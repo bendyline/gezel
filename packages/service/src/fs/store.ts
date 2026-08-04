@@ -36,6 +36,7 @@ import {
   ImportProvenanceSchema,
   type InstalledPackage,
   type InstalledToolset,
+  InstalledToolsetSchema,
   type MeesterStatusReport,
   MeesterStatusReportSchema,
   type MeesterStatusState,
@@ -112,15 +113,17 @@ import {
   projectLocalConfigFile,
   projectLocalCraftbookDir,
   projectLocalCraftbooksRoot,
-  projectLocalDir,
   projectLocalGezelDir,
   projectLocalGezelsRoot,
   projectLocalImportsFile,
   projectLocalPendingImportsFile,
   projectLocalRoot,
   projectMemoriesDir,
+  projectMemoryIndexDir,
   projectMetaFile,
+  projectPrivateDir,
   projectQuestionsFile,
+  projectStorageDir,
   projectStorageScope,
   projectTaskAboutFile,
   projectTaskFile,
@@ -138,6 +141,7 @@ import {
   systemToolsetsInstallDir,
   toolsetConfigFile,
   userGezelDir,
+  userProjectDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
 import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
@@ -514,6 +518,7 @@ export class Store {
       mkdir(p.documents, { recursive: true }),
     ]);
     await this.adoptMachineSharedGezelPrivateState();
+    await this.ensureMachineSharedProjectPrivateState();
     await this.backfillRoleBasedNames();
     await this.backfillVoices();
     await this.migrateLegacyTemperatureField();
@@ -588,6 +593,36 @@ export class Store {
   }
 
   /**
+   * Materialize an account-private sidecar for every mounted machine-shared
+   * project. The sidecar intentionally has no `project.json`, so the shared
+   * project remains the canonical definition while runtime state can be
+   * written without crossing account boundaries.
+   *
+   * Existing runtime-looking files in the shared root are deliberately not
+   * imported: another account could have modified executable selections,
+   * approvals, or pending questions before this release.
+   */
+  private async ensureMachineSharedProjectPrivateState(): Promise<void> {
+    const shared = activeMachineSharedHome();
+    if (!shared) return;
+    const ids = await safeReaddir(join(shared, 'projects'));
+    for (const id of ids) {
+      if (!(await pathExists(join(shared, 'projects', id, 'project.json')))) continue;
+      const local = userProjectDir(this.home, id);
+      // A real private project shadows the shared id and needs no sidecar work.
+      if (await pathExists(join(local, 'project.json'))) continue;
+      await mkdir(local, { recursive: true });
+      const packageFile = join(local, 'package.json');
+      if (!(await pathExists(packageFile))) {
+        await writeFileAtomic(
+          packageFile,
+          `${JSON.stringify({ name: `gezel-project-${id}`, private: true, version: '0.0.0' }, null, 2)}\n`,
+        );
+      }
+    }
+  }
+
+  /**
    * Phase 2 one-shot migration: projects with a legacy `gh/` checkout
    * get their clone moved INTO the workspace dir, so the post-Phase-2
    * principle holds (workspace === root of git repo). Without this
@@ -630,7 +665,7 @@ export class Store {
       } catch {
         continue;
       }
-      const workspaceDir = join(projectLocalDir(this.home, p.id), 'workspace');
+      const workspaceDir = join(projectStorageDir(this.home, p.id), 'workspace');
       // Check workspace state — must be empty OR only bootstrap files.
       let safeToMigrate = true;
       try {
@@ -714,7 +749,7 @@ export class Store {
       // If workingDir is set, projectWorkspaceDir resolves to it, not
       // to the internal workspace/ — leave that untouched either way.
       if (p.workingDir) continue;
-      const workspaceDir = join(projectLocalDir(this.home, p.id), 'workspace');
+      const workspaceDir = join(projectStorageDir(this.home, p.id), 'workspace');
       try {
         const entries = await readdir(workspaceDir);
         if (entries.length === 0) continue;
@@ -2373,7 +2408,7 @@ export class Store {
       if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
         throw new Error(`invalid project id "${id}"`);
       }
-      const localDir = projectLocalDir(this.home, id);
+      const localDir = projectStorageDir(this.home, id);
       const externalDir = projectDir(this.home, id, this.external);
       await mkdir(localDir, { recursive: true });
       await mkdir(externalDir, { recursive: true });
@@ -2452,10 +2487,10 @@ export class Store {
     // project leaves its workspace/artifacts behind under the old id, so a
     // later same-named project must claim a fresh id rather than mkdir over
     // (and re-adopt) those orphaned files. See {@link deleteProject}.
-    if (!(await pathExists(projectLocalDir(this.home, base)))) return base;
+    if (!(await pathExists(projectStorageDir(this.home, base)))) return base;
     for (let i = 2; i < 10000; i++) {
       const candidate = `${base}-${i}`;
-      if (!(await pathExists(projectLocalDir(this.home, candidate)))) return candidate;
+      if (!(await pathExists(projectStorageDir(this.home, candidate)))) return candidate;
     }
     throw new Error(`project id collision overflow for "${base}"`);
   }
@@ -2967,7 +3002,7 @@ export class Store {
     const { source } = this.resolveWorkspaceDir(id, meta);
     const removeWorkspace = !!opts?.removeWorkspace && source === 'internal';
 
-    const localDir = projectLocalDir(this.home, id);
+    const localDir = projectStorageDir(this.home, id);
     const externalDir = projectDir(this.home, id, this.external);
 
     if (removeWorkspace) {
@@ -3142,6 +3177,7 @@ export class Store {
   }
 
   async writeProjectActivity(id: string, activity: ProjectActivity): Promise<void> {
+    await mkdir(dirname(projectActivityFile(this.home, id)), { recursive: true });
     await writeFileAtomic(
       projectActivityFile(this.home, id),
       `${JSON.stringify(activity, null, 2)}\n`,
@@ -3608,7 +3644,7 @@ export class Store {
     if (meta?.github?.checkoutDir) {
       return { dir: meta.github.checkoutDir, source: 'githubCheckout' };
     }
-    return { dir: join(projectLocalDir(this.home, id), 'workspace'), source: 'internal' };
+    return { dir: join(projectStorageDir(this.home, id), 'workspace'), source: 'internal' };
   }
 
   async projectWorkspaceDir(id: string): Promise<string> {
@@ -4834,7 +4870,7 @@ export class Store {
   }
 
   private async readInstalledPackages(id: string): Promise<InstalledPackage[]> {
-    const pkgPath = join(projectLocalDir(this.home, id), 'package.json');
+    const pkgPath = join(projectPrivateDir(this.home, id), 'package.json');
     try {
       const raw = await readFile(pkgPath, 'utf8');
       const parsed = JSON.parse(raw) as {
@@ -5093,7 +5129,12 @@ export class Store {
   }
 
   memoryIndexDir(scope: 'gezel' | 'project', id: string): string {
-    return join(this.memoryBaseDir(scope, id), 'index');
+    // Project memory prose follows project ownership (and is therefore shared
+    // for a machine-wide project), but SQLite is derived daemon runtime. Each
+    // account builds its own index to avoid cross-UID writers opening mem.db.
+    return scope === 'project'
+      ? projectMemoryIndexDir(this.home, id)
+      : join(this.memoryBaseDir(scope, id), 'index');
   }
 
   // ---------- tasks (per-project, stable numeric IDs) ----------
@@ -5423,8 +5464,8 @@ export class Store {
     const primary = this.toolsetsFile(scope);
     try {
       const raw = await readFile(primary, 'utf8');
-      const parsed = JSON.parse(raw) as InstalledToolset[];
-      if (Array.isArray(parsed)) return parsed;
+      const parsed = InstalledToolsetSchema.array().safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
     } catch {
       /* fall through to the legacy-path check below */
     }
@@ -5439,8 +5480,8 @@ export class Store {
     if (scope.kind === 'system') {
       try {
         const legacyRaw = await readFile(systemToolsetsFile(this.home), 'utf8');
-        const legacyParsed = JSON.parse(legacyRaw);
-        if (Array.isArray(legacyParsed)) return legacyParsed as InstalledToolset[];
+        const legacyParsed = InstalledToolsetSchema.array().safeParse(JSON.parse(legacyRaw));
+        if (legacyParsed.success) return legacyParsed.data;
       } catch {
         /* legacy file missing or not a JSON array — give up */
       }

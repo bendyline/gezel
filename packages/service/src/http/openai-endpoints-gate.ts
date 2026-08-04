@@ -6,12 +6,12 @@ import type { ServiceContext } from './context.js';
  * `config.openaiEndpoints.enabled` (Settings → Connected Apps).
  *
  * Mounted BEFORE bearerAuth on `/v1/chat`, `/v1/models`,
- * `/v1/embeddings`, `/v1/gezels`, `/ollama/v1/*`, and
- * `/v1/apps/register` — when the user flips the switch off, nothing on
- * those surfaces answers, valid token or not, and no new app can even
- * request a grant. The rest of `/v1/apps/*` (list, approve, revoke)
- * stays reachable so the Connected Apps panel keeps working while the
- * facade is off. `/v1/remote/*` is deliberately not gated — remote
+ * `/v1/embeddings`, `/v1/gezels`, and `/ollama/v1/*` — when the user flips
+ * the switch off, nothing on those inference surfaces answers, valid token
+ * or not. `/v1/apps/register` remains reachable for non-OpenAI scopes (CLI,
+ * product, remote pairing) and rejects `openai` requests inside its router.
+ * The rest of `/v1/apps/*` also stays reachable so the Connected Apps panel
+ * keeps working while the facade is off. `/v1/remote/*` is deliberately not gated — remote
  * model serving has its own `remoteServing.enabled` switch.
  *
  * Unset means ON: the per-app consent flow remains the primary gate,

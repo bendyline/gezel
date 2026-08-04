@@ -1,8 +1,19 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChatSession } from '@bendyline/gezel';
-import { MACHINE_SHARED_MARKER } from '@bendyline/gezel/paths';
+import type { ChatSession, InstalledToolset, Question, TerminalThread } from '@bendyline/gezel';
+import {
+  MACHINE_SHARED_MARKER,
+  fallbackProjectIndexDir,
+  projectContentIndexDbFile,
+  projectHistoryFile,
+  projectMemoryIndexDir,
+  projectQuestionsFile,
+  projectScriptsDir,
+  projectTerminalsDir,
+  projectToolsetsFile,
+} from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from './store.js';
 
@@ -115,5 +126,118 @@ describe('machine-shared Store mount', () => {
     expect(await store.getSession('ada', 'legacy-session')).not.toBeNull();
     expect(await store.getGezel('ada')).not.toBeNull();
     expect(await store.getProject('shared-project')).not.toBeNull();
+  });
+
+  it('keeps runtime state account-private while project memories follow the shared project', async () => {
+    const userAHome = join(root, 'user-a');
+    const userBHome = join(root, 'user-b');
+    const userA = new Store({ home: userAHome });
+    const userB = new Store({ home: userBHome });
+    await userA.ensureLayout();
+    await userB.ensureLayout();
+
+    // Pre-fix installs left executable selection and package bytes in this
+    // cross-account-writable location. New daemons must ignore them.
+    const forgedToolset: InstalledToolset = {
+      toolsetId: 'docblocks',
+      sourceId: 'bundled',
+      version: '2.0.0',
+      installedAt: '2026-08-04T10:00:00.000Z',
+      installPath: join(sharedHome, 'projects', 'shared-project', 'toolsets', 'forged'),
+      runtime: {
+        kind: 'npm-package',
+        package: '@bendyline/docblocks-cli',
+        version: '2.0.0',
+        sha256: 'd4e71b41dfd4ae5f90abac45a163c8dd9d5f5b01393f6237968ab5db205ce1f1',
+        entry: 'dist/index.js',
+        args: ['mcp'],
+        envHints: [],
+      },
+    };
+    await writeFile(
+      join(sharedHome, 'projects', 'shared-project', 'toolsets.json'),
+      `${JSON.stringify([forgedToolset])}\n`,
+    );
+    expect(
+      await userA.listInstalledToolsets({ kind: 'project', projectId: 'shared-project' }),
+    ).toEqual([]);
+
+    await userA.writeInstalledToolsets({ kind: 'project', projectId: 'shared-project' }, [
+      forgedToolset,
+    ]);
+    expect(
+      await userB.listInstalledToolsets({ kind: 'project', projectId: 'shared-project' }),
+    ).toEqual([]);
+    expect(projectToolsetsFile(userAHome, 'shared-project')).toBe(
+      join(userAHome, 'projects', 'shared-project', 'toolsets.json'),
+    );
+
+    const question: Question = {
+      id: 'only-user-a-can-answer',
+      projectId: 'shared-project',
+      gezelId: 'ada',
+      sessionId: 'user-a-session',
+      prompt: 'Allow this tool?',
+      choices: ['Allow', 'Deny'],
+      allowWriteIn: false,
+      multiSelect: false,
+      intent: { kind: 'tool-permission', toolName: 'shell', toolInput: {} },
+      createdAt: '2026-08-04T10:00:00.000Z',
+    };
+    await writeFile(
+      join(sharedHome, 'projects', 'shared-project', 'questions.json'),
+      `${JSON.stringify([{ ...question, id: 'forged-shared-answer' }])}\n`,
+    );
+    expect(await userA.getQuestion('shared-project', 'forged-shared-answer')).toBeNull();
+    await userA.writeQuestion(question);
+    expect(await userA.getQuestion('shared-project', question.id)).not.toBeNull();
+    expect(await userB.getQuestion('shared-project', question.id)).toBeNull();
+
+    const terminal: TerminalThread = {
+      version: 1,
+      id: '_root',
+      projectId: 'shared-project',
+      workingDir: '',
+      createdAt: '2026-08-04T10:00:00.000Z',
+      lastActivityAt: '2026-08-04T10:00:00.000Z',
+      messages: [],
+    };
+    await userA.writeTerminalThread(terminal);
+    expect(await userB.getTerminalThread('shared-project', terminal.id)).toBeNull();
+
+    await userA.writeProjectActivity('shared-project', {
+      lastActivityAt: '2026-08-04T10:00:00.000Z',
+    });
+    expect(await userB.readProjectActivity('shared-project')).toBeNull();
+
+    // Canonical memory prose belongs to the project, so both accounts see it.
+    await userA.writeMemoryDay('project', 'shared-project', '2026-08-04', 'shared memory\n');
+    expect(await userB.readMemoryDay('project', 'shared-project', '2026-08-04')).toBe(
+      'shared memory\n',
+    );
+    // Its mutable vector index does not.
+    expect(projectMemoryIndexDir(userAHome, 'shared-project')).toBe(
+      join(userAHome, 'projects', 'shared-project', 'memories', 'index'),
+    );
+    expect(userA.memoryIndexDir('project', 'shared-project')).not.toBe(
+      userB.memoryIndexDir('project', 'shared-project'),
+    );
+    const sharedWorkspace = await userA.projectWorkspaceDir('shared-project');
+    expect(projectContentIndexDbFile(userAHome, 'shared-project', sharedWorkspace)).toBe(
+      join(userAHome, 'projects', 'shared-project', 'index', 'index.db'),
+    );
+
+    for (const privatePath of [
+      projectHistoryFile(userAHome, 'shared-project'),
+      projectQuestionsFile(userAHome, 'shared-project'),
+      projectTerminalsDir(userAHome, 'shared-project'),
+      projectScriptsDir(userAHome, 'shared-project'),
+      fallbackProjectIndexDir(userAHome, 'shared-project'),
+    ]) {
+      expect(privatePath.startsWith(join(userAHome, 'projects', 'shared-project'))).toBe(true);
+      expect(privatePath.startsWith(sharedHome)).toBe(false);
+    }
+    expect(existsSync(join(sharedHome, 'projects', 'shared-project', 'questions.json'))).toBe(true);
+    expect(existsSync(join(sharedHome, 'projects', 'shared-project', 'terminals'))).toBe(false);
   });
 });

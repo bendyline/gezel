@@ -119,7 +119,13 @@ export function parseMcpConfigText(text: string): ParsedMcpConfig {
 export async function discoverProjectMcpToolsets(
   workspaceDir: string,
   projectId: string,
+  opts: { allowProjectFiles?: boolean } = {},
 ): Promise<{ toolsets: DiscoveredProjectMcpToolset[]; warnings: CustomMcpImportWarning[] }> {
+  // A machine-shared workspace is writable by other local accounts. Its MCP
+  // config may be imported explicitly into this account's private roster, but
+  // it must never become executable merely because a session opened the
+  // project. `false` is passed by ChatManager for machine-shared projects.
+  if (opts.allowProjectFiles === false) return { toolsets: [], warnings: [] };
   const toolsets: DiscoveredProjectMcpToolset[] = [];
   const warnings: CustomMcpImportWarning[] = [];
   // Gezel-specific config wins over VS Code, which wins over the common

@@ -10,7 +10,7 @@ import {
   createLogger,
   isProactiveAllowed,
 } from '@bendyline/gezel';
-import { projectLocalDir } from '@bendyline/gezel/paths';
+import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
@@ -309,7 +309,7 @@ export class ProjectDigestGenerator {
   }
 
   private stateFile(projectId: string): string {
-    return join(projectLocalDir(this.store.homePath, projectId), 'digest-state.json');
+    return join(projectPrivateDir(this.store.homePath, projectId), 'digest-state.json');
   }
 
   private async readState(projectId: string): Promise<DigestState> {

@@ -330,6 +330,14 @@ export class ProviderPool {
         survived.lastUsedAt = this.now();
         return survived.provider;
       }
+      // Retirement may have started while this ensure was parked behind the
+      // drain. Never resurrect a user-owned engine after broker adoption.
+      if (this.retiring) {
+        throw new Error('local engine pool retired after machine engine adoption');
+      }
+    }
+    if (this.retiring) {
+      throw new Error('local engine pool retired after machine engine adoption');
     }
     const pending = this.buildLocks.get(key);
     if (pending) return pending;

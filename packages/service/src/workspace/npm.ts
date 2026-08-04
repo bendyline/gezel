@@ -7,7 +7,7 @@ import type {
   NpmInstallApprovalPackage,
   Question,
 } from '@bendyline/gezel';
-import { projectLocalDir } from '@bendyline/gezel/paths';
+import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
@@ -62,7 +62,7 @@ interface ProjectAllowlistFile {
 }
 
 function projectAllowlistPath(home: string, projectId: string): string {
-  return join(projectLocalDir(home, projectId), 'npm-allowlist.json');
+  return join(projectPrivateDir(home, projectId), 'npm-allowlist.json');
 }
 
 export async function readProjectAllowlist(

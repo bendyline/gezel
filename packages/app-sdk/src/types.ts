@@ -116,7 +116,7 @@ export interface AuthorizedConnection {
 }
 
 /** How the Node SDK reached the logged-in user's product daemon. */
-export type LocalDaemonMode = 'configured' | 'adopted' | 'spawned';
+export type LocalDaemonMode = 'configured' | 'legacy-full' | 'adopted' | 'spawned';
 
 /**
  * Optional lifecycle support for native clients that bundle a compatible
@@ -158,6 +158,17 @@ export interface LocalAuthorizedConnection extends AuthorizedConnection {
     /** Public loopback trust anchor; never the daemon's private key. */
     cert: string | null;
   };
+}
+
+/**
+ * First-party, same-user connection input. The returned credential is the
+ * daemon's rotating owner/UI token from its protected runtime directory, so
+ * this surface is for Gezel's own desktop/CLI clients—not third-party apps.
+ */
+export interface LocalOwnerConnectInput {
+  daemon: LocalDaemonOptions & { daemonEntry: string };
+  /** Override the runtime-derived pinned-TLS transport (primarily for tests). */
+  fetch?: typeof fetch;
 }
 
 export type ChatMessageRole = 'system' | 'user' | 'assistant' | 'tool';

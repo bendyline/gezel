@@ -2,14 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const discoverOrSpawn = vi.hoisted(() => vi.fn());
 const createTrustingFetch = vi.hoisted(() => vi.fn());
+const readSystemServiceEndpoint = vi.hoisted(() => vi.fn());
 
 vi.mock('@bendyline/gezel-client/node', () => ({
   discoverOrSpawn,
   createTrustingFetch,
+  readSystemServiceEndpoint,
   DaemonNotRunningError: class DaemonNotRunningError extends Error {},
 }));
 
-const { authorizeLocal } = await import('./local.js');
+const { authorizeLocal, authorizeLocalOwner } = await import('./local.js');
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -24,7 +26,7 @@ describe('local native app connection', () => {
   const originalPort = process.env.GEZEL_PORT;
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     restoreEnv('GEZEL_SYSTEM_SCOPE', originalSystemScope);
     restoreEnv('GEZEL_SERVICE_ROLE', originalRole);
     restoreEnv('GEZEL_PORT', originalPort);
@@ -126,6 +128,100 @@ describe('local native app connection', () => {
       }),
     ).rejects.toMatchObject({ code: 'daemon_entry_required' });
     expect(discoverOrSpawn).not.toHaveBeenCalled();
+  });
+
+  it('adopts a legacy full-product system service before the per-user ladder', async () => {
+    readSystemServiceEndpoint.mockResolvedValueOnce({
+      baseUrl: 'http://127.0.0.1:6228',
+      port: 6228,
+      cert: null,
+      home: '/machine/gezel',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, serviceRole: 'legacy-full' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
+      ) as unknown as typeof fetch;
+
+    const authorized = await authorizeLocal({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product'],
+      fetch: fetchImpl,
+      onVerificationCode: () => {},
+      daemon: { daemonEntry: '/bundled/gezeld.js', spawnIfMissing: true },
+    });
+
+    expect(authorized).toMatchObject({
+      baseUrl: 'http://127.0.0.1:6228',
+      token: 'app-token',
+      daemon: { mode: 'legacy-full', cert: null },
+    });
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+  });
+
+  it('never treats a machine-engine service as a product endpoint', async () => {
+    readSystemServiceEndpoint.mockResolvedValueOnce({
+      baseUrl: 'http://127.0.0.1:6228',
+      port: 6228,
+      cert: null,
+      home: '/machine/gezel',
+    });
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'spawned',
+      baseUrl: 'http://127.0.0.1:54321',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, serviceRole: 'machine-engine' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
+      ) as unknown as typeof fetch;
+
+    const authorized = await authorizeLocal({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product'],
+      fetch: fetchImpl,
+      onVerificationCode: () => {},
+      daemon: { daemonEntry: '/bundled/gezeld.js', spawnIfMissing: true },
+    });
+
+    expect(authorized.daemon.mode).toBe('spawned');
+    expect(authorized.baseUrl).toBe('http://127.0.0.1:54321');
+    expect(discoverOrSpawn).toHaveBeenCalledOnce();
+  });
+
+  it('lets a first-party same-user client adopt the rotating owner token without consent', async () => {
+    const trustingFetch = vi.fn() as unknown as typeof fetch;
+    createTrustingFetch.mockReturnValueOnce(trustingFetch);
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'spawned',
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'scoped-owner-token',
+      cert: 'loopback-cert',
+      pid: 4242,
+      client: {},
+    });
+
+    const authorized = await authorizeLocalOwner({
+      daemon: {
+        daemonEntry: '/bundled/gezeld.js',
+        spawnIfMissing: true,
+      },
+    });
+
+    expect(authorized).toMatchObject({
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'scoped-owner-token',
+      fetch: trustingFetch,
+      daemon: { mode: 'spawned', pid: 4242, cert: 'loopback-cert' },
+    });
   });
 });
 

@@ -1990,16 +1990,44 @@ export type ListCatalogItemVersionsResponse = z.infer<typeof ListCatalogItemVers
  * toolsetId in a separate file (see ToolsetConfigSchema); secrets live in
  * the SecretStore keyed by `(toolsetId, fieldId)`.
  */
-export const InstalledToolsetSchema = z.object({
+const InstalledToolsetFields = {
   toolsetId: z.string(),
   sourceId: z.string(),
   version: z.string(),
   installedAt: z.string(),
   /** Local install path (for npm-package / stdio-mcp-binary kinds). */
   installPath: z.string().optional(),
+};
+
+const StandardInstalledToolsetSchema = z.object({
+  ...InstalledToolsetFields,
   /** Snapshot of the runtime at install time — the live source of truth for spawning. */
   runtime: ToolsetRuntimeSchema,
 });
+
+/**
+ * The system bootstrap pins npm tarballs with registry SRI strings (normally
+ * SHA-512), rather than the catalog installer's SHA-256 hex digest. Existing
+ * system records persist that stronger pin in the historical `sha256` slot.
+ * Keep this compatibility shape scoped to `sourceId: 'system'` so catalog and
+ * user-installed runtimes remain subject to the ordinary SHA-256 schema.
+ */
+const SystemNpmPackageRuntimeSchema = NpmPackageRuntimeSchema.extend({
+  sha256: z
+    .string()
+    .regex(/^(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/),
+});
+
+const SystemInstalledToolsetSchema = z.object({
+  ...InstalledToolsetFields,
+  sourceId: z.literal('system'),
+  runtime: SystemNpmPackageRuntimeSchema,
+});
+
+export const InstalledToolsetSchema = z.union([
+  StandardInstalledToolsetSchema,
+  SystemInstalledToolsetSchema,
+]);
 export type InstalledToolset = z.infer<typeof InstalledToolsetSchema>;
 
 /**

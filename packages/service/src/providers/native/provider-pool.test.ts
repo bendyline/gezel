@@ -645,6 +645,37 @@ describe('ProviderPool', () => {
     expect(broker.committedBytes()).toBe(0);
   });
 
+  it('does not rebuild an ensure that was parked on a drain when retirement begins', async () => {
+    const made: BusyFakeProvider[] = [];
+    let releaseDrain!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+    const broker = new CapacityBroker({ budgetBytes: 32 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      sleep: () => gate,
+    });
+    const key = makeEngineKey('mlx', 'adopting-model', 0);
+    await pool.ensure('mlx', 'adopting-model', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    const evicting = pool.evict(key);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const parkedEnsure = pool.ensure('mlx', 'adopting-model', 0, 10 * GB);
+    const retirement = pool.retire();
+
+    made[0]!.busy = false;
+    releaseDrain();
+    await evicting;
+    await expect(parkedEnsure).rejects.toThrow(/retired/);
+    await retirement;
+
+    expect(made).toHaveLength(1);
+    expect(pool.snapshot().entries).toHaveLength(0);
+  });
+
   it('pickReplicaForBind skips draining replicas', async () => {
     const made: BusyFakeProvider[] = [];
     let releaseDrain!: () => void;

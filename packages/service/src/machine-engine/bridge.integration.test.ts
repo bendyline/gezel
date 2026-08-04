@@ -340,13 +340,10 @@ describe('split user + machine services', () => {
       user.context.tts.current(),
     ]);
     expect(providers.map((provider) => provider.name)).toEqual([
-      // GEZEL_MOCK_PROVIDER is an effective non-native image provider, so it
-      // stays in the user daemon. The other managers use their remote mocks as
-      // stand-ins for heavyweight native execution in this integration suite.
       'mock',
-      'remote:This machine',
-      'remote:This machine',
-      'remote:This machine',
+      'mock',
+      'mock-stt',
+      'mock-tts',
     ]);
   });
 

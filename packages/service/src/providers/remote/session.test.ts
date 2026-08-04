@@ -285,6 +285,29 @@ describe('RemoteSession', () => {
     expect(session.estimatePromptChars()).toBeGreaterThan('hello'.length + 'ok'.length);
   });
 
+  it('counts overlapping prefix-cache layers as metadata, not extra prompt text', () => {
+    const stable = 's'.repeat(40_000);
+    const gezelPrefix = stable.slice(0, 30_000);
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: (async () => sseResponse([{ type: 'done' }])) as unknown as typeof fetch,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: stable,
+      systemPromptLayers: { gezel: gezelPrefix, project: stable },
+      volatileContext: 'volatile',
+      model: 'm',
+      priorMessages: [{ role: 'user', content: 'earlier' }],
+      numCtx: 65_536,
+      timeoutMs: 60_000,
+    });
+
+    expect(session.estimatePromptChars()).toBe(
+      stable.length + 'volatile'.length + 'earlier'.length,
+    );
+  });
+
   it('budgets tool output and compacts older turns inside a remote tool loop', async () => {
     const requests: Array<Record<string, unknown>> = [];
     let pass = 0;

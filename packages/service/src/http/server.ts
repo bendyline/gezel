@@ -579,11 +579,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/events/chat', chatEventsRoutes(ctx));
 
   // Master switch for the OpenAI-compatible facade (Settings →
-  // Connected Apps). Gates inference surfaces AND new app registrations
-  // below; the rest of `/v1/apps/*` (list/approve/revoke) stays
-  // reachable so the panel works while the facade is off.
+  // Connected Apps). Registration remains reachable because non-OpenAI
+  // first-party clients (notably the CLI) use the same consent router; the
+  // register route itself rejects only requests that include `openai`.
   const openaiEndpointsGate = requireOpenAiEndpointsEnabled(ctx);
-  app.use('/v1/apps/register', openaiEndpointsGate);
 
   // `/v1/apps/*` is the public registration + consent surface. Routes
   // inside declare their own auth (some unauth, some root-only, some
@@ -610,8 +609,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/chat/*` and `/v1/models/*` are the OpenAI-compatible inference
   // surface. Gated by bearer auth + the `openai` scope (root passes
   // any scope check). Third-party apps acquire a token through
-  // `/v1/apps/register`; the desktop/CLI discovery credential explicitly
-  // carries `openai`. Session/MCP tokens do not reach this facade, while the
+  // `/v1/apps/register`; the desktop discovery credential explicitly carries
+  // `openai`. Session/MCP tokens do not reach this facade, while the
   // process-local root remains the deliberate wildcard.
   app.use('/v1/chat/*', openAiErrorEnvelope());
   app.use('/v1/chat/*', openaiEndpointsGate);

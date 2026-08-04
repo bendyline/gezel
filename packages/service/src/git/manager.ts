@@ -16,7 +16,7 @@ import type {
 } from '@bendyline/gezel';
 import {
   projectInternalGithubDir,
-  projectLocalDir,
+  projectStorageDir,
   sharedCloneDir,
   sharedClonesRoot,
 } from '@bendyline/gezel/paths';
@@ -310,7 +310,7 @@ export class GitManager {
     ref?: string;
   }): Promise<string> {
     const bare = await this.ensureSharedClone(args.url);
-    const worktreePath = join(projectLocalDir(this.home, args.projectId), 'workspace');
+    const worktreePath = join(projectStorageDir(this.home, args.projectId), 'workspace');
     // Worktree path mustn't already exist (git worktree add refuses).
     // The Phase-1+2 invariant is that workspace/ is empty for fresh
     // github-linked projects (createProject skips bootstrap); for older
@@ -433,7 +433,7 @@ export class GitManager {
     } catch {
       return; // bare clone is already gone
     }
-    const worktreePath = join(projectLocalDir(this.home, args.projectId), 'workspace');
+    const worktreePath = join(projectStorageDir(this.home, args.projectId), 'workspace');
     try {
       await worktreeRemove(bare, worktreePath, { force: args.force ?? false });
     } catch (err) {
@@ -494,7 +494,7 @@ export class GitManager {
     // `gh/` clone exists from before Phase 2 (no workspace clone yet),
     // adopt it so we don't re-clone — the migration in
     // `Store.cleanStaleWorkspaceBootstraps` will move it later.
-    const workspace = join(projectLocalDir(this.home, project.id), 'workspace');
+    const workspace = join(projectStorageDir(this.home, project.id), 'workspace');
     const wsRepo = await inspectGitWorkdir(workspace);
     if (wsRepo.isRepo) {
       return {

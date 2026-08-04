@@ -19,6 +19,14 @@ Node 24+. The Node entry uses `undici` to trust gezel's loopback TLS cert.
 ```ts
 import { detectGezel, connect } from '@bendyline/gezel-app-sdk';
 
+// Demo only: replace this with Keychain, Credential Manager, libsecret, etc.
+const tokens = new Map<string, string>();
+const tokenStorage = {
+  save(appId: string, token: string) { tokens.set(appId, token); },
+  load(appId: string) { return tokens.get(appId) ?? null; },
+  delete(appId: string) { tokens.delete(appId); },
+};
+
 const status = await detectGezel();
 if (!status.installed) throw new Error('gezel not installed');
 if (!status.running) throw new Error('start the gezel app first');
@@ -27,8 +35,7 @@ const app = await connect({
   appId: 'docblocks',
   appName: 'DocBlocks',
   scopes: ['openai'],
-  // Back this with Keychain, Credential Manager, libsecret, etc.
-  tokenStorage: keychainStorage,
+  tokenStorage,
 });
 
 // Make sure the model is downloaded and warm.
@@ -109,11 +116,17 @@ const authorized = await authorizeLocal({
 const client = new GezelClient(authorized);
 ```
 
-This path connects directly to the per-user daemon described by
-`~/.gezel/runtime`; it never connects to or bootstraps through the machine
-engine broker on port 6228. The returned object contains only the app's scoped
-token plus non-sensitive daemon diagnostics. It never exposes the daemon's
-first-party discovery credential.
+The normal path connects directly to the per-user daemon described by
+`~/.gezel/runtime`; it never connects to or bootstraps through a
+`machine-engine` broker on port 6228. The returned object contains only the
+app's scoped token plus non-sensitive daemon diagnostics. It never exposes the
+daemon's first-party discovery credential.
+
+During a rolling upgrade, the SDK first probes the installed system service.
+If that service declares `legacy-full` (or predates role publication), the SDK
+uses it as the temporary product endpoint so VS Code and Electron cannot show
+different pre-migration projects. A `machine-engine` service is never treated
+as a product endpoint; the ladder continues to the per-user daemon.
 
 `authorize()` remains the transport-level primitive for callers that already
 resolved a base URL or do not need daemon diagnostics.
@@ -144,6 +157,13 @@ SDK-owned launches are always detached per-user daemons with
 actual dynamic address through the user's runtime directory and cannot race
 the machine broker for port 6228. VS Code is the reference implementation of
 this optional launcher path.
+
+Gezel's own same-user desktop and CLI clients use `authorizeLocalOwner()`.
+That narrowly named first-party surface adopts or starts the same user daemon
+but returns its rotating runtime `ui` credential without opening a Connected
+Apps consent request, so a headless CLI never waits for a desktop approval UI.
+Third-party integrations must use `authorizeLocal()`; do not use the owner
+surface as an app-consent bypass.
 
 Use `product` for ordinary stateful product access and add `openai` only when
 the same app also calls the OpenAI-compatible inference routes. `product` does
@@ -176,6 +196,7 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 | `authorize()` | Generic discovery + consent result (`baseUrl`, scoped token, fetch) |
 | `connectLocal()` | Complete Node-native discovery + consent, returning `GezelApp` and diagnostics |
 | `authorizeLocal()` | Complete Node-native discovery + consent for typed product clients |
+| `authorizeLocalOwner()` | First-party same-user daemon connection without app consent |
 | `app.chat()` | OpenAI-compatible chat (streaming + non) |
 | `app.embeddings()` | OpenAI-compatible embeddings |
 | `app.models()` | List available models |

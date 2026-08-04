@@ -8,6 +8,7 @@ import {
   type LocalAuthorizedConnection,
   type LocalDaemonOptions,
   authorizeLocal,
+  authorizeLocalOwner,
 } from '@bendyline/gezel-app-sdk';
 import {
   GezelApiError,
@@ -109,9 +110,9 @@ export function resolveDevHome(globals: CliGlobals): void {
 /**
  * Connection for management commands (agent/env/task): use an explicitly
  * approved service when configured, otherwise a legacy full-product system
- * service, otherwise authorize against the user-owned daemon through the app
- * SDK. The SDK owns dynamic-port discovery, pinned TLS, scoped consent, and a
- * safe optional user-daemon spawn. A machine-engine system service is
+ * service, otherwise connect as a first-party same-user owner through the app
+ * SDK. The SDK owns dynamic-port discovery, pinned TLS, and a safe optional
+ * user-daemon spawn. A machine-engine system service is
  * compute-only and is discovered by the user daemon, never used directly as
  * the CLI's product API.
  */
@@ -123,8 +124,7 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
   if (!runtime || !isProcessAlive(runtime.pid)) {
     await prepareStandaloneAssets();
   }
-  const connected = await connectWithCliGrant({
-    storageKey: localTokenStorageKey(),
+  const authorized = await authorizeLocalOwner({
     daemon: {
       daemonEntry: resolveDaemonEntry(import.meta.url),
       spawnIfMissing: true,
@@ -132,6 +132,10 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
       ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     },
   });
+  const connected = await connectionFromAuthorization(
+    authorized,
+    'The local Gezel owner authorization',
+  );
   return connected.client;
 }
 

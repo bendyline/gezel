@@ -157,11 +157,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
   private estimatePromptCharsFor(priorMessages: PriorMessageWire[], prompt: string): number {
     let total =
-      this.systemMessage.length +
-      (this.deps.systemPromptLayers?.gezel.length ?? 0) +
-      (this.deps.systemPromptLayers?.project.length ?? 0) +
-      (this.deps.volatileContext?.length ?? 0) +
-      prompt.length;
+      this.systemMessage.length + (this.deps.volatileContext?.length ?? 0) + prompt.length;
     for (const message of priorMessages) {
       total += message.content.length;
       if ('toolCalls' in message) total += JSON.stringify(message.toolCalls).length;

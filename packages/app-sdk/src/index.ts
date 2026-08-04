@@ -41,7 +41,7 @@
  */
 export { detectGezel } from './detect.js';
 export { authorize, connect } from './connect.js';
-export { authorizeLocal, connectLocal } from './local.js';
+export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
 export { GezelSdkError } from './errors.js';
 export {
@@ -56,6 +56,7 @@ export type {
   LocalDaemonOptions,
   LocalDaemonMode,
   LocalAuthorizedConnection,
+  LocalOwnerConnectInput,
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,

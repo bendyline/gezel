@@ -3,12 +3,17 @@ import {
   DaemonNotRunningError,
   createTrustingFetch,
   discoverOrSpawn,
+  readSystemServiceEndpoint,
 } from '@bendyline/gezel-client/node';
 import { GezelApp } from './client.js';
 import { authorize } from './connect.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError } from './errors.js';
-import type { LocalAuthorizedConnection, LocalConnectInput } from './types.js';
+import type {
+  LocalAuthorizedConnection,
+  LocalConnectInput,
+  LocalOwnerConnectInput,
+} from './types.js';
 
 /**
  * Resolve the logged-in user's daemon and complete app consent in one call.
@@ -36,6 +41,19 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
     return {
       ...authorized,
       daemon: { mode: 'configured', cert: configured.cert },
+    };
+  }
+
+  const legacyFull = await discoverLegacyFullService(daemon?.home, connectInput.fetch);
+  if (legacyFull) {
+    const authorized = await authorize({
+      ...connectInput,
+      baseUrl: legacyFull.baseUrl,
+      fetch: legacyFull.fetch,
+    });
+    return {
+      ...authorized,
+      daemon: { mode: 'legacy-full', cert: legacyFull.cert },
     };
   }
 
@@ -86,6 +104,81 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
   });
   return {
     ...authorized,
+    daemon: {
+      mode: resolved.outcome,
+      pid: resolved.pid,
+      cert: resolved.cert,
+    },
+  };
+}
+
+/**
+ * Rolling-upgrade compatibility: a pre-split machine service still owns the
+ * product data until migration completes. Probe it before the per-user ladder
+ * so every SDK client sees the same projects as Electron during that window.
+ */
+async function discoverLegacyFullService(
+  explicitHome: string | undefined,
+  fetchOverride: typeof fetch | undefined,
+): Promise<{ baseUrl: string; cert: string | null; fetch: typeof fetch } | null> {
+  if (explicitHome || process.env.GEZEL_HOME || process.env.GEZEL_DEV === '1') return null;
+  let endpoint: Awaited<ReturnType<typeof readSystemServiceEndpoint>> = null;
+  try {
+    endpoint = await readSystemServiceEndpoint();
+  } catch {
+    endpoint = null;
+  }
+  if (!endpoint) return null;
+  const fetchImpl =
+    fetchOverride ??
+    (endpoint.cert
+      ? createTrustingFetch({ cert: endpoint.cert })
+      : (globalThis.fetch as typeof fetch));
+  try {
+    const response = await fetchImpl(`${endpoint.baseUrl}/api/health`);
+    if (!response.ok) return null;
+    const health = (await response.json()) as { serviceRole?: string };
+    if (health.serviceRole !== undefined && health.serviceRole !== 'legacy-full') return null;
+    return { baseUrl: endpoint.baseUrl, cert: endpoint.cert, fetch: fetchImpl };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Connect a first-party client running as the same OS user that owns the
+ * product daemon. This deliberately skips Connected Apps consent: the
+ * rotating credential comes from the user's protected runtime directory and
+ * is the same scoped `ui` credential used by the desktop shell. External apps
+ * must use {@link authorizeLocal} instead.
+ */
+export async function authorizeLocalOwner(
+  input: LocalOwnerConnectInput,
+): Promise<LocalAuthorizedConnection> {
+  let resolved: Awaited<ReturnType<typeof discoverOrSpawn>>;
+  try {
+    resolved = await discoverOrSpawn({
+      daemonEntry: input.daemon.daemonEntry,
+      detached: true,
+      env: userDaemonEnv(input.daemon.home),
+      home: input.daemon.home,
+      spawnIfMissing: input.daemon.spawnIfMissing ?? false,
+      timeoutMs: input.daemon.timeoutMs ?? 20_000,
+      logger: input.daemon.logger,
+    });
+  } catch (error) {
+    if (error instanceof DaemonNotRunningError) throw daemonNotRunning();
+    throw error;
+  }
+  const fetchImpl =
+    input.fetch ??
+    (resolved.cert
+      ? createTrustingFetch({ cert: resolved.cert })
+      : (globalThis.fetch as typeof fetch));
+  return {
+    baseUrl: resolved.baseUrl,
+    token: resolved.token,
+    fetch: fetchImpl,
     daemon: {
       mode: resolved.outcome,
       pid: resolved.pid,

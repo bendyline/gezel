@@ -332,17 +332,16 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     return c.json({ ok: true, sessionId: body.sessionId });
   });
 
-  // Resolve the model through the same native-engine router used by /infer,
-  // then return the context window AFTER the capacity broker has applied its
-  // live RAM/VRAM clamp. Device A calls this before it builds the coordinator
-  // prompt; discovery metadata alone is only the model-native/requested cap.
+  // Return the context window AFTER the capacity broker's live RAM/VRAM
+  // clamp, but do not bind or load a cold native engine. Session focus is a
+  // planning operation: it must never evict another account's resident model.
   app.post('/admit', async (c) => {
     const body = RemoteAdmissionRequestSchema.parse(await c.req.json());
     if (body.protocolVersion > PROTOCOL_VERSION) {
       return c.json({ error: 'protocol_version_unsupported', supported: PROTOCOL_VERSION }, 426);
     }
     const target = resolveModelTarget(body.model);
-    if (!target) {
+    if (!target || !target.model) {
       return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
     }
 
@@ -354,14 +353,22 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     }
     let probe: LLMSession | null = null;
     try {
-      const provider = await ctx.chat.getProviderForModel(target.provider, target.model);
-      const prepared = await provider.prepareContextWindow?.(target.model);
-      let contextWindow = prepared ?? provider.getContextWindow?.();
+      const nativeTarget = ['llama-cpp', 'mlx', 'ds4'].includes(target.provider);
+      const provider = nativeTarget
+        ? null
+        : await ctx.chat.getProviderForModel(target.provider, target.model);
+      let contextWindow = nativeTarget
+        ? await ctx.chat.previewContextWindowForModel(
+            target.provider as 'llama-cpp' | 'mlx' | 'ds4',
+            target.model,
+          )
+        : ((await provider?.prepareContextWindow?.(target.model)) ??
+          provider?.getContextWindow?.());
 
       // Ollama resolves num_ctx asynchronously while creating a session. Keep
       // the wire contract provider-agnostic by probing a bridge-free session
       // when the provider cannot report a window directly.
-      if (!contextWindow) {
+      if (!contextWindow && provider) {
         probe = await provider.createSession({
           systemMessage: '',
           model: target.model,

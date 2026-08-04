@@ -97,6 +97,21 @@ export function userProjectDir(root: string, projectId: string): string {
   return join(root, 'projects', projectId);
 }
 
+/**
+ * Per-account sidecar for project runtime state.
+ *
+ * Unlike {@link projectStorageDir}, this NEVER follows a machine-shared project
+ * into the installer-managed shared root. It is the only appropriate home for
+ * approvals, questions, histories, terminals, executable installs, and
+ * derived databases that belong to the logged-in user's daemon.
+ *
+ * A sidecar deliberately has no `project.json`; projectStorageScope therefore
+ * continues to resolve the canonical definition from the machine-shared root.
+ */
+export function projectPrivateDir(root: string, projectId: string): string {
+  return userProjectDir(root, projectId);
+}
+
 export function machineSharedGezelDir(gezelId: string): string | null {
   const shared = activeMachineSharedHome();
   return shared ? join(shared, 'gezels', gezelId) : null;
@@ -372,17 +387,10 @@ export function gezelPoppetjePath(
  * Per-project directory holding the project's content. Routes to the
  * external location when `external.projects` is set.
  *
- * The following per-project files/dirs deliberately STAY LOCAL even
- * when projects are externalized — use {@link projectLocalDir} (or its
- * named helpers) for them:
- *   - `project.json` (metadata)
- *   - `workspace/` (internal fallback working dir)
- *   - `gh/` (internal git checkout)
- *   - `scripts/` (TypeScript scripts + run records)
- *   - `history.jsonl` (append-only audit log)
- *   - `questions.json` (ask_user_question records)
- *   - `command-approvals.json`, `npm-allowlist.json`,
- *     `workspace-writes.jsonl`, `package.json`
+ * The canonical `project.json` plus an internal `workspace/` / legacy `gh/`
+ * checkout follow this directory. Account-private runtime state does not: it
+ * stays under {@link projectPrivateDir}, even when this project is
+ * machine-shared.
  */
 export function projectDir(root: string, projectId: string, external?: ExternalFolders): string {
   if (projectStorageScope(root, projectId) === 'machine-shared') {
@@ -392,35 +400,48 @@ export function projectDir(root: string, projectId: string, external?: ExternalF
 }
 
 /**
- * Always-local per-project directory. Used for working files,
- * append-only logs, and metadata that don't sync well over cloud
- * storage.
+ * Canonical on-machine project directory. For a machine-shared project this
+ * follows the project into the installer-managed shared root; otherwise it is
+ * the user's project directory.
+ *
+ * This helper is for the project definition and intentionally shared project
+ * content such as its internal workspace. Per-account runtime state must use
+ * {@link projectPrivateDir} instead.
  */
-export function projectLocalDir(root: string, projectId: string): string {
+export function projectStorageDir(root: string, projectId: string): string {
   if (projectStorageScope(root, projectId) === 'machine-shared') {
     return machineSharedProjectDir(projectId)!;
   }
   return userProjectDir(root, projectId);
 }
 
+/**
+ * @deprecated The old name blurred canonical project storage with private
+ * daemon state. Use {@link projectStorageDir} for shared project content or
+ * {@link projectPrivateDir} for per-account state.
+ */
+export function projectLocalDir(root: string, projectId: string): string {
+  return projectStorageDir(root, projectId);
+}
+
 /** Per-project `project.json` metadata file. Always local. */
 export function projectMetaFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'project.json');
+  return join(projectStorageDir(root, projectId), 'project.json');
 }
 
-/** Durable user/worker lifecycle for indexed code findings. Always local. */
+/** Durable user/worker lifecycle for indexed code findings. Account-private. */
 export function projectFindingLifecycleFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'finding-lifecycle.json');
+  return join(projectPrivateDir(root, projectId), 'finding-lifecycle.json');
 }
 
-/** Durable per-project code-review records (the GitHub tab's Review panel). Always local. */
+/** Durable per-project code-review records for this account. */
 export function projectCodeReviewsFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'code-reviews.json');
+  return join(projectPrivateDir(root, projectId), 'code-reviews.json');
 }
 
-/** Durable per-project report-action lifecycle records (fired/dismissed report recommendations). Always local. */
+/** Durable per-account report-action lifecycle records. */
 export function projectReportActionsFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'report-actions.json');
+  return join(projectPrivateDir(root, projectId), 'report-actions.json');
 }
 
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
@@ -451,6 +472,15 @@ export function projectMemoriesDir(
 }
 
 /**
+ * Per-account derived vector index for project memories. The canonical memory
+ * markdown follows the project via {@link projectMemoriesDir}; mutable SQLite
+ * never does.
+ */
+export function projectMemoryIndexDir(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'memories', 'index');
+}
+
+/**
  * Default location for the cloned GitHub repo when neither (a) the project
  * has a workingDir nor (b) the existing workingDir already holds the repo.
  * Internal-only checkout: lives under the project folder. Always local.
@@ -463,7 +493,7 @@ export function projectMemoriesDir(
  * a clone lives here.
  */
 export function projectInternalGithubDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'gh');
+  return join(projectStorageDir(root, projectId), 'gh');
 }
 
 /**
@@ -497,7 +527,7 @@ export function sharedCloneDir(root: string, key: string): string {
  * (paths, mtimes, installed CLIs) and shouldn't sync across machines.
  */
 export function projectIndexDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), '_index');
+  return join(projectPrivateDir(root, projectId), '_index');
 }
 
 /**
@@ -507,7 +537,7 @@ export function projectIndexDir(root: string, projectId: string): string {
  * machines.
  */
 export function projectTerminalsDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'terminals');
+  return join(projectPrivateDir(root, projectId), 'terminals');
 }
 
 export function projectTerminalFile(root: string, projectId: string, threadId: string): string {
@@ -535,7 +565,7 @@ export function globalIndexDbFile(root: string): string {
 
 /** Per-project JSONL holding events scoped to that project. Always local. */
 export function projectHistoryFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'history.jsonl');
+  return join(projectPrivateDir(root, projectId), 'history.jsonl');
 }
 
 /**
@@ -545,7 +575,7 @@ export function projectHistoryFile(root: string, projectId: string): string {
  * always want the full list. Always local.
  */
 export function projectQuestionsFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'questions.json');
+  return join(projectPrivateDir(root, projectId), 'questions.json');
 }
 
 /**
@@ -554,7 +584,7 @@ export function projectQuestionsFile(root: string, projectId: string): string {
  * (or bumps `updatedAt` on) the metadata file. Always local.
  */
 export function projectActivityFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'activity.json');
+  return join(projectPrivateDir(root, projectId), 'activity.json');
 }
 
 /**
@@ -634,12 +664,12 @@ export function projectTaskAboutFile(
 }
 
 /**
- * Project-scoped scripts directory. Holds `.ts` files with a mandatory
+ * Account-private project-scoped scripts directory. Holds `.ts` files with a mandatory
  * `export const meta` block; see `schemas/script.ts`. Not recursive —
  * one script per file, resolved by `meta.name`. Always local.
  */
 export function projectScriptsDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'scripts');
+  return join(projectPrivateDir(root, projectId), 'scripts');
 }
 
 export function projectScriptFile(root: string, projectId: string, name: string): string {
@@ -665,7 +695,7 @@ export function userScriptFile(root: string, name: string): string {
  * giant directory. Always local.
  */
 export function projectScriptRunsDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'scripts', 'runs');
+  return join(projectPrivateDir(root, projectId), 'scripts', 'runs');
 }
 
 export function projectScriptRunFile(
@@ -847,7 +877,22 @@ export function projectLocalQuarantineDir(workspaceDir: string): string {
  * the content-derived DB.
  */
 export function fallbackProjectIndexDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'index');
+  return join(projectPrivateDir(root, projectId), 'index');
+}
+
+/**
+ * Mutable content-index database for a project. Ordinary writable workspaces
+ * retain the historical `.gezel/index/` placement; machine-shared workspaces
+ * always use the account-private fallback to prevent cross-daemon SQLite use.
+ */
+export function projectContentIndexDbFile(
+  root: string,
+  projectId: string,
+  workspaceDir: string,
+): string {
+  return projectStorageScope(root, projectId) === 'machine-shared'
+    ? join(fallbackProjectIndexDir(root, projectId), 'index.db')
+    : projectLocalIndexDbFile(workspaceDir);
 }
 
 /**
@@ -862,7 +907,7 @@ export function projectLocalVillageFile(workspaceDir: string): string {
 
 /** Home-local village-file fallback (no external workingDir, or read-only repo). */
 export function fallbackProjectVillageFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'village.json');
+  return join(projectPrivateDir(root, projectId), 'village.json');
 }
 
 /** `@project` about-source mapping (which instruction file feeds the prompt). */
@@ -911,18 +956,18 @@ export function sharedToolsetsInstallDir(root: string): string {
 // ---------- project scope ----------
 
 /**
- * JSON file of a project's toolsets — installed by a custom project type, seen
- * by every session scoped to that project regardless of gezel. Kept in the
- * always-local project dir (never externalized), like the project's scripts
- * and workspace. See docs/project-types.md.
+ * JSON file of this account's project toolsets — installed by a custom project
+ * type and seen by this account's sessions scoped to that project. Kept in the
+ * private project sidecar so executable selection never crosses accounts.
+ * See docs/project-types.md.
  */
 export function projectToolsetsFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'toolsets.json');
+  return join(projectPrivateDir(root, projectId), 'toolsets.json');
 }
 
 /** Install root for a project's toolsets' on-disk extracts. */
 export function projectToolsetsInstallDir(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'toolsets');
+  return join(projectPrivateDir(root, projectId), 'toolsets');
 }
 
 /**

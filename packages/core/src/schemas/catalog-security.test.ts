@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ToolsetRuntimeSchema } from './catalog.js';
+import { InstalledToolsetSchema, ToolsetRuntimeSchema } from './catalog.js';
 
 const validRuntime = {
   kind: 'npm-package' as const,
@@ -27,6 +27,25 @@ describe('npm toolset runtime validation', () => {
       ToolsetRuntimeSchema.parse({ ...validRuntime, args: Array.from({ length: 65 }, () => 'x') }),
     ).toThrow();
     expect(() => ToolsetRuntimeSchema.parse({ ...validRuntime, envHints: ['bad-name'] })).toThrow();
+  });
+
+  it('accepts npm SRI pins only for service-managed system records', () => {
+    const systemRecord = {
+      toolsetId: '@playwright/mcp',
+      sourceId: 'system',
+      version: '1.2.3',
+      installedAt: '2026-08-04T00:00:00.000Z',
+      installPath: '/managed/system-toolsets/playwright',
+      runtime: {
+        ...validRuntime,
+        sha256: `sha512-${'B'.repeat(86)}==`,
+      },
+    };
+
+    expect(InstalledToolsetSchema.parse(systemRecord)).toMatchObject(systemRecord);
+    expect(() =>
+      InstalledToolsetSchema.parse({ ...systemRecord, sourceId: 'community' }),
+    ).toThrow();
   });
 });
 

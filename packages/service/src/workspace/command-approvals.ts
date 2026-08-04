@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { CommandApprovalScope } from '@bendyline/gezel';
-import { projectLocalDir } from '@bendyline/gezel/paths';
+import { projectPrivateDir } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
 
 /**
@@ -45,7 +45,7 @@ export function hashCommandInvocation(body: string | undefined, args: readonly s
 }
 
 function approvalsPath(home: string, projectId: string): string {
-  return join(projectLocalDir(home, projectId), 'command-approvals.json');
+  return join(projectPrivateDir(home, projectId), 'command-approvals.json');
 }
 
 export async function readCommandApprovals(

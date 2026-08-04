@@ -92,10 +92,18 @@ The intended shape is:
    identity.
 3. Store portable shared project metadata inside that project root. Each participating user's
    private chats, credentials, approvals, and personal preferences remain in their own `~/.gezel`.
-4. Phase one keeps metadata publication atomic but has last-writer semantics if two accounts edit
+   Project memory markdown follows the project: it is private for a user-owned project and shared
+   for a machine-wide project. Derived memory/content SQLite indexes, histories, questions,
+   terminals, activity stamps, executable toolsets and scripts, package environments, approvals,
+   and run records always live in an account-private project sidecar. A sidecar has no
+   `project.json`, so it cannot shadow the shared project definition.
+4. Never auto-execute MCP configuration discovered in a machine-shared workspace. A participating
+   account must explicitly import it into its private toolset roster; secrets and the resulting
+   runtime `.mcp.json` remain private to that account.
+5. Phase one keeps metadata publication atomic but has last-writer semantics if two accounts edit
    the same shared metadata simultaneously. Add cross-process transaction/version checks before
    exposing shared creation or presenting this as a high-concurrency collaboration mode.
-5. Add explicit creation/joining/removal UI later, show who can access it, and never widen an
+6. Add explicit creation/joining/removal UI later, show who can access it, and never widen an
    arbitrary existing folder's permissions silently. The migration release intentionally keeps
    shared creation out of the ordinary new-project/new-gezel flow.
 

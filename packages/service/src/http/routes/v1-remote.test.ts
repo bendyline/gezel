@@ -10,7 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
@@ -161,5 +161,38 @@ describe('remote model execution — B-side surface (e2e)', () => {
       model: 'copilot:mock-fast',
       contextWindow: 35_840,
     });
+  });
+
+  it('previews native admission without taking the inference bind path', async () => {
+    const token = await pairDevice('device-native-admit');
+    const inferenceBind = vi.spyOn(svc.context.chat, 'getProviderForModel');
+    const preview = vi
+      .spyOn(svc.context.chat, 'previewContextWindowForModel')
+      .mockResolvedValue(24_576);
+
+    try {
+      const res = await httpFetch(`${baseUrl}/v1/remote/admit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          protocolVersion: 1,
+          model: 'llama-cpp:mock-local',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        model: 'llama-cpp:mock-local',
+        contextWindow: 24_576,
+      });
+      expect(preview).toHaveBeenCalledWith('llama-cpp', 'mock-local');
+      expect(inferenceBind).not.toHaveBeenCalled();
+    } finally {
+      preview.mockRestore();
+      inferenceBind.mockRestore();
+    }
   });
 });

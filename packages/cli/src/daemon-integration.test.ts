@@ -8,7 +8,7 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ import {
   GezelClient,
   createTrustingFetch,
   discoverOrSpawn,
+  isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
 } from '@bendyline/gezel-client/node';
@@ -28,15 +29,20 @@ let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
 const execFileAsync = promisify(execFile);
 const cliEntry = fileURLToPath(new URL('../dist/bin/gezel.js', import.meta.url));
-const cliClientId = '00000000-0000-4000-8000-000000000001';
-const cliAppId = `gezel-cli.${cliClientId}`;
 
 async function runCli(...args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(process.execPath, [cliEntry, '--home', gezelHome, ...args], {
+  return runCliAtHome(gezelHome, ...args);
+}
+
+async function runCliAtHome(
+  home: string,
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      GEZEL_HOME: gezelHome,
+      GEZEL_HOME: home,
       GEZEL_MOCK_PROVIDER: '1',
     },
     timeout: 15_000,
@@ -45,12 +51,6 @@ async function runCli(...args: string[]): Promise<{ stdout: string; stderr: stri
 
 beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-'));
-  // Keep the CLI's per-install app id deterministic so the test daemon can
-  // exercise the real app-SDK authorization flow without a human consent UI.
-  await mkdir(join(gezelHome, 'cli'), { recursive: true, mode: 0o700 });
-  await writeFile(join(gezelHome, 'cli', 'client-id'), `${cliClientId}\n`, {
-    mode: 0o600,
-  });
   const daemonEntry = resolveDaemonEntry(import.meta.url);
   spawned = await discoverOrSpawn({
     daemonEntry,
@@ -63,7 +63,6 @@ beforeAll(async () => {
       // Skip the heavy LLM provider boot — mock is deterministic and has
       // no network dependency, which keeps this test CI-friendly.
       GEZEL_MOCK_PROVIDER: '1',
-      GEZEL_AUTOAPPROVE_APPS: cliAppId,
       // Force an ephemeral port. Without GEZEL_PORT the daemon now claims
       // the canonical fixed port (6228); pinning to 0 keeps this
       // cross-process test hermetic and off the shared port so it can't
@@ -134,25 +133,32 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     expect(gezels.gezels.length).toBeGreaterThan(0);
   });
 
-  it('authorizes CLI product calls through a persisted scoped app grant', async () => {
+  it('authorizes same-user CLI product calls without a headless consent loop', async () => {
     const result = await runCli('agent', 'list');
     expect(result.stderr).toBe('');
     expect(result.stdout.trim().length).toBeGreaterThan(0);
+  });
 
-    const tokenFiles = await readdir(join(gezelHome, 'cli', 'tokens'));
-    expect(tokenFiles).toHaveLength(1);
-    const saved = JSON.parse(
-      await readFile(join(gezelHome, 'cli', 'tokens', tokenFiles[0]!), 'utf8'),
-    ) as Record<string, string>;
-    expect(saved[cliAppId]).toBeTruthy();
-    expect(saved[cliAppId]).not.toBe(spawned.token);
-
-    const scopedClient = new GezelClient({
-      baseUrl: spawned.baseUrl,
-      token: saved[cliAppId]!,
-      ...(spawned.cert ? { fetch: createTrustingFetch({ cert: spawned.cert }) } : {}),
-    });
-    await expect(scopedClient.getConfig()).resolves.toBeTruthy();
+  it('spawns a missing user daemon and completes headlessly without desktop approval', async () => {
+    const headlessHome = await mkdtemp(join(tmpdir(), 'gezel-cli-headless-'));
+    try {
+      const result = await runCliAtHome(headlessHome, 'agent', 'list');
+      expect(result.stderr).toBe('');
+      expect(result.stdout.trim().length).toBeGreaterThan(0);
+      const runtime = await readRuntime(headlessHome);
+      expect(runtime).not.toBeNull();
+      expect(runtime?.port).not.toBe(6228);
+      expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
+    } finally {
+      const runtime = await readRuntime(headlessHome).catch(() => null);
+      if (runtime && isProcessAlive(runtime.pid)) {
+        process.kill(runtime.pid, 'SIGTERM');
+        for (let attempt = 0; attempt < 40 && isProcessAlive(runtime.pid); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      await rm(headlessHome, { recursive: true, force: true });
+    }
   });
 
   it('persists config writes across HTTP requests', async () => {

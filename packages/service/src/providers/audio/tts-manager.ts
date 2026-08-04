@@ -6,7 +6,7 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { RemotesRegistry } from '../../remotes/registry.js';
-import { resolveRemoteTarget } from '../remote/resolve.js';
+import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { RemoteTtsProvider } from './remote-tts.js';
 import { createTextToSpeechProvider } from './tts-factory.js';
@@ -51,8 +51,12 @@ export class TextToSpeechProviderManager {
 
   /** Route `remote:<id>/…` TTS models to the hosting server; else local. */
   async providerForModel(model?: string): Promise<TextToSpeechProvider> {
-    const target = resolveRemoteTarget(model, this.remotes, this.machineEngineRemoteId?.());
+    const target = resolveRemoteTarget(model, this.remotes);
     if (!target) return this.current();
+    return this.providerForRemoteTarget(target);
+  }
+
+  private providerForRemoteTarget(target: RemoteTarget): TextToSpeechProvider {
     const { remote, fetch } = target;
     const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
     let cached = this.remoteCache.get(remote.remoteId);
@@ -73,7 +77,11 @@ export class TextToSpeechProviderManager {
   }
 
   async current(): Promise<TextToSpeechProvider> {
-    if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
+    const machineRemoteId = this.machineEngineRemoteId?.();
+    if (machineRemoteId && usesMachineTextToSpeech(this.env ?? process.env)) {
+      const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
+      if (target) return this.providerForRemoteTarget(target);
+    }
     if (this.current_) return this.currentView_ ?? this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
@@ -107,6 +115,7 @@ export class TextToSpeechProviderManager {
   async retireLocalForMachineBroker(): Promise<void> {
     if (this.machineRetirement) return this.machineRetirement;
     const run = (async () => {
+      if (!usesMachineTextToSpeech(this.env ?? process.env)) return;
       this.activity.beginRetirement();
       await this.buildPromise;
       this.retiring_ ??= this.current_;
@@ -128,4 +137,9 @@ export class TextToSpeechProviderManager {
   async shutdown(): Promise<void> {
     await this.reset();
   }
+}
+
+/** Mock mode is an effective provider override and must stay user-local. */
+export function usesMachineTextToSpeech(env: NodeJS.ProcessEnv): boolean {
+  return env.GEZEL_MOCK_PROVIDER !== '1';
 }

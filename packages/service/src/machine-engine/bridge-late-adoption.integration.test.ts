@@ -2,7 +2,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { VideoGenerationOutput } from '../providers/video/types.js';
 import { type RunningService, startService } from '../service.js';
 
 async function waitFor(predicate: () => boolean, timeoutMs = 20_000): Promise<void> {
@@ -14,7 +13,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 20_000): Promise<vo
 }
 
 describe('late machine-engine adoption', () => {
-  it('retries a failed drain, preserves cloud-equivalent image config, and waits for active media', async () => {
+  it('retries a failed drain and preserves mock media overrides', async () => {
     const priorMock = process.env.GEZEL_MOCK_PROVIDER;
     const priorSecrets = process.env.GEZEL_SECRETS_BACKEND;
     process.env.GEZEL_MOCK_PROVIDER = '1';
@@ -23,7 +22,6 @@ describe('late machine-engine adoption', () => {
     const userHome = await mkdtemp(join(tmpdir(), 'gezel-late-user-'));
     let machine: RunningService | undefined;
     let user: RunningService | undefined;
-    let releaseGeneration: (() => void) | undefined;
     try {
       user = await startService({ home: userHome, role: 'user', machineEngineHome: machineHome });
       expect(user.context.machineEngine?.isConnected()).toBe(false);
@@ -43,15 +41,6 @@ describe('late machine-engine adoption', () => {
       stt.shutdown = sttShutdown;
       tts.shutdown = ttsShutdown;
 
-      const generationGate = new Promise<void>((resolve) => {
-        releaseGeneration = resolve;
-      });
-      video.generate = async () => {
-        await generationGate;
-        return {} as VideoGenerationOutput;
-      };
-      const generation = video.generate({ prompt: 'finish this local render' });
-
       const originalRetire = user.context.videoProvider.retireLocalForMachineBroker.bind(
         user.context.videoProvider,
       );
@@ -67,27 +56,14 @@ describe('late machine-engine adoption', () => {
 
       expect(user.context.machineEngine?.isConnected()).toBe(true);
       expect(videoShutdown).not.toHaveBeenCalled();
-      expect(imageShutdown).not.toHaveBeenCalled();
-
-      releaseGeneration?.();
-      await generation;
-      await waitFor(() => videoShutdown.mock.calls.length === 1);
-
-      expect(sttShutdown).toHaveBeenCalledTimes(1);
-      expect(ttsShutdown).toHaveBeenCalledTimes(1);
+      expect(sttShutdown).not.toHaveBeenCalled();
+      expect(ttsShutdown).not.toHaveBeenCalled();
       expect(imageShutdown).not.toHaveBeenCalled();
       await expect(user.context.imageProvider.current()).resolves.toMatchObject({ name: 'mock' });
-      await expect(user.context.videoProvider.current()).resolves.toMatchObject({
-        name: 'remote:This machine',
-      });
-      await expect(user.context.stt.current()).resolves.toMatchObject({
-        name: 'remote:This machine',
-      });
-      await expect(user.context.tts.current()).resolves.toMatchObject({
-        name: 'remote:This machine',
-      });
+      await expect(user.context.videoProvider.current()).resolves.toMatchObject({ name: 'mock' });
+      await expect(user.context.stt.current()).resolves.toMatchObject({ name: 'mock-stt' });
+      await expect(user.context.tts.current()).resolves.toMatchObject({ name: 'mock-tts' });
     } finally {
-      releaseGeneration?.();
       await user?.stop().catch(() => undefined);
       await machine?.stop().catch(() => undefined);
       await Promise.all([
