@@ -8,9 +8,9 @@ import { resolveSessionToolSurface, toolCapForTierAndRole } from './session-tool
  * evicting load-bearing tools while keeping incidental reads (the imara
  * office-hours kickoff loop,, was the 4th such incident). The
  * policy is now: small coordinators are capped to their complete curated
- * surface, while medium/large roles keep their full kit by default. The
- * opt-in coordinator diet remains covered independently. Implementation
- * roles keep their broad workbench.
+ * surface, while medium/large roles keep their full kit when the admitted
+ * context can hold it. Explicit and memory-pressure coordinator diets are
+ * covered independently. Implementation roles keep their broad workbench.
  */
 describe('toolCapForTierAndRole', () => {
   it('by default medium/large are uncapped for every role', () => {
@@ -76,6 +76,23 @@ describe('toolCapForTierAndRole', () => {
       toolCapForTierAndRole('medium', 'Meester', { coordinatorToolDiet: true }),
     ).not.toBeNull();
     expect(toolCapForTierAndRole('medium', 'Meester', { coordinatorToolDiet: false })).toBeNull();
+  });
+
+  it('automatically diets a medium coordinator when admission clamps below 48K', () => {
+    const clamped = toolCapForTierAndRole('medium', 'Meester', {
+      effectiveContextWindow: 35_840,
+    });
+    expect(clamped).not.toBeNull();
+    expect(clamped!).toBeGreaterThanOrEqual(27);
+
+    // At the full-roster floor the established medium-tier behavior remains
+    // unchanged: no count cap unless the operator explicitly opts into it.
+    expect(
+      toolCapForTierAndRole('medium', 'Meester', { effectiveContextWindow: 49_152 }),
+    ).toBeNull();
+    expect(
+      toolCapForTierAndRole('medium', 'Developer', { effectiveContextWindow: 35_840 }),
+    ).toBeNull();
   });
 
   it('tiny tier: implementation roles keep the broad workbench (75)', () => {

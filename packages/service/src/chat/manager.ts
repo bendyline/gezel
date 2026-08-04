@@ -2455,14 +2455,23 @@ export class ChatManager {
       registeredTools.length > 0
         ? await this.buildToolsOverrideForLiveSession(record, registeredTools)
         : undefined;
-    const sessionOpts = await this.buildSessionOpts(record, gezel.about, toolsOverride);
+    const cachedProvider = this.providers.get(record.providerName);
+    const effectiveContextWindow = cachedProvider?.getContextWindow?.();
+    const sessionOpts = await this.buildSessionOpts(
+      record,
+      gezel.about,
+      toolsOverride,
+      undefined,
+      undefined,
+      undefined,
+      effectiveContextWindow !== undefined ? { effectiveContextWindow } : undefined,
+    );
     // Effective model id for display: prefer what the session was
     // configured with, else fall back to the provider's auto-picked
     // default. Without the provider fallback, sessions where the user
     // never explicitly selected a model in Settings → AI show as
     // model-unset in the bundle even though a real model is loaded.
     // Mirrors the logic in `buildSessionOpts` for tier resolution.
-    const cachedProvider = this.providers.get(record.providerName);
     const modelId = sessionOpts.model ?? cachedProvider?.getEffectiveModelId?.();
     const parameterSize = await resolveCatalogParameterSize(this.catalog, modelId);
 
@@ -7761,14 +7770,29 @@ export class ChatManager {
    * stored `providerState` (use when the stored one is known dead). Used by
    * the mid-conversation "session gone" recovery path in `send`.
    */
-  private async createFreshSessionForRecord(record: ChatSession): Promise<LLMSession> {
+  private async createFreshSessionForRecord(
+    record: ChatSession,
+    runtime?: { pendingUserText?: string; omitLastUserFromPriorMessages?: boolean },
+  ): Promise<LLMSession> {
     const gezel = await this.store.getGezel(record.gezelId);
     if (!gezel) throw new Error(`agent ${record.gezelId} not found`);
     const provider = await this.ensureProviderForSession(record, gezel);
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
-    const sessionOpts = await this.buildSessionOpts(record, gezel.about);
+    const effectiveContextWindow = provider.getContextWindow?.();
+    const sessionOpts = await this.buildSessionOpts(
+      record,
+      gezel.about,
+      undefined,
+      undefined,
+      runtime?.pendingUserText,
+      undefined,
+      {
+        ...(effectiveContextWindow !== undefined ? { effectiveContextWindow } : {}),
+        ...(runtime?.omitLastUserFromPriorMessages ? { omitLastUserFromPriorMessages: true } : {}),
+      },
+    );
     return provider.createSession(sessionOpts);
   }
 
@@ -7831,7 +7855,13 @@ export class ChatManager {
           /* ignore */
         }
       }
-      state.session = await this.createFreshSessionForRecord(record);
+      state.session = await this.createFreshSessionForRecord(record, {
+        pendingUserText: userText,
+        // runSend persisted the first user message before recall completed.
+        // sendAndWait is about to supply that same message live, so replaying
+        // it here duplicates turn one and creates fake prior conversation.
+        omitLastUserFromPriorMessages: true,
+      });
       state.session.onUsage((u) => {
         this.usageTracker.recordTurn(record.providerName, u);
         this.accountTaskBudget(record, u);
@@ -10457,12 +10487,15 @@ export class ChatManager {
       pendingUserText,
     );
     const gateRepairConstrained = await this.gateRepairConstraintActive(record);
+    const effectiveContextWindow = provider.getContextWindow?.();
     const sessionOpts = await this.buildSessionOpts(
       record,
       gezel.about,
       undefined,
       undefined,
       pendingUserText,
+      undefined,
+      effectiveContextWindow !== undefined ? { effectiveContextWindow } : undefined,
     );
 
     // Try resume first if we have state. Fall back to fresh on failure.
@@ -10993,12 +11026,15 @@ export class ChatManager {
     promptExtras?: { bridgeFailed?: boolean },
     pendingUserText?: string,
   ): Promise<string | null> {
+    const effectiveContextWindow = this.providers.get(record.providerName)?.getContextWindow?.();
     const opts = await this.buildSessionOpts(
       record,
       gezel.about,
       toolsOverride,
       promptExtras,
       pendingUserText,
+      undefined,
+      effectiveContextWindow !== undefined ? { effectiveContextWindow } : undefined,
     );
     return opts.systemMessage ?? null;
   }
@@ -11013,6 +11049,12 @@ export class ChatManager {
     promptExtras?: { bridgeFailed?: boolean },
     pendingUserText?: string,
     requiredBridgeTool?: string,
+    runtime?: {
+      /** Post-admission per-turn context exposed by the selected provider. */
+      effectiveContextWindow?: number;
+      /** Current user message will be supplied by sendAndWait; don't replay it. */
+      omitLastUserFromPriorMessages?: boolean;
+    },
   ): Promise<BuiltSessionOpts> {
     const project = await this.store.getProject(record.projectId);
     const workspaceListing = project
@@ -11490,6 +11532,9 @@ export class ChatManager {
       securityPolicy,
       workspaceWritable,
       tier: localModelTier,
+      ...(runtime?.effectiveContextWindow !== undefined
+        ? { effectiveContextWindow: runtime.effectiveContextWindow }
+        : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
       forceDirectFileWork: directFileWorkConstrained,
@@ -11929,7 +11974,10 @@ export class ChatManager {
     const providerIsStateless =
       isLocalProvider(record.providerName) || record.providerName === 'anthropic';
     if (providerIsStateless && record.messages.length > 0) {
-      opts.priorMessages = record.messages
+      const replayMessages = runtime?.omitLastUserFromPriorMessages
+        ? record.messages.slice(0, -1)
+        : record.messages;
+      opts.priorMessages = replayMessages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -12569,6 +12617,9 @@ export class ChatManager {
       securityPolicy,
       workspaceWritable,
       tier: localModelTier,
+      ...(runtime?.effectiveContextWindow !== undefined
+        ? { effectiveContextWindow: runtime.effectiveContextWindow }
+        : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
       forceDirectFileWork: directFileWorkConstrained,
@@ -17235,6 +17286,11 @@ export async function buildLlamaCppProvider(opts: {
         }
       : {}),
     ...baseProviderOpts,
+    // The RAM-aware admission pass may have lowered the launch from the
+    // configured/default ceiling. Keep the session-side pressure checks,
+    // tool budgets, and user-facing diagnostics on the exact per-slot value
+    // passed to llama-server instead of falling back to the pre-clamp 65K.
+    numCtx: effectiveNumCtx,
     // Same value that decides `--mmproj` above, so the wire shape and the
     // launch flag can never disagree: typed image parts are only emitted for
     // a server that was actually started with a projector.

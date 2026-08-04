@@ -2043,6 +2043,10 @@ export class LlamaCppProvider implements LLMProvider {
     });
   }
 
+  getContextWindow(): number {
+    return this.numCtx;
+  }
+
   /**
    * Classifier hook the supervisor wires into its `onRawLine`. Runs
    * on every stdout/stderr line from llama-server; when the line
@@ -2646,14 +2650,26 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // error already proved we're over the line, so skip the ratio
     // gate. The proactive iteration-2 hook leaves `force` unset.
     if (!opts?.force && ratio < MID_LOOP_COMPACT_RATIO) return false;
-    // Slice prior = messages between the system msg (idx 0) and the
-    // current turn's user msg (currentTurnStartIdx). String-only
-    // content; the manager's compaction prompt expects role + text,
-    // not tool_calls / images.
+    // Slice prior = conversational messages after ALL leading system bands
+    // and before the current turn's user msg. Layered prefix caching seeds a
+    // stable + volatile system pair; treating the volatile band as prior
+    // conversation made a recalled first turn appear to have two old messages
+    // and emitted a bogus compaction warning on `hello`.
+    let priorStartIdx = 0;
+    while (
+      priorStartIdx < this.currentTurnStartIdx &&
+      this.messages[priorStartIdx]?.role === 'system'
+    ) {
+      priorStartIdx++;
+    }
     const prior: Array<{ role: string; content: string }> = [];
-    for (let i = 1; i < this.currentTurnStartIdx; i++) {
+    for (let i = priorStartIdx; i < this.currentTurnStartIdx; i++) {
       const m = this.messages[i]!;
-      if (typeof m.content === 'string' && m.content.length > 0) {
+      if (
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string' &&
+        m.content.length > 0
+      ) {
         prior.push({ role: m.role, content: m.content });
       }
     }
@@ -2678,15 +2694,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       this.compactedThisTurn = true;
       return false;
     }
-    // Replace [1..currentTurnStartIdx) with one synthesis assistant
-    // message. Splice keeps the array reference stable (other parts
-    // of the code may iterate over it; we mutate in place).
-    const removed = this.currentTurnStartIdx - 1;
-    this.messages.splice(1, removed, {
+    // Replace the prior conversation with one synthesis assistant message,
+    // preserving every leading system band verbatim. Splice keeps the array
+    // reference stable (other parts may iterate over it; we mutate in place).
+    const removed = this.currentTurnStartIdx - priorStartIdx;
+    this.messages.splice(priorStartIdx, removed, {
       role: 'assistant',
       content: result.syntheticContent,
     });
-    this.currentTurnStartIdx = 2;
+    this.currentTurnStartIdx = priorStartIdx + 1;
     this.compactedThisTurn = true;
     log.info(
       `[llama-cpp] mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)${opts?.force ? ' (reactive recovery)' : ''}`,

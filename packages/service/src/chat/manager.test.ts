@@ -100,6 +100,86 @@ describe('resolveMlxEffectiveNumCtx', () => {
   });
 });
 
+describe('ChatManager — clamped first-turn context', () => {
+  it('does not replay the current user during auto-recall and diets a clamped Meester', async () => {
+    const testHome = await mkdtemp(join(tmpdir(), 'gezel-first-turn-context-test-'));
+    const testStore = new Store({ home: testHome });
+    await testStore.ensureLayout();
+    await testStore.writeConfig({ provider: 'copilot' });
+    await testStore.createGezel({ name: 'Imara', role: 'Meester' });
+    await testStore.createProject({ name: 'Default' });
+    await testStore.writeConfig({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'qwen3.6-35b-a3b-q4' },
+    });
+
+    const recallMemory = {
+      hasIndex: () => true,
+      embedQuery: async () => [0.1, 0.2],
+      searchVector: async (scope: 'gezel' | 'project') =>
+        scope === 'project'
+          ? [
+              {
+                id: 'memory-1',
+                text: 'The project uses a local model.',
+                scope: 'project',
+                day: '2026-08-03',
+                score: 0.9,
+                kind: 'fact',
+              },
+            ]
+          : [],
+      save: async () => {},
+      reindex: async () => 0,
+      writeSummary: async () => {},
+      getRecent: async () => '',
+    } as unknown as MemoryManager;
+    const llama = new MockProvider({ name: 'llama-cpp' });
+    llama.ollamaContextConfig = { numCtx: 35_840, promptChars: () => 0 };
+    const testManager = new ChatManager({
+      store: testStore,
+      events: new ChatEventBus(),
+      memory: recallMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home: testHome,
+      providers: [['llama-cpp', llama]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(testHome),
+    });
+
+    try {
+      const session = await testManager.createSession({ gezelId: 'imara' });
+      llama.script('Hello from Imara');
+      await testManager.send(session.id, 'hello');
+
+      const creates = llama.calls.filter((call) => call.kind === 'create');
+      expect(creates.length).toBeGreaterThanOrEqual(2);
+      const recalled = creates.at(-1)?.opts;
+      expect(recalled?.priorMessages).toEqual([]);
+      expect(`${recalled?.systemMessage ?? ''}\n${recalled?.volatileContext ?? ''}`).toContain(
+        'Recalled from prior sessions',
+      );
+
+      // 35,840 is below the 48K full-roster floor, so the provider's actual
+      // admitted context must activate the curated coordinator surface.
+      expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
+      expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
+      expect(recalled?.toolAllowlist?.size).toBeLessThan(60);
+
+      const persisted = await testStore.getSession('imara', session.id);
+      expect(persisted?.messages.map((message) => [message.role, message.content])).toEqual([
+        ['user', 'hello'],
+        ['assistant', 'Hello from Imara'],
+      ]);
+    } finally {
+      await testManager.drainBackground();
+      await testManager.shutdown();
+      await rm(testHome, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * The properties `NativeEngineCrashedError` carries. Assigned onto a
  * scripted mock failure so the structured-detail path is exercised without

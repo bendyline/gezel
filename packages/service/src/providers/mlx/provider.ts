@@ -504,6 +504,10 @@ export class MlxProvider implements LLMProvider {
     // No-op — supervisor starts the child lazily on first sendAndWait.
   }
 
+  getContextWindow(): number {
+    return this.numCtx;
+  }
+
   async shutdown(): Promise<void> {
     // Poison FIRST so a turn racing the shutdown can't lazily respawn
     // the engine after the stop below. The engine pool evicts replicas

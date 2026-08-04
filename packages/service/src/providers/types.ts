@@ -942,6 +942,14 @@ export interface LLMProvider {
    */
   getEffectiveModelId?(): string | undefined;
   /**
+   * Effective per-turn context window the provider actually gives a
+   * session. Supervised local engines may lower the configured/model-native
+   * value at launch time to fit live RAM + VRAM; callers that size prompts
+   * or tool surfaces must use this post-admission number rather than the
+   * requested ceiling.
+   */
+  getContextWindow?(): number | undefined;
+  /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by
    * {@link createSession} call `queue.acquire()` in their
