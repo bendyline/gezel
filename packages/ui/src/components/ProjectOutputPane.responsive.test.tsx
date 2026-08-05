@@ -69,13 +69,13 @@ describe('ProjectOutputPane responsive toolbar', () => {
     );
     expect(states).toContain(true);
 
-    window.dispatchEvent(new CustomEvent(OUTPUT_PANE_RESTORE_EVENT));
-    await waitFor(() =>
+    fireEvent(window, new CustomEvent(OUTPUT_PANE_RESTORE_EVENT));
+    await waitFor(() => {
       expect(container.querySelector('.project-output-pane')).not.toHaveClass(
         'project-output-pane-maximized',
-      ),
-    );
-    expect(states.at(-1)).toBe(false);
+      );
+      expect(states.at(-1)).toBe(false);
+    });
     window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximized);
   });
 
