@@ -18,6 +18,7 @@ import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
+import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
 import { ProjectChat } from '../components/ProjectChat.js';
@@ -1625,6 +1626,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         }}
                       />
 
+                      <ProjectMemoriesEditor
+                        key={`${selected.id}:memories`}
+                        projectId={selected.id}
+                        projectName={selected.name}
+                      />
+
                       <section
                         id="project-about-connections"
                         className="project-about-section project-about-anchor"
@@ -1973,6 +1980,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <a href="#project-about-crew">Assigned gezellen</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
+                        <a href="#project-about-memories">Project memories</a>
                         <a href="#project-about-connections">Connections</a>
                         <a href="#project-about-settings">Settings</a>
                         <a href="#project-about-toolsets">Toolsets</a>

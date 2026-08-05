@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
@@ -263,6 +263,16 @@ describe('projects API', () => {
     const files = (await listRes.json()) as { files: Array<{ name: string }> };
     expect(files.files.find((f) => f.name === 'notes.md')).toBeTruthy();
 
+    const locationRes = await api(
+      'GET',
+      '/api/projects/integtest/reference-file-location?kind=artifact&path=notes.md',
+    );
+    expect(locationRes.status).toBe(200);
+    const location = (await locationRes.json()) as { path: string };
+    expect(location.path).toBe(
+      await realpath(join(svc.context.home, 'projects', 'integtest', 'artifacts', 'notes.md')),
+    );
+
     const delRes = await api('DELETE', '/api/projects/integtest/artifacts/delete?path=notes.md');
     expect(delRes.status).toBe(200);
   });
@@ -495,6 +505,59 @@ describe('memory API', () => {
     };
     expect(search.results.length).toBeGreaterThan(0);
     expect(search.results.some((r) => r.text.includes('concise answers'))).toBe(true);
+  });
+
+  it('edits a project memory day and refreshes its derived index', async () => {
+    await api('POST', '/api/projects', { name: 'Memory Project' });
+    await api('POST', '/api/gezels', { name: 'Memory Searcher' });
+    const saveRes = await api('POST', '/api/memory/save', {
+      scope: 'project',
+      id: 'memory-project',
+      text: 'The original project decision.',
+      kind: 'decision',
+    });
+    expect(saveRes.status).toBe(200);
+
+    const daysRes = await api('GET', '/api/memory/days?scope=project&id=memory-project');
+    const { days } = (await daysRes.json()) as { days: string[] };
+    expect(days).toHaveLength(1);
+    const day = days[0]!;
+
+    const updateRes = await api(
+      'PATCH',
+      `/api/memory/day?scope=project&id=memory-project&day=${day}`,
+      { content: '## 11:20 [decision]\n\nThe edited project decision.\n' },
+    );
+    expect(updateRes.status).toBe(200);
+    expect(await updateRes.json()).toEqual({ ok: true, indexed: true });
+
+    const readRes = await api('GET', `/api/memory/day?scope=project&id=memory-project&day=${day}`);
+    expect(await readRes.json()).toEqual({
+      content: '## 11:20 [decision]\n\nThe edited project decision.\n',
+    });
+
+    const searchRes = await api('POST', '/api/memory/search', {
+      gezelId: 'memory-searcher',
+      projectId: 'memory-project',
+      query: 'edited project decision',
+      topK: 5,
+    });
+    const search = (await searchRes.json()) as { results: Array<{ text: string }> };
+    expect(search.results.some((result) => result.text === 'The edited project decision.')).toBe(
+      true,
+    );
+
+    const invalidDay = await api(
+      'PATCH',
+      '/api/memory/day?scope=project&id=memory-project&day=../config',
+      { content: 'nope' },
+    );
+    expect(invalidDay.status).toBe(400);
+
+    const invalidId = await api('PATCH', '/api/memory/day?scope=project&id=..&day=2026-08-04', {
+      content: 'nope',
+    });
+    expect(invalidId.status).toBe(400);
   });
 });
 

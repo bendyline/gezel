@@ -208,7 +208,7 @@ export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Pro
         </div>
       )}
 
-      <div className="ollama-section ollama-section--flat">
+      <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
         {catalog.length === 0 ? (
           <p className="muted small">No models in the catalog yet.</p>

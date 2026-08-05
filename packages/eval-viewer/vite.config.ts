@@ -100,6 +100,10 @@ function evalIndexApi(): Plugin {
 }
 
 export default defineConfig({
+  // The viewer is also opened through Gezel's capability-scoped static
+  // preview route. Relative build URLs keep dist/index.html and its assets
+  // under that mount instead of escaping to the daemon's `/assets/*` root.
+  base: './',
   plugins: [react(), evalRunsServer(), evalIndexApi()],
   build: {
     outDir: 'dist',

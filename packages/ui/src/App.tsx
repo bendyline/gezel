@@ -24,6 +24,10 @@ import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
+import {
+  OUTPUT_PANE_MAXIMIZED_EVENT,
+  requestOutputPaneRestore,
+} from './components/output-pane-maximize.js';
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
@@ -136,6 +140,7 @@ function FullApp() {
   // is no cloud quota to show, and the EngineStatusPill covers that case.
   const [provider, setProvider] = useState<ProviderName>('copilot');
   const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
+  const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
   // Per-project signals painted on the sidebar rows: which projects have a
   // gezel mid-turn (the animated "thinking" indicator), and how many pending
   // questions each has (the "needs input" affordance). Both ride the single
@@ -175,6 +180,19 @@ function FullApp() {
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  // ProjectOutputPane reports its local maximize state through a window
+  // event so the persistent titlebar can provide the restore affordance
+  // that the pane's covered toolbar cannot. This avoids threading a UI-only
+  // callback through TabContent and every project-view layer in between.
+  useEffect(() => {
+    const onMaximizedChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ maximized?: boolean }>).detail;
+      setOutputPaneMaximized(detail?.maximized === true);
+    };
+    window.addEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
+    return () => window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
+  }, []);
   // Questions overlay — top-of-window dropdown that renders the pending
   // structured questions across every project. Opens on nav click.
   // Auto-closes when the last question is answered.
@@ -651,6 +669,17 @@ function FullApp() {
           <ClaudeCliPoolPill />
           <NightShiftMenu state={nightShift} onChange={setNightShift} />
           <EngagementMenu mode={engagementMode} />
+          {outputPaneMaximized && (
+            <button
+              type="button"
+              className="app-output-restore"
+              onClick={requestOutputPaneRestore}
+              title="Restore output pane (F5)"
+              aria-label="Restore output pane"
+            >
+              <OutputPaneRestoreIcon />
+            </button>
+          )}
           <QuotaMeter
             usage={usage}
             provider={provider}
@@ -727,6 +756,28 @@ function FullApp() {
   );
 }
 
+function OutputPaneRestoreIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M12.5 6.5H9.5V3.5" />
+      <path d="M9.5 6.5 12.8 3.2" />
+      <path d="M3.5 9.5H6.5V12.5" />
+      <path d="M6.5 9.5 3.2 12.8" />
+    </svg>
+  );
+}
+
 /**
  * Header control for the install-wide AI engagement mode. The trigger
  * is a play / pause icon — play when the AI runs unrestricted
@@ -749,14 +800,18 @@ const ENGAGEMENT_OPTIONS: EngagementOption[] = [
   {
     mode: 'proactive',
     label: 'Proactive',
-    hint: 'Full activity — scheduled jobs, nudges, fan-out.',
+    hint: 'Full activity — task work, scheduled triggers, nudges, fan-out.',
   },
   {
     mode: 'scheduled',
-    label: 'Scheduled + Reactive',
-    hint: 'Scheduled jobs run; no proactive nudges.',
+    label: 'Tasks + Reactive',
+    hint: 'Task work and scheduled triggers run; no proactive nudges.',
   },
-  { mode: 'reactive', label: 'Reactive only', hint: 'AI replies to your messages; nothing else.' },
+  {
+    mode: 'reactive',
+    label: 'Reactive only',
+    hint: 'AI replies to your messages; task work is paused.',
+  },
   { mode: 'off', label: 'Off', hint: 'AI is paused entirely.' },
 ];
 

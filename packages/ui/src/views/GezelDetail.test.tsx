@@ -102,6 +102,17 @@ const DETAIL = {
   icon: null,
 } as unknown as GezelDetailData;
 
+const FIXED_FUNCTION_DETAIL = {
+  ...DETAIL,
+  id: 'gz-image',
+  name: 'Maya Image',
+  role: 'Image generator',
+  fixedFunction: {
+    tool: 'generate_image',
+    promptKey: 'prompt',
+  },
+} as unknown as GezelDetailData;
+
 // A variant carrying a resolved poppetje so the appearance panel renders
 // its hero + enabled "Accessories…" affordance. Pin two wearable slots so
 // the toggle-on / toggle-off assertions are deterministic.
@@ -144,6 +155,53 @@ describe('GezelDetail', () => {
     expect(screen.getByText('Researcher')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'About' }));
     expect(screen.getByTestId('editor-initial')).toHaveTextContent('Research assistant.');
+  });
+
+  it('hides Toolsets and Memories for a fixed-function gezel', async () => {
+    vi.mocked(api.listInstalledImageModels).mockResolvedValue({
+      models: [
+        {
+          id: 'flux-1-schnell',
+          name: 'FLUX.1 Schnell',
+          approxSizeBytes: 8_000_000_000,
+          installedAt: '2026-08-04T00:00:00.000Z',
+        },
+      ],
+      defaultModel: 'flux-1-schnell',
+    });
+    vi.mocked(api.getGezel).mockResolvedValue(FIXED_FUNCTION_DETAIL);
+    render(<GezelDetail gezelId="gz-image" />);
+    await screen.findByRole('heading', { name: 'Maya Image' });
+
+    expect(screen.queryByRole('tab', { name: 'Toolsets' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Memories' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('Image · FLUX.1 Schnell')).toBeInTheDocument();
+  });
+
+  it('leaves Toolsets and Memories available for an ordinary gezel', async () => {
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    expect(screen.getByRole('tab', { name: 'Toolsets' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Memories' })).toBeInTheDocument();
+  });
+
+  it('returns to Chat when switching from Toolsets to a fixed-function gezel', async () => {
+    vi.mocked(api.getGezel).mockImplementation(async (id) =>
+      id === 'gz-image' ? FIXED_FUNCTION_DETAIL : DETAIL,
+    );
+    const { rerender } = render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Toolsets' }));
+    expect(screen.getByTestId('toolsets-editor')).toBeInTheDocument();
+
+    rerender(<GezelDetail gezelId="gz-image" />);
+    await screen.findByRole('heading', { name: 'Maya Image' });
+
+    expect(screen.queryByTestId('toolsets-editor')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('renders an error fallback when getGezel rejects', async () => {

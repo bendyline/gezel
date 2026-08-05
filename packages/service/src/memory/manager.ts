@@ -197,6 +197,29 @@ export class MemoryManager {
     return this.store.readMemoryDay(scope, id, day);
   }
 
+  /**
+   * Replace one source-of-truth daily file after a first-party editor change.
+   * A failed index refresh must not roll back or misreport the durable markdown
+   * save; the health monitor will rebuild the derived cache on its next sweep.
+   */
+  async replaceDay(
+    scope: 'gezel' | 'project',
+    id: string,
+    day: string,
+    content: string,
+  ): Promise<{ indexed: boolean }> {
+    await this.store.writeMemoryDay(scope, id, day, content);
+    try {
+      await this.reindex(scope, id);
+      return { indexed: true };
+    } catch (error) {
+      log.warn(
+        `[memory] saved edited ${scope}/${id}/${day}, but reindex failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { indexed: false };
+    }
+  }
+
   async getRecent(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
     return this.store.readRecentMemories(scope, id, days);
   }

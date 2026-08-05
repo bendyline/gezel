@@ -698,7 +698,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
         </div>
       )}
 
-      <div className="ollama-section ollama-section--flat">
+      <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
         <p className="muted small" style={{ marginTop: 0 }}>
           Models are hosted by{' '}
@@ -708,7 +708,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
             rel="noreferrer"
             style={{ color: 'inherit' }}
           >
-            huggingface.co
+            Hugging Face
           </a>
           , a community library of open, freely available AI models. Your device downloads them
           directly.

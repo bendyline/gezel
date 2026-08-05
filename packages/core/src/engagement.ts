@@ -10,9 +10,14 @@ export function isProactiveAllowed(cfg: Pick<GezelConfig, 'aiEngagementMode'>): 
   return getEngagementMode(cfg) === 'proactive';
 }
 
-export function isSchedulingAllowed(cfg: Pick<GezelConfig, 'aiEngagementMode'>): boolean {
+/** Whether autonomous work on active tasks may start or advance. */
+export function isTaskWorkAllowed(cfg: Pick<GezelConfig, 'aiEngagementMode'>): boolean {
   const m = getEngagementMode(cfg);
   return m === 'proactive' || m === 'scheduled';
+}
+
+export function isSchedulingAllowed(cfg: Pick<GezelConfig, 'aiEngagementMode'>): boolean {
+  return isTaskWorkAllowed(cfg);
 }
 
 export function isEngagementAllowed(cfg: Pick<GezelConfig, 'aiEngagementMode'>): boolean {

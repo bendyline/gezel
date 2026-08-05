@@ -2,6 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  OUTPUT_PANE_MAXIMIZED_EVENT,
+  OUTPUT_PANE_RESTORE_EVENT,
+} from './components/output-pane-maximize.js';
 import { createMockApi } from './test-utils/mockApi.js';
 
 vi.mock('./api.js', () => ({
@@ -41,6 +45,38 @@ vi.mock('./views/HomeView.js', () => ({ HomeView: () => <div>Home view</div> }))
 
 const { App } = await import('./App.js');
 const { api } = await import('./api.js');
+
+describe('Output pane titlebar restore', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('appears only while the output pane is maximized and requests a restore', async () => {
+    const restored = vi.fn();
+    window.addEventListener(OUTPUT_PANE_RESTORE_EVENT, restored);
+    render(<App />);
+
+    expect(screen.queryByRole('button', { name: 'Restore output pane' })).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OUTPUT_PANE_MAXIMIZED_EVENT, { detail: { maximized: true } }),
+      );
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore output pane' }));
+    expect(restored).toHaveBeenCalledOnce();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OUTPUT_PANE_MAXIMIZED_EVENT, { detail: { maximized: false } }),
+      );
+    });
+    expect(screen.queryByRole('button', { name: 'Restore output pane' })).not.toBeInTheDocument();
+
+    window.removeEventListener(OUTPUT_PANE_RESTORE_EVENT, restored);
+  });
+});
 
 describe('Night Shift header status', () => {
   beforeEach(() => {

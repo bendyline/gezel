@@ -78,6 +78,10 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   saveProjectScriptSource: { status: 'saved', hash: 'h1', metaOk: true, diagnostics: [] },
   createProjectScript: { name: 'script', source: '', hash: 'h0' },
   draftProjectScript: { source: '' },
+  listMemoryDays: { days: [] },
+  readMemoryDay: { content: '' },
+  readMemorySummary: { content: '' },
+  readMemoryLessons: { content: '' },
   getSdkTypes: { version: 'v0', files: [] },
   listMemories: { memories: [] },
   getHandboekArticle: {

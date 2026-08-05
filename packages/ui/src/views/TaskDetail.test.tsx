@@ -1,4 +1,9 @@
-import type { GezelSummary, Task, TaskNote } from '@bendyline/gezel';
+import {
+  initialPoppetjeForGezel,
+  type GezelSummary,
+  type Task,
+  type TaskNote,
+} from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -80,7 +85,11 @@ const TASK: Task = {
 } as unknown as Task;
 
 const GEZELS: GezelSummary[] = [
-  { id: 'gz-maya', name: 'Maya' } as GezelSummary,
+  {
+    id: 'gz-maya',
+    name: 'Maya',
+    poppetje: initialPoppetjeForGezel('gz-maya', 'Maya'),
+  } as GezelSummary,
   { id: 'noor', name: 'Noor', role: 'Boekwachter' } as GezelSummary,
 ];
 
@@ -134,6 +143,28 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(screen.getByText('Initial findings.')).toBeInTheDocument();
     });
+  });
+
+  it('shows a gezel poppetje beside a gezel-authored note', async () => {
+    vi.mocked(api.listTaskNotes).mockResolvedValue({
+      notes: [
+        {
+          ...NOTE,
+          author: { kind: 'gezel', gezelId: 'gz-maya', name: 'Maya' },
+        },
+      ],
+    } as never);
+
+    const { container } = render(
+      <TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('.task-note-author .gezel-icon-poppetje'),
+      ).not.toBeNull();
+    });
+    expect(container.querySelector('.task-note-author')).toHaveTextContent('Maya');
   });
 
   it('picking a status key calls setTaskStatus and propagates via onChanged', async () => {

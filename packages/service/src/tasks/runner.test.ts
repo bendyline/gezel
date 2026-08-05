@@ -1021,7 +1021,7 @@ describe('TaskRunner — night-shift gating + priority', () => {
   });
 
   it('dispatches under scheduled engagement', async () => {
-    // "Scheduled + Reactive" still runs the work the user set up; only
+    // "Tasks + Reactive" still runs the work the user set up; only
     // the proactive nudges are off.
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

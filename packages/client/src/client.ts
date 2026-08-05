@@ -225,6 +225,8 @@ import type {
   ReadImageBase64Response,
   ReadSymbolRequest,
   ReadSymbolResponse,
+  ReferenceFileLocationRequest,
+  ReferenceFileLocationResponse,
   RenameGezelRequest,
   RenderImageRequest,
   RenderImageResponse,
@@ -3904,6 +3906,19 @@ export class GezelClient {
     );
   }
 
+  updateMemoryDay(
+    scope: 'gezel' | 'project',
+    id: string,
+    day: string,
+    content: string,
+  ): Promise<{ ok: true; indexed: boolean }> {
+    return this.request(
+      'PATCH',
+      `/api/memory/day?scope=${scope}&id=${encodeURIComponent(id)}&day=${encodeURIComponent(day)}`,
+      { content },
+    );
+  }
+
   readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<{ content: string }> {
     return this.request('GET', `/api/memory/summary?scope=${scope}&id=${encodeURIComponent(id)}`);
   }
@@ -4460,6 +4475,17 @@ export class GezelClient {
     which: 'artifacts' | 'workspace' = 'artifacts',
   ): Promise<{ ok: true; path: string }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/reveal?which=${which}`);
+  }
+
+  resolveReferenceFileLocation(
+    projectId: string,
+    request: ReferenceFileLocationRequest,
+  ): Promise<ReferenceFileLocationResponse> {
+    const params = new URLSearchParams({ kind: request.kind, path: request.path });
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/reference-file-location?${params.toString()}`,
+    );
   }
 
   // ── artifacts (read-write) ──

@@ -8,7 +8,6 @@ import { GezelTimeline } from './GezelTimeline.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
-import { useGenerationEngineLabel } from './generation-engine-label.js';
 import { type OpenSessionIntent, consumeOpenSession } from './pending-open-session.js';
 
 const ALL_PROJECTS = '__ALL__';
@@ -24,7 +23,13 @@ const ALL_PROJECTS = '__ALL__';
  * first ranked project (voorman > assignment > recent session > the
  * `default` fallback). Switching gezels reshuffles the list.
  */
-export function GezelChatTab({ gezel }: { gezel: GezelDetail }) {
+export function GezelChatTab({
+  gezel,
+  engineLabel,
+}: {
+  gezel: GezelDetail;
+  engineLabel: string | null;
+}) {
   const [projects, setProjects] = useState<ProjectForGezel[] | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [focusSessionId, setFocusSessionId] = useState<string>('');
@@ -122,6 +127,7 @@ export function GezelChatTab({ gezel }: { gezel: GezelDetail }) {
           <GezelChatBody
             key={`${gezel.id}:${selectedProjectId}`}
             gezel={gezel}
+            engineLabel={engineLabel}
             project={
               projects.find((p) => p.projectId === selectedProjectId) ?? {
                 projectId: selectedProjectId,
@@ -157,10 +163,12 @@ function projectLabel(p: ProjectForGezel): string {
  */
 function GezelChatBody({
   gezel,
+  engineLabel,
   project,
   focusSessionId,
 }: {
   gezel: GezelDetail;
+  engineLabel: string | null;
   project: ProjectForGezel;
   focusSessionId?: string;
 }) {
@@ -171,11 +179,6 @@ function GezelChatBody({
   useEffect(() => {
     if (focusSessionId) setSessionId(focusSessionId);
   }, [focusSessionId]);
-
-  // For a fixed-function generator gezel (video/image), surface the actual
-  // generation model in the session switcher instead of the (unused) chat
-  // model engine. Null for ordinary LLM gezels → default provider+model label.
-  const engineLabel = useGenerationEngineLabel(gezel.fixedFunction);
 
   // Note: the parent keys us on `${gezel.id}:${selectedProjectId}` so we
   // always remount when either changes — no in-component reset effect

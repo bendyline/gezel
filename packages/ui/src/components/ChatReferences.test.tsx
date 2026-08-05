@@ -1,4 +1,4 @@
-import type { Task } from '@bendyline/gezel';
+import { type Task, initialPoppetjeForGezel } from '@bendyline/gezel';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,8 @@ import { CHAT_RAIL_MIN_SPLIT_PX, ChatReferences } from './ChatReferences.js';
 
 const apiMocks = vi.hoisted(() => ({
   getTaskByRef: vi.fn(),
+  getConfig: vi.fn(),
+  listGezels: vi.fn(),
   listTaskNotes: vi.fn(),
   readProjectArtifact: vi.fn(),
   readDocument: vi.fn(),
@@ -21,6 +23,8 @@ vi.mock('./CommandsPanel.js', () => ({
 let activeWidth = 0;
 
 beforeEach(() => {
+  apiMocks.getConfig.mockResolvedValue({ showPoppetjes: true });
+  apiMocks.listGezels.mockResolvedValue({ gezels: [] });
   apiMocks.listTaskNotes.mockResolvedValue({ notes: [] });
   apiMocks.readProjectArtifact.mockImplementation(async (_projectId, path) => ({
     content: `# ${path}`,
@@ -55,6 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
   delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia;
+  delete window.__GEZEL__;
 });
 
 function renderProjectRail() {
@@ -179,6 +184,15 @@ describe('ChatReferences task picker', () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
     apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
+    apiMocks.listGezels.mockResolvedValue({
+      gezels: [
+        {
+          id: 'maya',
+          name: 'Maya',
+          poppetje: initialPoppetjeForGezel('maya', 'Maya'),
+        },
+      ],
+    });
     apiMocks.listTaskNotes.mockResolvedValue({
       notes: [
         {
@@ -225,12 +239,67 @@ describe('ChatReferences task picker', () => {
     expect(noteBodies).toHaveLength(2);
     expect(noteBodies[0]).toHaveTextContent('Newest note');
     expect(noteBodies[0]).toHaveTextContent('Maya');
+    expect(noteBodies[0]?.querySelector('.gezel-icon-poppetje')).not.toBeNull();
     expect(noteBodies[0]).toHaveTextContent('Inspect');
     expect(noteBodies[1]).toHaveTextContent('Older note');
   });
 });
 
 describe('ChatReferences reference picker', () => {
+  it('offers native save-copy and containing-folder actions for the active file', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const saveReferenceCopy = vi.fn().mockResolvedValue({ ok: true });
+    const showReferenceInFolder = vi.fn().mockResolvedValue({ ok: true });
+    window.__GEZEL__ = {
+      token: '',
+      saveReferenceCopy,
+      showReferenceInFolder,
+    };
+    apiMocks.readProjectArtifact.mockRejectedValue(
+      new Error('Preview unavailable in native-action test'),
+    );
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() =>
+              onToolActivity({
+                name: 'read_artifact',
+                path: 'reports/final.md',
+                success: true,
+                durationMs: 1,
+              })
+            }
+          >
+            Add reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add reference' }));
+    const actions = await screen.findByRole('button', { name: 'Actions for final.md' });
+
+    await user.click(actions);
+    await user.click(await screen.findByRole('menuitem', { name: 'Save copy as…' }));
+    expect(saveReferenceCopy).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      kind: 'artifact',
+      path: 'reports/final.md',
+    });
+
+    await user.click(actions);
+    await user.click(await screen.findByRole('menuitem', { name: 'Show containing folder' }));
+    expect(showReferenceInFolder).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      kind: 'artifact',
+      path: 'reports/final.md',
+    });
+  });
+
   it('promotes a terminal workspace reference into the previewer', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

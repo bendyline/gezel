@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import type { PreviewSource } from '@bendyline/gezel';
+import { type PreviewSource, resolveSecurityPolicy } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import type { ServiceContext } from '../context.js';
@@ -32,11 +32,12 @@ import type { PreviewCapabilityStore } from '../preview-capability.js';
  *     same-origin requests to `/api/*` (those are bearer-gated anyway,
  *     but belt and suspenders).
  *
- *  3. **Restrictive response headers** set here: a strict CSP removes
- *     external resource origins, `X-Content-Type-
- *     Options: nosniff` stops MIME-confusion tricks, and
- *     `X-Frame-Options: SAMEORIGIN` means an attacker can't load our
- *     preview from an external page and trick the user.
+ *  3. **Policy-aware response headers** set here: CSP removes external
+ *     resource origins unless the resolved security policy explicitly
+ *     enables External services, `X-Content-Type-Options: nosniff` stops
+ *     MIME-confusion tricks, and `X-Frame-Options: SAMEORIGIN` means an
+ *     attacker can't load our preview from an external page and trick the
+ *     user. Navigation and framing stay locked down in both modes.
  *
  *  Electron further hardens the shell (`contextIsolation: true`,
  *  `nodeIntegration: false`), so even if something escaped, there's no
@@ -47,40 +48,74 @@ import type { PreviewCapabilityStore } from '../preview-capability.js';
  * A bare directory URL redirects to its trailing-slash form and then serves
  * `index.html`, preserving normal relative-asset resolution.
  */
-const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
-  // A preview carries read authority for a source subtree. Any external
-  // resource host would also be an exfiltration endpoint, so fetchable
-  // resource classes stay on the capability-bearing origin or inert URLs.
-  'content-security-policy': [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "style-src-elem 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self' data:",
-    "media-src 'self' data: blob:",
-    "connect-src 'self'",
-    "worker-src 'self' blob:",
+export const PREVIEW_EXTERNAL_SERVICES_HEADER = 'x-gezel-preview-external-services';
+
+/**
+ * Build the preview document CSP from the effective External services
+ * permission. The permissive form admits remote resources and API/WebSocket
+ * calls, but deliberately does not relax framing, form submission, base URLs,
+ * plugins, or the opaque-origin iframe sandbox.
+ */
+export function previewContentSecurityPolicy(allowExternalServices: boolean): string {
+  const network = allowExternalServices ? ' http: https:' : '';
+  const sockets = allowExternalServices ? ' ws: wss:' : '';
+  return [
+    `default-src 'self'${network}`,
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval'${network}`,
+    `style-src 'self' 'unsafe-inline'${network}`,
+    `style-src-elem 'self' 'unsafe-inline'${network}`,
+    `img-src 'self' data: blob:${network}`,
+    `font-src 'self' data:${network}`,
+    `media-src 'self' data: blob:${network}`,
+    `connect-src 'self'${network}${sockets}`,
+    `worker-src 'self' blob:${network}`,
     "object-src 'none'",
     "frame-src 'none'",
     "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'none'",
+    `webrtc '${allowExternalServices ? 'allow' : 'block'}'`,
     'sandbox allow-scripts',
-  ].join('; '),
-  'x-content-type-options': 'nosniff',
-  'x-frame-options': 'SAMEORIGIN',
-  'referrer-policy': 'no-referrer',
-  // Hardcoded for live reload — an edit to the artifact should show
-  // up on the next refresh without manual cache-busting.
-  'cache-control': 'no-store',
-  // The sandboxed iframe has an opaque/null origin. Anonymous scripts need
-  // matching CORS for useful stacks; admit that origin rather than every site.
-  'access-control-allow-origin': 'null',
-};
+  ].join('; ');
+}
 
-function previewHeaders(mime: string): Record<string, string> {
-  return { ...PREVIEW_SECURITY_HEADERS, 'content-type': mime };
+function previewSecurityHeaders(allowExternalServices: boolean): Record<string, string> {
+  return {
+    // A preview carries read authority for a source subtree. Any external
+    // resource host is also a possible exfiltration endpoint, so every
+    // fetchable class stays local until the user enables External services.
+    'content-security-policy': previewContentSecurityPolicy(allowExternalServices),
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'SAMEORIGIN',
+    'referrer-policy': 'no-referrer',
+    // Disable speculative DNS traffic in both modes. Real resource requests
+    // still resolve normally when External services is enabled.
+    'x-dns-prefetch-control': 'off',
+    // Hardcoded for live reload — an edit to the artifact should show
+    // up on the next refresh without manual cache-busting.
+    'cache-control': 'no-store',
+    // The sandboxed iframe has an opaque/null origin. Anonymous scripts need
+    // matching CORS for useful stacks; admit that origin rather than every site.
+    'access-control-allow-origin': 'null',
+    // Trusted signal consumed only by the Electron shell for a second,
+    // request-level enforcement layer. External pages cannot opt themselves
+    // in because main accepts this header only on the daemon preview origin.
+    [PREVIEW_EXTERNAL_SERVICES_HEADER]: allowExternalServices ? 'allowed' : 'blocked',
+  };
+}
+
+function previewHeaders(mime: string, allowExternalServices = false): Record<string, string> {
+  return { ...previewSecurityHeaders(allowExternalServices), 'content-type': mime };
+}
+
+async function previewAllowsExternalServices(ctx: ServiceContext): Promise<boolean> {
+  // A malformed or temporarily unreadable config must fail closed. This read
+  // happens once per HTML navigation; subresources inherit the document CSP.
+  try {
+    return resolveSecurityPolicy(await ctx.store.readConfig()).allowExternalServices;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -163,6 +198,31 @@ addEventListener('pagehide',function(){if(timer)clearTimeout(timer);},false);
  */
 const BROWSER_INTERNAL_LINK_RE =
   /<link\b(?=[^>]*\bhref\s*=\s*(?:"chrome:\/\/[^"\r\n]*"|'chrome:\/\/[^'\r\n]*'|chrome:\/\/[^\s>]+))[^>]*>/gi;
+const SCRIPT_ELEMENT_RE = /<script\b([^>]*)>[\s\S]*?<\/script\s*>/gi;
+
+function htmlAttribute(attrs: string, name: string): string | null {
+  const match = attrs.match(
+    new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'),
+  );
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
+function unbuiltSourceModuleShim(sources: string[]): string {
+  if (sources.length === 0) return '';
+  const names = sources.join(', ');
+  const message = `Preview cannot run unbuilt TypeScript/JSX module${sources.length > 1 ? 's' : ''}: ${names}. Build the app and preview its generated dist/index.html, or run its development server.`;
+  return `<script>(function(){
+var message=${JSON.stringify(message)};
+console.error(message);
+addEventListener('DOMContentLoaded',function(){
+var box=document.createElement('div');
+box.setAttribute('role','alert');
+box.style.cssText='box-sizing:border-box;max-width:720px;margin:48px auto;padding:24px;border:1px solid #b58b63;border-radius:12px;background:#f7f1e7;color:#342a22;font:16px/1.5 system-ui,sans-serif;white-space:pre-wrap';
+box.textContent=message;
+if(document.body)document.body.replaceChildren(box);
+},{once:true});
+})();</script>`;
+}
 
 /**
  * Prepare standalone HTML for the preview sandbox.
@@ -176,8 +236,23 @@ const BROWSER_INTERNAL_LINK_RE =
  */
 export function preparePreviewHtml(html: string): string {
   let out = html.replace(BROWSER_INTERNAL_LINK_RE, '');
+  const unbuiltSourceModules: string[] = [];
+  out = out.replace(SCRIPT_ELEMENT_RE, (match, rawAttrs: string) => {
+    const type = htmlAttribute(rawAttrs, 'type');
+    const src = htmlAttribute(rawAttrs, 'src');
+    if (
+      type?.toLowerCase() !== 'module' ||
+      !src ||
+      !/\.(?:[cm]?ts|tsx|jsx)(?:[?#].*)?$/i.test(src)
+    ) {
+      return match;
+    }
+    unbuiltSourceModules.push(src);
+    return `<!-- Gezel omitted unbuilt source module: ${src.replaceAll('--', '—')} -->`;
+  });
   const headMatch = out.match(/<head[^>]*>/i);
-  const shims = PREVIEW_LOG_SHIM + PREVIEW_SCROLLBAR_SHIM;
+  const shims =
+    PREVIEW_LOG_SHIM + PREVIEW_SCROLLBAR_SHIM + unbuiltSourceModuleShim(unbuiltSourceModules);
   if (headMatch) {
     const at = (headMatch.index ?? 0) + headMatch[0].length;
     out = out.slice(0, at) + shims + out.slice(at);
@@ -189,6 +264,13 @@ export function preparePreviewHtml(html: string): string {
     // have a src and don't hit the cross-origin scrubbing rules.
     if (!/\bsrc\s*=/.test(rawAttrs)) return match;
     if (/\bcrossorigin\b/.test(rawAttrs)) return match;
+    const src = htmlAttribute(rawAttrs, 'src');
+    // Classic cross-origin scripts are allowed to load without CORS. Do not
+    // force anonymous CORS onto them in External services mode, because that
+    // would reject otherwise-valid third-party dependencies whose servers do
+    // not emit Access-Control-Allow-Origin. Module scripts still apply their
+    // browser-mandated CORS rules.
+    if (src && /^(?:https?:)?\/\//i.test(src)) return match;
     return `<script${rawAttrs} crossorigin="anonymous">`;
   });
   return out;
@@ -262,7 +344,12 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       if (!buf) return c.json({ error: 'not found' }, 404);
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        return c.body(preparePreviewHtml(buf.toString('utf8')), 200, previewHeaders(mime));
+        const allowExternalServices = await previewAllowsExternalServices(ctx);
+        return c.body(
+          preparePreviewHtml(buf.toString('utf8')),
+          200,
+          previewHeaders(mime, allowExternalServices),
+        );
       }
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));
     }
@@ -286,7 +373,8 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
         const html = preparePreviewHtml((await readFile(full)).toString('utf8'));
-        return c.body(html, 200, previewHeaders(mime));
+        const allowExternalServices = await previewAllowsExternalServices(ctx);
+        return c.body(html, 200, previewHeaders(mime, allowExternalServices));
       }
       const buf = await readFile(full);
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));

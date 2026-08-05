@@ -31,6 +31,71 @@ export function isAllowedTopLevelNavigation(
   }
 }
 
+/** True only for a capability-bearing preview document on this daemon. */
+export function isPreviewDocumentUrl(candidate: string, allowedOrigin: string | null): boolean {
+  if (!allowedOrigin) return false;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.origin === allowedOrigin && parsed.pathname.startsWith('/preview/');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Preview frames may link between files covered by their capability, but may
+ * never replace themselves with an external document. External services is a
+ * resource/API permission, not a navigation or phishing escape hatch.
+ */
+export function isAllowedPreviewNavigation(
+  candidate: string,
+  allowedOrigin: string | null,
+): boolean {
+  return isPreviewDocumentUrl(candidate, allowedOrigin);
+}
+
+function effectivePort(url: URL): string {
+  if (url.port) return url.port;
+  if (url.protocol === 'https:' || url.protocol === 'wss:') return '443';
+  if (url.protocol === 'http:' || url.protocol === 'ws:') return '80';
+  return '';
+}
+
+function isSameDaemonEndpoint(candidate: URL, allowedOrigin: URL): boolean {
+  if (candidate.origin === allowedOrigin.origin) return true;
+  const matchingSocketScheme =
+    (allowedOrigin.protocol === 'https:' && candidate.protocol === 'wss:') ||
+    (allowedOrigin.protocol === 'http:' && candidate.protocol === 'ws:');
+  return (
+    matchingSocketScheme &&
+    candidate.hostname === allowedOrigin.hostname &&
+    effectivePort(candidate) === effectivePort(allowedOrigin)
+  );
+}
+
+/**
+ * Defense-in-depth request policy for resources initiated by a preview frame.
+ * CSP is the primary browser boundary; this Electron hook also cancels a
+ * request before it can leave the process. Inert data/blob URLs never reach an
+ * off-box host. File, custom, extension, and other schemes are always denied.
+ */
+export function isAllowedPreviewResourceRequest(
+  candidate: string,
+  allowedOrigin: string | null,
+  allowExternalServices: boolean,
+): boolean {
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol === 'data:' || parsed.protocol === 'blob:') return true;
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return false;
+    if (allowExternalServices) return true;
+    if (!allowedOrigin) return false;
+    return isSameDaemonEndpoint(parsed, new URL(allowedOrigin));
+  } catch {
+    return false;
+  }
+}
+
 /** Compare already-realpathed directories without accidentally authorizing descendants. */
 export function isExactApprovedPath(
   target: string,

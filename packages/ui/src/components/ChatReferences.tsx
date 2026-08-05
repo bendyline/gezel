@@ -1,4 +1,4 @@
-import type { Task, TaskNote } from '@bendyline/gezel';
+import type { GezelSummary, Task, TaskNote } from '@bendyline/gezel';
 import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
@@ -20,6 +20,7 @@ import { api } from '../api.js';
 import { DropdownChevron, DropdownMenu } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
+import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import { gezelChatTheme } from './chat-theme.js';
@@ -666,6 +667,22 @@ function TaskRailCard({
   const [loaded, setLoaded] = useState(false);
   const [notes, setNotes] = useState<TaskNote[]>([]);
   const [notesState, setNotesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [gezels, setGezels] = useState<GezelSummary[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listGezels()
+      .then((res) => {
+        if (!cancelled) setGezels(res.gezels);
+      })
+      .catch(() => {
+        if (!cancelled) setGezels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -778,10 +795,25 @@ function TaskRailCard({
               const step = note.stepId
                 ? task.craftbook.steps.find((candidate) => candidate.id === note.stepId)
                 : undefined;
+              const authorGezelId = note.author.kind === 'gezel' ? note.author.gezelId : undefined;
+              const authorGezel = authorGezelId
+                ? gezels.find((gezel) => gezel.id === authorGezelId)
+                : undefined;
               return (
                 <li key={note.id} className="chat-rail-task-note">
                   <header className="chat-rail-task-note-header">
-                    <span>{note.author.kind === 'user' ? 'You' : note.author.name}</span>
+                    <span className="task-note-author-identity">
+                      {authorGezel && (
+                        <GezelIcon
+                          svg={authorGezel.icon ?? null}
+                          poppetje={authorGezel.poppetje}
+                          iconOverride={authorGezel.iconOverride}
+                          name={authorGezel.name}
+                          size={22}
+                        />
+                      )}
+                      <span>{note.author.kind === 'user' ? 'You' : note.author.name}</span>
+                    </span>
                     <time dateTime={note.at} title={note.at}>
                       {formatTaskNoteTime(note.at)}
                     </time>
@@ -1038,6 +1070,7 @@ function ReferenceViewer({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [resolvedKind, setResolvedKind] = useState<RefKind>(reference.kind);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -1047,6 +1080,7 @@ function ReferenceViewer({
     setContent(null);
     setImageUrl(null);
     setError(null);
+    setActionError(null);
     setResolvedKind(reference.kind);
     void (async () => {
       try {
@@ -1081,6 +1115,37 @@ function ReferenceViewer({
   }, [projectId, reference, onResolved]);
 
   const resolvedDiffers = resolvedKind !== reference.kind;
+  const actionRequest = { projectId, kind: resolvedKind, path: reference.path } as const;
+
+  const saveCopy = async () => {
+    setActionError(null);
+    const action = window.__GEZEL__?.saveReferenceCopy;
+    if (!action) {
+      setActionError('Saving a copy is available in the desktop app.');
+      return;
+    }
+    try {
+      const result = await action(actionRequest);
+      if (!result.ok) setActionError(result.error);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const showContainingFolder = async () => {
+    setActionError(null);
+    const action = window.__GEZEL__?.showReferenceInFolder;
+    if (!action) {
+      setActionError('Showing the containing folder is available in the desktop app.');
+      return;
+    }
+    try {
+      const result = await action(actionRequest);
+      if (!result.ok) setActionError(result.error);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   return (
     <div className="chat-rail-viewer">
@@ -1096,12 +1161,44 @@ function ReferenceViewer({
           )}
           <code className="chat-rail-viewer-path">{reference.path}</code>
         </div>
-        {onClose && (
-          <button type="button" className="chat-rail-viewer-close" onClick={onClose}>
-            ×
-          </button>
-        )}
+        <div className="chat-rail-viewer-actions">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                className="tree-actions-trigger chat-rail-viewer-actions-trigger"
+                aria-label={`Actions for ${reference.path.split('/').pop() || reference.path}`}
+                title="File actions"
+              >
+                <span aria-hidden="true">⋯</span>
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="app-nav-menu tree-actions-menu chat-rail-viewer-actions-menu"
+                sideOffset={4}
+                align="end"
+              >
+                <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => void saveCopy()}>
+                  Save copy as…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className="app-nav-menu-item"
+                  onSelect={() => void showContainingFolder()}
+                >
+                  Show containing folder
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+          {onClose && (
+            <button type="button" className="chat-rail-viewer-close" onClick={onClose}>
+              ×
+            </button>
+          )}
+        </div>
       </header>
+      {actionError && <p className="error small chat-rail-viewer-action-error">{actionError}</p>}
       <div className="chat-rail-viewer-body">
         {loading && <p className="muted small">Loading…</p>}
         {error && <p className="error">{error}</p>}

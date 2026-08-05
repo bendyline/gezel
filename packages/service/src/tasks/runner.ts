@@ -43,7 +43,7 @@ import {
   type Task,
   createLogger,
   getEngagementMode,
-  isSchedulingAllowed,
+  isTaskWorkAllowed,
   projectAllowsAmbientWork,
   roleCapabilityFloor,
 } from '@bendyline/gezel';
@@ -419,7 +419,7 @@ export class TaskRunner {
       return;
     }
     // Every dispatch here starts an LLM turn nobody asked for in the
-    // moment, so this gate is `isSchedulingAllowed`, not
+    // moment, so this gate is `isTaskWorkAllowed`, not
     // `isEngagementAllowed`: `reactive` promises "AI replies to your
     // messages; nothing else", and a chaining craftbook kept talking
     // straight through it. Items stay on the queue either way and pick
@@ -428,7 +428,7 @@ export class TaskRunner {
     // through, because a launch that runs step 1 and then silently
     // stops mid-craftbook reads as broken, not as paused.
     const config = await this.store.readConfig().catch(() => ({}));
-    if (!isSchedulingAllowed(config)) {
+    if (!isTaskWorkAllowed(config)) {
       this.holdReason =
         getEngagementMode(config) === 'off' ? 'engagement-off' : 'engagement-paused';
       return;

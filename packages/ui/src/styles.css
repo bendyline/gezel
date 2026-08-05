@@ -1341,6 +1341,12 @@ html.embedded-chat #root {
   color: var(--titlebar-ink);
   font-size: 0.8rem;
 }
+/* Engine telemetry carries two-column labels plus memory meters, so give it
+   a little more breathing room than the compact quota popover. */
+.engine-pill-popover {
+  min-width: 22rem;
+  max-width: 30rem;
+}
 /* The pill lives in the dark titlebar, but its popover floats over the
    page body — so it has to follow the app theme, not the titlebar. In
    light mode swap the dark slab for parchment. Mirrors the themed
@@ -1524,14 +1530,10 @@ html.embedded-chat #root {
   width: 1px;
   background: color-mix(in srgb, var(--text-muted) 60%, transparent);
 }
-.machine-memory-reservation-pools-label,
-.machine-memory-reservation-caption {
+.machine-memory-reservation-pools-label {
   color: var(--text-muted);
   font-size: 0.64rem;
   line-height: 1.25;
-}
-.machine-memory-reservation-caption {
-  font-style: italic;
 }
 .machine-memory-segment {
   display: block;
@@ -1600,25 +1602,6 @@ html.embedded-chat #root {
 .machine-memory-note {
   font-size: 0.66rem;
   line-height: 1.3;
-}
-.machine-memory-models-heading {
-  color: var(--text);
-}
-.machine-memory-models {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  margin: 0.15rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-.machine-memory-models > li {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.machine-memory-model-name {
-  overflow-wrap: anywhere;
 }
 .machine-memory-device {
   overflow-wrap: anywhere;
@@ -4010,7 +3993,7 @@ button.danger {
 
 .project-about-toc {
   grid-column: 2;
-  grid-row: 1 / span 7;
+  grid-row: 1 / span 8;
   align-self: start;
   position: sticky;
   top: 1.25rem;
@@ -4097,6 +4080,79 @@ button.danger {
 
 .project-about-section-title {
   margin: 0 0 0.75rem;
+}
+
+.project-memories-hint {
+  margin: -0.35rem 0 0.75rem;
+}
+
+.project-memories-browser {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.project-memories-days {
+  max-height: 22rem;
+}
+
+.project-memories-day-list {
+  padding-left: 0;
+}
+
+.project-memory-editor {
+  min-width: 0;
+}
+
+.project-memory-editor-heading {
+  margin-bottom: 0.4rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-memory-source-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.project-memory-source {
+  width: 100%;
+  min-height: 280px;
+  padding: 0.75rem;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.project-memory-source:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.project-memory-source-status {
+  display: flex;
+  min-height: 1.8rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 .project-crew-settings {
@@ -4713,6 +4769,16 @@ button.danger {
 
   .project-about-toc {
     display: none;
+  }
+}
+
+@container (max-width: 620px) {
+  .project-memories-browser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-memories-days {
+    max-height: 10rem;
   }
 }
 
@@ -10887,6 +10953,17 @@ button.bench-step-foot:disabled {
   font-weight: 600;
 }
 
+.task-note-author-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.task-note-author-identity > .gezel-icon {
+  flex: 0 0 auto;
+}
+
 .task-note-step {
   margin-left: 0.2rem;
 }
@@ -13410,85 +13487,96 @@ button.bench-step-foot:disabled {
 }
 
 /* ── Reusable full-screen image preview ── */
-.image-preview-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.gz-overlay.image-preview-backdrop {
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   cursor: zoom-out;
+}
+.gz-dialog.image-preview-dialog {
+  width: fit-content;
+  min-width: 0;
+  max-width: 95vw;
+  max-height: 95vh;
+  box-sizing: border-box;
+  padding: 0.4rem;
+  gap: 0;
+  overflow: hidden;
+  background: rgba(10, 10, 10, 0.94);
+  border-color: rgba(255, 255, 255, 0.3);
+  cursor: default;
 }
 .image-preview-content {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  max-width: 95vw;
-  max-height: 95vh;
-  cursor: default;
+  min-width: 0;
+  max-width: calc(95vw - 0.8rem);
+  max-height: calc(95vh - 0.8rem);
 }
 .image-preview-img {
-  max-width: 95vw;
+  display: block;
+  max-width: calc(95vw - 0.8rem);
   max-height: 88vh;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.6);
   background: #000;
 }
 .image-preview-caption {
+  width: 100%;
+  padding: 0 0.4rem 0.1rem;
+  box-sizing: border-box;
+  overflow: hidden;
   font-size: 0.78rem;
   color: rgba(255, 255, 255, 0.75);
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .image-preview-actions {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 1;
   display: flex;
   gap: 0.5rem;
   align-items: center;
 }
-.image-preview-close {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  font-size: 1.6rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* The ✕ glyph sits a hair high in most fonts — nudge it down. */
-  padding-bottom: 2px;
-}
-.image-preview-close:hover {
-  background: rgba(176, 114, 76, 0.8);
-  border-color: rgba(176, 114, 76, 1);
-}
+.image-preview-close,
 .image-preview-download {
   width: 2.5rem;
   height: 2.5rem;
-  border-radius: 50%;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
   cursor: pointer;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  text-decoration: none;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
+.image-preview-close {
+  display: flex;
+  padding: 0 0 2px;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.image-preview-download {
+  display: inline-flex;
+  text-decoration: none;
+}
+.image-preview-close:hover,
 .image-preview-download:hover {
-  background: rgba(176, 114, 76, 0.8);
-  border-color: rgba(176, 114, 76, 1);
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  border-color: var(--accent);
+}
+.image-preview-close:focus-visible,
+.image-preview-download:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* Queued state: turn is waiting in the provider queue, not actually
@@ -14637,7 +14725,7 @@ button.timeline-session-divider-continuing::before {
 
 .memories-tree {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.4rem;
   overflow-y: auto;
   background: var(--surface);
@@ -14663,7 +14751,7 @@ button.timeline-session-divider-continuing::before {
   padding: 0.3rem 0.4rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-family: inherit;
   font-size: inherit;
@@ -14709,7 +14797,7 @@ button.timeline-session-divider-continuing::before {
   padding: 0.2rem 0.4rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.8rem;
   color: var(--text);
@@ -14734,7 +14822,7 @@ button.timeline-session-divider-continuing::before {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   padding: 0.5rem;
 }
@@ -14762,7 +14850,7 @@ button.timeline-session-divider-continuing::before {
   word-break: break-word;
   color: var(--text);
   background: var(--bg, #141414);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* Composer error banner sits inside .chat-composer above the editor. */
@@ -15476,7 +15564,7 @@ button.timeline-session-divider-continuing::before {
 
 .chat-rail-task-note-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.4rem;
   margin-bottom: 0.35rem;
   color: var(--text-muted);
@@ -15540,12 +15628,35 @@ button.timeline-session-divider-continuing::before {
   padding: 0 0.2rem 0.4rem 0.2rem;
 }
 
+.chat-rail-viewer-header > :first-child {
+  min-width: 0;
+}
+
 .chat-rail-viewer-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
   color: var(--muted);
   margin-left: 0.5rem;
   word-break: break-all;
+}
+
+.chat-rail-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+
+.chat-rail-viewer-actions-trigger {
+  opacity: 1;
+}
+
+.chat-rail-viewer-actions-menu.app-nav-menu {
+  min-width: 12rem;
+}
+
+.chat-rail-viewer-action-error {
+  margin: 0 0.2rem 0.4rem;
 }
 
 .chat-rail-viewer-close {
@@ -15988,6 +16099,10 @@ button.timeline-session-divider-continuing::before {
   border: none;
   background: transparent;
   margin-top: 1rem;
+}
+
+.provider-card .ollama-settings > .ollama-section--download {
+  padding-top: 10px;
 }
 
 /* Section headings match the sibling provider tabs' register — title
@@ -17479,9 +17594,10 @@ a.license-button:hover {
 
 /* Maximize: the SAME .project-output-pane <aside> goes full-window via
    fixed positioning — no portal, so the iframe is never remounted and
-   the running app keeps its state. z-index sits above the app chrome
-   (≤100) but below dialog/select portals (1000–1100) so the file
-   picker still opens on top. Esc or F5 restores. */
+   the running app keeps its state. The app body's z-index: 0 stacking
+   context keeps the persistent titlebar above this pane; dialog/select
+   portals (1000–1100) remain above it too. The titlebar Restore button,
+   Esc, or F5 exits this state. */
 .project-output-pane-maximized {
   position: fixed;
   inset: 0;
@@ -17493,8 +17609,9 @@ a.license-button:hover {
   border-right: none;
 }
 
-/* When maximized the toolbar IS the OS titlebar strip, so it behaves
-   like .app-header: draggable, with interactive children opting out. */
+/* The persistent app titlebar normally covers this strip while maximized.
+   Keep it draggable as a fallback for shells/layouts that expose any of it,
+   with interactive children opting out. */
 .project-output-pane-maximized .project-output-toolbar {
   -webkit-app-region: drag;
 }
@@ -17992,15 +18109,15 @@ a.license-button:hover {
   font-style: italic;
 }
 
-/* Header AI-engagement control. The pill-style `.engagement-badge`
-   moved to a play/pause dropdown trigger that lives next to the
-   QuotaMeter + hamburger. Shape mirrors `.app-nav-hamburger` (34×34
-   transparent button with hover halo) so the cluster reads as one
-   unified control row. Off mode tints red so the user can spot at a
-   glance that AI is fully paused — `proactive` / `scheduled` /
-   `reactive` keep the neutral foreground because the play vs. pause
-   icon is the primary signal. */
-.app-engagement-trigger {
+/* Header AI-engagement and maximized-output controls. The pill-style
+   `.engagement-badge` moved to a play/pause dropdown trigger; the Output
+   restore button joins it only while that pane is maximized. Both mirror
+   `.app-nav-hamburger`'s transparent square with a hover halo so the cluster
+   reads as one unified control row. Restore gets a 36×36 escape hit target
+   that fills nearly the whole titlebar. Off mode tints play/pause red so the
+   user can spot at a glance that AI is fully paused. */
+.app-engagement-trigger,
+.app-output-restore {
   align-self: center;
   display: inline-flex;
   align-items: center;
@@ -18016,9 +18133,28 @@ a.license-button:hover {
   opacity: 0.82;
   transition: background 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
 }
-.app-engagement-trigger:hover {
+.app-engagement-trigger:hover,
+.app-output-restore:hover {
   opacity: 1;
   background: rgba(255, 255, 255, 0.08);
+}
+.app-output-restore {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  opacity: 1;
+}
+.app-output-restore:hover,
+.app-output-restore:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(243, 237, 224, 0.34);
+}
+.app-output-restore > svg {
+  pointer-events: none;
 }
 .app-engagement-trigger[data-state="open"] {
   opacity: 1;

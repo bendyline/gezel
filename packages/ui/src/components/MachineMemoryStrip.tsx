@@ -8,7 +8,7 @@ interface Props {
   /** Poll only while mounted (the engine dropdown mounts this on open). */
   pollMs?: number;
   /**
-   * Catalog display names by model id, for the resident-model list. The
+   * Catalog display names by model id, for the reservation segments. The
    * memory endpoint carries ids only — resolving names there would put a
    * catalog read in a once-a-second poll — so the host passes down the
    * installed-model list it already holds. Unknown ids fall back to the id.
@@ -209,14 +209,6 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
       segment.bytes > 0 ? `${segment.label} about ${formatBytes(segment.bytes)}` : null,
     ),
     reservationNote,
-    residentModels.length > 0
-      ? `${residentModels.length} ${residentModels.length === 1 ? 'model' : 'models'} loaded: ${residentModels
-          .map(
-            (model) =>
-              `${modelNames?.get(model.modelId) ?? model.modelId} ${formatBytes(model.reservedBytes)}`,
-          )
-          .join(', ')}`
-      : null,
     usage.orphanedGezelEngineProcessCount > 0
       ? `${usage.orphanedGezelEngineProcessCount} leftover Gezel engine ${
           usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'
@@ -346,32 +338,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
           {capacityPoolSummary && (
             <div className="machine-memory-reservation-pools-label">{capacityPoolSummary}</div>
           )}
-          <div className="machine-memory-reservation-caption">
-            {hasMeasuredUsage
-              ? 'Reserved model capacity; the current-use meter above includes all apps.'
-              : 'Reserved capacity for loaded models; not live usage.'}
-          </div>
         </div>
       )}
       {reservationNote && <div className="machine-memory-note">{reservationNote}</div>}
-      {residentModels.length > 0 && (
-        <div className="machine-memory-note">
-          <div className="machine-memory-models-heading">
-            {residentModels.length} {residentModels.length === 1 ? 'model' : 'models'} loaded
-          </div>
-          <ul className="machine-memory-models">
-            {residentModels.map((model) => (
-              <li key={`${model.provider}:${model.modelId}`}>
-                <span className="machine-memory-model-name">
-                  {modelNames?.get(model.modelId) ?? model.modelId}
-                  {model.replicaCount > 1 && ` ×${model.replicaCount}`}
-                </span>
-                <span>{formatBytes(model.reservedBytes)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       {usage.orphanedGezelEngineProcessCount > 0 && (
         <div className="machine-memory-note">
           Includes {usage.orphanedGezelEngineProcessCount} leftover Gezel engine{' '}

@@ -206,6 +206,14 @@ export function NewProjectDialog({
   // Track which previewed URL last filled the about/mission fields, so
   // a re-blur on the same URL doesn't re-prompt for replacement.
   const lastAutofilledUrl = useRef<string | null>(null);
+  // Repo previews include an LLM draft and can take long enough that the
+  // user changes their selection while one is still running. Keep the field
+  // editable and ignore any result that no longer belongs to the current
+  // selection instead of locking the control for the whole round-trip.
+  const repoPreviewRequestId = useRef(0);
+  const activeRepoPreviewPath = useRef<string | null>(null);
+  const latestDraftFields = useRef({ name, nameManuallyEdited, about, mission });
+  latestDraftFields.current = { name, nameManuallyEdited, about, mission };
 
   // Reset form state each time the dialog opens. Stale inputs after a
   // closed-without-submit feel broken.
@@ -233,6 +241,8 @@ export function NewProjectDialog({
     setError('');
     setBusy(false);
     lastAutofilledUrl.current = null;
+    repoPreviewRequestId.current += 1;
+    activeRepoPreviewPath.current = null;
   }, [open]);
 
   // Load the custom project types offered in the gallery, once per open.
@@ -293,8 +303,19 @@ export function NewProjectDialog({
   const folderPathPlaceholder =
     window.__GEZEL__?.platform === 'win32' ? 'C:\\projects\\mystuff' : '/path/to/folder';
 
-  const handleRepoBlur = useCallback(async () => {
-    const path = repoUrl.trim();
+  const handleRepoChange = useCallback((next: string) => {
+    // Invalidate the previous request immediately. Its network work may still
+    // finish, but it must not rename or redraft a newly selected repository.
+    repoPreviewRequestId.current += 1;
+    activeRepoPreviewPath.current = null;
+    setPreviewBusy(false);
+    setRepoUrlHint(null);
+    setRepoUrl(next);
+  }, []);
+
+  const handleRepoPreview = useCallback(
+    async (requestedPath?: string) => {
+      const path = (requestedPath ?? repoUrl).trim();
     if (!path) {
       setRepoUrlHint(null);
       return;
@@ -317,15 +338,25 @@ export function NewProjectDialog({
       });
       return;
     }
+    // Refocusing and blurring the same value while its preview is already in
+    // flight should not start a duplicate README fetch + LLM draft.
+    if (activeRepoPreviewPath.current === path) return;
     setRepoUrlHint(null);
+    const requestId = repoPreviewRequestId.current + 1;
+    repoPreviewRequestId.current = requestId;
+    activeRepoPreviewPath.current = path;
     setPreviewBusy(true);
     try {
       const preview = await api.previewGitHubRepo(toGitHubUrl(path));
+      if (repoPreviewRequestId.current !== requestId) return;
       // Fill the (now-above) Name field the moment the repo resolves,
       // before the slower About/Mission draft — so a failed or empty
       // README draft still leaves the project named.
-      if (!name.trim() && !nameManuallyEdited) setName(preview.repo);
-      const draftName = name.trim() || preview.repo;
+      const currentAfterPreview = latestDraftFields.current;
+      if (!currentAfterPreview.name.trim() && !currentAfterPreview.nameManuallyEdited) {
+        setName(preview.repo);
+      }
+      const draftName = currentAfterPreview.name.trim() || preview.repo;
       const draft = await api.previewProjectAbout({
         name: draftName,
         repoUrl: preview.canonicalUrl,
@@ -333,8 +364,10 @@ export function NewProjectDialog({
         ...(preview.topics ? { topics: preview.topics } : {}),
         readme: preview.readme,
       });
-      const aboutHasContent = about.trim().length > 0;
-      const missionHasContent = mission.trim().length > 0;
+      if (repoPreviewRequestId.current !== requestId) return;
+      const currentAfterDraft = latestDraftFields.current;
+      const aboutHasContent = currentAfterDraft.about.trim().length > 0;
+      const missionHasContent = currentAfterDraft.mission.trim().length > 0;
       const overwriteOk =
         !aboutHasContent && !missionHasContent
           ? true
@@ -347,15 +380,21 @@ export function NewProjectDialog({
         lastAutofilledUrl.current = path;
       }
     } catch (err) {
+      if (repoPreviewRequestId.current !== requestId) return;
       const fixUrl = extractFixUrl(err);
       setRepoUrlHint({
         message: `Couldn't read this repo: ${describeApiError(err)}`,
         ...(fixUrl ? { fixUrl } : {}),
       });
     } finally {
-      setPreviewBusy(false);
+      if (repoPreviewRequestId.current === requestId) {
+        activeRepoPreviewPath.current = null;
+        setPreviewBusy(false);
+      }
     }
-  }, [repoUrl, githubIdentity, name, nameManuallyEdited, about, mission]);
+    },
+    [repoUrl, githubIdentity],
+  );
 
   // Set the folder path and pull a preview from the service: the basename
   // becomes the suggested Name (unless the user already typed one), and an
@@ -779,17 +818,16 @@ export function NewProjectDialog({
                         </span>
                         <GitHubRepoCombobox
                           value={repoUrl}
-                          onChange={setRepoUrl}
-                          onBlur={() => void handleRepoBlur()}
+                          onChange={handleRepoChange}
+                          onBlur={() => void handleRepoPreview()}
                           onSelect={(picked) => {
-                            setRepoUrl(picked);
-                            // Trigger the same repo-preview path the blur handler
-                            // runs, so picking from the list draft-fills the Name +
-                            // About / Mission without the user tabbing away first.
-                            setTimeout(() => void handleRepoBlur(), 0);
+                            handleRepoChange(picked);
+                            // Pass the picked value directly: state updates land
+                            // on the next render, while the preview should begin
+                            // immediately from this selection.
+                            void handleRepoPreview(picked);
                           }}
                           repos={githubRepos}
-                          disabled={previewBusy}
                         />
                         {previewBusy && (
                           <small className="muted">

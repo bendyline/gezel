@@ -133,7 +133,14 @@ export function HtmlPreviewFrame({
 }: HtmlPreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const inflightInvokes = useRef<Set<string>>(new Set());
-  const requestKey = JSON.stringify([projectId, path, source, refreshKey ?? null]);
+  const [securityPolicyRevision, setSecurityPolicyRevision] = useState(0);
+  const requestKey = JSON.stringify([
+    projectId,
+    path,
+    source,
+    refreshKey ?? null,
+    securityPolicyRevision,
+  ]);
   const [loadState, setLoadState] = useState<PreviewLoadState | null>(null);
   // Effects run after React commits. Keying the resolved lease to the props
   // that requested it prevents that commit from briefly remounting the old,
@@ -141,6 +148,20 @@ export function HtmlPreviewFrame({
   const activeLoadState = loadState?.requestKey === requestKey ? loadState : null;
   const src = activeLoadState?.status === 'ready' ? activeLoadState.url : null;
   const loadError = activeLoadState?.status === 'error' ? activeLoadState.error : null;
+
+  useEffect(() => {
+    // CSP is fixed when the document loads. Re-mint and remount whenever the
+    // centralized security policy changes so enabling External services makes
+    // remote dependencies available, and disabling it immediately discards a
+    // previously permissive document.
+    const onConfigUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ securityPolicy?: unknown }>).detail;
+      if (!detail || !Object.prototype.hasOwnProperty.call(detail, 'securityPolicy')) return;
+      setSecurityPolicyRevision((revision) => revision + 1);
+    };
+    window.addEventListener('gezel:config-updated', onConfigUpdated);
+    return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

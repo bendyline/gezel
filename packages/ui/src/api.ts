@@ -103,6 +103,18 @@ declare global {
        * `shell.openPath` semantics).
        */
       openPath?: (target: string) => Promise<string>;
+      /** Save a daemon-scoped References file through the native Save dialog. */
+      saveReferenceCopy?: (request: {
+        projectId: string;
+        kind: 'artifact' | 'document' | 'workspace';
+        path: string;
+      }) => Promise<{ ok: true; path?: string } | { ok: false; error: string }>;
+      /** Reveal a daemon-scoped References file in Finder/Explorer/the Linux file manager. */
+      showReferenceInFolder?: (request: {
+        projectId: string;
+        kind: 'artifact' | 'document' | 'workspace';
+        path: string;
+      }) => Promise<{ ok: true } | { ok: false; error: string }>;
       onNavigate?: (callback: (view: string) => void) => void;
       /** Stream an installed local model into a user-selected `.gezmodel` file. */
       exportModelBundle?: (

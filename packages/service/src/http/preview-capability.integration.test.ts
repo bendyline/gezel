@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { securityPolicyForLevel } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../service.js';
@@ -108,7 +109,10 @@ describe('preview capabilities (integration)', () => {
     expect(csp).toContain('sandbox allow-scripts');
     expect(csp).toContain("img-src 'self' data: blob:");
     expect(csp).not.toContain('https:');
+    expect(csp).toContain("webrtc 'block'");
     expect(page.headers.get('access-control-allow-origin')).toBe('null');
+    expect(page.headers.get('x-dns-prefetch-control')).toBe('off');
+    expect(page.headers.get('x-gezel-preview-external-services')).toBe('blocked');
 
     const base = lease.url.slice(0, lease.url.lastIndexOf('/') + 1);
     expect((await httpFetch(`${baseUrl}${base}app.js`)).status).toBe(200);
@@ -149,6 +153,29 @@ describe('preview capabilities (integration)', () => {
     expect(
       (await httpFetch(`${baseUrl}/preview/${capability}/workspace/default/secret.txt`)).status,
     ).toBe(403);
+  });
+
+  it('relaxes only resource egress when External services is enabled', async () => {
+    await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
+    try {
+      const minted = await mint(svc.clientToken);
+      expect(minted.status).toBe(201);
+      const lease = (await minted.json()) as { url: string };
+      const page = await httpFetch(`${baseUrl}${lease.url}`);
+      expect(page.status).toBe(200);
+
+      const csp = page.headers.get('content-security-policy') ?? '';
+      expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' http: https:");
+      expect(csp).toContain("connect-src 'self' http: https: ws: wss:");
+      expect(csp).toContain("img-src 'self' data: blob: http: https:");
+      expect(csp).toContain("frame-src 'none'");
+      expect(csp).toContain("form-action 'none'");
+      expect(csp).toContain('sandbox allow-scripts');
+      expect(csp).toContain("webrtc 'allow'");
+      expect(page.headers.get('x-gezel-preview-external-services')).toBe('allowed');
+    } finally {
+      await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('lockdown') });
+    }
   });
 
   it('serves the same preview over a plain-HTTP browserUrl on a separate port', async () => {
