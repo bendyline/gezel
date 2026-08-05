@@ -13,8 +13,11 @@ let page: Page;
 let gezelHome: string;
 
 const screenshotDir = join(_dirname, '..', 'screenshots');
+const UI_LOAD_TIMEOUT_MS = 60_000;
+const HOOK_TIMEOUT_MS = UI_LOAD_TIMEOUT_MS + 30_000;
 
 test.beforeAll(async () => {
+  test.setTimeout(HOOK_TIMEOUT_MS);
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-e2e-'));
 
   app = await electron.launch({
@@ -35,9 +38,11 @@ test.beforeAll(async () => {
   });
 
   page = await app.firstWindow();
-  // Wait for the page to load
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3000);
+  // The first window is the splash page, which deliberately shares the final
+  // document title. Wait for a UI-only element so a cold embedded-service boot
+  // cannot make the title assertion pass before navigation has completed.
+  await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
 });
 
 test.afterAll(async () => {
