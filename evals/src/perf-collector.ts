@@ -36,6 +36,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { cpus, freemem, hostname, platform, release, totalmem } from 'node:os';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import type { EngineBuild } from './native-bin.ts';
 
 export interface HostInfo {
   hostname: string;
@@ -57,8 +58,21 @@ export interface HostInfo {
   gpuModel: string | null;
   /** Which engine the trial was driven by. */
   framework: string;
-  /** Resolved binary path the harness picked — encodes the variant (cpu/cuda/vulkan/metal). */
+  /** Resolved binary path the harness picked. */
   frameworkBinary: string | null;
+  /**
+   * Backend actually resolved (`cuda`/`vulkan`/`metal`/`cpu`), or `env`/`flag`
+   * when an override bypassed the capability walk. Recorded separately because
+   * the path only encodes the variant for binaries found by that walk — an
+   * override can point anywhere.
+   */
+  frameworkVariant: string | null;
+  /**
+   * Build identity of that binary. Without it a trial record cannot
+   * distinguish two engine builds staged at the same path, so a throughput
+   * change can't be attributed to the engine rather than the model.
+   */
+  frameworkBuild: EngineBuild | null;
 }
 
 export interface ProcessSample {
@@ -235,6 +249,8 @@ export interface TrialBilling {
 export function captureHostInfo(opts: {
   framework: string;
   frameworkBinary: string | null;
+  frameworkVariant?: string | null;
+  frameworkBuild?: EngineBuild | null;
 }): HostInfo {
   const cpuList = cpus();
   return {
@@ -248,6 +264,8 @@ export function captureHostInfo(opts: {
     gpuModel: detectGpuModel(),
     framework: opts.framework,
     frameworkBinary: opts.frameworkBinary,
+    frameworkVariant: opts.frameworkVariant ?? null,
+    frameworkBuild: opts.frameworkBuild ?? null,
   };
 }
 

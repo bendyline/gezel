@@ -25,6 +25,7 @@ import {
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
+import type { ResolvedBinary } from './native-bin.ts';
 import { repoRoot, resolveDs4Binary, resolveLlamaBinary, resolveSdBinary } from './native-bin.ts';
 import {
   PerfCollector,
@@ -407,10 +408,16 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
 
   let llamaBin: string | undefined;
   let sdBin: string | undefined;
+  let resolvedLlama: ResolvedBinary | undefined;
   try {
     if (engine === 'llama-cpp') {
-      llamaBin = opts.llamaBin ?? resolveLlamaBinary().path;
-      log(`[trial] llama-server=${llamaBin}`);
+      // Route --llama-bin through resolution too: an explicit path still gets
+      // its build identity read and pin-checked, so no selection path reaches
+      // a trial record unidentified.
+      resolvedLlama = resolveLlamaBinary(opts.llamaBin);
+      llamaBin = resolvedLlama.path;
+      log(`[trial] llama-server=${llamaBin} ${describeResolvedLlama(resolvedLlama)}`);
+      for (const warning of resolvedLlama.warnings) log(`[trial] engine-warning: ${warning}`);
     } else if (engine === 'ds4') {
       // ds4-server is a GLOBAL singleton — it refuses to start if ANY other
       // ds4 process is alive ("another ds4 process is already running; refusing
@@ -733,6 +740,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   const hostInfo = captureHostInfo({
     framework: engine,
     frameworkBinary: llamaBin ?? null,
+    frameworkVariant: resolvedLlama?.variant ?? null,
+    frameworkBuild: resolvedLlama?.build ?? null,
   });
   try {
     await writeHostInfo(runDir, hostInfo);
@@ -1249,6 +1258,21 @@ export function llamaCppEvalLaunchOverridesForModel(
     summary:
       'llama-cpp large-model eval override: numCtx=65536, concurrency=1, kvCache=q4_0, capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m',
   };
+}
+
+/**
+ * One-line engine identity for the trial log, so a run can be attributed to a
+ * specific build without cross-referencing `host.json`.
+ */
+function describeResolvedLlama(resolved: ResolvedBinary): string {
+  const parts = [`variant=${resolved.variant ?? 'none'}`];
+  const build = resolved.build;
+  if (build?.buildNumber) parts.push(`build=${build.buildNumber}`);
+  if (build?.revision) parts.push(`rev=${build.revision.slice(0, 8)}`);
+  if (build?.backend) parts.push(`backend=${build.backend}`);
+  if (build?.cudaArchitectures?.length)
+    parts.push(`cuda-arch=${build.cudaArchitectures.join(',')}`);
+  return parts.join(' ');
 }
 
 /**

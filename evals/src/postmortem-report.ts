@@ -129,6 +129,9 @@ function performanceRows(facts: TrialFacts): string[] {
   const gpu = recordAt(facts, 'host.gpuModel');
   const framework = recordAt(facts, 'host.framework');
   const binary = recordAt(facts, 'host.frameworkBinary');
+  const frameworkVariant = recordAt(facts, 'host.frameworkVariant');
+  const buildNumber = recordAt(facts, 'host.frameworkBuild.buildNumber');
+  const buildRevision = recordAt(facts, 'host.frameworkBuild.revision');
   const tokenText =
     typeof inputTokens === 'number' && typeof outputTokens === 'number'
       ? `${inputTokens} + ${outputTokens}`
@@ -143,6 +146,15 @@ function performanceRows(facts: TrialFacts): string[] {
   const frameworkText = [framework, binary]
     .filter((item) => typeof item === 'string')
     .join(' via ');
+  // Build identity, not just the path: two engine builds can occupy the same
+  // path, and only this row distinguishes them when comparing runs.
+  const engineBuildText = [
+    typeof frameworkVariant === 'string' ? frameworkVariant : null,
+    typeof buildNumber === 'string' ? `build ${buildNumber}` : null,
+    typeof buildRevision === 'string' ? buildRevision.slice(0, 8) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return [
     `| Peak RSS | ${metric(peakRss, ' MB')} | \`facts.perf.process.peakRssMb\` |`,
@@ -159,6 +171,7 @@ function performanceRows(facts: TrialFacts): string[] {
     `| Total tokens | ${tokenText} | \`facts.perf.usage.totalInputTokens\`, \`facts.perf.usage.totalOutputTokens\` |`,
     `| Host | ${escapeTable(hostText || 'n/a')} | \`facts.host.cpuModel\`, \`facts.host.totalRamGb\`, \`facts.host.gpuModel\` |`,
     `| Framework | ${escapeTable(frameworkText || 'n/a')} | \`facts.host.framework\`, \`facts.host.frameworkBinary\` |`,
+    `| Engine build | ${escapeTable(engineBuildText || 'n/a')} | \`facts.host.frameworkVariant\`, \`facts.host.frameworkBuild\` |`,
   ];
 }
 
