@@ -7,6 +7,11 @@ publicHoistPattern:
 
 confirmModulesPurge: false
 
+# The packageManager pin in package.json is authoritative. Warn immediately
+# when the pnpm on PATH differs instead of silently downloading another pnpm
+# before the requested command starts (which can look like a hung command).
+pmOnFail: warn
+
 # A committed lockfile is part of the trusted base. Do not make every install
 # re-query registry metadata for every locked package; run `pnpm audit:lockfile`
 # when the release-age and publisher-trust policies need explicit verification.
