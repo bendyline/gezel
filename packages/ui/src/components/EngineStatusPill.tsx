@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
+import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
   type TurnStatsEntry,
@@ -484,7 +485,7 @@ function EngineStatusPillForProvider({
     return () => ctrl.abort();
   }, [includeMedia]);
 
-  // Tick every second while anything is in-flight so "N s" counter
+  // Tick every second while anything is in-flight so the elapsed counter
   // advances. Also keeps the rolling-window prune in sync with the
   // clock so recentTurns entries older than 60s actually fall off.
   useEffect(() => {
@@ -591,6 +592,7 @@ function EngineStatusPillForProvider({
     ? Math.max(0, Math.min(100, Math.round((busyProgress as number) * 100)))
     : 0;
   const elapsed = busyStartedAt ? Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)) : 0;
+  const elapsedLabel = formatElapsedClock(elapsed);
   // Queue-depth numbers for the provider's request queue.
   //   queuedInteractive + queuedBackground = everything *waiting*,
   //   running = everything in-flight. Memory-extraction, auto-
@@ -618,7 +620,9 @@ function EngineStatusPillForProvider({
   // Popover Status line. While a turn is actively generating we show
   // the live phase label (queue counts aren't known to composeQueueStatus);
   // otherwise the queue-aware idle/queued string.
-  const statusText = busy ? `${busyLabel}${elapsed > 0 ? ` · ${elapsed}s` : ''}` : queue.idleStatus;
+  const statusText = busy
+    ? `${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
+    : queue.idleStatus;
   const healthPresentation = deviceHealth ? presentDeviceHealth(deviceHealth) : null;
   const dotClassName = [
     'engine-pill-dot',
@@ -660,7 +664,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${busyLabel}${elapsed > 0 ? ` · ${elapsed}s` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -707,7 +711,9 @@ function EngineStatusPillForProvider({
               </span>
             </>
           )}
-          {busy && elapsed > 0 && <span className="engine-pill-elapsed">{` · ${elapsed}s`}</span>}
+          {busy && elapsed > 0 && (
+            <span className="engine-pill-elapsed">{` · ${elapsedLabel}`}</span>
+          )}
           {queuedWaiting > 0 && (
             <span
               className="engine-pill-queue-badge"

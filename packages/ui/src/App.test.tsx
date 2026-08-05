@@ -78,6 +78,42 @@ describe('Output pane titlebar restore', () => {
   });
 });
 
+describe('AI engagement menu', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('gives every execution mode its own glyph and marks the active mode clearly', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', {
+      name: 'AI engagement: Proactive. Click to change.',
+    });
+    expect(trigger.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
+
+    await user.click(trigger);
+
+    const proactive = await screen.findByRole('menuitem', { name: /Proactive/ });
+    expect(proactive.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
+    expect(proactive.querySelector('.app-engagement-menu-check svg')).toBeInTheDocument();
+
+    expect(
+      screen
+        .getByRole('menuitem', { name: /Tasks \+ Reactive/ })
+        .querySelector('.app-engagement-mode-icon-scheduled'),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('menuitem', { name: /Reactive only/ })
+        .querySelector('.app-engagement-mode-icon-reactive'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /^Off/ }).querySelector('.app-engagement-mode-icon-off'),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('Night Shift header status', () => {
   beforeEach(() => {
     window.localStorage.clear();
