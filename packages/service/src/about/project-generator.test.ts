@@ -15,6 +15,33 @@ function makeManager(response: string): ChatManager {
 }
 
 describe('generateProjectAboutFromRepo', () => {
+  it('forwards cancellation to the Klerk one-shot', async () => {
+    const manager = makeManager(
+      [
+        'About text that is plenty long enough to satisfy the minimum length rule the schema enforces.',
+        '---MISSION_OBJECTIVES---',
+        '- Concrete objective that exceeds the minimum length requirement for project creation.',
+      ].join('\n'),
+    );
+    const controller = new AbortController();
+
+    await generateProjectAboutFromRepo(
+      manager,
+      {
+        name: 'cancel-aware',
+        repoUrl: 'https://github.com/o/cancel-aware',
+        readme: '# Cancel aware',
+      },
+      controller.signal,
+    );
+
+    expect(manager.oneShotCompletion).toHaveBeenCalledWith(
+      expect.any(String),
+      120_000,
+      expect.objectContaining({ signal: controller.signal, useKlerk: true }),
+    );
+  });
+
   it('parses the about and mission objectives sections', async () => {
     const manager = makeManager(
       [

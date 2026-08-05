@@ -7,12 +7,14 @@ import type {
 } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
+import { GezelIcon } from '../../components/GezelIcon.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth } from '../../components/mail-link.js';
+import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
 import {
@@ -198,7 +200,7 @@ export function NewProjectDialog({
     message: string;
     fixUrl?: string;
   } | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
+  const [repoPreviewPhase, setRepoPreviewPhase] = useState<'reading' | 'drafting' | null>(null);
   const [githubIdentity, setGitHubIdentity] = useState<GitHubIdentity | null>(null);
   const [githubRepos, setGitHubRepos] = useState<GitHubRepoSummary[]>([]);
   const [error, setError] = useState('');
@@ -212,12 +214,18 @@ export function NewProjectDialog({
   // selection instead of locking the control for the whole round-trip.
   const repoPreviewRequestId = useRef(0);
   const activeRepoPreviewPath = useRef<string | null>(null);
+  const repoPreviewAbort = useRef<AbortController | null>(null);
   const latestDraftFields = useRef({ name, nameManuallyEdited, about, mission });
   latestDraftFields.current = { name, nameManuallyEdited, about, mission };
+  const githubRepoInputId = useId();
 
   // Reset form state each time the dialog opens. Stale inputs after a
   // closed-without-submit feel broken.
   useEffect(() => {
+    repoPreviewRequestId.current += 1;
+    activeRepoPreviewPath.current = null;
+    repoPreviewAbort.current?.abort();
+    repoPreviewAbort.current = null;
     if (!open) return;
     setName('');
     setNameManuallyEdited(false);
@@ -226,7 +234,7 @@ export function NewProjectDialog({
     setMission('');
     setRepoUrl('');
     setRepoUrlHint(null);
-    setPreviewBusy(false);
+    setRepoPreviewPhase(null);
     setEmailAddress('');
     setEmailProvider('imap');
     setImapHost('');
@@ -241,8 +249,6 @@ export function NewProjectDialog({
     setError('');
     setBusy(false);
     lastAutofilledUrl.current = null;
-    repoPreviewRequestId.current += 1;
-    activeRepoPreviewPath.current = null;
   }, [open]);
 
   // Load the custom project types offered in the gallery, once per open.
@@ -303,95 +309,114 @@ export function NewProjectDialog({
   const folderPathPlaceholder =
     window.__GEZEL__?.platform === 'win32' ? 'C:\\projects\\mystuff' : '/path/to/folder';
 
-  const handleRepoChange = useCallback((next: string) => {
-    // Invalidate the previous request immediately. Its network work may still
-    // finish, but it must not rename or redraft a newly selected repository.
+  const cancelRepoPreview = useCallback(() => {
     repoPreviewRequestId.current += 1;
     activeRepoPreviewPath.current = null;
-    setPreviewBusy(false);
-    setRepoUrlHint(null);
-    setRepoUrl(next);
+    repoPreviewAbort.current?.abort();
+    repoPreviewAbort.current = null;
+    setRepoPreviewPhase(null);
   }, []);
+
+  const handleRepoChange = useCallback(
+    (next: string) => {
+      // A new selection owns the form immediately. Abort the old fetch/draft
+      // and ensure even a provider that ignores cancellation cannot apply its
+      // eventual result to this repository.
+      cancelRepoPreview();
+      setRepoUrlHint(null);
+      setRepoUrl(next);
+    },
+    [cancelRepoPreview],
+  );
 
   const handleRepoPreview = useCallback(
     async (requestedPath?: string) => {
       const path = (requestedPath ?? repoUrl).trim();
-    if (!path) {
+      if (!path) {
+        setRepoUrlHint(null);
+        return;
+      }
+      if (!isLikelyGitHubPath(path)) {
+        setRepoUrlHint({
+          message: 'Looks incomplete — enter owner/repo (e.g. bendyline/squisq).',
+        });
+        return;
+      }
+      if (lastAutofilledUrl.current === path) {
+        // Already filled from this exact repo on a prior blur; don't
+        // re-prompt or re-call the API.
+        setRepoUrlHint(null);
+        return;
+      }
+      if (!githubIdentity) {
+        setRepoUrlHint({
+          message: 'Sign in to GitHub to auto-fill About and Mission objectives from this repo.',
+        });
+        return;
+      }
+      // Refocusing and blurring the same value while its preview is already in
+      // flight should not start a duplicate README fetch + LLM draft.
+      if (activeRepoPreviewPath.current === path) return;
       setRepoUrlHint(null);
-      return;
-    }
-    if (!isLikelyGitHubPath(path)) {
-      setRepoUrlHint({
-        message: 'Looks incomplete — enter owner/repo (e.g. bendyline/squisq).',
-      });
-      return;
-    }
-    if (lastAutofilledUrl.current === path) {
-      // Already filled from this exact repo on a prior blur; don't
-      // re-prompt or re-call the API.
-      setRepoUrlHint(null);
-      return;
-    }
-    if (!githubIdentity) {
-      setRepoUrlHint({
-        message: 'Sign in to GitHub to auto-fill About and Mission objectives from this repo.',
-      });
-      return;
-    }
-    // Refocusing and blurring the same value while its preview is already in
-    // flight should not start a duplicate README fetch + LLM draft.
-    if (activeRepoPreviewPath.current === path) return;
-    setRepoUrlHint(null);
-    const requestId = repoPreviewRequestId.current + 1;
-    repoPreviewRequestId.current = requestId;
-    activeRepoPreviewPath.current = path;
-    setPreviewBusy(true);
-    try {
-      const preview = await api.previewGitHubRepo(toGitHubUrl(path));
-      if (repoPreviewRequestId.current !== requestId) return;
-      // Fill the (now-above) Name field the moment the repo resolves,
-      // before the slower About/Mission draft — so a failed or empty
-      // README draft still leaves the project named.
-      const currentAfterPreview = latestDraftFields.current;
-      if (!currentAfterPreview.name.trim() && !currentAfterPreview.nameManuallyEdited) {
-        setName(preview.repo);
+      const requestId = repoPreviewRequestId.current + 1;
+      const controller = new AbortController();
+      repoPreviewRequestId.current = requestId;
+      activeRepoPreviewPath.current = path;
+      repoPreviewAbort.current = controller;
+      setRepoPreviewPhase('reading');
+      try {
+        const preview = await api.previewGitHubRepo(toGitHubUrl(path), controller.signal);
+        if (repoPreviewRequestId.current !== requestId) return;
+        setRepoPreviewPhase('drafting');
+        // Fill the (now-above) Name field the moment the repo resolves,
+        // before the slower About/Mission draft — so a failed or empty
+        // README draft still leaves the project named.
+        const currentAfterPreview = latestDraftFields.current;
+        if (!currentAfterPreview.nameManuallyEdited) {
+          setName(preview.repo);
+        }
+        const draftName = currentAfterPreview.nameManuallyEdited
+          ? currentAfterPreview.name.trim() || preview.repo
+          : preview.repo;
+        const draft = await api.previewProjectAbout(
+          {
+            name: draftName,
+            repoUrl: preview.canonicalUrl,
+            ...(preview.description ? { description: preview.description } : {}),
+            ...(preview.topics ? { topics: preview.topics } : {}),
+            readme: preview.readme,
+          },
+          controller.signal,
+        );
+        if (repoPreviewRequestId.current !== requestId) return;
+        const currentAfterDraft = latestDraftFields.current;
+        const aboutHasContent = currentAfterDraft.about.trim().length > 0;
+        const missionHasContent = currentAfterDraft.mission.trim().length > 0;
+        const overwriteOk =
+          !aboutHasContent && !missionHasContent
+            ? true
+            : window.confirm(
+                'Replace the current About and Mission objectives with text drafted from this repo?',
+              );
+        if (overwriteOk) {
+          setAbout(draft.about);
+          setMission(draft.missionObjectives);
+          lastAutofilledUrl.current = path;
+        }
+      } catch (err) {
+        if (repoPreviewRequestId.current !== requestId) return;
+        const fixUrl = extractFixUrl(err);
+        setRepoUrlHint({
+          message: `Couldn't read this repo: ${describeApiError(err)}`,
+          ...(fixUrl ? { fixUrl } : {}),
+        });
+      } finally {
+        if (repoPreviewRequestId.current === requestId) {
+          activeRepoPreviewPath.current = null;
+          repoPreviewAbort.current = null;
+          setRepoPreviewPhase(null);
+        }
       }
-      const draftName = currentAfterPreview.name.trim() || preview.repo;
-      const draft = await api.previewProjectAbout({
-        name: draftName,
-        repoUrl: preview.canonicalUrl,
-        ...(preview.description ? { description: preview.description } : {}),
-        ...(preview.topics ? { topics: preview.topics } : {}),
-        readme: preview.readme,
-      });
-      if (repoPreviewRequestId.current !== requestId) return;
-      const currentAfterDraft = latestDraftFields.current;
-      const aboutHasContent = currentAfterDraft.about.trim().length > 0;
-      const missionHasContent = currentAfterDraft.mission.trim().length > 0;
-      const overwriteOk =
-        !aboutHasContent && !missionHasContent
-          ? true
-          : window.confirm(
-              'Replace the current About and Mission objectives with text drafted from this repo?',
-            );
-      if (overwriteOk) {
-        setAbout(draft.about);
-        setMission(draft.missionObjectives);
-        lastAutofilledUrl.current = path;
-      }
-    } catch (err) {
-      if (repoPreviewRequestId.current !== requestId) return;
-      const fixUrl = extractFixUrl(err);
-      setRepoUrlHint({
-        message: `Couldn't read this repo: ${describeApiError(err)}`,
-        ...(fixUrl ? { fixUrl } : {}),
-      });
-    } finally {
-      if (repoPreviewRequestId.current === requestId) {
-        activeRepoPreviewPath.current = null;
-        setPreviewBusy(false);
-      }
-    }
     },
     [repoUrl, githubIdentity],
   );
@@ -749,6 +774,7 @@ export function NewProjectDialog({
                           {...(item.soon ? { disabled: true, badge: 'Soon' } : {})}
                           onSelect={() => {
                             if (item.soon) return;
+                            if (kind === 'github' && item.id !== 'github') cancelRepoPreview();
                             setKind(item.id as ProjectKindId);
                             setSelectedTypeId(null);
                             setTypeParams({});
@@ -767,6 +793,7 @@ export function NewProjectDialog({
                           {...(item.iconSvg ? { iconSvg: item.iconSvg } : {})}
                           {...(item.logoUrl ? { logoUrl: item.logoUrl } : {})}
                           onSelect={() => {
+                            if (kind === 'github') cancelRepoPreview();
                             setSelectedTypeId(item.manifest.id);
                             // A purpose-built type owns the whole form. Seed
                             // its parameter defaults before showing its editor.
@@ -809,14 +836,15 @@ export function NewProjectDialog({
                       </div>
                     )}
                     {kind === 'github' && (
-                      <label>
+                      <div className="gz-npd-field">
                         <span className="gz-new-project-github-label">
-                          <span>
+                          <label htmlFor={githubRepoInputId}>
                             GitHub repository <span className="muted">(optional)</span>
-                          </span>
+                          </label>
                           <GitHubSignInChip onChange={setGitHubIdentity} compact />
                         </span>
                         <GitHubRepoCombobox
+                          inputId={githubRepoInputId}
                           value={repoUrl}
                           onChange={handleRepoChange}
                           onBlur={() => void handleRepoPreview()}
@@ -829,12 +857,13 @@ export function NewProjectDialog({
                           }}
                           repos={githubRepos}
                         />
-                        {previewBusy && (
-                          <small className="muted">
-                            Reading repo and drafting Name / About / Mission from the README…
-                          </small>
+                        {repoPreviewPhase && (
+                          <RepoPreviewProgress
+                            phase={repoPreviewPhase}
+                            onCancel={cancelRepoPreview}
+                          />
                         )}
-                        {!previewBusy && repoUrlHint && (
+                        {!repoPreviewPhase && repoUrlHint && (
                           <small className="error">
                             {repoUrlHint.message}
                             {repoUrlHint.fixUrl && (
@@ -851,7 +880,7 @@ export function NewProjectDialog({
                             )}
                           </small>
                         )}
-                      </label>
+                      </div>
                     )}
                     {/* Folder sits above Name: picking the folder is the first move,
                 and it suggests the Name (and drafts About) from what it finds. */}
@@ -1045,6 +1074,47 @@ export function NewProjectDialog({
   );
 }
 
+function RepoPreviewProgress({
+  phase,
+  onCancel,
+}: {
+  phase: 'reading' | 'drafting';
+  onCancel: () => void;
+}) {
+  // Resolve the Klerk only while this row is visible; a closed dialog or a
+  // non-GitHub project should not add config/roster reads to ProjectsView.
+  const klerk = useKlerkInfo();
+  const klerkName = klerk?.name ?? 'Klerk';
+  return (
+    <output className="gz-npd-repo-progress" aria-live="polite">
+      <GezelIcon
+        svg={klerk?.icon}
+        poppetje={klerk?.poppetje}
+        iconOverride={klerk?.iconOverride}
+        name={klerkName}
+        size={28}
+        pulsing
+        title={`${klerkName} is working`}
+      />
+      <span className="gz-npd-repo-progress-text">
+        {phase === 'reading'
+          ? `${klerkName} is reading the repository…`
+          : `${klerkName} is drafting About and Mission objectives…`}
+      </span>
+      <button
+        type="button"
+        className="secondary gz-npd-repo-cancel"
+        onClick={(event) => {
+          event.preventDefault();
+          onCancel();
+        }}
+      >
+        Cancel draft
+      </button>
+    </output>
+  );
+}
+
 /**
  * Combobox for the New Project dialog's GitHub URL field. The native
  * `<datalist>` we tried first forces the browser to show the option's
@@ -1060,6 +1130,7 @@ export function NewProjectDialog({
  * field).
  */
 function GitHubRepoCombobox({
+  inputId,
   value,
   onChange,
   onBlur,
@@ -1067,6 +1138,7 @@ function GitHubRepoCombobox({
   repos,
   disabled,
 }: {
+  inputId: string;
   value: string;
   onChange: (next: string) => void;
   onBlur: () => void;
@@ -1118,6 +1190,7 @@ function GitHubRepoCombobox({
           github.com/
         </span>
         <input
+          id={inputId}
           ref={inputRef}
           value={value}
           onChange={(e) => {

@@ -49,6 +49,41 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient project preview', () => {
+  it('forwards cancellation to both repository and Klerk draft requests', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal);
+      if (String(url).endsWith('/api/system/github-repo-preview')) {
+        return Response.json({
+          owner: 'octocat',
+          repo: 'demo',
+          canonicalUrl: 'https://github.com/octocat/demo',
+          readme: '# Demo',
+          readmeTruncated: false,
+        });
+      }
+      return Response.json({
+        about: 'A sufficiently detailed description of this demonstration project and its scope.',
+        missionObjectives: 'Deliver the demonstration project with its primary workflows working.',
+      });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await client.previewGitHubRepo('https://github.com/octocat/demo', controller.signal);
+    await client.previewProjectAbout(
+      {
+        name: 'Demo',
+        repoUrl: 'https://github.com/octocat/demo',
+        readme: '# Demo',
+      },
+      controller.signal,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('GezelClient model inventory', () => {
   it('can explicitly bypass the daemon model-list cache', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {

@@ -227,7 +227,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.post('/preview-about', async (c) => {
     const body = ProjectAboutPreviewRequestSchema.parse(await c.req.json());
     try {
-      const result = await generateProjectAboutFromRepo(ctx.chat, body);
+      const result = await generateProjectAboutFromRepo(ctx.chat, body, c.req.raw.signal);
       const response: ProjectAboutPreviewResponse = result;
       return c.json(response);
     } catch (err) {

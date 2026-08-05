@@ -29,11 +29,13 @@ export interface ProjectAboutInput {
 export async function generateProjectAboutFromRepo(
   manager: ChatManager,
   input: ProjectAboutInput,
+  signal?: AbortSignal,
 ): Promise<{ about: string; missionObjectives: string }> {
   const prompt = buildPrompt(input);
   const raw = await manager.oneShotCompletion(prompt, 120_000, {
     useKlerk: true,
     jobLabel: `project-about · ${input.name}`,
+    ...(signal ? { signal } : {}),
   });
   const parsed = parseSections(raw);
   if (parsed) return parsed;

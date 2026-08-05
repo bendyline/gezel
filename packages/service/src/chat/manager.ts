@@ -8938,6 +8938,8 @@ export class ChatManager {
       onDelta?: (chunk: string) => void;
       onReasoningDelta?: (chunk: string) => void;
       onQueueWait?: (info: { aheadOf: number }) => void;
+      /** Cancel this ephemeral provider turn and release its session. */
+      signal?: AbortSignal;
     } = {},
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
@@ -9068,6 +9070,7 @@ export class ChatManager {
         timeoutMs,
         queue: {
           lane: 'background',
+          ...(opts.signal ? { signal: opts.signal } : {}),
           ...(opts.ambient ? { ambient: true } : {}),
           ...(gezelId ? { gezelId } : {}),
           ...(actorLabel ? { actorLabel } : {}),

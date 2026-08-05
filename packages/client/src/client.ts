@@ -2386,8 +2386,8 @@ export class GezelClient {
    * Fetch metadata + README for a GitHub repo URL. Used by the New
    * Project dialog to seed the project-about preview.
    */
-  previewGitHubRepo(url: string): Promise<GitHubRepoPreviewResponse> {
-    return this.request('POST', '/api/system/github-repo-preview', { url });
+  previewGitHubRepo(url: string, signal?: AbortSignal): Promise<GitHubRepoPreviewResponse> {
+    return this.request('POST', '/api/system/github-repo-preview', { url }, undefined, signal);
   }
 
   /**
@@ -2395,8 +2395,11 @@ export class GezelClient {
    * Returns drafted `about` and `missionObjectives` strings the dialog
    * pre-fills.
    */
-  previewProjectAbout(body: ProjectAboutPreviewRequest): Promise<ProjectAboutPreviewResponse> {
-    return this.request('POST', '/api/projects/preview-about', body);
+  previewProjectAbout(
+    body: ProjectAboutPreviewRequest,
+    signal?: AbortSignal,
+  ): Promise<ProjectAboutPreviewResponse> {
+    return this.request('POST', '/api/projects/preview-about', body, undefined, signal);
   }
 
   /**

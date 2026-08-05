@@ -3436,6 +3436,18 @@ describe('ChatManager — one-shot attribution', () => {
     });
   });
 
+  it('forwards a cancellation signal to one-shot provider work', async () => {
+    mock.script('done');
+    const controller = new AbortController();
+
+    await manager.oneShotCompletion('draft project copy', 1_000, {
+      signal: controller.signal,
+    });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue?.signal).toBe(controller.signal);
+  });
+
   it('does not apply user-daemon RAM pressure to broker-routed ambient work', () => {
     const denial = (
       manager as unknown as {
