@@ -25,9 +25,11 @@ afterEach(async () => {
 describe('legacy-full packaged UI discovery', () => {
   it('serves the bundled UI without GEZEL_UI_DIR', async () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-legacy-full-ui-'));
-    // Any established product directory keeps an upgraded system service in
-    // legacy-full mode instead of relabeling its data as engine-only.
-    await mkdir(join(home, 'projects', 'default'), { recursive: true });
+    // A non-default project proves this pre-split home was used, so upgrading
+    // must preserve legacy-full mode instead of stranding its product data
+    // behind the machine-engine boundary. The default project alone is only
+    // auto-created baseline state and is not sufficient evidence.
+    await mkdir(join(home, 'projects', 'workshop'), { recursive: true });
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,

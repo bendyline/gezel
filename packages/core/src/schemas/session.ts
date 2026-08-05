@@ -154,6 +154,28 @@ export const ChatSessionSchema = z.object({
   /** Optional specific step within the task. */
   stepId: z.string().optional(),
   /**
+   * The most recent successful `generate_image` run in this session,
+   * persisted so a follow-up message can continue where the last image
+   * left off. Written by the fixed-function image path after each
+   * generation; read by the follow-up classifier to thread the previous
+   * prompt (and, when the model supports img2img, the previous image)
+   * into the next call. Explicit persistence — not re-derived from the
+   * transcript — so the contract survives restarts and message edits.
+   */
+  lastImageGeneration: z
+    .object({
+      /** The full prompt actually sent to the engine (post-composition). */
+      prompt: z.string(),
+      negativePrompt: z.string().optional(),
+      /** Artifact path of the generated PNG, relative to the project's artifacts root. */
+      artifactPath: z.string(),
+      /** Engine seed reported for the generation, for composition-stable revisions. */
+      seed: z.number().int().optional(),
+      model: z.string().optional(),
+      at: z.string(),
+    })
+    .optional(),
+  /**
    * Optional craftbook TEMPLATE this session is editing (the explicit
    * Craftbook editor's AI-assist pane). Defaults the unified `craftbook_*`
    * tools to this book and injects its current structure into the system

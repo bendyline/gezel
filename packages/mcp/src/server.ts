@@ -46,6 +46,7 @@ import {
   deliverableStep,
   expandStepDeliverable,
   inferDeliverableKind,
+  isTrustedConstrainedToolset,
   pickRandomNameWithGender,
   removeStepAndCleanEdges,
   reorderStepsArray,
@@ -60,6 +61,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { commandResultIsError } from './command-result.js';
+import {
+  binaryDocumentCraftbookRoute,
+  isBinaryDocumentOutputPath,
+  normalizeDocumentOutputPath,
+} from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import {
   buildKickoffStepDescription,
@@ -3615,9 +3621,204 @@ function craftbookSetupRequiredText(craftbookId: string, missing: CraftbookTools
   return `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${needs} from the project's Craftbooks/Commands setup before invoking it. Do not create a substitute task, hand-write replacement steps, or silently change the requested output format.`;
 }
 
+function normalizedCraftbookTaskDescription(description: string | undefined, craftbookId: string) {
+  const text = description?.trim() || `Run the ${craftbookId} craftbook against this project.`;
+  return text.length >= 40 ? text : `${text} Complete every gated production and review step.`;
+}
+
+/**
+ * Install only exact, first-party, pinned, zero-configuration dependencies.
+ * Everything else remains an explicit setup boundary for the user.
+ */
+async function autoInstallTrustedCraftbookToolsets(
+  project: string,
+  requirements: CraftbookToolsetNeed[],
+): Promise<string[]> {
+  const installed: string[] = [];
+  const scope = { kind: 'project' as const, projectId: project };
+  const roster = await api.listInstalledToolsets(scope);
+  for (const need of requirements) {
+    const detail = await api.getCatalogItem('toolset', need.toolsetId, {
+      ...(need.sourceId ? { source: need.sourceId } : {}),
+    });
+    const manifest = detail.manifest;
+    if (
+      manifest.kind !== 'toolset' ||
+      manifest.runtime.kind !== 'npm-package' ||
+      !isTrustedConstrainedToolset({
+        toolsetId: manifest.id,
+        sourceId: detail.sourceId,
+        runtime: manifest.runtime,
+      }) ||
+      manifest.config.some((field) => field.required && field.default === undefined)
+    ) {
+      continue;
+    }
+    const runtime = manifest.runtime;
+    const current = roster.toolsets.find((entry) => entry.toolsetId === manifest.id);
+    if (
+      current?.sourceId === detail.sourceId &&
+      current.version === manifest.version &&
+      current.runtime.kind === 'npm-package' &&
+      current.runtime.sha256 === runtime.sha256 &&
+      current.runtime.entry === runtime.entry &&
+      current.runtime.args.length === runtime.args.length &&
+      current.runtime.args.every((arg, index) => arg === runtime.args[index])
+    ) {
+      continue;
+    }
+    await api.installToolset(manifest.id, {
+      scope,
+      version: manifest.version,
+      sourceId: detail.sourceId,
+    });
+    installed.push(manifest.id);
+    roster.toolsets = [
+      ...roster.toolsets.filter((entry) => entry.toolsetId !== manifest.id),
+      {
+        toolsetId: manifest.id,
+        sourceId: detail.sourceId,
+        version: manifest.version,
+        installedAt: new Date().toISOString(),
+        runtime,
+      },
+    ];
+  }
+  return installed;
+}
+
+type CraftbookLaunchResult =
+  | { kind: 'created'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
+  | { kind: 'existing'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
+  | { kind: 'setup-required'; missing: CraftbookToolsetNeed[]; installed: string[] };
+
+async function launchCraftbookTask(args: {
+  craftbookId: string;
+  project: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  assignee?: z.infer<ReturnType<typeof assigneeArg>>;
+  params?: Record<string, string>;
+  /** Ad-hoc binary handoffs join the active capability workflow. */
+  dedupeActiveCraftbook?: boolean;
+}): Promise<CraftbookLaunchResult> {
+  let projectCraftbooks = await api.listProjectCraftbooks(args.project);
+  let missing = projectCraftbooks.missingToolsets[args.craftbookId] ?? [];
+  const declaredCraftbook = projectCraftbooks.items.find(
+    (item) => item.manifest.kind === 'craftbook-template' && item.manifest.id === args.craftbookId,
+  );
+  const declaredRequirements: CraftbookToolsetNeed[] =
+    declaredCraftbook?.manifest.kind === 'craftbook-template'
+      ? (declaredCraftbook.manifest.toolsets ?? missing)
+      : missing;
+  const installed = await autoInstallTrustedCraftbookToolsets(
+    args.project,
+    declaredRequirements.filter((need) => !need.optional),
+  );
+  if (installed.length > 0) {
+    projectCraftbooks = await api.listProjectCraftbooks(args.project);
+    missing = projectCraftbooks.missingToolsets[args.craftbookId] ?? [];
+  }
+  if (missing.length > 0) return { kind: 'setup-required', missing, installed };
+
+  if (args.dedupeActiveCraftbook) {
+    const active = (await api.listProjectTasks(args.project)).tasks.find(
+      (task) =>
+        task.craftbook.id === args.craftbookId &&
+        (task.status === 'draft' || task.status === 'active' || task.status === 'paused'),
+    );
+    if (active) return { kind: 'existing', task: active, installed };
+  }
+
+  const craftbookName =
+    projectCraftbooks.items.find((item) => item.manifest.id === args.craftbookId)?.manifest.name ??
+    args.craftbookId;
+  const task = await api.createTask(args.project, {
+    title: args.title ?? craftbookName,
+    description: normalizedCraftbookTaskDescription(args.description, args.craftbookId),
+    craftbookId: args.craftbookId,
+    ...(args.version ? { craftbookVersion: args.version } : {}),
+    ...(args.params && Object.keys(args.params).length > 0 ? { craftbookParams: args.params } : {}),
+    ...(args.assignee ? { assignee: assigneeFromArg(args.assignee) } : {}),
+    ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
+    dispatchEntry: true,
+  });
+  return { kind: 'created', task, installed };
+}
+
+async function routeBinaryDocumentHandoff(args: {
+  project: string;
+  task: string;
+  expectedDeliverable: z.infer<typeof ExpectedDeliverableArgSchema> | undefined;
+}) {
+  const requestedPath =
+    args.expectedDeliverable?.kind === 'file'
+      ? args.expectedDeliverable.filePath?.trim()
+      : undefined;
+  if (!requestedPath || !isBinaryDocumentOutputPath(requestedPath)) return null;
+
+  const route = binaryDocumentCraftbookRoute(requestedPath);
+  if (!route) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `No production craftbook is registered for binary deliverable "${requestedPath}". The handoff was blocked; do not send it to a Builder or substitute a text file.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const outputPath = normalizeDocumentOutputPath(requestedPath);
+  const launch = await launchCraftbookTask({
+    craftbookId: route.craftbookId,
+    project: args.project,
+    title: `Create ${outputPath}`,
+    description: args.task,
+    params: { outputPath },
+    dedupeActiveCraftbook: true,
+  });
+  if (launch.kind === 'setup-required') {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: craftbookSetupRequiredText(route.craftbookId, launch.missing),
+        },
+      ],
+      isError: true,
+    };
+  }
+  const installedText =
+    launch.installed.length > 0
+      ? ` Installed or upgraded trusted project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+      : '';
+  if (launch.kind === 'existing') {
+    const existingOutput = launch.task.craftbookParams?.outputPath;
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Joined existing ${route.label} craftbook task ${launch.task.ref} instead of creating a conflicting binary handoff.${existingOutput ? ` It remains responsible for \`${existingOutput}\`.` : ''}${installedText}`,
+        },
+      ],
+    };
+  }
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `Routed \`${outputPath}\` through the ${route.label} craftbook — task ${launch.task.ref} was created and its entry step dispatched to the recipe-selected specialist. No Builder handoff was sent.${installedText}`,
+      },
+    ],
+  };
+}
+
 server.tool(
   'suggest_craftbook',
-  'Rank the available craftbooks against a task description and return the best-matching few — a shortlist, not the whole catalog. Use this (instead of scanning list_craftbooks) whenever you have a job to do and want the right procedure. The result explicitly identifies missing required toolset setup; never invoke or substitute for a craftbook until that setup is complete.',
+  'Rank the available craftbooks against a task description and return the best-matching few — a shortlist, not the whole catalog. Use this (instead of scanning list_craftbooks) whenever you have a job to do and want the right procedure. invoke_craftbook automatically installs or upgrades exact trusted zero-configuration bundled dependencies; other missing setup remains a hard blocker.',
   {
     query: z
       .string()
@@ -3676,7 +3877,7 @@ server.tool(
     const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
     const nextAction =
       topMissing.length > 0
-        ? craftbookSetupRequiredText(top.id, topMissing)
+        ? `Next call: invoke_craftbook({ craftbookId: "${top.id}" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not delegate the job raw.`
         : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not delegate the job raw and do not hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
     return {
       content: [
@@ -3789,7 +3990,7 @@ server.tool(
 
 server.tool(
   'invoke_craftbook',
-  "Spawn a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. Required toolsets are preflighted first; when setup is missing, this returns SETUP REQUIRED and does not create a doomed task. The new task starts at the recipe's entry step. The craftbook's bundled scripts (if any) install into the project on first invocation. Returns the new task ref.",
+  'Spawn and dispatch a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. Exact trusted zero-configuration bundled dependencies are installed or upgraded automatically at project scope; other missing setup returns a hard SETUP REQUIRED error and creates no task. Invocation params are carried into recipe placeholders such as {{outputPath}}. Returns the new task ref.',
   {
     craftbookId: z
       .string()
@@ -3804,42 +4005,55 @@ server.tool(
       ),
     version: z.string().optional().describe('Specific craftbook version. Defaults to latest.'),
     assignee: assigneeArg().optional(),
+    params: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe('Invocation parameters declared by the craftbook, such as outputPath.'),
+    outputPath: z
+      .string()
+      .optional()
+      .describe(
+        'Convenience alias for params.outputPath. Preserves the requested project-workspace filename for document-production craftbooks.',
+      ),
   },
-  async ({ craftbookId, project, title, description, version, assignee }) => {
+  async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const projectCraftbooks = await api.listProjectCraftbooks(resolvedProject);
-      const missing = projectCraftbooks.missingToolsets[craftbookId] ?? [];
-      if (missing.length > 0) {
+      const invocationParams = {
+        ...(params ?? {}),
+        ...(outputPath ? { outputPath: normalizeDocumentOutputPath(outputPath) } : {}),
+      };
+      const launch = await launchCraftbookTask({
+        craftbookId,
+        project: resolvedProject,
+        title,
+        description,
+        version,
+        assignee,
+        params: invocationParams,
+      });
+      if (launch.kind === 'setup-required') {
         return {
           content: [
             {
               type: 'text' as const,
-              text: craftbookSetupRequiredText(craftbookId, missing),
+              text: craftbookSetupRequiredText(craftbookId, launch.missing),
             },
           ],
+          isError: true,
         };
       }
-      const craftbookName =
-        projectCraftbooks.items.find((item) => item.manifest.id === craftbookId)?.manifest.name ??
-        craftbookId;
-      const created = await api.createTask(resolvedProject, {
-        title: title ?? craftbookName,
-        description: description ?? `Run the ${craftbookId} craftbook against this project.`,
-        craftbookId,
-        ...(version ? { craftbookVersion: version } : {}),
-        assignee: assignee
-          ? assigneeFromArg(assignee)
-          : gezelId
-            ? { kind: 'gezel', gezelId }
-            : { kind: 'user' },
-      });
+      const created = launch.task;
       const stepCount = created.craftbook.steps.length;
+      const installedText =
+        launch.installed.length > 0
+          ? ` Installed or upgraded trusted project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+          : '';
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step: ${created.activeStepId ?? '(none)'}.`,
+            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}`,
           },
         ],
       };
@@ -4620,6 +4834,12 @@ server.tool(
   },
   async ({ gezel, message, project, expectedDeliverable }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const documentRoute = await routeBinaryDocumentHandoff({
+      project: resolvedProject,
+      task: message,
+      expectedDeliverable,
+    });
+    if (documentRoute) return documentRoute;
     const repoGuard = await repoIntakeGuardForProject({
       tool: 'message_gezel',
       projectId: resolvedProject,
@@ -4748,6 +4968,12 @@ server.tool(
       };
     }
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const documentRoute = await routeBinaryDocumentHandoff({
+      project: resolvedProject,
+      task: question,
+      expectedDeliverable,
+    });
+    if (documentRoute) return documentRoute;
     const repoGuard = await repoIntakeGuardForProject({
       tool: 'ask_gezel',
       projectId: resolvedProject,
@@ -4875,6 +5101,12 @@ server.tool(
       };
     }
     const jobTitle = ROLE_TO_JOB_TITLE[role];
+    const documentRoute = await routeBinaryDocumentHandoff({
+      project: projectId,
+      task: question,
+      expectedDeliverable,
+    });
+    if (documentRoute) return documentRoute;
     if (expectedDeliverable?.kind === 'file') {
       return {
         content: [
@@ -5070,6 +5302,12 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
           if (autoFetched) return autoFetched;
         }
         const resolvedProject = project ? await resolveProjectId(project) : projectId;
+        const documentRoute = await routeBinaryDocumentHandoff({
+          project: resolvedProject,
+          task,
+          expectedDeliverable,
+        });
+        if (documentRoute) return documentRoute;
         const repoGuard = await repoIntakeGuardForProject({
           tool: `delegate_${slug}`,
           projectId: resolvedProject,
@@ -5085,11 +5323,15 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
           text: normalizedMessage,
           ...(expectedDeliverable ? { expectedDeliverable } : {}),
         });
+        const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean })
+          .deduplicated;
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Handed off to ${res.toGezelName} (${label}) in project "${resolvedProject}". Their reply will arrive in your next turn. [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
+              text: responseWasDeduplicated
+                ? `An identical file handoff is already pending with ${res.toGezelName} (${label}); joined it instead of queueing another message.`
+                : `Handed off to ${res.toGezelName} (${label}) in project "${resolvedProject}". Their reply will arrive in your next turn. [hint: ${res.toGezelName} is now on that project; the user can switch to their chat for follow-ups.]`,
             },
           ],
         };
@@ -7873,7 +8115,7 @@ server.tool(
       )
       .optional()
       .describe(
-        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local sd-cpp engine uses only the first (img2img). Prefer `artifactPath` over base64 when the image lives in the project.',
+        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local sd-cpp engine uses only the first (img2img). Not every local model supports img2img — when the resolved model does not, the sources are dropped and the result notes that the image was generated from the prompt alone. Prefer `artifactPath` over base64 when the image lives in the project.',
       ),
     strength: z
       .number()
@@ -7947,11 +8189,23 @@ server.tool(
       //      mentions "workspace". Phrasing the embed line as a literal
       //      copy-paste snippet with NO prose around the path keeps
       //      that hallucination from creeping in.
+      //
+      // The `(seed N, …)` parenthetical and the "call `read_artifact`
+      // with path `…`" tail are parsed by the service's fixed-function
+      // follow-up threading (chat/image-refinement.ts) to persist the
+      // last generation on the session — keep both shapes stable or
+      // update the extractors together.
       const workspaceLine = workspacePath
         ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replace_in_file\` or \`write_file\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `write_file`.';
       const normalizedLine = normalized.note ? ` ${normalized.note}` : '';
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      // When the resolved model can't do img2img the provider dropped the
+      // source images and generated from the prompt alone — say so up
+      // front, or the model reports an "edit" that never happened.
+      const skippedLine = meta.img2imgSkippedReason
+        ? ` NOTE: the source image was not used — ${meta.img2imgSkippedReason}; the image was generated from the prompt alone.`
+        : '';
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${skippedLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

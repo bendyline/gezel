@@ -1,4 +1,4 @@
-import type { GezelDetail, GezelSummary } from '@bendyline/gezel';
+import { type GezelDetail, type GezelSummary, pickRandomNameWithGender } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,7 +30,7 @@ vi.mock('@bendyline/gezel', async () => {
   return {
     ...actual,
     pickRandomName: () => 'Ada',
-    pickRandomNameWithGender: () => ({ name: 'Ada', gender: 'female' as const }),
+    pickRandomNameWithGender: vi.fn(() => ({ name: 'Ada', gender: 'female' as const })),
   };
 });
 
@@ -44,6 +44,9 @@ const GEZELS: GezelSummary[] = [
 
 describe('GezellenView', () => {
   beforeEach(() => {
+    vi.mocked(pickRandomNameWithGender)
+      .mockReset()
+      .mockReturnValue({ name: 'Ada', gender: 'female' });
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS } as never);
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
@@ -148,6 +151,21 @@ describe('GezellenView', () => {
         role: 'Designer',
       });
     });
+  });
+
+  it('updates the gender dropdown when a name reroll lands non-binary', async () => {
+    vi.mocked(pickRandomNameWithGender)
+      .mockReturnValueOnce({ name: 'Ada', gender: 'female' })
+      .mockReturnValueOnce({ name: 'Robin', gender: 'non-binary' });
+    render(<GezellenView />);
+    await screen.findByText('Maya');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /\+ New Gezel/ }));
+    await user.click(screen.getByRole('button', { name: 'Pick a random name' }));
+
+    expect(screen.getByPlaceholderText('e.g. Ada')).toHaveValue('Robin');
+    expect(screen.getByRole('combobox')).toHaveValue('non-binary');
   });
 
   it('the From template tab inside the New Gezel dialog shows the catalog browser', async () => {

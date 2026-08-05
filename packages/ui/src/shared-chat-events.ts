@@ -50,6 +50,38 @@ function recordForReplay(shared: SharedStream, envelope: ChatEventEnvelope): voi
     cached = [];
     shared.replay.set(envelope.sessionId, cached);
   }
+  if (event.type === 'engine_phase') {
+    // Mirror the service bus: a phase is a replaceable status snapshot. MLX
+    // emits it frequently enough that retaining every phase would split delta
+    // runs and evict early tool rows before a late timeline subscriber joins.
+    let priorIndex = -1;
+    for (let i = cached.length - 1; i >= 0; i--) {
+      if (cached[i]?.event.type === 'engine_phase') {
+        priorIndex = i;
+        break;
+      }
+    }
+    if (priorIndex >= 0) {
+      cached.splice(priorIndex, 1);
+      const left = cached[priorIndex - 1];
+      const right = cached[priorIndex];
+      if (
+        (left?.event.type === 'delta' || left?.event.type === 'reasoning_delta') &&
+        right?.event.type === left.event.type
+      ) {
+        cached[priorIndex - 1] = {
+          ...left,
+          event: {
+            type: left.event.type,
+            content: left.event.content + right.event.content,
+          },
+        };
+        cached.splice(priorIndex, 1);
+      }
+    }
+    cached.push(envelope);
+    return;
+  }
   if (event.type === 'delta' || event.type === 'reasoning_delta') {
     const tail = cached[cached.length - 1];
     if (tail?.event.type === event.type) {

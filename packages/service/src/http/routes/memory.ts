@@ -2,6 +2,9 @@ import { Hono } from 'hono';
 import { type MemoryKind, isMemoryKind } from '../../memory/daily-markdown.js';
 import type { ServiceContext } from '../context.js';
 
+const MEMORY_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MEMORY_ID_PATTERN = /^(?!\.{1,2}$)[^/\\]+$/;
+
 export function memoryRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -55,6 +58,28 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     if (!day) return c.json({ error: 'missing ?day=YYYY-MM-DD' }, 400);
     const content = await ctx.memory.readDay(scope, id, day);
     return c.json({ content });
+  });
+
+  app.patch('/day', async (c) => {
+    const scope = c.req.query('scope');
+    const id = c.req.query('id') ?? '';
+    const day = c.req.query('day') ?? '';
+    if (scope !== 'gezel' && scope !== 'project') {
+      return c.json({ error: 'missing or invalid ?scope=' }, 400);
+    }
+    if (!MEMORY_ID_PATTERN.test(id)) return c.json({ error: 'missing or invalid ?id=' }, 400);
+    if (!MEMORY_DAY_PATTERN.test(day)) {
+      return c.json({ error: 'missing or invalid ?day=YYYY-MM-DD' }, 400);
+    }
+    const target =
+      scope === 'project' ? await ctx.store.getProject(id) : await ctx.store.getGezel(id);
+    if (!target) return c.json({ error: `${scope} not found` }, 404);
+    const body = (await c.req.json().catch(() => null)) as { content?: unknown } | null;
+    if (typeof body?.content !== 'string') {
+      return c.json({ error: 'content must be a string' }, 400);
+    }
+    const { indexed } = await ctx.memory.replaceDay(scope, id, day, body.content);
+    return c.json({ ok: true, indexed });
   });
 
   app.get('/summary', async (c) => {

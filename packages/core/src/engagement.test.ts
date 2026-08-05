@@ -7,6 +7,7 @@ import {
   isEngagementAllowed,
   isProactiveAllowed,
   isSchedulingAllowed,
+  isTaskWorkAllowed,
   workshopTempoDefaults,
 } from './engagement.js';
 
@@ -40,6 +41,17 @@ describe('isSchedulingAllowed', () => {
   it('blocks reactive and off', () => {
     expect(isSchedulingAllowed({ aiEngagementMode: 'reactive' })).toBe(false);
     expect(isSchedulingAllowed({ aiEngagementMode: 'off' })).toBe(false);
+  });
+});
+
+describe('isTaskWorkAllowed', () => {
+  it('allows proactive and tasks + reactive', () => {
+    expect(isTaskWorkAllowed({ aiEngagementMode: 'proactive' })).toBe(true);
+    expect(isTaskWorkAllowed({ aiEngagementMode: 'scheduled' })).toBe(true);
+  });
+  it('blocks reactive and off', () => {
+    expect(isTaskWorkAllowed({ aiEngagementMode: 'reactive' })).toBe(false);
+    expect(isTaskWorkAllowed({ aiEngagementMode: 'off' })).toBe(false);
   });
 });
 

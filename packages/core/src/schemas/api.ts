@@ -1773,11 +1773,12 @@ export const GezelConfigSchema = z.object({
    * Global "panic button" controlling how much AI activity is allowed.
    *   - `proactive` (default): everything on — proactive prompts,
    *     anti-stall nudges, voorman/meester health checks, cross-gezel
-   *     `message_gezel`, scheduled crons.
-   *   - `scheduled`: reactive + scheduled crons. No proactive nudges
-   *     and no cross-gezel messaging from gezels; chat still works.
-   *   - `reactive`: chat only. No scheduled jobs. No nudges. No
+   *     `message_gezel`, all task handoffs, and scheduled triggers.
+   *   - `scheduled` (shown as "Tasks + Reactive"): chat, all task
+   *     handoffs, and scheduled triggers. No proactive nudges and no
    *     cross-gezel messaging from gezels.
+   *   - `reactive`: chat only. Task handoffs and scheduled triggers are
+   *     paused. No nudges or cross-gezel messaging from gezels.
    *   - `off`: AI disabled — chat composer is inactive, HTTP chat
    *     sends return 403, schedulers short-circuit. In-flight turns
    *     finish; the pending-sends queue is canceled on transition.
@@ -2985,6 +2986,22 @@ export const ListQuestionsResponseSchema = z.object({
   questions: z.array(QuestionSchema),
 });
 export type ListQuestionsResponse = z.infer<typeof ListQuestionsResponseSchema>;
+
+/**
+ * Resolve a file shown in the References pane to its canonical path on the
+ * daemon host. The desktop shell consumes this response directly so the
+ * renderer never needs to construct or receive host filesystem paths.
+ */
+export const ReferenceFileLocationRequestSchema = z.object({
+  kind: z.enum(['artifact', 'document', 'workspace']),
+  path: z.string().min(1).max(4096),
+});
+export type ReferenceFileLocationRequest = z.infer<typeof ReferenceFileLocationRequestSchema>;
+
+export const ReferenceFileLocationResponseSchema = z.object({
+  path: z.string().min(1),
+});
+export type ReferenceFileLocationResponse = z.infer<typeof ReferenceFileLocationResponseSchema>;
 
 /**
  * Resolve-and-read for project artifacts. Agents frequently guess paths

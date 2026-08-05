@@ -1,5 +1,6 @@
 import type React from 'react';
-import { useEffect } from 'react';
+import { useRef } from 'react';
+import { Dialog } from '../primitives/index.js';
 
 /**
  * Reusable full-screen image preview overlay. Click outside or hit
@@ -7,10 +8,9 @@ import { useEffect } from 'react';
  * screenshots today; intended to be the common surface for any
  * "click thumbnail to enlarge" interaction the app picks up later.
  *
- * Renders a fixed-position backdrop + centered image so it's not
- * confined by any parent's `overflow: hidden`. The image scales to
- * fit the viewport (max-width / max-height: 95%) so very tall or wide
- * screenshots stay fully visible without scrollbars.
+ * Renders through the shared dialog portal so it's not confined by a
+ * parent's overflow or stacking context. The image scales to fit the
+ * viewport so very tall or wide screenshots stay fully visible.
  */
 export function ImagePreview({
   src,
@@ -34,89 +34,67 @@ export function ImagePreview({
    */
   downloadFilename?: string;
 }): React.ReactNode {
-  // Escape-to-close. Listen on document so the handler fires regardless
-  // of where focus is (the overlay itself doesn't auto-focus).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  // Lock body scroll while the preview is open so wheel/trackpad
-  // gestures don't scroll the chat behind it.
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
-
-  const onBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-  const onBackdropKey = (e: React.KeyboardEvent<HTMLDialogElement>) => {
-    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-      e.preventDefault();
-      onClose();
-    }
-  };
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <dialog
-      className="image-preview-backdrop"
-      open
-      onClick={onBackdropClick}
-      onKeyDown={onBackdropKey}
-      aria-label="Image preview"
-    >
-      <div className="image-preview-actions">
-        {downloadFilename && (
-          <a
-            className="image-preview-download"
-            href={src}
-            download={downloadFilename}
-            aria-label={`Download ${downloadFilename}`}
-            title={`Download ${downloadFilename}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              role="img"
-              aria-label={`Download ${downloadFilename}`}
-            >
-              <title>{`Download ${downloadFilename}`}</title>
-              <path
-                d="M8 1.5v8m0 0L4.5 6m3.5 3.5L11.5 6M2 12.5h12"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </a>
-        )}
-        <button
-          type="button"
-          className="image-preview-close"
-          onClick={onClose}
-          aria-label="Close preview"
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="image-preview-backdrop" />
+        <Dialog.Content
+          className="image-preview-dialog"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            closeRef.current?.focus();
+          }}
         >
-          ×
-        </button>
-      </div>
-      <div className="image-preview-content">
-        <img className="image-preview-img" src={src} alt={alt ?? ''} />
-        {caption && <div className="image-preview-caption">{caption}</div>}
-      </div>
-    </dialog>
+          <Dialog.Title className="sr-only">Image preview</Dialog.Title>
+          <div className="image-preview-actions">
+            {downloadFilename && (
+              <a
+                className="image-preview-download"
+                href={src}
+                download={downloadFilename}
+                aria-label={`Download ${downloadFilename}`}
+                title={`Download ${downloadFilename}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 1.5v8m0 0L4.5 6m3.5 3.5L11.5 6M2 12.5h12"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className="sr-only">Download {downloadFilename}</span>
+              </a>
+            )}
+            <Dialog.Close asChild>
+              <button
+                ref={closeRef}
+                type="button"
+                className="image-preview-close"
+                aria-label="Close preview"
+                title="Close preview"
+              >
+                ×
+              </button>
+            </Dialog.Close>
+          </div>
+          <div className="image-preview-content">
+            <img className="image-preview-img" src={src} alt={alt ?? ''} />
+            <Dialog.Description asChild>
+              {caption ? (
+                <div className="image-preview-caption" title={caption}>
+                  {caption}
+                </div>
+              ) : (
+                <span className="sr-only">Enlarged image</span>
+              )}
+            </Dialog.Description>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

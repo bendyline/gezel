@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   ApplyPatchToProjectWorkspaceFileRequestSchema,
@@ -15,6 +15,8 @@ import {
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
   ProjectFolderPreviewRequestSchema,
+  ReferenceFileLocationRequestSchema,
+  ReferenceFileLocationResponseSchema,
   ReplaceInProjectWorkspaceFileRequestSchema,
   ReplaceLinesInProjectWorkspaceFileRequestSchema,
   UpdateProjectRequestSchema,
@@ -225,7 +227,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.post('/preview-about', async (c) => {
     const body = ProjectAboutPreviewRequestSchema.parse(await c.req.json());
     try {
-      const result = await generateProjectAboutFromRepo(ctx.chat, body);
+      const result = await generateProjectAboutFromRepo(ctx.chat, body, c.req.raw.signal);
       const response: ProjectAboutPreviewResponse = result;
       return c.json(response);
     } catch (err) {
@@ -772,6 +774,32 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // exit codes (explorer.exe returns non-zero even on success).
     execFile(launcher.cmd, launcher.args, () => {});
     return c.json({ ok: true, path: dir });
+  });
+
+  app.get('/:id/reference-file-location', async (c) => {
+    const id = c.req.param('id');
+    const request = ReferenceFileLocationRequestSchema.parse({
+      kind: c.req.query('kind'),
+      path: c.req.query('path'),
+    });
+    const base =
+      request.kind === 'artifact'
+        ? ctx.store.projectArtifactsDir(id)
+        : request.kind === 'workspace'
+          ? await ctx.store.projectWorkspaceDir(id)
+          : ctx.store.documentsDir();
+    const joined = safeJoin(base, request.path);
+    if (!joined || !(await realpathContained(base, joined))) {
+      return c.json({ error: 'path traversal' }, 400);
+    }
+    try {
+      const file = await stat(joined);
+      if (!file.isFile()) return c.json({ error: 'not found' }, 404);
+      const path = await realpath(joined);
+      return c.json(ReferenceFileLocationResponseSchema.parse({ path }));
+    } catch {
+      return c.json({ error: 'not found' }, 404);
+    }
   });
 
   // ── artifacts (read-write, always internal) ──

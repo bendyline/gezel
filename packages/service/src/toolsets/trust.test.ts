@@ -5,9 +5,9 @@ import { isTrustedConstrainedToolset } from './trust.js';
 const runtime: ToolsetRuntime = {
   kind: 'npm-package',
   package: '@bendyline/docblocks-cli',
-  version: '2.0.0',
-  sha256: 'd4e71b41dfd4ae5f90abac45a163c8dd9d5f5b01393f6237968ab5db205ce1f1',
-  entry: 'dist/index.js',
+  version: '2.3.4',
+  sha256: 'f9ebde4f7ea370778c9becf2a4f7a15fd435b4f2bcfdbcdf0f4242a1ef2db674',
+  entry: 'dist/bin.js',
   args: ['mcp'],
   envHints: [],
 };
@@ -28,6 +28,7 @@ describe('isTrustedConstrainedToolset', () => {
     { sourceId: 'bundled', runtime: { ...runtime, args: ['mcp', '--allow-write', 'C:\\'] } },
     { sourceId: 'bundled', runtime: { ...runtime, sha256: 'not-a-sha' } },
     { sourceId: 'bundled', runtime: { ...runtime, package: 'lookalike-docblocks' } },
+    { sourceId: 'bundled', runtime: { ...runtime, entry: 'dist/other.js' } },
   ])('rejects a spoofed or authority-expanded runtime', ({ sourceId, runtime: candidate }) => {
     expect(
       isTrustedConstrainedToolset({

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   daemonEntrypointArgument,
+  isAllowedPreviewNavigation,
+  isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
+  isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 
 describe('daemon-entrypoint launch guard', () => {
@@ -49,6 +52,61 @@ describe('Electron boundary policies', () => {
     expect(isAllowedTopLevelNavigation('file:///etc/passwd', origin, splash)).toBe(false);
     expect(isAllowedTopLevelNavigation('data:text/html,pwned', origin, splash)).toBe(false);
     expect(isAllowedTopLevelNavigation('https://example.com', origin, splash)).toBe(false);
+  });
+
+  it('recognizes only preview URLs on the exact daemon origin', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const preview = `${origin}/preview/cap/workspace/default/site/index.html`;
+    expect(isPreviewDocumentUrl(preview, origin)).toBe(true);
+    expect(isPreviewDocumentUrl(`${origin}/api/config`, origin)).toBe(false);
+    expect(isPreviewDocumentUrl('https://127.0.0.1:4313/preview/cap/x', origin)).toBe(false);
+    expect(isPreviewDocumentUrl('https://127.0.0.1.evil.test:4312/preview/cap/x', origin)).toBe(
+      false,
+    );
+  });
+
+  it('keeps preview navigation capability-pinned in every policy mode', () => {
+    const origin = 'https://127.0.0.1:4312';
+    expect(isAllowedPreviewNavigation(`${origin}/preview/cap/workspace/p/next.html`, origin)).toBe(
+      true,
+    );
+    expect(isAllowedPreviewNavigation(`${origin}/settings`, origin)).toBe(false);
+    expect(isAllowedPreviewNavigation('https://example.com/', origin)).toBe(false);
+    expect(isAllowedPreviewNavigation('data:text/html,pwned', origin)).toBe(false);
+  });
+
+  it('blocks strict preview egress but permits local assets and inert URLs', () => {
+    const origin = 'https://127.0.0.1:4312';
+    expect(isAllowedPreviewResourceRequest(`${origin}/preview/cap/app.js`, origin, false)).toBe(
+      true,
+    );
+    expect(isAllowedPreviewResourceRequest('wss://127.0.0.1:4312/events', origin, false)).toBe(
+      true,
+    );
+    expect(isAllowedPreviewResourceRequest('https://example.com/app.js', origin, false)).toBe(
+      false,
+    );
+    expect(isAllowedPreviewResourceRequest('ws://127.0.0.1:4312/events', origin, false)).toBe(
+      false,
+    );
+    expect(isAllowedPreviewResourceRequest('file:///etc/passwd', origin, false)).toBe(false);
+    expect(isAllowedPreviewResourceRequest('data:image/png;base64,AA==', origin, false)).toBe(true);
+    expect(isAllowedPreviewResourceRequest('blob:null/id', origin, false)).toBe(true);
+  });
+
+  it('allows ordinary network resources only in External services mode', () => {
+    const origin = 'https://127.0.0.1:4312';
+    for (const url of [
+      'https://cdn.example/app.js',
+      'http://api.example/data',
+      'wss://socket.example/events',
+      'ws://127.0.0.1:9999/events',
+    ]) {
+      expect(isAllowedPreviewResourceRequest(url, origin, true)).toBe(true);
+    }
+    expect(isAllowedPreviewResourceRequest('file:///tmp/secret', origin, true)).toBe(false);
+    expect(isAllowedPreviewResourceRequest('javascript:alert(1)', origin, true)).toBe(false);
+    expect(isAllowedPreviewResourceRequest('custom://handler', origin, true)).toBe(false);
   });
 
   it('approves exact roots, not their parents or children', () => {

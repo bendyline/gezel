@@ -476,8 +476,8 @@
             26.8,
             37.5
           ],
-          "h": "ddfeb931e9dbdc5487c033025b126f450fcd65b9d9e21cd95d8e168a028c3cdb",
-          "w": 214,
+          "h": "5e185373f744dacd60befa2cfae57498e0dafb4f982f402c1934b4c4a094bb30",
+          "w": 215,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -1416,8 +1416,8 @@
             25.9
           ],
           "p": "docs",
-          "h": "abb65ac0d5f4ebc8d630014f3fadc9a16ae70fad79a1f9ffa28df40ec0d7743d",
-          "w": 96,
+          "h": "1ecba9835e039e16eb1e1f8b7759f3fff4fa48e57ab7027068ad63d01ba04b81",
+          "w": 114,
           "a": "2026-08-04T14:24:03.960Z"
         },
         {
@@ -1444,8 +1444,8 @@
             46.7
           ],
           "p": "docs",
-          "h": "ca5eb2be065796737bdad8b8e28518f0145282d383a46be81109d9a158d5e58a",
-          "w": 658,
+          "h": "debe1e92efbbc3f3e70c1c37a200ac6f80d789ffe1efd689efb9023b8f764a44",
+          "w": 661,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4559,8 +4559,8 @@
             31.5
           ],
           "p": "packages/app-sdk",
-          "h": "f7d4349b3951c6b2f756a61b83f198d647eb88dd1fcd72bd3431ea1c0157569e",
-          "w": 172,
+          "h": "be661523acb153e510e615e5e4d535e239218119081614de1d99cad8370aef7f",
+          "w": 234,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4601,8 +4601,8 @@
             28.5
           ],
           "p": "packages/app-sdk/src",
-          "h": "22416948b957126c9159927d2310dea275fca1e2bb0060e4c1bcfb02ccdb175f",
-          "w": 196,
+          "h": "7748293fec557294a7171552f9d11c59c4638c81089f49fca1a04f132f641f53",
+          "w": 261,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4615,8 +4615,8 @@
             21.4
           ],
           "p": "packages/app-sdk/src",
-          "h": "58b3d473654abdb0ab44613a99e6b710f7dbfb185f6fafdda8dfd4f75847fa9d",
-          "w": 113,
+          "h": "f25c5311efecab25dbb7dba3bbe2d6fa080ec7471c9cf590753a9896e8333ec6",
+          "w": 107,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4629,7 +4629,7 @@
             20.3
           ],
           "p": "packages/app-sdk/src",
-          "h": "3ec780ceba8d636080a3c894e4d4646292f795804c9285fccddceeed47c1b056",
+          "h": "c84d19aa18d287ac0263ddc29433f8619960b923603a219e989f6c73ac5e0f6e",
           "w": 59,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -4643,9 +4643,23 @@
             20.4
           ],
           "p": "packages/app-sdk/src",
-          "h": "d79bcef3fe2ce16fa4a3dc7c91fdb290e56435c69d0aa2d9a2a5c07b905e65e0",
-          "w": 72,
+          "h": "76a714ef8449ab3b4c4c5d6595f1d2bb8af61e76c925e51ede033e23cc02dd9c",
+          "w": 78,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/app-sdk/src/local.ts",
+          "r": [
+            -33.2,
+            578.2,
+            28.8,
+            39.9
+          ],
+          "p": "packages/app-sdk/src",
+          "h": "6a520a424694725f8a1af1e4696283bfffa05e0d398c0d851e5b2838434b3632",
+          "w": 255,
+          "a": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -4685,8 +4699,8 @@
             31.2
           ],
           "p": "packages/app-sdk/src",
-          "h": "493e1e5d1d781d5dfcd8b8057c46b9999eb18923626843e223bbab57ffc5af1a",
-          "w": 331,
+          "h": "7fc499563de2a3e01b6960ea67f212374e9d7a33481ec93f3aa078be9db15db5",
+          "w": 386,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4993,8 +5007,8 @@
             47.5
           ],
           "p": "packages/app/installer",
-          "h": "cfb2b1876fee885abb9cae52d0e93e9029f3006935fa356f3439ae8a07a8294c",
-          "w": 663,
+          "h": "08635b31bf33f2cc78c3394bcd83ec372959cf5886d03d62dfb8582873496911",
+          "w": 722,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -5245,8 +5259,8 @@
             23.6
           ],
           "p": "packages/app/src",
-          "h": "8e7b67a3d41677f50a093eafa170fa2a40d06929f980f31d18e38f4226b2e2ca",
-          "w": 47,
+          "h": "838fa731a6e0c7c3535d87aa34043aeb00edff07ef246a42f3056ab57482d212",
+          "w": 112,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -5273,8 +5287,8 @@
             66.3
           ],
           "p": "packages/app/src",
-          "h": "b7e36b895edb0cfb3f8383eed5bbf1e65607575fb4184999b9f7fe9a687fbac3",
-          "w": 2071,
+          "h": "c8912773eadf73631b0079e5f0eb9eb79e295ea919bfb9e6c3cb471eca31fdea",
+          "w": 2179,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -5595,7 +5609,7 @@
             27
           ],
           "p": "packages/app/src",
-          "h": "36e7b8a061d9e053c24dafe183c7d368045acec936d253a827274eceb6d3a2a5",
+          "h": "9fd98fa813f73d461308a190dbf980708bd348ab175cb529bc28245f487ae03f",
           "w": 260,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -6463,8 +6477,8 @@
             31.1
           ],
           "p": "packages/cli",
-          "h": "0d20c999d6f3900b628b207ba0c564c372eaa15727cac29fa2fc015a10f6c0bc",
-          "w": 150,
+          "h": "fd1d4c6d4ae79ac7c15a95210c0a4b29bdf3935f3d7ed790d3c1f8b6098d7f25",
+          "w": 159,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -6477,8 +6491,8 @@
             61.8
           ],
           "p": "packages/cli/src/bin",
-          "h": "aae9b06be7e87bcf1b931370bbc50e2f3e3bcddb88d53269e8f27f333c58b08e",
-          "w": 980,
+          "h": "1a98e66b61d1b6c7436626567fa5f375e284c1512408b99a0ef0c50d3c63751e",
+          "w": 984,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -6491,8 +6505,8 @@
             36.1
           ],
           "p": "packages/cli/src",
-          "h": "d87ddd99cd804546e1d412a36e930d31ebfeddb329a9bda096e7ecfbc9f0a9e5",
-          "w": 551,
+          "h": "6bb93efdabdd8a8d0259ebfa0340482ee374845061d3c22ee4a7784014555cb2",
+          "w": 618,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -6549,7 +6563,8 @@
           "p": "packages/cli/src",
           "h": "be007d125d52df116a17a8db0fdf4bd82fdbf94226ffe41362c8f1ba899cd5b0",
           "w": 26,
-          "a": "2026-07-29T12:45:34.302Z"
+          "a": "2026-07-29T12:45:34.302Z",
+          "d": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -6771,8 +6786,8 @@
             68.1
           ],
           "p": "packages/client/src",
-          "h": "fa36a4646865af4316248c7cc9bd60aacc43ca63e8c8047dc65e56c98e9d937e",
-          "w": 6579,
+          "h": "e92941d2d8d68e77c6f69a0784a3967cfca1ef1ea7c73e6463bfc1d5934a64d7",
+          "w": 6614,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -6785,8 +6800,8 @@
             40.4
           ],
           "p": "packages/client/src",
-          "h": "36b164a6c421c384ee9d786e834e91cea3080125d7f05719c0e0832afc3a8150",
-          "w": 353,
+          "h": "c8bf9125b2df3a0e71244acb5d5c245a8de2b1a7c9965d22a3c072d41aa641e2",
+          "w": 372,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7387,8 +7402,8 @@
             20.8
           ],
           "p": "packages/core/src",
-          "h": "dcf063647d22e8141541265d54c790f3e02c86bd72b4ab5ee27b3dae37c0b242",
-          "w": 91,
+          "h": "4cb5442eed0158c89934778895e4c464f801501a4d552ec85cc9f79cf88a34f7",
+          "w": 96,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7919,8 +7934,8 @@
             42.6
           ],
           "p": "packages/core/src",
-          "h": "f6e46e9672a8a3b32229d73e7c3f779a4538b24d7b287ae2976cde4a4c0e1b27",
-          "w": 1104,
+          "h": "bd607d6b0107a321268ab7623dccd476e79fc0e3d5bf4eedaa0de6bddef44256",
+          "w": 1149,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8129,8 +8144,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "aac0ffbd461251f71e3cc2cfe98468327292a5b6faaac1815f96d0fb7fda1e3b",
-          "w": 6539,
+          "h": "1f6264f83c35929b689ab7d80ab775576dbdb53b180e222dee3a51c30d30dbfa",
+          "w": 6555,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8171,8 +8186,8 @@
             62
           ],
           "p": "packages/core/src/schemas",
-          "h": "dbb9b2438b6831d4baa0bfa4905bad07251d41bd94e84ae9492637f8e58e24d6",
-          "w": 2191,
+          "h": "81f3dbb79b4a91f0b964878e151dd717cdea76733572387c97ef734b7657fbb8",
+          "w": 2265,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8955,7 +8970,7 @@
             15.6
           ],
           "p": "packages/eval-viewer",
-          "h": "00eeb1b4b912d83d7e56f431946b02f6af2f233dd3d46efcb54d6d42c4c47053",
+          "h": "049d477c70653e32aea074d3d0b69aad6394ea19920aa2dc8604865525860c37",
           "w": 17,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -9249,8 +9264,8 @@
             31.3
           ],
           "p": "packages/eval-viewer",
-          "h": "152e9caacfcd56ea18e9d1520e0a0a66ad59e44ac13932170c31ba43d22d8506",
-          "w": 118,
+          "h": "80c1389510ed16914b0c344f342bc3f38bca8dfd6ff0e1335cf23562a81d6d84",
+          "w": 122,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11083,7 +11098,7 @@
             40.8
           ],
           "p": "packages/service/src/digest",
-          "h": "41e3053d3257ee0df37febbd754e369ed6ed4e8bcab47940266cb7473d38c199",
+          "h": "57a1b6124ced1393e74e77afd2b859b75cdb0131f2abe3bdb02bc9ec95815833",
           "w": 398,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -11209,7 +11224,7 @@
             32.9
           ],
           "p": "packages/service/src/filemap",
-          "h": "a707bb1694f67d3a2d6b417e675406cbb3d6e0e283212f5f467c9c0f435958da",
+          "h": "d582b80def81c26685d07eda88502fd7f820cb20a8b01d491724c92dba563edc",
           "w": 504,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -11267,7 +11282,8 @@
           "p": "packages/service/src/filemap",
           "h": "16cb88e62ef4dc58fe488771172820a106764ddf40565d77bac4b4e9fb3a9086",
           "w": 39,
-          "a": "2026-08-04T15:20:28.629Z"
+          "a": "2026-08-04T15:20:28.629Z",
+          "d": "2026-08-05T00:02:17.450Z"
         },
         {
           "k": "block",
@@ -11629,8 +11645,8 @@
             63.7
           ],
           "p": "packages/service/src/fs",
-          "h": "5e32aab4cbe54701a03320dad0ea62b6efd921d97d2bf59e5bf1139639b1edbe",
-          "w": 6291,
+          "h": "282511b4ae83b08984a6aa4fce4595076fba5ce6bea7bed8b25a3924cab19522",
+          "w": 6333,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11643,8 +11659,8 @@
             31.9
           ],
           "p": "packages/service/src/fs",
-          "h": "82cf15ee6de61172e76003e0056482a289818d88ebe701ea07dc6027f9d322d5",
-          "w": 190,
+          "h": "8195a37c49ddf4ddbc676107eb2bda998a23c6bc43e6033c47c807bfc852764f",
+          "w": 217,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11755,9 +11771,23 @@
             29.4
           ],
           "p": "packages/service/src/git",
-          "h": "50213561b9c13a94a7845ae3e1eb5a34ab5fd796a95178aae24e91c7046e6e1d",
-          "w": 324,
+          "h": "2da6072ebad4d9783c43d8568398b44f29ae1c9608b2c61c1b6b19c1c3293404",
+          "w": 346,
           "a": "2026-07-29T15:33:55.293Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/git/ignore.ts",
+          "r": [
+            -54,
+            2472.4,
+            22.9,
+            19.9
+          ],
+          "p": "packages/service/src/git",
+          "h": "83a6b595fdc666f36cd462bce88da8fe001169dd18d3c957110a6a9eddf8aa4d",
+          "w": 53,
+          "a": "2026-08-05T00:02:17.450Z"
         },
         {
           "k": "block",
@@ -11797,7 +11827,7 @@
             59.6
           ],
           "p": "packages/service/src/git",
-          "h": "a56180a81d7e9e2731440858503e96354cc11a5f5bc69fb7346ecf363a7a3171",
+          "h": "886988d1ce8a8589472f77ed663527d09a4b353b7f7beb5d5ce789bf8c9e206d",
           "w": 2078,
           "a": "2026-07-29T15:33:55.293Z"
         },
@@ -12360,7 +12390,7 @@
             24.1
           ],
           "p": "packages/service/src/http",
-          "h": "5eb39f828550ae2f5079527b8b1f185305317222d4c4039dc6f28f59d99d46f6",
+          "h": "102a0d77c549450849e8174643f45391292f6d5c95a69083dded0dddd0b48070",
           "w": 45,
           "a": "2026-07-30T01:07:34.767Z"
         },
@@ -12444,8 +12474,8 @@
             20.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "dc95b887bba2cc90fb7e70ee454f9d15261b1850b0a6d48807d5c55ada83cc6d",
-          "w": 80,
+          "h": "470a7d0a902794a58d462ba072e10e83beecad5d3695078d8671b85924b5610a",
+          "w": 109,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12794,8 +12824,8 @@
             16.3
           ],
           "p": "packages/service/src/http/routes",
-          "h": "e5f74b409623c9a76d7011f20dc7306de4cc0a6950ad5ae35599ef9d5d7c349e",
-          "w": 29,
+          "h": "2df9219f74c5465a415771f69f233f61fd95718aff43239358ebd9458d2cf1a5",
+          "w": 59,
           "a": "2026-08-04T14:24:03.960Z"
         },
         {
@@ -12850,8 +12880,8 @@
             24
           ],
           "p": "packages/service/src/http/routes",
-          "h": "168a31722d23d756fc04a0e16514fed299b7ed66c1b30f158424a1fa6cca7c97",
-          "w": 76,
+          "h": "bb641e3fd7d92a850ffd02f472a7e003ec3967e6c3ae0ff421dffad476527e9c",
+          "w": 101,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12895,6 +12925,20 @@
           "h": "5b83f956d1baba19ab7425bed00f4b52a1b1bba18d8892c5f704509293b33cdf",
           "w": 41,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/http/routes/model-migrations.ts",
+          "r": [
+            894.5,
+            1671.8,
+            22.4,
+            20.7
+          ],
+          "p": "packages/service/src/http/routes",
+          "h": "211f2b5a03e83f27031f3bd6b807a37d7975574efe47f37c12ef4938ee468887",
+          "w": 62,
+          "a": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -13032,8 +13076,8 @@
             30.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "5f2e0234ea51e277aa6db764390470ef23d8dda8088821f9c1605665f15e6d30",
-          "w": 286,
+          "h": "993d061c71a14babc97801e021dd8fa467606d1f7d1751dcbc1f0e09193c311e",
+          "w": 388,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13102,8 +13146,8 @@
             31.2
           ],
           "p": "packages/service/src/http/routes",
-          "h": "ac5e02529ae271c05a55e4c7bff5a29283b0650a60c7715b0a70f8e2687b2573",
-          "w": 161,
+          "h": "019d5b21f71ab1dec654988c061f351cc98e94e88028963c828fd768b7bacee9",
+          "w": 315,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13270,8 +13314,8 @@
             37.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "5334ca2f0169b29566712199050067df0f3e559fd039faebf25af0394232a176",
-          "w": 596,
+          "h": "590fac5dbc77e4497123d2d2afb334b6dde5349536eaf96ff53a5efa26ca2b1b",
+          "w": 599,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13354,8 +13398,8 @@
             37.3
           ],
           "p": "packages/service/src/http/routes",
-          "h": "324b00a6f425a60f9a3a2e30396e6a201817247bfd3ebb1f89f42b9f78db43e1",
-          "w": 434,
+          "h": "1129dc532d3d9d752f02b59af1a069a3dd9cfa5a2a827bba5aa5efe19104d0be",
+          "w": 458,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13466,8 +13510,8 @@
             39.7
           ],
           "p": "packages/service/src/http/routes",
-          "h": "de3ecdb1a007eef4273f21395627a9a98e815636db6bc0643ce067854b6c34c2",
-          "w": 405,
+          "h": "37bb898e5980095b773a10b2a1e9ad7683f737a0cf0831af30e1e0a447f49002",
+          "w": 510,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13494,8 +13538,8 @@
             37.5
           ],
           "p": "packages/service/src/http",
-          "h": "493e7dbdd956e8c1d41c9981ea51f262d60728a39710e7adda30f7674667e9c3",
-          "w": 627,
+          "h": "4286d4746c2357a9ef856c220d4263994de6d8beea65b01ffc05d1f964fad252",
+          "w": 630,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13508,8 +13552,8 @@
             39.3
           ],
           "p": "packages/service/src/http",
-          "h": "111bae8c56057bc9820c331e71af24f4590ee13c72d52af821da2cbb8439e47a",
-          "w": 782,
+          "h": "b74680f40da8c57101efae9e64be224347076055abdfff65c57f913247fbd5a0",
+          "w": 783,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13606,8 +13650,8 @@
             66
           ],
           "p": "packages/service/src/index-store",
-          "h": "b0e5a9a219aaae81984f6796d6ac7cf5a5f38ae651ff97e050f3e4ecce4efd52",
-          "w": 1726,
+          "h": "3d0c4485f28e56b5afdf13c2e6f99633cd997d0a1ea49fd6ce384b0746bfd0a1",
+          "w": 1735,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14012,8 +14056,8 @@
             38.6
           ],
           "p": "packages/service/src/machine-engine",
-          "h": "c4d0ff0235580e9267f53a26b7ba051db45e871857118a332bdef2e450f2cd4c",
-          "w": 229,
+          "h": "a20df8d34dee4aacf4b5b6580fb28c665bd891756d017e7717bb29fb2b879e64",
+          "w": 268,
           "a": "2026-08-04T14:24:03.960Z"
         },
         {
@@ -14390,8 +14434,8 @@
             32.4
           ],
           "p": "packages/service/src/memory",
-          "h": "d03c3f898516baf102abd8817d7b357be095155555a7ec5254f6c4a06aca8168",
-          "w": 243,
+          "h": "1ef3ea16ba522bc965efe42a0cbfbc9bbedcddc5e2f64d74f5ebcfbc330492dd",
+          "w": 266,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15180,6 +15224,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/models/shared-model-migration.ts",
+          "r": [
+            813.2,
+            2392.9,
+            42.7,
+            36.1
+          ],
+          "p": "packages/service/src/models",
+          "h": "ad087221f85dd8d56c06f68adb73dfc9c3330328df4c72b7ba44afc45ee2d60a",
+          "w": 418,
+          "a": "2026-08-04T23:01:23.676Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/models/storage-roots.ts",
           "r": [
             725.4,
@@ -15216,7 +15274,7 @@
             17.3
           ],
           "p": "packages/service/src/packages",
-          "h": "4074932bc113b6de85316a46ef5098d63adc98178b92d8f794521fd38100fa74",
+          "h": "b13e18cb976ecb6ffc0ec45a85aea666dd4b0af8473e050a634fa8339bc924dd",
           "w": 35,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -15342,7 +15400,7 @@
             41.2
           ],
           "p": "packages/service/src/project-type",
-          "h": "dfad882774ece1f904e815eb39a2dcc897df363a899133fdb64525ac6a0122fc",
+          "h": "fb3c78376664d341c4a7b6005adacfbb799f2e167562c13dbc59bd3907dba31a",
           "w": 650,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -15664,8 +15722,8 @@
             21
           ],
           "p": "packages/service/src/providers/audio",
-          "h": "d39d9e282ddeddef69bb472395feea127ab33314802951f47321d6aae31d7264",
-          "w": 104,
+          "h": "7667242c9a3865d7679a70e27e9d8709b4c1eb26a240855897cfff150e0e0dd0",
+          "w": 146,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15692,8 +15750,8 @@
             24.5
           ],
           "p": "packages/service/src/providers/audio",
-          "h": "b314658261315849a5aaee6f69d1f15034f570c235b5e6e046939747b5f5e0ec",
-          "w": 104,
+          "h": "b8ab13eac28777e48fbf6c2445f47f801ea6613fc5bbd99b71cec13093abefcf",
+          "w": 146,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16098,8 +16156,8 @@
             33.6
           ],
           "p": "packages/service/src/providers/image",
-          "h": "e318b2e583f3d837550d53caca86bd718790e6c7e181d49e711256ab8bc06710",
-          "w": 194,
+          "h": "737d58405139b742ff35539449270cdaf6d54dca4438c0d973f3ffccd12e7325",
+          "w": 228,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16365,8 +16423,8 @@
             67.7
           ],
           "p": "packages/service/src/providers/llama-cpp",
-          "h": "52c4407f9692e4506ec044239bac9a51fba2e515c4c82c9a1c329c8e270454d3",
-          "w": 6673,
+          "h": "2d4e5dac9fa79d0c54d0923223abd5a5896b5bb0c7a75e6fc2e985ee786e1fac",
+          "w": 6684,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16715,8 +16773,8 @@
             54.9
           ],
           "p": "packages/service/src/providers/mlx",
-          "h": "74e30a6a8205a0b3b9d8142a631fc9d0fb69128511c7be5e3bf7009640bc5eb2",
-          "w": 3522,
+          "h": "0fa271d37214ddbc3a35921231d7e969b22184f95ac649d031802892964df93b",
+          "w": 3599,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16925,8 +16983,8 @@
             30.7
           ],
           "p": "packages/service/src/providers/native",
-          "h": "83cc607ad2e8326aff63f90523c2cbe6eca1d17906f9e1804568bf824d5012bd",
-          "w": 246,
+          "h": "b94681c1a8897fad3ce7572f61cf6dbb031b788c5ab9f297e5943090529ac723",
+          "w": 252,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16967,8 +17025,8 @@
             47.5
           ],
           "p": "packages/service/src/providers/native",
-          "h": "5a86e43f8b0de4bc819618ecfc5345d14eb3bd58af8c651e80066e3eccc2c209",
-          "w": 876,
+          "h": "f4593b929652ce7b3e59caf7c6191707768948446ff6045541dae2b68852362c",
+          "w": 947,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17247,8 +17305,8 @@
             30
           ],
           "p": "packages/service/src/providers/remote",
-          "h": "6be03210f3ca083750f98fe952ab387b2e443802d6582431de2962ebb9f8a686",
-          "w": 207,
+          "h": "325891d9b9163bacaa5bb60f753c24d2f2b952705c08e63d5f9fa85a624362b1",
+          "w": 204,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17275,8 +17333,8 @@
             30.5
           ],
           "p": "packages/service/src/providers/remote",
-          "h": "288eb26aad956c143c48e36c4f7b2f18d45b992a13b679644011ece97d2a21af",
-          "w": 420,
+          "h": "2dc0af453336dadbdcbc6e13431d8475cc887e15b2cc945b23b24677c371bc19",
+          "w": 456,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17289,9 +17347,23 @@
             36.3
           ],
           "p": "packages/service/src/providers/remote",
-          "h": "0255eeeb4bafc852f95bab1ab173e7f742a43f39070c0169a048d5fbf4bdd1ff",
-          "w": 273,
+          "h": "ff3314f8cbcfeadca460a3302a841047165e753a6d3fec0ef8141dfe9191a12b",
+          "w": 300,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/providers/retirement-gate.ts",
+          "r": [
+            441.3,
+            2440.6,
+            16.4,
+            26.8
+          ],
+          "p": "packages/service/src/providers",
+          "h": "9399738f70ec02542bb31f62173d97910d9585f22859925d16849de2c3a771bf",
+          "w": 57,
+          "a": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -17485,8 +17557,8 @@
             56.5
           ],
           "p": "packages/service/src/providers",
-          "h": "775e547b89c690ff92529eb0159fc8a0101d8d49062a00ab85c9765568c1480b",
-          "w": 1052,
+          "h": "12a16f70641f7551138ab9abf4c232aa54f81552efce6d00648aeda7cca486eb",
+          "w": 1064,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17541,8 +17613,8 @@
             21.3
           ],
           "p": "packages/service/src/providers/video",
-          "h": "23b87690aa4c93a58afe7ca8b9e77191fe6b0339930db93fae3ab74bb3252462",
-          "w": 132,
+          "h": "4ba7a7a4f2cbbe4f649a7045a7d5fbc6830abb129e7720418590aed02f0525e6",
+          "w": 176,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -18353,8 +18425,8 @@
             66.9
           ],
           "p": "packages/service/src",
-          "h": "0587cd4e4fe0a76567b7df14def4c342d1aff66274a87e6569089318c51fe51c",
-          "w": 2594,
+          "h": "6e1f2ea96d92c6679949b07dcaf33f250dc056d671e89762d2be1ac11af64ac0",
+          "w": 2606,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -18801,7 +18873,7 @@
             42.5
           ],
           "p": "packages/service/src/tasks",
-          "h": "53cae0968dbfabcf8c7ecccf7db58250c6697da46b18978e0c04af006347e3c2",
+          "h": "49d14796ec0a369a1bde08cacce37f60d88e69aa6f714a1a367010b15c8c6cef",
           "w": 658,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -18829,8 +18901,8 @@
             66
           ],
           "p": "packages/service/src/tasks",
-          "h": "3281abb9d1a192947004387477ec703b07b0552c4bf02ef38d920148315f8671",
-          "w": 1053,
+          "h": "7b0bf95fc5c2dda1ccbd0bf920c30f48132588c3eea39c3b16236017c07a9dd6",
+          "w": 1056,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -18941,8 +19013,8 @@
             51.8
           ],
           "p": "packages/service/src/toolsets",
-          "h": "750006d9b11bf83b57384a5a56f5b953e8f3ed52f8554feef37f5d788fcc09d4",
-          "w": 629,
+          "h": "46e5c2351dcff855c80d4269558b0cd66dcdab91197bb94fd939ceb765a966e1",
+          "w": 635,
           "a": "2026-07-29T13:16:59.481Z"
         },
         {
@@ -19081,7 +19153,7 @@
             26.4
           ],
           "p": "packages/service/src/workspace",
-          "h": "ab5a7d302bfc34771a909573e1d61dc0c3ae3f6d429bc74fa5970816e02ab44a",
+          "h": "98c1028196667a3ed8f15ad6c1d575416d0d438bb9cd9c18de7eee233bcb903e",
           "w": 142,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -19207,7 +19279,7 @@
             19.9
           ],
           "p": "packages/service/src/workspace",
-          "h": "48111da4945612c95f9f5d6c513cbf4b189d5dbb489040514d20ae7ac4160c18",
+          "h": "84372bf46d2ee6ef91bd3a637d036573e0cc8543ee2c62bbc73bfc2e1cbd3da4",
           "w": 103,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -19221,7 +19293,7 @@
             45.3
           ],
           "p": "packages/service/src/workspace",
-          "h": "1b104fedb6b7326695e8782a94dea575f6f540abb8c73933cfb481182016f1bf",
+          "h": "4d93659644ebbf602249a7763cdf25a698aa168c6e07e96212532acee87ec0c4",
           "w": 484,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -19515,8 +19587,8 @@
             46.6
           ],
           "p": "packages/ui/src",
-          "h": "e59bffe218261f78310bf5887e4d186f6baeb6f553d0b8ada4d952e7dc0da86e",
-          "w": 1359,
+          "h": "29df67bbde6fbaa99abb3d89ba424054a3f33f5f1e0e935d5c72a0531bd3cba4",
+          "w": 1414,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -19829,21 +19901,6 @@
         },
         {
           "k": "block",
-          "id": "packages/ui/src/components/AiToolbarButtons.tsx",
-          "r": [
-            1707.3,
-            2516,
-            39.8,
-            26.3
-          ],
-          "p": "packages/ui/src/components",
-          "h": "c193b423f63918a98923011b300d204e361741e5d870fefca45470085b773f6c",
-          "w": 243,
-          "a": "2026-07-29T12:45:34.302Z",
-          "d": "2026-08-03T14:26:57.350Z"
-        },
-        {
-          "k": "block",
           "id": "packages/ui/src/components/AnsiOutput.tsx",
           "r": [
             1749,
@@ -19880,7 +19937,7 @@
             36.4
           ],
           "p": "packages/ui/src/components",
-          "h": "652259ded90a018cdc190eb995ac90f7ffe5fbaee931ae9d8bcbbae83c726b51",
+          "h": "e8031e01635b8eac0e60c3ac66f296ca00ae7e24c5c3e4bf560b5002d7ba9124",
           "w": 315,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -20020,8 +20077,8 @@
             48.4
           ],
           "p": "packages/ui/src/components",
-          "h": "edcad88c1d25287144cb7badb7de1d0397217addf4f6b5a9be664a0958262678",
-          "w": 1287,
+          "h": "de1b54af5ca79d36e06b26e8f71be63b80fe641da7495709f2a64cdd05c7670c",
+          "w": 1320,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20316,8 +20373,8 @@
             36
           ],
           "p": "packages/ui/src/components",
-          "h": "efe6c17ced637de910ac774243ab751d44dc9647bbc26ff8bce7008c59e1690a",
-          "w": 427,
+          "h": "4b0e1fd06b755d819442a56f2f89d050661b52bfa51cbc385070b9495dd007c3",
+          "w": 436,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20918,8 +20975,8 @@
             39.1
           ],
           "p": "packages/ui/src/components",
-          "h": "e6f2da5d1067727ab5441c1b62d94001e4a6d05fc3f5c220cf66b8d55353768a",
-          "w": 681,
+          "h": "27f13601c78fffa2b98125a76fc9abe61f3b367b9ecaaa47c633702e2fd11bf4",
+          "w": 683,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20974,8 +21031,8 @@
             36.8
           ],
           "p": "packages/ui/src/components",
-          "h": "bdad2e0b51298801867764731045764827614de77e30dd88da1a065c50b42e68",
-          "w": 328,
+          "h": "c27da39ac60715a14ed8f66b9580bf009667ec12c965327e7c83c04c93464b6a",
+          "w": 331,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21170,8 +21227,8 @@
             31.4
           ],
           "p": "packages/ui/src/components",
-          "h": "fe74b9fd969aeeeea3536edd867a49d40e4a6ef074803c347f91ea57881d99ea",
-          "w": 331,
+          "h": "5ed38a090d812f6eaced2627a88a2e2051a099fd35b7377c3f799ef51c0a90b7",
+          "w": 352,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21198,7 +21255,7 @@
             50.2
           ],
           "p": "packages/ui/src/components",
-          "h": "0b4bb17a7aea4a535ca34119599aa6316b410f2bda7770696def684a8fb5a49c",
+          "h": "478189e8bbe5defff24db930f4441b8c91dcb773871a4a75947f6c5aca3627f0",
           "w": 446,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -21282,8 +21339,8 @@
             52
           ],
           "p": "packages/ui/src/components",
-          "h": "2570fe190001da17e8fb4e71458f8426d8060b873ecf156606fc85b5440181d2",
-          "w": 1026,
+          "h": "172a93caef254219693741776732ccfe780c6e9d08f06e5d44abaed3f7e89de9",
+          "w": 1038,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21310,8 +21367,8 @@
             23
           ],
           "p": "packages/ui/src/components",
-          "h": "3f835d0cf8d7b78a4beb124e827f3e923e6e83ee1bfcc4aa0e4eddc0f6ef644d",
-          "w": 269,
+          "h": "7c560b0d0f6116bbc2e40e8f355d9f2c13d3d5b0d89bcd68fd412a16a7c37aa3",
+          "w": 360,
           "a": "2026-07-29T23:34:21.233Z"
         },
         {
@@ -21338,8 +21395,8 @@
             31
           ],
           "p": "packages/ui/src/components",
-          "h": "f60c7300e5cb5aa4d0f8e84e64f1868470c547d5c467be137001063a3cd5385e",
-          "w": 307,
+          "h": "be3199ab66607972023322afc670726bbc1117696d8ad7ca6b8f5a0b378dee9b",
+          "w": 403,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21352,8 +21409,8 @@
             42.4
           ],
           "p": "packages/ui/src/components",
-          "h": "b67a6aaa47b6c6fbbd7a1bf6d24e1582e2f0ac229fce9fb48a72eb9b8215b78f",
-          "w": 904,
+          "h": "ff7bc69b1eccc07bf05d13b84047cd4b1f35597be4a590294c3ac989127da99b",
+          "w": 914,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21366,8 +21423,8 @@
             43.9
           ],
           "p": "packages/ui/src/components",
-          "h": "bc65d03103b13d5538c37d9571313254184171823110ee9041dd1e21b7a53ef8",
-          "w": 283,
+          "h": "98f793e28cd4c7496d6dec066a343b3e78883f4ae8bb296bb55a93ca5ae965e0",
+          "w": 284,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21380,8 +21437,8 @@
             34.4
           ],
           "p": "packages/ui/src/components",
-          "h": "f888937cbea91f419aedd32f082548579a3e53306fd372682c8322aa3b575e18",
-          "w": 376,
+          "h": "fc4dbdf1b7f14232b94266a158f63dea84e9bd51f6b548971ac5198082034cba",
+          "w": 423,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21436,7 +21493,7 @@
             48.7
           ],
           "p": "packages/ui/src/components",
-          "h": "f02eb1267df642e568d7fef991855604462615d9a4c3b5906b310f7a8cea661a",
+          "h": "e2f2a9bf6967d02c26b5a2e3f7acbdbaa381745485e757a124d392acb085cc65",
           "w": 657,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -21562,8 +21619,8 @@
             51.1
           ],
           "p": "packages/ui/src/components",
-          "h": "9f88bd46cdd92d0c529c629d189123c24702e62c64ec9c01c1bc6e5e41574ca4",
-          "w": 853,
+          "h": "0438122a735ea60a4dc209bfde29181eccb573459cf9c65a2476c657a4745436",
+          "w": 872,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21646,8 +21703,8 @@
             30.2
           ],
           "p": "packages/ui/src/components",
-          "h": "ecfed38943453a12bc2d0aed01a429847c2c255fd6fb763e0295281d1d9046f5",
-          "w": 292,
+          "h": "8cf8b8b6cfb315fffd7772c40b9308b49e1130449095a6d863cb6cc15c7f7778",
+          "w": 314,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21775,6 +21832,20 @@
           "h": "2f5eeb2a0b564ffa9efe65cb42f9fbbea0da2c7596aabbc58fceed68f7201f14",
           "w": 299,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/components/SharedModelMigrationPanel.tsx",
+          "r": [
+            1707.3,
+            2516,
+            39.8,
+            26.3
+          ],
+          "p": "packages/ui/src/components",
+          "h": "00770d73f279aa9679b523bc218a7eaf15c81c317dbd63c939addff453b23cab",
+          "w": 172,
+          "a": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -22108,7 +22179,7 @@
             37.4
           ],
           "p": "packages/ui/src/components",
-          "h": "fc1aeeaa3c6bd9fb78feab2fcfcb705f526307149c70d896a2cbcf9b7afcddf5",
+          "h": "39b41483acabda7ecd4973fe7c60843ba5b1ec03819b7c880666a666de432df1",
           "w": 552,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -22598,8 +22669,8 @@
             18.5
           ],
           "p": "packages/ui/src/components",
-          "h": "0d7614bb32a2c1743fe306764cd80f37c642c0f44dabf32ebd19c0b5a6a1e240",
-          "w": 52,
+          "h": "2f50966ca10d98247807c4233cadd8a8f4b34f2c207ad970b7cb8e6d5589d54f",
+          "w": 51,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22657,6 +22728,20 @@
           "h": "7849f656f268bfd3314132689f8cbf86ab1005eff7ad7c55b0e29efa0f39cda9",
           "w": 224,
           "a": "2026-07-29T13:16:59.481Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/components/output-pane-maximize.ts",
+          "r": [
+            2189.7,
+            2704,
+            17.3,
+            16.2
+          ],
+          "p": "packages/ui/src/components",
+          "h": "f5a2ee59e4d0156ba2c7bc223a5668624735e9a9d7ed2a6dc07b1bd1667a8928",
+          "w": 17,
+          "a": "2026-08-05T00:02:17.450Z"
         },
         {
           "k": "block",
@@ -22836,8 +22921,8 @@
             21.7
           ],
           "p": "packages/ui/src/components/script-editor",
-          "h": "0d87b311f5b36581e0ebd94cc6e4e2c21a70d9afe4e3f804068a7a717f7a99da",
-          "w": 93,
+          "h": "40be1325380c4b31556332a89ce3f144582f574d5c33cb3457cc7232f0b207e6",
+          "w": 92,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22852,7 +22937,8 @@
           "p": "packages/ui/src/components/script-editor",
           "h": "8fb39b79582dd9be24da33c5935bbf6f3903c003bf2d0d652549e700675257a3",
           "w": 9,
-          "a": "2026-07-29T12:45:34.302Z"
+          "a": "2026-07-29T12:45:34.302Z",
+          "d": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -22906,7 +22992,7 @@
             39.7
           ],
           "p": "packages/ui/src/components/terminal-editor",
-          "h": "65bd7af2d261fc554e241adef0a6d1c40de736c378668da5d1457c08a3a13b92",
+          "h": "0562ea0efa43c689d74d1202b931ed2a76ffd928ac537a3a0b9077408821a29a",
           "w": 302,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -22948,8 +23034,8 @@
             27.1
           ],
           "p": "packages/ui/src/components/terminal-editor",
-          "h": "2d3fad0b5dd6407f231c83385001c1bcfe640d0abbe7bd85886c34f712dcd3b0",
-          "w": 214,
+          "h": "7eb0b7eeab67e09638883ea6fbcdbdc03f312b62d3da9e098c0efe5c58289121",
+          "w": 224,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23074,8 +23160,8 @@
             20.9
           ],
           "p": "packages/ui/src/components/transform",
-          "h": "8a2ecc837c861e5c0e7077a592c9c79c3d2dfcaddb4683019d830173795c3f21",
-          "w": 113,
+          "h": "47cc14a1e243cdee4f14da337319a43f586f153fa848bb550d0e83859446d283",
+          "w": 114,
           "a": "2026-08-03T14:26:57.350Z"
         },
         {
@@ -23511,6 +23597,20 @@
           "h": "f6dfe1a6c09d18c852eb942dfb3085202182f166d43d236fdca57696b4309ec1",
           "w": 17,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/model-inventory.ts",
+          "r": [
+            1883,
+            3191.8,
+            18.4,
+            17.3
+          ],
+          "p": "packages/ui/src",
+          "h": "35b9af240069760db5a1a529a0366d7dfe82c29c7dfd538a86612ebce483c674",
+          "w": 25,
+          "a": "2026-08-04T23:01:23.676Z"
         },
         {
           "k": "block",
@@ -24083,8 +24183,8 @@
             55.4
           ],
           "p": "packages/ui/src/views",
-          "h": "b565ab5aeedb20329c9952663b37bafb738f275c1f969c6c78c3417f5da8d57d",
-          "w": 1220,
+          "h": "fd873329d16b18242856f4def0b1a0c90119400c6b70056b95eebaed3f41609c",
+          "w": 1247,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24251,8 +24351,8 @@
             58.8
           ],
           "p": "packages/ui/src/views",
-          "h": "723c05f38f9659a3775ba85c89bb5e2a7ce966f80d992b95e5d97b6f9e9a4680",
-          "w": 2912,
+          "h": "20d6f53e83336557c9b2fd4ea731df16ff7dc0991c5bd3abcd7746ef4adce8cf",
+          "w": 2920,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24307,7 +24407,7 @@
             67.2
           ],
           "p": "packages/ui/src/views",
-          "h": "8d07b48eb891abbef8138067a20f0454e86bdc742500061c2a6c10c09f2ec5b8",
+          "h": "829dc6bb4340d727b6c7063adc13b19e9029f6c9103d159587a1d8c4191a56dd",
           "w": 4189,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -24321,8 +24421,8 @@
             42.7
           ],
           "p": "packages/ui/src/views",
-          "h": "e25c1cbedc584a85e95efeacf07337bff9e13d904e558fdec95c319ceb418715",
-          "w": 927,
+          "h": "4d804cdd90144ded0f3fe0947452a08c9c75bb7972c77817a874837bdc019e92",
+          "w": 942,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24699,7 +24799,7 @@
             30.9
           ],
           "p": "packages/vscode/src",
-          "h": "93837d0e0e3546e8978fa68a7c64ef764c4b3480429d999805d274dd6bfd595a",
+          "h": "cab58a6c33909857dc998c5cec821e2bf40a9c409311fa3b1c4ddc36f1e186dd",
           "w": 242,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -24755,8 +24855,8 @@
             27.2
           ],
           "p": "packages/vscode/src",
-          "h": "06f36e33cd58459fc0c81d4e2a99828530604c9cf357f8c610b4beff4af8e261",
-          "w": 234,
+          "h": "bdbd0232fc0050e7920d2402f235f8f45a5120fc3124f9807bb89b0349f29c0c",
+          "w": 131,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24783,8 +24883,8 @@
             33.6
           ],
           "p": "packages/vscode/src",
-          "h": "88019439f7d5a65fec6f86a2bcfb8fef90dfb39bf0fa38115ab0d7b81de76c28",
-          "w": 228,
+          "h": "aa45001a931e743e26c5a7dad249c47cfc63a6010cc300b2dd413d6e6775c32c",
+          "w": 116,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24797,8 +24897,8 @@
             36
           ],
           "p": "packages/vscode/src",
-          "h": "5169f4d7f2a771fbbf1bb97f1ddf9632fbb5c599fe9423828a72922ce8bbeb81",
-          "w": 441,
+          "h": "0871668d5004b60097144a95d8dbcb507c01e723fce67f7a8a889a417ca3ffe5",
+          "w": 416,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {

@@ -78,7 +78,7 @@ export function evalSpecFromTestSpec(
     tags: spec.tags,
     ...(spec.mocks.length > 0 ? { mocks: spec.mocks } : {}),
     testSpecVersion: loaded.version,
-    ...(loaded.hasSpawn ? { runAsCraftbookTask: true } : {}),
+    ...(loaded.hasSpawn || override?.runAsCraftbookTask ? { runAsCraftbookTask: true } : {}),
   };
 }
 

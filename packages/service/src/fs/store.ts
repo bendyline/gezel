@@ -146,6 +146,7 @@ import {
 import { applyPatch, parsePatch } from 'diff';
 import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
 import { matchReferencedTasksInContent } from '../chat/task-references.js';
+import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
 import {
@@ -3670,7 +3671,7 @@ export class Store {
 
   async listProjectWorkspaceHtmlPages(id: string): Promise<ProjectFileEntry[]> {
     const base = await this.projectWorkspaceDir(id);
-    return findHtmlPages(base);
+    return findHtmlPages(base, { resolveIgnoredPaths: createGitIgnoreResolver(base) });
   }
 
   async readProjectWorkspaceFile(id: string, filePath: string): Promise<string | null> {

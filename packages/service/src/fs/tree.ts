@@ -27,6 +27,8 @@ export interface WalkDirResult {
   truncated: boolean;
 }
 
+export type IgnorePathResolver = (paths: readonly string[]) => Promise<ReadonlySet<string>>;
+
 /**
  * Recursively list entries under `base`, breadth-first: a directory's
  * entries are all emitted before any subdirectory is entered, so shallow
@@ -110,38 +112,63 @@ export async function walkDir(
  * are pruned before recursion so large dependency and metadata trees never
  * become part of output-page discovery. Breadth-first for the same reason
  * as {@link walkDirDetailed}: a root `index.html` must win the entry cap
- * over hundreds of pages inside a deep content directory.
+ * over hundreds of pages inside a deep content directory. When an ignore
+ * resolver is supplied, each level is filtered before its child directories
+ * are queued, so an ignored subtree is never opened.
  */
 export async function findHtmlPages(
   base: string,
-  opts: { maxEntries?: number; maxDepth?: number } = {},
+  opts: {
+    maxEntries?: number;
+    maxDepth?: number;
+    resolveIgnoredPaths?: IgnorePathResolver;
+  } = {},
 ): Promise<ProjectFileEntry[]> {
   const maxEntries = opts.maxEntries ?? 500;
   const maxDepth = opts.maxDepth ?? 4;
   const results: ProjectFileEntry[] = [];
-  const queue: Array<{ dir: string; prefix: string; depth: number }> = [
+  let queue: Array<{ dir: string; prefix: string; depth: number }> = [
     { dir: base, prefix: '', depth: 0 },
   ];
   while (queue.length > 0) {
-    const item = queue.shift();
-    if (!item) break;
-    let entries: Dirent[];
-    try {
-      entries = await readdir(item.dir, { withFileTypes: true });
-    } catch {
-      continue;
+    const level = queue;
+    queue = [];
+    const listings: Array<{
+      item: { dir: string; prefix: string; depth: number };
+      entries: Dirent[];
+    }> = [];
+
+    for (const item of level) {
+      try {
+        const entries = await readdir(item.dir, { withFileTypes: true });
+        entries.sort((a, b) => a.name.localeCompare(b.name));
+        listings.push({ item, entries });
+      } catch {
+        // A disappearing or unreadable directory contributes no pages.
+      }
     }
 
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-      if (results.length >= maxEntries) return results;
-      if (entry.name.startsWith('.')) continue;
-      const rel = item.prefix ? `${item.prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || item.depth >= maxDepth) continue;
-        queue.push({ dir: join(item.dir, entry.name), prefix: rel, depth: item.depth + 1 });
-      } else if (/\.html?$/i.test(entry.name)) {
-        results.push({ name: entry.name, path: rel, isDirectory: false });
+    const candidates = listings.flatMap(({ item, entries }) =>
+      entries
+        .filter((entry) => !entry.name.startsWith('.'))
+        .map((entry) => (item.prefix ? `${item.prefix}/${entry.name}` : entry.name)),
+    );
+    const ignored = opts.resolveIgnoredPaths
+      ? await opts.resolveIgnoredPaths(candidates)
+      : new Set<string>();
+
+    for (const { item, entries } of listings) {
+      for (const entry of entries) {
+        if (results.length >= maxEntries) return results;
+        if (entry.name.startsWith('.')) continue;
+        const rel = item.prefix ? `${item.prefix}/${entry.name}` : entry.name;
+        if (ignored.has(rel)) continue;
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || item.depth >= maxDepth) continue;
+          queue.push({ dir: join(item.dir, entry.name), prefix: rel, depth: item.depth + 1 });
+        } else if (/\.html?$/i.test(entry.name)) {
+          results.push({ name: entry.name, path: rel, isDirectory: false });
+        }
       }
     }
   }

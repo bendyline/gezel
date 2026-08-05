@@ -32,6 +32,7 @@ import { EffortPicker } from '../components/ModelPicker.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { ProviderModelSelect } from '../components/ProviderModelSelect.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
+import { useGenerationEngineLabel } from '../components/generation-engine-label.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -70,6 +71,10 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
   const [showIterate, setShowIterate] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renaming, setRenaming] = useState(false);
+  const isFixedFunction = selected?.fixedFunction !== undefined;
+  const activeDetailTab =
+    isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories') ? 'chat' : detailTab;
+  const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
 
   const selectedRef = useRef<GezelDetailData | null>(null);
   const saveAbout = useCallback(
@@ -115,6 +120,12 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
       cancelled = true;
     };
   }, [gezelId, aboutAutosave.hydrate]);
+
+  useEffect(() => {
+    if (isFixedFunction && detailTab !== activeDetailTab) {
+      setDetailTab(activeDetailTab);
+    }
+  }, [activeDetailTab, detailTab, isFixedFunction]);
 
   const applyUpdate = useCallback((updated: GezelDetailData) => {
     selectedRef.current = updated;
@@ -175,7 +186,7 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
 
   return (
     <section
-      className={`gezel-detail${detailTab === 'chat' ? ' gezel-detail-chat' : ''}`}
+      className={`gezel-detail${activeDetailTab === 'chat' ? ' gezel-detail-chat' : ''}`}
       data-testid="gezel-detail"
     >
       <header className="detail-header">
@@ -229,6 +240,14 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
               <span className="gezel-role muted small ff-header-tag" title="Fixed-function gezel">
                 Fixed-function · forwards to <code>{selected.fixedFunction.tool}</code>
               </span>
+              {generationEngineLabel && (
+                <span
+                  className="gezel-role muted small ff-header-tag"
+                  title="Generation model used by this gezel"
+                >
+                  {generationEngineLabel}
+                </span>
+              )}
             </div>
           ) : (
             <ProviderOverride gezel={selected} onUpdated={applyUpdate} />
@@ -267,7 +286,7 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
         setGenerating={setGeneratingIcon}
       />
       <div className="entity-tabs-row">
-        <Tabs.Root value={detailTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
+        <Tabs.Root value={activeDetailTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
           <Tabs.List>
             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
             <Tabs.Trigger value="about">About</Tabs.Trigger>
@@ -282,14 +301,16 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
                 />
               )}
             </Tabs.Trigger>
-            <Tabs.Trigger value="toolsets">Toolsets</Tabs.Trigger>
-            <Tabs.Trigger value="memories">Memories</Tabs.Trigger>
+            {!isFixedFunction && <Tabs.Trigger value="toolsets">Toolsets</Tabs.Trigger>}
+            {!isFixedFunction && <Tabs.Trigger value="memories">Memories</Tabs.Trigger>}
           </Tabs.List>
         </Tabs.Root>
         {!standalone && <PromoteToTabButton target={{ kind: 'gezel', id: selected.id }} />}
       </div>
-      {detailTab === 'appearance' && <AppearancePanel gezel={selected} onUpdated={applyUpdate} />}
-      {detailTab === 'growth' && (
+      {activeDetailTab === 'appearance' && (
+        <AppearancePanel gezel={selected} onUpdated={applyUpdate} />
+      )}
+      {activeDetailTab === 'growth' && (
         <GrowthPanel
           gezel={selected}
           onUpdated={() => {
@@ -309,13 +330,13 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
           }}
         />
       )}
-      {detailTab === 'toolsets' && (
+      {!isFixedFunction && activeDetailTab === 'toolsets' && (
         <ToolsetsEditor scope={{ kind: 'gezel', gezelId: selected.id }} subject={selected.name} />
       )}
-      {detailTab === 'about' && selected.fixedFunction && (
+      {activeDetailTab === 'about' && selected.fixedFunction && (
         <FixedFunctionAboutPanel gezel={selected} onUpdated={applyUpdate} />
       )}
-      {detailTab === 'about' && !selected.fixedFunction && (
+      {activeDetailTab === 'about' && !selected.fixedFunction && (
         <div className="editor-wrap">
           {generatingAbout && (
             <div className="about-generating-banner">
@@ -390,8 +411,12 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
           />
         </div>
       )}
-      {detailTab === 'chat' && <GezelChatTab gezel={selected} />}
-      {detailTab === 'memories' && <MemoriesTree gezelId={selected.id} gezelName={selected.name} />}
+      {activeDetailTab === 'chat' && (
+        <GezelChatTab gezel={selected} engineLabel={generationEngineLabel} />
+      )}
+      {!isFixedFunction && activeDetailTab === 'memories' && (
+        <MemoriesTree gezelId={selected.id} gezelName={selected.name} />
+      )}
     </section>
   );
 }

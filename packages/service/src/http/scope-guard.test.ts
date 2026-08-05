@@ -464,6 +464,15 @@ describe('sessionRouteGuard', () => {
         )
       ).status,
     ).toBe(403);
+    expect(
+      (
+        await app.request('/api/memory/day?scope=project&id=proj-a&day=2026-08-04', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'edited' }),
+        })
+      ).status,
+    ).toBe(403);
     expect((await app.request('/api/history?project=proj-a&gezel=gz-1')).status).toBe(200);
     expect((await app.request('/api/history?project=proj-a')).status).toBe(403);
     expect((await app.request('/api/sessions/search?q=x&project=proj-a&gezel=gz-1')).status).toBe(

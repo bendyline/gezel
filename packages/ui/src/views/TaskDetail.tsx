@@ -726,12 +726,27 @@ export function TaskDetail({
                   ? task.craftbook.steps.find((s) => s.id === n.stepId)
                   : undefined;
                 const authorLabel = n.author.kind === 'user' ? 'You' : n.author.name;
+                const authorGezelId = n.author.kind === 'gezel' ? n.author.gezelId : undefined;
+                const authorGezel = authorGezelId
+                  ? gezels.find((gezel) => gezel.id === authorGezelId)
+                  : undefined;
                 const editing = editingNoteId === n.id;
                 const cardCls = editing ? 'task-note-card editing' : 'task-note-card read-only';
                 return (
                   <li key={n.id} className={cardCls}>
                     <header className="task-note-header">
-                      <span className="task-note-author">{authorLabel}</span>
+                      <span className="task-note-author task-note-author-identity">
+                        {authorGezel && (
+                          <GezelIcon
+                            svg={authorGezel.icon ?? null}
+                            poppetje={authorGezel.poppetje}
+                            iconOverride={authorGezel.iconOverride}
+                            name={authorGezel.name}
+                            size={22}
+                          />
+                        )}
+                        <span>{authorLabel}</span>
+                      </span>
                       <time className="task-note-time muted small" title={n.at}>
                         {formatTimestamp(n.at)}
                       </time>

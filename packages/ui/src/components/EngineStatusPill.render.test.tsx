@@ -278,12 +278,13 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.getByText('Model capacity')).toBeInTheDocument();
     expect(screen.getByText('Capacity: ~30.4 GiB VRAM + ~38.0 GiB system RAM')).toBeInTheDocument();
     expect(
-      screen.getByText('Reserved capacity for loaded models; not live usage.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('2 models loaded')).toBeInTheDocument();
-    // Known ids take their catalog name; the rest fall back to the id.
-    expect(screen.getByText('Talkie 1930 13B ×2')).toBeInTheDocument();
-    expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
+      screen.queryByText('Reserved capacity for loaded models; not live usage.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('2 models loaded')).not.toBeInTheDocument();
+    // The uncluttered meter still exposes model detail accessibly. Known ids
+    // take their catalog name; the rest fall back to the id.
+    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2/i);
+    expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
   });
 
   it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {

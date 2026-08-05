@@ -7,6 +7,7 @@ import {
   type HtmlPreviewSource,
   type PageScriptErrorDetails,
 } from './HtmlPreviewFrame.js';
+import { OUTPUT_PANE_RESTORE_EVENT, reportOutputPaneMaximized } from './output-pane-maximize.js';
 import { useCompactLayout } from './useCompactLayout.js';
 
 /**
@@ -199,11 +200,11 @@ function OutputToolbarOverflow({ actions }: { actions: OutputAction[] }) {
  * whole window by toggling a `position: fixed` class on the SAME
  * `<aside>` — the iframe is never moved in the React tree, so the
  * running app keeps its state across maximize/restore (no reload). Its
- * z-index sits above the app chrome but below dialogs/selects so the
- * file picker still opens on top while maximized. Esc or F5 restores
- * it. F5 isn't bound to reload in our Electron shell (it uses
- * Cmd/Ctrl+R), so claiming it here is safe — we still `preventDefault`
- * as belt-and-suspenders.
+ * app's persistent titlebar stays above it and exposes a Restore button;
+ * dialogs/selects also remain above the pane. Esc or F5 restores it too.
+ * F5 isn't bound to reload in our Electron shell (it uses Cmd/Ctrl+R),
+ * so claiming it here is safe — we still `preventDefault` as
+ * belt-and-suspenders.
  */
 export function ProjectOutputPane({
   projectId,
@@ -356,6 +357,24 @@ export function ProjectOutputPane({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [maximized]);
+
+  // The maximized pane's own toolbar is covered by the persistent app
+  // titlebar (the app body deliberately sits in a lower stacking context).
+  // Mirror this state into the titlebar so it can expose an always-visible
+  // Restore button, and accept that button's restore request here. Cleanup
+  // clears the titlebar affordance if this project/pane is unmounted.
+  useEffect(() => {
+    const restore = () => setMaximized(false);
+    window.addEventListener(OUTPUT_PANE_RESTORE_EVENT, restore);
+    return () => {
+      window.removeEventListener(OUTPUT_PANE_RESTORE_EVENT, restore);
+      reportOutputPaneMaximized(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    reportOutputPaneMaximized(maximized);
   }, [maximized]);
 
   const openInBrowser = useCallback(() => {

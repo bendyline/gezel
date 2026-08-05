@@ -10,6 +10,7 @@ import {
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
+import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
 import type { ServiceContext } from '../context.js';
@@ -261,7 +262,23 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     const provider = await ctx.imageProvider.current();
     const models = await provider.listInstalledModels();
     const kind = providerKind(provider.name);
-    return c.json({ models: models.map((m) => ({ ...m, kind })) });
+    // Cloud image APIs are all edit-capable; local models resolve through
+    // the explicit-field → assessment-map → weights-kind ladder so the UI
+    // and MCP callers can tell which installed models can edit an image.
+    return c.json({
+      models: models.map((m) => ({
+        ...m,
+        kind,
+        supportsImg2Img:
+          kind === 'cloud'
+            ? true
+            : resolveImg2ImgSupport({
+                modelId: m.id,
+                explicit: m.supportsImg2Img,
+                weightsKind: m.weightsKind,
+              }).supported,
+      })),
+    });
   });
 
   /**

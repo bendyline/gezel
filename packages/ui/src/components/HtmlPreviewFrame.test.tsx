@@ -10,11 +10,47 @@ vi.mock('../api.js', async () => {
 
 describe('HtmlPreviewFrame security boundary', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(api.createProjectTypePreviewUrl).mockResolvedValue({
       url: 'https://127.0.0.1/preview/cap/type/checkers/board/index.html',
       expiresAt: '2026-07-29T22:00:00.000Z',
       scopePath: 'board',
     });
+  });
+
+  it('re-mints the frame when the security policy changes', async () => {
+    const lockedUrl = 'https://127.0.0.1/preview/locked/type/checkers/board/index.html';
+    const externalUrl = 'https://127.0.0.1/preview/external/type/checkers/board/index.html';
+    vi.mocked(api.createProjectTypePreviewUrl)
+      .mockResolvedValueOnce({
+        url: lockedUrl,
+        expiresAt: '2026-07-29T22:00:00.000Z',
+        scopePath: 'board',
+      })
+      .mockResolvedValueOnce({
+        url: externalUrl,
+        expiresAt: '2026-07-29T22:00:00.000Z',
+        scopePath: 'board',
+      });
+
+    render(
+      <HtmlPreviewFrame
+        projectId="checkers"
+        path="board/index.html"
+        source="type"
+        title="Dashboard"
+      />,
+    );
+    await waitFor(() => expect(screen.getByTitle('Dashboard')).toHaveAttribute('src', lockedUrl));
+
+    window.dispatchEvent(
+      new CustomEvent('gezel:config-updated', {
+        detail: { securityPolicy: { allowExternalServices: true } },
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByTitle('Dashboard')).toHaveAttribute('src', externalUrl));
+    expect(api.createProjectTypePreviewUrl).toHaveBeenCalledTimes(2);
   });
 
   it('loads the preview in an opaque script-only sandbox', async () => {

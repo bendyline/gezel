@@ -271,6 +271,36 @@ function expectedDeliverableIsFile(value: unknown): boolean {
   return (deliverable as { kind?: unknown }).kind === 'file';
 }
 
+/**
+ * A successful async file handoff is the terminal action for this sender.
+ * Role-typed `delegate_*` tools share `message_gezel`'s parked-delivery
+ * contract: the recipient cannot start until this provider turn releases the
+ * session. Continuing the inner MLX tool loop after either call both delays the
+ * assignee and invites duplicate handoffs from the model.
+ */
+export function isSuccessfulAsyncFileHandoff(
+  toolName: string,
+  args: Record<string, unknown>,
+  output: string,
+): boolean {
+  return (
+    !output.startsWith('ERROR:') &&
+    (toolName === 'message_gezel' || toolName.startsWith('delegate_')) &&
+    expectedDeliverableIsFile(args.expectedDeliverable)
+  );
+}
+
+export function mlxGenerationPhaseDetail(
+  generationTps: number | undefined,
+  completionTokens: number | undefined,
+): string {
+  if (generationTps !== undefined && generationTps > 0 && completionTokens !== undefined) {
+    return `${formatTps(generationTps)} tok/s · ${completionTokens} tokens`;
+  }
+  if (completionTokens !== undefined) return `Generating · ${completionTokens} tokens`;
+  return 'Generating response';
+}
+
 function asyncFileHandoffClosing(count: number): string {
   return count === 1
     ? 'I sent the file handoff. The specialist has the project context and should write the deliverable to disk.'
@@ -350,12 +380,10 @@ export class MlxProvider implements LLMProvider {
   private fatalError: MlxFatalError | null = null;
   /**
    * Width-N gate over actual engine requests. The width is the engine's
-   * batch capability ({@link batchMaxConcurrency}). At width 1 — MLX today,
-   * one stream at a time — this behaves exactly like the old serial
-   * promise chain: strict FIFO, a single engine request in flight. When
-   * the wrapped server gains batched generation, a wider gate lets up to N
-   * requests run concurrently for the server to coalesce, with no other
-   * scheduler change.
+   * batch capability ({@link batchMaxConcurrency}). At width 1 this is strict
+   * FIFO with one HTTP request in flight, while the sidecar still uses its
+   * snapshot-capable BatchGenerator internally. A wider gate lets up to N
+   * requests reach the sidecar for one static batched wave.
    */
   private engineGateActive = 0;
   private readonly engineGateWaiters: Array<() => void> = [];
@@ -369,11 +397,9 @@ export class MlxProvider implements LLMProvider {
     concurrency?: number;
     /**
      * Engine batch width — how many sequences the wrapped MLX server can
-     * generate truly concurrently. Today the server is single-stream, so
-     * this defaults to 1 (serial) and {@link acquireExclusiveEngineRequest}
-     * behaves exactly like the old serial gate. Raising it (once the server
-     * gains batched generation) widens the gate and switches the queue to
-     * the adaptive interactive policy — no scheduler change.
+     * generate concurrently. This defaults to 1 (a singleton BatchGenerator
+     * queue); raising it widens the gate and switches the queue to the
+     * adaptive interactive policy.
      */
     batchMaxConcurrency?: number;
     affinity?: boolean;
@@ -428,9 +454,8 @@ export class MlxProvider implements LLMProvider {
   }
 
   /**
-   * Batch capability — the wrapped MLX server generates one sequence at a
-   * time today, so `maxConcurrency` is 1 (serial) unless raised once it
-   * gains batched generation. See {@link LLMProvider.batch}.
+   * Batch capability advertised by the wrapped MLX BatchGenerator.
+   * See {@link LLMProvider.batch}.
    */
   get batch(): BatchCapability {
     return { maxConcurrency: this.batchMaxConcurrency };
@@ -470,7 +495,8 @@ export class MlxProvider implements LLMProvider {
     } else {
       // Park FIFO until a release hands us its slot. The active count
       // stays at `width` across the handoff, so we never exceed it — at
-      // width 1 this is exactly the old serial promise chain.
+      // Width 1 is a strict provider-side FIFO; the sidecar still uses its
+      // singleton BatchGenerator path for cache snapshots.
       await new Promise<void>((resolve) => this.engineGateWaiters.push(resolve));
     }
     const waitedMs = Date.now() - waitStartedAt;
@@ -1063,9 +1089,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // ask_gezel would otherwise deadlock behind the asker's held slot
     // (the asker is parked in `bridges.callTool` waiting for the
     // consultation's reply — chicken-and-egg). The wrapped Python
-    // server's per-stream lock still serializes generation against
-    // any other concurrent request, so bypassing the TS-side FIFO
-    // only loses the queue's affinity scoring, not safety.
+    // server's BatchEngine and its memory-aware admission still enforce
+    // the configured generation width, so bypassing the TS-side FIFO only
+    // loses the queue's affinity scoring, not safety.
     if (opts?.queue?.bypassQueue) return this.sendAndWaitInner(prompt, opts);
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
   }
@@ -1794,16 +1820,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 lastPhaseAt = firstTokenAt;
               } else {
                 const now = Date.now();
-                if (
-                  now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS &&
-                  generationTps !== undefined &&
-                  generationTps > 0 &&
-                  completionTokens !== undefined
-                ) {
+                if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
                   this.emitEnginePhase({
                     provider: 'mlx',
                     phase: 'generating',
-                    detail: `${formatTps(generationTps)} tok/s · ${completionTokens} tokens`,
+                    detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
                   });
                   lastPhaseAt = now;
                 }
@@ -2978,11 +2999,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             if (call.function.name === 'ask_user_question' && !output.startsWith('ERROR:')) {
               askedQuestionThisTurn = true;
             }
-            if (
-              call.function.name === 'message_gezel' &&
-              !output.startsWith('ERROR:') &&
-              expectedDeliverableIsFile(args.expectedDeliverable)
-            ) {
+            if (isSuccessfulAsyncFileHandoff(call.function.name, args, output)) {
               asyncFileHandoffCount++;
             }
             if (

@@ -66,15 +66,17 @@ function tryReadSpecFile(book: BookRef): { raw: string; path: string } | null {
 
 function crossCheckErrors(id: string, spec: CraftbookTestSpec): string[] {
   const errors: string[] = [];
-  const deliverablePaths = new Set((spec.success.deliverables ?? []).map((d) => d.path));
-  if (deliverablePaths.size > 0 && !deliverablePaths.has(spec.rubric.artifact.path)) {
-    errors.push(
-      `${id}: rubric.artifact.path "${spec.rubric.artifact.path}" is not among success.deliverables paths`,
-    );
-  }
-  for (const file of spec.setup.files) {
-    if (file.path.startsWith('/') || file.path.includes('..')) {
-      errors.push(`${id}: setup file path "${file.path}" must be a plain relative path`);
+  const paths = [
+    ...spec.setup.files.map((file) => ({ label: 'setup file', path: file.path })),
+    ...(spec.success.deliverables ?? []).map((deliverable) => ({
+      label: 'deliverable',
+      path: deliverable.path,
+    })),
+    { label: 'rubric artifact', path: spec.rubric.artifact.path },
+  ];
+  for (const entry of paths) {
+    if (entry.path.startsWith('/') || entry.path.includes('..')) {
+      errors.push(`${id}: ${entry.label} path "${entry.path}" must be a plain relative path`);
     }
   }
   return errors;

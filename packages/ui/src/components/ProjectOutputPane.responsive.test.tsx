@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { ProjectOutputPane } from './ProjectOutputPane.js';
+import { OUTPUT_PANE_MAXIMIZED_EVENT, OUTPUT_PANE_RESTORE_EVENT } from './output-pane-maximize.js';
 
 vi.mock('../api.js', async () => {
   const { createMockApi } = await import('../test-utils/mockApi.js');
@@ -45,6 +46,39 @@ afterEach(() => {
 });
 
 describe('ProjectOutputPane responsive toolbar', () => {
+  it('reports maximize state and accepts a restore request from the titlebar', async () => {
+    const states: boolean[] = [];
+    const onMaximized = (event: Event) => {
+      states.push((event as CustomEvent<{ maximized: boolean }>).detail.maximized);
+    };
+    window.addEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximized);
+    const { container } = render(
+      <ProjectOutputPane
+        projectId="project"
+        htmlFiles={[]}
+        typePage={{ entry: 'report.html', label: longPageLabel }}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: 'F5' });
+    await waitFor(() =>
+      expect(container.querySelector('.project-output-pane')).toHaveClass(
+        'project-output-pane-maximized',
+      ),
+    );
+    expect(states).toContain(true);
+
+    fireEvent(window, new CustomEvent(OUTPUT_PANE_RESTORE_EVENT));
+    await waitFor(() => {
+      expect(container.querySelector('.project-output-pane')).not.toHaveClass(
+        'project-output-pane-maximized',
+      );
+      expect(states.at(-1)).toBe(false);
+    });
+    window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximized);
+  });
+
   it('collapses a long page label to an accessible page icon in a narrow pane', async () => {
     render(
       <ProjectOutputPane

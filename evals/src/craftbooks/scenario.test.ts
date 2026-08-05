@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MockServicesRuntime } from '../mock/mock-server.ts';
 import type { EvalContext } from '../types.ts';
 import { craftbookScenarioFromSpec, prioritizeRepairFailures } from './scenario.ts';
 import type { CraftbookEvalSpec } from './types.ts';
@@ -240,7 +241,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(installedIds).not.toContain('builtin.images');
   });
 
-  it('installs mock-mcp toolsets for the direct worker when mcp mocks are declared', async () => {
+  it('installs mock-mcp toolsets for the project when mcp mocks are declared', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
       createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
@@ -255,7 +256,7 @@ describe('craftbook generic scenario adapter', () => {
       }),
       sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
     };
-    const mocksRuntime = {
+    const mocksRuntime: MockServicesRuntime = {
       services: new Map(),
       caPem: '',
       seedEntries: () => [],
@@ -264,6 +265,7 @@ describe('craftbook generic scenario adapter', () => {
       servicesMarkdown: () => '# mocks',
       servicesJson: () => '[]\n',
       mcpToolsetFiles: () => [],
+      bindProject: vi.fn(),
       close: async () => {},
     };
     const scenario = craftbookScenarioFromSpec({
@@ -286,8 +288,9 @@ describe('craftbook generic scenario adapter', () => {
       logChanged: vi.fn(),
     } as unknown as EvalContext);
 
+    expect(mocksRuntime.bindProject).toHaveBeenCalledWith('project-1');
     expect(client.installToolset).toHaveBeenCalledWith('mock-mcp-alerts', {
-      scope: { kind: 'gezel', gezelId: 'gezel-1' },
+      scope: { kind: 'project', projectId: 'project-1' },
     });
   });
 

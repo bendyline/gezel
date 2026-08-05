@@ -11,6 +11,8 @@ interface ResolvedIndexEntry {
       package?: string;
       version?: string;
       sha256?: string;
+      entry?: string;
+      args?: string[];
     };
     tools?: Array<{ name: string }>;
     toolsets?: Array<{
@@ -51,12 +53,14 @@ describe('DocBlocks catalog contract', () => {
     expect(docblocks, 'the bundled DocBlocks toolset should exist').toBeDefined();
     if (!docblocks) return;
 
-    expect(docblocks.version).toBe('2.3.2');
+    expect(docblocks.version).toBe('2.3.4');
     expect(docblocks.runtime).toEqual(
       expect.objectContaining({
         package: '@bendyline/docblocks-cli',
-        version: '2.3.2',
-        sha256: '642f3f054b2ac76487ab869a5cf3dd1c7bec55853b3093f4e09e4b98232229ca',
+        version: '2.3.4',
+        sha256: 'f9ebde4f7ea370778c9becf2a4f7a15fd435b4f2bcfdbcdf0f4242a1ef2db674',
+        entry: 'dist/bin.js',
+        args: ['mcp'],
       }),
     );
 
@@ -94,7 +98,7 @@ describe('DocBlocks catalog contract', () => {
     const expected = new Map([
       ['report-pdf', { version: '1.1.0', artifacts: ['report.pdf'] }],
       ['research-to-document', { version: '1.2.0', artifacts: ['report.docx'] }],
-      ['powerpoint-deck', { version: '1.2.0', artifacts: ['deck.pptx'] }],
+      ['powerpoint-deck', { version: '1.3.0', artifacts: [], workspace: ['{{outputPath}}'] }],
       ['narrated-slideshow', { version: '1.1.0', artifacts: ['slideshow.gif', 'slideshow.mp4'] }],
     ]);
 
@@ -120,17 +124,23 @@ describe('DocBlocks catalog contract', () => {
       expect(prompts).not.toContain('validate_document` with');
 
       const artifactFiles = new Set<string>();
+      const workspaceFiles = new Set<string>();
       for (const step of craftbook.steps ?? []) {
-        if (step.advanceWhen?.artifact && step.advanceWhen.file) {
-          artifactFiles.add(step.advanceWhen.file);
+        if (step.advanceWhen?.file) {
+          (step.advanceWhen.artifact ? artifactFiles : workspaceFiles).add(step.advanceWhen.file);
         }
         for (const check of step.gate?.checks ?? []) {
-          if (check.artifact && check.file) artifactFiles.add(check.file);
+          if (check.file) (check.artifact ? artifactFiles : workspaceFiles).add(check.file);
         }
       }
       for (const artifact of contract.artifacts) {
         expect(artifactFiles, `${id} should gate the real ${artifact} artifact`).toContain(
           artifact,
+        );
+      }
+      for (const output of contract.workspace ?? []) {
+        expect(workspaceFiles, `${id} should gate the real ${output} workspace output`).toContain(
+          output,
         );
       }
     }

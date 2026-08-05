@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   // Folders. Returns an error string (empty on success) mirroring
   // Electron's `shell.openPath` convention.
   openPath: (target) => ipcRenderer.invoke('gezel:open-path', target),
+  // References-pane file actions stay behind main-process IPC: the renderer
+  // identifies a daemon-scoped file, while Electron owns native dialogs and
+  // OS file-manager integration.
+  saveReferenceCopy: (request) => ipcRenderer.invoke('gezel:save-reference-copy', request),
+  showReferenceInFolder: (request) => ipcRenderer.invoke('gezel:show-reference-in-folder', request),
   onNavigate: (callback) => {
     ipcRenderer.on('gezel:navigate', (_event, view) => callback(view));
   },

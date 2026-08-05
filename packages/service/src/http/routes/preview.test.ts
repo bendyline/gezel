@@ -269,4 +269,41 @@ describe('preparePreviewHtml', () => {
     expect(prepared).toContain(PREVIEW_LOG_SHIM);
     expect(prepared).toContain(PREVIEW_SCROLLBAR_SHIM);
   });
+
+  it('replaces unbuilt Vite source modules with an actionable preview error', () => {
+    const prepared = preparePreviewHtml(`<!doctype html><html><head>
+      <meta http-equiv="Content-Security-Policy" content="script-src 'self'">
+    </head><body><div id="root"></div>
+      <script type="module" src="/src/main.tsx"></script>
+    </body></html>`);
+
+    expect(prepared).not.toContain('<script type="module" src="/src/main.tsx"');
+    expect(prepared).toContain('Gezel omitted unbuilt source module: /src/main.tsx');
+    expect(prepared).toContain('Build the app and preview its generated dist/index.html');
+    // The warning is injected before the page's meta CSP, so a source app that
+    // disallows inline scripts still receives the clear failure state.
+    expect(prepared.indexOf('Preview cannot run unbuilt')).toBeLessThan(
+      prepared.indexOf('http-equiv="Content-Security-Policy"'),
+    );
+  });
+
+  it('leaves built JavaScript modules untouched', () => {
+    const html =
+      '<html><head></head><body><script type="module" src="./assets/app.js"></script></body></html>';
+    const prepared = preparePreviewHtml(html);
+    expect(prepared).toContain(
+      '<script type="module" src="./assets/app.js" crossorigin="anonymous"></script>',
+    );
+    expect(prepared).not.toContain('Preview cannot run unbuilt');
+  });
+
+  it('does not impose CORS on classic third-party scripts', () => {
+    const html =
+      '<html><head><script src="https://cdn.example.test/widget.js"></script></head></html>';
+    const prepared = preparePreviewHtml(html);
+    expect(prepared).toContain('<script src="https://cdn.example.test/widget.js"></script>');
+    expect(prepared).not.toContain(
+      '<script src="https://cdn.example.test/widget.js" crossorigin="anonymous">',
+    );
+  });
 });

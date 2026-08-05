@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
-    "@bendyline/gilde": "0.1.11",
+    "@bendyline/gilde": "0.1.12",
     "tar": "7.5.21",
     "zod": "^4.4.3"
   },

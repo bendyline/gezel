@@ -1599,6 +1599,15 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * `--vae` / `--clip_l` / `--clip_g` / `--t5xxl` (FLUX, SD3 GGUF).
    */
   weightsKind: z.enum(['checkpoint', 'diffusion-model']).default('checkpoint'),
+  /**
+   * Whether this model supports image-to-image (editing a source image via
+   * sd-server's `/sdapi/v1/img2img`). Explicit catalog declaration — when
+   * absent, the service falls back to its per-model assessment map and then
+   * to a `weightsKind`-based default (classic checkpoints support img2img;
+   * unverified diffusion-model architectures are treated as txt2img-only).
+   * See `resolveImg2ImgSupport` in the service's image provider layer.
+   */
+  supportsImg2Img: z.boolean().optional(),
   /** Coarse hardware tier — drives the "runs on …" pill. */
   hardwareTier: ImageModelHardwareTierSchema,
   /** Minimum recommended unified-memory / VRAM in gigabytes. */
@@ -1664,6 +1673,8 @@ export const ImageModelManifestSchema = z.object({
   upstream: z.string().url().optional(),
   category: ImageModelCategorySchema.optional(),
   weightsKind: z.enum(['checkpoint', 'diffusion-model']).default('checkpoint'),
+  /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
+  supportsImg2Img: z.boolean().optional(),
   auxiliaryFiles: z.array(ImageModelAuxiliaryFileSchema).default([]),
   hardwareTier: ImageModelHardwareTierSchema,
   minRamGB: z.number().positive(),

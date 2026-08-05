@@ -1102,6 +1102,47 @@ describe('TaskManager craftbookParams interpolation', () => {
     );
   });
 
+  it('applies paramSchema defaults before snapshotting and lets invocation values override them', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: { reviewId: { type: 'string', default: 'latest' } },
+            },
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const withDefault = await tasks.create('website', {
+      title: 'Default review',
+      craftbookId: 'code-review',
+      assignee: { kind: 'user' },
+    });
+    expect(withDefault.craftbook.steps[0]?.advanceWhen?.file).toBe('reviews/latest/report.md');
+    expect(withDefault.craftbookParams).toEqual({ reviewId: 'latest' });
+    expect(withDefault.craftbook.paramSchema).toEqual({
+      type: 'object',
+      properties: { reviewId: { type: 'string', default: 'latest' } },
+    });
+
+    const overridden = await tasks.create('website', {
+      title: 'Named review',
+      craftbookId: 'code-review',
+      assignee: { kind: 'user' },
+      craftbookParams: { reviewId: 'release-candidate' },
+    });
+    expect(overridden.craftbook.steps[0]?.advanceWhen?.file).toBe(
+      'reviews/release-candidate/report.md',
+    );
+    expect(overridden.craftbookParams).toEqual({ reviewId: 'release-candidate' });
+  });
+
   it('leaves the snapshot byte-identical when no params are given', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {

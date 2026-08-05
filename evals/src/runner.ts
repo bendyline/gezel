@@ -644,7 +644,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     )
   ) {
     try {
-      mockRuntime = await startMockServices(scenario.mockServices);
+      mockRuntime = await startMockServices(scenario.mockServices, { trialHome });
     } catch (err) {
       return finalize({
         trialId,

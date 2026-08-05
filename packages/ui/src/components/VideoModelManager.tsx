@@ -395,7 +395,7 @@ export function VideoModelManager({
         </div>
       )}
 
-      <div className="ollama-section ollama-section--flat">
+      <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
         <CatalogBrowser
           kind="video-model"

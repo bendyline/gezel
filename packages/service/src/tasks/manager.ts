@@ -147,6 +147,7 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // guard) silently fails to install its hooks.
     ...(book.triggers ? { triggers: book.triggers } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
+    ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     // Snapshot toolsets so ChatManager can derive the auto-allow tool set
     // from `task.craftbook.toolsets` without re-resolving the catalog book.
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
@@ -160,6 +161,22 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** Read scalar string defaults from a craftbook's permissive JSON schema. */
+function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<string, string> {
+  const properties = (
+    paramSchema && typeof paramSchema.properties === 'object' && paramSchema.properties !== null
+      ? paramSchema.properties
+      : {}
+  ) as Record<string, unknown>;
+  const defaults: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(properties)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const value = (raw as { default?: unknown }).default;
+    if (typeof value === 'string') defaults[key] = value;
+  }
+  return defaults;
 }
 
 /**
@@ -818,7 +835,13 @@ export class TaskManager {
     // the snapshot is written, so gates and observable-progress see the
     // resolved paths. Unknown placeholders survive untouched; books
     // without `{{}}` are unaffected.
-    if (input.craftbookParams) interpolateStepsContext(craftbook.steps, input.craftbookParams);
+    const effectiveCraftbookParams = {
+      ...craftbookParamDefaults(mainBook.paramSchema),
+      ...(input.craftbookParams ?? {}),
+    };
+    if (Object.keys(effectiveCraftbookParams).length > 0) {
+      interpolateStepsContext(craftbook.steps, effectiveCraftbookParams);
+    }
     // A previous run may have left the same deliverable path behind. An
     // existence-only observable gate would then advance this brand-new task
     // before its assignee changed anything. Preserve explicit author intent
@@ -876,8 +899,8 @@ export class TaskManager {
       craftbook,
       ...(spawnsCraftbook ? { spawnsCraftbook } : {}),
       ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
-      ...(input.craftbookParams && Object.keys(input.craftbookParams).length > 0
-        ? { craftbookParams: input.craftbookParams }
+      ...(Object.keys(effectiveCraftbookParams).length > 0
+        ? { craftbookParams: effectiveCraftbookParams }
         : {}),
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }

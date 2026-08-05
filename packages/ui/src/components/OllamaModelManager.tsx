@@ -407,7 +407,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
         </div>
       )}
 
-      <div className="ollama-section ollama-section--flat">
+      <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
         <MemoryBudgetLine memory={memory} showAll={showAll} setShowAll={setShowAll} />
         <CategoryTabs

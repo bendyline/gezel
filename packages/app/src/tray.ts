@@ -22,7 +22,7 @@ export type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
 
 const MODE_LABELS: Record<EngagementMode, string> = {
   proactive: 'Proactive',
-  scheduled: 'Scheduled',
+  scheduled: 'Tasks + Reactive',
   reactive: 'Reactive only',
   off: 'Off',
 };

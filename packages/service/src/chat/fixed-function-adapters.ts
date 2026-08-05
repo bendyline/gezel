@@ -301,11 +301,17 @@ const ADAPTERS: Record<string, FixedFunctionAdapter> = {
       if (match) {
         const dims = match[1]!.replace(/\s+/g, '');
         const model = match[2]!;
+        // Surface an img2img skip honestly: the user asked for an edit
+        // of the previous image but the model can't do that, so the
+        // result is a prompt-only regeneration.
+        const skipSuffix = /source image was not used/i.test(rawText)
+          ? ' (This model cannot edit an existing image — regenerated from the revised prompt instead.)'
+          : '';
         const imgTag = /<img\s+src="([^"]+)">/i.exec(rawText);
         if (imgTag) {
-          return `Generated ${dims} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.`;
+          return `Generated ${dims} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.${skipSuffix}`;
         }
-        return `Generated ${dims} image with ${model}.`;
+        return `Generated ${dims} image with ${model}.${skipSuffix}`;
       }
       return firstSentence(rawText);
     },

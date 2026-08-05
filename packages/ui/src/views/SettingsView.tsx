@@ -4091,19 +4091,19 @@ const ENGAGEMENT_MODES: {
     id: 'proactive',
     label: 'Proactive',
     description:
-      'Default. Proactive prompts, anti-stall nudges, voorman health checks, cross-gezel messaging, and scheduled tasks all run.',
+      'Default. All task work, scheduled triggers, proactive prompts, anti-stall nudges, voorman health checks, and cross-gezel messaging run.',
   },
   {
     id: 'scheduled',
-    label: 'Scheduled + Reactive',
+    label: 'Tasks + Reactive',
     description:
-      'Chat works and scheduled tasks still fire. No proactive nudges and no cross-gezel messaging between gezellen.',
+      'Chat works, all active task work continues, and scheduled tasks still fire. No proactive nudges or cross-gezel messaging between gezellen.',
   },
   {
     id: 'reactive',
     label: 'Reactive only',
     description:
-      'AI only responds to your direct chat messages. No scheduled jobs. No proactive nudges or cross-gezel messages.',
+      'AI only responds to your direct chat messages. New task steps and scheduled jobs are paused; an in-flight turn can finish. No proactive nudges or cross-gezel messages.',
   },
   {
     id: 'off',

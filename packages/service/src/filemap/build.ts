@@ -17,6 +17,7 @@ import {
   layoutFileMap,
   nowIso,
 } from '@bendyline/gezel';
+import { gitIgnoredPaths } from '../git/ignore.js';
 import {
   GIT_CHURN_WINDOW_DAYS,
   GIT_META_COMMITS,
@@ -28,7 +29,6 @@ import { importRoads } from './affinity.js';
 import { computeImportance } from './centrality.js';
 import { composeFileMapScopes } from './compose.js';
 import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
-import { gitIgnoredVillagePaths } from './gitignore.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
@@ -136,7 +136,7 @@ export async function buildFileMap(
   root: string,
   options: BuildFileMapOptions = {},
 ): Promise<FileMapResponse> {
-  const ignoredPaths = await gitIgnoredVillagePaths(
+  const ignoredPaths = await gitIgnoredPaths(
     root,
     index.allFiles().map((file) => file.path),
   );

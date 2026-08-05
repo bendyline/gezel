@@ -154,6 +154,8 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
       kind: z.literal('mcp'),
       id: MockServiceIdSchema,
       description: z.string().min(1),
+      /** Override the local-catalog id when the mock replaces a real dependency. */
+      toolsetId: MockServiceIdSchema.optional(),
       /**
        * Served live by the eval mock rail: each declared tool becomes a
        * real tool on a per-trial Streamable-HTTP MCP endpoint, installed
@@ -168,6 +170,15 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
               name: z.string().min(1),
               description: z.string().min(1),
               resultTemplate: z.unknown().optional(),
+              /** Deterministic eval-only file materialization after this tool call. */
+              writeFixture: z
+                .object({
+                  surface: z.enum(['workspace', 'artifact']),
+                  pathArgument: z.string().min(1),
+                  fixture: z.enum(['minimal-pptx']),
+                })
+                .strict()
+                .optional(),
             })
             .strict(),
         )
@@ -289,7 +300,7 @@ export const CraftbookTestRubricSchema = z
   .object({
     artifact: z
       .object({
-        /** Deliverable path the judge reads (adapter derives the basename). */
+        /** Workspace or artifact path the judge reads (adapter derives the basename). */
         path: z.string().min(1),
         kind: z.enum(['html', 'markdown', 'yaml', 'typescript', 'json', 'text']),
       })

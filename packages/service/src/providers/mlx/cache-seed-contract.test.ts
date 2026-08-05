@@ -1,7 +1,7 @@
 /**
  * Source-contract test for the MLX sidecar's prompt-cache seeding.
  *
- * The regression this pins: the batched path (`--max-concurrency > 1`)
+ * The regression this pins: the BatchGenerator path (`--max-concurrency >= 1`)
  * originally reused a session's cache only when the previous turn's
  * ENTIRE saved token sequence — prompt plus raw generated tokens — was
  * an exact prefix of the new prompt. Verbose families (Gemma) never
@@ -54,6 +54,10 @@ describe('MLX sidecar cache seeding', () => {
     expect(seed).toMatch(/sub\.reused_tokens = plan\.reused/);
     // The one-line grep for "is the cache actually being used?".
     expect(seed).toMatch(/\[batch\] seed cache_id=/);
+    // This should be exceptional after prompt snapshots are established; make
+    // any recurrence loud enough to diagnose from a debug bundle.
+    expect(seed).toMatch(/WARNING full prefill/);
+    expect(seed).toMatch(/plan\.mode == "fresh-untrimmable"/);
   });
 
   it('drives the engine per-step so segment edges are observable', () => {
@@ -68,8 +72,10 @@ describe('MLX sidecar cache seeding', () => {
 
   it('plants a deliberate segment cut clear of the re-merging prompt tail', () => {
     const run = sliceBlock(SERVER_SRC, 'async def _run(');
+    const segments = sliceBlock(SERVER_SRC, 'def _snapshot_segments(');
     expect(run).toMatch(/insert_segments\(/);
-    expect(run).toMatch(/len\(seg\) - _SNAPSHOT_BOUNDARY_MARGIN/);
+    expect(segments).toMatch(/cache_seed\.plan_snapshot_segments\(/);
+    expect(segments).toMatch(/sub\.snapshot_target = plan\.target/);
     // The margin constant itself, with a sane value.
     expect(SERVER_SRC).toMatch(/_SNAPSHOT_BOUNDARY_MARGIN = \d+/);
     // Snapshot mode is probed per model, surfaced in the ready log.
@@ -78,8 +84,17 @@ describe('MLX sidecar cache seeding', () => {
 
   it('verifies the snapshot boundary at capture time', () => {
     const snap = sliceBlock(SERVER_SRC, 'def _capture_prompt_snapshot(');
-    // Runtime proof of the boundary invariant, never assumed.
-    expect(snap).toMatch(/offsets == \{at_tokens\}/);
+    // Runtime proof of the per-sequence boundary invariant, including the
+    // unpadded token list returned alongside the extracted layers.
+    expect(snap).toMatch(/extracted_tokens = got\[1\]/);
+    expect(snap).toMatch(/cache_seed\.snapshot_matches_prompt\(/);
+  });
+
+  it('captures one padding-aware snapshot for every sub in a wave', () => {
+    const run = sliceBlock(SERVER_SRC, 'async def _run(');
+    expect(run).toMatch(/getattr\(pr, "end_of_segment", False\)/);
+    expect(run).toMatch(/boundary == psub\.snapshot_target/);
+    expect(run).not.toMatch(/len\(self\._subs\) == 1/);
   });
 
   it('saves the snapshot when the post-generation cache cannot be trimmed', () => {
@@ -101,6 +116,15 @@ describe('MLX sidecar cache seeding', () => {
     expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('uses the cache-safe BatchGenerator path for singleton queues', () => {
+    const chat = sliceBlock(SERVER_SRC, 'async def chat_completions(');
+    // Memory pressure commonly clamps large Qwen models to concurrency=1.
+    // That must still use prompt snapshots; routing 1 through the legacy
+    // serial path cold-prefills every divergent tool-loop iteration.
+    expect(chat).toMatch(/max_concurrency[^\n]*or 0\) >= 1/);
+    expect(chat).not.toMatch(/max_concurrency > 1/);
+  });
+
   it('does not compute prefill_total from entry size in chat_completions', () => {
     const chat = sliceBlock(SERVER_SRC, 'async def chat_completions(');
     // The old arithmetic under-reported the liveness total by ~40× when
@@ -109,12 +133,17 @@ describe('MLX sidecar cache seeding', () => {
     expect(chat).not.toMatch(/len\(prompt_tokens\) - prior_tokens/);
   });
 
-  it('guards the serial and warm paths against the incoherent slice-trim', () => {
+  it('guards only the explicit serial fallback against incoherent slice-trim', () => {
     const chat = sliceBlock(SERVER_SRC, 'async def chat_completions(');
     expect(chat).toMatch(/cache_seed\.serial_reset_needed\(/);
+  });
+
+  it('warms through the same snapshot-capable BatchEngine path', () => {
     const warm = sliceBlock(SERVER_SRC, 'async def cache_warm(');
-    expect(warm).toMatch(/cache_seed\.serial_reset_needed\(/);
-    // The warm path must skip (preserve the entry), not reset it.
-    expect(warm).toMatch(/"skipped": "divergent-untrimmable"/);
+    expect(warm).toMatch(/cache_seed\.stable_snapshot_boundary\(/);
+    expect(warm).toMatch(/_get_batch_engine\(\)\.submit\(sub\)/);
+    expect(warm).toMatch(/await _await_batched_completion\(sub\)/);
+    expect(warm).not.toMatch(/stream_generate\(/);
+    expect(warm).not.toMatch(/serial_reset_needed\(/);
   });
 });

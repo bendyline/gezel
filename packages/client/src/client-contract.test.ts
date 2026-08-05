@@ -255,6 +255,16 @@ const cases: ContractCase[] = [
     invoke: (c) => c.getProject('project/one'),
   },
   {
+    name: 'reference file location',
+    method: 'GET',
+    path: '/api/projects/project%2Fone/reference-file-location?kind=artifact&path=reports%2Fone.md',
+    invoke: (c) =>
+      c.resolveReferenceFileLocation('project/one', {
+        kind: 'artifact',
+        path: 'reports/one.md',
+      }),
+  },
+  {
     name: 'project update',
     method: 'PUT',
     path: '/api/projects/project%2Fone',

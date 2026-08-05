@@ -2,9 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isGitInstalled, runGit } from '../git/git.js';
+import { createGitIgnoreResolver } from '../git/ignore.js';
 import { findHtmlPages, walkDir, walkDirDetailed } from './tree.js';
 
 let root: string;
+const gitOk = await isGitInstalled();
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'gezel-html-pages-'));
@@ -118,5 +121,34 @@ describe('findHtmlPages', () => {
     const paths = (await findHtmlPages(root)).map((entry) => entry.path);
 
     expect(paths).toEqual(['app/index.html']);
+  });
+
+  it.skipIf(!gitOk)('excludes Git-ignored pages without entering ignored directories', async () => {
+    await runGit(['init', '-q'], { cwd: root });
+    await Promise.all([
+      seed('app/index.html'),
+      seed('app/private.html'),
+      seed('generated/index.html'),
+      seed('generated/deep/never-scanned.html'),
+    ]);
+    await Promise.all([
+      writeFile(join(root, '.gitignore'), 'generated/\n'),
+      writeFile(join(root, 'app', '.gitignore'), 'private.html\n'),
+    ]);
+
+    const checkedPaths: string[] = [];
+    const resolveGitIgnores = createGitIgnoreResolver(root);
+    const paths = (
+      await findHtmlPages(root, {
+        resolveIgnoredPaths: async (candidates) => {
+          checkedPaths.push(...candidates);
+          return resolveGitIgnores(candidates);
+        },
+      })
+    ).map((entry) => entry.path);
+
+    expect(paths).toEqual(['app/index.html']);
+    expect(checkedPaths).not.toContain('generated/index.html');
+    expect(checkedPaths).not.toContain('generated/deep');
   });
 });

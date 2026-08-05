@@ -314,7 +314,7 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
         </div>
       )}
 
-      <div className="ollama-section ollama-section--flat">
+      <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
         <CatalogBrowser
           kind="image-model"

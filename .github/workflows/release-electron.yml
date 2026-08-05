@@ -364,6 +364,17 @@ jobs:
           if (!(Test-Path $host_exe)) { throw "[service-host] missing $host_exe — native release did not include the service host" }
           Write-Host "[service-host] staged $host_exe"
 
+          # Present is not enough: the host compiles the daemon's launch
+          # environment in, but it is built from a separately-tagged native
+          # release. When that pin lags a change to main.cpp, the two disagree
+          # silently — v1.26217.38 shipped a host predating
+          # GEZEL_SERVICE_ROLE, so every Windows machine service ran the full
+          # product API instead of the inference-only broker. The binary's own
+          # --self-test cannot catch this (same stale source, same stale
+          # assertions) and it carries no version resource to compare.
+          node scripts/verify-service-host-contract.mjs $host_exe
+          if ($LASTEXITCODE -ne 0) { throw '[service-host] launch contract mismatch — the pinned native release is stale' }
+
       - name: Install Trusted Signing SDK
         shell: pwsh
         env:

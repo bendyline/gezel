@@ -21,6 +21,10 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
+  type ReferenceFileLocationRequest,
+  ReferenceFileLocationRequestSchema,
+} from '@bendyline/gezel';
+import {
   GezelClient,
   createTrustingFetch,
   streamAllChatEvents,
@@ -28,8 +32,11 @@ import {
 import { autostart } from './autostart/index.js';
 import {
   daemonEntrypointArgument,
+  isAllowedPreviewNavigation,
+  isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
+  isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
@@ -62,6 +69,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let connection: Connection | null = null;
 let mainWindow: Electron.BrowserWindow | null = null;
+/** Permission snapshot carried by each capability URL's last HTML response. */
+const previewDocumentExternalServices = new Map<string, boolean>();
+const MAX_TRACKED_PREVIEW_DOCUMENTS = 512;
+const PREVIEW_EXTERNAL_SERVICES_HEADER = 'x-gezel-preview-external-services';
 /** True while the window is showing splash.html rather than the daemon UI. */
 let splashShowing = false;
 // The system tray (locus for notifications, status, and the engagement-mode
@@ -362,6 +373,58 @@ function safeOrigin(url: string): string | null {
   }
 }
 
+function responseHeaderValue(
+  headers: Record<string, string[]> | undefined,
+  wanted: string,
+): string | null {
+  if (!headers) return null;
+  const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === wanted);
+  return entry?.[1]?.[0]?.trim().toLowerCase() ?? null;
+}
+
+function normalizedDocumentUrl(candidate: string): string | null {
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function rememberPreviewDocument(candidate: string, allowExternalServices: boolean): void {
+  const key = normalizedDocumentUrl(candidate);
+  if (!key) return;
+  // Refresh insertion order when the same lease reloads under a new policy.
+  previewDocumentExternalServices.delete(key);
+  previewDocumentExternalServices.set(key, allowExternalServices);
+  while (previewDocumentExternalServices.size > MAX_TRACKED_PREVIEW_DOCUMENTS) {
+    const oldest = previewDocumentExternalServices.keys().next().value as string | undefined;
+    if (!oldest) break;
+    previewDocumentExternalServices.delete(oldest);
+  }
+}
+
+/**
+ * Resolve whether a request comes from a preview frame (or one of its
+ * descendants) and, if so, the document's External services permission.
+ * Seeing a preview URL without the trusted response signal fails closed.
+ */
+function previewExternalServicesForFrame(
+  frame: Electron.WebFrameMain | null | undefined,
+  allowedOrigin: string | null,
+): boolean | null {
+  let current = frame ?? null;
+  while (current) {
+    if (isPreviewDocumentUrl(current.url, allowedOrigin)) {
+      const key = normalizedDocumentUrl(current.url);
+      return key ? (previewDocumentExternalServices.get(key) ?? false) : false;
+    }
+    current = current.parent;
+  }
+  return null;
+}
+
 /**
  * Renderer Content-Security-Policy. The UI is same-origin (served by the
  * loopback daemon) and loads no remote scripts, so a strict policy is
@@ -497,6 +560,32 @@ async function createWindow(): Promise<void> {
     if (isAllowedTopLevelNavigation(url, allowedOrigin, allowedSplashUrl)) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
+  });
+
+  // The iframe sandbox blocks popups and top-level navigation, but it still
+  // permits a preview to replace its own document. Keep subframes pinned to
+  // capability-bearing `/preview/*` URLs even when External services is on;
+  // that permission is for dependencies and APIs, not document navigation.
+  const guardPreviewFrameNavigation = (details: {
+    url: string;
+    isMainFrame: boolean;
+    frame: Electron.WebFrameMain | null;
+    initiator?: Electron.WebFrameMain | null;
+    preventDefault(): void;
+  }) => {
+    if (details.isMainFrame) return;
+    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const originatesInPreview =
+      previewExternalServicesForFrame(details.frame, allowedOrigin) !== null ||
+      previewExternalServicesForFrame(details.initiator, allowedOrigin) !== null;
+    if (!originatesInPreview || isAllowedPreviewNavigation(details.url, allowedOrigin)) return;
+    details.preventDefault();
+  };
+  mainWindow.webContents.on('will-frame-navigate', (details) => {
+    guardPreviewFrameNavigation(details);
+  });
+  mainWindow.webContents.on('will-redirect', (details) => {
+    guardPreviewFrameNavigation(details);
   });
 
   // Dev-mode visibility: forward renderer console + crash signals to the
@@ -883,6 +972,88 @@ ipcMain.handle(
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0] ?? null;
+  },
+);
+
+type DesktopReferenceFileRequest = ReferenceFileLocationRequest & { projectId: string };
+
+function parseDesktopReferenceFileRequest(value: unknown): DesktopReferenceFileRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.projectId !== 'string' ||
+    candidate.projectId.length === 0 ||
+    candidate.projectId.length > 255
+  ) {
+    return null;
+  }
+  const parsed = ReferenceFileLocationRequestSchema.safeParse({
+    kind: candidate.kind,
+    path: candidate.path,
+  });
+  return parsed.success ? { projectId: candidate.projectId, ...parsed.data } : null;
+}
+
+async function fetchReferenceBlob(request: DesktopReferenceFileRequest): Promise<Blob> {
+  if (!apiClient) throw new Error('service is unavailable');
+  if (request.kind === 'artifact') {
+    return apiClient.fetchProjectArtifactBlob(request.projectId, request.path);
+  }
+  if (request.kind === 'workspace') {
+    return apiClient.fetchProjectWorkspaceBlob(request.projectId, request.path);
+  }
+  return apiClient.fetchDocumentBlob(request.path);
+}
+
+ipcMain.handle(
+  'gezel:save-reference-copy',
+  async (
+    event,
+    value: unknown,
+  ): Promise<{ ok: true; path?: string } | { ok: false; error: string }> => {
+    const request = parseDesktopReferenceFileRequest(value);
+    if (!request) return { ok: false, error: 'invalid reference file request' };
+    if (!apiClient) return { ok: false, error: 'service is unavailable' };
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const filename = basename(request.path.replaceAll('\\', '/')) || 'reference';
+    const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
+      title: 'Save copy as',
+      defaultPath: filename,
+    });
+    if (picked.canceled || !picked.filePath) return { ok: true };
+    const partial = `${picked.filePath}.partial-${randomUUID()}`;
+    try {
+      const blob = await fetchReferenceBlob(request);
+      await pipeline(
+        Readable.fromWeb(blob.stream() as import('node:stream/web').ReadableStream<Uint8Array>),
+        createWriteStream(partial, { flags: 'wx' }),
+      );
+      await rm(picked.filePath, { force: true });
+      await rename(partial, picked.filePath);
+      return { ok: true, path: picked.filePath };
+    } catch (err) {
+      await rm(partial, { force: true }).catch(() => {});
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+);
+
+ipcMain.handle(
+  'gezel:show-reference-in-folder',
+  async (_event, value: unknown): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const request = parseDesktopReferenceFileRequest(value);
+    if (!request) return { ok: false, error: 'invalid reference file request' };
+    if (!apiClient) return { ok: false, error: 'service is unavailable' };
+    if (connection?.mode === 'remote') {
+      return { ok: false, error: 'Containing folders are unavailable for remote projects.' };
+    }
+    try {
+      const location = await apiClient.resolveReferenceFileLocation(request.projectId, request);
+      shell.showItemInFolder(location.path);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   },
 );
 
@@ -1809,6 +1980,25 @@ app.whenReady().then(async () => {
     callback(got === pinnedLoopbackFingerprint ? 0 : -2);
   });
 
+  // CSP is the first preview egress boundary. This request hook is a separate
+  // Electron-level sink: even if authored markup finds a browser CSP bypass,
+  // strict previews cannot emit HTTP(S)/WebSocket traffic off the daemon
+  // endpoint. Permissive previews admit ordinary network resources, while
+  // subframe document loads remain capability-pinned in every mode.
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const allowExternalServices = previewExternalServicesForFrame(details.frame, allowedOrigin);
+    if (allowExternalServices === null) {
+      callback({});
+      return;
+    }
+    const allowed =
+      details.resourceType === 'subFrame'
+        ? isAllowedPreviewNavigation(details.url, allowedOrigin)
+        : isAllowedPreviewResourceRequest(details.url, allowedOrigin, allowExternalServices);
+    callback(allowed ? {} : { cancel: true });
+  });
+
   // Stamp the renderer CSP onto responses from the loopback origin. CSP
   // on non-document responses is ignored by the browser, so a blanket
   // hook is both safe and the simplest delivery point — EXCEPT for the
@@ -1820,13 +2010,17 @@ app.whenReady().then(async () => {
   // the preview's deliberate CDN/img allowances. Leave preview responses
   // to their route-set CSP.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    let pathname = '';
-    try {
-      pathname = new URL(details.url).pathname;
-    } catch {
-      pathname = '';
-    }
-    if (pathname.startsWith('/preview/')) {
+    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    if (isPreviewDocumentUrl(details.url, allowedOrigin)) {
+      if (details.resourceType === 'subFrame') {
+        const policyHeader = responseHeaderValue(
+          details.responseHeaders,
+          PREVIEW_EXTERNAL_SERVICES_HEADER,
+        );
+        // Only the exact trusted preview route reaches this branch. Missing or
+        // malformed policy signals are deliberately interpreted as blocked.
+        rememberPreviewDocument(details.url, policyHeader === 'allowed');
+      }
       callback({ responseHeaders: details.responseHeaders });
       return;
     }

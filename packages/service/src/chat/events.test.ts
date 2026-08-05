@@ -225,6 +225,39 @@ describe('ChatEventBus — lossless replay history', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.event).toMatchObject({ type: 'delta', content: 'first second' });
   });
+
+  it('keeps only the latest engine phase without evicting early tool activity', () => {
+    const bus = new ChatEventBus();
+    const scope = { sessionId: 's1', gezelId: 'ada', projectId: 'eliza' };
+    bus.publish(scope, {
+      type: 'user_message',
+      message: { role: 'user', content: 'build it', at: 't0' },
+    });
+    bus.publish(scope, { type: 'tool', name: 'delegate_builder', durationMs: 5, success: true });
+    for (let i = 0; i < 1000; i++) {
+      bus.publish(scope, { type: 'delta', content: `t${i} ` });
+      bus.publish(scope, {
+        type: 'engine_phase',
+        provider: 'mlx',
+        phase: 'generating',
+        detail: `Generating · ${i} tokens`,
+      });
+    }
+
+    const seen: ChatEventEnvelope[] = [];
+    bus.subscribeProject('eliza', (env) => seen.push(env));
+
+    expect(seen.map((env) => env.event.type)).toEqual([
+      'user_message',
+      'tool',
+      'delta',
+      'engine_phase',
+    ]);
+    expect(seen[1]?.event).toMatchObject({ type: 'tool', name: 'delegate_builder' });
+    expect(seen[2]?.event).toMatchObject({ type: 'delta' });
+    expect((seen[2]?.event as { content: string }).content).toContain('t999 ');
+    expect(seen[3]?.event).toMatchObject({ detail: 'Generating · 999 tokens' });
+  });
 });
 
 describe('ChatEventBus — session-scoped replay (existing behavior)', () => {

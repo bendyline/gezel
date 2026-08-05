@@ -249,6 +249,37 @@ export class ChatEventBus {
    */
   private recordInHistory(history: ChatEvent[], event: ChatEvent): void {
     if (event.type === 'heartbeat' || event.type === 'wire_pulse') return;
+    if (event.type === 'engine_phase') {
+      // Generation phases are a live status snapshot, not an append-only
+      // transcript. MLX can emit them ~3 times/second; retaining every one
+      // interleaves the delta stream, defeats adjacent-delta coalescing, and
+      // pushes early tool rows out of the 500-event replay cap. Keep only the
+      // newest phase, and re-join delta runs that its removal makes adjacent.
+      let priorIndex = -1;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i]?.type === 'engine_phase') {
+          priorIndex = i;
+          break;
+        }
+      }
+      if (priorIndex >= 0) {
+        history.splice(priorIndex, 1);
+        const left = history[priorIndex - 1];
+        const right = history[priorIndex];
+        if (
+          (left?.type === 'delta' || left?.type === 'reasoning_delta') &&
+          right?.type === left.type
+        ) {
+          history[priorIndex - 1] = {
+            type: left.type,
+            content: left.content + right.content,
+          };
+          history.splice(priorIndex, 1);
+        }
+      }
+      history.push(event);
+      return;
+    }
     if (event.type === 'delta' || event.type === 'reasoning_delta') {
       const tail = history[history.length - 1];
       if (tail?.type === event.type) {

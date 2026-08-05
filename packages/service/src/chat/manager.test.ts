@@ -1696,64 +1696,26 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(seed).toContain('Do NOT create or rely on `script.js`, `styles.css`');
   });
 
-  it('preserves a PPTX handoff as a binary deliverable instead of write_file markdown', async () => {
-    await store.createGezel({ name: 'Maya', role: 'Developer' });
-    const adaSession = await manager.createSession({ gezelId: 'ada' });
-    mock.script('The exact-format production surface is unavailable.');
-
-    const res = await manager.messageGezel({
-      fromGezelId: 'ada',
-      fromSessionId: adaSession.id,
-      toGezelIdOrName: 'maya',
-      text: 'Create a PowerPoint about D-Day.',
-      expectedDeliverable: { kind: 'file', filePath: 'd-day.pptx' },
-    });
-
-    await waitForCondition(async () => {
-      const disk = await store.getSession('maya', res.sessionId);
-      return (disk?.messages.length ?? 0) >= 2;
-    });
-
-    const mayaDisk = await store.getSession('maya', res.sessionId);
-    const seed = String(mayaDisk!.messages[0]?.content ?? '');
-    expect(seed).toContain('REAL BINARY DOCUMENT OR MEDIA FILE at `d-day.pptx`');
-    expect(seed).toContain('author the source as Markdown');
-    expect(seed).toContain('`convert_document`');
-    expect(seed).toContain('`preview_document`');
-    expect(seed).toContain('`save_artifact`');
-    expect(seed).toContain('blocked instead of silently substituting another format');
-    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
-  });
-
   it.each([
+    ['PowerPoint', 'd-day.pptx'],
     ['animated GIF', 'launch-loop.gif'],
     ['video', 'launch-video.mp4'],
-  ])('preserves an %s handoff as DocBlocks media instead of write_file text', async (_, path) => {
+  ])('rejects an ad-hoc %s handoff so a craftbook owns production', async (_, path) => {
     await store.createGezel({ name: 'Maya', role: 'Copywriter' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
-    mock.script('The exact-format production surface is unavailable.');
 
-    const res = await manager.messageGezel({
-      fromGezelId: 'ada',
-      fromSessionId: adaSession.id,
-      toGezelIdOrName: 'maya',
-      text: `Turn this content into ${path}.`,
-      expectedDeliverable: { kind: 'file', filePath: path },
-    });
+    await expect(
+      manager.messageGezel({
+        fromGezelId: 'ada',
+        fromSessionId: adaSession.id,
+        toGezelIdOrName: 'maya',
+        text: `Turn this content into ${path}.`,
+        expectedDeliverable: { kind: 'file', filePath: path },
+      }),
+    ).rejects.toThrow(/cannot be sent as an ad-hoc gezel handoff.*matching craftbook/i);
 
-    await waitForCondition(async () => {
-      const disk = await store.getSession('maya', res.sessionId);
-      return (disk?.messages.length ?? 0) >= 2;
-    });
-
-    const mayaDisk = await store.getSession('maya', res.sessionId);
-    const seed = String(mayaDisk!.messages[0]?.content ?? '');
-    expect(seed).toContain(`REAL BINARY DOCUMENT OR MEDIA FILE at \`${path}\``);
-    expect(seed).toContain('DocBlocks production tools/craftbook');
-    expect(seed).toContain('author the source as Markdown');
-    expect(seed).toContain('`convert_document`');
-    expect(seed).toContain('`save_artifact`');
-    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
+    const mayaSessions = await store.listSessions({ gezelId: 'maya' });
+    expect(mayaSessions).toHaveLength(0);
   });
 
   it('does not append a contradictory write_file-first instruction to focused repair handoffs', async () => {
@@ -3434,6 +3396,18 @@ describe('ChatManager — one-shot attribution', () => {
       actorLabel: 'System',
       job: 'maintenance',
     });
+  });
+
+  it('forwards a cancellation signal to one-shot provider work', async () => {
+    mock.script('done');
+    const controller = new AbortController();
+
+    await manager.oneShotCompletion('draft project copy', 1_000, {
+      signal: controller.signal,
+    });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue?.signal).toBe(controller.signal);
   });
 
   it('does not apply user-daemon RAM pressure to broker-routed ambient work', () => {
@@ -5431,12 +5405,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     });
 
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
-    mock.script('on it');
-    await manager.send(session.id, 'add a logo to the start screen');
-
-    const create = mock.calls.find((c) => c.kind === 'create');
-    const sys = create!.opts!.systemMessage!;
-    expect(sys).not.toContain('File edits are OFF');
+    const snapshot = await manager.getSessionDebug(session.id);
+    expect(snapshot.systemPrompt).not.toContain('File edits are OFF');
   });
 
   it('exposes on-disk diagnostics paths in the debug snapshot', async () => {

@@ -6,6 +6,27 @@ import type { ServiceContext } from '../context.js';
 const log = createLogger('chat-events');
 
 /**
+ * Hono's SSE writer is stateful: two overlapping `writeSSE` calls can
+ * interleave frame bytes or trip the stream's backpressure handling. Chat
+ * events are published synchronously and local models can emit token + phase
+ * events several times per second, so every route needs one ordered write
+ * lane. Keep the helper transport-agnostic so the ordering contract is easy to
+ * regression-test without booting a service.
+ */
+export function serializeSseWrites<T>(
+  write: (frame: T) => Promise<void>,
+): (frame: T) => Promise<void> {
+  let tail = Promise.resolve();
+  return (frame: T) => {
+    const next = tail.then(() => write(frame));
+    // Keep the lane usable long enough for the route's rejection handler to
+    // close/unsubscribe it; callers still receive `next`'s original failure.
+    tail = next.catch(() => undefined);
+    return next;
+  };
+}
+
+/**
  * Chat event SSE endpoints.
  *
  *   GET /events/chat?session=<id>            — bare ChatEvent for a single
@@ -50,23 +71,27 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         unsubscribe();
         releaseClose?.();
       };
-      unsubscribe = ctx.chatEvents.subscribe(key, async (event) => {
-        try {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-          // This is a finite, single-turn stream. Return immediately after
-          // the terminal frame so Chromium can reclaim the connection slot
-          // before the next rapid send opens another session stream.
-          if (event.type === 'done') close();
-        } catch {
-          // A write failure without a preceding abort means the socket died
-          // under the client (daemon restart doesn't hit this path; a
-          // dropped h2 connection or a vanished renderer does). Log it —
-          // this is the server-side trace for a "network error" the
-          // composer reports.
-          if (!closed) log.info(`session=${key} stream write failed (client connection lost)`);
-          close();
-        }
-      });
+      const write = serializeSseWrites((frame: { event?: string; data: string }) =>
+        stream.writeSSE(frame),
+      );
+      unsubscribe = ctx.chatEvents.subscribe(key, (event) =>
+        write({ data: JSON.stringify(event) })
+          .then(() => {
+            // This is a finite, single-turn stream. Return immediately after
+            // the terminal frame so Chromium can reclaim the connection slot
+            // before the next rapid send opens another session stream.
+            if (event.type === 'done') close();
+          })
+          .catch(() => {
+            // A write failure without a preceding abort means the socket died
+            // under the client (daemon restart doesn't hit this path; a
+            // dropped h2 connection or a vanished renderer does). Log it —
+            // this is the server-side trace for a "network error" the
+            // composer reports.
+            if (!closed) log.info(`session=${key} stream write failed (client connection lost)`);
+            close();
+          }),
+      );
       if (closed) unsubscribe();
 
       stream.onAbort(close);
@@ -75,7 +100,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         await Promise.race([stream.sleep(1000), closeSignal]);
         if (closed) break;
         try {
-          await stream.writeSSE({ event: 'ping', data: '' });
+          await write({ event: 'ping', data: '' });
         } catch {
           if (!closed) log.info(`session=${key} stream ping failed (client connection lost)`);
           close();
@@ -90,29 +115,32 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
     if (!projectId) return c.json({ error: 'missing ?project=<id>' }, 400);
     return streamSSE(c, async (stream) => {
       let closed = false;
-      const unsubscribe = ctx.chatEvents.subscribeProject(projectId, async (envelope) => {
-        try {
-          await stream.writeSSE({ data: JSON.stringify(envelope) });
-        } catch {
-          /* stream closed */
-        }
-      });
-
-      stream.onAbort(() => {
+      let unsubscribe = () => {};
+      const close = () => {
+        if (closed) return;
         closed = true;
         unsubscribe();
-      });
+      };
+      const write = serializeSseWrites((frame: { event?: string; data: string }) =>
+        stream.writeSSE(frame),
+      );
+      unsubscribe = ctx.chatEvents.subscribeProject(projectId, (envelope) =>
+        write({ data: JSON.stringify(envelope) }).catch(() => close()),
+      );
+
+      stream.onAbort(close);
 
       while (!closed) {
         await stream.sleep(1000);
+        if (closed) break;
         try {
-          await stream.writeSSE({ event: 'ping', data: '' });
+          await write({ event: 'ping', data: '' });
         } catch {
           log.debug(`project=${projectId} envelope stream ping failed (client connection lost)`);
-          closed = true;
+          close();
         }
       }
-      unsubscribe();
+      close();
     });
   });
 
@@ -121,58 +149,64 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
     if (!gezelId) return c.json({ error: 'missing ?gezel=<id>' }, 400);
     return streamSSE(c, async (stream) => {
       let closed = false;
-      const unsubscribe = ctx.chatEvents.subscribeGezel(gezelId, async (envelope) => {
-        try {
-          await stream.writeSSE({ data: JSON.stringify(envelope) });
-        } catch {
-          /* stream closed */
-        }
-      });
-
-      stream.onAbort(() => {
+      let unsubscribe = () => {};
+      const close = () => {
+        if (closed) return;
         closed = true;
         unsubscribe();
-      });
+      };
+      const write = serializeSseWrites((frame: { event?: string; data: string }) =>
+        stream.writeSSE(frame),
+      );
+      unsubscribe = ctx.chatEvents.subscribeGezel(gezelId, (envelope) =>
+        write({ data: JSON.stringify(envelope) }).catch(() => close()),
+      );
+
+      stream.onAbort(close);
 
       while (!closed) {
         await stream.sleep(1000);
+        if (closed) break;
         try {
-          await stream.writeSSE({ event: 'ping', data: '' });
+          await write({ event: 'ping', data: '' });
         } catch {
           log.debug(`gezel=${gezelId} envelope stream ping failed (client connection lost)`);
-          closed = true;
+          close();
         }
       }
-      unsubscribe();
+      close();
     });
   });
 
   app.get('/all', async (c) => {
     return streamSSE(c, async (stream) => {
       let closed = false;
-      const unsubscribe = ctx.chatEvents.subscribeAll(async (envelope) => {
-        try {
-          await stream.writeSSE({ data: JSON.stringify(envelope) });
-        } catch {
-          /* stream closed */
-        }
-      });
-
-      stream.onAbort(() => {
+      let unsubscribe = () => {};
+      const close = () => {
+        if (closed) return;
         closed = true;
         unsubscribe();
-      });
+      };
+      const write = serializeSseWrites((frame: { event?: string; data: string }) =>
+        stream.writeSSE(frame),
+      );
+      unsubscribe = ctx.chatEvents.subscribeAll((envelope) =>
+        write({ data: JSON.stringify(envelope) }).catch(() => close()),
+      );
+
+      stream.onAbort(close);
 
       while (!closed) {
         await stream.sleep(1000);
+        if (closed) break;
         try {
-          await stream.writeSSE({ event: 'ping', data: '' });
+          await write({ event: 'ping', data: '' });
         } catch {
           log.debug('global envelope stream ping failed (client connection lost)');
-          closed = true;
+          close();
         }
       }
-      unsubscribe();
+      close();
     });
   });
 

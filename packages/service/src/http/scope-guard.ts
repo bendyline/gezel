@@ -250,6 +250,9 @@ async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<Ses
 
   // Memory calls carry their scope outside the path. Enforce both axes here.
   if (path.startsWith('/api/memory/')) {
+    if (path === '/api/memory/day' && method === 'PATCH') {
+      return sessionDeny('editing raw memory files requires a first-party client');
+    }
     if (auth.team) return SESSION_ALLOW;
     if (path === '/api/memory/search' && method === 'POST') {
       const body = await readJsonSafe(c);
@@ -264,7 +267,7 @@ async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<Ses
         (body?.scope === 'gezel' && body.id === auth.gezelId);
       return own ? SESSION_ALLOW : sessionDeny('memory write scope does not match the session');
     }
-    if (/^\/api\/memory\/(?:recent|days|day|summary)$/.test(path)) {
+    if (method === 'GET' && /^\/api\/memory\/(?:recent|days|day|summary)$/.test(path)) {
       const scope = c.req.query('scope') ?? 'gezel';
       const id = c.req.query('id') ?? '';
       const own =

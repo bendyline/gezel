@@ -2564,25 +2564,37 @@ export async function resolveEffectiveServiceRole(
   home: string,
 ): Promise<ServiceRole> {
   const configured = env.GEZEL_SERVICE_ROLE;
+  const systemScope = env.GEZEL_SYSTEM_SCOPE === '1';
   const requested =
     explicit ??
     (configured === 'user' || configured === 'machine-engine' || configured === 'legacy-full'
       ? configured
-      : // A system service installed before split roles had the full product
-        // API. All ordinary/standalone launches are user daemons.
-        env.GEZEL_SYSTEM_SCOPE === '1'
-        ? 'legacy-full'
+      : // A system-scope launch whose host named no role is a misconfigured
+        // host, not a pre-split one, and the two are indistinguishable from
+        // here. Resolve to the LEAST authority and let the established-state
+        // check below promote it back to legacy-full only on the evidence a
+        // real pre-split home leaves behind.
+        //
+        // This defaulted to `legacy-full` and that failed open. v1.26217.38
+        // shipped a Windows service host compiled before GEZEL_SERVICE_ROLE
+        // existed (the native pin was not bumped for the release that added
+        // it), so every Windows machine service silently took this branch,
+        // served the full product API, and published its `ui`-scoped token at
+        // the cross-account permissions the runtime directory grants — a
+        // credential every local account can read. Nothing failed; the split
+        // simply never engaged. Least authority is the only safe default when
+        // the role is unstated.
+        systemScope
+        ? 'machine-engine'
         : 'user');
 
-  if (requested !== 'machine-engine' || env.GEZEL_SYSTEM_SCOPE !== '1') return requested;
+  if (requested !== 'machine-engine' || !systemScope) return requested;
 
-  // The installer changes its environment before the new binary starts. If
-  // an older full-product system service already has a product layout, never
-  // relabel it as engine-only: the next Electron launch would otherwise show
-  // an empty per-user home while established machine-home projects remain
-  // hidden behind the broker boundary. New brokers never create entries in
-  // either directory, so their subsequent starts stay machine-engine.
-  if (await hasLegacyMachineProductState(home)) {
+  // If an older full-product system service already has a product layout,
+  // never relabel it as engine-only: the next Electron launch would otherwise
+  // show an empty per-user home while established machine-home projects remain
+  // hidden behind the broker boundary.
+  if (await hasEstablishedMachineProductState(home)) {
     log.warn(
       '[service] established machine-home product state detected; preserving legacy-full compatibility until an explicit per-user migration is completed',
     );
@@ -2591,15 +2603,54 @@ export async function resolveEffectiveServiceRole(
   return requested;
 }
 
-async function hasLegacyMachineProductState(home: string): Promise<boolean> {
-  for (const directory of ['projects', 'gezels']) {
-    try {
-      const entries = await readdir(join(home, directory), { withFileTypes: true });
-      if (entries.some((entry) => entry.isDirectory())) return true;
-    } catch {
-      // Missing/unreadable means there is no established product layout that
-      // this process can safely identify.
-    }
+/**
+ * Does this system home still hold pre-split product data that a broker would
+ * strand?
+ *
+ * Directory presence alone is NOT the signal, because `legacy-full` itself
+ * creates the `default` project and the system crew on every boot. Keying on
+ * presence made the compatibility mode self-perpetuating: one boot in
+ * legacy-full manufactured the exact evidence that pinned every later boot to
+ * legacy-full, so a home could never return to the broker role even once its
+ * real data had been migrated out.
+ *
+ * The signals are the two things only a human produces: a project beyond the
+ * auto-created `default`, or a gezel with a persisted session. That is the
+ * same "was this home ever actually used" question the supervisor answers in
+ * `readHomeUsageSignals`, and deliberately the same answer shape.
+ *
+ * Deliberately NOT keyed on the machine-shared marker. The marker resolves
+ * from platform convention rather than from `home`, so it reports on whatever
+ * machine-wide install happens to exist rather than on the home being
+ * inspected — wrong for a per-user daemon, and wrong for any home that is not
+ * the conventional system one. The usage signals already answer correctly
+ * after a migration, because what migration leaves behind is exactly baseline.
+ */
+async function hasEstablishedMachineProductState(home: string): Promise<boolean> {
+  const projects = await listSubdirectories(join(home, 'projects'));
+  if (projects.some((name) => name !== 'default')) return true;
+
+  for (const gezelId of await listSubdirectories(join(home, 'gezels'))) {
+    const sessions = await listFileNames(join(home, 'gezels', gezelId, 'sessions'));
+    if (sessions.some((name) => name.endsWith('.json'))) return true;
   }
   return false;
+}
+
+async function listSubdirectories(path: string): Promise<string[]> {
+  try {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+async function listFileNames(path: string): Promise<string[]> {
+  try {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
 }
