@@ -1033,6 +1033,9 @@ function mergeIdentityAndVersion(
       ...(identity.upstream !== undefined ? { upstream: identity.upstream } : {}),
       ...(identity.category ? { category: identity.category } : {}),
       weightsKind: identity.weightsKind,
+      ...(identity.supportsImg2Img !== undefined
+        ? { supportsImg2Img: identity.supportsImg2Img }
+        : {}),
       auxiliaryFiles: version.auxiliaryFiles,
       hardwareTier: identity.hardwareTier,
       minRamGB: identity.minRamGB,

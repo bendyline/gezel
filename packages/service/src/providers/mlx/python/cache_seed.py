@@ -1,6 +1,6 @@
 """Prompt-cache seed planning for the gezel MLX wrapper.
 
-Why this exists: the batched path (`--max-concurrency > 1`) originally
+Why this exists: the BatchGenerator path (`--max-concurrency >= 1`) originally
 reused a session's cache only when the previous turn's ENTIRE saved token
 sequence — prompt plus the model's raw generated tokens — was an exact
 prefix of the new prompt. That almost never holds for verbose families
@@ -8,12 +8,11 @@ prefix of the new prompt. That almost never holds for verbose families
 assistant message before persisting it, so the re-templated history
 diverges from the raw tokens at the first stripped character, the exact
 check failed, and every turn re-prefilled the full conversation from
-token 0 (~2 minutes on a 20K-token Meester session). The serial path
-never had this bug — mlx_vlm's `PromptCacheState` reuses the longest
-common prefix and trims the tail — so the fix is to give the batched
-path the same semantics, via each cache class's own `is_trimmable()` /
-`trim(n)` protocol (never naive keys-slicing, which silently corrupts
-rotated sliding-window caches).
+token 0 (~2 minutes on a 20K-token Meester session). The fix gives the
+BatchGenerator path longest-common-prefix reuse via each cache class's
+own `is_trimmable()` / `trim(n)` protocol (never naive keys-slicing,
+which silently corrupts rotated sliding-window caches). The legacy
+serial fallback remains only behind explicit `--max-concurrency 0`.
 
 Sliding-window caveat: RotatingKVCache reports `is_trimmable() == False`
 once its offset passes the window (`max_size`), because rewinding past
@@ -52,6 +51,13 @@ class SeedPlan(NamedTuple):
     mode: str
 
 
+class SnapshotSegmentPlan(NamedTuple):
+    """One sequence's segments plus its absolute snapshot token boundary."""
+
+    segments: List[List[int]]
+    target: Optional[int]
+
+
 def longest_common_prefix(a: Sequence[int], b: Sequence[int]) -> int:
     """Length of the shared leading run of two token sequences."""
     limit = min(len(a), len(b))
@@ -59,6 +65,54 @@ def longest_common_prefix(a: Sequence[int], b: Sequence[int]) -> int:
         if a[i] != b[i]:
             return i
     return limit
+
+
+def stable_snapshot_boundary(
+    prompt_tokens: Sequence[int],
+    alternate_tokens: Sequence[int],
+    margin: int,
+) -> int:
+    """Choose a continuation-safe snapshot boundary for prefix warming.
+
+    A system-only cache warm has to append a synthetic user turn for chat
+    templates that reject system-only input. Comparing two deliberately
+    different synthetic turns reveals the stable token prefix before their
+    content; backing up by ``margin`` also protects against tokenizer merges
+    with a future, third user turn. Returns zero when there is no useful safe
+    boundary.
+    """
+    common = longest_common_prefix(prompt_tokens, alternate_tokens)
+    return max(0, common - max(0, int(margin)))
+
+
+def plan_snapshot_segments(
+    segment: Sequence[int],
+    reused: int,
+    prompt_length: int,
+    requested_target: Optional[int],
+    margin: int,
+) -> SnapshotSegmentPlan:
+    """Split one seed segment at the single boundary worth snapshotting.
+
+    ``requested_target is None`` selects the normal end-minus-margin boundary;
+    an explicit zero disables capture (used when prefix warming cannot prove a
+    stable synthetic-user boundary). Targets are absolute prompt positions, so
+    cached-prefix reuse is subtracted before cutting the remaining segment.
+    """
+    remaining = [int(t) for t in segment]
+    target = (
+        int(prompt_length) - max(0, int(margin))
+        if requested_target is None
+        else int(requested_target)
+    )
+    if not 0 < target < int(prompt_length):
+        return SnapshotSegmentPlan([remaining], None)
+    relative = target - max(0, int(reused))
+    if 0 < relative < len(remaining):
+        return SnapshotSegmentPlan(
+            [remaining[:relative], remaining[relative:]], target
+        )
+    return SnapshotSegmentPlan([remaining], target)
 
 
 def _layer_trimmable(layer: Any) -> bool:
@@ -100,6 +154,31 @@ def _offsets_consistent(layers: Sequence[Any], expected: int) -> bool:
         except (TypeError, ValueError):
             return False
     return True
+
+
+def snapshot_matches_prompt(
+    layers: Optional[Sequence[Any]],
+    extracted_tokens: Optional[Sequence[int]],
+    prompt_tokens: Sequence[int],
+    expected: int,
+) -> bool:
+    """Validate one BatchGenerator per-sequence cache extraction.
+
+    mlx_lm right-pads unequal prompt chunks while processing a batch, then
+    converts that padding into per-sequence left padding before
+    ``extract_cache(uid)``. Its returned token list is never padded, making an
+    exact token-prefix comparison the strongest portable proof that the cache
+    belongs to this sequence and boundary. Layer offsets add a second proof
+    where the cache type exposes them; offset-less state caches are accepted
+    when the extracted tokens align exactly.
+    """
+    if expected <= 0 or not layers or extracted_tokens is None:
+        return False
+    actual = [int(t) for t in extracted_tokens]
+    wanted = [int(t) for t in prompt_tokens[:expected]]
+    if len(actual) != expected or actual != wanted:
+        return False
+    return _offsets_consistent(layers, expected)
 
 
 def trim_layers(layers: Sequence[Any], n: int) -> bool:

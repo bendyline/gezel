@@ -208,6 +208,8 @@ export const TaskCraftbookSchema = z.object({
   entryStepId: z.string().min(1),
   triggers: z.array(z.string()).optional(),
   hooks: z.array(HookSpecSchema).optional(),
+  /** Invocation schema retained with the task snapshot for audit/UI context. */
+  paramSchema: z.record(z.string(), z.unknown()).optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   /**
    * Embedded script sources snapshotted from the source craftbook, so the

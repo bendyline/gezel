@@ -158,4 +158,69 @@ describe('shared chat events', () => {
     expect(raced).toBe('empty');
     finish.resolve();
   });
+
+  it('replays tools and one current phase after a chatty MLX stream', async () => {
+    const finish = deferred();
+    streams.all.mockReset();
+    streams.all.mockImplementation(async function* (_opts: SseStreamOptions) {
+      yield {
+        sessionId: 's-chatty',
+        gezelId: 'g1',
+        projectId: 'p1',
+        event: { type: 'user_message', message: { role: 'user', content: 'go', at: 't0' } },
+      } satisfies ChatEventEnvelope;
+      yield {
+        sessionId: 's-chatty',
+        gezelId: 'g1',
+        projectId: 'p1',
+        event: { type: 'tool', name: 'delegate_builder', durationMs: 5, success: true },
+      } satisfies ChatEventEnvelope;
+      for (let i = 0; i < 3; i++) {
+        yield {
+          sessionId: 's-chatty',
+          gezelId: 'g1',
+          projectId: 'p1',
+          event: { type: 'delta', content: `t${i}` },
+        } satisfies ChatEventEnvelope;
+        yield {
+          sessionId: 's-chatty',
+          gezelId: 'g1',
+          projectId: 'p1',
+          event: {
+            type: 'engine_phase',
+            provider: 'mlx',
+            phase: 'generating',
+            detail: `Generating · ${i} tokens`,
+          },
+        } satisfies ChatEventEnvelope;
+      }
+      await finish.promise;
+    });
+
+    const opts = {
+      url: 'http://127.0.0.1/events/chat/all?chatty=1',
+      headers: { Authorization: 'Bearer z' },
+    };
+    const earlyController = new AbortController();
+    const early = streamSharedAllChatEvents({ ...opts, signal: earlyController.signal });
+    for (let i = 0; i < 8; i++) await early.next();
+
+    const lateController = new AbortController();
+    const late = streamSharedAllChatEvents({ ...opts, signal: lateController.signal });
+    const replayed = [];
+    for (let i = 0; i < 4; i++) replayed.push((await late.next()).value!);
+    expect(replayed.map((env) => env.event.type)).toEqual([
+      'user_message',
+      'tool',
+      'delta',
+      'engine_phase',
+    ]);
+    expect(replayed[1]?.event).toMatchObject({ name: 'delegate_builder' });
+    expect(replayed[2]?.event).toEqual({ type: 'delta', content: 't0t1t2' });
+    expect(replayed[3]?.event).toMatchObject({ detail: 'Generating · 2 tokens' });
+
+    lateController.abort();
+    earlyController.abort();
+    finish.resolve();
+  });
 });

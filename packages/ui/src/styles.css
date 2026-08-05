@@ -16733,6 +16733,10 @@ a.license-button:hover {
   gap: 0.6rem;
 }
 
+.new-gezel-gender-field select {
+  margin-left: 0.5rem;
+}
+
 .new-gezel-template-tab {
   display: flex;
   flex-direction: column;

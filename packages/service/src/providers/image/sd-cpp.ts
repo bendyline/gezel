@@ -35,6 +35,7 @@ import {
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import { resolveImg2ImgSupport } from './img2img-support.js';
 import type {
   ImageEngineHealth,
   ImageGenerationInput,
@@ -262,7 +263,26 @@ export class StableDiffusionCppProvider implements ImageProvider {
     // actually take effect. `cfg_scale` is set per model (distilled /
     // Flux-flow models need CFG 1; others inherit the server default).
     const cfg = modelId ? MODEL_CFG_DEFAULTS.get(modelId) : undefined;
-    const inputImages = input.inputImages ?? [];
+    let inputImages = input.inputImages ?? [];
+    // Capability gate: models whose architecture doesn't honor init
+    // latents on the pinned sd-server fall back to txt2img instead of
+    // silently producing an "edit" that never saw the source. The skip
+    // is reported on meta so every caller (route, MCP tool, chat
+    // bubble) can say so honestly.
+    let img2imgSkippedReason: string | undefined;
+    if (inputImages.length > 0) {
+      const installed = await this.readInstalledManifestFields(modelId);
+      const verdict = resolveImg2ImgSupport({
+        modelId,
+        explicit: installed?.supportsImg2Img,
+        weightsKind: installed?.weightsKind,
+      });
+      if (!verdict.supported) {
+        img2imgSkippedReason = verdict.reason ?? 'model does not support image editing (img2img)';
+        log.info(`[sd-cpp] dropping ${inputImages.length} input image(s): ${img2imgSkippedReason}`);
+        inputImages = [];
+      }
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
     let res: Response;
@@ -332,6 +352,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
         widthPx: width,
         heightPx: height,
         durationMs: Date.now() - started,
+        ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
       },
     };
   }
@@ -350,6 +371,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
           name?: string;
           approxSizeBytes?: number;
           installedAt?: string;
+          weightsKind?: 'checkpoint' | 'diffusion-model';
+          supportsImg2Img?: boolean;
           fileSha256?: Record<string, string>;
         };
         if (!parsed.id || !parsed.name || !parsed.approxSizeBytes || !parsed.installedAt) continue;
@@ -361,6 +384,10 @@ export class StableDiffusionCppProvider implements ImageProvider {
           name: parsed.name,
           approxSizeBytes: parsed.approxSizeBytes,
           installedAt: parsed.installedAt,
+          ...(parsed.weightsKind ? { weightsKind: parsed.weightsKind } : {}),
+          ...(typeof parsed.supportsImg2Img === 'boolean'
+            ? { supportsImg2Img: parsed.supportsImg2Img }
+            : {}),
         });
       } catch {
         /* skip malformed entries */
@@ -439,6 +466,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
           approxSizeBytes: totalAllBytes,
           weightsFilename,
           weightsKind: spec.weightsKind,
+          ...(spec.supportsImg2Img !== undefined ? { supportsImg2Img: spec.supportsImg2Img } : {}),
           weightsSizeBytes: weightsActualSize,
           sha256: spec.sha256.toLowerCase(),
           auxiliaryFiles: auxiliaryRecords,
@@ -633,22 +661,53 @@ export class StableDiffusionCppProvider implements ImageProvider {
 
   private async defaultSampleSteps(modelId: string | undefined): Promise<number> {
     if (!modelId) return DEFAULT_SAMPLE_STEPS;
-    try {
-      const root = await findModelRoot(this.storageRoots, modelId);
-      if (!root) return DISTILLED_MODEL_SAMPLE_STEPS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
-      const raw = await readFile(join(root, modelId, 'manifest.json'), 'utf8');
-      const parsed = JSON.parse(raw) as { recommendedSteps?: unknown };
-      if (
-        typeof parsed.recommendedSteps === 'number' &&
-        Number.isInteger(parsed.recommendedSteps) &&
-        parsed.recommendedSteps > 0
-      ) {
-        return parsed.recommendedSteps;
-      }
-    } catch {
-      /* Older installed metadata did not persist catalog generation defaults. */
+    const fields = await this.readInstalledManifestFields(modelId);
+    if (
+      typeof fields?.recommendedSteps === 'number' &&
+      Number.isInteger(fields.recommendedSteps) &&
+      fields.recommendedSteps > 0
+    ) {
+      return fields.recommendedSteps;
     }
     return DISTILLED_MODEL_SAMPLE_STEPS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
+  }
+
+  /**
+   * Read the installed `manifest.json` fields that steer per-model
+   * behavior. Returns null for unknown ids and unreadable/legacy
+   * metadata — callers fall back to their per-field defaults. (Older
+   * installed metadata did not persist catalog generation defaults or
+   * the img2img capability.)
+   */
+  private async readInstalledManifestFields(modelId: string | undefined): Promise<{
+    recommendedSteps?: number;
+    weightsKind?: 'checkpoint' | 'diffusion-model';
+    supportsImg2Img?: boolean;
+  } | null> {
+    if (!modelId) return null;
+    try {
+      const root = await findModelRoot(this.storageRoots, modelId);
+      if (!root) return null;
+      const raw = await readFile(join(root, modelId, 'manifest.json'), 'utf8');
+      const parsed = JSON.parse(raw) as {
+        recommendedSteps?: unknown;
+        weightsKind?: unknown;
+        supportsImg2Img?: unknown;
+      };
+      return {
+        ...(typeof parsed.recommendedSteps === 'number'
+          ? { recommendedSteps: parsed.recommendedSteps }
+          : {}),
+        ...(parsed.weightsKind === 'checkpoint' || parsed.weightsKind === 'diffusion-model'
+          ? { weightsKind: parsed.weightsKind }
+          : {}),
+        ...(typeof parsed.supportsImg2Img === 'boolean'
+          ? { supportsImg2Img: parsed.supportsImg2Img }
+          : {}),
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

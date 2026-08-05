@@ -193,8 +193,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         name: 'message_gezel',
         arguments: {
           gezel: 'maya',
-          message: 'Create the requested deck.',
-          expectedDeliverable: { kind: 'file', filePath: 'd-day.pptx' },
+          message: 'Create the requested page.',
+          expectedDeliverable: { kind: 'file', filePath: 'index.html' },
         },
       },
     ]);
@@ -202,7 +202,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     // handoff is nevertheless the terminal action for this sender turn.
     mock.script('Let me hand this off.');
 
-    await manager.send(session.id, 'Create a PowerPoint about D-Day.');
+    await manager.send(session.id, 'Create a single-file project page.');
 
     const senderSends = mock.calls.filter(
       (call) => call.kind === 'send' && call.sendOpts?.queue?.sessionId === session.id,

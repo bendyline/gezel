@@ -300,11 +300,10 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             cache_id: prefixId,
-            // The "system" role gives the model the same context it'll
-            // see at chat time; we don't follow with a user message
-            // because we just want the system-prompt prefill state.
-            // mlx_vlm.apply_chat_template tolerates a system-only
-            // sequence and produces a deterministic prefix.
+            // The "system" role gives the model the same context it'll see at
+            // chat time. The sidecar supplies two different synthetic users
+            // for templates that reject system-only input, then snapshots
+            // their stable token prefix before either user turn.
             messages: [{ role: 'system', content: systemPrompt }],
             // Critical: persist=true writes the warmed entry to disk so
             // sibling sessions opened after this process restart still

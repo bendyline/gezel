@@ -194,6 +194,113 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(manager.inflightInfo(session.id)).toBeNull();
   }, 30_000);
 
+  it('threads a removal follow-up as a seed-stable revise with a negative prompt', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: {
+        fixedFunction: {
+          tool: 'generate_image',
+          promptKey: 'prompt',
+        },
+      },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+
+    const first = await manager.send(
+      session.id,
+      'woodcut style image of a dutch artisan craftsman',
+    );
+    expect(first.toolCalls?.[0]?.success).toBe(true);
+
+    // The generation is persisted on the session for follow-up threading.
+    const afterFirst = await store.getSession(gezel.id, session.id);
+    const prev = afterFirst?.lastImageGeneration;
+    expect(prev?.prompt).toBe('woodcut style image of a dutch artisan craftsman');
+    expect(prev?.artifactPath).toMatch(/^generated\/image-.*\.png$/);
+    expect(prev?.seed).toBeTypeOf('number');
+
+    // Script the one-shot composer reply the refinement will request.
+    mock.script(
+      'PROMPT: woodcut style image of a dutch artisan craftsman, clean lower margin\nAVOID: lettering, text',
+    );
+    const second = await manager.send(session.id, 'no lettering at the bottom?');
+
+    expect(second.toolCalls?.[0]?.success).toBe(true);
+    const args = second.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('woodcut style image of a dutch artisan craftsman, clean lower margin');
+    expect(args).toContain('negativePrompt: lettering, text');
+    expect(args).toContain(`seed: ${prev!.seed}`);
+    // A removal must NOT go through img2img — the unwanted element is
+    // baked into the init latents; seed-stable txt2img drops it instead.
+    expect(args).not.toContain('inputImages');
+
+    const afterSecond = await store.getSession(gezel.id, session.id);
+    expect(afterSecond?.lastImageGeneration?.prompt).toContain('clean lower margin');
+  }, 30_000);
+
+  it('threads an additive follow-up as an img2img edit of the previous image', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: {
+        fixedFunction: {
+          tool: 'generate_image',
+          promptKey: 'prompt',
+        },
+      },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+
+    await manager.send(session.id, 'woodcut style image of a dutch artisan craftsman');
+    const prev = (await store.getSession(gezel.id, session.id))?.lastImageGeneration;
+    expect(prev?.artifactPath).toBeDefined();
+
+    mock.script(
+      'PROMPT: woodcut style image of a dutch artisan craftsman wearing a red hat\nAVOID: none',
+    );
+    const second = await manager.send(session.id, 'add a red hat');
+
+    expect(second.toolCalls?.[0]?.success).toBe(true);
+    const args = second.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('wearing a red hat');
+    expect(args).toContain('inputImages');
+    expect(args).toContain(prev!.artifactPath);
+    expect(args).toContain('strength: 0.6');
+
+    // The mock image provider actually received the source image.
+    const imageProvider = (await svc.context.imageProvider.current()) as unknown as {
+      lastInputImageCount: number;
+    };
+    expect(imageProvider.lastInputImageCount).toBe(1);
+  }, 30_000);
+
+  it('falls back to deterministic composition when the composer one-shot fails', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: {
+        fixedFunction: {
+          tool: 'generate_image',
+          promptKey: 'prompt',
+        },
+      },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+
+    await manager.send(session.id, 'woodcut style image of a dutch artisan craftsman');
+
+    // Composer one-shot errors → heuristic composition: previous prompt
+    // kept, removal routed into the negative prompt.
+    mock.scriptSendFailure('engine busy');
+    const second = await manager.send(session.id, 'no lettering at the bottom?');
+
+    expect(second.toolCalls?.[0]?.success).toBe(true);
+    const args = second.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('prompt: woodcut style image of a dutch artisan craftsman');
+    expect(args).toContain('negativePrompt: lettering at the bottom');
+  }, 30_000);
+
   it('honors an inline image-file handoff path without polluting the image prompt', async () => {
     const gezel = await store.createGezel({
       name: 'Picasso',

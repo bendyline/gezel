@@ -2499,6 +2499,8 @@ export class GezelClient {
       secrets?: Record<string, string>;
       /** Pin to a specific catalog version. Omit for "install latest." */
       version?: string;
+      /** Pin to an exact catalog source when provenance is security-relevant. */
+      sourceId?: string;
     },
   ): Promise<{ ok: true; installed: InstalledToolset }> {
     return this.request('POST', `/api/catalog/toolset/${encodeURIComponent(id)}/install`, body);

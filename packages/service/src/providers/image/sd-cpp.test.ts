@@ -64,6 +64,104 @@ describe('StableDiffusionCppProvider.generate', () => {
     expect(out.meta.heightPx).toBe(128);
   });
 
+  it('routes input images to img2img for a model that supports it', async () => {
+    const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fakeFetch: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ images: [pngB64] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: fakeFetch,
+    });
+
+    const out = await provider.generate({
+      prompt: 'same craftsman, no lettering',
+      model: 'sd-1.5',
+      seed: 7,
+      inputImages: [{ data: Buffer.from('fake-png'), mimeType: 'image/png' }],
+      strength: 0.6,
+    });
+
+    expect(calls[0]!.url).toBe('http://fake:9081/sdapi/v1/img2img');
+    expect(calls[0]!.body.init_images).toEqual([Buffer.from('fake-png').toString('base64')]);
+    expect(calls[0]!.body.denoising_strength).toBe(0.6);
+    expect(out.meta.img2imgSkippedReason).toBeUndefined();
+  });
+
+  it('drops input images for a model assessed as txt2img-only and reports the skip', async () => {
+    const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fakeFetch: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ images: [pngB64] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: fakeFetch,
+    });
+
+    const out = await provider.generate({
+      prompt: 'same craftsman, no lettering',
+      model: 'flux-2-klein-4b-q4',
+      inputImages: [{ data: Buffer.from('fake-png'), mimeType: 'image/png' }],
+      strength: 0.6,
+    });
+
+    expect(calls[0]!.url).toBe('http://fake:9081/sdapi/v1/txt2img');
+    expect(calls[0]!.body.init_images).toBeUndefined();
+    expect(out.meta.img2imgSkippedReason).toMatch(/flux-2-klein-4b-q4/);
+  });
+
+  it('lets an explicit installed-manifest capability override the assessment map', async () => {
+    await mkdir(join(modelsRoot, 'flux-2-klein-4b-q4'), { recursive: true });
+    await writeFile(
+      join(modelsRoot, 'flux-2-klein-4b-q4', 'manifest.json'),
+      JSON.stringify({
+        id: 'flux-2-klein-4b-q4',
+        name: 'FLUX.2 Klein',
+        approxSizeBytes: 1,
+        installedAt: new Date().toISOString(),
+        weightsKind: 'diffusion-model',
+        supportsImg2Img: true,
+      }),
+      'utf8',
+    );
+    const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
+    const calls: Array<{ url: string }> = [];
+    const fakeFetch: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url) });
+      void init;
+      return new Response(JSON.stringify({ images: [pngB64] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: fakeFetch,
+    });
+
+    const out = await provider.generate({
+      prompt: 'edit it',
+      model: 'flux-2-klein-4b-q4',
+      inputImages: [{ data: Buffer.from('fake-png'), mimeType: 'image/png' }],
+    });
+
+    expect(calls[0]!.url).toBe('http://fake:9081/sdapi/v1/img2img');
+    expect(out.meta.img2imgSkippedReason).toBeUndefined();
+  });
+
   it('surfaces unreachable-server errors with a helpful message', async () => {
     const fakeFetch: typeof fetch = async () => {
       throw new Error('ECONNREFUSED');

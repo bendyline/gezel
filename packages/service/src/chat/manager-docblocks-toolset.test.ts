@@ -38,15 +38,15 @@ let mock: MockProvider;
 const docblocksToolset = (installPath: string, args: string[] = ['mcp']): InstalledToolset => ({
   toolsetId: 'docblocks',
   sourceId: 'bundled',
-  version: '2.0.0',
+  version: '2.3.4',
   installedAt: '2026-07-14T00:00:00Z',
   installPath,
   runtime: {
     kind: 'npm-package',
     package: '@bendyline/docblocks-cli',
-    version: '2.0.0',
-    sha256: 'd4e71b41dfd4ae5f90abac45a163c8dd9d5f5b01393f6237968ab5db205ce1f1',
-    entry: 'dist/index.js',
+    version: '2.3.4',
+    sha256: 'f9ebde4f7ea370778c9becf2a4f7a15fd435b4f2bcfdbcdf0f4242a1ef2db674',
+    entry: 'dist/bin.js',
     args,
     envHints: [],
   },
@@ -64,7 +64,7 @@ beforeEach(async () => {
   await store.createGezel({ name: 'Ada', role: 'Developer' });
   await store.createProject({ name: 'Default' });
   await mkdir(join(home, 'stub', 'dist'), { recursive: true });
-  await writeFile(join(home, 'stub', 'dist', 'index.js'), '#!/usr/bin/env node\n');
+  await writeFile(join(home, 'stub', 'dist', 'bin.js'), '#!/usr/bin/env node\n');
   events = new ChatEventBus();
   mock = new MockProvider({ name: 'copilot' });
   manager = new ChatManager({
@@ -121,7 +121,7 @@ describe('ChatManager — docblocks toolset spawn grants project roots', () => {
     expect(spec).toBeTruthy();
     const args = spec?.args ?? [];
 
-    expect(args[0]).toBe(join(home, 'stub', 'dist', 'index.js'));
+    expect(args[0]).toBe(join(home, 'stub', 'dist', 'bin.js'));
     expect(args[1]).toBe('mcp');
 
     const workspaceDir = await store.projectWorkspaceDir('default');

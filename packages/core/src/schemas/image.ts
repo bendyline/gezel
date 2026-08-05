@@ -105,6 +105,15 @@ export const ImageGenerationMetaSchema = z.object({
   widthPx: z.number().int().positive(),
   heightPx: z.number().int().positive(),
   durationMs: z.number().int().nonnegative(),
+  /**
+   * Set when the request supplied `inputImages` but the resolved model
+   * does not support img2img — the provider dropped the source images
+   * and generated from the prompt alone. Carries a human-readable
+   * reason ("model X does not support image editing (img2img)").
+   * Callers surfacing the result should mention the skip so nobody
+   * believes an edit happened when a fresh generation did.
+   */
+  img2imgSkippedReason: z.string().optional(),
 });
 export type ImageGenerationMeta = z.infer<typeof ImageGenerationMetaSchema>;
 
@@ -147,6 +156,13 @@ export const InstalledImageModelSchema = z.object({
   /** `'local'` for sd-cpp/mock, `'cloud'` for Google/OpenAI. Optional for
    *  back-compat with older responses. */
   kind: z.enum(['local', 'cloud']).optional(),
+  /**
+   * Whether this model can edit a source image (img2img). Resolved by
+   * the service from the catalog declaration, the per-model assessment
+   * map, and the weights-kind default; cloud models are always capable.
+   * Optional for back-compat with older responses.
+   */
+  supportsImg2Img: z.boolean().optional(),
 });
 export type InstalledImageModel = z.infer<typeof InstalledImageModelSchema>;
 

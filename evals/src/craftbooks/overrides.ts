@@ -13,6 +13,8 @@ export interface CraftbookEvalOverride {
   existingScenarioId?: string;
   coverage: CraftbookEvalSpec['coverage'];
   gaps?: string[];
+  /** Run this non-fanout book through the real task/step dispatcher. */
+  runAsCraftbookTask?: boolean;
 }
 
 export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
@@ -1491,14 +1493,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'powerpoint-deck': {
+    runAsCraftbookTask: true,
     coverage: {
       status: 'implemented',
       notes:
-        'The latest sidecar checks the one-H1-per-slide Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset and real PPTX artifact gate; the revised workflow has not yet been run on a local model.',
+        'Runs the real multi-role craftbook task against a project-scoped fake DocBlocks MCP. Deterministic gates require convert, preview, save, and a ZIP-shaped PPTX at the requested workspace path; local-model validation is still pending.',
     },
-    gaps: [
-      'Add a fake DocBlocks MCP that returns a deterministic PPTX artifact and slide previews, then assert the saved binary and tool-call sequence.',
-    ],
+    gaps: ['Run the new end-to-end fake-DocBlocks scenario on at least one local model.'],
   },
   'pr-security-review': {
     coverage: {

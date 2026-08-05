@@ -265,6 +265,7 @@ async function setupMockServices(
 ): Promise<void> {
   const mocks = ctx.mocks;
   if (!mocks) return;
+  mocks.bindProject(projectId);
   const grants = mocks.projectGrants();
   if (grants.grantedCredentials.length > 0) {
     await ctx.client.updateProject(projectId, grants);
@@ -293,25 +294,25 @@ async function setupMockServices(
 }
 
 /**
- * Install the local-catalog `mock-mcp-<id>` toolset for every `mcp` mock
- * onto the gezel that will do the work. The runner already wrote the
+ * Install the local-catalog MCP toolset for every `mcp` mock at project
+ * scope. The runner already wrote the
  * manifests into the trial home's local catalog root before the daemon
- * spawned, so this rides the ordinary catalog-install rail — the gezel's
- * next session build bridges the fake MCP over Streamable HTTP and its
- * tools land on the normal roster.
+ * spawned, so this rides the ordinary catalog-install rail. Project scope is
+ * load-bearing for multi-role craftbooks: Planner, Copywriter, Designer, and
+ * Reviewer sessions must all see the same fake dependency.
  */
 async function installMockMcpToolsets(
   ctx: EvalContext,
   spec: CraftbookEvalSpec,
-  gezelId: string,
+  projectId: string,
 ): Promise<void> {
   for (const mock of spec.mocks ?? []) {
     if (mock.kind !== 'mcp') continue;
-    const toolsetId = mockMcpToolsetId(mock.id);
+    const toolsetId = mockMcpToolsetId(mock.id, mock.toolsetId);
     await ctx.client.installToolset(toolsetId, {
-      scope: { kind: 'gezel', gezelId },
+      scope: { kind: 'project', projectId },
     });
-    ctx.log(`[craftbook:${spec.craftbookId}] installed ${toolsetId} toolset for ${gezelId}`);
+    ctx.log(`[craftbook:${spec.craftbookId}] installed ${toolsetId} toolset for ${projectId}`);
   }
 }
 
@@ -340,7 +341,8 @@ async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<
 /** `createTask` requires a description of at least 40 chars. */
 function craftbookTaskDescription(spec: CraftbookEvalSpec): string {
   const base = (spec.objective ?? '').trim() || spec.title;
-  return `${base} Run this craftbook end to end in this project until the deterministic eval deliverables exist.`;
+  const request = spec.prompt?.trim();
+  return `${base} Run this craftbook end to end in this project until the deterministic eval deliverables exist.${request ? ` User request: ${request}` : ''}`;
 }
 
 /**
@@ -363,6 +365,9 @@ async function dispatchCraftbookTask(
     title: spec.title,
     description: craftbookTaskDescription(spec),
     craftbookId: spec.craftbookId,
+    ...(spec.success.deliverables?.[0]?.path
+      ? { craftbookParams: { outputPath: spec.success.deliverables[0].path } }
+      : {}),
     assignee: { kind: 'gezel', gezelId: workerId },
     dispatchEntry: true,
   });
@@ -1107,15 +1112,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       const projectId = await ensureProject(ctx, spec);
       if (projectId) await writeFixtureFiles(ctx, projectId, spec);
       if (projectId && ctx.mocks) await setupMockServices(ctx, projectId, spec);
-      // Meester-routed books (no direct worker) still need the fake MCP
-      // on the gezel that receives the kickoff.
-      if (projectId && ctx.mocks && !spec.setup?.worker) {
-        await installMockMcpToolsets(ctx, spec, ctx.meesterId);
-      }
+      if (projectId && ctx.mocks) await installMockMcpToolsets(ctx, spec, projectId);
       if (projectId && spec.setup?.worker) {
         const workerId = await ensureWorker(ctx, spec);
         if (!workerId) return;
-        if (ctx.mocks) await installMockMcpToolsets(ctx, spec, workerId);
         if (directWorkerNeedsWorkspaceToolsets(spec)) {
           await ensureWorkspaceToolsetsForWorker(ctx.client, workerId);
           ctx.log(

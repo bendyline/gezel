@@ -218,6 +218,14 @@ import {
 } from './fixed-function-adapters.js';
 import { extractImageAttachments } from './image-attachments.js';
 import {
+  IMG2IMG_EDIT_STRENGTH,
+  classifyImageFollowUp,
+  composeImageRefinementPrompt,
+  extractGeneratedImageArtifactPath,
+  extractGeneratedImageModel,
+  extractGeneratedImageSeed,
+} from './image-refinement.js';
+import {
   type LocalModelTier,
   classifyLocalModelTier,
   parseBillionsFromModelId,
@@ -3407,11 +3415,15 @@ export class ChatManager {
       args.expectedDeliverable?.kind === 'file'
         ? args.expectedDeliverable.filePath?.trim()
         : undefined;
+    if (requestedFilePath && isExpectedBinaryDocumentDeliverablePath(requestedFilePath)) {
+      throw new Error(
+        `binary deliverable "${requestedFilePath}" cannot be sent as an ad-hoc gezel handoff; invoke the matching craftbook so its required production toolset, specialist roles, gates, and visual review are enforced`,
+      );
+    }
     if (
       requestedFilePath &&
       isPureDelegationRole(target.role) &&
       !isExpectedImageDeliverablePath(requestedFilePath) &&
-      !isExpectedBinaryDocumentDeliverablePath(requestedFilePath) &&
       (target.parsed.frontmatter.tools?.length ?? 0) === 0
     ) {
       throw new Error(
@@ -7714,6 +7726,52 @@ export class ChatManager {
         ? await this.resolveFixedFunctionTaskImageArgs(record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    // Follow-up threading for interactive image sessions. Without an LLM
+    // in the loop, "no lettering at the bottom" would otherwise become
+    // the ENTIRE prompt of an unrelated fresh generation. When the
+    // session has a previous generation and the message reads as a
+    // continuation, compose a full standalone prompt from the previous
+    // one (one-shot via the gezel's own model, deterministic fallback)
+    // and thread seed / source image so the composition carries over.
+    // Task-driven sessions skip this — their prompt is the task brief.
+    const refinementArgs: Record<string, unknown> = {};
+    if (ff.tool === 'generate_image' && !record.taskRef) {
+      const prev = record.lastImageGeneration;
+      const plan = classifyImageFollowUp(promptValue, Boolean(prev));
+      if (prev && plan !== 'fresh') {
+        if (plan === 'variation') {
+          // Same prompt, fresh seed — "another one" wants a sibling, not a copy.
+          promptValue = prev.prompt;
+          if (prev.negativePrompt) refinementArgs.negativePrompt = prev.negativePrompt;
+        } else {
+          const composed = await composeImageRefinementPrompt(
+            {
+              prompt: prev.prompt,
+              negativePrompt: prev.negativePrompt,
+              artifactPath: prev.artifactPath,
+              seed: prev.seed,
+            },
+            promptValue,
+            (input, timeoutMs) =>
+              this.oneShotCompletion(input, timeoutMs, {
+                gezelId: record.gezelId,
+                jobLabel: `image prompt · ${gezel.name}`,
+              }),
+          );
+          promptValue = composed.prompt;
+          if (composed.negativePrompt) refinementArgs.negativePrompt = composed.negativePrompt;
+          // Seed continuity keeps the composition recognizable across a
+          // revise — and backstops an edit when the model turns out not
+          // to support img2img and the engine drops the source image.
+          if (prev.seed !== undefined) refinementArgs.seed = prev.seed;
+          if (plan === 'edit') {
+            refinementArgs.inputImages = [{ artifactPath: prev.artifactPath }];
+            refinementArgs.strength = IMG2IMG_EDIT_STRENGTH;
+          }
+        }
+        log.info(`fixed-function#${tag} image follow-up (${plan}) threads previous generation`);
+      }
+    }
     // For the generative passthrough gezels, peel conversational framing
     // ("can you generate a smiling cat?" → "a smiling cat") — diffusion
     // models render the literal text, so the request words become subject
@@ -7738,6 +7796,7 @@ export class ChatManager {
     }
     const callArgs: Record<string, unknown> = {
       ...(ff.defaults ?? {}),
+      ...refinementArgs,
       [promptKey]: promptValue,
       ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
     };
@@ -7754,6 +7813,9 @@ export class ChatManager {
       // returns a tight summary, falling back to a first-sentence
       // trim for tools without a specific rule.
       assistantText = formatFixedFunctionResult(ff.tool, rawText, callArgs);
+      if (ff.tool === 'generate_image') {
+        this.recordLastImageGeneration(record, callArgs, promptKey, rawText);
+      }
     } catch (err) {
       success = false;
       errorMessage = err instanceof Error ? err.message : String(err);
@@ -7785,6 +7847,46 @@ export class ChatManager {
     this.events.publish(scope, { type: 'complete', message: assistantMessage });
     this.events.publish(scope, { type: 'done' });
     return assistantMessage;
+  }
+
+  /**
+   * Persist the just-completed generation on the session record so the
+   * next message can thread it (see {@link classifyImageFollowUp}). The
+   * artifact path is parsed from the tool's summary text — the canonical
+   * `generated/…` copy — with the bridge-persisted thumbnail artifact as
+   * a fallback; both resolve to the same bytes for img2img input. Parse
+   * failure just skips the record: follow-ups degrade to fresh
+   * generations, never errors. The session write happens with the
+   * assistant-message persist that follows every fixed-function turn.
+   */
+  private recordLastImageGeneration(
+    record: ChatSession,
+    callArgs: Record<string, unknown>,
+    promptKey: string,
+    rawText: string,
+  ): void {
+    const artifactPath =
+      extractGeneratedImageArtifactPath(rawText) ??
+      (this.currentTurnTools.get(record.id) ?? [])
+        .filter((t) => t.name === 'generate_image' && t.success)
+        .at(-1)?.images?.[0]?.path;
+    if (!artifactPath) return;
+    const promptArg = callArgs[promptKey];
+    if (typeof promptArg !== 'string' || promptArg.length === 0) return;
+    const negativePrompt =
+      typeof callArgs.negativePrompt === 'string' && callArgs.negativePrompt.length > 0
+        ? callArgs.negativePrompt
+        : undefined;
+    const seed = extractGeneratedImageSeed(rawText);
+    const model = extractGeneratedImageModel(rawText);
+    record.lastImageGeneration = {
+      prompt: promptArg,
+      ...(negativePrompt ? { negativePrompt } : {}),
+      artifactPath,
+      ...(seed !== undefined ? { seed } : {}),
+      ...(model ? { model } : {}),
+      at: nowIso(),
+    };
   }
 
   /**
@@ -18272,9 +18374,9 @@ export async function buildMlxProvider(opts: {
           ...(config.mlxPrefillStepSize
             ? ['--prefill-step-size', String(config.mlxPrefillStepSize)]
             : []),
-          // Batched generation: N>1 routes the wrapped server through one
-          // mlx_lm BatchGenerator (static-wave continuous batching). 1 keeps
-          // the serial stream_generate path (byte-identical to before).
+          // BatchGenerator width. Every positive value uses the snapshot-safe
+          // path; 1 is a singleton wave, N>1 batches co-arriving sequences.
+          // Only an explicit 0 selects the legacy serial fallback.
           '--max-concurrency',
           String(mlxBatchMaxConcurrency),
           // This engine's unified-memory SHARE (weights + KV + compute): the
@@ -18311,9 +18413,9 @@ export async function buildMlxProvider(opts: {
     supervisor,
     ...baseProviderOpts,
     // Engine batch width — matches the server's `--max-concurrency`. Widens
-    // the provider's queue + engine gate to N (1 = serial, the default).
-    // Supervised path only; external-baseUrl MLX stays serial (we don't
-    // control that server's --max-concurrency).
+    // the provider's queue + engine gate to N (1 = singleton BatchGenerator).
+    // Supervised path only; external-baseUrl MLX stays at one in-flight
+    // request because we don't control that server's width.
     batchMaxConcurrency: mlxBatchMaxConcurrency,
     // mlx_vlm.server's `/v1/chat/completions` keys its in-memory cache
     // on `request.model` and reloads when it doesn't match what was

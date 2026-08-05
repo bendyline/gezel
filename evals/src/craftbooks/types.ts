@@ -165,12 +165,11 @@ export interface CraftbookEvalSpec {
   /** Version of the test.json the spec was adapted from (shim provenance header). */
   testSpecVersion?: string;
   /**
-   * The book is a declarative-fanout spawn host (its `craftbook.json` carries
-   * a `spawn` block). The scenario runs it as a real craftbook TASK — create
+   * Run the book as a real craftbook TASK — create
    * the task from the craftbook and dispatch its entry step, so the runtime
-   * drives the step chain and the per-item fanout — instead of the freehand
-   * direct-worker kickoff. Scoped to spawn books only; non-spawn books keep
-   * the direct-worker path. Set from the loaded craftbook by the adapter.
+   * drives the step chain (and per-item fanout, when declared) instead of the
+   * freehand direct-worker kickoff. Set from the loaded craftbook or an eval
+   * override when the scenario must prove role routing and tool handoffs.
    */
   runAsCraftbookTask?: boolean;
 }

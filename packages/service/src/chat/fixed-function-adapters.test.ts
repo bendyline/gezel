@@ -104,6 +104,17 @@ describe('formatFixedFunctionResult — generate_image adapter', () => {
     const raw = 'Image rendered. Some other detail line.';
     expect(formatFixedFunctionResult('generate_image', raw, {})).toBe('Image rendered.');
   });
+
+  it('surfaces an img2img skip so the user knows no edit happened', () => {
+    const raw =
+      'Generated 512×512 image with flux-2-klein-4b-q4 (seed 42, 4 steps, 800ms). ' +
+      'NOTE: the source image was not used — model flux-2-klein-4b-q4 does not support image ' +
+      'editing (img2img) on the bundled engine; the image was generated from the prompt alone. ' +
+      'The user already sees this image inline below the tool call.';
+    expect(formatFixedFunctionResult('generate_image', raw, {})).toBe(
+      'Generated 512×512 image with flux-2-klein-4b-q4. (This model cannot edit an existing image — regenerated from the revised prompt instead.)',
+    );
+  });
 });
 
 describe('cleanGenerativePrompt', () => {

@@ -73,9 +73,7 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
   const [renaming, setRenaming] = useState(false);
   const isFixedFunction = selected?.fixedFunction !== undefined;
   const activeDetailTab =
-    isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories')
-      ? 'chat'
-      : detailTab;
+    isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories') ? 'chat' : detailTab;
   const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
 
   const selectedRef = useRef<GezelDetailData | null>(null);

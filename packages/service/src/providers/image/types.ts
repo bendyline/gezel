@@ -71,6 +71,13 @@ export interface ImageGenerationMeta {
   widthPx: number;
   heightPx: number;
   durationMs: number;
+  /**
+   * Set when `inputImages` were supplied but the resolved model does not
+   * support img2img — the provider dropped the sources and generated from
+   * the prompt alone. Mirrors the core wire schema so the route can
+   * forward it untouched.
+   */
+  img2imgSkippedReason?: string;
 }
 
 export interface ImageGenerationOutput {
@@ -83,6 +90,10 @@ export interface InstalledImageModelInfo {
   name: string;
   approxSizeBytes: number;
   installedAt: string;
+  /** Loading shape recorded at pull time; absent on pre-capability installs. */
+  weightsKind?: 'checkpoint' | 'diffusion-model';
+  /** Explicit catalog capability recorded at pull time; absent → resolve via the ladder. */
+  supportsImg2Img?: boolean;
 }
 
 export type ImageModelPullEvent =
@@ -126,6 +137,14 @@ export interface ImageModelPullSpec {
    * `--diffusion-model <weights>` plus one `--<role>` flag per aux file.
    */
   weightsKind: 'checkpoint' | 'diffusion-model';
+  /**
+   * Explicit img2img capability from the catalog manifest, persisted
+   * into the installed metadata so local state stays self-describing
+   * even if the catalog entry later disappears. Absent when the catalog
+   * didn't declare it — resolution falls back to the assessment map +
+   * weights-kind default.
+   */
+  supportsImg2Img?: boolean;
   /** Auxiliary files (VAE, text encoders) downloaded alongside the unet. */
   auxiliaryFiles: ImageModelAuxiliaryPullSpec[];
 }

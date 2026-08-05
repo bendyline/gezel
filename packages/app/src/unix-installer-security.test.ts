@@ -138,6 +138,24 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('launchctl enable "system/${DAEMON_LABEL}"');
   });
 
+  it('documents and preserves the boundary between engine data and shared projects', () => {
+    expect(macUninstall).toContain('DATA_DIR="/Library/Application Support/Gezel"');
+    expect(macUninstall).toContain('MACHINE_SHARED_DIR="/Users/Shared/Gezel"');
+    expect(macUninstall).toContain('--purge-data additionally removes ONLY');
+    expect(macUninstall).toContain('This includes downloaded shared models.');
+    expect(macUninstall).toContain(
+      'This script never removes the two locations listed under "Always preserved."',
+    );
+    expect(macUninstall).toContain(
+      '[gezel uninstall] preserved machine-shared projects and gezels at ${MACHINE_SHARED_DIR}',
+    );
+    expect(macUninstall).toContain(
+      "[gezel uninstall] preserved every account's private Gezel data under ~/.gezel",
+    );
+    expect(macUninstall).toContain('rm -rf "$DATA_DIR"');
+    expect(macUninstall).not.toContain('rm -rf "$MACHINE_SHARED_DIR"');
+  });
+
   it('repairs a daemon account that kept its user but lost its group', () => {
     // Group creation lives inside the `user does not exist` branch, so a
     // machine holding the user without the group takes the *other* branch on

@@ -375,7 +375,7 @@ function ScratchTab({
           </button>
         </div>
       </label>
-      <label>
+      <label className="new-gezel-gender-field">
         Gender
         <select
           value={gender}

@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { pronounFormsForGender, pronounsForGender } from './names.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { pickRandomNameWithGender, pronounFormsForGender, pronounsForGender } from './names.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('gezel pronouns', () => {
   it.each([
@@ -23,5 +27,25 @@ describe('gezel pronouns', () => {
 
   it('uses neutral forms for a legacy gezel without an assigned gender', () => {
     expect(pronounFormsForGender(undefined)).toEqual(pronounFormsForGender('non-binary'));
+  });
+});
+
+describe('random gezel names', () => {
+  it('sets the gender to non-binary within the 4% roll', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.25)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.039);
+
+    expect(pickRandomNameWithGender().gender).toBe('non-binary');
+  });
+
+  it('keeps the name-derived gender at the 4% boundary', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.25)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.04);
+
+    expect(pickRandomNameWithGender().gender).toBe('female');
   });
 });

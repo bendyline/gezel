@@ -82,6 +82,74 @@ check("lcp divergent", cs.longest_common_prefix([1, 2, 3], [1, 9, 3]) == 1)
 check("lcp empty", cs.longest_common_prefix([], [1]) == 0)
 check("lcp prefix", cs.longest_common_prefix([1, 2], [1, 2, 3, 4]) == 2)
 
+# ---- stable_snapshot_boundary ----
+
+check(
+    "stable warm boundary backs off from synthetic-user divergence",
+    cs.stable_snapshot_boundary(
+        [1, 2, 3, 4, 5, 6, 7],
+        [1, 2, 3, 4, 5, 9, 9],
+        2,
+    )
+    == 3,
+)
+check(
+    "stable warm boundary clamps at zero",
+    cs.stable_snapshot_boundary([1, 2], [1, 9], 16) == 0,
+)
+
+# ---- plan_snapshot_segments ----
+
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, None, 16)
+check(
+    "normal snapshot plan cuts once at end minus margin",
+    snapshot_plan.target == 84
+    and list(map(len, snapshot_plan.segments)) == [84, 16],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(50)), 50, 100, None, 16)
+check(
+    "snapshot plan subtracts reused absolute prefix",
+    snapshot_plan.target == 84
+    and list(map(len, snapshot_plan.segments)) == [34, 16],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, 60, 16)
+check(
+    "warm snapshot plan honors custom stable target",
+    snapshot_plan.target == 60
+    and list(map(len, snapshot_plan.segments)) == [60, 40],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(10)), 90, 100, 84, 16)
+check(
+    "already-reused target needs no new segment edge",
+    snapshot_plan.target == 84 and len(snapshot_plan.segments) == 1,
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, 0, 16)
+check(
+    "explicit zero disables snapshot instead of choosing default",
+    snapshot_plan.target is None and len(snapshot_plan.segments) == 1,
+)
+
+# ---- snapshot_matches_prompt ----
+
+check(
+    "snapshot accepts exact per-sequence tokens",
+    cs.snapshot_matches_prompt([FullLayer(3)], [1, 2, 3], [1, 2, 3, 4], 3),
+)
+check(
+    "snapshot rejects right-padding leakage",
+    not cs.snapshot_matches_prompt(
+        [FullLayer(4)], [1, 2, 3, 0], [1, 2, 3, 4], 3
+    ),
+)
+check(
+    "snapshot rejects offset drift",
+    not cs.snapshot_matches_prompt([FullLayer(2)], [1, 2, 3], [1, 2, 3, 4], 3),
+)
+check(
+    "snapshot accepts offset-less state cache when tokens align",
+    cs.snapshot_matches_prompt([StateLayer()], [1, 2, 3], [1, 2, 3, 4], 3),
+)
+
 # ---- seed_from_state: fresh paths ----
 
 plan = cs.seed_from_state(None, [1, 2, 3])

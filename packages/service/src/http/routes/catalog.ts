@@ -52,6 +52,8 @@ const InstallToolsetRequestSchema = z.object({
   secrets: z.record(z.string(), z.string()).optional(),
   /** Optional explicit version pin. Default = catalog's auto-resolved latest. */
   version: z.string().optional(),
+  /** Optional exact catalog source pin (required for trusted auto-install rails). */
+  sourceId: z.string().optional(),
 });
 
 /**
@@ -284,7 +286,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       imported.push(definition.name);
     }
     await ctx.store.writeInstalledToolsets(body.scope, next);
-    await ctx.chat.resetClient();
+    await ctx.chat.resetClient({ deferBusy: true });
     return c.json({ ok: true as const, imported, warnings: parsed.warnings });
   });
 
@@ -406,7 +408,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       const project = await ctx.store.getProject(body.scope.projectId).catch(() => null);
       if (!project) return c.json({ error: 'project not found' }, 404);
     }
-    const detail = await ctx.catalog.get('toolset', id, undefined, body.version);
+    const detail = await ctx.catalog.get('toolset', id, body.sourceId, body.version);
     if (!detail) {
       return c.json(
         {
@@ -492,7 +494,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
 
     // New toolset → live chat sessions must be rebuilt so their MCP bridges
     // include the new server.
-    await ctx.chat.resetClient();
+    await ctx.chat.resetClient({ deferBusy: true });
 
     return c.json({ ok: true, installed: record });
   });

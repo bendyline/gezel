@@ -1,8 +1,8 @@
 import {
-  initialPoppetjeForGezel,
   type GezelSummary,
   type Task,
   type TaskNote,
+  initialPoppetjeForGezel,
 } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -160,9 +160,7 @@ describe('TaskDetail', () => {
     );
 
     await waitFor(() => {
-      expect(
-        container.querySelector('.task-note-author .gezel-icon-poppetje'),
-      ).not.toBeNull();
+      expect(container.querySelector('.task-note-author .gezel-icon-poppetje')).not.toBeNull();
     });
     expect(container.querySelector('.task-note-author')).toHaveTextContent('Maya');
   });

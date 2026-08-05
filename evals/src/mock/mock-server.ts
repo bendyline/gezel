@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Server } from 'node:https';
 import { createServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
+import { dirname, join } from 'node:path';
 import type { CraftbookTestSpec, MockService } from '@bendyline/gezel';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -54,8 +56,8 @@ export interface StartedMockService {
 }
 
 /** Catalog id of the local toolset that fronts a `kind:'mcp'` mock service. */
-export function mockMcpToolsetId(serviceId: string): string {
-  return `mock-mcp-${serviceId}`;
+export function mockMcpToolsetId(serviceId: string, explicitId?: string): string {
+  return explicitId ?? `mock-mcp-${serviceId}`;
 }
 
 export interface MockServicesRuntime {
@@ -82,11 +84,14 @@ export interface MockServicesRuntime {
    * catalog toolset. Empty when the book declares no mcp mocks.
    */
   mcpToolsetFiles(): Array<{ path: string; content: string }>;
+  /** Bind deterministic MCP file effects to the scenario's project. */
+  bindProject(projectId: string): void;
   close(): Promise<void>;
 }
 
 export async function startMockServices(
   mocks: CraftbookTestSpec['mocks'],
+  opts: { trialHome?: string } = {},
 ): Promise<MockServicesRuntime | null> {
   const live = mocks.filter(
     (mock): mock is Extract<MockService, { kind: 'http' | 'webhook' | 'mcp' }> =>
@@ -110,6 +115,7 @@ export async function startMockServices(
   const services = new Map<string, StartedMockService>();
   const servers: Server[] = [];
   const specById = new Map(live.map((mock) => [mock.id, mock]));
+  let boundProjectId: string | null = null;
 
   for (const mock of live) {
     const token = mock.kind === 'http' ? randomBytes(24).toString('hex') : null;
@@ -123,7 +129,10 @@ export async function startMockServices(
     };
     if (mock.kind === 'mcp') {
       const server = createServer({ key: pems.private, cert: pems.cert }, (req, res) => {
-        void handleMcpMockRequest(mock, started, req, res);
+        void handleMcpMockRequest(mock, started, req, res, {
+          trialHome: opts.trialHome,
+          projectId: boundProjectId,
+        });
       });
       await new Promise<void>((resolvePromise, rejectPromise) => {
         server.once('error', rejectPromise);
@@ -247,7 +256,7 @@ export async function startMockServices(
         if (mock.kind !== 'mcp') continue;
         const service = services.get(mock.id);
         if (!service) continue;
-        const toolsetId = mockMcpToolsetId(mock.id);
+        const toolsetId = mockMcpToolsetId(mock.id, mock.toolsetId);
         const shard = toolsetId.slice(0, 2).toLowerCase();
         const base = `toolsets/${shard}/${toolsetId}`;
         files.push({
@@ -370,6 +379,9 @@ export async function startMockServices(
         2,
       )}\n`;
     },
+    bindProject(projectId: string) {
+      boundProjectId = projectId;
+    },
     async close() {
       await Promise.all(
         servers.map(
@@ -467,6 +479,7 @@ async function handleMcpMockRequest(
   started: StartedMockService,
   req: IncomingMessage,
   res: ServerResponse,
+  fixtureContext: { trialHome?: string; projectId: string | null },
 ): Promise<void> {
   try {
     if (req.method !== 'POST') {
@@ -485,7 +498,7 @@ async function handleMcpMockRequest(
       // No inputSchema: the SDK skips argument validation entirely, so a
       // model may pass any args (e.g. `ack_alert({id})`) without a
       // rejection — the mock ignores them and serves the template.
-      server.registerTool(tool.name, { description: tool.description }, async () => {
+      server.registerTool(tool.name, { description: tool.description }, async (args) => {
         started.requests.push({
           at: new Date().toISOString(),
           method: 'POST',
@@ -494,6 +507,9 @@ async function handleMcpMockRequest(
           status: 200,
           authorized: true,
         });
+        if (tool.writeFixture) {
+          await materializeMockToolFixture(tool.writeFixture, args, fixtureContext);
+        }
         return {
           content: [{ type: 'text', text: JSON.stringify(tool.resultTemplate ?? { ok: true }) }],
         };
@@ -520,6 +536,133 @@ async function handleMcpMockRequest(
       res.end();
     }
   }
+}
+
+function valueAtPath(value: unknown, dottedPath: string): unknown {
+  let current = value;
+  for (const part of dottedPath.split('.')) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+/** Materialize a deterministic fixture through the trial project's real file surfaces. */
+export async function materializeMockToolFixture(
+  effect: {
+    surface: 'workspace' | 'artifact';
+    pathArgument: string;
+    fixture: 'minimal-pptx';
+  },
+  args: unknown,
+  context: { trialHome?: string; projectId: string | null },
+): Promise<void> {
+  if (!context.trialHome || !context.projectId) {
+    throw new Error('mock MCP file effect has no bound trial project');
+  }
+  const rawPath = valueAtPath(args, effect.pathArgument);
+  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) {
+    throw new Error(`mock MCP file effect expected string argument ${effect.pathArgument}`);
+  }
+  const normalized = rawPath.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  if (normalized.split('/').includes('..')) {
+    throw new Error('mock MCP file effect path must stay inside the project');
+  }
+  const drawer = effect.surface === 'artifact' ? 'artifacts' : 'workspace';
+  const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, minimalPptxFixture());
+}
+
+/** Small deterministic ZIP-shaped Open XML presentation used only by eval mocks. */
+export function minimalPptxFixture(): Uint8Array {
+  const files: Array<[string, string]> = [
+    [
+      '[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
+    ],
+    [
+      '_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>',
+    ],
+    [
+      'ppt/presentation.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>',
+    ],
+    [
+      'ppt/_rels/presentation.xml.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>',
+    ],
+    [
+      'ppt/slides/slide1.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>Deterministic DocBlocks eval deck</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>',
+    ],
+  ];
+  return zipStored(files);
+}
+
+function zipStored(files: Array<[string, string]>): Uint8Array {
+  const encoder = new TextEncoder();
+  const locals: Uint8Array[] = [];
+  const centrals: Uint8Array[] = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBytes = encoder.encode(name);
+    const data = encoder.encode(text);
+    const crc = crc32(data);
+    const local = new Uint8Array(30 + nameBytes.length + data.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    local.set(nameBytes, 30);
+    local.set(data, 30 + nameBytes.length);
+    locals.push(local);
+
+    const central = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint32(42, offset, true);
+    central.set(nameBytes, 46);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const centralSize = centrals.reduce((sum, entry) => sum + entry.length, 0);
+  const out = new Uint8Array(offset + centralSize + 22);
+  let cursor = 0;
+  for (const entry of locals) {
+    out.set(entry, cursor);
+    cursor += entry.length;
+  }
+  for (const entry of centrals) {
+    out.set(entry, cursor);
+    cursor += entry.length;
+  }
+  const end = new DataView(out.buffer, cursor, 22);
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, files.length, true);
+  end.setUint16(10, files.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, offset, true);
+  return out;
+}
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 /** Exact, `:param`-segment, or trailing-`*` path matching. */

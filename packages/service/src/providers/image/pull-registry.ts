@@ -110,6 +110,9 @@ export class ImageModelPullRegistry {
       approxSizeBytes: manifest.approxSizeBytes,
       name: manifest.name,
       weightsKind: manifest.weightsKind,
+      ...(manifest.supportsImg2Img !== undefined
+        ? { supportsImg2Img: manifest.supportsImg2Img }
+        : {}),
       auxiliaryFiles: manifest.auxiliaryFiles.map((aux) => ({
         role: aux.role,
         downloadUrl: aux.downloadUrl,

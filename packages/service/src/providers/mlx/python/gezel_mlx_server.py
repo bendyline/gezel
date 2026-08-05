@@ -230,11 +230,12 @@ parser.add_argument(
     type=int,
     default=1,
     help=(
-        "Max sequences to generate concurrently. 1 (default) keeps the "
-        "serial `stream_generate` + _GENERATION_LOCK path, byte-identical to "
-        "before. N>1 routes generation through a single mlx_lm BatchGenerator "
-        "(continuous batching) so up to N chat turns share batched decode "
-        "passes. Set from the TS provider's batchMaxConcurrency."
+        "Max sequences to generate concurrently. Any positive value routes "
+        "generation through a single mlx_lm BatchGenerator; 1 (default) is a "
+        "singleton queue that still uses the cache-safe prompt-boundary "
+        "snapshot path, while N>1 also enables continuous batching. Set 0 only "
+        "for the legacy serial stream_generate fallback. Set from the TS "
+        "provider's batchMaxConcurrency."
     ),
 )
 parser.add_argument(
@@ -738,18 +739,19 @@ def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
         print(f"[cache] prefix-seed failed for {gp}: {exc}", flush=True)
 
 
-# ───────── Batched / continuous-generation engine (--max-concurrency > 1) ─────────
+# ───────── BatchGenerator engine (--max-concurrency >= 1) ─────────
 #
-# When launched with --max-concurrency N>1, generation runs through a
-# single BatchEngine instead of the serial `stream_generate` +
-# _GENERATION_LOCK path. The engine owns one mlx_lm BatchGenerator
-# (continuous batching) driven by ONE asyncio worker on the event-loop
-# thread — MLX GPU streams are thread-local (see the chat_completions
-# note), so all model work stays on that thread, multiplexed across
-# sequences rather than serialized. Every per-session concern maps to a
-# per-sequence list in the BatchGenerator API (sampler, logits processors
-# incl. the tool grammar, seed KV cache, max_tokens); on finish we extract
-# the sequence's KV and persist it via the SAME _save_cache /
+# Any positive concurrency routes through BatchEngine instead of the legacy
+# serial `stream_generate` + _GENERATION_LOCK path. At N=1 this is still a
+# singleton queue, but it matters for correctness/performance: BatchGenerator
+# exposes prompt-segment boundaries, which lets windowed Qwen/Gemma caches save
+# a coherent prompt snapshot instead of cold-prefilling after every tool-loop
+# turn. At N>1 the same engine also continuously batches independent sequences.
+# One asyncio worker drives the generator on the event-loop thread — MLX GPU
+# streams are thread-local (see the chat_completions note). Every per-session
+# concern maps to a per-sequence list in the BatchGenerator API (sampler, logits
+# processors incl. the tool grammar, seed KV cache, max_tokens); on finish we
+# extract the sequence's KV and persist it via the SAME _save_cache /
 # _seed_prefix_from_session path the serial route uses.
 
 
@@ -825,10 +827,20 @@ class _Sub:
         "request", "prompt_tokens", "grammar", "seed_state", "request_id",
         "http_request", "uid", "queue", "cancelled", "token_ids", "emitted",
         "pinned_cache_ids", "prefill_total", "first_token_seen",
-        "reused_tokens", "seed_mode", "prompt_snapshot",
+        "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
+        "saved_cache_state",
     )
 
-    def __init__(self, request, prompt_tokens, grammar, seed_state, request_id, http_request):
+    def __init__(
+        self,
+        request,
+        prompt_tokens,
+        grammar,
+        seed_state,
+        request_id,
+        http_request,
+        snapshot_target=None,
+    ):
         self.request = request
         self.prompt_tokens = prompt_tokens   # List[int], full prompt
         self.grammar = grammar               # SafeToolGrammarProcessor | None
@@ -850,6 +862,14 @@ class _Sub:
         # the saved session entry stays a pure prefix of the next turn's
         # re-templated prompt. See cache_seed.probe_needs_prompt_snapshot.
         self.prompt_snapshot = None
+        # Absolute token boundary to capture. Normal turns default to
+        # len(prompt)-margin at admission; prefix warming supplies the stable
+        # boundary found by comparing two different synthetic user turns.
+        self.snapshot_target = snapshot_target
+        # The exact state committed at finish. Cache warming uses this direct
+        # reference for immediate persistence even if the memory-budget pass
+        # evicts the just-built entry from the global LRU.
+        self.saved_cache_state = None
 
 
 class BatchEngine:
@@ -973,7 +993,37 @@ class BatchEngine:
                 f"reused={plan.reused} prefill={len(plan.segment)}",
                 flush=True,
             )
+            if plan.mode == "fresh-untrimmable":
+                print(
+                    f"[batch] WARNING full prefill: cache_id={sub.request.cache_id} "
+                    f"had divergent untrimmable state without a reusable prompt "
+                    f"snapshot (tokens={len(plan.segment)})",
+                    flush=True,
+                )
         return plan.segment, plan.caches, plan.all_tokens
+
+    def _snapshot_segments(self, sub, segment):
+        """Plant exactly one per-sequence segment edge for KV extraction.
+
+        BatchGenerator reports every prefill chunk as a prompt response. The
+        old handler copied the growing cache at *every* chunk and kept only the
+        last copy. Long prompts therefore paid dozens of large, discarded KV
+        copies. A dedicated target makes capture one-shot and also works for
+        unequal-length multi-sequence waves: mlx_lm finalizes each chunk's
+        right-padding before returning, then extract_cache(uid) removes that
+        sequence's left-padding.
+        """
+        if not self._needs_snapshot or not sub.request.cache_id:
+            return [segment]
+        plan = cache_seed.plan_snapshot_segments(
+            segment,
+            sub.reused_tokens,
+            len(sub.prompt_tokens),
+            sub.snapshot_target,
+            _SNAPSHOT_BOUNDARY_MARGIN,
+        )
+        sub.snapshot_target = plan.target
+        return plan.segments
 
     def _emit_prefill_liveness(self) -> None:
         """While the active wave is still prefilling (no token emitted yet),
@@ -1072,25 +1122,7 @@ class BatchEngine:
                 segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
                 for sub in batch:
                     seg, c, at = self._seed_args(sub)
-                    if (
-                        self._needs_snapshot
-                        and sub.request.cache_id
-                        and len(seg) > _SNAPSHOT_BOUNDARY_MARGIN + 1
-                    ):
-                        # Deliberate segment cut MARGIN tokens before the
-                        # prompt's end. The prompt batch never crosses a
-                        # segment boundary in one prompt() call, so the cut
-                        # guarantees an end_of_segment flush there — the
-                        # stable, advancing boundary the KV snapshot needs
-                        # (the prompt's final tokens re-merge under the next
-                        # turn's continuation; a snapshot cut at the true end
-                        # misses by a couple of tokens, and wrapped rotating
-                        # layers can't trim even that). Cost: one extra tiny
-                        # forward for the tail segment.
-                        cut = len(seg) - _SNAPSHOT_BOUNDARY_MARGIN
-                        segments.append([seg[:cut], seg[cut:]])
-                    else:
-                        segments.append([seg])
+                    segments.append(self._snapshot_segments(sub, seg))
                     caches.append(c)
                     alltoks.append(at)
                     samplers.append(self._sampler_for(sub.request))
@@ -1155,17 +1187,15 @@ class BatchEngine:
                         continue
                     if getattr(pr, "end_of_prompt", False):
                         continue
-                    if has_progress and len(self._subs) == 1:
-                        # Segment/chunk edge: seeded prefix + tokens
-                        # prefilled so far. Later edges overwrite earlier
-                        # ones (longer stable prefix); the margin keeps the
-                        # capture clear of the prompt's re-merging tail.
-                        # Single-sub waves only — a multi-sub prompt batch
-                        # carries un-finalized right-padding that
-                        # extract_cache doesn't account for mid-prefill.
+                    if has_progress and getattr(pr, "end_of_segment", False):
+                        # Capture only the deliberately planted edge. Chunk
+                        # edges are observable too, but copying at each one is
+                        # expensive and unnecessary. extract_cache(uid) is
+                        # padding-aware after PromptProcessingBatch.prompt()
+                        # finalizes this step, so every sub in a multi-request
+                        # wave can safely take its own snapshot.
                         boundary = psub.reused_tokens + int(progress[0])
-                        plen = len(psub.prompt_tokens)
-                        if 0 < boundary <= plen - _SNAPSHOT_BOUNDARY_MARGIN:
+                        if boundary == psub.snapshot_target:
                             self._capture_prompt_snapshot(psub, boundary)
                 if responses:
                     # A token came back → prefill for this wave is done; stop
@@ -1199,28 +1229,30 @@ class BatchEngine:
         it, so a full-length snapshot misses by ~2 tokens and wrapped
         rotating layers can't trim even that. The admission loop plants
         a deliberate cut `_SNAPSHOT_BOUNDARY_MARGIN` tokens before the
-        prompt's end so every turn gets a stable, advancing boundary;
-        later edges overwrite earlier ones (longer prefix = better).
+        prompt's end so every turn gets one stable, advancing boundary.
 
-        `extract_cache` materializes contiguous per-sequence copies, so
-        the snapshot doesn't alias the live batch buffers. The offset
-        check is the runtime proof of the boundary invariant — on any
-        mismatch the snapshot is dropped (logged once) and _finish falls
-        back to the post-gen save.
+        `extract_cache` materializes contiguous per-sequence copies and
+        returns that sequence's unpadded token list, so the snapshot doesn't
+        alias the live batch buffers or accidentally retain another sub's
+        right-padding. Exact token-prefix + layer-offset checks are the runtime
+        proof of the boundary invariant — on any mismatch the snapshot is
+        dropped (logged once) and _finish falls back to the post-gen save.
         """
         try:
             got = self._gen.extract_cache([sub.uid]).get(sub.uid)
             layers = got[0] if got else None
-            if not layers:
-                return
-            offsets = {getattr(c, "offset", None) for c in layers}
-            if offsets == {at_tokens}:
+            extracted_tokens = got[1] if got else None
+            if cache_seed.snapshot_matches_prompt(
+                layers, extracted_tokens, sub.prompt_tokens, at_tokens
+            ):
                 sub.prompt_snapshot = (list(layers), at_tokens)
             elif not self._snapshot_warned:
                 self._snapshot_warned = True
+                offsets = [getattr(c, "offset", None) for c in (layers or [])]
                 print(
-                    f"[batch] prompt snapshot skipped: offsets {offsets} != "
-                    f"boundary {at_tokens} (post-gen save fallback)",
+                    f"[batch] prompt snapshot skipped: boundary={at_tokens} "
+                    f"extracted_tokens={len(extracted_tokens or [])} "
+                    f"offsets={offsets} (post-gen save fallback)",
                     flush=True,
                 )
         except Exception as exc:  # noqa: BLE001 — snapshot is best-effort
@@ -1271,6 +1303,9 @@ class BatchEngine:
                     # overwriting it with un-trimmable full-length state.
                     trimmable = cache_seed.all_trimmable(post_gen)
                     if not trimmable and sub.prompt_snapshot is None and sub.reused_tokens > 0:
+                        prior_entry = _CACHE.get(sub.request.cache_id)
+                        if prior_entry is not None:
+                            sub.saved_cache_state = prior_entry.state
                         print(
                             f"[batch] kept prior cache entry for "
                             f"cache_id={sub.request.cache_id} (segment too short "
@@ -1293,6 +1328,7 @@ class BatchEngine:
                             )
                         if state.token_ids:
                             _save_cache(sub.request.cache_id, state)
+                            sub.saved_cache_state = state
                             _seed_prefix_from_session(sub.request, state)
                             print(
                                 f"[batch] saved cache_id={sub.request.cache_id} "
@@ -1394,6 +1430,27 @@ async def _batched_stream_iter(sub: "_Sub"):
         # If we exit early (disconnect / error), make sure the worker evicts us.
         sub.cancelled = True
         # Release the eviction pins taken for this turn's cache + prefix.
+        _unmark_inflight(sub.pinned_cache_ids)
+        sub.pinned_cache_ids = []
+
+
+async def _await_batched_completion(sub: "_Sub") -> None:
+    """Drain a non-streaming BatchEngine sub (currently cache warming)."""
+    completed = False
+    try:
+        while True:
+            item = await sub.queue.get()
+            kind = item[0]
+            if kind == "done":
+                completed = True
+                return
+            if kind == "err":
+                raise RuntimeError(item[1])
+            # Generated token deltas are intentionally discarded: warming
+            # needs one decode step to finalize the cache, not its text.
+    finally:
+        if not completed:
+            sub.cancelled = True
         _unmark_inflight(sub.pinned_cache_ids)
         sub.pinned_cache_ids = []
 
@@ -1621,98 +1678,83 @@ class CacheWarmRequest(BaseModel):
 
 @app.post("/v1/cache/warm")
 async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
-    """Run prefill (+ 1 generated token) and save the resulting cache.
+    """Warm a cache through the same snapshot-capable BatchGenerator as chat.
 
-    Phase 4 hook — called by the gezel UI on session-open so the first
-    real turn returns near-instantly. We use stream_generate with
-    max_tokens=1 and discard the single generated token; the cache is
-    populated by stream_generate's normal prefill path AND the
-    post-loop `prompt_cache_state.update()` call only runs when the
-    generator is fully exhausted. CRITICAL: if there's already a
-    populated cache for this cache_id with a matching token prefix,
-    the warm is a near-instant no-op (mlx-vlm reuses the cache and
-    only prefills the suffix). If there's a populated cache but the
-    prefix has *diverged*, we DON'T overwrite it — letting the next
-    real chat-completions request handle the rebuild atomically. This
-    avoids the failure mode where warming saves an empty/partial state
-    that then misses on the next real send.
+    The older serial warm saved post-generation state. That is reusable for
+    full-attention caches (they can trim back to the shared prefix), but not for
+    wrapped sliding-window caches: their synthetic user/generated tail cannot
+    be rewound, so the real first turn paid a full prefill anyway.
 
-    Prefix warming (cache-adapter.ts warmPrefix) sends a system-only
-    message list — but Qwen-family chat templates raise "No user query
-    found in messages" when no user turn is present, which 500'd every
-    warm and silently disabled pre-warming entirely. We append a minimal
-    user turn so the template renders. The expensive system block is
-    self-contained and renders identically regardless of what follows,
-    so the warmed KV prefix still matches (and cache-hits) the real
-    first turn, which diverges only after the system block.
+    System-only warms still need a synthetic user for Qwen-family templates.
+    We render a second, deliberately different synthetic user and take their
+    token LCP minus the normal safety margin. That gives BatchEngine an exact
+    snapshot boundary inside the stable system prefix, before either fake user
+    can contaminate an untrimmable entry.
     """
-    warm_messages = req.messages
-    if not any(m.role == "user" for m in warm_messages):
-        warm_messages = list(warm_messages) + [
-            ChatMessageReq(role="user", content="hi")
-        ]
+    synthetic_user = not any(m.role == "user" for m in req.messages)
+    warm_messages = list(req.messages)
+    if synthetic_user:
+        warm_messages.append(ChatMessageReq(role="user", content="hi"))
+
     prompt_text = _build_prompt(warm_messages)
-    existing = _CACHE.get(req.cache_id)
-    # Reuse the existing cache_state object if present so the
-    # update() call mutates the same instance the dict already holds.
-    # On in-memory miss, try disk — re-warming a prefix that's already
-    # been persisted is a near-instant no-op (matching token_ids = no
-    # new prefill) instead of paying the full system-prompt prefill
-    # again. Without this, every supervisor restart's first warmPrefix
-    # would re-pay the prefill cost on the same content.
-    if existing is None:
-        disk_state = _try_load_from_disk(req.cache_id)
-        cache_state = disk_state if disk_state is not None else PromptCacheState()
-    else:
-        cache_state = existing.state
-    prior_tokens = len(cache_state.token_ids or [])
-    # Same guard as the serial chat path: a diverged warm prompt against
-    # an un-trimmable cache would hit mlx_vlm's incoherent slice-trim
-    # and mutate the shared entry into garbage. The docstring's contract
-    # is "diverged → don't touch the prior entry", so skip the warm
-    # outright; the next real send rebuilds atomically.
-    if cache_state.cache is not None and (cache_state.token_ids or []):
-        _variants = _serial_prompt_token_variants(prompt_text)
-        if cache_seed.serial_reset_needed(cache_state.token_ids, cache_state.cache, _variants):
+    tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+    prompt_tokens = [int(t) for t in tok.encode(prompt_text)]
+    snapshot_target = None
+    if synthetic_user:
+        alternate_messages = list(req.messages) + [
+            ChatMessageReq(role="user", content="__gezel_cache_boundary_probe__")
+        ]
+        alternate_text = _build_prompt(alternate_messages)
+        alternate_tokens = [int(t) for t in tok.encode(alternate_text)]
+        target = cache_seed.stable_snapshot_boundary(
+            prompt_tokens, alternate_tokens, _SNAPSHOT_BOUNDARY_MARGIN
+        )
+        snapshot_target = target
+        if snapshot_target == 0:
             print(
-                f"[cache] warm skipped for cache_id={req.cache_id}: diverged "
-                f"prefix on untrimmable cache (prior={prior_tokens})",
+                f"[cache] no stable synthetic-user boundary for "
+                f"cache_id={req.cache_id}; using normal finish save",
                 flush=True,
             )
-            return JSONResponse(
-                {
-                    "warmed": False,
-                    "cache_id": req.cache_id,
-                    "token_count": prior_tokens,
-                    "persisted": False,
-                    "skipped": "divergent-untrimmable",
-                }
-            )
+
+    warm_request = ChatRequest(
+        model=req.model or str(ARGS.model),
+        messages=warm_messages,
+        stream=True,
+        cache_id=req.cache_id,
+        max_tokens=1,
+        temperature=0.0,
+    )
+    cache_state, _, _ = _resolve_cache_state(warm_request)
+    prior_tokens = len(cache_state.token_ids or [])
+    sub = _Sub(
+        request=warm_request,
+        prompt_tokens=prompt_tokens,
+        grammar=None,
+        seed_state=cache_state,
+        request_id=f"cachewarm-{uuid.uuid4()}",
+        http_request=None,
+        snapshot_target=snapshot_target,
+    )
+    sub.pinned_cache_ids = _mark_inflight(req.cache_id)
+    sub.prefill_total = len(prompt_tokens)
     try:
-        # Drain the generator fully — `max_tokens=1` makes it a
-        # single-token cycle, but we MUST let stream_generate run to
-        # completion (no early break!) because the
-        # `prompt_cache_state.update(...)` call lives AFTER the inner
-        # generation loop. Breaking early leaves the cache_state
-        # unpopulated and corrupts any prior good entry.
-        for _ in stream_generate(
-            model=MODEL,
-            processor=PROCESSOR,
-            prompt=prompt_text,
-            max_tokens=1,
-            prompt_cache_state=cache_state,
-            prefill_step_size=ARGS.prefill_step_size,
-        ):
-            pass
+        _get_batch_engine().submit(sub)
+    except Exception as exc:
+        _unmark_inflight(sub.pinned_cache_ids)
+        sub.pinned_cache_ids = []
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+    try:
+        await _await_batched_completion(sub)
     except Exception as exc:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
-    # Only commit if the cache state was actually populated. Belt-and-
-    # braces against any path where update() didn't run.
-    new_tokens = len(cache_state.token_ids or [])
+
+    cache_state = sub.saved_cache_state
+    new_tokens = len(cache_state.token_ids or []) if cache_state is not None else 0
     persisted = False
-    if new_tokens > 0:
-        _save_cache(req.cache_id, cache_state)
+    if cache_state is not None and new_tokens > 0:
         # Prefix warming sets persist=True so the entry survives the next
         # supervisor stop and brand-new sessions can load it on first
         # request. Session warming leaves it in-memory only; the next
@@ -2063,11 +2105,12 @@ async def chat_completions(request: ChatRequest, http_request: Request):
 
     request_id = f"chatcmpl-{uuid.uuid4()}"
 
-    # Batched path: with --max-concurrency > 1, multiplex this turn through
-    # the shared BatchEngine (continuous batching) instead of the serial
-    # stream_generate below. Everything above (prompt, grammar, cache
-    # cascade) is reused as-is.
-    if getattr(ARGS, "max_concurrency", 1) and ARGS.max_concurrency > 1:
+    # BatchGenerator path: use it even for a singleton queue. Besides
+    # concurrency, this path owns the prompt-boundary snapshot needed to reuse
+    # wrapped/windowed KV caches safely after a tool result makes the next
+    # prompt diverge from the raw generated-token tail. The serial fallback is
+    # retained only for an explicit --max-concurrency 0.
+    if int(getattr(ARGS, "max_concurrency", 1) or 0) >= 1:
         _engine = _get_batch_engine()
         _tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
         prompt_tokens = [int(t) for t in _tok.encode(prompt_text)]
