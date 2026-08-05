@@ -854,6 +854,12 @@ html.embedded-chat #root {
    hamburger is the last child so it always ends up pinned to the
    rightmost edge of the cluster. */
 .app-header-right {
+  /* The Windows overlay is 39px tall and these controls are 34px. With the
+     cluster's bottom bias, only 3px remain above them; the global 4px focus
+     ring is therefore clipped by the top edge of the window. Keep the same
+     2px accent band while reducing the separator from 2px to 1px so the
+     complete ring fits without shifting or shrinking the controls. */
+  --focus-ring: 0 0 0 1px var(--bg), 0 0 0 3px var(--accent);
   margin-left: auto;
   margin-bottom: 2px;
   display: flex;

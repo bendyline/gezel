@@ -212,3 +212,4 @@ packages/catalog/scripts/harvested-auth/
 /ship-audit
 /.tmp-docblocks-2.3.2
 /packages/app/.tmp-preview-debug
+.gezel/village.json
