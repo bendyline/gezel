@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from './client.js';
-import { type SpawnLike, discoverOrSpawn } from './discover-or-spawn.js';
+import { type SpawnLike, discoverOrSpawn, stopOwnedDaemon } from './discover-or-spawn.js';
 import type { RuntimeInfo } from './discovery.js';
 
 function makeFakeChild() {
@@ -11,6 +11,11 @@ function makeFakeChild() {
     kill: ReturnType<typeof vi.fn>;
     stdout: null;
     stderr: null;
+    stdin: {
+      destroyed: boolean;
+      writableEnded: boolean;
+      end: ReturnType<typeof vi.fn>;
+    };
     exitCode: number | null;
     signalCode: NodeJS.Signals | null;
   };
@@ -18,6 +23,15 @@ function makeFakeChild() {
   child.unref = vi.fn();
   child.stdout = null;
   child.stderr = null;
+  child.stdin = {
+    destroyed: false,
+    writableEnded: false,
+    end: vi.fn(() => {
+      child.stdin.writableEnded = true;
+      child.exitCode = 0;
+      queueMicrotask(() => child.emit('exit', 0, null));
+    }),
+  };
   child.exitCode = null;
   child.signalCode = null;
   child.kill = vi.fn((signal: NodeJS.Signals = 'SIGTERM') => {
@@ -107,6 +121,92 @@ describe('discoverOrSpawn', () => {
       expect(spawned?.ELECTRON_RUN_AS_NODE).toBe('1');
       expect(callerEnv.ELECTRON_RUN_AS_NODE).toBeUndefined();
       expect(spawned).not.toBe(callerEnv);
+    });
+
+    it('opts attached pipe-owned daemons into stdin EOF shutdown without mutating the caller', async () => {
+      const callerEnv: NodeJS.ProcessEnv = { GEZEL_HOME: '/tmp/home' };
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      const result = await discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        detached: false,
+        stdio: 'pipe',
+        env: callerEnv,
+        timeoutMs: 100,
+        pollIntervalMs: 1,
+        spawnFn,
+        readRuntimeFn: async () => sampleRuntime,
+        isProcessAliveFn: () => true,
+        clientFactory: fakeClient,
+        forceSpawn: true,
+      });
+
+      expect(result.outcome).toBe('spawned');
+      expect(spawnFn.mock.calls[0]?.[2].env?.GEZEL_SHUTDOWN_ON_STDIN_EOF).toBe('1');
+      expect(callerEnv.GEZEL_SHUTDOWN_ON_STDIN_EOF).toBeUndefined();
+    });
+
+    it('does not opt detached or inherited-stdio daemons into stdin EOF shutdown', async () => {
+      const detachedEnv = await spawnAndCaptureEnv(undefined, { GEZEL_HOME: '/tmp/home' });
+      expect(detachedEnv?.GEZEL_SHUTDOWN_ON_STDIN_EOF).toBeUndefined();
+
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      await discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        detached: false,
+        stdio: 'inherit',
+        timeoutMs: 20,
+        pollIntervalMs: 2,
+        spawnFn,
+        readRuntimeFn: async () => null,
+        isProcessAliveFn: () => false,
+        clientFactory: fakeClient,
+      }).catch(() => undefined);
+      expect(spawnFn.mock.calls[0]?.[2].env?.GEZEL_SHUTDOWN_ON_STDIN_EOF).toBeUndefined();
+    });
+  });
+
+  describe('owned daemon shutdown', () => {
+    it('uses stdin EOF on Windows and does not signal or taskkill a child that exits cleanly', async () => {
+      const child = makeFakeChild();
+      const terminateWindowsTree = vi.fn(async () => {});
+
+      await stopOwnedDaemon(child, undefined, {
+        platform: 'win32',
+        graceMs: 20,
+        forceMs: 20,
+        terminateWindowsTree,
+      });
+
+      expect(child.stdin?.end).toHaveBeenCalledOnce();
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(terminateWindowsTree).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a Windows process-tree kill when stdin EOF is ignored', async () => {
+      const child = makeFakeChild();
+      const mutable = child as unknown as {
+        pid: number;
+        signalCode: NodeJS.Signals | null;
+        stdin: { end: ReturnType<typeof vi.fn> };
+      };
+      mutable.pid = 43210;
+      mutable.stdin.end.mockImplementation(() => {
+        // Deliberately remain alive through the graceful window.
+      });
+      const terminateWindowsTree = vi.fn(async () => {
+        mutable.signalCode = 'SIGKILL';
+        queueMicrotask(() => child.emit('exit', null, 'SIGKILL'));
+      });
+
+      await stopOwnedDaemon(child, undefined, {
+        platform: 'win32',
+        graceMs: 5,
+        forceMs: 20,
+        terminateWindowsTree,
+      });
+
+      expect(terminateWindowsTree).toHaveBeenCalledWith(43210);
+      expect(child.kill).not.toHaveBeenCalled();
     });
   });
 
@@ -294,7 +394,8 @@ describe('discoverOrSpawn', () => {
         clientFactory: fakeClient,
       }),
     ).rejects.toThrow(/Timed out/);
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child.stdin?.end).toHaveBeenCalledOnce();
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it('keeps polling through a transient health failure', async () => {

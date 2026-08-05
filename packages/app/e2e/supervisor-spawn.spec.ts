@@ -104,7 +104,7 @@ test('spawn - child exits after Electron close', async () => {
   const pidRaw = await readFile(runtimePidPath, 'utf8');
   const pid = Number.parseInt(pidRaw.trim(), 10);
   await app.close();
-  // Give gracefullyStop its 3-second SIGTERM window plus a bit of slack.
+  // Give gracefullyStop its 3-second stdin-EOF window plus a bit of slack.
   await new Promise((r) => setTimeout(r, 4000));
   let alive = true;
   try {

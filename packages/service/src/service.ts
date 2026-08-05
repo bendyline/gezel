@@ -323,12 +323,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     lockPath: join(runtimeDir, 'lock'),
   });
   // The per-engine supervisor only reaps its own engine family before a
-  // launch. Sweep all clearly-Gezel, same-home PPID-1 engines once at service
-  // boot so starting a DS4 chat also clears an abandoned MLX/Python server
-  // (and vice versa). Acquiring the home lock first proves no live same-home
-  // daemon can be racing this cleanup.
+  // launch. Sweep every clearly-Gezel owner-less engine once at service boot
+  // so starting a DS4 chat also clears an abandoned MLX/Python server (and
+  // vice versa). This is deliberately not home-scoped: app-resource binaries
+  // loading machine-shared models may carry no user-home path in argv. Unix
+  // proves ownerlessness via PPID 1; Windows proves it when the retained
+  // creator pid is absent from the process table. Any engine with a live
+  // owner is left untouched.
   try {
-    const cleanup = await reapOrphanedGezelEngineProcesses({ home });
+    const cleanup = await reapOrphanedGezelEngineProcesses();
     if (cleanup.targetedPids.length > 0) {
       const remaining =
         cleanup.remainingPids.length > 0

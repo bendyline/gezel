@@ -8,6 +8,7 @@ import {
   readRuntime as defaultReadRuntime,
 } from './discovery.js';
 import { createTrustingFetch } from './node-tls.js';
+import { terminateWindowsProcessTree } from './processes.js';
 
 export type DiscoverOrSpawnOutcome = 'adopted' | 'spawned';
 
@@ -194,7 +195,9 @@ export async function discoverOrSpawn(
   const child = spawnFn(process.execPath, [daemonEntry], {
     detached,
     stdio,
-    env: daemonSpawnEnv(env ?? process.env),
+    env: daemonSpawnEnv(env ?? process.env, {
+      shutdownOnStdinEof: !detached && stdio === 'pipe',
+    }),
   });
   if (detached) child.unref();
 
@@ -242,21 +245,28 @@ export async function discoverOrSpawn(
  * reads the variable at launch, so it has to be in the child's environment;
  * there is no command-line equivalent.
  *
- * Keyed off `process.versions.electron` rather than set unconditionally,
- * because the CLI's `execPath` is already node and node has no use for it.
- * That also keeps the non-Electron path byte-identical to before, including
- * passing `process.env` through by reference.
+ * `ELECTRON_RUN_AS_NODE` is keyed off `process.versions.electron`; the stdin
+ * EOF contract is keyed off an attached spawn with a dedicated pipe. Detached
+ * daemons and foreground/inherited-stdio daemons must not treat the caller's
+ * terminal EOF as an ownership signal.
  *
- * Always a fresh object when we do add it: `env` is usually `process.env`
- * itself, and mutating that would leak the flag into every later spawn from
- * this process — including any relaunch of the app, which the flag breaks.
+ * Always use a fresh object when adding either flag: `env` is usually
+ * `process.env` itself, and mutating that would leak ownership semantics into
+ * later detached/foreground spawns.
  *
  * The macOS LaunchDaemon sets exactly this for the installed service, so the
  * daemon and its own children are already proven to run under it.
  */
-function daemonSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (!process.versions.electron) return env;
-  return { ...env, ELECTRON_RUN_AS_NODE: '1' };
+function daemonSpawnEnv(
+  env: NodeJS.ProcessEnv,
+  options: { shutdownOnStdinEof: boolean },
+): NodeJS.ProcessEnv {
+  if (!process.versions.electron && !options.shutdownOnStdinEof) return env;
+  return {
+    ...env,
+    ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+    ...(options.shutdownOnStdinEof ? { GEZEL_SHUTDOWN_ON_STDIN_EOF: '1' } : {}),
+  };
 }
 
 function remainingMs(deadline: number): number {
@@ -298,24 +308,94 @@ async function terminateFailedSpawn(
   child: ChildProcess,
   logger?: DiscoverOrSpawnOptions['logger'],
 ): Promise<void> {
-  if (childHasExited(child)) return;
   logger?.warn?.('[gezel] daemon startup timed out; terminating the spawned child');
-  const graceful = waitForExit(child, 250);
-  try {
-    child.kill('SIGTERM');
-  } catch {
-    /* process may have exited between the predicate and signal */
+  await stopOwnedDaemon(child, logger, { graceMs: 250, forceMs: 250 });
+}
+
+export interface StopOwnedDaemonOptions {
+  /** Time allowed for stdin EOF (or POSIX SIGTERM) cleanup. Defaults to 3 seconds. */
+  graceMs?: number;
+  /** Time allowed for the hard-stop fallback to become observable. */
+  forceMs?: number;
+  platform?: NodeJS.Platform;
+  /** Test seam for Windows process-tree termination. */
+  terminateWindowsTree?: (pid: number) => Promise<void>;
+}
+
+/**
+ * Stop a daemon spawned in attached `stdio: 'pipe'` mode.
+ *
+ * Closing stdin is the primary channel on every platform. In particular,
+ * Windows maps Node's SIGTERM to abrupt TerminateProcess, so a signal cannot
+ * run `gezeld`'s shutdown hooks. The spawn path opts the child into stdin EOF
+ * shutdown, and the OS also closes the same pipe if the owning Electron/eval
+ * process dies unexpectedly. If graceful shutdown stalls, Windows uses
+ * `taskkill /T /F` so the daemon and native-engine descendants are contained;
+ * POSIX retains the SIGTERM -> SIGKILL ladder.
+ */
+export async function stopOwnedDaemon(
+  child: ChildProcess | undefined,
+  logger?: DiscoverOrSpawnOptions['logger'],
+  options: StopOwnedDaemonOptions = {},
+): Promise<void> {
+  if (!child || childHasExited(child)) return;
+  const platform = options.platform ?? process.platform;
+  const graceMs = options.graceMs ?? 3_000;
+  const forceMs = options.forceMs ?? 3_000;
+  let requestedGraceful = false;
+  let gracefulExit: Promise<boolean> | undefined;
+
+  if (child.stdin && !child.stdin.destroyed && !child.stdin.writableEnded) {
+    try {
+      // Register before end(): a test double or very small child can report
+      // exit synchronously from the EOF request.
+      gracefulExit = waitForExit(child, graceMs);
+      child.stdin.end();
+      requestedGraceful = true;
+      logger?.info?.('[gezel] requested graceful daemon shutdown through stdin EOF');
+    } catch {
+      // Fall through to the platform hard-stop ladder.
+    }
   }
-  if (await graceful) return;
-  if (!childHasExited(child)) {
-    const forced = waitForExit(child, 250);
+
+  if (!requestedGraceful && platform !== 'win32') {
+    try {
+      gracefulExit = waitForExit(child, graceMs);
+      child.kill('SIGTERM');
+      requestedGraceful = true;
+    } catch {
+      /* process may have exited between the predicate and signal */
+    }
+  }
+
+  if (requestedGraceful && gracefulExit && (await gracefulExit)) return;
+  if (childHasExited(child)) return;
+
+  const forcedExit = waitForExit(child, forceMs);
+  if (platform === 'win32' && Number.isInteger(child.pid) && (child.pid ?? 0) > 0) {
+    logger?.warn?.(
+      `[gezel] daemon pid=${child.pid} did not exit gracefully; terminating its Windows process tree`,
+    );
+    try {
+      await (options.terminateWindowsTree ?? terminateWindowsProcessTree)(child.pid!);
+    } catch (error) {
+      logger?.warn?.(
+        `[gezel] Windows process-tree termination failed; falling back to direct kill: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* process may already be gone */
+      }
+    }
+  } else {
     try {
       child.kill('SIGKILL');
     } catch {
       /* process may have exited immediately before escalation */
     }
-    await forced;
   }
+  await forcedExit;
 }
 
 function childHasExited(child: ChildProcess): boolean {

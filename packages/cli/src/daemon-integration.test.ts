@@ -21,6 +21,8 @@ import {
   isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
+  stopOwnedDaemon,
+  stopProcessByPid,
 } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -79,14 +81,7 @@ beforeAll(async () => {
 }, 20_000);
 
 afterAll(async () => {
-  if (spawned?.child && spawned.child.exitCode === null) {
-    spawned.child.kill('SIGTERM');
-    await new Promise<void>((resolve) => {
-      const onExit = () => resolve();
-      spawned.child!.once('exit', onExit);
-      setTimeout(() => resolve(), 3000);
-    });
-  }
+  await stopOwnedDaemon(spawned?.child);
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
 });
 
@@ -152,13 +147,15 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
       expect(runtime).not.toBeNull();
       expect(runtime?.port).not.toBe(6228);
       expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
+
+      const stopped = await runCliAtHome(headlessHome, 'stop');
+      expect(stopped.stderr).toBe('');
+      expect(stopped.stdout).toContain('stopped gezeld pid=');
+      expect(runtime ? isProcessAlive(runtime.pid) : true).toBe(false);
     } finally {
       const runtime = await readRuntime(headlessHome).catch(() => null);
       if (runtime && isProcessAlive(runtime.pid)) {
-        process.kill(runtime.pid, 'SIGTERM');
-        for (let attempt = 0; attempt < 40 && isProcessAlive(runtime.pid); attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 25));
-        }
+        await stopProcessByPid(runtime.pid);
       }
       await rm(headlessHome, { recursive: true, force: true });
     }

@@ -1,10 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isGezelEngineCommand } from '@bendyline/gezel-client/node';
 
 const exec = promisify(execFile);
-
-const NATIVE_ENGINE_RE = /(?:^|[/\s])gezel-(?:llama|ds4|sd|whisper)-server(?:\.exe)?(?=\s|$)/;
-const PYTHON_ENGINE_RE = /(?:^|[/\s])gezel_(?:mlx|video)_server\.py(?=\s|$)/;
 
 export interface ProcessListEntry {
   pid: number;
@@ -51,13 +49,19 @@ export function parseProcessList(stdout: string): ProcessListEntry[] {
 export function findGezelEngineProcesses(
   entries: ProcessListEntry[],
   home: string,
+  platform: NodeJS.Platform = process.platform,
 ): ProcessListEntry[] {
-  const homeAnchor = home.endsWith('/') ? home : `${home}/`;
-  return entries.filter(
-    ({ command }) =>
-      command.includes(homeAnchor) &&
-      (NATIVE_ENGINE_RE.test(command) || PYTHON_ENGINE_RE.test(command)),
-  );
+  const separator = platform === 'win32' ? '\\' : '/';
+  const normalizedHome = normalizeProcessCommand(home, platform).replace(/[\\/]+$/, '');
+  const homeAnchor = `${normalizedHome}${separator}`;
+  return entries.filter(({ command }) => {
+    const normalizedCommand = normalizeProcessCommand(command, platform);
+    return normalizedCommand.includes(homeAnchor) && isGezelEngineCommand(command);
+  });
+}
+
+function normalizeProcessCommand(value: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? value.replaceAll('/', '\\').toLowerCase() : value;
 }
 
 /** Parse the byte-form summary emitted by `/usr/bin/footprint`. */
