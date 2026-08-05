@@ -122,7 +122,8 @@ describe('telemetryToActivityCounters', () => {
     const counters = telemetryToActivityCounters([
       session({
         sessionId: 's1',
-        generationSpurts: 2,
+        turnsStarted: 2,
+        generationSpurts: 200,
         toolCalls: 5,
         fileMutations: 2,
         enginePhaseEvents: 7,
@@ -133,7 +134,8 @@ describe('telemetryToActivityCounters', () => {
       }),
       session({
         sessionId: 's2',
-        generationSpurts: 1,
+        turnsStarted: 1,
+        generationSpurts: 100,
         toolCalls: 1,
         fileMutations: 0,
         enginePhaseEvents: 2,

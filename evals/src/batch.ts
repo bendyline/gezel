@@ -514,8 +514,9 @@ async function gpuProcessText(app: GpuComputeApp): Promise<string> {
 
 /**
  * Wait for compute processes to drain off the GPU before launching the
- * next trial. The previous trial's `llama-server` has just been SIGTERMed;
- * the CUDA driver may still be reclaiming its 81 GB CUDA0 buffer. Without
+ * next trial. The previous trial's native engine has just been stopped with
+ * its owning daemon; the CUDA driver may still be reclaiming its 81 GB CUDA0
+ * buffer. Without
  * waiting, the next trial's `ggml_cuda_init` can OOM and the daemon
  * SIGABRTs before becoming ready. Wild-caught (nemotron-super
  * v6 matrix): tankcombat crashed with `CUDA error: out of memory ...

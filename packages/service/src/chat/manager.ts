@@ -2950,7 +2950,11 @@ export class ChatManager {
       gezelId: args.gezelId,
       projectId,
     });
-    const active = existing.find((s) => !s.archived);
+    // This helper owns ordinary (gezel, project) conversations. Task and
+    // night-shift sessions are created explicitly with taskRef/stepId and
+    // must never become the implicit destination for lobby chat, mentions,
+    // reactions, or legacy chat clients merely because they are newest.
+    const active = existing.find((s) => !s.archived && !s.taskRef);
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
       if (full) return full;
@@ -15696,7 +15700,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const flatPrimaryRoute = availableToolNameSet.has('start_job')
     ? '`start_job({ name, about, missionObjectives, taskDescription, specialistRole })`'
     : availableToolNameSet.has('message_gezel')
-      ? '`ensure_gezel` when needed, then `message_gezel` with the exact deliverable and acceptance criteria'
+      ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
       : 'the available project/task tools listed below';
   const crewPrimaryRoute = availableToolNameSet.has('start_project')
     ? '`start_project({ name, about, missionObjectives, taskDescription })`'
@@ -15857,9 +15861,21 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     const hasSearchMemory = availableTools?.some((t) => t.name === 'search_memory') ?? false;
     const hasSaveMemory = availableTools?.some((t) => t.name === 'save_memory') ?? false;
     const hasMemoryTools = hasSearchMemory || hasSaveMemory;
+    const workspaceReadTools = toolsFrom(['read_file', 'list_dir', 'find_files', 'search_files']);
+    const workspaceWriteTools = toolsFrom(['write_file']);
+    const workspaceDelegationTools = toolsFrom([
+      'message_gezel',
+      'ensure_gezel',
+      'create_task',
+      'assign_task',
+    ]);
+    const workspaceDelegationGuidance =
+      workspaceDelegationTools.length > 0
+        ? `Delegate with ${formatToolList(workspaceDelegationTools)}, passing the exact path, requested change, and acceptance criteria.`
+        : 'No delegation tool is wired this turn; explain that the workspace change is blocked instead of inventing a handoff.';
     if (hasReadFile && hasWriteFile) {
       const artifactsLine = hasArtifactTools
-        ? '\n- **Artifacts** (`write_artifact` / `read_artifact` / `list_artifacts`) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in `### Workspace files`, use `read_file` / `write_file`; do not use artifact tools for it. Conventions: `scripts/` for re-runnable Playwright/Node scripts, `tests/` for *.spec.ts you own, `reports/`/`drafts/` for narrative.\n'
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
         : '\n';
       const decisionLine = hasWriteArtifact
         ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
@@ -15868,20 +15884,20 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
 
 ### Where work belongs
 
-- **Workspace** (\`write_file\` / \`read_file\` / \`list_dir\`) — files the user ships: source, configs, assets, README, tests for their product.
+- **Workspace** (${formatToolList([...workspaceWriteTools, ...workspaceReadTools])}) — files the user ships: source, configs, assets, README, tests for their product.
 ${artifactsLine}
 ${decisionLine}`;
     } else if (hasReadFile) {
       const artifactsLine = hasArtifactTools
-        ? '\n- **Artifacts** (`write_artifact` / `read_artifact` / `list_artifacts`) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving `packages/...`, `src/...`, or a path listed in `### Workspace files` with `write_artifact` creates only a side-drawer copy and does not change the project.\n'
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving \`packages/...\`, \`src/...\`, or a path listed in \`### Workspace files\` with an artifact-writing tool creates only a side-drawer copy and does not change the project.\n`
         : '\n';
       projectContext += `
 
 ### Where work belongs
 
-- **Workspace reads** (\`read_file\` / \`list_dir\` / \`find_files\` / \`search_files\`) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`, not \`read_artifact\`. You can read; you cannot write.
+- **Workspace reads** (${formatToolList(workspaceReadTools)}) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}. You can read; you cannot write.
 ${artifactsLine}
-- **Workspace writes are delegated.** When a fix or change is needed, hand off to a developer with rich context: \`message_gezel({ gezel, message })\` (or \`ensure_gezel\` + \`create_task\` + \`assign_task\` if no developer exists). Don't paste source into chat — that can't be applied.`;
+- **Workspace writes are delegated.** ${workspaceDelegationGuidance} Don't paste source into chat — that can't be applied.`;
     } else if (hasWriteFile) {
       projectContext += `
 
@@ -15891,14 +15907,14 @@ ${artifactsLine}
 - **Workspace reads are not available this turn.** Use the workspace listing and task context already shown here. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
     } else {
       const artifactsLine = hasArtifactTools
-        ? '- **Artifacts** (`write_artifact` / `read_artifact` / `list_artifacts`) — a separate scratch drawer for plans, reports, recommendations, and meeting notes. They are not workspace files; do not treat a path shown in `### Workspace files` as an artifact unless `list_artifacts` returned it too.\n'
+        ? `- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, reports, recommendations, and meeting notes. They are not workspace files; do not treat a path shown in \`### Workspace files\` as an artifact${hasListArtifacts ? ' unless `list_artifacts` returned it too' : ''}.\n`
         : '- **No direct file drawers are available this turn.** If another gezel says they wrote a file, treat their chat reply as a path + precis only. Do not claim you have read or received the full file unless a file-reading tool is actually available and you call it.\n';
       projectContext += `
 
 ### Where work belongs
 
 ${artifactsLine}
-- **Workspace files** are listed below for context — the project's source, configs, and assets. You don't have file-read/write tools for them; specialist gezels (developer, designer, reviewer) do. To act on a workspace file, delegate via \`create_task\` / \`assign_task\` / \`message_gezel\`.`;
+- **Workspace files** are listed below for context — the project's source, configs, and assets. You don't have file-read/write tools for them; specialist gezels (developer, designer, reviewer) do. ${workspaceDelegationGuidance}`;
     }
     // Workspace file listing is intentionally NOT folded into
     // projectContext. The listing changes per-turn (file added/removed
@@ -15976,7 +15992,12 @@ ${artifactsLine}
     const listing = documentFiles
       .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
       .join('\n');
-    documentsContext = `\n\n---\n\nShared documents library (cross-project guidelines, mission statements, style guides). Use \`list_documents\` / \`read_document\` to consult these, and \`write_document\` to add new ones:\n\`\`\`\n${listing}\n\`\`\``;
+    const documentTools = toolsFrom(['list_documents', 'read_document', 'write_document']);
+    const documentGuidance =
+      documentTools.length > 0
+        ? `Use ${formatToolList(documentTools)} as their individual capabilities allow:`
+        : 'No shared-document tool is wired this turn; this listing is context only:';
+    documentsContext = `\n\n---\n\nShared documents library (cross-project guidelines, mission statements, style guides). ${documentGuidance}\n\`\`\`\n${listing}\n\`\`\``;
   }
 
   const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. ${SQUISQ_DIALECT_BRIEF}`;

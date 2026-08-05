@@ -25,6 +25,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { listProcessSnapshots } from '@bendyline/gezel-client/node';
 import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('native');
@@ -240,6 +241,8 @@ export interface NativeEngineSupervisorOptions {
    * real processes.
    */
   psRunner?: () => Promise<NativeProcessSnapshot[]>;
+  /** Platform seam for Windows owner-liveness semantics in orphan tests. */
+  platform?: NodeJS.Platform;
   /**
    * Test seam paired with `psRunner` — invoked instead of
    * `process.kill(pid, 'SIGKILL')`. Lets unit tests assert which pids
@@ -336,6 +339,7 @@ export class NativeEngineSupervisor {
   private readonly readyOnAnyResponse: boolean;
   private readonly psRunner: () => Promise<NativeProcessSnapshot[]>;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
+  private readonly platform: NodeJS.Platform;
   // Ad-hoc log listeners attached at runtime (vs. the construction-time
   // `onLog` / `onRawLine` hooks). Used by the owning provider to
   // subscribe to engine log lines for the duration of a single request
@@ -408,7 +412,8 @@ export class NativeEngineSupervisor {
     this.logPrefix = opts.logPrefix ?? '[native]';
     this.readinessPath = opts.readinessPath ?? '/health';
     this.readyOnAnyResponse = opts.readyOnAnyResponse ?? false;
-    this.psRunner = opts.psRunner ?? defaultPsRunner;
+    this.platform = opts.platform ?? process.platform;
+    this.psRunner = opts.psRunner ?? (() => defaultPsRunner(this.platform));
     this.killProcess = opts.killProcess ?? ((pid, sig) => process.kill(pid, sig));
   }
 
@@ -811,13 +816,21 @@ export class NativeEngineSupervisor {
    * Injected legacy `psRunner` rows may omit PPID and retain the historical
    * match behavior; the production runner always includes it.
    *
-   * macOS + Linux only (`ps -axo pid=,ppid=,command=`); Windows gets a
-   * silent no-op via the default psRunner.
+   * macOS + Linux use `ps -axo pid=,ppid=,command=`. Windows uses the
+   * Win32_Process CIM snapshot; because Windows retains a dead creator's pid
+   * instead of reparenting to pid 1, absence of that ppid proves orphanhood.
    */
   private async reapOrphansMatching(launch: NativeEngineLaunch): Promise<number> {
     const anchors = this.buildOrphanAnchors(launch);
     if (anchors.command.length === 0 && anchors.args.length === 0) return 0;
     const procs = await this.psRunner();
+    const livePids = new Set(procs.map(({ pid }) => pid));
+    const normalizedCommandAnchors = anchors.command.map((anchor) =>
+      normalizeProcessMatch(anchor, this.platform),
+    );
+    const normalizedArgAnchors = anchors.args.map((anchor) =>
+      normalizeProcessMatch(anchor, this.platform),
+    );
     const ourPid = process.pid;
     const targets: number[] = [];
     for (const { pid, ppid, command } of procs) {
@@ -826,17 +839,21 @@ export class NativeEngineSupervisor {
       // it may be mid-turn for another session. Only owner-less orphans
       // (force-quit / OS-reaped prior launches) are ours to clean up.
       if (liveEnginePids.has(pid)) continue;
-      // Cross-daemon ownership: a matching native engine with a non-init
-      // parent is still owned by another live daemon/process. Command-path
-      // matching alone cannot distinguish two isolated eval homes because
-      // they intentionally share the same binary. Once the owner exits,
-      // Unix reparents the child to init/launchd (PPID 1), making it safe to
-      // reap on a later launch. Missing PPID is supported only for injected
-      // legacy test runners; defaultPsRunner always supplies it.
-      if (ppid !== undefined && ppid > 1) continue;
+      // Cross-daemon ownership: command-path matching alone cannot
+      // distinguish isolated homes that share a native binary. Unix reparents
+      // a true orphan to pid 1. Windows leaves the creator pid on the child,
+      // so it is an orphan only when that pid is absent from this same atomic-
+      // enough snapshot. PID reuse can cause a conservative false negative,
+      // never a live-process kill. Missing PPID preserves legacy test seams.
+      if (ppid !== undefined && !isOwnerlessProcess(ppid, livePids, this.platform)) continue;
+      const normalizedCommand = normalizeProcessMatch(command, this.platform);
       const matched =
-        anchors.command.some((anchor) => command === anchor || command.startsWith(`${anchor} `)) ||
-        anchors.args.some((anchor) => command.includes(anchor));
+        normalizedCommandAnchors.some(
+          (anchor) =>
+            normalizedCommand === anchor ||
+            normalizedCommand.startsWith(`${anchor} `) ||
+            normalizedCommand.startsWith(`"${anchor}"`),
+        ) || normalizedArgAnchors.some((anchor) => normalizedCommand.includes(anchor));
       if (!matched) continue;
       targets.push(pid);
     }
@@ -907,9 +924,9 @@ export class NativeEngineSupervisor {
       seen.add(p);
       bucket.push(p);
     };
-    if (launch.command.startsWith('/')) add(command, launch.command);
+    if (isAbsoluteProcessPath(launch.command)) add(command, launch.command);
     for (const arg of launch.args) {
-      if (!arg.startsWith('/')) continue;
+      if (!isAbsoluteProcessPath(arg)) continue;
       // File-shaped: ends with a dot-extension whose tail contains at
       // least one letter (`gezel_mlx_server.py`, `model.bin`). Skips
       // bare directory paths (`/Users/me/.gezel/.../models/qwen3.6`),
@@ -1244,35 +1261,36 @@ function panicPriority(kind: NativeEnginePanicKind): number {
 }
 
 /**
- * Default `psRunner` — executes `ps -axo pid=,ppid=,command=` and parses
- * the output into `{ pid, ppid, command }` rows. PPID is load-bearing:
- * command paths identify *which* engine a row belongs to, while PPID
- * distinguishes an owner-less prior-launch orphan (reparented to init,
- * PPID 1) from an engine actively owned by another gezeld process.
- * macOS + Linux both ship a `ps` with this format. On Windows there's no
- * comparable one-liner; we return an empty list. Errors are swallowed and
- * treated as "no orphans" so a missing `ps` doesn't block startup.
+ * Default process snapshot. PPID is load-bearing: command paths identify
+ * which engine a row belongs to, while the parent snapshot distinguishes an
+ * owner-less prior-launch orphan from an engine actively owned by another
+ * gezeld process. Errors remain best-effort so cleanup cannot block startup.
  */
-async function defaultPsRunner(): Promise<NativeProcessSnapshot[]> {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') return [];
-  const { execFile } = await import('node:child_process');
-  let stdout: string;
+async function defaultPsRunner(platform: NodeJS.Platform): Promise<NativeProcessSnapshot[]> {
   try {
-    stdout = await new Promise<string>((resolve, reject) => {
-      execFile(
-        'ps',
-        ['-axo', 'pid=,ppid=,command='],
-        { maxBuffer: 8 * 1024 * 1024 },
-        (err, out) => {
-          if (err) reject(err);
-          else resolve(out);
-        },
-      );
-    });
+    return await listProcessSnapshots({ platform });
   } catch {
     return [];
   }
-  return parseNativeProcessSnapshot(stdout);
+}
+
+function isOwnerlessProcess(
+  ppid: number,
+  livePids: ReadonlySet<number>,
+  platform: NodeJS.Platform,
+): boolean {
+  return platform === 'win32' ? !livePids.has(ppid) : ppid <= 1;
+}
+
+function normalizeProcessMatch(value: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? value.replaceAll('/', '\\').toLowerCase() : value;
+}
+
+function isAbsoluteProcessPath(value: string): boolean {
+  // Accept both syntaxes independent of the host running the test/build. The
+  // launch value itself is authoritative, and cross-platform fixtures exercise
+  // Windows paths on Unix CI and Unix paths on Windows CI.
+  return value.startsWith('/') || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value);
 }
 
 /** Parse the portable `ps -axo pid=,ppid=,command=` shape. */

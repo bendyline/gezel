@@ -200,6 +200,8 @@ vi.mock('@bendyline/gezel-client/node', () => ({
   readRuntime: vi.fn(() => Promise.resolve(ctx.runtime)),
   isProcessAlive: vi.fn(() => ctx.processAlive),
   resolveDaemonEntry: () => '/fake/daemon-entry.js',
+  stopProcessByPid: vi.fn().mockResolvedValue(true),
+  stopOwnedDaemon: vi.fn().mockResolvedValue(undefined),
   systemSharedAssetsDir: () => '/mock/shared-assets',
 }));
 vi.mock('@bendyline/gezel-service', () => ({
@@ -216,7 +218,11 @@ const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, st
   await import('./index.js');
 const { resolveMode } = await import('./mode.js');
 const { resolveNativeBinaryPath } = await import('./native-bin.js');
-const { discoverOrSpawn } = await import('@bendyline/gezel-client/node');
+const {
+  discoverOrSpawn,
+  stopOwnedDaemon,
+  stopProcessByPid: stopDaemonProcessByPid,
+} = await import('@bendyline/gezel-client/node');
 const { readBundleMeta } = await import('./extract-bundle.js');
 
 // Env keys the supervisor's prelude mutates. We snapshot at the start
@@ -1107,77 +1113,78 @@ describe('health lifecycle', () => {
 });
 
 describe('graceful child shutdown', () => {
-  it('escalates to SIGKILL when SIGTERM was delivered but the child did not exit', async () => {
-    vi.useFakeTimers();
-    try {
-      const child = new EventEmitter() as EventEmitter & {
-        killed: boolean;
-        exitCode: number | null;
-        signalCode: NodeJS.Signals | null;
-        kill: ReturnType<typeof vi.fn>;
-      };
-      // Start true to prove this is not a valid process-exit predicate.
-      child.killed = true;
-      child.exitCode = null;
-      child.signalCode = null;
-      child.kill = vi.fn((signal: NodeJS.Signals = 'SIGTERM') => {
-        if (signal === 'SIGKILL') {
-          child.signalCode = signal;
-          queueMicrotask(() => child.emit('exit', null, signal));
-        }
-        return true;
-      });
+  it('delegates owned-child shutdown to the shared stdin/tree lifecycle helper', async () => {
+    const child = makeFakeChild();
+    const logger = baseOpts().logger;
 
-      const stopping = gracefullyStop(child as unknown as ChildProcess, baseOpts().logger);
-      await vi.advanceTimersByTimeAsync(3_000);
-      await stopping;
+    await gracefullyStop(child, logger);
 
-      expect(child.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
-      expect(child.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(stopOwnedDaemon).toHaveBeenCalledWith(child, logger, {
+      graceMs: 3_000,
+      forceMs: 3_000,
+    });
   });
 
-  it('confirms an adopted stale pid exited and escalates before allowing replacement', async () => {
-    vi.useFakeTimers();
-    try {
-      let alive = true;
-      const signals: NodeJS.Signals[] = [];
-      const stopping = stopProcessByPid(1234, baseOpts().logger, {
+  it('delegates adopted-pid shutdown to the shared cross-platform helper', async () => {
+    const logger = baseOpts().logger;
+    const isAlive = () => true;
+    const signalProcess = vi.fn();
+
+    await expect(
+      stopProcessByPid(1234, logger, {
         graceMs: 100,
         pollIntervalMs: 10,
-        isAlive: () => alive,
-        signalProcess: (_pid, signal) => {
-          signals.push(signal);
-          if (signal === 'SIGKILL') alive = false;
-        },
-      });
+        platform: 'linux',
+        isAlive,
+        signalProcess,
+      }),
+    ).resolves.toBe(true);
 
-      await vi.advanceTimersByTimeAsync(100);
-      await expect(stopping).resolves.toBe(true);
-      expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(stopDaemonProcessByPid).toHaveBeenCalledWith(1234, {
+      graceMs: 100,
+      pollIntervalMs: 10,
+      platform: 'linux',
+      isAlive,
+      signalProcess,
+      terminateWindowsTree: undefined,
+      logger,
+    });
   });
 
   it('refuses replacement when an adopted stale pid survives escalation', async () => {
-    vi.useFakeTimers();
-    try {
-      const signals: NodeJS.Signals[] = [];
-      const stopping = stopProcessByPid(1234, baseOpts().logger, {
+    vi.mocked(stopDaemonProcessByPid).mockResolvedValueOnce(false);
+    await expect(
+      stopProcessByPid(1234, baseOpts().logger, {
+        platform: 'linux',
+        isAlive: () => true,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('force-stops an adopted stale Windows daemon as a complete process tree', async () => {
+    const isAlive = () => true;
+    const signalProcess = vi.fn();
+    const terminateWindowsTree = vi.fn(async () => {});
+
+    await expect(
+      stopProcessByPid(1234, baseOpts().logger, {
+        platform: 'win32',
         graceMs: 100,
         pollIntervalMs: 10,
-        isAlive: () => true,
-        signalProcess: (_pid, signal) => signals.push(signal),
-      });
+        isAlive,
+        signalProcess,
+        terminateWindowsTree,
+      }),
+    ).resolves.toBe(true);
 
-      await vi.advanceTimersByTimeAsync(200);
-      await expect(stopping).resolves.toBe(false);
-      expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(stopDaemonProcessByPid).toHaveBeenCalledWith(
+      1234,
+      expect.objectContaining({
+        platform: 'win32',
+        isAlive,
+        signalProcess,
+        terminateWindowsTree,
+      }),
+    );
   });
 });

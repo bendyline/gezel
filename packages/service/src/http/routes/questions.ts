@@ -243,6 +243,25 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       return c.json(question);
     }
 
+    // Craftbook dependency requests also hold the originating MCP call
+    // open. The catalog route polls this answer and performs the install
+    // itself after Allow, so seeding a second model turn here would race
+    // the still-live invocation and duplicate the user's request.
+    if (question.intent?.kind === 'toolset-install-approval') {
+      const intent = question.intent;
+      const declined = question.answer?.declined === true;
+      const approved = !declined && (question.answer?.selectedChoices ?? []).includes(0);
+      ctx.chat.recordSessionIntent(
+        {
+          sessionId: question.sessionId,
+          gezelId: question.gezelId,
+          projectId: question.projectId,
+        },
+        approved ? `approved: install ${intent.toolsetId}` : `denied: install ${intent.toolsetId}`,
+      );
+      return c.json(question);
+    }
+
     // Night-shift-review questions are a synthesized morning summary —
     // no live session (sessionId is '') and nothing to arm. Answering
     // (Dismiss) just collapses the card everywhere.

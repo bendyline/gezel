@@ -28,6 +28,7 @@ import { PromptExecutorContextTrim } from './prompt-executor-context-trim.js';
 import { PromptMeesterBuildPrelude } from './prompt-meester-build-prelude.js';
 import { PromptMeesterCraftbookPrelude } from './prompt-meester-craftbook-prelude.js';
 import { PromptMinimalContext } from './prompt-minimal-context.js';
+import { PromptNativeToolCallFormat } from './prompt-native-tool-call-format.js';
 import { PromptPreferWritefileEdits } from './prompt-prefer-writefile-edits.js';
 import { PromptPrivateReasoningGuidance } from './prompt-private-reasoning-guidance.js';
 import { PromptRetrievalFirst } from './prompt-retrieval-first.js';
@@ -83,6 +84,13 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   // read-only input. The guard must be read after the steer.
   PromptSourceFilesReadOnly as Behavior<unknown>,
   PromptTerseVisibleReply as Behavior<unknown>,
+  // LAST of the prompt-append block on purpose. The cookbook tells models
+  // "never write tool-use markup … real calls go through the function-calling
+  // channel", which is false on MLX (there is no such channel — salvage is the
+  // only path). For a model with no decode-time grammar this block has to be
+  // the one that lands last, or the cookbook's rule wins and the model
+  // suppresses the only syntax that works.
+  PromptNativeToolCallFormat as Behavior<unknown>,
   ReasoningStripThinkTags as Behavior<unknown>,
   ReasoningStripChannelTags as Behavior<unknown>,
   ReasoningCapturePreToolProse as Behavior<unknown>,

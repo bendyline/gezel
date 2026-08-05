@@ -17,7 +17,7 @@ export function chatRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const projectId = c.req.query('project') ?? DEFAULT_PROJECT;
     const sessions = await ctx.chat.listSessions({ gezelId: id, projectId });
-    const active = sessions.find((s) => !s.archived);
+    const active = sessions.find((s) => !s.archived && !s.taskRef);
     if (!active) return c.json({ gezelId: id, projectId, messages: [] });
     const messages = await ctx.chat.history(active.id);
     return c.json({ gezelId: id, projectId, messages });

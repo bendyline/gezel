@@ -563,7 +563,11 @@ export const MLX_TUNING_MAP: TuningMap = {
   'sampling.dry': null,
   'sampling.xtc': null,
   'reasoning.effort': null,
-  'reasoning.thinkingBudget': null,
+  // Enforced by the sidecar's ThinkBudgetProcessor (llama parity with
+  // `--reasoning-budget`). Dropping this was wild-caught twice: the
+  // 2026-07 "qwen unbounded-thinking loops" finding, and 2026-08-05's
+  // 44K-char/70-hesitation single think block against a 4,096 budget.
+  'reasoning.thinkingBudget': { key: 'max_thinking_tokens' },
   'reasoning.enableThinking': { write: writeChatTemplateKwarg('enable_thinking') },
   'output.responseFormat': { write: writeMlxResponseFormat },
   'output.jsonSchema': null,

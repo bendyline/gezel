@@ -367,7 +367,10 @@ export function ChatComposer({
         }
       } else {
         const res = await api.listChatSessions({ gezelId, projectId });
-        const existing = res.sessions.find((s) => !s.archived);
+        // Ordinary chat must never reuse a task/craftbook handoff session.
+        // The SessionSwitcher applies the same boundary, but this fallback
+        // also has to enforce it for the fast-type race before auto-pick.
+        const existing = res.sessions.find((s) => !s.archived && !s.taskRef);
         if (existing) {
           liveSessionIdRef.current = existing.id;
           setLiveSessionId(existing.id);

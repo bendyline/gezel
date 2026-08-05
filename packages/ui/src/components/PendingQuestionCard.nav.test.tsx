@@ -1,5 +1,5 @@
 import type { Question } from '@bendyline/gezel';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -19,6 +19,7 @@ vi.mock('../api.js', () => ({
 }));
 
 const { PendingQuestionCard } = await import('./PendingQuestionCard.js');
+const { api } = await import('../api.js');
 
 function question(over: Partial<Question> = {}): Question {
   return {
@@ -54,6 +55,32 @@ describe('PendingQuestionCard navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open in chat' }));
 
     expect(onOpenInChat).toHaveBeenCalledWith(expect.objectContaining({ id: 'q1' }));
+  });
+
+  it('renders a craftbook MCP install request and submits approval', async () => {
+    render(
+      <PendingQuestionCard
+        question={question({
+          prompt: 'The powerpoint-deck craftbook needs Example MCP. Install it?',
+          choices: ['Install', 'Not now'],
+          allowWriteIn: false,
+          intent: {
+            kind: 'toolset-install-approval',
+            toolsetId: 'example-mcp',
+            sourceId: 'bundled',
+            version: '1.2.3',
+            targetProjectId: 'learning',
+            craftbookId: 'powerpoint-deck',
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/powerpoint-deck craftbook needs Example MCP/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+    await waitFor(() => {
+      expect(api.answerQuestion).toHaveBeenCalledWith('q1', { selectedChoices: [0] });
+    });
   });
 
   // A task-paused card is service-synthesized with no session behind it, so

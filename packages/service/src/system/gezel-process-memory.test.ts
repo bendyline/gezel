@@ -23,6 +23,27 @@ describe('Gezel macOS process memory', () => {
     ]);
   });
 
+  it('matches Windows engine paths case-insensitively with backslash separators', () => {
+    const home = 'C:\\Users\\Test\\.gezel';
+    const entries = [
+      {
+        pid: 510,
+        ppid: 500,
+        command:
+          '"C:\\Program Files\\Gezel\\gezel-llama-server.exe" --model "c:\\users\\test\\.gezel\\models\\a.gguf"',
+      },
+      {
+        pid: 511,
+        ppid: 500,
+        command: '"C:\\Program Files\\Gezel\\gezel-sd-server.exe" --model "C:\\other\\model.gguf"',
+      },
+    ];
+
+    expect(findGezelEngineProcesses(entries, home, 'win32')).toEqual([
+      expect.objectContaining({ pid: 510 }),
+    ]);
+  });
+
   it('parses the combined physical-footprint byte summary', () => {
     expect(
       parseFootprintBytes(`

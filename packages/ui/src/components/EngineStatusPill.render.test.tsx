@@ -127,6 +127,35 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
   });
 
+  it('shows elapsed work as a minute-and-second clock', async () => {
+    const now = Date.now();
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'llama-cpp',
+          phase: 'prefill',
+          label: 'Processing prompt (50%)',
+          progress: 0.5,
+          startedAt: now - 64_000,
+          lastEventAt: now,
+        },
+      ],
+    ]);
+
+    try {
+      render(<EngineStatusPill />);
+
+      const talkie = await screen.findByRole('button', { name: /Talkie 1930 13B/i });
+      expect(talkie.querySelector('.engine-pill-elapsed')).toHaveTextContent('· 1:04');
+      expect(talkie.getAttribute('title')).toContain('· 1:04');
+      expect(talkie).not.toHaveTextContent('64s');
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
   it('persists the Observe/Manage choice from the engine pill', async () => {
     const user = userEvent.setup();
     vi.mocked(api.updateConfig).mockResolvedValue({

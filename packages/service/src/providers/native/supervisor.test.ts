@@ -509,6 +509,59 @@ not a process row
     await sup.stop();
   });
 
+  it('reaps a Windows engine whose retained creator pid is absent while preserving live owners', async () => {
+    const binary = 'C:\\Gezel\\native-bin\\gezel-llama-server.exe';
+    const liveOwnerPid = 72000;
+    const liveEnginePid = 72001;
+    const deadOwnerPid = 71900;
+    const orphanPid = 71901;
+    const killed = new Set<number>();
+    const reaped: number[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: binary,
+        args: ['--model', 'C:\\Users\\test\\.gezel\\models\\active.gguf', '--port', '33065'],
+        baseUrl: 'http://127.0.0.1:33065',
+      }),
+      spawn: (() =>
+        makeFakeChild(73000) as unknown as ReturnType<
+          typeof import('node:child_process').spawn
+        >) as unknown as typeof import('node:child_process').spawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      platform: 'win32',
+      psRunner: async () =>
+        [
+          {
+            pid: liveOwnerPid,
+            ppid: 60000,
+            command: 'node C:\\other-home\\service\\dist\\bin\\gezeld.js',
+          },
+          {
+            pid: liveEnginePid,
+            ppid: liveOwnerPid,
+            command: `"${binary.toUpperCase()}" --model C:\\other-home\\model.gguf --port 33066`,
+          },
+          {
+            pid: orphanPid,
+            ppid: deadOwnerPid,
+            command: `"${binary.toUpperCase()}" --model C:\\abandoned\\model.gguf --port 33067`,
+          },
+        ].filter(({ pid }) => !killed.has(pid)),
+      killProcess: (pid) => {
+        reaped.push(pid);
+        killed.add(pid);
+      },
+    });
+
+    await sup.ensureRunning();
+    expect(reaped).toEqual([orphanPid]);
+    expect(reaped).not.toContain(liveEnginePid);
+    await sup.stop();
+  });
+
   it('does not reap wrapper processes that only mention the launch command as an argument', async () => {
     const fakeSpawn = (() =>
       makeFakeChild() as unknown as ReturnType<

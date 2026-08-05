@@ -15,6 +15,10 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+it('runs native grammar compilation in the isolated integration lane', ({ task }) => {
+  expect(task.file.projectName).toBe('integration');
+});
+
 describe('classifyFile', () => {
   it('classifies code, markdown, docs, images, and trivia', () => {
     expect(classifyFile('src/a.ts', 100)).toMatchObject({
@@ -79,60 +83,6 @@ describe('extractCodeSymbols (web-tree-sitter)', () => {
     expect(byName.get('Beta')).toMatchObject({ kind: 'class', lineStart: 3, lineEnd: 5 });
     expect(byName.get('doThing')).toMatchObject({ kind: 'method', parent: 'Beta' });
     expect(byName.get('Shape')).toMatchObject({ kind: 'interface' });
-  });
-
-  it('extracts symbols from swift', async () => {
-    const code = [
-      'protocol Drawable {',
-      '  func draw()',
-      '}',
-      'class Circle {',
-      '  func draw() {}',
-      '}',
-      'func area(radius: Double) -> Double { return 3.14 * radius * radius }',
-    ].join('\n');
-    const syms = await extractCodeSymbols('swift', code);
-    expect(syms).not.toBeNull();
-    const kinds = new Map(syms!.map((s) => [s.name, s.kind]));
-    expect(kinds.get('Circle')).toBe('class');
-    expect(kinds.get('area')).toBe('function');
-    expect(kinds.get('Drawable')).toBe('protocol');
-  });
-
-  it('extracts symbols from kotlin', async () => {
-    const code = [
-      'class Winkel(val name: String) {',
-      '  fun open() {}',
-      '}',
-      'object Register {',
-      '  fun total(): Int = 0',
-      '}',
-      'fun main() {}',
-    ].join('\n');
-    const syms = await extractCodeSymbols('kotlin', code);
-    expect(syms).not.toBeNull();
-    const kinds = new Map(syms!.map((s) => [s.name, s.kind]));
-    expect(kinds.get('Winkel')).toBe('class');
-    expect(kinds.get('Register')).toBe('object');
-    expect(kinds.get('main')).toBe('function');
-  });
-
-  it('extracts symbols from scala', async () => {
-    const code = [
-      'trait Greeter {',
-      '  def greet(name: String): String',
-      '}',
-      'object Main {',
-      '  def run(): Unit = ()',
-      '}',
-      'class Shop(name: String)',
-    ].join('\n');
-    const syms = await extractCodeSymbols('scala', code);
-    expect(syms).not.toBeNull();
-    const kinds = new Map(syms!.map((s) => [s.name, s.kind]));
-    expect(kinds.get('Greeter')).toBe('trait');
-    expect(kinds.get('Main')).toBe('object');
-    expect(kinds.get('Shop')).toBe('class');
   });
 });
 

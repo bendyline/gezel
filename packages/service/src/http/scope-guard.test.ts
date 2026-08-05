@@ -516,6 +516,52 @@ describe('sessionRouteGuard', () => {
     ).toBe(403);
   });
 
+  it('admits only coordinator, project-scoped craftbook toolset installs and requests', async () => {
+    const worker = sessionPolicyApp(session('proj-a'));
+    const coordinator = sessionPolicyApp(session('proj-a', true));
+    const install = { scope: { kind: 'project', projectId: 'proj-b' } };
+    expect(
+      (await coordinator.request('/api/catalog/toolset/docblocks/install', jsonPost(install)))
+        .status,
+    ).toBe(200);
+    expect(
+      (await worker.request('/api/catalog/toolset/docblocks/install', jsonPost(install))).status,
+    ).toBe(403);
+    expect(
+      (
+        await coordinator.request(
+          '/api/catalog/toolset/docblocks/install',
+          jsonPost({ scope: { kind: 'shared' } }),
+        )
+      ).status,
+    ).toBe(403);
+
+    const request = {
+      ...install,
+      gezelId: 'gz-1',
+      sessionId: 'proj-a',
+      sourceId: 'bundled',
+      version: '1.0.0',
+      craftbookId: 'powerpoint-deck',
+    };
+    expect(
+      (
+        await coordinator.request(
+          '/api/catalog/toolset/example/request-install-and-wait',
+          jsonPost(request),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await coordinator.request(
+          '/api/catalog/toolset/example/request-install-and-wait',
+          jsonPost({ ...request, sessionId: 'other' }),
+        )
+      ).status,
+    ).toBe(403);
+  });
+
   it('binds project action attribution and task-note authorship to the bearer identity', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     const ownWrite = {

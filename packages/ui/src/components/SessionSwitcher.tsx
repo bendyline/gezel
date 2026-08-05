@@ -71,7 +71,11 @@ export function SessionSwitcher({
         all = res.sessions.filter((s) => s.gezelId === gezelId);
       } else {
         const res = await api.listChatSessions({ gezelId, projectId });
-        all = res.sessions;
+        // The ordinary chat surface is the gezel's lobby conversation.
+        // Task-scoped sessions (including night-shift handoffs) have their
+        // own task UI and procedure prompt; letting one win this newest-first
+        // list silently drops an ordinary user message into that procedure.
+        all = res.sessions.filter((s) => !s.taskRef);
       }
       const visible = all.filter((s) => !s.archived);
       setSessions(visible);

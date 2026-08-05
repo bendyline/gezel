@@ -491,6 +491,35 @@ describe('findProseToolCallSpans — OpenAI-flavored write_file shape (Gemma 4 2
     expect(c).toContain('</html>');
   });
 
+  it('salvages a pythonic write_file whose content escapes single quotes', () => {
+    // LFM2.5's chat template escapes every `'` in a tool argument
+    // (`replace("'", "\\'")`), so any JS or HTML the model writes arrives
+    // with `\'` inside a single-quoted kwarg. `\'` is legal in Python/JS
+    // but NOT valid JSON, so copying it through made `JSON.parse` reject the
+    // whole object and the call vanished. Wild-caught on the tankcombat
+    // anchor: the model emitted a complete, working 3.1 KB game and the
+    // deliverable was dropped on the floor — the trial scored 0 writes.
+    const text = String.raw`<|tool_call_start|>[write_file(path='game.html', content='<script>\n  let s = \'playing\';\n</script>\n')]<|tool_call_end|>`;
+    const spans = findProseToolCallSpans(text, WRITE_KNOWN);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.name).toBe('write_file');
+    const c = String(spans[0]!.arguments.content);
+    expect(c).toContain("let s = 'playing';");
+    expect(c).not.toContain("\\'");
+  });
+
+  it('keeps other backslash escapes intact when unescaping single quotes', () => {
+    // The `\'` special-case must not eat legitimate escapes sharing the
+    // branch: `\\` (literal backslash) and `\n` (newline) still round-trip.
+    const text = String.raw`write_file(path='p.txt', content='C:\\dir\nit\'s fine')`;
+    const spans = findProseToolCallSpans(text, WRITE_KNOWN);
+    expect(spans).toHaveLength(1);
+    const c = String(spans[0]!.arguments.content);
+    expect(c).toContain('C:\\dir');
+    expect(c).toContain('\n');
+    expect(c).toContain("it's fine");
+  });
+
   it('salvages write_file that arrives without a wrapping markdown fence', () => {
     // Some Gemma turns drop the ```javascript wrapper and emit the
     // call as bare prose. Should still salvage.

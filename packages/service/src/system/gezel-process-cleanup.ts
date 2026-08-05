@@ -1,24 +1,17 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import {
-  type ProcessListEntry,
-  findGezelEngineProcesses,
-  parseProcessList,
-} from './gezel-process-memory.js';
+import { isGezelEngineCommand, listProcessSnapshots } from '@bendyline/gezel-client/node';
+import type { ProcessListEntry } from './gezel-process-memory.js';
 
-const exec = promisify(execFile);
 const ORPHAN_REAP_WAIT_MS = 10_000;
 const ORPHAN_REAP_POLL_MS = 150;
 
 export interface GezelOrphanCleanupResult {
-  /** Same-home, clearly-Gezel PPID-1 engines selected for cleanup. */
+  /** Clearly-Gezel owner-less engines selected for cleanup. */
   targetedPids: number[];
   /** Targets still visible after the bounded post-SIGKILL wait. */
   remainingPids: number[];
 }
 
 export interface ReapOrphanedGezelEngineProcessesOptions {
-  home: string;
   platform?: NodeJS.Platform;
   servicePid?: number;
   psRunner?: () => Promise<ProcessListEntry[]>;
@@ -28,32 +21,42 @@ export interface ReapOrphanedGezelEngineProcessesOptions {
 }
 
 /**
- * Sweep every known engine family for the current Gezel home.
+ * Sweep every known first-party Gezel engine family.
  *
  * The per-engine supervisor also reaps before launching, but that is
  * deliberately scoped to the engine being started. A DS4 chat therefore
  * cannot discover an abandoned MLX Python server. Running this once after the
  * same-home daemon lock is acquired closes that cross-engine gap.
  *
- * Safety is intentionally strict: the command must identify a known Gezel
- * native/Python engine, contain this service's exact home path, and have PPID
- * 1. A non-init parent means another live daemon still owns it.
+ * Safety is intentionally strict: argv[0] must be one of our `gezel-*` native
+ * binaries, or Python's first script argument must be a `gezel_*_server.py`.
+ * On Unix, PPID 1 proves its owner exited. Windows retains the creator pid
+ * instead of reparenting, so the creator must be absent from the same process
+ * snapshot. The sweep is intentionally not home-scoped: production engines
+ * can load models from the machine-shared store and run binaries from app
+ * resources, leaving no user-home path in their command line. Ownerlessness
+ * is the cross-home safety proof; a process with any live owner is untouched.
  */
 export async function reapOrphanedGezelEngineProcesses(
-  opts: ReapOrphanedGezelEngineProcessesOptions,
+  opts: ReapOrphanedGezelEngineProcessesOptions = {},
 ): Promise<GezelOrphanCleanupResult> {
   const platform = opts.platform ?? process.platform;
-  if (platform !== 'darwin' && platform !== 'linux') {
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     return { targetedPids: [], remainingPids: [] };
   }
 
-  const psRunner = opts.psRunner ?? defaultPsRunner;
+  const psRunner = opts.psRunner ?? (() => listProcessSnapshots({ platform }));
   const killProcess = opts.killProcess ?? ((pid, signal) => process.kill(pid, signal));
   const sleep = opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const servicePid = opts.servicePid ?? process.pid;
   const initial = await psRunner();
-  const targetedPids = findGezelEngineProcesses(initial, opts.home)
-    .filter(({ pid, ppid }) => pid !== servicePid && ppid === 1)
+  const livePids = new Set(initial.map(({ pid }) => pid));
+  const targetedPids = initial
+    .filter(({ command }) => isGezelEngineCommand(command))
+    .filter(
+      ({ pid, ppid }) =>
+        pid !== servicePid && (platform === 'win32' ? !livePids.has(ppid) : ppid === 1),
+    )
     .map(({ pid }) => pid);
 
   for (const pid of targetedPids) {
@@ -81,13 +84,4 @@ async function findRemaining(
   if (pids.length === 0) return [];
   const alive = new Set((await psRunner()).map(({ pid }) => pid));
   return pids.filter((pid) => alive.has(pid));
-}
-
-async function defaultPsRunner(): Promise<ProcessListEntry[]> {
-  const { stdout } = await exec('/bin/ps', ['-axo', 'pid=,ppid=,command='], {
-    encoding: 'utf8',
-    timeout: 3_000,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  return parseProcessList(String(stdout));
 }

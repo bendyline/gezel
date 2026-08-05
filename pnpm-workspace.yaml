@@ -7,13 +7,21 @@ publicHoistPattern:
 
 confirmModulesPurge: false
 
+# The packageManager pin in package.json is authoritative. Warn immediately
+# when the pnpm on PATH differs instead of silently downloading another pnpm
+# before the requested command starts (which can look like a hung command).
+pmOnFail: warn
+
+# A committed lockfile is part of the trusted base. Do not make every install
+# re-query registry metadata for every locked package; run `pnpm audit:lockfile`
+# when the release-age and publisher-trust policies need explicit verification.
+trustLockfile: true
+
 # Network defaults are sized for a cold CI install of ~1440 packages, not for a
 # warm laptop. pnpm's stock 60s fetchTimeout with 2 retries aborted a Windows
-# release build outright: registry metadata requests were taking 10-44s each
-# while the supply-chain policy check fired 1593 lookups of its own against the
-# same connection pool, and the large tarballs (onnxruntime, monaco, mermaid,
-# @huggingface/transformers) lost the race. Lower concurrency trades a little
-# warm-cache speed for far less pool contention when the cache is cold.
+# release build outright when large tarballs (onnxruntime, monaco, mermaid,
+# @huggingface/transformers) competed for the same connection pool. Lower
+# concurrency trades a little warm-cache speed for less pool contention.
 fetchTimeout: 300000
 fetchRetries: 5
 networkConcurrency: 8

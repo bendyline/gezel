@@ -43,6 +43,7 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { artifactPathFromHref, linkifyArtifactRefs } from './artifact-linkify.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
+import { formatElapsedClock } from './elapsed-time.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -1391,7 +1392,7 @@ export function StreamingStatusLine({
         // the dot as the normal label-to-meta separator.
         <>
           {showProgress ? ' ' : ' · '}
-          {formatElapsed(elapsedSeconds)}
+          {formatElapsedClock(elapsedSeconds)}
         </>
       )}
       {toolCount > 0 && (
@@ -2127,7 +2128,7 @@ export function GhostQueuedBubble({
     <div className={`msg msg-user msg-ghost-queued${extraClass ? ` ${extraClass}` : ''}`}>
       <div className="msg-role">
         <span className="msg-ghost-queued-label">{nudge ? '⋯ nudge' : '⋯ queued'}</span>
-        {waited !== null && <span className="muted small"> · {formatElapsed(waited)}</span>}
+        {waited !== null && <span className="muted small"> · {formatElapsedClock(waited)}</span>}
       </div>
       {editing ? (
         <div className="msg-ghost-queued-edit">
@@ -3020,17 +3021,9 @@ export function useElapsedSeconds(startedAt: number | null): number | null {
   return Math.max(0, Math.floor((now - startedAt) / 1000));
 }
 
-function formatElapsed(s: number): string {
-  const total = Math.max(0, Math.floor(s));
-  const m = Math.floor(total / 60);
-  const r = total % 60;
-  const ss = r.toString().padStart(2, '0');
-  return m > 0 ? `${m}:${ss}` : `:${ss}`;
-}
-
 /**
  * Human-readable elapsed string for the "still working" banner. Same
- * math as `formatElapsed`, but we spell out the units so a user
+ * math as `formatElapsedClock`, but we spell out the units so a user
  * skimming the bubble gets "2 min 15 sec" instead of parsing "2m 15s".
  */
 function formatElapsedLong(s: number): string {

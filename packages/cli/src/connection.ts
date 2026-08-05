@@ -349,7 +349,12 @@ async function connectPreferredService(
  * source-pinned release manifest and platform signature policy.
  */
 async function prepareStandaloneAssets(): Promise<void> {
-  if (process.env.GEZEL_NATIVE_BIN_DIR) return;
+  // Mock mode replaces every local inference provider and is explicitly used
+  // by tests/CI to avoid native-engine work. Scanning an installed Electron
+  // payload here is therefore both unnecessary and harmful: signature checks
+  // can consume most of the daemon-start budget and may write warnings to an
+  // otherwise clean CLI stderr stream.
+  if (process.env.GEZEL_MOCK_PROVIDER === '1' || process.env.GEZEL_NATIVE_BIN_DIR) return;
   const candidates = electronNativeBinCandidates();
   if (candidates.length === 0) return;
   const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');

@@ -29,5 +29,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Verify lockfile supply-chain policies
+        run: pnpm audit:lockfile
       - name: Production dependency vulnerability audit at high severity
         run: pnpm audit:vulnerabilities --audit-level=high

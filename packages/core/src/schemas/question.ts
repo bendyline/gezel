@@ -65,13 +65,9 @@ export type QuestionAnswer = z.infer<typeof QuestionAnswerSchema>;
  * Structured intent for special-purpose questions that the service
  * creates internally (not via the `ask_user_question` MCP tool).
  *
- * Today the only such intent is `npm-install-approval`: a gezel called
- * `npm_install(pkg, version)` and the package wasn't in the shipped
- * or per-project allowlist, so the service fabricates a pending
- * question. The UI renders a specialized card (package name, version,
- * npm description, three buttons) and the answer handler translates
- * the button pick into a real install / skip / decline and feeds a
- * synthetic user message back to the gezel's session.
+ * Examples include npm package approvals, runtime tool permissions, and
+ * craftbook MCP-toolset install requests. Each service-owned intent gets
+ * a specialized card and answer behavior; plain questions remain generic.
  *
  * Plain questions asked via `ask_user_question` leave `intent`
  * unset — existing rendering path is unchanged.
@@ -138,6 +134,27 @@ export const ToolPermissionIntentSchema = z.object({
   toolInput: z.record(z.string(), z.unknown()),
 });
 export type ToolPermissionIntent = z.infer<typeof ToolPermissionIntentSchema>;
+
+/**
+ * Approval for a craftbook's missing zero-configuration MCP toolset.
+ *
+ * Trusted, pinned first-party dependencies (currently DocBlocks) install
+ * without interrupting the user. Other code-bearing or remote MCPs pause
+ * the live craftbook invocation here before anything is downloaded or
+ * registered. The catalog request route long-polls this question, installs
+ * after an explicit Allow, then lets the original invocation continue.
+ * Toolsets with required configuration do not use this intent because an
+ * approval click cannot supply credentials or settings.
+ */
+export const ToolsetInstallApprovalIntentSchema = z.object({
+  kind: z.literal('toolset-install-approval'),
+  toolsetId: z.string(),
+  sourceId: z.string(),
+  version: z.string(),
+  targetProjectId: z.string(),
+  craftbookId: z.string(),
+});
+export type ToolsetInstallApprovalIntent = z.infer<typeof ToolsetInstallApprovalIntentSchema>;
 
 /**
  * Cost-confirmation question created by the service before invoking a
@@ -288,6 +305,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   }),
   CommandApprovalIntentSchema,
   ToolPermissionIntentSchema,
+  ToolsetInstallApprovalIntentSchema,
   ImageGenerationApprovalIntentSchema,
   VideoGenerationApprovalIntentSchema,
   ScheduleApprovalIntentSchema,

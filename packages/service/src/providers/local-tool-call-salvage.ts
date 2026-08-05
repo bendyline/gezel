@@ -3057,7 +3057,16 @@ function singleToDoubleQuotes(json: string): string {
       while (i < json.length) {
         const c2 = json[i]!;
         if (c2 === '\\' && i + 1 < json.length) {
-          out += c2 + json[i + 1];
+          const next = json[i + 1]!;
+          // `\'` is a legal escape in Python/JS single-quoted strings but is
+          // NOT valid JSON, so copying it through makes `JSON.parse` reject
+          // the whole object. An apostrophe needs no escape inside a JSON
+          // double-quoted string, so emit it bare. Wild-caught on LFM2.5,
+          // whose chat template escapes every `'` in a tool argument: a
+          // complete `write_file` carrying ordinary JS (`gameState =
+          // \'playing\'`) parsed to zero spans and the deliverable was
+          // dropped on the floor.
+          out += next === "'" ? "'" : c2 + next;
           i += 2;
           continue;
         }

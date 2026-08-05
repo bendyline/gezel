@@ -12,6 +12,8 @@ import {
   isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
+  stopOwnedDaemon,
+  stopProcessByPid,
 } from '@bendyline/gezel-client/node';
 import { Command } from 'commander';
 import {
@@ -210,31 +212,35 @@ async function startForeground(env: NodeJS.ProcessEnv): Promise<void> {
   const entry = resolveDaemonEntry(import.meta.url);
 
   // `env` is prepared by the caller (GEZEL_PORT / GEZEL_WEB / transport).
-  // Attached child with inherited stdio — the daemon's pino logs stream
-  // directly to this terminal, and Ctrl+C flows through. In web mode the
-  // daemon prints its own one-time URL to this stdout.
+  // Keep a dedicated stdin ownership pipe while inheriting output. EOF gives
+  // gezeld a graceful, cross-platform stop channel and the OS closes the same
+  // pipe if this foreground owner crashes. In web mode the daemon still
+  // prints its one-time URL to this stdout.
   const child = spawn(process.execPath, [entry], {
     detached: false,
-    stdio: 'inherit',
-    env,
+    stdio: ['pipe', 'inherit', 'inherit'],
+    env: { ...env, GEZEL_SHUTDOWN_ON_STDIN_EOF: '1' },
   });
 
-  const forward = (signal: NodeJS.Signals) => {
-    try {
-      child.kill(signal);
-    } catch {
-      /* already dead */
-    }
+  let stopping: Promise<void> | undefined;
+  const requestStop = () => {
+    stopping ??= stopOwnedDaemon(child);
+    void stopping;
   };
-  process.on('SIGINT', () => forward('SIGINT'));
-  process.on('SIGTERM', () => forward('SIGTERM'));
+  process.on('SIGINT', requestStop);
+  process.on('SIGTERM', requestStop);
 
-  await new Promise<void>((resolve) => {
-    child.on('exit', (code) => {
-      process.exitCode = code ?? 0;
-      resolve();
+  try {
+    await new Promise<void>((resolve) => {
+      child.on('exit', (code) => {
+        process.exitCode = code ?? 0;
+        resolve();
+      });
     });
-  });
+  } finally {
+    process.off('SIGINT', requestStop);
+    process.off('SIGTERM', requestStop);
+  }
 }
 
 program
@@ -306,11 +312,11 @@ program
       console.log('gezeld is not running');
       return;
     }
-    try {
-      process.kill(runtime.pid, 'SIGTERM');
-      console.log(`sent SIGTERM to pid ${runtime.pid}`);
-    } catch (err) {
-      console.error(`failed to stop: ${(err as Error).message}`);
+    const stopped = await stopProcessByPid(runtime.pid);
+    if (stopped) {
+      console.log(`stopped gezeld pid=${runtime.pid}`);
+    } else {
+      console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
       process.exitCode = 1;
     }
   });

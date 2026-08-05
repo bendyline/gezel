@@ -81,4 +81,38 @@ describe('SessionSwitcher', () => {
     });
     expect(screen.getByText(/Landing page plan/)).toBeInTheDocument();
   });
+
+  it('keeps task and night-shift sessions out of ordinary chat', async () => {
+    mockSessions([
+      {
+        id: 'night-shift',
+        gezelId: 'g1',
+        title: 'Night-shift oversight',
+        taskRef: 'p1/7',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+      {
+        id: 'ordinary',
+        gezelId: 'g1',
+        title: 'Morning chat',
+        lastActivityAt: new Date(Date.now() - 1_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    const onSessionIdChange = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={onSessionIdChange}
+      />,
+    );
+
+    await waitFor(() => expect(onSessionIdChange).toHaveBeenCalledWith('ordinary'));
+    expect(screen.queryByText(/Night-shift oversight/)).not.toBeInTheDocument();
+  });
 });

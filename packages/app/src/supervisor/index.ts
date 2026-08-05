@@ -12,6 +12,8 @@ import {
   isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
+  stopProcessByPid as stopDaemonProcessByPid,
+  stopOwnedDaemon,
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import {
@@ -819,15 +821,16 @@ async function connectResolved(
           );
           // Stop the outdated daemon before respawning so the user doesn't
           // end up with two gezeld instances racing for the same `~/.gezel/`
-          // state. This is the ONE situation where we SIGTERM a pid we
-          // didn't spawn — justified because the version check just told
-          // us it's stale. Phase 2 will coordinate with autostart cleanly;
+          // state. This is the ONE situation where we stop a pid we didn't
+          // spawn — justified because the version check just told us it's
+          // stale. On Windows the stop covers its full descendant tree.
+          // Phase 2 will coordinate with autostart cleanly;
           // for now the autostart may restart the old one on the next
           // login cycle, which is acceptable for a skeleton.
           const stopped = await stopProcessByPid(mode.pid, opts.logger);
           if (!stopped) {
             throw new Error(
-              `Stale gezeld pid=${mode.pid} did not exit after SIGTERM/SIGKILL; refusing to spawn another writer`,
+              `Stale gezeld pid=${mode.pid} did not exit after the bounded stop ladder; refusing to spawn another writer`,
             );
           }
           return await respawnPackagedAfterMismatch(opts);
@@ -838,7 +841,7 @@ async function connectResolved(
         // (a proxy for "when this daemon was started"). If the workspace
         // build is newer, the user just rebuilt — the running daemon is
         // executing stale TS, so adopting it would have the new UI talking
-        // to old service code. SIGTERM and fall through to embedded.
+        // to old service code. Stop it and fall through to embedded.
         // Without this, `pnpm app` (which always runs `pnpm build` first)
         // can silently use a daemon that doesn't reflect the just-built
         // code, exactly the failure that surfaced when iterating on the
@@ -851,7 +854,7 @@ async function connectResolved(
           const stopped = await stopProcessByPid(mode.pid, opts.logger);
           if (!stopped) {
             throw new Error(
-              `Stale development gezeld pid=${mode.pid} did not exit after SIGTERM/SIGKILL; refusing embedded startup`,
+              `Stale development gezeld pid=${mode.pid} did not exit after the bounded stop ladder; refusing embedded startup`,
             );
           }
           return buildEmbedded(opts, {
@@ -1503,111 +1506,51 @@ async function spawnChild(opts: ConnectOptions): Promise<{
 export interface StopProcessByPidOptions {
   graceMs?: number;
   pollIntervalMs?: number;
+  platform?: NodeJS.Platform;
   isAlive?: (pid: number) => boolean;
   signalProcess?: (pid: number, signal: NodeJS.Signals) => unknown;
+  terminateWindowsTree?: (pid: number) => Promise<void>;
 }
 
 /**
  * Stop an adopted per-user daemon only on the two explicitly-authorized stale
- * version/build paths. A signal is not evidence of exit: confirm liveness,
- * escalate once, and refuse the next writer if the pid still survives.
+ * version/build paths. On POSIX a signal is not evidence of exit: confirm
+ * liveness and escalate once. On Windows, where signals are single-process
+ * TerminateProcess calls, force-stop the whole descendant tree. Refuse the
+ * next writer if the pid survives either bounded ladder.
  */
 export async function stopProcessByPid(
   pid: number,
   logger: ConnectOptions['logger'],
   options: StopProcessByPidOptions = {},
 ): Promise<boolean> {
-  const graceMs = options.graceMs ?? GRACEFUL_STOP_MS;
-  const pollIntervalMs = options.pollIntervalMs ?? 50;
+  const platform = options.platform ?? process.platform;
   const alive = options.isAlive ?? isProcessAlive;
-  const signal = options.signalProcess ?? ((target, sig) => process.kill(target, sig));
   if (!alive(pid)) return true;
 
-  try {
-    signal(pid, 'SIGTERM');
-  } catch {
-    /* verify liveness below; ESRCH is success, EPERM remains alive */
+  if (platform === 'win32') {
+    logger?.warn?.(`[supervisor] force-stopping stale Windows gezeld tree pid=${pid}`);
   }
-  if (await waitForPidExit(pid, graceMs, pollIntervalMs, alive)) return true;
-
-  logger?.warn?.(`[supervisor] pid=${pid} ignored SIGTERM; sending SIGKILL`);
-  try {
-    signal(pid, 'SIGKILL');
-  } catch {
-    /* verify liveness below */
-  }
-  const stopped = await waitForPidExit(pid, graceMs, pollIntervalMs, alive);
-  if (!stopped) logger?.error?.(`[supervisor] pid=${pid} survived SIGKILL`);
-  return stopped;
-}
-
-async function waitForPidExit(
-  pid: number,
-  timeoutMs: number,
-  pollIntervalMs: number,
-  alive: (pid: number) => boolean,
-): Promise<boolean> {
-  const deadline = Date.now() + Math.max(1, timeoutMs);
-  while (alive(pid) && Date.now() < deadline) {
-    const remaining = deadline - Date.now();
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.max(1, Math.min(pollIntervalMs, remaining))),
-    );
-  }
-  return !alive(pid);
+  return stopDaemonProcessByPid(pid, {
+    graceMs: options.graceMs ?? GRACEFUL_STOP_MS,
+    pollIntervalMs: options.pollIntervalMs,
+    platform,
+    isAlive: alive,
+    signalProcess: options.signalProcess,
+    terminateWindowsTree: options.terminateWindowsTree,
+    logger,
+  });
 }
 
 export async function gracefullyStop(
   child: ChildProcess | undefined,
   logger: ConnectOptions['logger'],
 ): Promise<void> {
-  if (!child || childHasExited(child)) return;
+  if (!child) return;
   logger?.info?.('[supervisor] stopping gezeld child...');
-  // Register the waiter before signalling; a fast child can exit
-  // synchronously from a test double or on the next native event turn.
-  const gracefulExit = waitForChildExit(child, GRACEFUL_STOP_MS);
-  try {
-    child.kill('SIGTERM');
-  } catch {
-    /* it may have exited between the predicate and signal */
-  }
-  if (await gracefulExit) return;
-
-  // `child.killed` means only that kill() delivered a signal. It says
-  // nothing about process termination, so exitCode/signalCode remain the
-  // sole predicates here.
-  if (!childHasExited(child)) {
-    logger?.warn?.('[supervisor] gezeld ignored SIGTERM; sending SIGKILL');
-    const forcedExit = waitForChildExit(child, GRACEFUL_STOP_MS);
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      /* it may have exited immediately before escalation */
-    }
-    if (!(await forcedExit) && !childHasExited(child)) {
-      logger?.warn?.('[supervisor] could not confirm gezeld exited after SIGKILL');
-    }
-  }
-}
-
-function childHasExited(child: ChildProcess): boolean {
-  return child.exitCode != null || child.signalCode != null;
-}
-
-function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (childHasExited(child)) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (exited: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.off('exit', onExit);
-      resolve(exited);
-    };
-    const onExit = () => finish(true);
-    const timer = setTimeout(() => finish(childHasExited(child)), timeoutMs);
-    child.once('exit', onExit);
+  await stopOwnedDaemon(child, logger, {
+    graceMs: GRACEFUL_STOP_MS,
+    forceMs: GRACEFUL_STOP_MS,
   });
 }
 

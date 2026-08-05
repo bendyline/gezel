@@ -1,15 +1,14 @@
-import { execFile } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { promisify } from 'node:util';
 import {
   type DiscoverOrSpawnResult,
   discoverOrSpawn,
+  isGezelEngineCommand,
+  listProcessSnapshots,
   resolveDaemonEntry,
+  stopOwnedDaemon,
 } from '@bendyline/gezel-client/node';
-
-const execFileAsync = promisify(execFile);
 
 export interface SpawnTrialDaemonOptions {
   /** GEZEL_HOME for this daemon — should be a writable, ideally fresh dir. */
@@ -155,36 +154,20 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
 }
 
 /**
- * Politely terminate a spawned daemon. Sends SIGTERM, waits up to
- * `gracefulMs`, then SIGKILLs. Resolves once the child has exited.
+ * Stop a spawned daemon through the cross-platform ownership channel.
+ * Closing stdin lets gezeld run its cleanup hooks (and also happens if the
+ * eval runner crashes). After `gracefulMs`, the shared helper force-stops the
+ * full Windows process tree or uses the POSIX signal ladder. A final
+ * process-table sweep catches engines left by an already-abrupt daemon exit.
  */
 export async function shutdownTrialDaemon(
   spawned: TrialDaemon,
   gracefulMs = 10_000,
 ): Promise<void> {
-  const child = spawned.child;
-  if (child && child.exitCode === null) {
-    child.kill('SIGTERM');
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      child.once('exit', finish);
-      setTimeout(() => {
-        if (!settled && child.exitCode === null) {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            /* already dead */
-          }
-        }
-        finish();
-      }, gracefulMs);
-    });
-  }
+  await stopOwnedDaemon(spawned.child, undefined, {
+    graceMs: gracefulMs,
+    forceMs: Math.min(gracefulMs, 3_000),
+  });
   await reapTrialNativeChildren(spawned.home);
 }
 
@@ -209,29 +192,21 @@ async function reapTrialNativeChildren(home: string): Promise<void> {
   }
 }
 
-async function findTrialNativeChildren(home: string): Promise<number[]> {
+export async function findTrialNativeChildren(
+  home: string,
+  options: {
+    platform?: NodeJS.Platform;
+    listProcesses?: typeof listProcessSnapshots;
+  } = {},
+): Promise<number[]> {
   try {
-    // `command=` is the keyword that exists on BOTH macOS (BSD ps) and
-    // Linux (procps). The previous `cmd=` is procps-only: on macOS it
-    // errored ("keyword not found"), the catch below swallowed it, and
-    // the teardown reaper was a silent no-op — every trial's engine
-    // survived teardown, and a mid-generation kill left the GPU busy so
-    // the NEXT trial's turns starved into `chat-stalled` (wild-caught
-    // repeatedly craftbook A/B matrix).
-    const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,command='], { timeout: 5000 });
-    return stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .map((line) => {
-        const match = line.match(/^(\d+)\s+(.+)$/);
-        if (!match) return null;
-        return { pid: Number(match[1]), cmd: match[2] ?? '' };
-      })
-      .filter((row): row is { pid: number; cmd: string } => row !== null)
+    const platform = options.platform ?? process.platform;
+    const homeNeedle = normalizeCommandForPlatform(home, platform);
+    return (await (options.listProcesses ?? listProcessSnapshots)({ platform }))
       .filter(
-        ({ pid, cmd }) =>
+        ({ pid, command }) =>
           pid !== process.pid &&
-          cmd.includes(home) &&
+          normalizeCommandForPlatform(command, platform).includes(homeNeedle) &&
           // The MLX server (`python …/gezel_mlx_server.py --model <home>/…`)
           // was missing here, so MLX trials orphaned their server on teardown —
           // and MLX pins the model in WIRED Metal memory, which accumulated
@@ -242,19 +217,20 @@ async function findTrialNativeChildren(home: string): Promise<number[]> {
           // llama-server; an unreaped one orphans tens of GB of WIRED Metal
           // RAM after a trial (same failure mode as the MLX leak above —
           // fatal on a 64GB box), so it must be matched here too.
-          (cmd.includes('llama-server') ||
-            cmd.includes('ds4-server') ||
-            cmd.includes('sd-server') ||
-            cmd.includes('gezel_mlx_server')),
+          isGezelEngineCommand(command),
       )
       .map(({ pid }) => pid);
   } catch (err) {
-    // Loud, not silent: a broken ps invocation here means engines leak
-    // across trials (see the `command=` note above — that failure hid
-    // for weeks behind this catch).
+    // Loud, not silent: failed process discovery means engines can leak
+    // across trials. This caught both the historical macOS `ps` keyword bug
+    // and the Windows no-`ps` gap that left GPU servers resident.
     console.warn(
-      `[spawn] findTrialNativeChildren: ps failed (${err instanceof Error ? err.message : err}) — native engine reap skipped`,
+      `[spawn] findTrialNativeChildren: process snapshot failed (${err instanceof Error ? err.message : err}) — native engine reap skipped`,
     );
     return [];
   }
+}
+
+function normalizeCommandForPlatform(value: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? value.replaceAll('/', '\\').toLowerCase() : value;
 }

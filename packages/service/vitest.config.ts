@@ -17,6 +17,20 @@ const MAX_WORKERS = Math.max(2, Math.min(8, availableParallelism()));
  * single integration worker so their subprocess trees do not compete with
  * one another. Everything else remains parallel, with a bounded worker pool.
  */
+/**
+ * Each file gets its own fork because the integration project is isolated and
+ * has file parallelism disabled. Keep the large grammar compilations split
+ * across files: loading TypeScript + Swift + Kotlin + Scala in one fork was
+ * enough to exhaust V8's native compilation zone on a 16 GB CI runner even
+ * with tier-up disabled and one compilation task at a time.
+ */
+const NATIVE_MEMORY_SUITES = [
+  'src/index-store/content-indexer.test.ts',
+  'src/index-store/symbols-swift.test.ts',
+  'src/index-store/symbols-kotlin.test.ts',
+  'src/index-store/symbols-scala.test.ts',
+];
+
 const INTEGRATION_SUITES = [
   // Full embedded-service / HTTPS boots.
   'src/integration.test.ts',
@@ -37,7 +51,7 @@ const INTEGRATION_SUITES = [
   'src/providers/llama-cpp/provider.test.ts',
   'src/providers/native/capacity-broker.test.ts',
   // WebAssembly grammar compilation has a high native-memory peak.
-  'src/index-store/content-indexer.test.ts',
+  ...NATIVE_MEMORY_SUITES,
   // Script runner sandbox spawns + nested runs.
   'src/scripts/*.test.ts',
   'src/workspace/derive.test.ts',
@@ -119,6 +133,9 @@ export default defineConfig({
           include: INTEGRATION_SUITES,
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
+          // Explicit because native grammar memory is released only when the
+          // per-file fork exits; do not let a future default change reuse it.
+          isolate: true,
           // Keep integration files sequential while retaining the shared
           // project-level worker cap required for parallel project groups.
           fileParallelism: false,
