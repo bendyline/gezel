@@ -39,7 +39,7 @@ describe('prompt.native-tool-call-format', () => {
   });
 
   it('is a no-op without a config (so a forced A/B cannot diverge on empty guidance)', () => {
-    expect(PromptNativeToolCallFormat.promptAppend?.(CTX, undefined)).toBeNull();
+    expect(PromptNativeToolCallFormat.promptAppend?.(CTX, undefined as never)).toBeNull();
   });
 
   it('is a no-op when the example is blank or whitespace', () => {
