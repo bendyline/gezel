@@ -110,6 +110,9 @@ Var GezelServiceStoppedForInstall
 ; electron-builder expands this immediately before MUI_PAGE_INSTFILES. Its
 ; PRE callback is therefore the last pre-install boundary in assisted mode:
 ; cancelling on the welcome/license pages leaves a healthy broker untouched.
+; The intermediate BUILD_UNINSTALLER pass has no installer pages and treats
+; an emitted but unreferenced function as an error, so omit this pair there.
+!ifndef BUILD_UNINSTALLER
 !macro customPageAfterChangeDir
   !define MUI_PAGE_CUSTOMFUNCTION_PRE GezelBeforeInstall
 !macroend
@@ -117,6 +120,7 @@ Var GezelServiceStoppedForInstall
 Function GezelBeforeInstall
   !insertmacro StopGezelServiceForInstall
 FunctionEnd
+!endif
 
 ; Silent auto-updates do not traverse the MUI page callbacks, so retain the
 ; orderly pre-file-replacement stop for that committed, non-interactive path.

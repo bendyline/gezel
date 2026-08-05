@@ -333,6 +333,11 @@ describe('Windows machine-service installer security', () => {
     const preStart = position('Function GezelBeforeInstall');
     const preFunction = hook.slice(preStart, hook.indexOf('FunctionEnd', preStart));
     expect(preFunction).toContain('!insertmacro StopGezelServiceForInstall');
+    const installerOnlyGuard = hook.lastIndexOf('!ifndef BUILD_UNINSTALLER', pageStart);
+    const installerOnlyEnd = hook.indexOf('!endif', preStart);
+    expect(installerOnlyGuard).toBeGreaterThanOrEqual(0);
+    expect(installerOnlyGuard).toBeLessThan(pageStart);
+    expect(installerOnlyEnd).toBeGreaterThan(preStart);
 
     const stopStart = position('!macro StopGezelServiceForInstall');
     const stopMacro = hook.slice(stopStart, hook.indexOf('!macroend', stopStart));
