@@ -70,6 +70,7 @@ from mlx_vlm.utils import load
 # extracts both .py files into the same dir).
 sys.path.insert(0, str(Path(__file__).parent))
 import cache_persist  # noqa: E402
+import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
 
@@ -971,7 +972,8 @@ class BatchEngine:
                 repetition_context_size=int(request.repetition_context_size or 20),
             )
         if grammar is not None:
-            procs = list(procs) + [grammar]
+            # Accepts a single processor or a list (grammar + think-budget).
+            procs = list(procs) + (grammar if isinstance(grammar, list) else [grammar])
         return procs or None
 
     def _seed_args(self, sub):
@@ -1539,6 +1541,9 @@ class ChatRequest(BaseModel):
     top_k: Optional[int] = None
     repetition_penalty: Optional[float] = None
     repetition_context_size: Optional[int] = None
+    # `tuning.reasoning.thinkingBudget` — enforced here because MLX has no
+    # `--reasoning-budget` equivalent; see think_budget.py.
+    max_thinking_tokens: Optional[int] = None
     # Decode-time tool-call grammar (gezel extension). When set, the
     # server builds an llguidance logits processor that constrains the
     # function name of any tool call to the known tools — see
@@ -2064,6 +2069,18 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         tool_grammar_processor = tool_grammar.build_tool_grammar_processor(
             _grammar_tok, request.tools, request.tool_grammar
         )
+    think_budget_processor = None
+    if request.max_thinking_tokens:
+        _tb_tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+        think_budget_processor = think_budget.build_think_budget_processor(
+            _tb_tok,
+            request.max_thinking_tokens,
+            # Thinking templates open the assistant turn already inside the
+            # think block (`...<think>\n` generation prompt) — the open tag
+            # never appears in the generated stream, so seed the state from
+            # the prompt tail.
+            opens_in_think=prompt_text.rstrip().endswith("<think>"),
+        )
 
     # Look up or initialize cache state. Cascade:
     #   1. In-memory hit on cache_id           — best case, no I/O.
@@ -2117,7 +2134,10 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         sub = _Sub(
             request=request,
             prompt_tokens=prompt_tokens,
-            grammar=tool_grammar_processor,
+            grammar=[
+                p for p in (tool_grammar_processor, think_budget_processor) if p is not None
+            ]
+            or None,
             seed_state=cache_state,
             request_id=request_id,
             http_request=http_request,
@@ -2196,11 +2216,15 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                 generation_kwargs["repetition_context_size"] = (
                     request.repetition_context_size
                 )
-            if tool_grammar_processor is not None:
+            _lps = [
+                p for p in (tool_grammar_processor, think_budget_processor) if p is not None
+            ]
+            if _lps:
                 # Forwarded through stream_generate(**kwargs) → generate_step,
-                # which accepts `logits_processors`. Constrains the tool-call
-                # function name to the known tools at sampling time.
-                generation_kwargs["logits_processors"] = [tool_grammar_processor]
+                # which accepts `logits_processors`. Grammar constrains the
+                # tool-call function name; think-budget forces `</think>` at
+                # the configured reasoning budget (llama parity).
+                generation_kwargs["logits_processors"] = _lps
 
             output_text = ""
             last_chunk = None

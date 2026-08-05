@@ -2,7 +2,7 @@
   "name": "@bendyline/gezel-evals",
   "version": "0.0.0",
   "private": true,
-  "description": "End-to-end evaluation harness — drives gezeld via GezelClient against scripted scenarios and reports success rates.",
+  "description": "End-to-end evaluation harness \u2014 drives gezeld via GezelClient against scripted scenarios and reports success rates.",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -25,7 +25,8 @@
     "compare:scores": "tsx src/bin/compare-scores.ts",
     "coverage:models": "tsx src/bin/model-coverage.ts",
     "coverage:refresh": "tsx src/bin/model-coverage.ts --out runs/current-model-coverage-$(date +%F).md && tsx src/bin/compare-scores.ts --out runs/current-score-comparison-$(date +%F).md",
-    "screenshot": "tsx src/bin/screenshot.ts"
+    "screenshot": "tsx src/bin/screenshot.ts",
+    "thinking-report": "tsx src/bin/thinking-report.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
