@@ -233,6 +233,29 @@ function parseCall(text: string): ParsedCall {
   if (expression.arguments.length === 0) {
     return { argumentCount: 0, value: {}, supported: true };
   }
+  // Some local models are trained on Python-style keyword calls inside
+  // native tool tokens: `write_file(path='x', content='y')`. TypeScript
+  // parses each `name=value` as an assignment expression. Treat a complete
+  // keyword-argument list as the one object MCP receives so the contract
+  // matrix validates the keys and values instead of falsely reporting
+  // positional arguments.
+  if (
+    expression.arguments.every(
+      (argument) =>
+        ts.isBinaryExpression(argument) &&
+        argument.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(argument.left),
+    )
+  ) {
+    const value: Record<string, SymbolicValue> = {};
+    for (const argument of expression.arguments) {
+      const assignment = argument as ts.BinaryExpression;
+      const converted = expressionValue(assignment.right);
+      if (!converted.supported) return { argumentCount: 1, supported: false };
+      value[(assignment.left as ts.Identifier).text] = converted.value;
+    }
+    return { argumentCount: 1, value, supported: true };
+  }
   if (expression.arguments.length !== 1) {
     return { argumentCount: expression.arguments.length, supported: true };
   }

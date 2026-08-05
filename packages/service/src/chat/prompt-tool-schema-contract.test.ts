@@ -79,6 +79,25 @@ describe('lintPromptToolSchemaContract', () => {
     ]);
   });
 
+  it('validates native Python-style keyword calls as one MCP input object', () => {
+    const report = lintPromptToolSchemaContract({
+      prompt: "<|tool_call_start|>[write_file(path='notes.md', content='hello')]<|tool_call_end|>",
+      toolContracts: CONTRACTS,
+    });
+
+    expect(report).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('still catches bad keys in native Python-style keyword calls', () => {
+    const report = lintPromptToolSchemaContract({
+      prompt: "<|tool_call_start|>[write_file(filename='notes.md', body='hello')]<|tool_call_end|>",
+      toolContracts: CONTRACTS,
+    });
+
+    expect(report.errors[0]?.detail).toContain('$.path is required');
+    expect(report.errors[0]?.detail).toContain('$.filename is not an allowed property');
+  });
+
   it('checks required and unknown object keys even when values are placeholders', () => {
     const report = lintPromptToolSchemaContract({
       prompt: 'Call `write_file({ filename, body })` now.',

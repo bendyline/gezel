@@ -104,7 +104,7 @@ import type {
 import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
-} from './project-macro-loop-bail.js';
+} from '../project-macro-loop-bail.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,

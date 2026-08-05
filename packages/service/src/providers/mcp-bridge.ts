@@ -948,7 +948,11 @@ export class McpBridge {
     name: string,
     args: Record<string, unknown>,
     opts?: { budgetChars?: number; numCtxTokens?: number },
-  ): Promise<{ text: string; images: Array<{ base64: string; mimeType: string }> }> {
+  ): Promise<{
+    text: string;
+    images: Array<{ base64: string; mimeType: string }>;
+    isError: boolean;
+  }> {
     if (!this.client) throw new Error('[mcp-bridge] not started');
     // Resolve renamed/miscased spellings to the advertised name BEFORE
     // anything keys off it — hooks, wrappers, timeouts, the tool-call
@@ -1184,7 +1188,7 @@ export class McpBridge {
       // Preserve the pre-existing behavior: throw if the SDK threw; return
       // an ERROR: string if the tool reported isError via the MCP result.
       if (!combined) throw new Error(redacted);
-      return { text: `ERROR: ${redacted}`, images: [] };
+      return { text: `ERROR: ${redacted}`, images: [], isError: true };
     }
     if (debugOn) {
       // Tail-clamp so a giant `list_dir` return doesn't flood.
@@ -1217,7 +1221,7 @@ export class McpBridge {
         `call_tool ${toolName} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
       );
     }
-    return { text: capped, images };
+    return { text: capped, images, isError: false };
   }
 
   async stop(): Promise<void> {

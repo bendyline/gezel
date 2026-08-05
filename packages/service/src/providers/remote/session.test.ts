@@ -16,7 +16,10 @@ function sseResponse(frames: unknown[]): Response {
 }
 
 function fakeBridge(
-  handlers: Record<string, (args: Record<string, unknown>) => Promise<string>>,
+  handlers: Record<
+    string,
+    (args: Record<string, unknown>) => Promise<string | { text: string; isError: boolean }>
+  >,
 ): McpBridgePool {
   return {
     isEmpty: () => Object.keys(handlers).length === 0,
@@ -27,10 +30,13 @@ function fakeBridge(
         description: '',
         parameters: { type: 'object' },
       })),
-    callToolRich: async (name: string, args: Record<string, unknown>) => ({
-      text: await handlers[name]!(args),
-      images: [],
-    }),
+    callToolRich: async (name: string, args: Record<string, unknown>) => {
+      const result = await handlers[name]!(args);
+      return {
+        ...(typeof result === 'string' ? { text: result, isError: false } : result),
+        images: [],
+      };
+    },
     stop: async () => {},
   } as unknown as McpBridgePool;
 }
@@ -157,6 +163,96 @@ describe('RemoteSession', () => {
     const tools = calls[0]!.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toContain('read_file');
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
+  });
+
+  it('ends the turn immediately after a successful project kickoff', async () => {
+    let forwardPasses = 0;
+    let kickoffCalls = 0;
+    const fetchImpl = (async () => {
+      forwardPasses++;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: 'kickoff-1',
+              name: 'start_project',
+              arguments: JSON.stringify({ name: 'Frogger Arcade' }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        start_project: async () => {
+          kickoffCalls++;
+          return 'Started project "Frogger Arcade" (frogger-arcade). Recruited Maya as lead (template: developer). Created task frogger-arcade/1.';
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma-e4b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    const text = await session.sendAndWait('Build me Frogger');
+
+    expect(forwardPasses).toBe(1);
+    expect(kickoffCalls).toBe(1);
+    expect(text).toContain('Project "Frogger Arcade" is kicked off');
+    expect(text).toContain('Maya is on it');
+  });
+
+  it('stops after two failed project kickoffs even when the model varies the arguments', async () => {
+    let forwardPasses = 0;
+    let kickoffCalls = 0;
+    const fetchImpl = (async () => {
+      forwardPasses++;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `kickoff-${forwardPasses}`,
+              name: 'start_project',
+              arguments: JSON.stringify({ name: `Frogger ${forwardPasses}` }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        start_project: async () => {
+          kickoffCalls++;
+          return { text: 'start_project failed: routing unavailable', isError: true };
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma-e4b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    const text = await session.sendAndWait('Build me Frogger');
+
+    expect(forwardPasses).toBe(2);
+    expect(kickoffCalls).toBe(2);
+    expect(text).toContain("couldn't start the project after 2 attempts");
+    expect(text).toContain('routing unavailable');
   });
 
   it('throws when B sends an error frame', async () => {

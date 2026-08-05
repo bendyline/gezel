@@ -6,10 +6,10 @@
 
 Built, tested, and **default-on**:
 - **Density switch + plumbing** — `executionDensity: auto|flat|scaffold` on `GezelConfig`; `resolveExecutionDensity` / `isSelfOrchestratingProvider` in `core/execution-density.ts`; eval `--render-mode` flag. **`auto` is the default (incl. unset):** flat for codex-cli/anthropic-cli/copilot, scaffold for local + raw-cloud (untouched). Set `executionDensity: 'scaffold'` to force the crew back (escape hatch).
-- **Flat = the existing solo path** — the meester's routing prose (`manager.ts buildInstructions`) routes concrete asks to `start_job` (solo **ambachtsman**, which already collapses the craftbook onto the one specialist). Verified end-to-end: codex with no flag now routes solo by default and passes.
+- **One model-facing kickoff, adaptive staffing underneath** — the meester always calls `start_project`. The MCP runtime receives the effective density and maps flat execution onto the existing single-lead project path (which already collapses the craftbook onto one specialist); scaffold density recruits a crew. `start_job` is compatibility-only and is not advertised to ordinary model sessions.
 - **(a) Concision nudge** — universal (the over-write-summary tendency appears in BOTH arms): an upper-bound/length-limit bullet added to the Developer + Researcher `about.md`.
 - **(b) Gate floor kept** — gates are unchanged and universal across densities, preserving an objective completion check when flat execution omits a separate Reviewer role.
-- **Optional reviewer pass** — the flat routing prose explicitly allows `start_project` (crew) for a separate review/second-opinion pass on high-stakes deliverables.
+- **Optional reviewer pass** — flat projects can still add a separate review/second-opinion task for high-stakes deliverables without exposing a second kickoff macro.
 - **Watchdog** (Component D) — self-orchestrating providers get a 20-min silence floor (`evals/src/runner.ts`).
 
 Not yet done: the collapse renderer for the **pinned-craftbook** path (needed for the local/pinned case), and broader comparative validation across self-orchestrating providers.
@@ -70,7 +70,7 @@ executionDensity(provider, task, config):
 
 ## 3. Component A — the Ambachtsman (flat team)
 
-**What:** a single generalist gezel owns a task end-to-end (plan → execute → self-verify), with the full tool surface, replacing `meester → voorman → specialists`. It is the elevation of the existing solo **Builder** (`start_job`) path from per-job to a first-class per-project staffing model.
+**What:** a single generalist gezel owns a task end-to-end (plan → execute → self-verify), with the full tool surface, replacing `meester → voorman → specialists`. It uses the existing solo project storage mode internally, selected by `start_project` from the effective execution density rather than by a model-facing “job” type.
 
 **Integration points:**
 - `gezels/roster.ts` `deriveGezelRoster:30` — when density is flat, return a single **ambachtsman** instead of a derived crew.

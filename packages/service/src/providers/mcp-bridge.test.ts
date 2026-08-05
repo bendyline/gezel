@@ -104,6 +104,10 @@ beforeAll(async () => {
     GEZEL_AGENT_ID: 'ada',
     GEZEL_PROJECT_ID: 'default',
     GEZEL_HOME: svc.context.home,
+    // This end-to-end suite retains direct-client coverage for compatibility
+    // handlers. Ordinary model sessions omit this and advertise only
+    // start_project; inventory/session-surface tests assert that default.
+    GEZEL_MCP_LEGACY_TOOLS: '1',
   };
   if (svc.cert) env.GEZEL_CERT_PATH = gezelPaths(svc.context.home).runtime.cert;
   bridgeEnv = env;
@@ -140,6 +144,7 @@ describe('McpBridge', () => {
     expect(names).toContain('update_gezel');
     expect(names).toContain('list_projects');
     expect(names).toContain('start_project');
+    expect(names).toContain('start_job');
     expect(names).toContain('update_project');
     // `create_project` is intentionally NOT exposed as an MCP tool —
     // `start_project` is the single project-creation entry point for
@@ -416,6 +421,40 @@ describe('McpBridge', () => {
     expect(listing).toContain('updated');
   });
 
+  it('start_project selects flat staffing internally without advertising a job macro', async () => {
+    const flatBridge = new McpBridge();
+    const flatEnv: Record<string, string> = {
+      ...bridgeEnv,
+      GEZEL_EXECUTION_DENSITY: 'flat',
+    };
+    delete flatEnv.GEZEL_MCP_LEGACY_TOOLS;
+    await flatBridge.start({ command: 'node', args: [mcpPath], env: flatEnv });
+    try {
+      const advertised = new Set(flatBridge.getOpenAITools().map((tool) => tool.name));
+      expect(advertised.has('start_project')).toBe(true);
+      expect(advertised.has('start_job')).toBe(false);
+
+      const create = await flatBridge.callTool('start_project', {
+        name: 'Flat Project Kickoff',
+        about:
+          'A focused single-deliverable project that proves staffing density is selected behind the one model-facing project kickoff.',
+        missionObjectives:
+          '- Create one concrete workspace deliverable\n- Keep the model-facing concept a project',
+        taskDescription:
+          'Build the requested small project deliverable and verify it without creating a separate crew.',
+      });
+
+      expect(create).toContain('Started project "Flat Project Kickoff"');
+      expect(create).toContain('as lead (template: developer)');
+      expect(create).not.toContain('Started job');
+      const projectId = create.match(/\(([a-z0-9-]+)\)/)?.[1];
+      expect(projectId).toBeTruthy();
+      expect((await svc.context.store.getProject(projectId!))?.mode).toBe('solo');
+    } finally {
+      await flatBridge.stop();
+    }
+  });
+
   it('start_project kickoff keeps build deliverable and image guidance on the task (D1: no chat notify)', async () => {
     const create = await bridge.callTool('start_project', {
       name: 'Pet Shop Regression',
@@ -490,7 +529,6 @@ describe('McpBridge', () => {
         'Build the single-page pet shop website and use the image-generation tool to produce a custom PNG logo that the HTML displays.',
       specialistRole: 'builder',
     });
-    expect(create).toContain('Promoted start_job to start_project');
     expect(create).toContain('Started project "Pet Shop Solo Promotion"');
     expect(create).toContain('as voorman');
 
@@ -521,7 +559,7 @@ describe('McpBridge', () => {
       ],
     });
 
-    expect(create).toContain('Started job "Tic-Tac-Toe Solo Fallback"');
+    expect(create).toContain('Started project "Tic-Tac-Toe Solo Fallback"');
     expect(create).not.toContain('failed');
 
     const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
@@ -555,7 +593,7 @@ describe('McpBridge', () => {
       specialistRole: 'image_generator',
     });
 
-    expect(create).toContain('Started job "Sunset Role Alias"');
+    expect(create).toContain('Started project "Sunset Role Alias"');
     expect(create).toContain('template: image-generator');
 
     const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;

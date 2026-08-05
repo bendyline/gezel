@@ -72,7 +72,6 @@ import {
   buildKickoffTaskDescription,
   inferSourceDeliverablePath,
   shouldPromoteStartJobToProject,
-  shouldRouteStartProjectToJob,
 } from './kickoff-text.js';
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
@@ -190,6 +189,7 @@ const excludedToolNames = new Set(
 if (process.env.GEZEL_MCP_LEGACY_TOOLS !== '1') {
   for (const name of [
     'create_gezel_from_gilde',
+    'start_job',
     'list_project_local_gezels',
     'craftbook_create',
     'craftbook_replace',
@@ -3397,7 +3397,7 @@ server.tool(
 
 server.tool(
   'start_project_from_type',
-  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the voorman, its scripts/seed/dashboard are installed), and notifies the voorman to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic multi-discipline build, use start_project; for a single-file deliverable, start_job.',
+  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the voorman, its scripts/seed/dashboard are installed), and notifies the voorman to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic build of any size, use start_project.',
   {
     name: z.string().describe('Project name, e.g. "Learn Spanish".'),
     typeId: z.string().describe('Project type id (from list_project_types).'),
@@ -4895,7 +4895,7 @@ server.tool(
       .string()
       .optional()
       .describe(
-        'Project id or name. Defaults to YOUR current project, which is correct ONLY when the target should work in your project. If the work belongs to a project you spun up (via `start_project` / `start_job` / `fetch_repo`) and your own session is in a different project (typical for the Meester, who lives in `Default` and talks about other projects), you MUST pass `project` — otherwise the message lands in a sibling session where the target has none of the project\'s files, tasks, mission, or memory scope, and you\'ll get a "what project are we talking about?" reply. Pass the projectId returned by the macro that created the project; if you lost it, call `list_projects` first.',
+        'Project id or name. Defaults to YOUR current project, which is correct ONLY when the target should work in your project. If the work belongs to a project you spun up (via `start_project` / `fetch_repo`) and your own session is in a different project (typical for the Meester, who lives in `Default` and talks about other projects), you MUST pass `project` — otherwise the message lands in a sibling session where the target has none of the project\'s files, tasks, mission, or memory scope, and you\'ll get a "what project are we talking about?" reply. Pass the projectId returned by the macro that created the project; if you lost it, call `list_projects` first.',
       ),
     expectedDeliverable: ExpectedDeliverableArgSchema.optional().describe(
       "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the target's default chat-reply framing for a file-deliverable one. Text/source paths are written with `write_file`; image paths are rendered with `generate_image({ prompt, saveAs })`. Use this whenever the message asks for an actual workspace file; omit for normal short-message pings.",
@@ -5354,7 +5354,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         .string()
         .optional()
         .describe(
-          'Project id or name. Defaults to YOUR current project, which is correct only when the target should work in your project. If you are coordinating from Default for a project created by `start_project`, `start_job`, or `fetch_repo`, pass that project id here; otherwise file writes and tool reads happen in Default instead of the intended workspace.',
+          'Project id or name. Defaults to YOUR current project, which is correct only when the target should work in your project. If you are coordinating from Default for a project created by `start_project` or `fetch_repo`, pass that project id here; otherwise file writes and tool reads happen in Default instead of the intended workspace.',
         ),
       expectedDeliverable: ExpectedDeliverableArgSchema.optional().describe(
         'Optional concrete deliverable, e.g. `{ kind: "file", filePath: "index.html" }`, so the specialist writes/renders the artifact.',
@@ -5772,9 +5772,8 @@ function duplicateMacroProjectNotice(
   };
 }
 
-// Shared field schemas — the two macros below differ only in role
-// shape (voorman vs. specialist) and the message they send. The
-// project-shaped fields are identical.
+// Shared project-kickoff field schemas. `start_job` remains as an opt-in
+// compatibility alias, but ordinary model sessions see only `start_project`.
 const macroNameSchema = z
   .string()
   .describe('Human-readable name (e.g. "Space Invaders Browser Game").');
@@ -6250,7 +6249,7 @@ async function runPromotedStartJobAsProject(input: {
       content: [
         {
           type: 'text' as const,
-          text: `[runtime] Promoted start_job to start_project because this build needs a generated image/logo asset.\n\n${resultText}`,
+          text: resultText,
         },
       ],
     };
@@ -6264,7 +6263,7 @@ async function runPromotedStartJobAsProject(input: {
 
 server.tool(
   'start_project',
-  'Use when the user wants something built that benefits from a CREW: a voorman who plans, coordinates, and recruits specialists as needed. Atomically: creates a fresh project, recruits a voorman from the gilde, wires them in as project lead, creates the kickoff task, and hands the crew its entry step (the work starts in a task-scoped session). Use for multimodal or multi-discipline builds — website AND logo, code AND tests AND docs, app AND research, etc. For one small deliverable, use `start_job`: developer/builder for a single-file app or prototype, or image-generator for a single PNG/JPG/WebP. ONE call replaces the old five-call ritual; the macro handles all the IDs internally so you never have to chain.',
+  'Start a fresh project for any build request, from a single-file prototype to a multimodal product. Atomically: creates the project, selects an appropriate lead or crew for the effective execution mode, creates the kickoff task, and hands off its entry step. ONE call replaces the old multi-call setup ritual; preserve the requested deliverable paths and acceptance criteria in `taskDescription`.',
   {
     name: macroNameSchema,
     about: macroAboutSchema,
@@ -6275,16 +6274,8 @@ server.tool(
   },
   async ({ name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage }) => {
     const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
-    if (shouldRouteStartProjectToJob(brief)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `[runtime routing guard] "${brief.name}" is a clearly single-deliverable job, not a crew project. No project was created. Retry now with \`start_job\` using the same name/about/mission/task fields and \`specialistRole: "developer"\` (or \`"image-generator"\` for a raster-only deliverable).`,
-          },
-        ],
-        isError: true,
-      };
+    if (process.env.GEZEL_EXECUTION_DENSITY === 'flat') {
+      return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
     }
     const repoRedirect = repoFetchRedirectForMacro({
       tool: 'start_project',
@@ -6403,24 +6394,19 @@ server.tool(
   },
 );
 
-server.tool(
-  'start_job',
-  'Use when ONE specialist will handle the whole thing themselves — prototyping, envisioning, a one-person build, a focused exploration. Preferred for small single-file browser games/sites/apps/prototypes at index.html: pick `specialistRole: "developer"` or `"builder"`. For one raster image, pick `specialistRole: "image-generator"`; the runtime also infers that role when the primary path ends in PNG/JPG/WebP. Atomically: creates a fresh project (in solo mode), recruits the specialist as the project\'s ambachtsman (Dutch for craftsman — same role slot as voorman, different label), creates the kickoff task, and hands them its entry step (the work starts in a task-scoped session). The service strips team-management tools from their session — they literally can\'t recruit, so picking the right specialist up front matters. Pick `specialistRole` from the gilde: "developer", "designer", "image-generator", "builder", "copywriter", "planner", or any other specialist template. Use for "quick prototype", "one-shot", "just for me to play with", or any work the user has explicitly scoped small. **Multimodal asks (e.g. "website AND logo image") still go to `start_project` — a single specialist can\'t cover multiple media without a crew.**',
-  {
-    name: macroNameSchema,
-    about: macroAboutSchema,
-    missionObjectives: macroMissionSchema,
-    taskDescription: macroTaskDescriptionSchema,
-    specialistRole: z
-      .string()
-      .optional()
-      .describe(
-        'Gilde template id for the ambachtsman. One of "developer", "designer", "image-generator", "builder", "copywriter", "planner" (or any other non-voorman specialist template). Raster paths infer image-generator when omitted. Picking the right specialist matters — they can\'t recruit anyone else.',
-      ),
-    taskTitle: macroTaskTitleSchema,
-    kickoffMessage: macroKickoffMessageSchema,
+async function runFlatProject(
+  input: {
+    name: string;
+    about?: string;
+    missionObjectives?: string;
+    taskDescription?: string;
+    specialistRole?: string;
+    taskTitle?: string;
+    kickoffMessage?: string;
   },
-  async ({
+  cacheTool: 'start_project' | 'start_job',
+) {
+  const {
     name,
     about,
     missionObjectives,
@@ -6428,140 +6414,154 @@ server.tool(
     specialistRole,
     taskTitle,
     kickoffMessage,
-  }) => {
-    const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
-    const primaryDeliverablePath = inferSourceDeliverablePath(brief);
-    const inferredProducerRole =
-      !specialistRole && primaryDeliverablePath
-        ? policyForDeliverable(
-            primaryDeliverablePath,
-            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`,
-          ).suggestedProducerRole
-        : undefined;
-    const effectiveSpecialistRole = inferredProducerRole ?? normalizeSpecialistRole(specialistRole);
-    const repoRedirect = repoFetchRedirectForMacro({
-      tool: 'start_job',
+  } = input;
+  const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
+  const primaryDeliverablePath = inferSourceDeliverablePath(brief);
+  const inferredProducerRole =
+    !specialistRole && primaryDeliverablePath
+      ? policyForDeliverable(
+          primaryDeliverablePath,
+          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`,
+        ).suggestedProducerRole
+      : undefined;
+  const effectiveSpecialistRole = inferredProducerRole ?? normalizeSpecialistRole(specialistRole);
+  const repoRedirect = repoFetchRedirectForMacro({
+    tool: cacheTool,
+    ...brief,
+  });
+  if (repoRedirect) {
+    if (repoRedirect.url) {
+      return fetchRepoProject({
+        url: repoRedirect.url,
+        projectName: repoRedirect.projectName,
+        about: brief.about,
+        missionObjectives: brief.missionObjectives,
+        note: `[runtime] ${repoRedirect.message}`,
+        handoffReview: true,
+      });
+    }
+    return {
+      content: [{ type: 'text' as const, text: repoRedirect.message }],
+      isError: true,
+    };
+  }
+
+  if (shouldPromoteStartJobToProject(brief)) {
+    return runPromotedStartJobAsProject({
       ...brief,
+      taskTitle,
+      kickoffMessage,
     });
-    if (repoRedirect) {
-      if (repoRedirect.url) {
-        return fetchRepoProject({
-          url: repoRedirect.url,
-          projectName: repoRedirect.projectName,
-          about: brief.about,
-          missionObjectives: brief.missionObjectives,
-          note: `[runtime] ${repoRedirect.message}`,
-          handoffReview: true,
+  }
+
+  const idempotent = lookupMacroIdempotent(brief.name);
+  if (idempotent) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the lead from the original call is already on it.\n\n${idempotent.resultText}`,
+        },
+      ],
+    };
+  }
+  // Persistent backstop (survives the 60 s cache TTL): if a same-named active
+  // project already exists, reuse it instead of spawning a suffixed duplicate.
+  const existingJob = await findActiveMacroProject(brief.name);
+  if (existingJob) {
+    return duplicateMacroProjectNotice(cacheTool, existingJob);
+  }
+  try {
+    const project = await api.createProject({
+      name: brief.name,
+      about: normalizeMarkdown(brief.about),
+      missionObjectives: normalizeMarkdown(brief.missionObjectives),
+      mode: 'solo',
+    });
+    const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+    const ambachtsman = await api.createGezelFromTemplate(effectiveSpecialistRole, {
+      name: gezelName,
+      gender: gezelGender,
+    });
+    await api.updateProject(project.id, { voormanGezelId: ambachtsman.id });
+    const effectiveTaskDescription = buildKickoffTaskDescription({
+      ...brief,
+      ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
+    });
+    // HARD-PIN structure for solo too — but as the generic build-loop with
+    // every step collapsed onto the one specialist. A multi-role gallery
+    // book would try to recruit (step-role resolution is server-side),
+    // which contradicts solo; collapsing keeps phase + gate discipline for
+    // one worker. No confident match (or build-loop unavailable) → ad-hoc.
+    const sourceDeliverablePath = inferSourceDeliverablePath({
+      ...brief,
+      taskDescription: effectiveTaskDescription,
+    });
+    const craftbookPick = await pickCraftbookForBrief(project.id, brief);
+    const soloLoop = craftbookPick
+      ? await buildSoloLoopSteps(
+          ambachtsman.id,
+          sourceDeliverablePath ?? 'index.html',
+          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
+        )
+      : null;
+    // Single-channel kickoff: `dispatchEntry` hands the entry step to the
+    // ambachtsman as a task-scoped handoff — no separate chat notify. The
+    // old notify's advisory expectedDeliverable becomes an ENFORCED step
+    // gate on the ad-hoc fallback (the pinned loop already gates it).
+    const task = soloLoop
+      ? await api.createTask(project.id, {
+          title: taskTitle ?? `Build ${brief.name}`,
+          description: effectiveTaskDescription,
+          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          steps: soloLoop.steps,
+          entryStepId: soloLoop.entryStepId,
+          dispatchEntry: true,
+        })
+      : await api.createTask(project.id, {
+          title: taskTitle ?? `Build ${brief.name}`,
+          description: effectiveTaskDescription,
+          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          steps: [
+            {
+              name: 'Plan and execute',
+              description: buildKickoffStepDescription(brief),
+              ...(sourceDeliverablePath ? { deliverable: { path: sourceDeliverablePath } } : {}),
+            },
+          ],
+          dispatchEntry: true,
         });
-      }
-      return {
-        content: [{ type: 'text' as const, text: repoRedirect.message }],
-        isError: true,
-      };
-    }
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${ambachtsman.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${ambachtsman.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${ambachtsman.name} is on it and they can watch the work in the ${brief.name} project.`;
+    recordMacroResult(cacheTool, brief.name, project.id, resultText);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: resultText,
+        },
+      ],
+    };
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: `${cacheTool} failed: ${unwrapApiError(err)}` }],
+      isError: true,
+    };
+  }
+}
 
-    if (shouldPromoteStartJobToProject(brief)) {
-      return runPromotedStartJobAsProject({
-        ...brief,
-        taskTitle,
-        kickoffMessage,
-      });
-    }
-
-    const idempotent = lookupMacroIdempotent(brief.name);
-    if (idempotent) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the lead from the original call is already on it.\n\n${idempotent.resultText}`,
-          },
-        ],
-      };
-    }
-    // Persistent backstop (survives the 60 s cache TTL): if a same-named active
-    // project already exists, reuse it instead of spawning a suffixed duplicate.
-    const existingJob = await findActiveMacroProject(brief.name);
-    if (existingJob) {
-      return duplicateMacroProjectNotice('start_job', existingJob);
-    }
-    try {
-      const project = await api.createProject({
-        name: brief.name,
-        about: normalizeMarkdown(brief.about),
-        missionObjectives: normalizeMarkdown(brief.missionObjectives),
-        mode: 'solo',
-      });
-      const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
-      const ambachtsman = await api.createGezelFromTemplate(effectiveSpecialistRole, {
-        name: gezelName,
-        gender: gezelGender,
-      });
-      await api.updateProject(project.id, { voormanGezelId: ambachtsman.id });
-      const effectiveTaskDescription = buildKickoffTaskDescription({
-        ...brief,
-        ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
-      });
-      // HARD-PIN structure for solo too — but as the generic build-loop with
-      // every step collapsed onto the one specialist. A multi-role gallery
-      // book would try to recruit (step-role resolution is server-side),
-      // which contradicts solo; collapsing keeps phase + gate discipline for
-      // one worker. No confident match (or build-loop unavailable) → ad-hoc.
-      const sourceDeliverablePath = inferSourceDeliverablePath({
-        ...brief,
-        taskDescription: effectiveTaskDescription,
-      });
-      const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-      const soloLoop = craftbookPick
-        ? await buildSoloLoopSteps(
-            ambachtsman.id,
-            sourceDeliverablePath ?? 'index.html',
-            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-          )
-        : null;
-      // Single-channel kickoff: `dispatchEntry` hands the entry step to the
-      // ambachtsman as a task-scoped handoff — no separate chat notify. The
-      // old notify's advisory expectedDeliverable becomes an ENFORCED step
-      // gate on the ad-hoc fallback (the pinned loop already gates it).
-      const task = soloLoop
-        ? await api.createTask(project.id, {
-            title: taskTitle ?? `Build ${brief.name}`,
-            description: effectiveTaskDescription,
-            assignee: { kind: 'gezel', gezelId: ambachtsman.id },
-            steps: soloLoop.steps,
-            entryStepId: soloLoop.entryStepId,
-            dispatchEntry: true,
-          })
-        : await api.createTask(project.id, {
-            title: taskTitle ?? `Build ${brief.name}`,
-            description: effectiveTaskDescription,
-            assignee: { kind: 'gezel', gezelId: ambachtsman.id },
-            steps: [
-              {
-                name: 'Plan and execute',
-                description: buildKickoffStepDescription(brief),
-                ...(sourceDeliverablePath ? { deliverable: { path: sourceDeliverablePath } } : {}),
-              },
-            ],
-            dispatchEntry: true,
-          });
-      const resultText = `Started job "${brief.name}" (${project.id}). Recruited ${ambachtsman.name} as ambachtsman (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${ambachtsman.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${ambachtsman.name} is on it and they can watch the work in the ${brief.name} project.`;
-      recordMacroResult('start_job', brief.name, project.id, resultText);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: resultText,
-          },
-        ],
-      };
-    } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: `start_job failed: ${unwrapApiError(err)}` }],
-        isError: true,
-      };
-    }
+server.tool(
+  'start_job',
+  'Legacy compatibility alias for starting a flat project. Ordinary model sessions should use `start_project`.',
+  {
+    name: macroNameSchema,
+    about: macroAboutSchema,
+    missionObjectives: macroMissionSchema,
+    taskDescription: macroTaskDescriptionSchema,
+    specialistRole: z.string().optional(),
+    taskTitle: macroTaskTitleSchema,
+    kickoffMessage: macroKickoffMessageSchema,
   },
+  async (input) => runFlatProject(input, 'start_job'),
 );
 
 server.tool(

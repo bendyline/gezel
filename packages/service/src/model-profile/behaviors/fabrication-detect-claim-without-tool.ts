@@ -150,8 +150,8 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     requiredTools: ['create_project', 'start_project', 'start_job'],
     claim: 'created a project',
     nudge:
-      'You told the user you created the project, but you did not call `create_project`, `start_project`, or `start_job` this turn. ' +
-      'Call the right one now with the user-intended name and a real `about` + `missionObjectives` derived from their request.',
+      'You told the user you created the project, but you did not call `start_project` this turn. ' +
+      'Call it now with the user-intended name and a real `about` + `missionObjectives` derived from their request.',
   },
   {
     pattern: new RegExp(
@@ -170,7 +170,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     claim: 'created a gezel',
     nudge:
       'You told the user you created a gezel, but you did not call `create_gezel`, `ensure_gezel`, ' +
-      '`start_project`, or `start_job` this turn. Call the right one now.',
+      'or `start_project` this turn. Call the right one now.',
   },
   {
     pattern: new RegExp(
@@ -182,7 +182,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     requiredTools: ['create_task', 'start_project', 'start_job'],
     claim: 'created a task',
     nudge:
-      'You told the user you created a task, but you did not call `create_task`, `start_project`, or `start_job` this turn. Call the right one now.',
+      'You told the user you created a task, but you did not call `create_task` or `start_project` this turn. Call the right one now.',
   },
   {
     // Task-assignment fabrication — "I assigned the task to `dev-16a`"

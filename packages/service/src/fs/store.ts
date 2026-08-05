@@ -965,15 +965,15 @@ export class Store {
   /**
    * One-shot migration: if the active Meester's about.md carries
    * markers from any prior version of `MEESTER_ABOUT_MD`, overwrite
-   * with the current curated text. Two staleness detectors run, each
-   * gated on TWO markers so a user-customized about (e.g. kept old
+   * with the current curated text. Staleness detectors use exact historical
+   * markers so a user-customized about (e.g. kept old
    * sections intentionally) doesn't get clobbered:
    *
    *   1. **Pre-tools-block era** — `## Your tools` heading + the
    *      "browser automation available as a system toolset" prose.
    *      Both removed when the auto-injected `## Tools available
    *      this turn` block shipped (~1.5K tokens/turn savings).
-   *   2. **Pre-`start_project`/`start_job` macros era** — `## The
+   *   2. **Pre-project-kickoff macro era** — `## The
    *      three-step project setup` heading + the `mode: 'solo'`
    *      reference in the old "Solo projects ('jobs')" section.
    *      Both removed when the two-macro split landed; without this
@@ -1006,7 +1006,18 @@ export class Store {
     const hasPostMacroPreSpecialistMarker =
       about.includes('## Starting work — two macros, one decision') &&
       !about.includes('ask_specialist');
-    if (!hasPreToolsBlockMarker && !hasPreMacroSplitMarker && !hasPostMacroPreSpecialistMarker)
+    // The two-macro era asked the model to choose between start_project and
+    // start_job. That choice is now runtime-owned; refresh even the later
+    // variant that already mentioned ask_specialist so persisted prompts do
+    // not advertise a compatibility-only tool.
+    const hasTwoMacroEraMarker =
+      about.includes('## Starting work — two macros, one decision') && about.includes('start_job');
+    if (
+      !hasPreToolsBlockMarker &&
+      !hasPreMacroSplitMarker &&
+      !hasPostMacroPreSpecialistMarker &&
+      !hasTwoMacroEraMarker
+    )
       return;
     const { MEESTER_ABOUT_MD } = await import('../meester/prompt.js');
     await this.updateGezelAbout(gezelId, MEESTER_ABOUT_MD);
@@ -1014,7 +1025,9 @@ export class Store {
       ? 'pre-tools-block era'
       : hasPreMacroSplitMarker
         ? 'pre-macro-split era'
-        : 'pre-ask-specialist era';
+        : hasPostMacroPreSpecialistMarker
+          ? 'pre-ask-specialist era'
+          : 'two-macro era';
     log.info(`[meester] refreshed stale about.md for ${gezelId} (${reason})`);
   }
 

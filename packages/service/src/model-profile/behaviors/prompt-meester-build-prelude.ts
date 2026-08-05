@@ -105,36 +105,19 @@ export function looksLikeNewBuildRequest(text: string): boolean {
   return BUILD_REQUEST_RE.test(text);
 }
 
-const SINGLE_SPECIALIST_RE =
-  /\b(?:single[-\s]?file|one[-\s]?file|one[-\s]?shot|quick prototype|just for me|all in (?:one )?(?:file|index\.html)|everything in (?:one )?(?:file|index\.html)|index\.html|no build(?: step)?|without a build step)\b/i;
-
-export function looksLikeSingleSpecialistBuildRequest(text: string): boolean {
-  return SINGLE_SPECIALIST_RE.test(text);
-}
-
-const MEESTER_CREW_BUILD_PRELUDE =
+const MEESTER_BUILD_PRELUDE =
   '(System note for this turn: the user is asking for a new substantive build. Make ONE tool call:\n' +
-  ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, recruits a voorman, wires them in as lead, creates the kickoff task, and hands the crew its entry step (the work starts in a task-scoped session). Use this for "build me a website / game / app / dashboard" and ALL multimodal asks (e.g. site AND logo, code AND tests AND docs). `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `workspace/index.html` and the acceptance criteria.\n' +
-  ' • Do not use `start_job` unless the user explicitly scoped the work to one specialist ("quick prototype", "one-shot", "just for me", "single HTML file", "no build step").\n' +
-  'After the macro returns, your turn is done — tell the user the lead/specialist is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
-
-const MEESTER_SINGLE_JOB_PRELUDE =
-  '(System note for this turn: the user asked for a one-specialist deliverable. Make ONE tool call:\n' +
-  ' • `start_job({ name, about, missionObjectives, taskDescription, specialistRole })`. Use `specialistRole: "builder"` or `"developer"` for code. `taskDescription` must tell the specialist to deliver the requested file, not a plan. For source code say to write `index.html` with `write_file` (workspace-relative path; do not prefix `workspace/`). Preserve the acceptance criteria.\n' +
-  ' • Do NOT call `start_project` for this single-file / no-build-step request. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them.\n' +
-  'After the macro returns, your turn is done — tell the user which specialist is on it.)';
+  ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the effective execution mode, creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every "build me a website / game / app / dashboard" request, from a single-file prototype through multimodal work. `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`).\n' +
+  'After the macro returns, your turn is done — tell the user the lead is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
 
 export const PromptMeesterBuildPrelude: Behavior = {
   id: 'prompt.meester-build-prelude',
   description:
-    'Prepends a system note to the user prompt when the active gezel is the Meester and the message looks like a "build me X" request, anchoring the first-call expectation on `start_project` or `start_job`.',
+    'Prepends a system note to the user prompt when the active gezel is the Meester and the message looks like a "build me X" request, anchoring the first-call expectation on `start_project`.',
 
   userPromptPrelude(ctx) {
     if (!ctx.isMeester) return null;
     if (!looksLikeNewBuildRequest(ctx.userText)) return null;
-    if (looksLikeSingleSpecialistBuildRequest(ctx.userText)) {
-      return MEESTER_SINGLE_JOB_PRELUDE;
-    }
-    return MEESTER_CREW_BUILD_PRELUDE;
+    return MEESTER_BUILD_PRELUDE;
   },
 };

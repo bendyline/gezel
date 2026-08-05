@@ -313,7 +313,6 @@ export async function resolveSessionToolSurface(
   });
   if (projectOrchestrationConstrained) {
     allowlist = constrainAllowlistForProjectOrchestration(allowlist, {
-      soloJobOnly: projectOrchestrationPrefersSoloJob(opts.session, opts.latestUserMessage),
       ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
       suppressRoleDelegation: sessionContainsRemoteRepoIntakeRequest(
         opts.session,
@@ -451,7 +450,6 @@ export async function resolveSessionToolSurface(
 }
 
 const MEESTER_PROJECT_ORCHESTRATION_TOOLS = [
-  'start_job',
   'start_project',
   'fetch_repo',
   'fetch_diff',
@@ -464,14 +462,6 @@ const MEESTER_PROJECT_ORCHESTRATION_TOOLS = [
   // compact front door; the invoked task carries the rest of the workflow.
   'suggest_craftbook',
   'invoke_craftbook',
-  'search_memory',
-  'save_memory',
-  'search_history',
-  'search_sessions',
-] as const;
-
-const MEESTER_SOLO_PROJECT_JOB_TOOLS = [
-  'start_job',
   'search_memory',
   'save_memory',
   'search_history',
@@ -534,7 +524,6 @@ const STEP_COMPLETION_TOOLS: readonly string[] = [
 ];
 
 const MEESTER_TOOL_CAP_PRIORITY = [
-  'start_job',
   'start_project',
   'fetch_repo',
   'fetch_diff',
@@ -794,7 +783,7 @@ export function toolCapForTierAndRole(
  * curated orchestration priority list, or `null` when the diet is off or
  * the role isn't a coordinator. Capping at the list length keeps every
  * curated tool (so the resume/orchestration surface — `read_task_notes`,
- * `list_tasks`, `start_job`… — always survives) and drops only the
+ * `list_tasks`, `start_project`… — always survives) and drops only the
  * uncurated tail. The `capToolAllowlist` priority ordering
  * (`MEESTER_TOOL_CAP_PRIORITY`/`VOORMAN_TOOL_CAP_PRIORITY`) plus the
  * always-keep load-bearing floor do the rest.
@@ -1049,11 +1038,9 @@ export function projectOrchestrationConstraintActive(opts: {
 
 function constrainAllowlistForProjectOrchestration(
   allowlist: Set<string> | null,
-  opts?: { soloJobOnly?: boolean; rolesAsTools?: boolean; suppressRoleDelegation?: boolean },
+  opts?: { rolesAsTools?: boolean; suppressRoleDelegation?: boolean },
 ): Set<string> {
-  const projectTools = opts?.soloJobOnly
-    ? MEESTER_SOLO_PROJECT_JOB_TOOLS
-    : MEESTER_PROJECT_ORCHESTRATION_TOOLS;
+  const projectTools = MEESTER_PROJECT_ORCHESTRATION_TOOLS;
   if (!allowlist) return new Set(projectTools);
   const constrained = new Set<string>();
   for (const tool of projectTools) {
@@ -1068,38 +1055,6 @@ function constrainAllowlistForProjectOrchestration(
     }
   }
   return constrained;
-}
-
-function projectOrchestrationPrefersSoloJob(
-  record: ChatSession,
-  latestUserMessage: string | undefined,
-): boolean {
-  const candidates = [
-    latestUserMessage,
-    record.title,
-    ...record.messages
-      .filter((message) => message.role === 'user')
-      .map((message) => message.content),
-  ];
-  return candidates.some((text) => isSingleSpecialistDeliverableRequest(text));
-}
-
-function isSingleSpecialistDeliverableRequest(text: string | undefined): boolean {
-  const normalized = text?.toLowerCase() ?? '';
-  if (!normalized.trim()) return false;
-  const asksForMultidiscipline =
-    /\b(?:logo|image|illustration|photo|video|audio|research|docs?|tests?)\b/i.test(normalized) &&
-    /\band\b/i.test(normalized);
-  if (asksForMultidiscipline) return false;
-  return (
-    /\b(?:quick prototype|one-shot|just for me)\b/i.test(normalized) ||
-    /\bsingle[-\s]?(?:file|html)\b/i.test(normalized) ||
-    /\bone[-\s]?file\b/i.test(normalized) ||
-    /\bno build step\b/i.test(normalized) ||
-    /\ball in (?:one )?`?index\.html`?\b/i.test(normalized) ||
-    /\bworkspace\/index\.html\b/i.test(normalized) ||
-    /\bindex\.html\b/i.test(normalized)
-  );
 }
 
 function capToolAllowlist(opts: {

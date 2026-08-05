@@ -110,7 +110,6 @@ export const ALWAYS_REGISTERED_TOOLS = [
   // Projects
   'list_projects',
   'start_project',
-  'start_job',
   'fetch_repo',
   'fetch_diff',
   'update_project',
@@ -253,6 +252,7 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   // from model sessions by default; direct MCP clients can opt in while they
   // migrate by setting GEZEL_MCP_LEGACY_TOOLS=1.
   create_gezel_from_gilde: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  start_job: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
   list_project_local_gezels: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
   craftbook_create: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
   craftbook_replace: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },

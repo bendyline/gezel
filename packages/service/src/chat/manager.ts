@@ -12168,6 +12168,11 @@ export class ChatManager {
       (envLayeredOverride ??
         config.layeredPrefixCache?.enabled ??
         record.providerName === 'llama-cpp');
+    const executionDensity = resolveExecutionDensity(
+      config.executionDensity,
+      record.providerName,
+      localModelTier,
+    );
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
       ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
@@ -12181,11 +12186,7 @@ export class ChatManager {
         : {}),
       role: gezel?.role,
       providerName: record.providerName,
-      executionDensity: resolveExecutionDensity(
-        config.executionDensity,
-        record.providerName,
-        localModelTier,
-      ),
+      executionDensity,
       project,
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
@@ -12774,6 +12775,7 @@ export class ChatManager {
         GEZEL_PROJECT_ID: record.projectId,
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
+        GEZEL_EXECUTION_DENSITY: executionDensity,
         ...(record.expectedDeliverable
           ? { GEZEL_EXPECTED_DELIVERABLE: JSON.stringify(record.expectedDeliverable) }
           : {}),
@@ -15326,11 +15328,11 @@ export interface BuildInstructionsOptions {
    */
   providerName?: ProviderName;
   /**
-   * Resolved execution density for this session. `flat` flips the
-   * delegation-role routing prose to default to `start_job` (a solo
-   * ambachtsman) over `start_project` (a crew) — see
-   * {@link resolveExecutionDensity} and `docs/frontier-adaptive-execution.md`.
-   * Absent ⇒ `scaffold` (the historical crew-default behavior).
+   * Resolved execution density for this session. The model always calls
+   * `start_project`; this value lets the runtime choose a flat lead or a
+   * scaffolded crew without making the model select between two macros.
+   * See {@link resolveExecutionDensity} and
+   * `docs/frontier-adaptive-execution.md`.
    */
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
@@ -15688,7 +15690,6 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   ]);
   const projectTaskTools = toolsFrom([
     'start_project',
-    'start_job',
     'update_project',
     'create_task',
     'assign_task',
@@ -15697,26 +15698,21 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   ]);
   const artifactTools = toolsFrom(['list_artifacts', 'read_artifact', 'write_artifact']);
   const routingTail = `\n\n**Things you should never try:**\n\n- "I'll just write the file myself" / "Let me create that for you" → no. Even if writing the file feels faster, the answer is to delegate. The user's session with you is the lobby; the work happens in the project.\n- Searching the tool catalog for a workaround when a tool was denied. A denial is a signal that you're outside your role, not a puzzle to solve. Stop, route, hand off.\n- Naming or fabricating tools that are not in the Available tools list for this turn.\n\n**Things you DO do yourself:**\n\n- Talk to the user. Ask clarifying questions. Confirm scope.\n- Use the **artifacts drawer** for plans and scratch when available (${formatToolList(artifactTools)}).\n- Manage the team with the tools actually wired this turn (${formatToolList(teamTools)}).\n- Manage projects and tasks with the tools actually wired this turn (${formatToolList(projectTaskTools)}).`;
-  // FLAT density flips the routing default from crew→solo: one capable
-  // generalist (the ambachtsman, via `start_job`) owns the whole job, which
-  // also collapses the craftbook onto that single specialist. This is the
-  // frontier-adaptive path — a self-orchestrating model doesn't need a crew
-  // relay or per-step hand-offs. Emitted for any delegation role in flat
-  // mode (not just the cli providers); see docs/frontier-adaptive-execution.md.
+  // Execution density is deliberately absent from the model-facing tool
+  // choice. Every build enters through `start_project`; the MCP runtime
+  // selects a flat lead or scaffolded crew. This prevents prompt/toolset
+  // drift and leaves one unambiguous kickoff action for smaller models.
   const craftbookRoute =
     availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
       ? 'For named output formats or multi-step production work, call `suggest_craftbook` once, then make `invoke_craftbook` your next tool call when it returns a match or fallback. Do not repeat the suggestion with a rephrased query or switch to a generic kickoff macro.'
       : '';
-  const flatPrimaryRoute = availableToolNameSet.has('start_job')
-    ? '`start_job({ name, about, missionObjectives, taskDescription, specialistRole })`'
+  const projectPrimaryRoute = availableToolNameSet.has('start_project')
+    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
     : availableToolNameSet.has('message_gezel')
       ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
       : 'the available project/task tools listed below';
-  const crewPrimaryRoute = availableToolNameSet.has('start_project')
-    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
-    : flatPrimaryRoute;
-  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD — and on this install, route SOLO\n\nYou are a router; specialists do the work. For concrete work, route through ${flatPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
-  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${crewPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
+  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
+  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail = !isDelegationRole
     ? ''
     : opts.executionDensity === 'flat'
@@ -15735,7 +15731,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   let projectContext = '';
   if (project) {
     const isSolo = project.mode === 'solo';
-    projectContext = `\n\n---\n\nYou are working in the ${isSolo ? 'solo project (job)' : 'project'} "${project.name}".`;
+    projectContext = `\n\n---\n\nYou are working in the project "${project.name}".`;
     if (project.workingDir) {
       // Deliberately path-free: the model addresses workspace files by
       // paths relative to the root, so the host path is need-to-know it
@@ -15749,7 +15745,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
       const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
-        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the entire project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
+        ? ` The lead of this project is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
         : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
     if (project.about && project.about.trim().length > 0) {

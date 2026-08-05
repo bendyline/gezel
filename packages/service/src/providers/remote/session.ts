@@ -16,6 +16,10 @@ import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type { ProviderQueue } from '../queue.js';
 import { runInQueue } from '../queue.js';
+import {
+  PROJECT_MACRO_FAILURE_CAP,
+  deriveProjectMacroClosing,
+} from '../project-macro-loop-bail.js';
 import { StreamingSessionBase } from '../streaming-session.js';
 import type {
   ExternalToolCall,
@@ -182,6 +186,9 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     let userMessageAdded = false;
     let nextPrompt = prompt;
     let fullText = '';
+    let projectMacroResult: string | null = null;
+    let projectMacroFailureCount = 0;
+    let lastProjectMacroFailure = '';
     this.activePriorMessages = priorMessages;
     this.pendingPrompt = prompt;
 
@@ -221,18 +228,51 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           } catch {
             /* leave empty — the tool will surface its own validation error */
           }
+          const isProjectMacro = call.name === 'start_project' || call.name === 'start_job';
           let output: string;
-          try {
-            const budgetChars = computeToolBudgetChars(this.numCtx, this.estimatePromptChars());
-            const rich = await this.deps.bridges.callToolRich(call.name, args, {
-              budgetChars,
-              numCtxTokens: this.numCtx,
-            });
-            output = rich.text;
-          } catch (err) {
-            output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+          let outputIsError = false;
+          if (isProjectMacro && projectMacroResult) {
+            output =
+              'The project was already started successfully by an earlier kickoff call in this turn. This duplicate was suppressed; end the turn now.';
+          } else {
+            try {
+              const budgetChars = computeToolBudgetChars(this.numCtx, this.estimatePromptChars());
+              const rich = await this.deps.bridges.callToolRich(call.name, args, {
+                budgetChars,
+                numCtxTokens: this.numCtx,
+              });
+              output = rich.text;
+              outputIsError = rich.isError;
+            } catch (err) {
+              output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              outputIsError = true;
+            }
+          }
+          if (isProjectMacro && !projectMacroResult) {
+            if (outputIsError) {
+              projectMacroFailureCount++;
+              lastProjectMacroFailure = output;
+            } else {
+              projectMacroResult = output;
+            }
           }
           priorMessages.push({ role: 'tool', content: output, toolCallId: call.id });
+        }
+        if (projectMacroResult) {
+          const closing = deriveProjectMacroClosing(projectMacroResult);
+          priorMessages.push({ role: 'assistant', content: closing });
+          this.transcript = [...priorMessages];
+          return fullText ? `${fullText}\n${closing}` : closing;
+        }
+        if (projectMacroFailureCount >= PROJECT_MACRO_FAILURE_CAP) {
+          const detail = lastProjectMacroFailure
+            .replace(/^ERROR:\s*/i, '')
+            .replace(/^start_(?:project|job) failed:\s*/i, '')
+            .trim();
+          const closing = `I couldn't start the project after ${PROJECT_MACRO_FAILURE_CAP} attempts.${detail ? ` ${detail}` : ''}`;
+          priorMessages.push({ role: 'assistant', content: closing });
+          this.transcript = [...priorMessages];
+          return fullText ? `${fullText}\n${closing}` : closing;
         }
         currentTurnStartIdx = await this.maybeCompactMidLoop(priorMessages, currentTurnStartIdx);
         nextPrompt = ''; // tool results drive the next forward-pass

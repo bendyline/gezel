@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
-} from './project-macro-loop-bail.js';
+} from '../project-macro-loop-bail.js';
 
 describe('deriveProjectMacroClosing', () => {
   it('parses a start_project success result into a voorman closing', () => {
@@ -22,6 +22,15 @@ describe('deriveProjectMacroClosing', () => {
     expect(closing).toContain('Logo Iteration');
     expect(closing).toContain('Maya');
     // Jobs don't say "crew" — single specialist, no team to lead.
+    expect(closing).not.toContain('crew');
+  });
+
+  it('parses a flat start_project result whose specialist is described as the lead', () => {
+    const closing = deriveProjectMacroClosing(
+      'Started project "Frogger" (frogger). Recruited Maya as lead (template: developer). Created task frogger/1.',
+    );
+    expect(closing).toContain('Frogger');
+    expect(closing).toContain('Maya');
     expect(closing).not.toContain('crew');
   });
 

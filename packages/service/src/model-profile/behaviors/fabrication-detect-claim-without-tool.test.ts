@@ -30,7 +30,7 @@ function turnCtx(overrides: Partial<TurnCtx>): TurnCtx {
 }
 
 describe('detectFabricatedToolClaim', () => {
-  it('catches the wild-caught "I have created the project" without a create_project call', () => {
+  it('catches the wild-caught "I have created the project" without a project kickoff', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the "Space Invaders" project.',
       firedToolNames: ['create_gezel_from_gilde', 'update_project', 'list_projects'],
@@ -38,7 +38,7 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
     expect(v.requiredTools).toContain('create_project');
-    expect(v.nudge).toMatch(/create_project/);
+    expect(v.nudge).toMatch(/start_project/);
   });
 
   it('catches "I\'ve created the **Space Invaders** project" (markdown-bold name)', () => {
@@ -273,7 +273,7 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     );
     expect(verdict).not.toBeNull();
     expect(verdict?.warnUser).toBeUndefined();
-    expect(verdict?.promptForNextTurn).toMatch(/create_project/);
+    expect(verdict?.promptForNextTurn).toMatch(/start_project/);
     expect(verdict?.reason).toContain('created a project');
   });
 
