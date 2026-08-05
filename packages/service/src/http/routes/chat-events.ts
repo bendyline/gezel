@@ -52,7 +52,9 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
       const projectId = c.req.query('project') ?? 'default';
       if (!gezelId) return c.json({ error: 'missing ?session=<id> or ?gezel=<id>' }, 400);
       const sessions = await ctx.chat.listSessions({ gezelId, projectId });
-      const active = sessions.find((s) => !s.archived);
+      // The gezel/project fallback is an ordinary-chat compatibility route.
+      // Task and night-shift streams must be selected explicitly by session.
+      const active = sessions.find((s) => !s.archived && !s.taskRef);
       if (!active) return c.json({ error: 'no active session' }, 404);
       sessionId = active.id;
     }

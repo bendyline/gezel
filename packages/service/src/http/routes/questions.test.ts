@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -196,5 +196,93 @@ describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
     // Answer persisted so the card collapses and re-apply never re-asks.
     const questions = await svc.context.store.listProjectQuestions(projectId);
     expect(questions.find((q) => q.id === questionId)?.answer?.declined).toBe(true);
+  });
+});
+
+describe('POST /api/questions/:id/answer — toolset install approval', () => {
+  it('persists the approval without seeding a duplicate model turn', async () => {
+    const project = await svc.context.store.createProject({ name: 'MCP Approval' });
+    const questionId = crypto.randomUUID();
+    await svc.context.store.writeQuestion({
+      id: questionId,
+      projectId: project.id,
+      gezelId: 'imara',
+      sessionId: 'live-install-call',
+      prompt: 'Install Example MCP?',
+      choices: ['Install', 'Not now'],
+      allowWriteIn: false,
+      intent: {
+        kind: 'toolset-install-approval',
+        toolsetId: 'example-mcp',
+        sourceId: 'bundled',
+        version: '1.0.0',
+        targetProjectId: project.id,
+        craftbookId: 'example-book',
+      },
+      createdAt: new Date().toISOString(),
+    });
+    const deliver = vi.spyOn(svc.context.chat, 'deliverQuestionAnswer');
+
+    const res = await api('POST', `/api/questions/${questionId}/answer`, {
+      selectedChoices: [0],
+    });
+    expect(res.status).toBe(200);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(
+      (await svc.context.store.getQuestion(project.id, questionId))?.answer?.selectedChoices,
+    ).toEqual([0]);
+
+    deliver.mockRestore();
+  });
+
+  it('blocks a live install request until the user answers its question', async () => {
+    const project = await svc.context.store.createProject({ name: 'MCP Request Bridge' });
+    const config = await svc.context.store.readConfig();
+    const gezelId = config.meesterGezelId!;
+    const sessionId = 'toolset-request-session';
+    const detail = await svc.context.catalog.get('toolset', 'docblocks');
+    expect(detail?.manifest.kind).toBe('toolset');
+    if (!detail || detail.manifest.kind !== 'toolset') throw new Error('DocBlocks missing');
+
+    const sessionToken = svc.context.tokenStore.issueSession({
+      appId: `session:${sessionId}`,
+      projectId: project.id,
+      gezelId,
+      team: true,
+    });
+    const installResponse = httpFetch(
+      `${baseUrl}/api/catalog/toolset/docblocks/request-install-and-wait`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          scope: { kind: 'project', projectId: project.id },
+          sourceId: detail.sourceId,
+          version: detail.manifest.version,
+          gezelId,
+          sessionId,
+          craftbookId: 'powerpoint-deck',
+        }),
+      },
+    );
+
+    let question: Question | undefined;
+    for (let attempt = 0; attempt < 20 && !question; attempt += 1) {
+      question = (await pendingFor(project.id)).find(
+        (entry) => entry.intent?.kind === 'toolset-install-approval',
+      );
+      if (!question) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(question?.intent?.kind).toBe('toolset-install-approval');
+
+    const answer = await api('POST', `/api/questions/${question!.id}/answer`, {
+      selectedChoices: [1],
+      declined: true,
+    });
+    expect(answer.status).toBe(200);
+    expect((await installResponse).status).toBe(403);
   });
 });

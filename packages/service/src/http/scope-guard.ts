@@ -375,6 +375,27 @@ async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<Ses
   ) {
     return SESSION_ALLOW;
   }
+  if (auth.team && method === 'POST' && /^\/api\/catalog\/toolset\/[^/]+\/install$/.test(path)) {
+    const body = await readJsonSafe(c);
+    const scope = body?.scope as Record<string, unknown> | undefined;
+    return scope?.kind === 'project' && typeof scope.projectId === 'string'
+      ? SESSION_ALLOW
+      : sessionDeny('session toolset installs must be project-scoped');
+  }
+  if (
+    auth.team &&
+    method === 'POST' &&
+    /^\/api\/catalog\/toolset\/[^/]+\/request-install-and-wait$/.test(path)
+  ) {
+    const body = await readJsonSafe(c);
+    const scope = body?.scope as Record<string, unknown> | undefined;
+    return scope?.kind === 'project' &&
+      typeof scope.projectId === 'string' &&
+      body?.gezelId === auth.gezelId &&
+      body?.sessionId === sessionId(auth)
+      ? SESSION_ALLOW
+      : sessionDeny('toolset request origin does not match the session token');
+  }
   if (/^\/api\/scripts\/standard(?:\/source)?$/.test(path) && method === 'GET') {
     return SESSION_ALLOW;
   }

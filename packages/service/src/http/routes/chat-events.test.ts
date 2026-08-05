@@ -175,6 +175,22 @@ describe('GET /events/chat — single-session stream', () => {
     const res = await api('GET', `/events/chat?gezel=${created.id}`);
     expect(res.status).toBe(404);
   });
+
+  it('does not resolve an ordinary gezel stream to a task session', async () => {
+    const created = (await (
+      await api('POST', '/api/gezels', { name: 'TaskSessionOnlyBot' })
+    ).json()) as { id: string };
+    await svc.context.chat.createSession({
+      gezelId: created.id,
+      projectId: 'default',
+      taskRef: 'default/99',
+      stepId: 'night-shift',
+      nightShift: true,
+    });
+
+    const res = await api('GET', `/events/chat?gezel=${created.id}`);
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('GET /events/chat/project — project envelope stream', () => {

@@ -73,6 +73,15 @@ export function PendingQuestionCard({
       <ToolPermissionForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />
     );
   }
+  if (question.intent?.kind === 'toolset-install-approval') {
+    return (
+      <ToolsetInstallApprovalForm
+        question={question}
+        onAnswered={onAnswered}
+        onOpenInChat={onOpenInChat}
+      />
+    );
+  }
   if (question.intent?.kind === 'image-generation-approval') {
     return (
       <ImageGenerationApprovalForm
@@ -482,6 +491,94 @@ function ToolPermissionForm({
           disabled={submitting !== null}
         >
           {submitting === 'deny' ? 'Denying…' : 'Deny'}
+        </button>
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
+      </div>
+    </div>
+  );
+}
+
+// ── Craftbook toolset install approval ─────────────────────────────
+//
+// A craftbook can auto-install only the exact trusted constrained
+// dependencies. Other zero-configuration MCP toolsets pause the live
+// invocation here so the user explicitly approves the download/register
+// step; the service resumes that same invocation after this answer lands.
+
+function ToolsetInstallApprovalForm({
+  question,
+  onAnswered,
+  onOpenInChat,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+  onOpenInChat?: (question: Question) => void;
+}) {
+  const intent = question.intent as {
+    kind: 'toolset-install-approval';
+    toolsetId: string;
+    sourceId: string;
+    version: string;
+    targetProjectId: string;
+    craftbookId: string;
+  };
+  const [submitting, setSubmitting] = useState<'allow' | 'deny' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(
+    async (decision: 'allow' | 'deny') => {
+      if (submitting) return;
+      setSubmitting(decision);
+      setError(null);
+      try {
+        const updated = await api.answerQuestion(question.id, {
+          selectedChoices: [decision === 'allow' ? 0 : 1],
+        });
+        onAnswered?.(updated);
+      } catch (err) {
+        setError((err as Error).message ?? 'Failed to submit answer.');
+        setSubmitting(null);
+      }
+    },
+    [question.id, submitting, onAnswered],
+  );
+
+  return (
+    <div className="pending-question pending-question-pending pending-question-tool-permission">
+      <ContextStrip question={question} />
+      <div className="pending-question-prompt">{question.prompt}</div>
+      <details className="pending-question-tool-args">
+        <summary>Install details</summary>
+        <dl>
+          <dt>Toolset</dt>
+          <dd>
+            <code>{intent.toolsetId}</code>
+          </dd>
+          <dt>Version</dt>
+          <dd>{intent.version}</dd>
+          <dt>Project</dt>
+          <dd>{intent.targetProjectId}</dd>
+          <dt>Requested by</dt>
+          <dd>{intent.craftbookId}</dd>
+        </dl>
+      </details>
+      {error && <p className="pending-question-error">{error}</p>}
+      <div className="pending-question-actions">
+        <button
+          type="button"
+          className="pending-question-submit"
+          onClick={() => void submit('allow')}
+          disabled={submitting !== null}
+        >
+          {submitting === 'allow' ? 'Installing…' : 'Install'}
+        </button>
+        <button
+          type="button"
+          className="pending-question-skip subtle"
+          onClick={() => void submit('deny')}
+          disabled={submitting !== null}
+        >
+          {submitting === 'deny' ? 'Declining…' : 'Not now'}
         </button>
         <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>

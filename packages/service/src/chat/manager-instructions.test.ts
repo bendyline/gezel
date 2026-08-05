@@ -87,6 +87,56 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(none).not.toContain('search_code');
     expect(none).not.toContain('get_pull_request');
   });
+
+  it('names only wired delegation tools in workspace guidance', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const onlyMessage = buildInstructions({
+      name: 'Wren',
+      role: 'Meester',
+      about: 'Route work to a specialist.',
+      project,
+      executionDensity: 'flat',
+      workspaceFiles: [{ path: 'brief.md', isDirectory: false }],
+      availableTools: [{ name: 'message_gezel', description: 'Send a handoff.' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(onlyMessage).toContain('Delegate with `message_gezel`');
+    expect(onlyMessage).not.toContain('`ensure_gezel`');
+    expect(onlyMessage).not.toContain('`create_task`');
+    expect(onlyMessage).not.toContain('`assign_task`');
+
+    const none = buildInstructions({
+      name: 'Wren',
+      role: 'Meester',
+      about: 'Route work to a specialist.',
+      project,
+      executionDensity: 'flat',
+      workspaceFiles: [{ path: 'brief.md', isDirectory: false }],
+      availableTools: [],
+    } as unknown as BuildInstructionsOptions).full;
+    expect(none).toContain('No delegation tool is wired this turn');
+    expect(none).not.toContain('`message_gezel`');
+    expect(none).not.toContain('`create_task`');
+    expect(none).not.toContain('`assign_task`');
+  });
+
+  it('does not advertise unavailable shared-document tools', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const rendered = buildInstructions({
+      name: 'Wren',
+      role: 'Meester',
+      about: 'Route work to a specialist.',
+      project,
+      executionDensity: 'flat',
+      documentFiles: [{ path: 'guidelines.md', isDirectory: false }],
+      availableTools: [{ name: 'message_gezel', description: 'Send a handoff.' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('No shared-document tool is wired this turn');
+    expect(rendered).not.toContain('`list_documents`');
+    expect(rendered).not.toContain('`read_document`');
+    expect(rendered).not.toContain('`write_document`');
+  });
 });
 
 describe('buildInstructions assigned pronouns', () => {

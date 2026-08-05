@@ -454,6 +454,63 @@ describe('ChatComposer recipient picker', () => {
   });
 });
 
+describe('ChatComposer ordinary-session fallback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: 'night-shift-session',
+          gezelId: 'tomas',
+          projectId: 'default',
+          title: 'Night-shift oversight',
+          taskRef: 'default/1',
+          archived: false,
+          providerName: 'openai',
+          createdAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+        },
+        {
+          id: 'ordinary-session',
+          gezelId: 'tomas',
+          projectId: 'default',
+          title: 'Morning chat',
+          archived: false,
+          providerName: 'openai',
+          createdAt: new Date(Date.now() - 1_000).toISOString(),
+          lastActivityAt: new Date(Date.now() - 1_000).toISOString(),
+        },
+      ],
+    });
+    vi.mocked(api.sendToChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'ordinary-session',
+    });
+    vi.mocked(streamChatEvents).mockImplementation(() =>
+      (async function* completedTurn() {
+        yield { type: 'done' as const };
+      })(),
+    );
+  });
+
+  it('skips a newer task session when the switcher has not auto-picked yet', async () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId={undefined} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    await waitFor(() => {
+      expect(api.sendToChatSession).toHaveBeenCalledWith('ordinary-session', {
+        message: 'Hello from the test',
+      });
+    });
+    expect(api.createChatSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('ChatComposer transport resilience', () => {
   const toolEvent = (name: string) => ({
     type: 'tool' as const,

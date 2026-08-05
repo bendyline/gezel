@@ -316,6 +316,20 @@ describe('ChatManager — session lifecycle', () => {
     expect(picked.id).toBe(b.id);
   });
 
+  it('ensureOrCreateSession never reuses a task-scoped session for ordinary chat', async () => {
+    const ordinary = await manager.createSession({ gezelId: 'ada' });
+    await manager.createSession({
+      gezelId: 'ada',
+      taskRef: 'default/9',
+      stepId: 'night-shift',
+      nightShift: true,
+    });
+
+    const picked = await manager.ensureOrCreateSession({ gezelId: 'ada' });
+    expect(picked.id).toBe(ordinary.id);
+    expect(picked.taskRef).toBeUndefined();
+  });
+
   it('ensureOrCreateSession creates one when none exist', async () => {
     const picked = await manager.ensureOrCreateSession({ gezelId: 'ada' });
     expect(picked.messages).toEqual([]);

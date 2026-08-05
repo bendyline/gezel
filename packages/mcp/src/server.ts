@@ -3628,7 +3628,8 @@ function normalizedCraftbookTaskDescription(description: string | undefined, cra
 
 /**
  * Install only exact, first-party, pinned, zero-configuration dependencies.
- * Everything else remains an explicit setup boundary for the user.
+ * Other zero-configuration MCP dependencies take the approval path below;
+ * anything needing credentials/configuration remains an explicit setup.
  */
 async function autoInstallTrustedCraftbookToolsets(
   project: string,
@@ -3687,6 +3688,66 @@ async function autoInstallTrustedCraftbookToolsets(
   return installed;
 }
 
+/**
+ * Pause the live invocation on the standard in-chat approval card for
+ * non-trusted MCP dependencies that need no credentials/configuration.
+ * Trusted constrained dependencies take the silent path above; configured
+ * dependencies stay in the explicit Craftbooks/Commands setup workflow.
+ */
+async function requestCraftbookToolsetInstalls(
+  project: string,
+  craftbookId: string,
+  requirements: CraftbookToolsetNeed[],
+): Promise<string[]> {
+  if (!sessionId || !gezelId) return [];
+  const installed: string[] = [];
+  for (const need of requirements) {
+    const detail = await api.getCatalogItem('toolset', need.toolsetId, {
+      ...(need.sourceId ? { source: need.sourceId } : {}),
+    });
+    const manifest = detail.manifest;
+    if (manifest.kind !== 'toolset') continue;
+    if (
+      isTrustedConstrainedToolset({
+        toolsetId: manifest.id,
+        sourceId: detail.sourceId,
+        runtime: manifest.runtime,
+      }) ||
+      manifest.config.some((field) => field.required && field.default === undefined)
+    ) {
+      continue;
+    }
+
+    const res = await fetchImpl(
+      `${baseUrl}/api/catalog/toolset/${encodeURIComponent(manifest.id)}/request-install-and-wait`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          scope: { kind: 'project', projectId: project },
+          sourceId: detail.sourceId,
+          version: manifest.version,
+          gezelId,
+          sessionId,
+          craftbookId,
+          ...(need.reason ? { reason: need.reason } : {}),
+        }),
+      },
+    );
+    if (!res.ok) {
+      // A decline, policy ceiling, or timeout leaves the dependency missing.
+      // Stop asking after the first refusal; launchCraftbookTask will return
+      // the normal setup-required result with the complete missing list.
+      break;
+    }
+    installed.push(manifest.id);
+  }
+  return installed;
+}
+
 type CraftbookLaunchResult =
   | { kind: 'created'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
   | { kind: 'existing'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
@@ -3719,6 +3780,14 @@ async function launchCraftbookTask(args: {
   if (installed.length > 0) {
     projectCraftbooks = await api.listProjectCraftbooks(args.project);
     missing = projectCraftbooks.missingToolsets[args.craftbookId] ?? [];
+  }
+  if (missing.length > 0) {
+    const approved = await requestCraftbookToolsetInstalls(args.project, args.craftbookId, missing);
+    installed.push(...approved);
+    if (approved.length > 0) {
+      projectCraftbooks = await api.listProjectCraftbooks(args.project);
+      missing = projectCraftbooks.missingToolsets[args.craftbookId] ?? [];
+    }
   }
   if (missing.length > 0) return { kind: 'setup-required', missing, installed };
 
@@ -3793,7 +3862,7 @@ async function routeBinaryDocumentHandoff(args: {
   }
   const installedText =
     launch.installed.length > 0
-      ? ` Installed or upgraded trusted project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+      ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
       : '';
   if (launch.kind === 'existing') {
     const existingOutput = launch.task.craftbookParams?.outputPath;
@@ -3990,7 +4059,7 @@ server.tool(
 
 server.tool(
   'invoke_craftbook',
-  'Spawn and dispatch a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. Exact trusted zero-configuration bundled dependencies are installed or upgraded automatically at project scope; other missing setup returns a hard SETUP REQUIRED error and creates no task. Invocation params are carried into recipe placeholders such as {{outputPath}}. Returns the new task ref.',
+  "Spawn and dispatch a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. Exact trusted zero-configuration bundled dependencies install automatically at project scope; other zero-configuration MCP dependencies request the user's approval in chat. Dependencies that need credentials/configuration return a hard SETUP REQUIRED error and create no task. Invocation params are carried into recipe placeholders such as {{outputPath}}. Returns the new task ref.",
   {
     craftbookId: z
       .string()
@@ -4047,7 +4116,7 @@ server.tool(
       const stepCount = created.craftbook.steps.length;
       const installedText =
         launch.installed.length > 0
-          ? ` Installed or upgraded trusted project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+          ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
           : '';
       return {
         content: [

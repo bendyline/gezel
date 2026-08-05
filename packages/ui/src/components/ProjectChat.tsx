@@ -73,7 +73,10 @@ export function ProjectChat({
       .listChatSessions({ projectId: project.id })
       .then((r) => {
         if (cancelled) return;
-        const live = r.sessions.filter((s) => !s.archived);
+        // Task/craftbook runs have their own task surfaces. They must not
+        // steer the ordinary project composer toward whichever gezel most
+        // recently worked a night-shift step.
+        const live = r.sessions.filter((s) => !s.archived && !s.taskRef);
         setLastActiveGezelId(live[0]?.gezelId ?? null);
       })
       .catch(() => {
