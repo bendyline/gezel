@@ -884,7 +884,13 @@ export function resolveUsageTotals(
   httpUsage: TrialMetrics['usage'],
   parsed: EngineTimingParse,
 ): TrialMetrics['usage'] {
-  const engineIsAuthoritative = parsed.engine !== 'mlx';
+  // Engine logs are authoritative for EVERY local engine, MLX included.
+  // The MLX exception here dated from when its stream-pulse parse was new;
+  // in practice the HTTP tracker undercounts MLX ~27× (wild-caught
+  // 2026-08-05: `tokens from http (mlx): 429 out` vs 11,887 in the same
+  // trial's engine log — the tracker misses in-turn iterations and
+  // reasoning), which silently poisoned every long-trial MLX token stat.
+  const engineIsAuthoritative = true;
   const inputFromEngine = engineIsAuthoritative || httpUsage.totalInputTokens === undefined;
   const outputFromEngine = engineIsAuthoritative || httpUsage.totalOutputTokens === undefined;
   return {

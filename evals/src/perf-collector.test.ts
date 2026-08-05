@@ -288,16 +288,18 @@ describe('resolveUsageTotals', () => {
     expect(resolved.source).toBe('engine-log');
   });
 
-  // MLX has no per-request block — its counts are reconstructed from
-  // heartbeats, so the tracker stays the stronger signal there.
-  it('prefers the HTTP tracker for MLX and reports source honestly', () => {
+  // The engine log wins for MLX too. The old "tracker is the stronger
+  // signal" policy was wild-caught undercounting ~27× (429 vs 11,887 out
+  // tokens in the same trial) — the tracker misses in-turn iterations and
+  // reasoning, and it silently poisoned every long-trial MLX token stat.
+  it('prefers the engine log for MLX over the undercounting tracker', () => {
     const resolved = resolveUsageTotals(
       { available: true, totalInputTokens: 900, totalOutputTokens: 400 },
       { engine: 'mlx', timings },
     );
-    expect(resolved.totalInputTokens).toBe(900);
-    expect(resolved.totalOutputTokens).toBe(400);
-    expect(resolved.source).toBe('http');
+    expect(resolved.totalInputTokens).toBe(35792);
+    expect(resolved.totalOutputTokens).toBe(10823);
+    expect(resolved.source).toBe('engine-log');
   });
 
   it('falls back to the parsed figures when the MLX tracker is empty', () => {
