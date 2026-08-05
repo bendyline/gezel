@@ -122,9 +122,13 @@ export default defineConfig({
           // Keep integration files sequential while retaining the shared
           // project-level worker cap required for parallel project groups.
           fileParallelism: false,
-          // The default 5s budget is below the full-suite tail for real
-          // service/git subprocess work even though the tests pass alone.
-          testTimeout: 10_000,
+          // The default 5s budget — and the previous 10s override — are below
+          // the full-suite tail for real service/git subprocess work even
+          // though the tests pass alone. Hooks need the same headroom because
+          // ChatManager teardown drains background turns before removing its
+          // temporary home.
+          testTimeout: 30_000,
+          hookTimeout: 30_000,
         },
       },
       {

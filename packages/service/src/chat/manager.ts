@@ -3227,7 +3227,7 @@ export class ChatManager {
         `[chat] model-routing: step ${dispatchStepId} of ${args.taskRef} → ${routed.provider}/${routed.model} (${routed.reason})`,
       );
       const defaultModel = (await this.store.readConfig()).defaultModel?.[routed.provider];
-      this.historyManager
+      await this.historyManager
         ?.log({
           kind: 'task.step.routed',
           projectId: args.projectId,

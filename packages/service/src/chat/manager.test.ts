@@ -5405,12 +5405,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     });
 
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
-    mock.script('on it');
-    await manager.send(session.id, 'add a logo to the start screen');
-
-    const create = mock.calls.find((c) => c.kind === 'create');
-    const sys = create!.opts!.systemMessage!;
-    expect(sys).not.toContain('File edits are OFF');
+    const snapshot = await manager.getSessionDebug(session.id);
+    expect(snapshot.systemPrompt).not.toContain('File edits are OFF');
   });
 
   it('exposes on-disk diagnostics paths in the debug snapshot', async () => {
