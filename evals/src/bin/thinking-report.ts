@@ -53,9 +53,10 @@ function trialEngineKey(trialDir: string): string {
   const name = trialDir.split('/').at(-1) ?? '';
   const engine = /-mlx-/.test(name) ? 'mlx' : /-ds4-/.test(name) ? 'ds4' : 'llama-cpp';
   // trial id shape: <scenario>-[engine-]<model>-<timestamp>-<rand>
-  const m = /-(?:mlx-|ds4-)?((?:gemma|qwen|deepseek|laguna|ornith|talkie)[^/]*?)-\d{4}-\d{2}-\d{2}T/.exec(
-    name,
-  );
+  const m =
+    /-(?:mlx-|ds4-)?((?:gemma|qwen|deepseek|laguna|ornith|talkie)[^/]*?)-\d{4}-\d{2}-\d{2}T/.exec(
+      name,
+    );
   return `${m?.[1] ?? 'unknown'} (${engine})`;
 }
 
@@ -97,7 +98,9 @@ function main(roots: string[]): void {
       }
       try {
         const log = readFileSync(join(trial, 'log.txt'), 'utf8');
-        const perf = [...log.matchAll(/tokens from engine[^:]*: [\d,]+ in \/ ([\d,]+) out/g)].at(-1);
+        const perf = [...log.matchAll(/tokens from engine[^:]*: [\d,]+ in \/ ([\d,]+) out/g)].at(
+          -1,
+        );
         if (perf?.[1]) row.outTokens += Number(perf[1].replace(/,/g, ''));
       } catch {
         /* no log — fine */
@@ -112,11 +115,12 @@ function main(roots: string[]): void {
       for (const f of sessionFiles) {
         let messages: Array<{ role?: string; reasoning?: string; content?: string }> = [];
         try {
-          messages = (
-            JSON.parse(readFileSync(join(sessionsDir, f), 'utf8')) as {
-              messages?: typeof messages;
-            }
-          ).messages ?? [];
+          messages =
+            (
+              JSON.parse(readFileSync(join(sessionsDir, f), 'utf8')) as {
+                messages?: typeof messages;
+              }
+            ).messages ?? [];
         } catch {
           continue;
         }
@@ -146,9 +150,7 @@ function main(roots: string[]): void {
     console.log(
       `  asstMsgs=${row.asstMsgs} withReasoning=${row.msgsWithReasoning} reasoningChars=${row.reasoningChars.toLocaleString()} visibleChars=${row.visibleChars.toLocaleString()} (ratio ${ratio.toFixed(1)}x)`,
     );
-    console.log(
-      `  hesitations=${row.hesitations} (${hesPerK.toFixed(1)}/1K reasoning chars)`,
-    );
+    console.log(`  hesitations=${row.hesitations} (${hesPerK.toFixed(1)}/1K reasoning chars)`);
     const worst = row.worst.sort((a, b) => b.waits - a.waits).slice(0, 3);
     for (const w of worst) {
       console.log(`    worst: ${w.waits} waits in ${w.chars.toLocaleString()} chars — ${w.trial}`);
