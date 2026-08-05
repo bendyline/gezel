@@ -361,8 +361,8 @@ project, [Hochschule für Gestaltung Schwäbisch Gmünd](https://www.hfg-gmuend.
 
 Most of Gezel's own **code** dependencies (npm packages and native engines) are
 permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed resvg
-component redistribution is documented above. One proprietary
-component is redistributed:
+component redistribution is documented above. Two proprietary
+components are redistributed:
 
 - **NVIDIA CUDA runtime** (`libcudart`, `libcublas`, `libcublasLt` on Linux;
   `cudart`/`cublas` DLLs on Windows) is bundled beside the **CUDA variants** of
@@ -372,7 +372,32 @@ component is redistributed:
   redistributable list). The NVIDIA GPU **driver** itself (`libcuda.so.1` /
   `nvcuda.dll`) is *not* bundled — it must already be present on the user's
   machine. The Metal (macOS), CPU, and Vulkan builds bundle no proprietary
-  components.
+  GPU components. (The Visual C++ runtime below is installer-scoped on
+  Windows, so it accompanies every Windows variant including those.)
+
+- **Microsoft Visual C++ 2015-2022 Redistributable (x64)**
+  (`vc_redist.x64.exe`) is embedded in the **Windows installer only** and run
+  once during installation (`/install /quiet /norestart`, see
+  `packages/app/installer/nsis-hooks.nsh`). It is required rather than
+  optional: every native engine binary Gezel ships on Windows imports
+  `MSVCP140.dll`, `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`, which are not
+  Windows components — without the redistributable the loader fails those DLLs
+  before `main()` and local models never start. It is redistributed under
+  Microsoft's [redistributable
+  terms](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution),
+  which permit shipping it with an application that requires it.
+
+  It is installed centrally rather than copied app-local, so Windows Update
+  services it. `packages/app/scripts/stage-vc-redist.mjs` takes the copy
+  belonging to the Visual Studio toolset that compiled those engine DLLs — a
+  CRT must match its compiling toolset — and refuses to stage any file whose
+  Authenticode signature is not valid and does not name Microsoft Corporation.
+
+  Unlike every other component in this file, its licence text is **not** copied
+  into `resources/licenses/`: Microsoft ships the redistributable as a single
+  self-extracting executable whose terms live in the Visual Studio licence
+  rather than as a text file beside the binaries. The link above is the
+  authoritative text. macOS and Linux builds do not carry it.
 
 Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
 platform-specific binary siblings, pulled in transitively by

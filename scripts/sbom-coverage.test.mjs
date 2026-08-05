@@ -174,3 +174,45 @@ test('CUDA components are scoped to the platforms that carry them', () => {
     'macOS carries no CUDA payload; scoping it there would overstate the SBOM',
   );
 });
+
+/**
+ * An August 2026 audit of v1.26217.39 found the Windows installer embedding
+ * `vc_redist.x64.exe` (18.5 MB) and executing it during `customInstall`, while
+ * the SBOM, NOTICE.md and the EULA all omitted it — the same "nothing failed
+ * because nothing checked" shape as the CUDA gap above, in the one document
+ * that tells users its inventory is complete.
+ *
+ * The installer stages it whenever `stage-vc-redist.mjs` finds it, so the
+ * disclosure is not variant-specific: it rides along with every Windows build.
+ */
+test('the Visual C++ redistributable is disclosed wherever Windows ships', async () => {
+  const win32 = allPlatformKeys().filter((key) => key.startsWith('win32-'));
+  assert.ok(win32.length > 0, 'no Windows platform keys — the scoping property would be empty');
+
+  const generator = await readFile(join(here, 'generate-sbom.mjs'), 'utf8');
+  assert.match(
+    generator,
+    /'bom-ref': 'gezel:native\/msvc-runtime-redistributable'/,
+    'the SBOM must carry the Visual C++ redistributable the Windows installer runs',
+  );
+  assert.match(
+    generator,
+    /key\.startsWith\('win32-'\)/,
+    'the redistributable accompanies every Windows variant, not just one',
+  );
+
+  // The two documents a user actually reads: the installed inventory, and the
+  // terms they accept before any of it reaches disk.
+  const notice = await readFile(join(root, 'NOTICE.md'), 'utf8');
+  assert.match(
+    notice,
+    /Microsoft Visual C\+\+ 2015-2022 Redistributable/,
+    'NOTICE.md must name the redistributable it ships',
+  );
+  const eula = await readFile(join(root, 'packages', 'app', 'EULA.txt'), 'utf8');
+  assert.match(
+    eula,
+    /Microsoft Visual C\+\+ 2015-2022\s+Redistributable/,
+    'the EULA names every component whose terms differ from the MIT License',
+  );
+});
