@@ -241,7 +241,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(installedIds).not.toContain('builtin.images');
   });
 
-  it('installs mock-mcp toolsets for the direct worker when mcp mocks are declared', async () => {
+  it('installs mock-mcp toolsets for the project when mcp mocks are declared', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
       createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),

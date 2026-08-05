@@ -641,6 +641,35 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build
 
+      # ── GCC 14 for Linux ARM (SME) ────────────────────────────
+      # ubuntu-24.04-arm defaults to GCC 13.3, which rejects the `sme`
+      # -march modifier — it landed in GCC 14. That only matters under
+      # GGML_CPU_ALL_VARIANTS, which llama-cpp's build.sh turns on:
+      # ggml's Linux-ARM variant list unconditionally includes
+      # armv9.2_1/armv9.2_2 with SME and does NOT gate them on compiler
+      # support, so configure succeeds and the build dies at 3% with
+      # `cc1: error: invalid feature modifier 'sme'`. The per-variant
+      # `-feats` targets compile without the -march flags, which is why
+      # nothing catches it earlier. Upstream carries the same workaround
+      # in their own release workflow.
+      #
+      # Scoped to llama-cpp because it is the only engine setting
+      # CPU_ALL_VARIANTS; sd-cpp / whisper-cpp / ds4 build fine on GCC 13
+      # and moving them would churn their GLIBCXX floor for no reason. If
+      # one of them adopts CPU_ALL_VARIANTS, widen this condition in the
+      # same change. Safe on the CUDA leg: it pins toolkit 12.9, which
+      # accepts GCC 14 as a host compiler (12.4 on linux-x64 does not —
+      # x64 needs none of this, its variant list is GCC 13-clean).
+      - name: Install GCC 14 (Linux ARM llama-cpp)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.platform == 'linux-arm64'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-14 g++-14
+          echo "CC=gcc-14" >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          gcc-14 --version
+
       # macOS ships Metal + Xcode CLI tools; no extra steps needed.
 
       # ── Build ─────────────────────────────────────────────────
