@@ -1,0 +1,32 @@
+{
+  "id": "lfm2.5-2.6b-q4",
+  "name": "LFM2.5 (2.6B)",
+  "description": "Liquid AI's LFM2.5 at 2.6B parameters. A hybrid convolution-attention design built for on-device speed — light on memory, quick even on modest hardware, with integrated reasoning, native tool calling, and a 128K context window.",
+  "tags": ["liquid-ai", "small", "tools"],
+  "category": "general",
+  "maintainer": { "name": "Liquid AI", "url": "https://huggingface.co/LiquidAI/LFM2.5-2.6B" },
+  "version": "1.0.0",
+  "updatedAt": "2026-08-04T00:00:00Z",
+  "license": "LFM Open License v1.0",
+  "licenseClass": "custom-restricted",
+  "licenseShortName": "LFM Open 1.0",
+  "parameterSize": "2.6B",
+  "approxSizeBytes": 1674454848,
+  "supportsTools": true,
+  "contextWindow": 128000,
+  "upstream": "https://huggingface.co/LiquidAI/LFM2.5-2.6B",
+  "style": {
+    "family": "other",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "llamaCpp": {
+    "huggingfaceRepo": "LiquidAI/LFM2.5-2.6B-GGUF",
+    "filename": "LFM2.5-2.6B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/LFM2.5-2.6B-4bit",
+    "quantization": "4bit"
+  }
+}

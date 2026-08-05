@@ -73,6 +73,7 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 
 
 # ───────── Leaked special-token scrub ─────────
@@ -335,9 +336,13 @@ _start_parent_death_watchdog()
 
 # ───────── Model loading (one-shot at startup) ─────────
 
+
 print(f"Started server process [{os.getpid()}]", flush=True)
 print("Waiting for application startup.", flush=True)
 print(f"Loading model from: {ARGS.model}", flush=True)
+_LFM2_FF_DIM = ensure_lfm2_config_compat(ARGS.model)
+if _LFM2_FF_DIM is not None:
+    print(f"Applied lfm2 config compat: block_ff_dim={_LFM2_FF_DIM}", flush=True)
 MODEL, PROCESSOR = load(ARGS.model)
 print("Model and processor loaded successfully.", flush=True)
 
