@@ -2462,6 +2462,7 @@ html.embedded-chat #root {
   line-height: 1.4;
   min-width: 1.1rem;
   text-align: center;
+  transform: translateY(2px);
 }
 
 /* Questions overlay — drops down from beneath the app header. The
