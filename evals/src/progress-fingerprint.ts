@@ -348,8 +348,15 @@ async function readServiceTelemetryActivity(
  * granularity of the log line it replaces:
  *   toolCalls    ← Σ toolCalls          (was `[mcp-bridge] call_tool`)
  *   writeCalls   ← Σ fileMutations      (same six-tool set)
- *   turnStarts   ← Σ generationSpurts   (was `slot launch_slot_` — one
- *                                        per completion request served)
+ *   turnStarts   ← Σ turnsStarted       (true per-send turns; NOT
+ *                                        generationSpurts, which is
+ *                                        engine-asymmetric — llama ~1/turn
+ *                                        but MLX one per ~300ms stream
+ *                                        pulse. Wild-caught 2026-08-05: a
+ *                                        single long MLX turn read as "870
+ *                                        turns without artifact writes"
+ *                                        and the chatter-path killed the
+ *                                        trial for streaming too long)
  *   slotUpdates  ← Σ enginePhaseEvents  (was `slot update_slots:`)
  *   streamPulses ← Σ deltas+pulses+heartbeats (was `stream-active`)
  *   image*       ← Σ gpuEvents / any gpuTaskActive
@@ -365,7 +372,7 @@ export function telemetryToActivityCounters(
   let imageLogLines = 0;
   let imageGenerationActive = false;
   for (const s of sessions) {
-    turnStarts += s.generationSpurts;
+    turnStarts += s.turnsStarted;
     toolCalls += s.toolCalls;
     writeCalls += s.fileMutations;
     slotUpdates += s.enginePhaseEvents;
