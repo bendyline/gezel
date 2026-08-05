@@ -38,6 +38,7 @@ interface ClaimRule {
 // equivalent so the claim catalog isn't a vocabulary game.
 const PROJECT_CREATION_VERBS = [
   'created',
+  'initiated',
   'initialized',
   'set\\s+up',
   'spun\\s+up',
@@ -58,6 +59,15 @@ const GEZEL_CREATION_VERBS = [
   'spun\\s+up',
   'hired',
   'made',
+].join('|');
+
+const VOORMAN_RECRUITMENT_VERBS = [
+  'recruited',
+  'hired',
+  'brought\\s+on',
+  'added',
+  'created',
+  'spun\\s+up',
 ].join('|');
 
 // Past-tense verbs that imply "the file was written to disk":
@@ -94,6 +104,22 @@ const DELIVERABLE_GATE_VERBS = [
 ].join('|');
 
 const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
+  {
+    // A Meester can claim the project more indirectly by saying the lead
+    // exists. The Ypres incident used "recruited a `voorman`" after only
+    // suggest_craftbook calls; no gezel/project mutation had happened.
+    pattern: new RegExp(
+      String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
+        VOORMAN_RECRUITMENT_VERBS +
+        String.raw`)\s+(?:(?:the|a|an|our|your)\s+)?(?:new\s+)?[*"'\x60_]*voorman\b[*"'\x60_]*`,
+      'i',
+    ),
+    requiredTools: ['create_gezel', 'ensure_gezel', 'create_gezel_from_gilde', 'start_project'],
+    claim: 'recruited a voorman',
+    nudge:
+      'You told the user you recruited a voorman, but you did not call `create_gezel`, `ensure_gezel`, ' +
+      '`create_gezel_from_gilde`, or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
+  },
   {
     pattern: new RegExp(
       String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
@@ -346,9 +372,22 @@ export const FabricationDetectClaimWithoutTool: Behavior = {
       firedToolNames,
     });
     if (!claim.fabricated || !claim.nudge) return null;
+    const suggestedCraftbook = firedToolNames.includes('suggest_craftbook');
+    const invokedCraftbook = firedToolNames.includes('invoke_craftbook');
+    const exactFormatRequest =
+      /\b(?:powerpoint|pptx|word|docx|excel|xlsx|pdf|epub|mp4|gif|slide\s*deck|presentation)\b/i.test(
+        ctx.userText,
+      );
+    const promptForNextTurn =
+      ctx.isMeester && exactFormatRequest && suggestedCraftbook && !invokedCraftbook
+        ? 'You claimed the requested work or project was started, but only `suggest_craftbook` succeeded. ' +
+          'Use the best craftbook id from that result and call `invoke_craftbook` now. ' +
+          'Do not call `suggest_craftbook` again with a rephrased query, do not switch to a project/job kickoff macro, ' +
+          'and do not claim anything was created until `invoke_craftbook` returns success.'
+        : claim.nudge;
     return {
       reason: `claimed "${claim.claim}" without calling [${claim.requiredTools.join(', ')}]`,
-      promptForNextTurn: claim.nudge,
+      promptForNextTurn,
     };
   },
 };

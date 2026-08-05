@@ -352,9 +352,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
 
     const sends = mock.calls.filter((call) => call.kind === 'send');
     expect(
-      sends.some((call) =>
-        /read-only tool returned the context you needed/i.test(call.prompt ?? ''),
-      ),
+      sends.some((call) => /read-only tool returned useful context/i.test(call.prompt ?? '')),
     ).toBe(true);
     expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
     await expect(store.readProjectWorkspaceFile('default', 'src/game.js')).resolves.toBe(
@@ -364,6 +362,33 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       'read_file',
       'replace_in_file',
     ]);
+  }, 30_000);
+
+  it('continues an untasked PowerPoint request after suggest_craftbook instead of summarizing', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'suggest_craftbook',
+        arguments: { query: 'create a PowerPoint about the Battle of Ypres' },
+      },
+    ]);
+    mock.script(
+      'I will start a project called "Battle of Ypres Presentation".\n\n' +
+        "The voorman is on it, and I'll let you know when the draft is ready.",
+      'I cannot complete the requested action yet.',
+    );
+
+    await manager.send(session.id, 'Can you create a PowerPoint about the Battle of Ypres?');
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    const progressNudge = sends.find((call) =>
+      /read-only tool returned useful context/i.test(call.prompt ?? ''),
+    );
+    expect(progressNudge).toBeDefined();
+    expect(progressNudge?.prompt).toContain('If the lookup result named a next tool call');
+    expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
+    expect(mock.toolCallOutputs.map((output) => output.name)).toEqual(['suggest_craftbook']);
   }, 30_000);
 
   it('persists gate infrastructure diagnostics on the assistant message', async () => {

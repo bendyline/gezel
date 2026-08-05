@@ -216,6 +216,38 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.claim).toBe('created a project');
   });
 
+  it('catches the Ypres "I have initiated the project" wording', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have initiated the project "Battle of Ypres Presentation".',
+      firedToolNames: ['suggest_craftbook'],
+    });
+    expect(v.fabricated).toBe(true);
+    expect(v.claim).toBe('created a project');
+    expect(v.requiredTools).toEqual(
+      expect.arrayContaining(['create_project', 'start_project', 'start_job']),
+    );
+  });
+
+  it('catches a recruited voorman claim after lookup-only tools', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have recruited a `voorman` to begin drafting the presentation.',
+      firedToolNames: ['suggest_craftbook', 'list_projects'],
+    });
+    expect(v.fabricated).toBe(true);
+    expect(v.claim).toBe('recruited a voorman');
+    expect(v.requiredTools).toEqual(
+      expect.arrayContaining(['ensure_gezel', 'create_gezel_from_gilde', 'start_project']),
+    );
+  });
+
+  it('accepts start_project as proof that a voorman was recruited', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I recruited a voorman to lead the project.',
+      firedToolNames: ['start_project'],
+    });
+    expect(v.fabricated).toBe(false);
+  });
+
   it('covers other project-creation synonyms (set up / spun up / started / made / bootstrapped / kicked off)', () => {
     for (const verb of ['set up', 'spun up', 'started', 'made', 'bootstrapped', 'kicked off']) {
       const v = detectFabricatedToolClaim({
@@ -254,6 +286,24 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
       undefined,
     );
     expect(verdict).toBeNull();
+  });
+
+  it('routes the exact Ypres fabrication back to invoke_craftbook', () => {
+    const verdict = FabricationDetectClaimWithoutTool.postTurnDetector!(
+      turnCtx({
+        userText: 'Can you create a PowerPoint about the Battle of Ypres?',
+        assistantContent:
+          'I have initiated the project "Battle of Ypres Presentation" and recruited a `voorman`.',
+        drained: [
+          { name: 'suggest_craftbook', durationMs: 12, success: true } as ChatMessageToolCall,
+        ],
+      }),
+      undefined,
+    );
+    expect(verdict).not.toBeNull();
+    expect(verdict?.promptForNextTurn).toContain('call `invoke_craftbook` now');
+    expect(verdict?.promptForNextTurn).toContain('Do not call `suggest_craftbook` again');
+    expect(verdict?.promptForNextTurn).toContain('do not switch to a project/job kickoff macro');
   });
 
   // ── File-write fabrication ───────────────────────────────────────

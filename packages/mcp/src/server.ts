@@ -3925,7 +3925,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: 'No craftbook matched. Fall back to the generic "build-loop" procedure (design → build → evaluate → loop) via invoke_craftbook, or create_task with explicit phase steps.',
+            text: 'No craftbook matched. Call invoke_craftbook with the generic "build-loop" procedure (design → build → evaluate → loop), or create_task with explicit phase steps. Do not call suggest_craftbook again with a rephrased query and do not claim work started until the action call succeeds.',
           },
         ],
       };
@@ -3946,8 +3946,8 @@ server.tool(
     const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
     const nextAction =
       topMissing.length > 0
-        ? `Next call: invoke_craftbook({ craftbookId: "${top.id}" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not delegate the job raw.`
-        : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not delegate the job raw and do not hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
+        ? `Next call: invoke_craftbook({ craftbookId: "${top.id}" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
+        : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
     return {
       content: [
         {

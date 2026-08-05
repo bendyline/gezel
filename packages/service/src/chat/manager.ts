@@ -7090,13 +7090,13 @@ export class ChatManager {
           let voormanIdleVerdict: 'idle' | 'nothing-built' | null = null;
           const completedAsyncHandoff = drained.some(isSuccessfulAsyncHandoffToolCall);
           if (looksStalled(finalContent)) {
-            // Subdivide: stall + tools-ran is "you ran the tools, now
-            // wrap up with words" (CLOSING_SUMMARY_NUDGE). Stall +
-            // no-tools is the original "you said you would, but didn't
-            // actually call the tool" case (CONTINUATION_NUDGE). The
-            // wrong nudge is misleading: telling the model to "execute
-            // the tool now" when the tool already succeeded confuses it
-            // into running it again. drained is empty for Copilot (its
+            // Subdivide by what the successful tools accomplished. A real
+            // action that only lacks closing prose gets CLOSING_SUMMARY_NUDGE;
+            // a lookup is still intermediate progress and must continue
+            // toward the user's requested action. Treating every successful
+            // call as terminal caused the Ypres failure: suggest_craftbook
+            // ran, then the recovery prompt forbade invoke_craftbook.
+            // drained is empty for Copilot (its
             // SDK runs tools in-subprocess) — fall back to the original
             // text-stall nudge there.
             if (noopConfirmationAccepted) {
@@ -7126,16 +7126,20 @@ export class ChatManager {
                   `session ${sessionId}: file mutation completed — skipping tool-only closing nudge so validation can run`,
                 );
               } else if (
-                state.record.taskRef &&
-                drained.every((call) => call.success && isReadOnlyToolName(call.name))
+                drained.some((call) => call.success) &&
+                drained
+                  .filter((call) => call.success)
+                  .every((call) => isReadOnlyToolName(call.name))
               ) {
-                // A read is context acquisition, not completion, for a
-                // task-driving session. The old generic "No more tools"
-                // nudge made small models summarize the read and abandon
-                // the actual build/edit action.
+                // A lookup is context acquisition, not completion. This is
+                // true both inside a task and in an untasked Meester turn:
+                // suggest_craftbook must be followed by invoke_craftbook,
+                // not a closing summary that forbids more tools.
                 stallReason = 'tool-read-only';
-              } else {
+              } else if (drained.some((call) => call.success && !isReadOnlyToolName(call.name))) {
                 stallReason = 'tool-only';
+              } else {
+                stallReason = 'text';
               }
             } else {
               stallReason = 'text';
@@ -14532,16 +14536,16 @@ export function buildFailedToolRecoveryNudge(calls: ReadonlyArray<ToolOutcome>):
 }
 
 /**
- * Nudge specific to "ran tools, then went silent" — small models often
- * emit a `tool_use` block as their entire turn output and stop, leaving
+ * Nudge specific to "ran an action tool, then went silent" — small models
+ * often emit a `tool_use` block as their entire turn output and stop, leaving
  * the user staring at an expanded tool-call card with no closing
  * narrative. The tier-keyed system-prompt rules already ask the model
  * to wrap up after tools (see {@link tinyTierPromptHints} +
  * {@link SMALL_TIER_PROMPT_HINTS}); this is the deterministic backstop
  * for when the model didn't follow that.
  *
- * Distinct from CONTINUATION_NUDGE on purpose: this case is "tool ran,
- * just say what happened" — telling the model to "execute the tool now"
+ * Distinct from CONTINUATION_NUDGE on purpose: this case is "the requested
+ * action ran, just say what happened" — telling the model to execute it again
  * (the CONTINUATION_NUDGE wording) would be misleading since the tool
  * already succeeded.
  */
@@ -14550,14 +14554,16 @@ const CLOSING_SUMMARY_NUDGE =
   'In one sentence, tell the user what happened. No more tools — just words.';
 
 /**
- * A task-scoped read-only call is an intermediate observation, not the
- * deliverable. Keep the model moving toward the first mutating/action tool
- * instead of applying the terminal closing-summary nudge.
+ * A read-only call is an intermediate observation, not the deliverable.
+ * Keep the model moving toward the first mutating/action tool instead of
+ * applying the terminal closing-summary nudge. This wording covers both
+ * task-scoped work and untasked coordinator lookups.
  */
 const READ_ONLY_PROGRESS_NUDGE =
-  'The read-only tool returned the context you needed, but the current task step is not finished. ' +
-  'Continue now with the next concrete action in the Step procedure, using the required tool. ' +
-  'Do not stop merely to say that you read, inspected, or retrieved something.';
+  "The read-only tool returned useful context, but it did not complete the user's request. " +
+  'Continue now with the next concrete action using the appropriate action tool. ' +
+  'If the lookup result named a next tool call, make that call now. ' +
+  'Do not stop merely to summarize what you read, inspected, retrieved, or were advised to invoke.';
 
 /**
  * Nudge specific to the voorman-idle case: the project's voorman just
@@ -14846,6 +14852,10 @@ const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'get_task',
   'read_task_notes',
   'search_history',
+  // Procedure discovery/inspection is not execution. A successful
+  // suggestion must still be followed by invoke_craftbook.
+  'suggest_craftbook',
+  'craftbook_read',
 ]);
 
 function truncate(s: string, max: number): string {
@@ -14878,7 +14888,7 @@ function isReadOnlyToolName(name: string): boolean {
   // as a mutation. Conservative — a mutating tool named `get_quote` would
   // be a false positive, but the project's naming discipline makes that
   // unlikely enough that the simpler rule wins.
-  return /^(?:list|read|get|search|has)_/.test(name);
+  return /^(?:list|read|get|search|has|suggest)_/.test(name);
 }
 
 function isSuccessfulAsyncHandoffToolCall(toolCall: ChatMessageToolCall): boolean {
@@ -15695,7 +15705,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // mode (not just the cli providers); see docs/frontier-adaptive-execution.md.
   const craftbookRoute =
     availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
-      ? 'For named output formats or multi-step production work, first call `suggest_craftbook`, then `invoke_craftbook` when it finds a match.'
+      ? 'For named output formats or multi-step production work, call `suggest_craftbook` once, then make `invoke_craftbook` your next tool call when it returns a match or fallback. Do not repeat the suggestion with a rephrased query or switch to a generic kickoff macro.'
       : '';
   const flatPrimaryRoute = availableToolNameSet.has('start_job')
     ? '`start_job({ name, about, missionObjectives, taskDescription, specialistRole })`'
@@ -15719,7 +15729,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     (availableToolNameSet.has('suggest_craftbook') ||
       availableToolNameSet.has('invoke_craftbook') ||
       availableToolNameSet.has('convert_document'))
-      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. Prefer the matching craftbook via ${availableToolNameSet.has('suggest_craftbook') ? '`suggest_craftbook`' : 'the available craftbook surface'}${availableToolNameSet.has('invoke_craftbook') ? ' + `invoke_craftbook`' : ''}. Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
+      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. The matching craftbook route takes precedence over generic project/job kickoff and direct delegation. ${availableToolNameSet.has('suggest_craftbook') ? 'Call `suggest_craftbook` exactly once.' : 'Use the available craftbook surface.'}${availableToolNameSet.has('invoke_craftbook') ? ' If it returns a match or fallback, your NEXT tool call in this same turn must be `invoke_craftbook` with the returned id; do not repeat the lookup with a rephrased query.' : ''} Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. Do not claim a project, task, or deliverable exists until the action tool returns success. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
       : '';
 
   let projectContext = '';
