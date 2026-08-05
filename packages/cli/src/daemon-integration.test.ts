@@ -45,7 +45,10 @@ async function runCliAtHome(
       GEZEL_HOME: home,
       GEZEL_MOCK_PROVIDER: '1',
     },
-    timeout: 15_000,
+    // connectOwned gives a cold daemon up to 20s to start. Keep the outer
+    // process budget larger than that contract so execFile cannot kill the
+    // CLI before it can report its own success or startup failure.
+    timeout: 25_000,
   });
 }
 
@@ -88,7 +91,7 @@ afterAll(async () => {
 });
 
 // Every case here crosses a process boundary, and the CLI-entry cases shell
-// out twice with a 15s `execFile` budget each — more than vitest's 5s default
+// out twice with a 25s `execFile` budget each — more than vitest's 5s default
 // allows, so a loaded runner timed the suite out rather than failing an
 // assertion. Match the budget to the work the tests actually do.
 describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
