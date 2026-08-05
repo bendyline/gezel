@@ -98,9 +98,9 @@ function main(roots: string[]): void {
       }
       try {
         const log = readFileSync(join(trial, 'log.txt'), 'utf8');
-        const perf = [...log.matchAll(/tokens from \S+ \([a-z-]+\): [\d,]+ in \/ ([\d,]+) out/g)].at(
-          -1,
-        );
+        const perf = [
+          ...log.matchAll(/tokens from \S+ \([a-z-]+\): [\d,]+ in \/ ([\d,]+) out/g),
+        ].at(-1);
         if (perf?.[1]) row.outTokens += Number(perf[1].replace(/,/g, ''));
       } catch {
         /* no log — fine */
