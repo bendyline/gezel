@@ -7,9 +7,9 @@ import {
   windowsDetachedSpawnOptions,
 } from '@bendyline/gezel/native';
 import {
-  detectLlamaGpuVram,
-  type GpuVendor as LlamaGpuVendor,
   type LlamaGpuMemoryKind,
+  type GpuVendor as LlamaGpuVendor,
+  detectLlamaGpuVram,
 } from '../providers/llama-cpp/devices.js';
 import {
   autoDetectBudgetBytes,
@@ -184,11 +184,7 @@ export function memoryProfileForLlamaGpu(
 ): MemoryProfile {
   const ratioLooksUnified = gpu.vramBytes >= totalRamBytes * 0.75;
   const gpuMemoryKind: GpuMemoryKind =
-    gpu.memoryKind === 'integrated'
-      ? 'integrated'
-      : ratioLooksUnified
-        ? 'unified'
-        : gpu.memoryKind;
+    gpu.memoryKind === 'integrated' ? 'integrated' : ratioLooksUnified ? 'unified' : gpu.memoryKind;
   const shared = gpuMemoryKind === 'integrated' || gpuMemoryKind === 'unified';
   const budget = computeCapacityBudget({
     systemRamBytes: totalRamBytes,

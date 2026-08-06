@@ -50,12 +50,7 @@ export function describeCurrentHardware(profile: {
   gpuVramBytes: number | null;
   gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
   usableBytes: number;
-  source:
-    | 'darwin-unified'
-    | 'gpu-nvidia'
-    | 'gpu-vulkan'
-    | 'gpu-integrated'
-    | 'system-ram-fallback';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   gpuVendor?: keyof typeof GPU_VENDOR_LABEL;
 }): HardwareDescription {
   const total = formatBytes(profile.totalRamBytes);

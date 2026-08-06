@@ -141,7 +141,8 @@ export const SMALL_MODEL_VRAM_THRESHOLD = 8 * GB;
 export function needsSmallModelRecommendation(device: RecoDevice): boolean {
   if (device.platform === 'darwin') return false;
   const kind =
-    device.gpuMemoryKind ?? (device.gpuVramBytes == null ? ('none' as const) : ('unknown' as const));
+    device.gpuMemoryKind ??
+    (device.gpuVramBytes == null ? ('none' as const) : ('unknown' as const));
   if (kind === 'unified') return false;
   if (kind === 'integrated' || kind === 'none') return true;
   return device.gpuVramBytes == null || device.gpuVramBytes < SMALL_MODEL_VRAM_THRESHOLD;

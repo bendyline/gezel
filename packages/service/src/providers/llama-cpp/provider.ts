@@ -4409,6 +4409,22 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             const hasToolCalls = Boolean(delta?.tool_calls && delta.tool_calls.length > 0);
             const reasoningChunk = delta?.reasoning_content ?? null;
             const hasReasoning = reasoningChunk !== null && reasoningChunk.length > 0;
+            // TTFT means first model activity, not merely first user-visible
+            // prose. Reasoning-only and structured-tool turns can spend the
+            // entire generation without a `content` delta, so measuring only
+            // there made those turns look permanently stuck and produced no
+            // TTFT log at all.
+            if ((hasContent || hasReasoning || hasToolCalls) && firstTokenAt === null) {
+              firstTokenAt = Date.now();
+              const ttft = firstTokenAt - start;
+              log.info(`[llama-cpp] TTFT ${ttft}ms (session model=${this.deps.model})`);
+              this.emitEnginePhase({
+                provider: 'llama-cpp',
+                phase: 'generating',
+                detail: `First token in ${(ttft / 1000).toFixed(1)}s`,
+                ttftMs: ttft,
+              });
+            }
             // Prompt evaluation and server-side queueing can legitimately be
             // much longer than the constrained-action budget. Start that
             // budget only once the model has actually begun decoding visible
@@ -4482,16 +4498,6 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             }
             if (hasContent) {
               turnContent += delta!.content!;
-              if (firstTokenAt === null) {
-                firstTokenAt = Date.now();
-                const ttft = firstTokenAt - start;
-                log.info(`[llama-cpp] TTFT ${ttft}ms (session model=${this.deps.model})`);
-                this.emitEnginePhase({
-                  provider: 'llama-cpp',
-                  phase: 'generating',
-                  detail: `First token in ${(ttft / 1000).toFixed(1)}s`,
-                });
-              }
               this.emitDelta(delta!.content!);
               if (!rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;

@@ -36,12 +36,7 @@ interface MemoryProfile {
   totalRamBytes: number;
   gpuVramBytes: number | null;
   gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
-  source:
-    | 'darwin-unified'
-    | 'gpu-nvidia'
-    | 'gpu-vulkan'
-    | 'gpu-integrated'
-    | 'system-ram-fallback';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
   /**
    * What the daemon's capacity broker will admit across VRAM + system RAM.

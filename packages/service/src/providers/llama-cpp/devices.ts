@@ -288,10 +288,7 @@ export function gpuMemoryKindFromName(name: string): LlamaGpuMemoryKind {
     ) {
       return 'discrete';
     }
-    if (
-      /\b(?:vega|radeon\s+graphics)\b/.test(n) ||
-      /\bradeon\s+\d{3,4}[ms]\b/.test(n)
-    ) {
+    if (/\b(?:vega|radeon\s+graphics)\b/.test(n) || /\bradeon\s+\d{3,4}[ms]\b/.test(n)) {
       return 'integrated';
     }
   }
@@ -302,9 +299,7 @@ export function gpuMemoryKindFromName(name: string): LlamaGpuMemoryKind {
   return 'unknown';
 }
 
-export async function detectLlamaGpuVram(
-  homeOverride?: string,
-): Promise<{
+export async function detectLlamaGpuVram(homeOverride?: string): Promise<{
   vramBytes: number;
   name: string;
   vendor?: GpuVendor;

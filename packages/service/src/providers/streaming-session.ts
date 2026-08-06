@@ -12,6 +12,8 @@ export interface EnginePhaseEvent {
   phase: string;
   detail?: string;
   progress?: number;
+  /** Time from request dispatch to the first model-produced token/fragment. */
+  ttftMs?: number;
 }
 
 /**

@@ -288,18 +288,37 @@ describe('LlamaCppProvider constructor', () => {
     let wirePulses = 0;
     let reasoning = '';
     const contentDeltas: string[] = [];
+    const activity: string[] = [];
+    const generatingPhases: Array<{ ttftMs?: number }> = [];
     session.onWirePulse?.(() => {
       wirePulses++;
     });
+    (
+      session as unknown as {
+        onEnginePhase?: (
+          handler: (event: { phase: string; ttftMs?: number }) => void,
+        ) => () => void;
+      }
+    ).onEnginePhase?.((event) => {
+      activity.push(`phase:${event.phase}`);
+      if (event.phase === 'generating') generatingPhases.push(event);
+    });
     session.onReasoningDelta?.((c) => {
+      activity.push('reasoning');
       reasoning += c;
     });
     session.onDelta((c) => {
+      activity.push('content');
       contentDeltas.push(c);
     });
     const final = await session.sendAndWait('hello');
     expect(reasoning).toBe('let me think about this');
     expect(wirePulses).toBe(0);
+    // Private reasoning is the first decoded model activity, so it advances
+    // the phase and captures TTFT before any visible content arrives.
+    expect(activity.slice(0, 3)).toEqual(['phase:prefill', 'phase:generating', 'reasoning']);
+    expect(generatingPhases).toHaveLength(1);
+    expect(generatingPhases[0]?.ttftMs).toBeTypeOf('number');
     // Reasoning must never leak into the visible stream or the committed reply.
     expect(contentDeltas.join('')).toBe('the answer');
     expect(final).toBe('the answer');

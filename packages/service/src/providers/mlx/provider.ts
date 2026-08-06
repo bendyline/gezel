@@ -1803,6 +1803,27 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             const promptTps = usage?.prompt_tps;
             const generationTps = usage?.generation_tps;
             const cachedTokens = usage?.cached_tokens;
+            // A structured-tool response may never emit visible `content`.
+            // Count its first argument fragment as model activity so TTFT is
+            // still observable and the engine phase advances to generating.
+            if ((hasContent || hasToolCalls) && firstTokenAt === null) {
+              firstTokenAt = Date.now();
+              const ttft = firstTokenAt - start;
+              log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
+              // First-token detail folds in the prefill speed when
+              // the engine surfaces it. Prefill happens entirely
+              // inside `generate_step`, so this is the first chance
+              // we get to put a number on it.
+              const prefillSuffix =
+                promptTps && promptTps > 0 ? ` · prefill ${formatTps(promptTps)} tok/s` : '';
+              this.emitEnginePhase({
+                provider: 'mlx',
+                phase: 'generating',
+                detail: `First token in ${(ttft / 1000).toFixed(1)}s${prefillSuffix}`,
+                ttftMs: ttft,
+              });
+              lastPhaseAt = firstTokenAt;
+            }
             if (hasContent) {
               // Run the raw chunk through the marker stripper before
               // it lands anywhere user-visible. The TTFT / generating
@@ -1813,23 +1834,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // visible output is empty.
               const safeContent = stripper.push(delta!.content!);
               if (safeContent.length > 0) turnContent += safeContent;
-              if (firstTokenAt === null) {
-                firstTokenAt = Date.now();
-                const ttft = firstTokenAt - start;
-                log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
-                // First-token detail folds in the prefill speed when
-                // the engine surfaces it. Prefill happens entirely
-                // inside `generate_step`, so this is the first chance
-                // we get to put a number on it.
-                const prefillSuffix =
-                  promptTps && promptTps > 0 ? ` · prefill ${formatTps(promptTps)} tok/s` : '';
-                this.emitEnginePhase({
-                  provider: 'mlx',
-                  phase: 'generating',
-                  detail: `First token in ${(ttft / 1000).toFixed(1)}s${prefillSuffix}`,
-                });
-                lastPhaseAt = firstTokenAt;
-              } else {
+              if (firstTokenAt !== null) {
                 const now = Date.now();
                 if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
                   this.emitEnginePhase({

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  gpuVendorFromName,
   gpuMemoryKindFromName,
+  gpuVendorFromName,
   matchNvidiaRuntimeDevice,
   maxGpuVramBytes,
   parseLlamaDevices,

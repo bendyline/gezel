@@ -5879,6 +5879,7 @@ export class ChatManager {
           phase: ev.phase,
           ...(ev.detail ? { detail: ev.detail } : {}),
           ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
+          ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
         });
       });
       // turn_stats — llama-cpp + Ollama per-turn token counts +

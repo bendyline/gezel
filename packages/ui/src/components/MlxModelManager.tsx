@@ -26,12 +26,7 @@ import { approximateQuantizationLabel, quantizationTitle } from './model-quantiz
 interface MemoryProfile {
   totalRamBytes: number;
   gpuVramBytes: number | null;
-  source:
-    | 'darwin-unified'
-    | 'gpu-nvidia'
-    | 'gpu-vulkan'
-    | 'gpu-integrated'
-    | 'system-ram-fallback';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
 }
 

@@ -20,6 +20,7 @@ import {
   RemoteCacheEvictRequestSchema,
   RemoteCacheWarmRequestSchema,
   RemoteImageGenRequestSchema,
+  type RemoteInferFrame,
   RemoteInferRequestSchema,
   type RemoteModelDescriptor,
   RemoteSynthesizeRequestSchema,
@@ -27,6 +28,11 @@ import {
   RemoteVideoGenRequestSchema,
   type WireQueueHints,
 } from '../../providers/remote/wire.js';
+import type {
+  EnginePhaseEvent,
+  EngineStatsEvent,
+  TurnStatsEvent,
+} from '../../providers/streaming-session.js';
 import {
   ExternalToolsUnsupportedError,
   type LLMProvider,
@@ -37,6 +43,7 @@ import {
 import { type TenantLimiter, createTenantLimiter } from '../../remotes/tenant-limits.js';
 import type { ServiceContext } from '../context.js';
 import { resolveModelTarget } from '../openai-compat/translate.js';
+import { serializeSseWrites } from './chat-events.js';
 
 const log = createLogger('remote-cache');
 
@@ -444,10 +451,24 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     const lane = effectiveLane(body.queue.lane, cfg?.remoteServing?.priority);
 
     return streamSSE(c, async (stream) => {
-      const send = (frame: unknown) =>
-        void stream.writeSSE({ data: JSON.stringify(frame) }).catch(() => {});
+      // Native sessions can synchronously emit content, reasoning, phase, and
+      // stats callbacks for one wire chunk. Hono's writer is stateful, so keep
+      // those frames ordered and await the terminal frame before disconnecting
+      // (otherwise a fast `done` can close the response ahead of queued data).
+      const write = serializeSseWrites((frame: RemoteInferFrame) =>
+        stream.writeSSE({ data: JSON.stringify(frame) }),
+      );
+      const send = (frame: RemoteInferFrame) => void write(frame).catch(() => {});
       const unsubs: Array<() => void> = [];
       unsubs.push(session.onDelta((text) => send({ type: 'delta', text })));
+      unsubs.push(
+        session.onReasoningDelta?.((text) => send({ type: 'reasoning_delta', text })) ?? (() => {}),
+      );
+      unsubs.push(
+        session.onToolArgsDelta?.((name, text) => send({ type: 'tool_args_delta', name, text })) ??
+          (() => {}),
+      );
+      unsubs.push(session.onWirePulse?.(() => send({ type: 'wire_pulse' })) ?? (() => {}));
       unsubs.push(
         session.onUsage((u: TurnUsage) =>
           send({
@@ -467,6 +488,44 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       );
       unsubs.push(
         session.onWarning?.((message) => send({ type: 'warning', message })) ?? (() => {}),
+      );
+      const streamingSession = session as LLMSession & {
+        onEnginePhase?: (handler: (ev: EnginePhaseEvent) => void) => () => void;
+        onTurnStats?: (handler: (ev: TurnStatsEvent) => void) => () => void;
+        onEngineStats?: (handler: (ev: EngineStatsEvent) => void) => () => void;
+      };
+      unsubs.push(
+        streamingSession.onEnginePhase?.((ev) =>
+          send({
+            type: 'phase',
+            provider: target.provider === 'ds4' ? 'ds4' : ev.provider,
+            phase: ev.phase,
+            ...(ev.detail ? { detail: ev.detail } : {}),
+            ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
+            ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+          }),
+        ) ?? (() => {}),
+      );
+      unsubs.push(
+        streamingSession.onTurnStats?.((ev) =>
+          send({
+            type: 'turn_stats',
+            provider: target.provider === 'ds4' ? 'ds4' : ev.provider,
+            promptTokens: ev.promptTokens,
+            completionTokens: ev.completionTokens,
+            durationMs: ev.durationMs,
+            ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+          }),
+        ) ?? (() => {}),
+      );
+      unsubs.push(
+        streamingSession.onEngineStats?.((ev) =>
+          send({
+            type: 'engine_stats',
+            provider: target.provider === 'ds4' ? 'ds4' : ev.provider,
+            ramAllocBytes: ev.ramAllocBytes,
+          }),
+        ) ?? (() => {}),
       );
 
       try {
@@ -490,13 +549,13 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
         if (calls.length > 0) send({ type: 'tool_call', calls });
         const reasoning = session.getLastTurnReasoning?.();
         if (reasoning) send({ type: 'reasoning', text: reasoning });
-        send({ type: 'done' });
+        await write({ type: 'done' });
       } catch (err) {
-        send({
+        await write({
           type: 'error',
           code: 'inference_failed',
           message: err instanceof Error ? err.message : String(err),
-        });
+        }).catch(() => {});
       } finally {
         for (const u of unsubs) u();
         await session.disconnect().catch(() => {});

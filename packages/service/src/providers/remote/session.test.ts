@@ -165,6 +165,84 @@ describe('RemoteSession', () => {
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
+  it('forwards native-engine liveness, TTFT phases, and performance telemetry', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        { type: 'phase', provider: 'llama-cpp', phase: 'prefill', detail: 'prompt' },
+        { type: 'wire_pulse' },
+        { type: 'reasoning_delta', text: 'considering' },
+        { type: 'tool_args_delta', name: 'write_file', text: '{"path":"game.html"' },
+        {
+          type: 'phase',
+          provider: 'llama-cpp',
+          phase: 'generating',
+          detail: 'First token in 12.3s',
+          ttftMs: 12_345,
+        },
+        {
+          type: 'turn_stats',
+          provider: 'llama-cpp',
+          promptTokens: 100,
+          completionTokens: 20,
+          durationMs: 5000,
+          tokensPerSec: 4,
+        },
+        { type: 'engine_stats', provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 },
+        { type: 'delta', text: 'Ready.' },
+        { type: 'done' },
+      ])) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 'sys',
+      model: 'llama-cpp:gemma-e2b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+    const phases: Array<{ phase: string; ttftMs?: number }> = [];
+    const reasoning: string[] = [];
+    const toolArgs: Array<[string, string]> = [];
+    const turnStats: Array<{ tokensPerSec?: number }> = [];
+    const engineStats: Array<{ ramAllocBytes: number }> = [];
+    let pulses = 0;
+    session.onEnginePhase((event) => phases.push(event));
+    session.onReasoningDelta((text) => reasoning.push(text));
+    session.onToolArgsDelta((name, text) => toolArgs.push([name, text]));
+    session.onWirePulse(() => {
+      pulses += 1;
+    });
+    session.onTurnStats((event) => turnStats.push(event));
+    session.onEngineStats((event) => engineStats.push(event));
+
+    await expect(session.sendAndWait('build it')).resolves.toBe('Ready.');
+    expect(phases).toEqual([
+      { provider: 'llama-cpp', phase: 'prefill', detail: 'prompt' },
+      {
+        provider: 'llama-cpp',
+        phase: 'generating',
+        detail: 'First token in 12.3s',
+        ttftMs: 12_345,
+      },
+    ]);
+    expect(reasoning).toEqual(['considering']);
+    expect(toolArgs).toEqual([['write_file', '{"path":"game.html"']]);
+    expect(pulses).toBe(1);
+    expect(turnStats).toEqual([
+      {
+        provider: 'llama-cpp',
+        promptTokens: 100,
+        completionTokens: 20,
+        durationMs: 5000,
+        tokensPerSec: 4,
+      },
+    ]);
+    expect(engineStats).toEqual([{ provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 }]);
+  });
+
   it('advances from acceptance note to deliverable write across remote forward passes', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const emitted = [

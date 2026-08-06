@@ -47,6 +47,13 @@ const MAX_TOOL_LOOPS = 24;
 const MID_LOOP_COMPACT_RATIO = 0.7;
 const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
+function nativeProviderFromModel(model: string): 'llama-cpp' | 'mlx' | 'ds4' | null {
+  const separator = model.indexOf(':');
+  if (separator <= 0) return null;
+  const provider = model.slice(0, separator);
+  return provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4' ? provider : null;
+}
+
 export interface RemoteSessionDeps {
   baseUrl: string;
   token: string;
@@ -463,6 +470,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           text += frame.text;
           this.emitDelta(frame.text);
           break;
+        case 'reasoning_delta':
+          this.emitReasoningDelta(frame.text);
+          break;
+        case 'tool_args_delta':
+          this.emitToolArgsDelta(frame.name, frame.text);
+          break;
+        case 'wire_pulse':
+          this.emitWirePulse();
+          break;
         case 'tool_call':
           toolCalls = frame.calls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }));
           break;
@@ -496,11 +512,50 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         case 'queued':
           opts?.queue?.onQueueWait?.({ aheadOf: frame.aheadOf ?? 0 });
           break;
+        case 'phase': {
+          // New brokers identify the native provider explicitly. Retain the
+          // model-prefix fallback so a newly upgraded user daemon can still
+          // consume phase frames from the first rolling-compatible broker.
+          const provider = frame.provider ?? nativeProviderFromModel(this.deps.model);
+          if (provider) {
+            if (typeof frame.ttftMs === 'number') {
+              // This is deliberately written by A as well as B: Settings →
+              // Open logs opens the per-user daemon log, while the machine
+              // broker's stdout is admin-protected on packaged installs.
+              log.info(
+                `[remote] TTFT ${frame.ttftMs}ms (engine=${provider} model=${this.deps.model})`,
+              );
+            }
+            this.emitEnginePhase({
+              provider,
+              phase: frame.phase,
+              ...(frame.detail ? { detail: frame.detail } : {}),
+              ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
+              ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+            });
+          }
+          break;
+        }
+        case 'turn_stats':
+          this.emitTurnStats({
+            provider: frame.provider,
+            promptTokens: frame.promptTokens,
+            completionTokens: frame.completionTokens,
+            durationMs: frame.durationMs,
+            ...(typeof frame.tokensPerSec === 'number' ? { tokensPerSec: frame.tokensPerSec } : {}),
+          });
+          break;
+        case 'engine_stats':
+          this.emitEngineStats({
+            provider: frame.provider,
+            ramAllocBytes: frame.ramAllocBytes,
+          });
+          break;
         case 'error':
           errFrame = { code: frame.code, message: frame.message };
           break;
         default:
-          break; // phase/done — no-op for now
+          break; // done
       }
     });
 

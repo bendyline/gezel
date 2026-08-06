@@ -167,6 +167,19 @@ export type RemoteAdmissionResponse = z.infer<typeof RemoteAdmissionResponseSche
 
 /** Streamed text delta. */
 export const DeltaFrameSchema = z.object({ type: z.literal('delta'), text: z.string() });
+/** Live private-reasoning delta; kept separate from visible reply text. */
+export const ReasoningDeltaFrameSchema = z.object({
+  type: z.literal('reasoning_delta'),
+  text: z.string(),
+});
+/** Live structured-tool argument fragment, used as a liveness signal on A. */
+export const ToolArgsDeltaFrameSchema = z.object({
+  type: z.literal('tool_args_delta'),
+  name: z.string(),
+  text: z.string(),
+});
+/** B received a non-content SSE frame from its native engine. */
+export const WirePulseFrameSchema = z.object({ type: z.literal('wire_pulse') });
 /** End-of-turn tool calls B parsed; B halts the turn and returns them to A. */
 export const ToolCallFrameSchema = z.object({
   type: z.literal('tool_call'),
@@ -195,9 +208,26 @@ export const QueuedFrameSchema = z.object({
 /** Engine progress (model loading / prefill), passed through for UX. */
 export const PhaseFrameSchema = z.object({
   type: z.literal('phase'),
+  provider: z.enum(['llama-cpp', 'mlx', 'ds4']).optional(),
   phase: z.string(),
   detail: z.string().optional(),
   progress: z.number().optional(),
+  ttftMs: z.number().int().nonnegative().optional(),
+});
+/** End-of-turn native-engine performance counters. */
+export const TurnStatsFrameSchema = z.object({
+  type: z.literal('turn_stats'),
+  provider: z.enum(['llama-cpp', 'ollama', 'mlx', 'ds4']),
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  durationMs: z.number().int().nonnegative(),
+  tokensPerSec: z.number().nonnegative().optional(),
+});
+/** Native engine's static memory allocation, when available. */
+export const EngineStatsFrameSchema = z.object({
+  type: z.literal('engine_stats'),
+  provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+  ramAllocBytes: z.number().nonnegative(),
 });
 /** Terminal success. */
 export const DoneFrameSchema = z.object({ type: z.literal('done') });
@@ -287,12 +317,17 @@ export type RemoteSynthesizeRequest = z.infer<typeof RemoteSynthesizeRequestSche
 
 export const RemoteInferFrameSchema = z.discriminatedUnion('type', [
   DeltaFrameSchema,
+  ReasoningDeltaFrameSchema,
+  ToolArgsDeltaFrameSchema,
+  WirePulseFrameSchema,
   ToolCallFrameSchema,
   UsageFrameSchema,
   ReasoningFrameSchema,
   WarningFrameSchema,
   QueuedFrameSchema,
   PhaseFrameSchema,
+  TurnStatsFrameSchema,
+  EngineStatsFrameSchema,
   DoneFrameSchema,
   ErrorFrameSchema,
 ]);

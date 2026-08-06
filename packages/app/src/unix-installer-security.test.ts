@@ -1,4 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +24,19 @@ function position(source: string, needle: string): number {
   const index = source.indexOf(needle);
   expect(index, `missing installer security directive: ${needle}`).toBeGreaterThanOrEqual(0);
   return index;
+}
+
+function shellFunction(
+  source: string,
+  name: string,
+  body: 'subshell' | 'brace' = 'subshell',
+): string {
+  const opening = body === 'subshell' ? '(' : '{';
+  const closing = body === 'subshell' ? ')' : '}';
+  const start = position(source, `${name}() ${opening}`);
+  const end = source.indexOf(`\n${closing}\n`, start);
+  expect(end, `unterminated installer function: ${name}`).toBeGreaterThan(start);
+  return source.slice(start, end + 2);
 }
 
 const macPostinstall = installerFile('macos-pkg-scripts/postinstall');
@@ -239,6 +263,18 @@ describe('macOS machine-service filesystem security', () => {
 });
 
 describe('Linux machine-service filesystem security', () => {
+  it('uses a trusted root environment for package-manager hooks', () => {
+    for (const hook of [linuxPostinstall, linuxPostremove]) {
+      expect(hook).toContain('set -eu');
+      expect(hook).toContain('PATH=/usr/sbin:/usr/bin:/sbin:/bin');
+      expect(hook).toContain('if [ "$(id -u)" -ne 0 ]; then');
+
+      const path = position(hook, 'PATH=/usr/sbin:/usr/bin:/sbin:/bin');
+      const firstCommand = position(hook, 'if [ "$(id -u)" -ne 0 ]; then');
+      expect(path).toBeLessThan(firstCommand);
+    }
+  });
+
   it('refuses to commandeer a pre-existing interactive or shared account', () => {
     expect(linuxPostinstall).toContain('abort_bad_service_identity()');
     expect(linuxPostinstall).toContain('systemctl disable --now gezeld.service');
@@ -309,11 +345,152 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('assert_not_symlink "$DATA_DIR/runtime"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$ASSETS_DIR/models"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
+    expect(linuxPostinstall).toContain('[ ! -f "$UNIT_SRC" ] || [ -L "$UNIT_SRC" ]');
+    expect(linuxPostinstall).toContain(
+      'assert_not_symlink "$UNIT_DST" "Gezel systemd unit target"',
+    );
+    expect(position(linuxPostinstall, 'assert_not_symlink "$UNIT_DST"')).toBeLessThan(
+      position(linuxPostinstall, 'systemctl stop gezeld.service'),
+    );
+    expect(linuxPostinstall).toContain('install -o root -g root -m 0644 "$UNIT_SRC" "$UNIT_DST"');
     expect(linuxUnit).toContain('UMask=0077');
     expect(linuxUnit).toContain('Environment=GEZEL_PORT=6228');
     expect(linuxUnit).toContain('Environment=GEZEL_SERVICE_ROLE=machine-engine');
     expect(linuxUnit).not.toContain('Environment=GEZEL_UI_DIR=');
     expect(linuxUnit).toContain('Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets');
+  });
+
+  it('isolates public desktop caches from the private installer umask', () => {
+    const installRefresh = shellFunction(linuxPostinstall, 'refresh_desktop_caches');
+    const removeRefresh = shellFunction(linuxPostremove, 'refresh_desktop_caches');
+
+    expect(position(linuxPostinstall, 'umask 077')).toBeLessThan(
+      position(linuxPostinstall, 'refresh_desktop_caches() ('),
+    );
+    for (const refresh of [installRefresh, removeRefresh]) {
+      expect(refresh).toContain('umask 022');
+      expect(refresh).not.toContain('umask 077');
+      expect(refresh).toContain('update-mime-database "$MIME_DATABASE_DIR"');
+      expect(refresh).toContain('update-desktop-database "$APPLICATIONS_DATABASE_DIR"');
+      expect(refresh).toContain('gtk-update-icon-cache -f -t "$HICOLOR_THEME_DIR"');
+    }
+
+    expect(linuxPostinstall.match(/^refresh_desktop_caches$/gm)).toHaveLength(1);
+    expect(linuxPostremove.match(/^refresh_desktop_caches$/gm)).toHaveLength(1);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'actually creates public cache output under 022 without leaking that umask',
+    () => {
+      const probeRoot = mkdtempSync(join(tmpdir(), 'gezel-linux-cache-umask-'));
+      const probeBin = join(probeRoot, 'bin');
+      const outputDir = join(probeRoot, 'output');
+
+      try {
+        mkdirSync(probeBin, { recursive: true });
+        mkdirSync(outputDir, { recursive: true });
+        const probe = '#!/bin/sh\n: > "$CACHE_PROBE_DIR/${0##*/}"\n';
+        for (const command of [
+          'update-mime-database',
+          'update-desktop-database',
+          'gtk-update-icon-cache',
+        ]) {
+          const commandPath = join(probeBin, command);
+          writeFileSync(commandPath, probe);
+          chmodSync(commandPath, 0o755);
+        }
+
+        const script = `${shellFunction(linuxPostinstall, 'refresh_desktop_caches')}
+PATH=$PROBE_BIN
+MIME_DATABASE_DIR=/unused/mime
+APPLICATIONS_DATABASE_DIR=/unused/applications
+HICOLOR_THEME_DIR=/unused/hicolor
+umask 077
+refresh_desktop_caches
+: > "$CACHE_PROBE_DIR/after-refresh"
+`;
+        execFileSync('/bin/sh', ['-c', script], {
+          env: {
+            ...process.env,
+            CACHE_PROBE_DIR: outputDir,
+            PROBE_BIN: probeBin,
+          },
+        });
+
+        for (const command of [
+          'update-mime-database',
+          'update-desktop-database',
+          'gtk-update-icon-cache',
+        ]) {
+          expect(statSync(join(outputDir, command)).mode & 0o777).toBe(0o644);
+        }
+        expect(statSync(join(outputDir, 'after-refresh')).mode & 0o777).toBe(0o600);
+      } finally {
+        rmSync(probeRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does destructive removal only for final dpkg and RPM removals', () => {
+    expect(linuxPostremove).toContain('DPKG_MAINTSCRIPT_NAME');
+    expect(linuxPostremove).toContain('remove|purge|disappear');
+    expect(linuxPostremove).toContain('0|remove|purge|disappear');
+    expect(linuxPostremove).not.toContain("''|0|remove|purge|disappear");
+    expect(linuxPostremove).toContain('package upgrade/rollback detected');
+
+    const guard = position(linuxPostremove, 'if ! is_final_removal "${1:-}"; then');
+    expect(guard).toBeLessThan(position(linuxPostremove, 'systemctl disable --now gezeld.service'));
+    expect(guard).toBeLessThan(position(linuxPostremove, 'rm -f "$UNIT_DST"'));
+    expect(guard).toBeLessThan(position(linuxPostremove, 'update-alternatives --remove'));
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'classifies real dpkg and RPM removal actions conservatively',
+    () => {
+      const script = `${shellFunction(linuxPostremove, 'is_final_removal', 'brace')}
+if is_final_removal "$1"; then
+  printf final
+else
+  printf preserve
+fi
+`;
+      const classify = (action: string, dpkg = false) =>
+        execFileSync('/bin/sh', ['-c', script, 'gezel-remove-test', action], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            DPKG_MAINTSCRIPT_NAME: dpkg ? 'postrm' : '',
+          },
+        });
+
+      for (const action of ['remove', 'purge', 'disappear']) {
+        expect(classify(action, true)).toBe('final');
+      }
+      for (const action of ['', 'upgrade', 'failed-upgrade', 'abort-install', 'abort-upgrade']) {
+        expect(classify(action, true)).toBe('preserve');
+      }
+      expect(classify('0')).toBe('final');
+      for (const action of ['', '1', '2', 'upgrade', 'failed-upgrade']) {
+        expect(classify(action)).toBe('preserve');
+      }
+    },
+  );
+
+  it('never overwrites an unrelated command while registering the CLI', () => {
+    expect(linuxPostinstall).toContain('if [ ! -L "$COMMAND_LINK" ]; then');
+    expect(linuxPostinstall).toContain('refusing to replace an existing non-symlink');
+    expect(linuxPostinstall).toContain('refusing to replace an unrelated symlink');
+    expect(linuxPostinstall).toContain('"$ELECTRON_EXE")');
+    expect(linuxPostinstall).toContain('"$ALTERNATIVES_LINK")');
+    expect(linuxPostinstall).toContain(
+      'update-alternatives --install "$COMMAND_LINK" gezel "$ELECTRON_EXE" 100',
+    );
+    expect(linuxPostinstall).not.toMatch(/update-alternatives --install[^\n]*\|\|/);
+    expect(linuxPostinstall).not.toMatch(/^\s*ln -sf\b/m);
+
+    expect(linuxPostremove).toContain('update-alternatives --remove gezel "$ELECTRON_EXE"');
+    expect(linuxPostremove).toContain('[ -L "$COMMAND_LINK" ]');
+    expect(linuxPostremove).toContain('rm -f "$COMMAND_LINK"');
   });
 
   it('preserves Chromium sandbox and AppArmor setup in the custom package hooks', () => {
@@ -329,11 +506,11 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel');
     expect(linuxPostinstall).toContain('apparmor_parser --skip-kernel-load --debug');
     expect(linuxPostinstall).toContain('apparmor_parser --replace --write-cache --skip-read-cache');
-    expect(linuxPostinstall).toContain('update-mime-database /usr/share/mime');
-    expect(linuxPostinstall).toContain('update-desktop-database /usr/share/applications');
+    expect(linuxPostinstall).toContain('refresh_desktop_caches');
 
     expect(linuxPostremove).toContain('update-alternatives --remove gezel "$ELECTRON_EXE"');
     expect(linuxPostremove).toContain('apparmor_parser --remove "$APPARMOR_PROFILE_TARGET"');
     expect(linuxPostremove).toContain('rm -f "$APPARMOR_PROFILE_TARGET"');
+    expect(linuxPostremove).toContain('refresh_desktop_caches');
   });
 });

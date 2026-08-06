@@ -112,6 +112,11 @@ describe('remote model execution — B-side surface (e2e)', () => {
 
   it('streams a remote inference completion from the mock provider', async () => {
     const token = await pairDevice('device-infer');
+    const provider = (await svc.context.chat.getProviderForModel(
+      'copilot',
+      'mock-fast',
+    )) as MockProvider;
+    provider.scriptReasoning('checking the plan');
     const res = await httpFetch(`${baseUrl}/v1/remote/infer`, {
       method: 'POST',
       headers: {
@@ -132,8 +137,10 @@ describe('remote model execution — B-side surface (e2e)', () => {
     const text = await res.text();
     // SSE frames, terminating in a `done` frame (mock emits text, no tool call).
     expect(text).toContain('data:');
+    expect(text).toContain('"type":"reasoning_delta"');
     expect(text).toContain('"type":"done"');
     expect(text).not.toContain('"type":"error"');
+    expect(text.indexOf('"type":"reasoning_delta"')).toBeLessThan(text.indexOf('"type":"done"'));
   });
 
   it('marks a trailing tool-result request as a continuation, not an empty user turn', async () => {

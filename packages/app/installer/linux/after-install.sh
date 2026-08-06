@@ -6,7 +6,18 @@
 #
 # Idempotent: re-runs (e.g. on upgrade) detect existing user / unit
 # and only do the missing work.
-set -e
+set -eu
+# Package managers normally provide a trusted root PATH, but maintainer hooks
+# are also easy to invoke by hand while diagnosing a failed install. Never let
+# an inherited user-controlled PATH choose commands that this root script runs.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[gezel after-install] ERROR: this package hook must run as root" >&2
+  exit 1
+fi
+
 # Private-by-default state for both this migration and any helper it spawns.
 # systemd applies the same mask to future daemon writes.
 umask 077
@@ -19,6 +30,8 @@ SERVICE_TREE="$DATA_DIR/service"
 UNIT_SRC=/opt/Gezel/gezeld.service
 UNIT_DST=/etc/systemd/system/gezeld.service
 ELECTRON_EXE=/opt/Gezel/gezel
+COMMAND_LINK=/usr/bin/gezel
+ALTERNATIVES_LINK=/etc/alternatives/gezel
 CHROME_SANDBOX=/opt/Gezel/chrome-sandbox
 APPARMOR_PROFILE_SOURCE=/opt/Gezel/resources/apparmor-profile
 APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel
@@ -27,6 +40,9 @@ EXTRACT_CLI="$UNPACKED_DIR/extract-service-bundle.js"
 MIGRATE_SHARED_CLI="$UNPACKED_DIR/migrate-legacy-shared.js"
 BUNDLE_TARBALL="$UNPACKED_DIR/service-bundle.tar.gz"
 BUNDLE_META="$UNPACKED_DIR/service-bundle.meta.json"
+MIME_DATABASE_DIR=/usr/share/mime
+APPLICATIONS_DATABASE_DIR=/usr/share/applications
+HICOLOR_THEME_DIR=/usr/share/icons/hicolor
 
 echo "[gezel after-install] starting"
 
@@ -45,6 +61,39 @@ assert_not_symlink() {
     exit 1
   fi
 }
+
+if [ ! -f "$UNIT_SRC" ] || [ -L "$UNIT_SRC" ]; then
+  echo "[gezel after-install] ERROR: unit file is missing or unsafe: $UNIT_SRC" >&2
+  exit 1
+fi
+assert_not_symlink "$UNIT_DST" "Gezel systemd unit target"
+
+# Desktop integration is public operating-system state. Keep it in a subshell
+# so the installer's private umask cannot leak into caches read by desktop
+# sessions. A v1.26211.23 install rebuilt the MIME databases under umask 077,
+# leaving them root-only; rerunning this function during an upgrade repairs
+# those files without weakening Gezel's private state under /var/lib/gezel.
+refresh_desktop_caches() (
+  umask 022
+
+  if command -v update-mime-database >/dev/null 2>&1; then
+    if ! update-mime-database "$MIME_DATABASE_DIR"; then
+      echo "[gezel after-install] WARNING: could not refresh the shared MIME database" >&2
+    fi
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    if ! update-desktop-database "$APPLICATIONS_DATABASE_DIR"; then
+      echo "[gezel after-install] WARNING: could not refresh the desktop database" >&2
+    fi
+  fi
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    if ! gtk-update-icon-cache -f -t "$HICOLOR_THEME_DIR"; then
+      echo "[gezel after-install] WARNING: could not refresh the hicolor icon cache" >&2
+    fi
+  fi
+
+  return 0
+)
 
 abort_bad_service_identity() {
   echo "[gezel after-install] ERROR: refusing to use '$GEZEL_USER' as the daemon identity: $1" >&2
@@ -238,17 +287,33 @@ find "$SERVICE_TREE" -xdev ! -type l -exec chmod go-rwx {} +
 # 3. Preserve electron-builder's standard Linux desktop integration. Supplying
 # our own afterInstall hook replaces electron-builder's default hook entirely,
 # so these responsibilities must live here too.
-if command -v update-alternatives >/dev/null 2>&1; then
-  # Remove an old direct symlink before registering the managed alternative.
-  if [ -L /usr/bin/gezel ] &&
-    [ -e /usr/bin/gezel ] &&
-    [ "$(readlink /usr/bin/gezel)" != /etc/alternatives/gezel ]; then
-    rm -f /usr/bin/gezel
+if [ -e "$COMMAND_LINK" ] || [ -L "$COMMAND_LINK" ]; then
+  if [ ! -L "$COMMAND_LINK" ]; then
+    echo "[gezel after-install] ERROR: refusing to replace an existing non-symlink: $COMMAND_LINK" >&2
+    exit 1
   fi
-  update-alternatives --install /usr/bin/gezel gezel "$ELECTRON_EXE" 100 ||
-    ln -sf "$ELECTRON_EXE" /usr/bin/gezel
+
+  command_link_target=$(readlink "$COMMAND_LINK" 2>/dev/null || true)
+  case "$command_link_target" in
+    "$ELECTRON_EXE")
+      # Migrate the direct symlink created by older Gezel packages into the
+      # distro's alternatives manager.
+      rm -f "$COMMAND_LINK"
+      ;;
+    "$ALTERNATIVES_LINK") ;;
+    *)
+      echo "[gezel after-install] ERROR: refusing to replace an unrelated symlink: $COMMAND_LINK -> $command_link_target" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if command -v update-alternatives >/dev/null 2>&1; then
+  # A failure here can mean another package owns the name. Do not hide that
+  # conflict by falling back to `ln -sf`, which could overwrite its command.
+  update-alternatives --install "$COMMAND_LINK" gezel "$ELECTRON_EXE" 100
 else
-  ln -sf "$ELECTRON_EXE" /usr/bin/gezel
+  ln -s "$ELECTRON_EXE" "$COMMAND_LINK"
 fi
 
 # Chromium needs either working unprivileged user namespaces or its root-owned
@@ -294,19 +359,11 @@ if command -v apparmor_status >/dev/null 2>&1 &&
   fi
 fi
 
-if command -v update-mime-database >/dev/null 2>&1; then
-  update-mime-database /usr/share/mime || true
-fi
-if command -v update-desktop-database >/dev/null 2>&1; then
-  update-desktop-database /usr/share/applications || true
-fi
+refresh_desktop_caches
 
-# 4. Install the systemd unit (root:root 644, standard).
-if [ ! -f "$UNIT_SRC" ]; then
-  echo "[gezel after-install] ERROR: unit file missing at $UNIT_SRC" >&2
-  exit 1
-fi
-install -m 644 "$UNIT_SRC" "$UNIT_DST"
+# 4. Install the systemd unit (root:root 0644, standard). The source and
+# destination were both validated before any existing service was stopped.
+install -o root -g root -m 0644 "$UNIT_SRC" "$UNIT_DST"
 
 # 5. Enable + start. Tolerate systems without systemctl (e.g. running
 # inside a chroot during package builds) — the install still succeeds

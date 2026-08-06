@@ -1054,8 +1054,9 @@ export interface StreamingBubbleProps {
   /**
    * When set, the turn is sitting in the provider queue — waiting for
    * other turns to finish before it can start. The "thinking" label
-   * is replaced with "queued — N ahead" so the user knows the delay
-   * isn't a stall but backpressure. Cleared on the first delta.
+   * is replaced with its numbered place in the model queue so the user
+   * knows the delay isn't a stall but backpressure. Cleared on the first
+   * delta.
    */
   queueAhead?: number;
   /**
@@ -1289,15 +1290,15 @@ export function StreamingStatusLine({
   thinkingProgress?: number | undefined;
   thinkingDetail?: string | undefined;
 }) {
-  // "queued — 3 ahead" reads more naturally than "3 ahead queued";
-  // fall back to a bare "queued" when nobody's ahead (still waiting
-  // on an empty running slot — rare but possible on reconnection).
+  // Name both the queue and its contents: a bare "queued" can read like
+  // the user's message has not been sent yet, while this state specifically
+  // means the message reached Gezel and is waiting behind model work.
   const statusLabel = failed
     ? 'stopped'
     : queued
       ? queueAhead !== undefined && queueAhead > 0
-        ? `queued — ${queueAhead} ahead`
-        : 'queued'
+        ? `model queue · position ${queueAhead + 1}`
+        : 'model queue · next in line'
       : thinkingLabel && thinkingLabel.trim().length > 0
         ? thinkingLabel
         : 'thinking';
@@ -1342,15 +1343,13 @@ export function StreamingStatusLine({
           viewBox="0 0 12 12"
           fill="none"
           role="img"
-          aria-label="Queued"
+          aria-label="Model queue"
         >
-          <title>Queued</title>
-          <path
-            d="M3 1.5h6M3 10.5h6M3.5 1.5v2a2.5 2.5 0 0 0 5 0v-2M3.5 10.5v-2a2.5 2.5 0 0 1 5 0v2"
-            stroke="currentColor"
-            strokeWidth="1"
-            strokeLinecap="round"
-          />
+          <title>Model queue</title>
+          <circle cx="2" cy="2.5" r="0.8" fill="currentColor" />
+          <circle cx="2" cy="6" r="0.8" fill="currentColor" />
+          <circle cx="2" cy="9.5" r="0.8" fill="currentColor" />
+          <path d="M4 2.5h6M4 6h6M4 9.5h6" stroke="currentColor" strokeLinecap="round" />
         </svg>
       )}
       {/* Wrapped in a span so the CSS container query can hide just
@@ -1775,30 +1774,29 @@ export function StreamingBubble({
                 bubble doesn't look idle while we wait for the
                 next chunk. Suppressed for failed turns. */}
         {queued && renderedSegments.length === 0 ? (
-          <div className="queued-pill" aria-label="Queued — waiting on the provider">
-            <svg
-              className="queued-pill-icon"
-              width="14"
-              height="14"
-              viewBox="0 0 12 12"
-              fill="none"
-              aria-hidden
-            >
-              <title>Queued</title>
-              <path
-                d="M3 1.5h6M3 10.5h6M3.5 1.5v2a2.5 2.5 0 0 0 5 0v-2M3.5 10.5v-2a2.5 2.5 0 0 1 5 0v2"
-                stroke="currentColor"
-                strokeWidth="1"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="queued-pill-label">
-              Waiting on the provider
-              {queueAhead && queueAhead > 0
-                ? ` — ${queueAhead} turn${queueAhead === 1 ? '' : 's'} ahead`
-                : ''}
+          <output
+            className="queued-pill"
+            aria-live="polite"
+            aria-label={
+              queueAhead && queueAhead > 0
+                ? `Waiting in the model queue, position ${queueAhead + 1} in line, ${queueAhead} prompt${queueAhead === 1 ? '' : 's'} ahead`
+                : 'Waiting in the model queue, next in line'
+            }
+          >
+            <QueuePositionVisual ahead={queueAhead ?? 0} />
+            <span className="queued-pill-copy">
+              <span className="queued-pill-label">
+                {queueAhead && queueAhead > 0
+                  ? `Position ${queueAhead + 1} in line`
+                  : 'Next in line'}
+              </span>
+              <span className="queued-pill-detail">
+                {queueAhead && queueAhead > 0
+                  ? `${queueAhead} prompt${queueAhead === 1 ? '' : 's'} ahead`
+                  : 'Waiting for a model slot'}
+              </span>
             </span>
-          </div>
+          </output>
         ) : (
           <>
             {!failed && liveReasoning && liveReasoning.trim().length > 0 && (
@@ -1942,7 +1940,7 @@ export function StreamingBubble({
                   <>
                     Still working — silent for {formatElapsedLong(silentFor)}.
                     {localEngine === 'llama-cpp'
-                      ? ' First model load is slow — usually 30-60s on macOS; subsequent turns are much faster. On-device models also take a while on long reasoning or large tool outputs.'
+                      ? ' First model load is slow; subsequent turns are much faster. On-device models also take a while on long reasoning or large tool outputs.'
                       : localEngine === 'ds4'
                         ? ' DwarfStar streams a very large model from disk — reading a long conversation can take a few minutes before the reply starts.'
                         : onProbeOllama
@@ -2043,6 +2041,30 @@ export function StreamingBubble({
         {...(debugMode && sessionId ? { debug: { sessionId } } : {})}
       />
     </div>
+  );
+}
+
+/**
+ * Compact line diagram for a queued prompt. The numbered square is this
+ * prompt's exact position; the dots between it and the arrow are the work
+ * ahead. Cap the drawn dots so a busy queue stays compact while the number
+ * and adjacent copy continue to carry the exact position.
+ */
+function QueuePositionVisual({ ahead }: { ahead: number }) {
+  const visibleAhead = Math.min(ahead, 3);
+  return (
+    <span className="queue-position-visual" aria-hidden="true">
+      <span className="queue-position-you">{ahead + 1}</span>
+      {ahead > 3 && <span className="queue-position-overflow">…</span>}
+      {Array.from({ length: visibleAhead }, (_, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: fixed decorative queue slots
+        <span className="queue-position-ahead" key={index} />
+      ))}
+      <svg className="queue-position-arrow" width="9" height="10" viewBox="0 0 9 10" fill="none">
+        <title>Queue direction</title>
+        <path d="M1 5h6M5 2.5 7.5 5 5 7.5" stroke="currentColor" strokeLinecap="round" />
+      </svg>
+    </span>
   );
 }
 
