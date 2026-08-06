@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   degradeMoeOffloadDecision,
   estimateKvReserveBytes,
+  estimateWindowedKvLinearization,
   planMoeOffload,
 } from './offload-planner.js';
 
@@ -168,6 +169,90 @@ describe('estimateKvReserveBytes', () => {
     expect(estimateKvReserveBytes({ ...dims, headCountKv: undefined })).toBeUndefined();
     expect(
       estimateKvReserveBytes({ blockCount: 40, headCountKv: 8, ctxTokens: 16384 }),
+    ).toBeUndefined();
+  });
+});
+
+describe('estimateWindowedKvLinearization', () => {
+  // gemma4-31b's real header: 60 layers in a 5:1 SWA:global pattern,
+  // SWA layers 16 heads × 256+256 dims, global layers 4 heads × 512+512.
+  // The windowed cache is what the engine allocates when `--swa-full` is
+  // declined — pricing it with full-attention math (~105 GB at 65536)
+  // instead of this (~7.9 GB) is exactly the over-clamp that granted
+  // 19–56K windows on a 65536 request (2026-08-04 gemma4-26b sweep).
+  const gemma31b = {
+    blockCount: 60,
+    headCountKvPerLayer: Array.from({ length: 60 }, (_, i) => ((i + 1) % 6 === 0 ? 4 : 16)),
+    slidingWindow: 1024,
+    slidingWindowPattern: Array.from({ length: 60 }, (_, i) => (i + 1) % 6 !== 0),
+    keyLength: 512,
+    valueLength: 512,
+    keyLengthSwa: 256,
+    valueLengthSwa: 256,
+  };
+
+  it('prices gemma4-31b: global layers scale, SWA layers are a fixed reservation', () => {
+    const w = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'f16' });
+    // 10 global layers × 4 heads × (512+512) dims × 2 bytes.
+    expect(w?.bytesPerToken).toBe(10 * 4 * 1024 * 2);
+    // 50 SWA layers × 16 heads × (256+256) dims × 2 bytes × (1024 window + 2048 ubatch margin).
+    expect(w?.fixedBytes).toBe(50 * 16 * 512 * 2 * (1024 + 2048));
+  });
+
+  it('undercuts the full-attention estimate by an order of magnitude at 64K', () => {
+    const w = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'f16' });
+    const windowedTotal = (w?.fixedBytes ?? 0) + (w?.bytesPerToken ?? 0) * 65_536;
+    const fullTotal = estimateKvReserveBytes({
+      blockCount: 60,
+      headCountKv: 14,
+      keyLength: 512,
+      valueLength: 512,
+      ctxTokens: 65_536,
+      kvCacheType: 'f16',
+    });
+    expect(windowedTotal).toBeLessThan((fullTotal ?? 0) / 10);
+  });
+
+  it('accepts scalar KV heads and falls back to global dims when swa dims are absent (e4b shape)', () => {
+    const w = estimateWindowedKvLinearization({
+      blockCount: 6,
+      headCountKv: 2,
+      slidingWindow: 512,
+      slidingWindowPattern: [true, true, true, true, true, false],
+      keyLength: 512,
+      valueLength: 512,
+      kvCacheType: 'f16',
+    });
+    expect(w?.bytesPerToken).toBe(1 * 2 * 1024 * 2);
+    expect(w?.fixedBytes).toBe(5 * 2 * 1024 * 2 * (512 + 2048));
+  });
+
+  it('scales by the KV cache dtype', () => {
+    const f16 = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'f16' });
+    const q8 = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'q8_0' });
+    expect(q8?.bytesPerToken).toBeCloseTo((f16?.bytesPerToken ?? 0) * (34 / 32 / 2), 5);
+  });
+
+  it('degrades to undefined instead of guessing a layer layout', () => {
+    expect(
+      estimateWindowedKvLinearization({ ...gemma31b, slidingWindowPattern: undefined }),
+    ).toBeUndefined();
+    expect(
+      estimateWindowedKvLinearization({
+        ...gemma31b,
+        slidingWindowPattern: [true, false],
+      }),
+    ).toBeUndefined();
+    expect(
+      estimateWindowedKvLinearization({ ...gemma31b, headCountKvPerLayer: [16, 4] }),
+    ).toBeUndefined();
+    expect(estimateWindowedKvLinearization({ ...gemma31b, slidingWindow: 0 })).toBeUndefined();
+    expect(
+      estimateWindowedKvLinearization({
+        ...gemma31b,
+        headCountKvPerLayer: undefined,
+        headCountKv: undefined,
+      }),
     ).toBeUndefined();
   });
 });

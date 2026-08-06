@@ -103,6 +103,18 @@ class GgufBuilder {
     return this;
   }
 
+  metaBoolArray(key: string, values: boolean[]) {
+    this.parts.push(this.gguf_string(key));
+    this.parts.push(this.u32(VTYPE.ARRAY));
+    this.parts.push(this.u32(VTYPE.BOOL));
+    this.parts.push(this.u64(BigInt(values.length)));
+    const b = Buffer.alloc(values.length);
+    values.forEach((v, i) => b.writeUInt8(v ? 1 : 0, i));
+    this.parts.push(b);
+    this.metaCount++;
+    return this;
+  }
+
   /**
    * Add an array of strings — the most common metadata array shape
    * (e.g. tokenizer vocab) and the one the parser must skip
@@ -309,6 +321,53 @@ describe('readGgufSummary', () => {
     const s = readGgufSummary(path);
     expect(s.headCountKv).toBe(14);
     expect(s.keyLength).toBe(512);
+  });
+
+  it('reads the SWA layout: window, per-layer pattern, swa head dims, raw per-layer heads (Gemma 4)', () => {
+    // Mirrors gemma4-26b's real header shape: 5 SWA layers per global
+    // layer, SWA layers at half the head dims and different head counts.
+    // These fields feed estimateWindowedKvLinearization — the admission
+    // input when `--swa-full` is declined or pinned off.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'gemma4')
+      .metaU32('gemma4.block_count', 6)
+      .metaU32Array('gemma4.attention.head_count_kv', [8, 8, 8, 8, 8, 2])
+      .metaU32('gemma4.attention.key_length', 512)
+      .metaU32('gemma4.attention.value_length', 512)
+      .metaU32('gemma4.attention.sliding_window', 1024)
+      .metaBoolArray('gemma4.attention.sliding_window_pattern', [true, true, true, true, true, false])
+      .metaU32('gemma4.attention.key_length_swa', 256)
+      .metaU32('gemma4.attention.value_length_swa', 256)
+      .finish();
+    const path = join(dir, 'swa-layout.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.headCountKv).toBe(7);
+    expect(s.headCountKvPerLayer).toEqual([8, 8, 8, 8, 8, 2]);
+    expect(s.slidingWindow).toBe(1024);
+    expect(s.slidingWindowPattern).toEqual([true, true, true, true, true, false]);
+    expect(s.keyLengthSwa).toBe(256);
+    expect(s.valueLengthSwa).toBe(256);
+  });
+
+  it('leaves SWA fields absent on non-SWA headers and keeps the stream in sync past them', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'qwen3moe')
+      .metaU32('qwen3moe.block_count', 48)
+      .metaU32('qwen3moe.attention.head_count_kv', 8)
+      .metaU32('qwen3moe.attention.key_length', 128)
+      .finish();
+    const path = join(dir, 'no-swa.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.slidingWindow).toBeUndefined();
+    expect(s.slidingWindowPattern).toBeUndefined();
+    expect(s.headCountKvPerLayer).toBeUndefined();
+    expect(s.keyLength).toBe(128);
   });
 });
 

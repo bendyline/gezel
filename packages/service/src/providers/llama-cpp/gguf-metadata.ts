@@ -93,14 +93,41 @@ export interface GgufSummary {
    * `<arch>.attention.head_count_kv` — KV heads (GQA). Archs that store a
    * per-layer array here (Gemma 4) yield the array MEAN, possibly
    * fractional — the KV estimate multiplies by `block_count`, so the mean
-   * keeps the aggregate exact. See readUintScalarOrArrayMean for why
+   * keeps the aggregate exact. See readUintScalarOrArrayDetail for why
    * "degrade to unavailable" was the wrong policy.
    */
   headCountKv?: number;
+  /**
+   * The raw per-layer `head_count_kv` array when the arch stores one
+   * (Gemma 4) — index-aligned with `slidingWindowPattern`, which is what
+   * makes the windowed-KV estimate exact: Gemma 4's global layers carry
+   * DIFFERENT head counts than its SWA layers (31b: 4 vs 16), so a mean
+   * cannot price the two cache shapes. Absent for scalar-headed archs.
+   */
+  headCountKvPerLayer?: number[];
   /** `<arch>.attention.key_length` — per-head K dim when it differs from embd/heads. */
   keyLength?: number;
   /** `<arch>.attention.value_length` — per-head V dim when it differs from embd/heads. */
   valueLength?: number;
+  /**
+   * `<arch>.attention.sliding_window` — SWA window size in tokens.
+   * `> 0` marks the model as sliding-window-attention; layers listed
+   * `true` in `slidingWindowPattern` cache only ~this many tokens under
+   * the default (windowed) KV cache.
+   */
+  slidingWindow?: number;
+  /**
+   * `<arch>.attention.sliding_window_pattern` — one flag per layer,
+   * `true` = SWA (window-capped cache), `false` = global attention
+   * (full-context cache). Gemma 4 ships 5:1. Input to
+   * `estimateWindowedKvLinearization`; absent on non-SWA archs and on
+   * GGUFs that predate the key.
+   */
+  slidingWindowPattern?: boolean[];
+  /** `<arch>.attention.key_length_swa` — per-head K dim on SWA layers when it differs (Gemma 4: 256 vs 512). */
+  keyLengthSwa?: number;
+  /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
+  valueLengthSwa?: number;
   /**
    * `<arch>.nextn_predict_layers` — number of multi-token-prediction
    * (MTP / "nextn") layers. `> 0` means the GGUF carries an MTP head,
@@ -291,30 +318,70 @@ function readUintScalar(r: Reader, type: GgufValueType): number | undefined {
 }
 
 /**
- * Like {@link readUintScalar}, but also accepts a per-layer ARRAY and
- * returns the MEAN of its elements (possibly fractional). Gemma 4 stores
- * `attention.head_count_kv` as one entry per layer; the KV-cache
- * estimate multiplies the returned value by `block_count`, so the mean
- * keeps the aggregate exactly equal to the per-layer sum. Skipping
- * arrays here is what left `headCountKv` undefined and silently downgraded
- * the RAM admission check to the weights-scaled heuristic — which judged a
- * ~33 GB full-attention KV cache as fitting (2026-08-05 gemma4-31b Metal
- * OOM under `--swa-full`).
+ * Like {@link readUintScalar}, but also accepts a per-layer ARRAY,
+ * returning both the MEAN (possibly fractional) and the raw values.
+ * Gemma 4 stores `attention.head_count_kv` as one entry per layer; the
+ * aggregate KV estimate multiplies the mean by `block_count` (keeping the
+ * total exactly equal to the per-layer sum), while the windowed-KV
+ * estimate needs the raw values because global and SWA layers carry
+ * different head counts. Skipping arrays here is what left `headCountKv`
+ * undefined and silently downgraded the RAM admission check to the
+ * weights-scaled heuristic — which judged a ~33 GB full-attention KV
+ * cache as fitting (2026-08-05 gemma4-31b Metal OOM under `--swa-full`).
  */
-function readUintScalarOrArrayMean(r: Reader, type: GgufValueType): number | undefined {
-  if (type !== GgufValueType.ARRAY) return readUintScalar(r, type);
+function readUintScalarOrArrayDetail(
+  r: Reader,
+  type: GgufValueType,
+): { mean?: number; perLayer?: number[] } {
+  if (type !== GgufValueType.ARRAY) {
+    const v = readUintScalar(r, type);
+    return v !== undefined ? { mean: v } : {};
+  }
   const elemType = r.u32() as GgufValueType;
   const count = Number(r.u64());
+  const values: number[] = [];
   let sum = 0;
   let readable = 0;
   for (let i = 0; i < count; i++) {
     const v = readUintScalar(r, elemType);
     if (v !== undefined) {
+      values.push(v);
       sum += v;
       readable++;
     }
   }
-  return readable === count && count > 0 ? sum / count : undefined;
+  if (readable !== count || count === 0) return {};
+  return { mean: sum / count, perLayer: values };
+}
+
+/**
+ * Read a BOOL (or 0/1 integer) ARRAY — the shape of Gemma 4's
+ * `attention.sliding_window_pattern`. Non-array values and arrays with
+ * unreadable elements are consumed and reported as undefined, so the
+ * windowed-KV estimate degrades to unavailable rather than guessing a
+ * layer layout.
+ */
+function readBoolArray(r: Reader, type: GgufValueType): boolean[] | undefined {
+  if (type !== GgufValueType.ARRAY) {
+    r.skipValue(type);
+    return undefined;
+  }
+  const elemType = r.u32() as GgufValueType;
+  const count = Number(r.u64());
+  const values: boolean[] = [];
+  let readable = true;
+  for (let i = 0; i < count; i++) {
+    if (elemType === GgufValueType.BOOL || elemType === GgufValueType.UINT8) {
+      values.push(r.u8() !== 0);
+      continue;
+    }
+    // readUintScalar consumes the element either way, keeping the stream
+    // in sync — never break out of this loop early.
+    const v = readUintScalar(r, elemType);
+    if (v === undefined) readable = false;
+    else values.push(v !== 0);
+  }
+  return readable && values.length === count ? values : undefined;
 }
 
 /**
@@ -405,11 +472,22 @@ export function readGgufSummary(
       } else if (key.endsWith('.attention.head_count')) {
         summary.headCount = readUintScalar(r, type);
       } else if (key.endsWith('.attention.head_count_kv')) {
-        summary.headCountKv = readUintScalarOrArrayMean(r, type);
+        const detail = readUintScalarOrArrayDetail(r, type);
+        if (detail.mean !== undefined) summary.headCountKv = detail.mean;
+        if (detail.perLayer) summary.headCountKvPerLayer = detail.perLayer;
       } else if (key.endsWith('.attention.key_length')) {
         summary.keyLength = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length')) {
         summary.valueLength = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.sliding_window')) {
+        summary.slidingWindow = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.sliding_window_pattern')) {
+        const pattern = readBoolArray(r, type);
+        if (pattern) summary.slidingWindowPattern = pattern;
+      } else if (key.endsWith('.attention.key_length_swa')) {
+        summary.keyLengthSwa = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.value_length_swa')) {
+        summary.valueLengthSwa = readUintScalar(r, type);
       } else {
         r.skipValue(type);
       }

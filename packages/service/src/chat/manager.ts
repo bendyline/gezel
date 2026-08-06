@@ -146,6 +146,7 @@ import {
 import {
   degradeMoeOffloadDecision,
   estimateKvReserveBytes,
+  estimateWindowedKvLinearization,
   planMoeOffload,
 } from '../providers/llama-cpp/offload-planner.js';
 import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
@@ -10545,7 +10546,7 @@ export class ChatManager {
               weightsBytes: installed.approxSizeBytes,
               kvCacheType,
             }) / referenceCtx;
-      const admission = planCtxTokensForMemory({
+      let admission = planCtxTokensForMemory({
         requestedPerTurnCtxTokens: effectiveNumCtx,
         slots,
         minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
@@ -10556,6 +10557,52 @@ export class ChatManager {
         freeSystemRamBytes: availableSystemRamBytes(),
         vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
       });
+      // Mirror the launch path's windowed-cache admission (see
+      // buildLlamaCppProvider): when the launch will decline the Gemma
+      // `--swa-full` auto-default (or the windowed cache is pinned), the
+      // full-attention plan above overstates the real allocation — re-plan
+      // with the windowed linearization so the previewed window matches
+      // what the engine will actually grant.
+      const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
+      const windowedCacheWillRun =
+        (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
+        (explicitSwaFull === false ||
+          (explicitSwaFull === undefined &&
+            isGemmaModel({ architecture: installed.architecture, modelId })));
+      if (windowedCacheWillRun) {
+        const windowed = estimateWindowedKvLinearization({
+          blockCount: summary.blockCount,
+          embeddingLength: summary.embeddingLength,
+          headCount: summary.headCount,
+          headCountKv: summary.headCountKv,
+          headCountKvPerLayer: summary.headCountKvPerLayer,
+          slidingWindow: summary.slidingWindow,
+          slidingWindowPattern: summary.slidingWindowPattern,
+          keyLength: summary.keyLength,
+          valueLength: summary.valueLength,
+          keyLengthSwa: summary.keyLengthSwa,
+          valueLengthSwa: summary.valueLengthSwa,
+          kvCacheType,
+        });
+        if (windowed) {
+          admission = planCtxTokensForMemory({
+            requestedPerTurnCtxTokens: effectiveNumCtx,
+            slots,
+            minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
+            kvBytesPerToken: windowed.bytesPerToken,
+            weightsResidentBytes:
+              Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
+            budgetBytes: admissionBudgetBytes,
+            committedOtherBytes,
+            freeSystemRamBytes: availableSystemRamBytes(),
+            vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+          });
+        } else if ((summary.slidingWindow ?? 0) > 0 || explicitSwaFull === undefined) {
+          // SWA model without a readable layout: the launch path leaves
+          // such a launch untouched — preview the requested window.
+          return effectiveNumCtx;
+        }
+      }
       if (!admission.minimumSatisfied) {
         throw new CapacityDeniedError(
           formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
@@ -17614,10 +17661,12 @@ export async function buildLlamaCppProvider(opts: {
       // ~105 GB at 65536 — `--swa-full` was never fittable there, and
       // under evals (clamp skipped) it wired Metal past its limit
       // mid-prefill and presented as empty model turns (2026-08-05).
-      // When swa-full is off the windowed cache is what the engine
-      // allocates, so the full-attention clamp math would over-clamp by
-      // the layer ratio — skip the clamp and keep the July-baseline
-      // behavior that demonstrably fit.
+      // When the windowed cache is what will run, the launch is NOT left
+      // ungated: admission re-plans with the windowed-KV linearization
+      // (SWA layers = fixed window-capped bytes, global layers = the only
+      // per-token cost), so a host too small even for the windowed cache
+      // still denies or clamps honestly instead of OOMing one machine
+      // class below the 2026-08-05 incident.
       {
         const REFERENCE_CTX = 4096;
         const exactKvAtReference = estimateKvReserveBytes({
@@ -17677,44 +17726,98 @@ export async function buildLlamaCppProvider(opts: {
           });
         const fullKvOverBudget =
           !admission.minimumSatisfied || admission.slots < slots || admission.clamped;
-        if (swaFullAutoDefault && fullKvOverBudget) {
-          // Declining `--swa-full` dominates every remedy below: the
-          // denial, the slot reduction, and the clamp are all driven by
-          // full-attention KV math, which overstates the windowed cache's
-          // real allocation by the global:SWA layer ratio. Weights-level
-          // admission stays with the capacity broker.
-          swaFullAutoFits = false;
-          log.warn(
-            [
-              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: full-attention KV at the requested `,
-              `${effectiveNumCtx * slots}-token total context does not fit — keeping the full `,
-              'context and declining the --swa-full auto-default instead; the windowed KV cache ',
-              'is what actually fits (cross-request prefix reuse unavailable). ',
-              `Fit detail: ${admission.reason ?? 'over budget at the requested slot count'}`,
-            ].join(''),
-          );
-        } else if (explicitSwaFull === false && fullKvOverBudget) {
-          // Windowed cache pinned: the full-attention plan math would
-          // over-deny/over-clamp by the layer ratio; leave the launch alone.
-        } else if (envNumCtx === undefined) {
-          if (!admission.minimumSatisfied) {
+        // The plan whose ladder (deny → shed slots → clamp) is enforced
+        // below. Defaults to the full-attention plan; the windowed-cache
+        // branches replace it with windowed math or — only when the GGUF
+        // hides its SWA layout — null (no safe estimate; launch untouched,
+        // the pre-windowed-admission behavior).
+        let ladderPlan: typeof admission | null = admission;
+        const windowedCacheWillRun =
+          fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
+        if (windowedCacheWillRun) {
+          // The denial, the slot reduction, and the clamp above are all
+          // driven by full-attention KV math, which overstates the windowed
+          // cache's real allocation (Gemma 4: global layers are both fewer
+          // AND cheaper per token than SWA layers — ~14× on 31b). Re-plan
+          // with the windowed linearization: SWA layers become a fixed,
+          // context-independent reservation; only global layers scale.
+          // Without it a 31b-class Gemma on a ~32 GB host would launch
+          // with NO context admission at all — the same lazy-Metal-wiring
+          // OOM this gate exists to prevent, one machine class down.
+          const windowed = estimateWindowedKvLinearization({
+            blockCount: summary.blockCount,
+            embeddingLength: summary.embeddingLength,
+            headCount: summary.headCount,
+            headCountKv: summary.headCountKv,
+            headCountKvPerLayer: summary.headCountKvPerLayer,
+            slidingWindow: summary.slidingWindow,
+            slidingWindowPattern: summary.slidingWindowPattern,
+            keyLength: summary.keyLength,
+            valueLength: summary.valueLength,
+            keyLengthSwa: summary.keyLengthSwa,
+            valueLengthSwa: summary.valueLengthSwa,
+            kvCacheType,
+          });
+          if (swaFullAutoDefault) {
+            // Declining `--swa-full` dominates every full-math remedy:
+            // the context window is capability, the full cache is a
+            // session-switch performance trade. Weights-level admission
+            // stays with the capacity broker.
+            swaFullAutoFits = false;
+            log.warn(
+              [
+                `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: full-attention KV at the requested `,
+                `${effectiveNumCtx * slots}-token total context does not fit — keeping the full `,
+                'context and declining the --swa-full auto-default instead; the windowed KV cache ',
+                'is what actually fits (cross-request prefix reuse unavailable). ',
+                `Fit detail: ${admission.reason ?? 'over budget at the requested slot count'}`,
+              ].join(''),
+            );
+          }
+          if (windowed) {
+            ladderPlan = planCtxTokensForMemory({
+              requestedPerTurnCtxTokens: effectiveNumCtx,
+              slots,
+              minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
+              kvBytesPerToken: windowed.bytesPerToken,
+              weightsResidentBytes: residentBytes + windowed.fixedBytes * slots,
+              budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes,
+              committedOtherBytes,
+              freeSystemRamBytes: availableSystemRamBytes(),
+              vramBytes: liveBudget.vramBytes,
+            });
+          } else if ((summary.slidingWindow ?? 0) > 0 || swaFullAutoDefault) {
+            // A sliding-window model whose GGUF hides the layer layout:
+            // full math over-states the real cache and there is no exact
+            // substitute — leave the launch alone rather than over-clamp.
+            ladderPlan = null;
+          }
+          // else: `swaFull: false` pinned on a model with no SWA layers at
+          // all — the flag is a no-op there and the full-attention plan IS
+          // the real allocation; fall through with it intact.
+        }
+        if (ladderPlan !== null && envNumCtx === undefined) {
+          const windowedNote = ladderPlan === admission ? '' : ' (windowed KV admission)';
+          if (!ladderPlan.minimumSatisfied) {
             throw new CapacityDeniedError(
               formatContextCapacityDenial({
                 modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this local model',
-                plan: admission,
+                plan: ladderPlan,
               }),
             );
           }
-          if (admission.slots < slots) {
+          if (ladderPlan.slots < slots) {
             log.info(
-              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: reducing engine slots ${slots} -> ${admission.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
+              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}${windowedNote}: reducing engine slots ${slots} -> ${ladderPlan.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
             );
-            slots = admission.slots;
+            slots = ladderPlan.slots;
             batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
           }
-          if (admission.clamped) {
-            log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
-            effectiveNumCtx = admission.perTurnCtxTokens;
+          if (ladderPlan.clamped) {
+            log.warn(
+              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}${windowedNote}: ${ladderPlan.reason}`,
+            );
+            effectiveNumCtx = ladderPlan.perTurnCtxTokens;
           }
         }
       }
