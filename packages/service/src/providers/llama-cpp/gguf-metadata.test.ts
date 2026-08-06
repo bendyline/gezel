@@ -336,7 +336,14 @@ describe('readGgufSummary', () => {
       .metaU32('gemma4.attention.key_length', 512)
       .metaU32('gemma4.attention.value_length', 512)
       .metaU32('gemma4.attention.sliding_window', 1024)
-      .metaBoolArray('gemma4.attention.sliding_window_pattern', [true, true, true, true, true, false])
+      .metaBoolArray('gemma4.attention.sliding_window_pattern', [
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+      ])
       .metaU32('gemma4.attention.key_length_swa', 256)
       .metaU32('gemma4.attention.value_length_swa', 256)
       .finish();

@@ -16,6 +16,7 @@ import {
 } from '@bendyline/gezel';
 import type { ExternalFolders, TaskAssignee } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
   DeviceHealthGate,
   createSystemDeviceHealthProbe,
@@ -38,6 +39,7 @@ import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
+import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
 import { effectiveEngineRelease } from './engines/native-manifest.js';
 import { EngineBinaryRegistry } from './engines/registry.js';
 import { ModelFitnessManager } from './fitness/manager.js';
@@ -525,9 +527,29 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // engine binaries here so the on-device chat path finds them. Idempotent
   // when the supervisor already populated the env (embedded / dev /
   // packaged-spawn launches); the discovery short-circuits per binary.
-  // Bare npm/CLI installs have no Electron supervisor to point discovery at
-  // the runtime-downloaded cache. Make the source-pinned cache the default
-  // native-bin root while preserving a packaged/operator override. This makes
+  // A directly-started user daemon has no Electron supervisor to point it at
+  // an installed app payload. Reuse that payload only after the service's own
+  // source-pinned per-file manifest, architecture, and platform-signature
+  // policy accept it. This is the same gate the standalone CLI uses; metadata
+  // beside the installed app is never trusted. An explicit/operator path and
+  // mock mode both remain untouched.
+  if (!process.env.GEZEL_NATIVE_BIN_DIR && process.env.GEZEL_MOCK_PROVIDER !== '1') {
+    const installedCandidates = electronNativeBinCandidates().filter((candidate) =>
+      existsSync(candidate),
+    );
+    if (installedCandidates.length > 0) {
+      const reuse = await reuseVerifiedElectronNativeBinaries({ candidates: installedCandidates });
+      if (reuse.reused) {
+        log.info(`[native] ${reuse.reason}: ${reuse.nativeBinDir}`);
+      } else {
+        log.warn(`[native] installed Electron payload rejected: ${reuse.reason}`);
+      }
+    }
+  }
+
+  // Bare npm/CLI installs may have neither a supervisor nor an installed app.
+  // Make the source-pinned, user-owned download cache the final default while
+  // preserving every verified or operator-provided override above. This makes
   // a verified TUI bootstrap install available immediately and on later daemon
   // launches without another download.
   process.env.GEZEL_NATIVE_BIN_DIR ??= join(

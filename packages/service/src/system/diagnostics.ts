@@ -86,7 +86,7 @@ function collectLocalEngines(deps: SystemDiagnosticsDeps): SystemDiagnostics['lo
     const d = snapshot.diagnostics ?? {};
     out.push({
       provider,
-      ...(stringField(d.model) ?? modelId ? { model: stringField(d.model) ?? modelId } : {}),
+      ...((stringField(d.model) ?? modelId) ? { model: stringField(d.model) ?? modelId } : {}),
       ...(snapshot.pid !== undefined ? { pid: snapshot.pid } : {}),
       ...(snapshot.startedAt > 0 ? { startedAt: new Date(snapshot.startedAt).toISOString() } : {}),
       ...(numberField(d.contextPerSlot) !== undefined

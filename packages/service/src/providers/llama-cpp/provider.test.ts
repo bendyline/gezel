@@ -473,6 +473,11 @@ describe('LlamaCppProvider constructor', () => {
         {
           choices: [{ index: 0, finish_reason: 'stop' }],
           usage: { prompt_tokens: 42, completion_tokens: 7 },
+          timings: {
+            predicted_per_second: 63.25,
+            prompt_per_second: 635.5,
+            cache_n: 12,
+          },
         },
         '[DONE]',
       ]);
@@ -488,6 +493,9 @@ describe('LlamaCppProvider constructor', () => {
           promptTokens: number;
           completionTokens: number;
           durationMs: number;
+          ttftMs?: number;
+          promptTokensPerSec?: number;
+          cachedPromptTokens?: number;
           tokensPerSec?: number;
         }) => void,
       ) => () => void;
@@ -497,6 +505,9 @@ describe('LlamaCppProvider constructor', () => {
       provider: string;
       promptTokens: number;
       completionTokens: number;
+      ttftMs?: number;
+      promptTokensPerSec?: number;
+      cachedPromptTokens?: number;
       tokensPerSec?: number;
     }> = [];
     session.onTurnStats((ev) =>
@@ -504,6 +515,13 @@ describe('LlamaCppProvider constructor', () => {
         provider: ev.provider,
         promptTokens: ev.promptTokens,
         completionTokens: ev.completionTokens,
+        ...(ev.ttftMs !== undefined ? { ttftMs: ev.ttftMs } : {}),
+        ...(ev.promptTokensPerSec !== undefined
+          ? { promptTokensPerSec: ev.promptTokensPerSec }
+          : {}),
+        ...(ev.cachedPromptTokens !== undefined
+          ? { cachedPromptTokens: ev.cachedPromptTokens }
+          : {}),
         ...(ev.tokensPerSec !== undefined ? { tokensPerSec: ev.tokensPerSec } : {}),
       }),
     );
@@ -512,9 +530,10 @@ describe('LlamaCppProvider constructor', () => {
     expect(stats[0]?.provider).toBe('llama-cpp');
     expect(stats[0]?.promptTokens).toBe(42);
     expect(stats[0]?.completionTokens).toBe(7);
-    // tokensPerSec only defined when there's non-zero generation
-    // time AND non-zero output; both hold here.
-    expect(stats[0]?.tokensPerSec).toBeGreaterThanOrEqual(0);
+    expect(stats[0]?.tokensPerSec).toBe(63.25);
+    expect(stats[0]?.promptTokensPerSec).toBe(635.5);
+    expect(stats[0]?.cachedPromptTokens).toBe(12);
+    expect(stats[0]?.ttftMs).toBeGreaterThanOrEqual(0);
   });
 
   it('emits engine_phase prefill then generating across a single turn', async () => {

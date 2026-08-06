@@ -24,6 +24,13 @@ const BASE_HEALTH = {
   platform: 'win32',
 } as HealthResponse;
 
+async function openAdvanced() {
+  const heading = screen.getByRole('heading', { name: 'Advanced' });
+  const details = heading.closest('details') as HTMLDetailsElement;
+  if (!details.open) await userEvent.click(heading);
+  return details;
+}
+
 describe('LlamaCppSettings', () => {
   beforeEach(() => {
     window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'linux' };
@@ -139,6 +146,27 @@ describe('LlamaCppSettings', () => {
     expect(screen.queryByRole('heading', { name: 'Machine health' })).not.toBeInTheDocument();
   });
 
+  it('collapses Advanced by default and toggles it from the disclosure heading', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+
+    const heading = screen.getByRole('heading', { name: 'Advanced' });
+    const details = heading.closest('details') as HTMLDetailsElement;
+    const contextSizing = screen.getByLabelText('Context sizing');
+
+    expect(details).not.toHaveAttribute('open');
+    expect(contextSizing).not.toBeVisible();
+
+    await userEvent.click(heading);
+    expect(details).toHaveAttribute('open');
+    expect(contextSizing).toBeVisible();
+
+    await userEvent.click(heading);
+    expect(details).not.toHaveAttribute('open');
+    expect(contextSizing).not.toBeVisible();
+  });
+
   it('selecting a default model patches config.defaultModel.llama-cpp', async () => {
     const onConfigChanged = vi.fn();
     render(
@@ -166,6 +194,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Engine backend/)).toBeInTheDocument();
     });
@@ -182,6 +211,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={cfgWithOverride} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Engine backend/)).toBeInTheDocument();
     });
@@ -200,6 +230,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={cfgWithOverride} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Restart the app to apply/)).toBeInTheDocument();
     });
@@ -210,6 +241,7 @@ describe('LlamaCppSettings', () => {
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
 
+    await openAdvanced();
     const selector = await screen.findByLabelText('Context sizing');
     expect(selector).toHaveValue('adaptive');
 
@@ -226,6 +258,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Engine backend/)).toBeInTheDocument();
     });
@@ -236,9 +269,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
-    await waitFor(() => {
-      expect(screen.getByText(/Advanced/)).toBeInTheDocument();
-    });
+    await openAdvanced();
 
     const user = userEvent.setup();
     const urlInput = screen.getByPlaceholderText(/127\.0\.0\.1:8080/) as HTMLInputElement;
@@ -258,6 +289,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Engine log/)).toBeInTheDocument();
     });
@@ -298,6 +330,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
     });
@@ -313,6 +346,7 @@ describe('LlamaCppSettings', () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
     });
@@ -332,6 +366,7 @@ describe('LlamaCppSettings', () => {
         health={BASE_HEALTH}
       />,
     );
+    await openAdvanced();
     await waitFor(() => {
       expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
     });

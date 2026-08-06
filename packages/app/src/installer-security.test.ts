@@ -161,6 +161,24 @@ describe('Windows machine-service installer security', () => {
     }
   });
 
+  it('re-publishes preserved shared models for standalone use during uninstall', () => {
+    const uninstallStart = position('!macro customUnInstall');
+    const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));
+    const removeService = uninstall.indexOf('!insertmacro RemoveGezelService');
+    const sanitizeAssets = uninstall.indexOf(
+      '!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\\assets"',
+    );
+    const publicAcl = uninstall.indexOf('"${GEZEL_DATA_DIR}\\assets" /inheritance:r /grant:r');
+
+    expect(removeService).toBeGreaterThanOrEqual(0);
+    expect(sanitizeAssets).toBeGreaterThan(removeService);
+    expect(publicAcl).toBeGreaterThan(sanitizeAssets);
+    expect(uninstall.slice(publicAcl)).toContain('*S-1-5-32-545:(OI)(CI)(RX)');
+    expect(uninstall.slice(publicAcl)).not.toMatch(/S-1-5-32-545:[^\n]*\([^)]+[WMF][^)]*\)/);
+    expect(uninstall).not.toContain('RMDir /r "${GEZEL_DATA_DIR}\\assets"');
+    expect(uninstall).not.toContain('Delete "${GEZEL_DATA_DIR}\\assets');
+  });
+
   it('registers born-disabled LocalService and assigns the service SID before startup', () => {
     // One atomic sc.exe create: disabled AND LocalService AND a quoted
     // ImagePath from birth — no transient LocalSystem or enabled window.

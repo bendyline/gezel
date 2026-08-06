@@ -79,7 +79,7 @@ export function SecurityComplianceSettings({
         const res = await api.updateConfig({ securityPolicy: next });
         onConfigChanged(res);
         window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-        setStatus('saved');
+        setStatus('');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }

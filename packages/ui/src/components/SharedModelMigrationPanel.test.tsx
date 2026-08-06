@@ -42,9 +42,7 @@ describe('SharedModelMigrationPanel', () => {
 
     render(<SharedModelMigrationPanel engine="mlx" />);
 
-    expect(
-      await screen.findByRole('button', { name: 'Moving and verifying…' }),
-    ).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Moving and verifying…' })).toBeDisabled();
     expect(
       screen.queryByRole('button', { name: 'Move to shared location' }),
     ).not.toBeInTheDocument();
@@ -97,9 +95,7 @@ describe('SharedModelMigrationPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Move to shared location' }));
     await user.click(screen.getByRole('button', { name: 'Move model' }));
 
-    expect(
-      await screen.findByRole('button', { name: 'Moving and verifying…' }),
-    ).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Moving and verifying…' })).toBeDisabled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

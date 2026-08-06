@@ -77,13 +77,14 @@ describe('SecurityComplianceSettings', () => {
   });
 
   it('flipping a capability off-preset persists a Custom-classified policy', async () => {
+    const onConfigChanged = vi.fn();
     vi.mocked(api.updateConfig).mockImplementation(async (patch) =>
       configWithPolicy(patch.securityPolicy),
     );
     render(
       <SecurityComplianceSettings
         config={configWithPolicy(securityPolicyForLevel('lockdown'))}
-        onConfigChanged={vi.fn()}
+        onConfigChanged={onConfigChanged}
       />,
     );
     await userEvent.click(screen.getByRole('checkbox', { name: /Edit files/ }));
@@ -93,5 +94,7 @@ describe('SecurityComplianceSettings', () => {
         securityPolicy: { level: 'custom', ...lockdownCaps, allowFileEdits: false },
       });
     });
+    await waitFor(() => expect(onConfigChanged).toHaveBeenCalled());
+    expect(screen.queryByText(/^saved$/i)).not.toBeInTheDocument();
   });
 });

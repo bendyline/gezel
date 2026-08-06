@@ -580,7 +580,9 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th title="Effective per-turn context size after Gezel's configured limit">
                     Context size
                   </th>
-                  <th>Fitness</th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -652,7 +654,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                             type="button"
                             className="home-link"
                             disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
                             onClick={() => {
                               void api
                                 .runModelFitnessProbe('mlx', m.id)

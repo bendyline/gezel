@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -44,6 +44,7 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
 
 describe('LlamaCppModelManager local model list', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [
         {
@@ -71,6 +72,23 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('64K')).toBeInTheDocument();
     expect(screen.queryByText('128K')).not.toBeInTheDocument();
+  });
+
+  it('does not stack inventory requests while shared models are being verified', async () => {
+    let finish!: (value: { models: never[] }) => void;
+    const verification = new Promise<{ models: never[] }>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(api.listLlamaCppModels).mockReturnValue(verification as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(screen.getByText(/Checking shared models/)).toBeInTheDocument();
+    await waitFor(() => expect(api.listLlamaCppActiveInstalls).toHaveBeenCalled());
+    expect(api.listLlamaCppModels).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish({ models: [] }));
+    await waitFor(() => expect(screen.queryByText(/Checking shared models/)).not.toBeInTheDocument());
   });
 
   it('explains when the selected context policy will not fit', async () => {

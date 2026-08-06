@@ -43,7 +43,7 @@ function* walkDaemonLogs(dir: string): Generator<string> {
   }
   for (const entry of entries) {
     const full = join(dir, entry);
-    let st;
+    let st: ReturnType<typeof statSync>;
     try {
       st = statSync(full);
     } catch {

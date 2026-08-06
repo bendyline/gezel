@@ -5517,9 +5517,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               ...(lastUsage.prompt_per_second !== undefined
                 ? { promptTokensPerSec: lastUsage.prompt_per_second }
                 : {}),
-              ...(lastUsage.cache_n !== undefined
-                ? { cachedPromptTokens: lastUsage.cache_n }
-                : {}),
+              ...(lastUsage.cache_n !== undefined ? { cachedPromptTokens: lastUsage.cache_n } : {}),
               ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
             });
           }

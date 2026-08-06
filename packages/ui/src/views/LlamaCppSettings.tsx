@@ -439,9 +439,14 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         platform={window.__GEZEL__?.platform ?? health?.platform}
       />
 
-      <section style={{ marginBottom: '2rem' }}>
-        <h4>Advanced</h4>
-        <p className="muted small" style={{ marginTop: 0 }}>
+      <details className="llama-advanced-settings">
+        <summary className="llama-advanced-summary">
+          <span className="llama-advanced-caret" aria-hidden="true">
+            &rsaquo;
+          </span>
+          <h4>Advanced</h4>
+        </summary>
+        <p className="muted small" style={{ marginTop: '0.75rem' }}>
           Tune how the managed on-device engine starts, or override how Gezel connects to it. Most
           users don't need any of these — the supervised engine handles everything. Set them only
           when you need a different context policy, are running your own engine process, point at a
@@ -672,7 +677,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         </div>
 
         <EngineLogViewer />
-      </section>
+      </details>
     </div>
   );
 }

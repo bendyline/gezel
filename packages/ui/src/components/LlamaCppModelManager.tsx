@@ -168,6 +168,7 @@ interface Props {
 export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<LlamaCppInstalledModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
   // Interrupted/unverified downloads holding disk with no install manifest —
   // invisible to the installed list. Surfaced so the user can resume or
   // delete them before the daemon's 7-day reclaim sweep.
@@ -192,6 +193,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
   const [probing, setProbing] = useState<string[]>([]);
   const probingRef = useRef<string[]>([]);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
 
   const refreshFitness = useCallback(async () => {
     try {
@@ -213,16 +215,28 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     }
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await api.listLlamaCppModels();
-      setModels(res.models);
-      setModelsError(null);
-    } catch (err) {
-      setModelsError(err instanceof Error ? err.message : String(err));
-    }
-    void refreshFitness();
-    void refreshIncomplete();
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+
+    setModelsLoading(true);
+    const request = (async () => {
+      try {
+        const res = await api.listLlamaCppModels();
+        setModels(res.models);
+        setModelsError(null);
+      } catch (err) {
+        setModelsError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setModelsLoading(false);
+      }
+      void refreshFitness();
+      void refreshIncomplete();
+    })();
+    refreshInFlight.current = request;
+    void request.then(() => {
+      if (refreshInFlight.current === request) refreshInFlight.current = null;
+    });
+    return request;
   }, [refreshFitness, refreshIncomplete]);
 
   useEffect(() => {
@@ -621,9 +635,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
         <SharedModelMigrationPanel engine="llama-cpp" onModelsChanged={onModelsChanged} />
       )}
 
-      {(models.length > 0 || modelsError) && (
+      {(modelsLoading || models.length > 0 || modelsError) && (
         <div className="ollama-section">
           <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
+          {modelsLoading && models.length === 0 && !modelsError && (
+            <p className="muted small" aria-live="polite">
+              Checking shared models… Large models can take a few minutes the first time; later
+              starts use the local verification cache.
+            </p>
+          )}
           {modelsError && <p className="error">{modelsError}</p>}
           {models.length > 0 && (
             <table className="ollama-model-table">
@@ -635,7 +655,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   <th title="Effective per-turn context size after Gezel's settings and memory limits">
                     Context size
                   </th>
-                  <th>Fitness</th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -741,7 +763,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                             type="button"
                             className="home-link"
                             disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
                             onClick={() => {
                               void api
                                 .runModelFitnessProbe('llama-cpp', m.id)

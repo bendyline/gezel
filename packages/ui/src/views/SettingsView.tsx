@@ -4,13 +4,13 @@ import {
   type ProviderName,
   isOllamaReasoningModel,
 } from '@bendyline/gezel';
+import type { SystemDiagnostics } from '@bendyline/gezel';
 import type {
   ConfigResponse,
   ProviderUsage,
   QuotaBucket,
   UsageResponse,
 } from '@bendyline/gezel-client';
-import type { SystemDiagnostics } from '@bendyline/gezel';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';

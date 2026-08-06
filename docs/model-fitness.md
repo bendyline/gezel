@@ -25,13 +25,25 @@ When a local model finishes downloading, a fitness probe runs automatically in
 the background. You can also re-run it any time from Settings → Local models
 ("Run fitness check"). The probe spins up one real session against the model —
 no gezel, no project, no MCP subprocess, zero user-state pollution — and runs
-two turns:
+three turns:
 
-1. **A plain-generation turn** measures decode throughput (tokens/second,
-   first-token → end, so model-load time is excluded).
-2. **A tool-round-trip turn** advertises one synthetic `write_file` tool and
+1. **A short-generation turn** absorbs the cold model load and records the
+   engine's own decode-loop throughput as a raw baseline.
+2. **A representative-context turn** adds a deterministic neutral payload
+   targeting a 20K-token prompt, then records the observed prompt tokens,
+   prompt-cache reuse, time to first output, prefill throughput, and decode
+   throughput. This is the practical speed used by the badge and throughput
+   check. `GEZEL_FITNESS_REPRESENTATIVE_TOKENS` overrides the target (`0`
+   disables this turn for diagnostics/tests).
+3. **A tool-round-trip turn** advertises one synthetic `write_file` tool and
    asks the model to call it. The call is captured and validated but never
    executed.
+
+Native engines' own generation timing is authoritative. Wall-clock
+`completionTokens / generationDuration` is only a compatibility fallback for
+older engines that do not report decode timing; deriving it from the first SSE
+fragment can badly overstate thinking models whose hidden reasoning is counted
+as completion tokens but is not streamed from its first token.
 
 From that it computes five checks (mirroring the eval preflight, minus the
 harness-only profile-resolution check):
@@ -40,7 +52,7 @@ harness-only profile-resolution check):
 |---|---|
 | **spawn** | the engine came up and served the probe session (capacity budget not exhausted) |
 | **tool round-trip** | the model emitted a well-formed call to the advertised tool |
-| **throughput** | decode rate ≥ 3 t/s (`GEZEL_FITNESS_MIN_TPS` to override) |
+| **throughput** | representative-context decode rate ≥ 3 t/s (`GEZEL_FITNESS_MIN_TPS` to override; short-prompt fallback when representative telemetry is unavailable) |
 | **reasoning budget** | the manifest caps `thinkingBudget` finitely, OR the model shows no thinking — never the unbounded 2³⁰ sentinel |
 | **context fit** | `min(GGUF train context, launch numCtx)` ≥ 16K tokens |
 
@@ -85,12 +97,13 @@ The proeve result renders as a single badge, composed from the RAM-axis fit
 ([computeModelFit](../packages/core/src/model-fit.ts)) plus the fitness record by
 the pure [composeFitnessBadge](../packages/core/src/fitness-badge.ts):
 
-- **A speed band with the measured decode rate** — admitted, described in plain
-  English rather than by naming the trial: `runs fast (128 t/s)` at 100 t/s and
-  up, `runs well (42 t/s)` from 30, `runs slow (8.9 t/s)` from 2, and
-  `runs, but too slow (1.4 t/s)` below that (a warn pill — it passed the trial
-  but is not practical here). `runs (speed unknown)` when the rate was not
-  measured.
+- **Representative responsiveness** — admitted records show both perceived
+  startup and loaded-context decode, for example `starts ~31s · 25 t/s`. The
+  tooltip adds observed prompt size, prefill rate, cache reuse, and the raw
+  short-prompt decode baseline. The same decode bands still determine pill
+  severity: ≥100 t/s fast, ≥30 well, ≥2 slow, and below 2 a warning. Older
+  records remain readable but say `short prompt · 128 t/s` and invite a re-run
+  instead of presenting the microbenchmark as practical speed.
 - **A named warning** — the first failing axis names it: `slow decoding`,
   `tool calls failed`, `unbounded reasoning`, `small context`, `did not start`.
 - **`checking fitness…`** — a probe is running.

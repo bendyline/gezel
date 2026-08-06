@@ -47,6 +47,16 @@ prompt bands, transcript, and tool schemas—never project paths or credentials.
 
 - Before a broker has ever been adopted, the user daemon can run native engines locally. This keeps
   development, portable installs, and failed system-service installs working.
+- The app supervisor and standalone CLI mount the installer-owned `assets/models/` tree as a
+  lower-priority, read-only overlay even when no broker process or registration exists. User-owned
+  models shadow matching shared ids, shared payloads are re-hashed before first local use, and every
+  download/update/delete remains confined to the user-owned model store. Platform uninstallers
+  preserve that public-read boundary when they preserve the shared model files.
+- A self-contained daemon may also execute an installed Electron app's `native-bin/` payload, but
+  only when the daemon's source-pinned native release and complete per-file manifest match it. The
+  verifier rejects missing or unexpected loadable files, hash/size drift, unsafe symlinks, the wrong
+  architecture, and invalid platform signatures/notarization. Rejection falls back to the daemon's
+  independently verified, user-owned native cache; it never falls through to unverified execution.
 - Once a broker is adopted, a transient broker restart does not silently create a second engine
   owner. Existing sessions resolve the broker's rotated port, certificate, and token before their
   next forward pass.

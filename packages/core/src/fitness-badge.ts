@@ -50,38 +50,32 @@ const CHECK_LABELS: ReadonlyArray<{
 ];
 
 /**
- * Speed bands for an admitted model, fastest first. The badge says how it
- * runs on *this* machine in plain English rather than naming the trial —
- * "proeve passed" told a user nothing about whether they would enjoy using
- * the model.
+ * Speed bands for an admitted model, fastest first. They determine severity
+ * and the plain-language tooltip while the badge itself shows the two numbers
+ * users experience: startup latency and loaded-context decode speed.
  */
 const SPEED_BANDS: ReadonlyArray<{
   minTps: number;
-  label: string;
   tier: FitnessBadgeTier;
   detail: string;
 }> = [
   {
     minTps: 100,
-    label: 'runs fast',
     tier: 'ok',
     detail: 'It decodes faster than you can read.',
   },
   {
     minTps: 30,
-    label: 'runs well',
     tier: 'ok',
     detail: 'It decodes at a comfortable working speed.',
   },
   {
     minTps: 2,
-    label: 'runs slow',
     tier: 'ok',
     detail: 'It works, but long answers and tool loops will take a while.',
   },
   {
     minTps: 0,
-    label: 'runs, but too slow',
     tier: 'warn',
     detail: 'It is too slow on this machine for practical agentic work.',
   },
@@ -89,10 +83,22 @@ const SPEED_BANDS: ReadonlyArray<{
 
 /**
  * `128` above 10, `8.9` below. Bands are picked from this rounded value, not
- * the raw one, so the label never reads "runs well (100 t/s)" at 99.6.
+ * the raw one, so the displayed rate and its severity cannot disagree at a
+ * rounding boundary.
  */
 function displayTps(tps: number): number {
   return tps >= 10 ? Math.round(tps) : Number(tps.toFixed(1));
+}
+
+function displayDuration(ms: number): string {
+  const seconds = ms / 1000;
+  return seconds < 10 ? `${Number(seconds.toFixed(1))}s` : `${Math.round(seconds)}s`;
+}
+
+function displayContext(tokens: number): string {
+  return tokens >= 1000
+    ? `${Number((tokens / 1000).toFixed(tokens >= 10_000 ? 0 : 1))}K`
+    : `${tokens}`;
 }
 
 function ramCaveat(ramFit: ModelFitResult | undefined): string {
@@ -169,20 +175,59 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
   }
 
   const passed = 'It starts, calls tools, and answers.';
-  const tps = record.genTokensPerSec;
+  const representative = record.representativeContext;
+  const tps = representative ? representative.genTokensPerSec : record.genTokensPerSec;
   if (tps == null) {
+    if (representative?.ttftMs != null) {
+      const promptTokens = representative.promptTokens ?? representative.targetPromptTokens;
+      return {
+        tier: 'ok',
+        label: `starts ~${displayDuration(representative.ttftMs)} · speed unknown`,
+        detail: `${passed} With a representative ${displayContext(promptTokens)}-token prompt, first model output arrived in ${displayDuration(representative.ttftMs)}; decode speed was not measured.${softener}${ramCaveat(ramFit)}`,
+      };
+    }
     return {
       tier: 'ok',
-      label: 'runs (speed unknown)',
-      detail: `${passed} Its decode speed was not measured.${softener}${ramCaveat(ramFit)}`,
+      label: representative ? 'representative speed unknown' : 'short prompt · speed unknown',
+      detail: representative
+        ? `${passed} Its representative-context decode speed was not measured.${softener}${ramCaveat(ramFit)}`
+        : `${passed} This older check did not measure representative-context performance; re-run it for realistic startup and decode timing.${softener}${ramCaveat(ramFit)}`,
     };
   }
 
   const shown = displayTps(tps);
   const band = SPEED_BANDS.find((b) => shown >= b.minTps) ?? SPEED_BANDS[SPEED_BANDS.length - 1]!;
+  if (representative) {
+    const observedPromptTokens = representative.promptTokens ?? representative.targetPromptTokens;
+    const promptDetail = `With a representative ${displayContext(observedPromptTokens)}-token prompt`;
+    const startDetail =
+      representative.ttftMs != null
+        ? `first model output arrived in ${displayDuration(representative.ttftMs)}`
+        : 'time to first output was not measured';
+    const prefillDetail =
+      representative.promptTokensPerSec != null
+        ? ` Prefill ran at ${displayTps(representative.promptTokensPerSec)} t/s.`
+        : '';
+    const cacheDetail =
+      representative.cachedPromptTokens != null && representative.cachedPromptTokens > 0
+        ? ` ${representative.cachedPromptTokens.toLocaleString()} prompt tokens came from cache.`
+        : '';
+    const shortDetail =
+      record.shortPromptGenTokensPerSec != null
+        ? ` Short-prompt decode was ${displayTps(record.shortPromptGenTokensPerSec)} t/s.`
+        : '';
+    return {
+      tier: band.tier,
+      label:
+        representative.ttftMs != null
+          ? `starts ~${displayDuration(representative.ttftMs)} · ${shown} t/s`
+          : `${displayContext(observedPromptTokens)} context · ${shown} t/s`,
+      detail: `${passed} ${promptDetail}, ${startDetail}, and decode ran at ${shown} t/s. ${band.detail}${prefillDetail}${cacheDetail}${shortDetail}${softener}${ramCaveat(ramFit)}`,
+    };
+  }
   return {
     tier: band.tier,
-    label: `${band.label} (${shown} t/s)`,
-    detail: `${passed} ${band.detail}${softener}${ramCaveat(ramFit)}`,
+    label: `short prompt · ${shown} t/s`,
+    detail: `${passed} This older check measured only short-prompt decode (${shown} t/s); re-run it for realistic startup and loaded-context timing. ${band.detail}${softener}${ramCaveat(ramFit)}`,
   };
 }

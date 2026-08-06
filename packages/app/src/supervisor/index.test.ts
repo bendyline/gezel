@@ -76,6 +76,13 @@ const ctx = vi.hoisted(() => ({
     signal: string;
     reason: string;
   }>,
+  nativeRoot: '/mock/native-bin',
+  installedNativeCandidates: ['/mock/installed-native-bin'],
+  nativeReuse: {
+    reused: true,
+    nativeBinDir: '/mock/native-bin',
+    reason: 'verified Electron native release test',
+  } as { reused: boolean; nativeBinDir?: string; reason: string },
 }));
 
 vi.mock('./extract-pnpm.js', () => ({
@@ -105,7 +112,7 @@ vi.mock('./native-bin.js', () => ({
       ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
       : null,
   ),
-  nativeBinDir: () => '/mock/native-bin',
+  nativeBinDir: () => ctx.nativeRoot,
 }));
 // Probe + cache-bust key live in core (`@bendyline/gezel/native`)
 // because the supervisor needs to static-import them BEFORE the
@@ -203,6 +210,7 @@ vi.mock('@bendyline/gezel-client/node', () => ({
   stopProcessByPid: vi.fn().mockResolvedValue(true),
   stopOwnedDaemon: vi.fn().mockResolvedValue(undefined),
   systemSharedAssetsDir: () => '/mock/shared-assets',
+  electronNativeBinCandidates: () => ctx.installedNativeCandidates,
 }));
 vi.mock('@bendyline/gezel-service', () => ({
   startService: vi.fn().mockResolvedValue({
@@ -210,6 +218,12 @@ vi.mock('@bendyline/gezel-service', () => ({
     context: { token: 'embedded-token' },
     cert: { certPem: 'EMBEDDED-CERT-PEM' },
     stop: vi.fn().mockResolvedValue(undefined),
+  }),
+  reuseVerifiedElectronNativeBinaries: vi.fn(async () => {
+    if (ctx.nativeReuse.reused && ctx.nativeReuse.nativeBinDir) {
+      process.env.GEZEL_NATIVE_BIN_DIR = ctx.nativeReuse.nativeBinDir;
+    }
+    return ctx.nativeReuse;
   }),
 }));
 
@@ -261,6 +275,13 @@ beforeEach(async () => {
     reason: 'mock',
   };
   ctx.nativeLlamaPaths = {};
+  ctx.nativeRoot = '/mock/native-bin';
+  ctx.installedNativeCandidates = ['/mock/installed-native-bin'];
+  ctx.nativeReuse = {
+    reused: true,
+    nativeBinDir: ctx.nativeRoot,
+    reason: 'verified Electron native release test',
+  };
   // "We can't read our own bundle version" is the default, which makes every
   // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
   // records but leaves implementations in place, so a test that stubs a
@@ -810,6 +831,60 @@ describe('Branch 3 — embedded', () => {
     expect(svc.token).toBe('embedded-token');
     expect(svc.cert).toBe('EMBEDDED-CERT-PEM');
     expect(svc.fallbackReason).toBeNull();
+    expect(process.env.GEZEL_SHARED_ASSETS_DIR).toBe('/mock/shared-assets');
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBeUndefined();
+    await svc.shutdown();
+  });
+
+  it('uses a native payload that exists in the development checkout', async () => {
+    ctx.nativeRoot = join(testHome, 'native-bin');
+    ctx.nativeReuse = {
+      reused: true,
+      nativeBinDir: ctx.nativeRoot,
+      reason: 'verified Electron native release test',
+    };
+    await mkdir(ctx.nativeRoot, { recursive: true });
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
+
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(ctx.nativeRoot);
+    await svc.shutdown();
+  });
+
+  it('does not expose a development or installed payload rejected by the native pin', async () => {
+    ctx.nativeRoot = join(testHome, 'native-bin');
+    ctx.nativeReuse = { reused: false, reason: 'sha256 mismatch' };
+    await mkdir(ctx.nativeRoot, { recursive: true });
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+    const warnings: string[] = [];
+
+    const svc = await connectOrStart(
+      baseOpts({
+        forceEmbedded: true,
+        logger: { info: () => {}, warn: (message) => void warnings.push(message) },
+      }),
+    );
+
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBeUndefined();
+    expect(warnings.some((message) => message.includes('sha256 mismatch'))).toBe(true);
+    await svc.shutdown();
+  });
+
+  it('reuses a verified installed Electron payload when the development payload is absent', async () => {
+    const installedRoot = join(testHome, 'installed-native-bin');
+    ctx.installedNativeCandidates = [installedRoot];
+    ctx.nativeReuse = {
+      reused: true,
+      nativeBinDir: installedRoot,
+      reason: 'verified Electron native release test',
+    };
+    await mkdir(installedRoot, { recursive: true });
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
+
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
     await svc.shutdown();
   });
 });

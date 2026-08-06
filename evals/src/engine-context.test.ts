@@ -27,7 +27,9 @@ describe('extractEngineContext', () => {
   it('returns null for empty/absent logs and logs without engine evidence', () => {
     expect(extractEngineContext(null)).toBeNull();
     expect(extractEngineContext('')).toBeNull();
-    expect(extractEngineContext('INFO [chat] [mlx] launch {"pid":1,"command":"python"}')).toBeNull();
+    expect(
+      extractEngineContext('INFO [chat] [mlx] launch {"pid":1,"command":"python"}'),
+    ).toBeNull();
   });
 
   it('reads the launch line into granted context (contract pin)', () => {

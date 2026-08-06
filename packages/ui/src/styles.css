@@ -3579,6 +3579,62 @@ html.embedded-chat #root {
   justify-content: flex-start;
 }
 
+/* Settings already exposes a full-height content scrollbar against this seam.
+   When the navigation rail is also on the right, keeping its secondary track
+   painted at rest reads as a duplicate scrollbar. Preserve its gutter (and
+   therefore the layout), but reveal the track and thumb only while the rail is
+   hovered or contains keyboard focus. */
+:root[data-sidebar-side="right"] .app-body:has(> .app-main > .settings-layout) .app-sidebar-scroll {
+  scrollbar-color: transparent transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-color: transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll::-webkit-scrollbar-track,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-color: var(--border);
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll::-webkit-scrollbar-thumb,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+}
+
 /* Mirror the connected tab when the navigation rail lives on the right.
    Nested project/gezel rows also span the group's 0.9rem indent so their
    paper bridge still reaches the canvas seam. */
@@ -7981,6 +8037,51 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .settings-panel a,
 .settings-panel .home-link {
   font-family: var(--font-ui);
+}
+
+/* llama.cpp's low-level launch controls stay out of the way until explicitly
+   requested. Native <details> supplies the disclosure semantics and keyboard
+   behavior; the custom marker matches the Settings navigation chevrons. */
+.llama-advanced-settings {
+  margin-bottom: 2rem;
+}
+
+.llama-advanced-summary {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem 0.25rem 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.llama-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.llama-advanced-summary h4 {
+  margin: 0;
+}
+
+.llama-advanced-caret {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.llama-advanced-settings[open] .llama-advanced-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .llama-advanced-caret {
+    transition: none;
+  }
 }
 
 /* Machine health is a device-level policy: the mode is a prominent binary

@@ -52,18 +52,18 @@ describe('composeFitnessBadge', () => {
   });
 
   it.each([
-    [420, 'runs fast (420 t/s)', 'ok'],
-    [128.4, 'runs fast (128 t/s)', 'ok'],
-    [100, 'runs fast (100 t/s)', 'ok'],
-    [99.6, 'runs fast (100 t/s)', 'ok'],
-    [30, 'runs well (30 t/s)', 'ok'],
-    [42.1, 'runs well (42 t/s)', 'ok'],
-    [24.3, 'runs slow (24 t/s)', 'ok'],
-    [8.94, 'runs slow (8.9 t/s)', 'ok'],
-    [10, 'runs slow (10 t/s)', 'ok'],
-    [2, 'runs slow (2 t/s)', 'ok'],
-    [1.87, 'runs, but too slow (1.9 t/s)', 'warn'],
-    [0.4, 'runs, but too slow (0.4 t/s)', 'warn'],
+    [420, 'short prompt · 420 t/s', 'ok'],
+    [128.4, 'short prompt · 128 t/s', 'ok'],
+    [100, 'short prompt · 100 t/s', 'ok'],
+    [99.6, 'short prompt · 100 t/s', 'ok'],
+    [30, 'short prompt · 30 t/s', 'ok'],
+    [42.1, 'short prompt · 42 t/s', 'ok'],
+    [24.3, 'short prompt · 24 t/s', 'ok'],
+    [8.94, 'short prompt · 8.9 t/s', 'ok'],
+    [10, 'short prompt · 10 t/s', 'ok'],
+    [2, 'short prompt · 2 t/s', 'ok'],
+    [1.87, 'short prompt · 1.9 t/s', 'warn'],
+    [0.4, 'short prompt · 0.4 t/s', 'warn'],
   ] as const)('fresh admitted at %s t/s → %s', (genTokensPerSec, label, tier) => {
     const b = composeFitnessBadge({ fitness: fresh(record({ genTokensPerSec })) });
     expect(b.label).toBe(label);
@@ -73,7 +73,33 @@ describe('composeFitnessBadge', () => {
   it('fresh admitted without a measured t/s → speed-unknown label', () => {
     const b = composeFitnessBadge({ fitness: fresh(record({ genTokensPerSec: null })) });
     expect(b.tier).toBe('ok');
-    expect(b.label).toBe('runs (speed unknown)');
+    expect(b.label).toBe('short prompt · speed unknown');
+  });
+
+  it('shows representative startup plus loaded-context decode instead of a speed band', () => {
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          genTokensPerSec: 24.8,
+          shortPromptGenTokensPerSec: 33.1,
+          representativeContext: {
+            targetPromptTokens: 20_000,
+            promptTokens: 19_804,
+            cachedPromptTokens: 420,
+            completionTokens: 160,
+            durationMs: 37_000,
+            ttftMs: 31_176,
+            promptTokensPerSec: 635.2,
+            genTokensPerSec: 24.8,
+          },
+        }),
+      ),
+    });
+
+    expect(b.label).toBe('starts ~31s · 25 t/s');
+    expect(b.detail).toContain('representative 20K-token prompt');
+    expect(b.detail).toContain('Prefill ran at 635 t/s');
+    expect(b.detail).toContain('Short-prompt decode was 33 t/s');
   });
 
   it.each([
