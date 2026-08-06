@@ -593,6 +593,12 @@ export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): nu
  * per-token band so tiny models don't round to ~0 and giant MoE weights
  * don't push the estimate far past reality.
  */
+/** Approximate scale from an f16 KV baseline to the launcher's cache dtype. */
+export function kvQuantScale(kvCacheType: string | undefined): number {
+  const kvType = kvCacheType ?? 'q8_0';
+  return kvType.startsWith('q4') ? 0.3 : kvType.startsWith('q8') ? 0.55 : kvType === 'f32' ? 2 : 1;
+}
+
 export function estimatePerSlotKvBytes(opts: {
   perTurnCtxTokens: number;
   weightsBytes: number;
@@ -600,18 +606,15 @@ export function estimatePerSlotKvBytes(opts: {
 }): number {
   const KB = 1024;
   // f16 KV bytes/token per byte of (quantized) on-disk weights. ~1.3× the
-  // measured Gemma-26B anchor (~3.7e-6) → conservative.
+  // measured Gemma-26B anchor (~3.7e-6) → conservative. NOTE the anchor is
+  // a WINDOWED-cache measurement, and small dense models routinely exceed
+  // the 40 KB/token floor by 3× — this heuristic exists only for weights
+  // without a readable header (external paths, MLX safetensors). Callers
+  // with GGUF metadata pass `exactPerSlotKvBytesF16` to the slot ceilings
+  // instead (see estimateExactPerSlotKvBytesF16 in offload-planner).
   const KV_RATIO_F16 = 5e-6;
   const perTokenF16 = Math.min(400 * KB, Math.max(40 * KB, opts.weightsBytes * KV_RATIO_F16));
-  const kvType = opts.kvCacheType ?? 'q8_0';
-  const quant = kvType.startsWith('q4')
-    ? 0.3
-    : kvType.startsWith('q8')
-      ? 0.55
-      : kvType === 'f32'
-        ? 2
-        : 1; // f16 / unknown → full
-  return Math.round(opts.perTurnCtxTokens * perTokenF16 * quant);
+  return Math.round(opts.perTurnCtxTokens * perTokenF16 * kvQuantScale(opts.kvCacheType));
 }
 
 /**
@@ -664,12 +667,23 @@ export function localEngineSlotCeiling(opts: {
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;
+  /**
+   * Header-exact per-slot KV at f16 (see estimateExactPerSlotKvBytesF16).
+   * When present it replaces the weights-scaled heuristic, scaled to the
+   * launcher's cache dtype by the same approximate quant ladder — the
+   * heuristic under-prices small dense models ~3× (over-slotting exactly
+   * the models that get multi-slot defaults) and over-prices MoE.
+   */
+  exactPerSlotKvBytesF16?: number;
 }): number {
-  const perSlotKv = estimatePerSlotKvBytes({
-    perTurnCtxTokens: opts.perTurnCtxTokens,
-    weightsBytes: opts.weightsBytes,
-    ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
-  });
+  const perSlotKv =
+    opts.exactPerSlotKvBytesF16 !== undefined && opts.exactPerSlotKvBytesF16 > 0
+      ? Math.round(opts.exactPerSlotKvBytesF16 * kvQuantScale(opts.kvCacheType))
+      : estimatePerSlotKvBytes({
+          perTurnCtxTokens: opts.perTurnCtxTokens,
+          weightsBytes: opts.weightsBytes,
+          ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
+        });
   if (perSlotKv <= 0) return 1;
   const freeForKv = localEngineKvBudgetBytes(opts);
   const usableForKv = freeForKv * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
@@ -687,6 +701,7 @@ export function llamaCppSlotCeiling(opts: {
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;
+  exactPerSlotKvBytesF16?: number;
 }): number {
   return localEngineSlotCeiling({ engine: 'llama-cpp', ...opts });
 }

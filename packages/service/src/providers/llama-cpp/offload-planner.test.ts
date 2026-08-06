@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   degradeMoeOffloadDecision,
+  estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
   planMoeOffload,
@@ -231,6 +232,21 @@ describe('estimateWindowedKvLinearization', () => {
     const f16 = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'f16' });
     const q8 = estimateWindowedKvLinearization({ ...gemma31b, kvCacheType: 'q8_0' });
     expect(q8?.bytesPerToken).toBeCloseTo((f16?.bytesPerToken ?? 0) * (34 / 32 / 2), 5);
+  });
+
+  it('estimateExactPerSlotKvBytesF16 picks windowed for SWA layouts and full per-layer otherwise', () => {
+    // SWA model → windowed linearization at the per-turn window (the
+    // engine-default cache, and the honest slot-ceiling upper bound).
+    const swa = estimateExactPerSlotKvBytesF16(gemma31b, 65_536);
+    expect(swa).toBe(50 * 16 * 512 * 2 * (1024 + 2048) + 10 * 4 * 1024 * 2 * 65_536);
+    // Dense model → full-attention per-layer bytes at the same window.
+    const dense = estimateExactPerSlotKvBytesF16(
+      { blockCount: 40, headCountKv: 8, keyLength: 128, valueLength: 128 },
+      65_536,
+    );
+    expect(dense).toBe(40 * 8 * 256 * 2 * 65_536);
+    // No readable geometry → undefined so callers fall back to the heuristic.
+    expect(estimateExactPerSlotKvBytesF16({ blockCount: 40 }, 65_536)).toBeUndefined();
   });
 
   it('degrades to undefined instead of guessing a layer layout', () => {

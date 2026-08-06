@@ -136,6 +136,7 @@ import {
   buildLlamaCppEngineArgs,
 } from '../providers/llama-cpp/engine-flags.js';
 import { readGgufSummaryAsync } from '../providers/llama-cpp/gguf-metadata-async.js';
+import type { GgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
 import {
   type LlamaCppKvCacheType,
@@ -145,6 +146,7 @@ import {
 } from '../providers/llama-cpp/kv-cache-type.js';
 import {
   degradeMoeOffloadDecision,
+  estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
   planMoeOffload,
@@ -159,6 +161,7 @@ import {
   MlxProvider,
   mlxVenvPackages,
 } from '../providers/mlx/index.js';
+import { readMlxModelGeometry } from '../providers/mlx/model-geometry.js';
 import { MockProvider } from '../providers/mock.js';
 import {
   CapacityDeniedError,
@@ -9718,7 +9721,13 @@ export class ChatManager {
         broker,
       });
       await this.initLocalProvider('llama-cpp', provider, cfg);
-      const bytes = await this.resolveResidentBytes('llama-cpp', modelId);
+      // Prefer the launch admission's own reservation (weights + KV at the
+      // granted window) over the catalog/weights-multiplier estimate — the
+      // ledger otherwise carries zero KV and under-reserves dense models
+      // whose KV rivals their weights (M1).
+      const bytes =
+        provider.plannedReservationBytes?.() ??
+        (await this.resolveResidentBytes('llama-cpp', modelId));
       const installed = await this.llamaCppModels?.resolveModel(modelId).catch(() => null);
       return {
         provider,
@@ -9744,7 +9753,10 @@ export class ChatManager {
         broker,
       });
       await this.initLocalProvider('mlx', provider, cfg);
-      const bytes = await this.resolveResidentBytes('mlx', modelId);
+      // Same M1 preference as the llama-cpp builder: the launch admission's
+      // weights+KV reservation over the catalog/weights-multiplier fallback.
+      const bytes =
+        provider.plannedReservationBytes?.() ?? (await this.resolveResidentBytes('mlx', modelId));
       const installed = await this.mlxModels?.resolveModel(modelId).catch(() => null);
       return {
         provider,
@@ -10444,6 +10456,19 @@ export class ChatManager {
     name: LocalProviderName,
     modelId: string,
   ): Promise<number | undefined> {
+    return (await this.previewLocalEnginePlan(name, modelId)).contextWindow;
+  }
+
+  /**
+   * Full non-binding launch preview: the context window a native model
+   * would receive AND the resident footprint (weights + KV at that
+   * window) the launch would reserve. Powers the models-list "size in
+   * memory" column alongside {@link previewContextWindowForModel}.
+   */
+  async previewLocalEnginePlan(
+    name: LocalProviderName,
+    modelId: string,
+  ): Promise<{ contextWindow?: number; plannedResidentBytes?: number }> {
     let residentContextWindow: number | undefined;
     for (const resident of this.peekResidentLocalProviders(name, modelId)) {
       const residentModel = resident.getEffectiveModelId?.();
@@ -10471,11 +10496,79 @@ export class ChatManager {
     if (name === 'mlx') {
       const installed = await this.mlxModels?.resolveModel(modelId);
       if (!installed) throw new ModelNotInstalledError(name, modelId);
-      const effective = resolveMlxEffectiveNumCtx({
+      let effective = resolveMlxEffectiveNumCtx({
         ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
         ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
       });
-      return useResidentOr(effective, Math.min(installed.contextWindow ?? 65_536, 65_536));
+      const minimum = Math.min(installed.contextWindow ?? 65_536, 65_536);
+      // Memory-priced preview (M4): mirror buildMlxProvider's admission so
+      // the advertised window is what memory admits, not the native max —
+      // before this an MLX 26B on a 16 GB Mac previewed 256K.
+      const geometry = installed.modelDir ? readMlxModelGeometry(installed.modelDir) : undefined;
+      const exactPerSlotKvF16 = geometry
+        ? estimateExactPerSlotKvBytesF16(geometry, effective)
+        : undefined;
+      let plannedResidentBytes: number | undefined;
+      if (geometry && exactPerSlotKvF16 !== undefined) {
+        const {
+          CapacityBroker,
+          computeCapacityBudget,
+          defaultLocalEngineSlots,
+          kvQuantScale,
+          localEngineSlotCeiling,
+          planCtxTokensForMemory,
+        } = await import('../providers/native/capacity-broker.js');
+        const router = this.engineRouter ?? this.engineRouterCache;
+        const brokerSnap = router?.broker.committed();
+        const liveBudget = computeCapacityBudget();
+        const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
+        const fastBudget = brokerSnap?.enforced
+          ? (router?.broker.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+          : liveBudget.fastBytes;
+        const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
+        const kvBits = config.mlxKvBits ?? 0;
+        const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
+        const kvBytesPerToken =
+          (exactPerSlotKvF16 / Math.max(1, effective)) * kvQuantScale(kvCacheType);
+        const weightsResident = CapacityBroker.estimateResidentBytes(
+          'mlx',
+          installed.approxSizeBytes,
+        );
+        const configured = config.providerConcurrency?.mlx;
+        const ceiling = localEngineSlotCeiling({
+          engine: 'mlx',
+          budgetBytes: fastBudget,
+          weightsBytes: installed.approxSizeBytes,
+          perTurnCtxTokens: effective,
+          kvCacheType,
+          committedOtherBytes,
+          exactPerSlotKvBytesF16: exactPerSlotKvF16,
+        });
+        let slots = configured ?? Math.min(defaultLocalEngineSlots(), ceiling);
+        const admission = planCtxTokensForMemory({
+          requestedPerTurnCtxTokens: effective,
+          slots,
+          minimumPerTurnCtxTokens: minimum,
+          kvBytesPerToken,
+          weightsResidentBytes: weightsResident,
+          budgetBytes,
+          committedOtherBytes,
+          freeSystemRamBytes: availableSystemRamBytes(),
+          vramBytes: 0,
+        });
+        if (!admission.minimumSatisfied) {
+          throw new CapacityDeniedError(
+            formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
+          );
+        }
+        slots = admission.slots;
+        effective = admission.perTurnCtxTokens;
+        plannedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective * slots);
+      }
+      return {
+        contextWindow: useResidentOr(effective, minimum),
+        ...(plannedResidentBytes !== undefined ? { plannedResidentBytes } : {}),
+      };
     }
 
     if (name === 'ds4') {
@@ -10496,7 +10589,12 @@ export class ChatManager {
         ramTieredCtx,
         catalogMaxCtx: ds4Source?.maxLaunchCtx,
       });
-      return useResidentOr(effective, Math.min(effective, 65_536));
+      return {
+        contextWindow: useResidentOr(effective, Math.min(effective, 65_536)),
+        // ds4's catalog residentBytes is an authored SSD-streaming working
+        // set (weights cache + KV allowance) — already the honest number.
+        plannedResidentBytes: await this.resolveResidentBytes('ds4', modelId),
+      };
     }
 
     const installed = await this.llamaCppModels?.resolveModel(modelId);
@@ -10519,14 +10617,15 @@ export class ChatManager {
       contextSizing: config.llamaCppContextSizing ?? 'adaptive',
     });
     let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
-    if (residentContextWindow !== undefined || envNumCtx !== undefined) {
-      return useResidentOr(effectiveNumCtx, contextRequirement.minimumPerTurnCtxTokens);
-    }
+    // Resident/env short-circuits still want a footprint estimate, which
+    // needs the header read below — the return moves after it.
+    const shortCircuit = residentContextWindow !== undefined || envNumCtx !== undefined;
 
     const {
       computeCapacityBudget,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
+      kvQuantScale,
       llamaCppSlotCeiling,
       planCtxTokensForMemory,
     } = await import('../providers/native/capacity-broker.js');
@@ -10546,6 +10645,73 @@ export class ChatManager {
       modelId,
       override: config.llamaCppKvCacheType,
     });
+    // Header-exact per-slot KV for the slot ceiling (M2); the
+    // weights-scaled heuristic only when the GGUF is unreadable.
+    // Metadata-only read — this path never needs tensor sizes.
+    let summary: GgufSummary | null = null;
+    try {
+      summary = await readGgufSummaryAsync(installed.weightsPath);
+    } catch {
+      summary = null;
+    }
+    const exactPerSlotKvF16 = summary
+      ? estimateExactPerSlotKvBytesF16(
+          {
+            blockCount: summary.blockCount,
+            embeddingLength: summary.embeddingLength,
+            headCount: summary.headCount,
+            headCountKv: summary.headCountKv,
+            headCountKvPerLayer: summary.headCountKvPerLayer,
+            slidingWindow: summary.slidingWindow,
+            slidingWindowPattern: summary.slidingWindowPattern,
+            keyLength: summary.keyLength,
+            valueLength: summary.valueLength,
+            keyLengthSwa: summary.keyLengthSwa,
+            valueLengthSwa: summary.valueLengthSwa,
+          },
+          effectiveNumCtx,
+        )
+      : undefined;
+    // Weights + KV at a given window/slot count — the models-list "size
+    // in memory" estimate, matching the launch path's reservation math.
+    const plannedFor = (ctx: number, slotCount: number, kv: string): number | undefined => {
+      if (!summary) return undefined;
+      const perSlotF16 = estimateExactPerSlotKvBytesF16(
+        {
+          blockCount: summary.blockCount,
+          embeddingLength: summary.embeddingLength,
+          headCount: summary.headCount,
+          headCountKv: summary.headCountKv,
+          headCountKvPerLayer: summary.headCountKvPerLayer,
+          slidingWindow: summary.slidingWindow,
+          slidingWindowPattern: summary.slidingWindowPattern,
+          keyLength: summary.keyLength,
+          valueLength: summary.valueLength,
+          keyLengthSwa: summary.keyLengthSwa,
+          valueLengthSwa: summary.valueLengthSwa,
+        },
+        ctx,
+      );
+      if (perSlotF16 === undefined) return undefined;
+      return Math.round(
+        installed.approxSizeBytes * 1.2 + perSlotF16 * kvQuantScale(kv) * slotCount,
+      );
+    };
+    if (shortCircuit) {
+      const contextWindow = useResidentOr(
+        effectiveNumCtx,
+        contextRequirement.minimumPerTurnCtxTokens,
+      );
+      const planned = plannedFor(
+        contextWindow,
+        configuredSlots ?? defaultLocalEngineSlots(),
+        kvCacheType,
+      );
+      return {
+        contextWindow,
+        ...(planned !== undefined ? { plannedResidentBytes: planned } : {}),
+      };
+    }
     const ceilingFor = (kv: LlamaCppKvCacheType) =>
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
@@ -10553,6 +10719,7 @@ export class ChatManager {
         perTurnCtxTokens: effectiveNumCtx,
         kvCacheType: kv,
         committedOtherBytes,
+        ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
       });
     const kvPlan = planLlamaCppKv({
       architecture: installed.architecture,
@@ -10567,17 +10734,19 @@ export class ChatManager {
     if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
     try {
-      const summary = await readGgufSummaryAsync(installed.weightsPath, {
-        includeTensorSizes: true,
-      });
+      if (!summary) throw new Error('GGUF header unreadable');
       const referenceCtx = 4096;
       const exactKvAtReference = estimateKvReserveBytes({
         blockCount: summary.blockCount,
         embeddingLength: summary.embeddingLength,
         headCount: summary.headCount,
         headCountKv: summary.headCountKv,
+        headCountKvPerLayer: summary.headCountKvPerLayer,
+        slidingWindowPattern: summary.slidingWindowPattern,
         keyLength: summary.keyLength,
         valueLength: summary.valueLength,
+        keyLengthSwa: summary.keyLengthSwa,
+        valueLengthSwa: summary.valueLengthSwa,
         ctxTokens: referenceCtx,
         kvCacheType,
       });
@@ -10648,7 +10817,7 @@ export class ChatManager {
         } else if ((summary.slidingWindow ?? 0) > 0 || explicitSwaFull === undefined) {
           // SWA model without a readable layout: the launch path leaves
           // such a launch untouched — preview the requested window.
-          return effectiveNumCtx;
+          return { contextWindow: effectiveNumCtx };
         }
       }
       if (!admission.minimumSatisfied) {
@@ -10664,7 +10833,11 @@ export class ChatManager {
         `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return effectiveNumCtx;
+    const planned = plannedFor(effectiveNumCtx, slots, kvCacheType);
+    return {
+      contextWindow: effectiveNumCtx,
+      ...(planned !== undefined ? { plannedResidentBytes: planned } : {}),
+    };
   }
 
   /**
@@ -17500,6 +17673,36 @@ export async function buildLlamaCppProvider(opts: {
   // re-prefills the other session's whole context (~41K tok ≈ 79s,
   // wild-caught). Policy + evidence in planLlamaCppKv; explicit
   // kvCacheType or slot config disables the trade.
+  // Header-exact per-slot KV for the slot ceiling (M2); the weights
+  // heuristic only when no readable GGUF is at hand (external base URL,
+  // manual model path). Metadata-only read — the tensor-size walk for the
+  // offload planner happens later and separately.
+  let headerSummary: GgufSummary | null = null;
+  if (modelPath) {
+    try {
+      headerSummary = await readGgufSummaryAsync(modelPath);
+    } catch {
+      headerSummary = null;
+    }
+  }
+  const exactPerSlotKvF16 = headerSummary
+    ? estimateExactPerSlotKvBytesF16(
+        {
+          blockCount: headerSummary.blockCount,
+          embeddingLength: headerSummary.embeddingLength,
+          headCount: headerSummary.headCount,
+          headCountKv: headerSummary.headCountKv,
+          headCountKvPerLayer: headerSummary.headCountKvPerLayer,
+          slidingWindow: headerSummary.slidingWindow,
+          slidingWindowPattern: headerSummary.slidingWindowPattern,
+          keyLength: headerSummary.keyLength,
+          valueLength: headerSummary.valueLength,
+          keyLengthSwa: headerSummary.keyLengthSwa,
+          valueLengthSwa: headerSummary.valueLengthSwa,
+        },
+        effectiveNumCtx,
+      )
+    : undefined;
   const ceilingFor = (kv: LlamaCppKvCacheType) =>
     llamaCppSlotCeiling({
       budgetBytes,
@@ -17507,6 +17710,7 @@ export async function buildLlamaCppProvider(opts: {
       perTurnCtxTokens: effectiveNumCtx,
       kvCacheType: kv,
       committedOtherBytes,
+      ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
     });
   const kvPlan = planLlamaCppKv({
     architecture: modelCatalogInfo?.architecture,
@@ -17636,6 +17840,11 @@ export async function buildLlamaCppProvider(opts: {
   // full cache cannot fit; stays undefined when it fits or the fit could
   // not be computed.
   let swaFullAutoFits: boolean | undefined;
+  // Broker-ledger reservation for this launch: resident weights + the KV
+  // the engine will actually allocate at the granted window and cache
+  // mode. Undefined when the GGUF is unreadable — the pool builder then
+  // falls back to the legacy weights-multiplier reservation.
+  let plannedReservationBytes: number | undefined;
   // Whether the model's GGUF ships MTP (`nextn`) layers — a safety
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
@@ -17719,8 +17928,12 @@ export async function buildLlamaCppProvider(opts: {
           embeddingLength: summary.embeddingLength,
           headCount: summary.headCount,
           headCountKv: summary.headCountKv,
+          headCountKvPerLayer: summary.headCountKvPerLayer,
+          slidingWindowPattern: summary.slidingWindowPattern,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
+          keyLengthSwa: summary.keyLengthSwa,
+          valueLengthSwa: summary.valueLengthSwa,
           ctxTokens: REFERENCE_CTX,
           kvCacheType,
         });
@@ -17873,16 +18086,65 @@ export async function buildLlamaCppProvider(opts: {
         }
       }
 
-      const kvReserveBytes = estimateKvReserveBytes({
-        blockCount: summary.blockCount,
-        embeddingLength: summary.embeddingLength,
-        headCount: summary.headCount,
-        headCountKv: summary.headCountKv,
-        keyLength: summary.keyLength,
-        valueLength: summary.valueLength,
-        ctxTokens: effectiveNumCtx * slots,
-        kvCacheType,
-      });
+      // Price the KV the engine will ACTUALLY allocate. Mirrors the
+      // `--swa-full` tri-state in buildLlamaCppEngineArgs (explicit config
+      // → manifest → Gemma auto-default gated on the fit verdict): an SWA
+      // model on the default windowed cache carries only its global layers
+      // per token plus a fixed window block per slot. Feeding the offload
+      // planner full-attention math for a windowed launch over-biased
+      // Gemma experts into system RAM for a cache that never materializes.
+      const effectiveSwaFull =
+        config.llamaCppSwaFull ??
+        manifestEngineConfig?.swaFull ??
+        (swaFullAutoFits !== false &&
+          isGemmaModel({
+            architecture: modelCatalogInfo?.architecture,
+            modelId: defaultModelId ?? undefined,
+          }));
+      const windowedKvPlan = effectiveSwaFull
+        ? undefined
+        : estimateWindowedKvLinearization({
+            blockCount: summary.blockCount,
+            embeddingLength: summary.embeddingLength,
+            headCount: summary.headCount,
+            headCountKv: summary.headCountKv,
+            headCountKvPerLayer: summary.headCountKvPerLayer,
+            slidingWindow: summary.slidingWindow,
+            slidingWindowPattern: summary.slidingWindowPattern,
+            keyLength: summary.keyLength,
+            valueLength: summary.valueLength,
+            keyLengthSwa: summary.keyLengthSwa,
+            valueLengthSwa: summary.valueLengthSwa,
+            kvCacheType,
+          });
+      const kvReserveBytes = windowedKvPlan
+        ? Math.round(
+            windowedKvPlan.fixedBytes * slots +
+              windowedKvPlan.bytesPerToken * effectiveNumCtx * slots,
+          )
+        : estimateKvReserveBytes({
+            blockCount: summary.blockCount,
+            embeddingLength: summary.embeddingLength,
+            headCount: summary.headCount,
+            headCountKv: summary.headCountKv,
+            headCountKvPerLayer: summary.headCountKvPerLayer,
+            slidingWindowPattern: summary.slidingWindowPattern,
+            keyLength: summary.keyLength,
+            valueLength: summary.valueLength,
+            keyLengthSwa: summary.keyLengthSwa,
+            valueLengthSwa: summary.valueLengthSwa,
+            ctxTokens: effectiveNumCtx * slots,
+            kvCacheType,
+          });
+      // The broker-ledger reservation for this launch: resident weights
+      // plus the KV the engine will allocate at the granted window (M1 —
+      // the weights-only ledger under-reserved dense models whose KV
+      // rivals their weights: qwen3.5-4b at 64K carries more KV than
+      // parameters). Consumed by the pool builder via
+      // `plannedReservationBytes` so co-residency admission can see it.
+      if (kvReserveBytes !== undefined) {
+        plannedReservationBytes = residentBytes + kvReserveBytes;
+      }
       offloadDecision = planMoeOffload({
         isMoE,
         residentBytes,
@@ -18215,6 +18477,9 @@ export async function buildLlamaCppProvider(opts: {
     // tool budgets, and user-facing diagnostics on the exact per-slot value
     // passed to llama-server instead of falling back to the pre-clamp 65K.
     numCtx: effectiveNumCtx,
+    // Weights + KV at the granted window/cache mode — the broker-ledger
+    // reservation the pool should hold for this replica (M1).
+    ...(plannedReservationBytes !== undefined ? { plannedReservationBytes } : {}),
     // Same value that decides `--mmproj` above, so the wire shape and the
     // launch flag can never disagree: typed image parts are only emitted for
     // a server that was actually started with a projector.
@@ -18392,7 +18657,7 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
-  const effectiveNumCtx = resolveMlxEffectiveNumCtx({
+  let effectiveNumCtx = resolveMlxEffectiveNumCtx({
     ...(modelCatalogInfo?.contextWindow
       ? { modelContextWindow: modelCatalogInfo.contextWindow }
       : {}),
@@ -18547,6 +18812,13 @@ export async function buildMlxProvider(opts: {
     weightsBytes: mlxWeightsBytes,
     committedOtherBytes: mlxCommittedOther,
   });
+  // Header-exact per-slot KV from the model dir's config.json (M4) —
+  // before this, MLX memory math could only use the weights heuristic,
+  // which under-prices small dense models ~3× and over-prices hybrids.
+  const mlxGeometry = modelDir ? readMlxModelGeometry(modelDir) : undefined;
+  const mlxExactPerSlotKvF16 = mlxGeometry
+    ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
+    : undefined;
   const mlxSlotCeiling = localEngineSlotCeiling({
     engine: 'mlx',
     budgetBytes: mlxBudgetBytes,
@@ -18554,9 +18826,71 @@ export async function buildMlxProvider(opts: {
     perTurnCtxTokens: effectiveNumCtx,
     kvCacheType: mlxKvCacheType,
     committedOtherBytes: mlxCommittedOther,
+    ...(mlxExactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: mlxExactPerSlotKvF16 } : {}),
   });
   const mlxRequestedSlots = concurrency ?? defaultLocalEngineSlots();
-  const mlxSlots = concurrency ?? Math.min(mlxRequestedSlots, mlxSlotCeiling);
+  let mlxSlots = concurrency ?? Math.min(mlxRequestedSlots, mlxSlotCeiling);
+  if (mlxSlots < mlxRequestedSlots) {
+    log.info(
+      `[mlx] memory ceiling clamped concurrency ${mlxRequestedSlots} → ${mlxSlots} ` +
+        `(model ~${Math.round(mlxWeightsBytes / 1024 ** 3)}GB weights, ctx ${effectiveNumCtx}, ` +
+        `kv ${mlxKvCacheType}, ~${Math.round(mlxKvBudgetBytes / 1024 ** 3)}GB free for KV)`,
+    );
+  }
+  // Memory-priced context admission (M4): MLX previously launched at the
+  // model's NATIVE window with no admission at all — its lazily-growing
+  // cache meant the OOM arrived mid-generation instead of at launch, and
+  // the UI advertised a window memory could never back. Same ladder as
+  // llama-cpp (deny below min(native, 64K) → shed slots → clamp), priced
+  // with the config.json-exact KV when readable. MLX has no eval-env
+  // bypass; an explicit `config.mlxNumCtx` still sets the REQUEST, not an
+  // admission exemption.
+  let mlxPlannedReservationBytes: number | undefined;
+  if (mlxGeometry && mlxExactPerSlotKvF16 !== undefined) {
+    const { CapacityBroker, kvQuantScale, planCtxTokensForMemory, resolveLocalContextRequirement } =
+      await import('../providers/native/capacity-broker.js');
+    const requirement = resolveLocalContextRequirement({
+      ...(modelCatalogInfo?.contextWindow
+        ? { modelContextWindow: modelCatalogInfo.contextWindow }
+        : {}),
+      requestedContextWindow: effectiveNumCtx,
+    });
+    const kvBytesPerToken =
+      (mlxExactPerSlotKvF16 / Math.max(1, effectiveNumCtx)) * kvQuantScale(mlxKvCacheType);
+    const weightsResident = CapacityBroker.estimateResidentBytes('mlx', mlxWeightsBytes);
+    const admission = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: effectiveNumCtx,
+      slots: mlxSlots,
+      minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+      kvBytesPerToken,
+      weightsResidentBytes: weightsResident,
+      budgetBytes: mlxBrokerSnap?.enforced ? mlxBrokerSnap.budgetBytes : mlxBudgetBytes,
+      committedOtherBytes: mlxCommittedOther,
+      freeSystemRamBytes: availableSystemRamBytes(),
+      vramBytes: 0,
+    });
+    if (!admission.minimumSatisfied) {
+      throw new CapacityDeniedError(
+        formatContextCapacityDenial({
+          modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this MLX model',
+          plan: admission,
+        }),
+      );
+    }
+    if (admission.slots < mlxSlots) {
+      log.info(
+        `[mlx] ${modelCatalogInfo?.id ?? 'model'}: reducing concurrency ${mlxSlots} -> ${admission.slots} to preserve at least ${requirement.minimumPerTurnCtxTokens} context tokens per turn`,
+      );
+      mlxSlots = admission.slots;
+    }
+    if (admission.clamped) {
+      log.warn(`[mlx] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
+      effectiveNumCtx = admission.perTurnCtxTokens;
+    }
+    mlxPlannedReservationBytes = Math.round(
+      weightsResident + kvBytesPerToken * effectiveNumCtx * mlxSlots,
+    );
+  }
   const envMlxBatch = process.env.GEZEL_BATCHED_INFERENCE;
   const envMlxBatchOverride =
     envMlxBatch === '1' || envMlxBatch === 'true'
@@ -18566,13 +18900,6 @@ export async function buildMlxProvider(opts: {
         : undefined;
   const mlxBatchEnabled = envMlxBatchOverride ?? config.batchedInference?.enabled ?? mlxSlots > 1;
   const mlxBatchMaxConcurrency = mlxBatchEnabled ? mlxSlots : 1;
-  if (mlxSlots < mlxRequestedSlots) {
-    log.info(
-      `[mlx] memory ceiling clamped concurrency ${mlxRequestedSlots} → ${mlxSlots} ` +
-        `(model ~${Math.round(mlxWeightsBytes / 1024 ** 3)}GB weights, ctx ${effectiveNumCtx}, ` +
-        `kv ${mlxKvCacheType}, ~${Math.round(mlxKvBudgetBytes / 1024 ** 3)}GB free for KV)`,
-    );
-  }
 
   const providerHolder: { current: MlxProvider | null } = { current: null };
 
@@ -18758,6 +19085,11 @@ export async function buildMlxProvider(opts: {
   const provider = new MlxProvider({
     supervisor,
     ...baseProviderOpts,
+    // Weights + KV at the admitted window — the broker-ledger reservation
+    // the pool should hold for this replica (M1).
+    ...(mlxPlannedReservationBytes !== undefined
+      ? { plannedReservationBytes: mlxPlannedReservationBytes }
+      : {}),
     // Engine batch width — matches the server's `--max-concurrency`. Widens
     // the provider's queue + engine gate to N (1 = singleton BatchGenerator).
     // Supervised path only; external-baseUrl MLX stays at one in-flight

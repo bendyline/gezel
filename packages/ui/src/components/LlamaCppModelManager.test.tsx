@@ -78,6 +78,37 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.queryByText('128K')).not.toBeInTheDocument();
   });
 
+  it('shows the expected in-memory footprint beside the on-disk size', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'qwen3.5-4b-q4',
+          name: 'Qwen 3.5 (4B)',
+          approxSizeBytes: 2_600_000_000,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/qwen3.5-4b-q4/model.gguf',
+          contextWindow: 256_000,
+          effectiveContextWindow: 65_536,
+          // Weights + KV at the granted window — for a small dense model
+          // the KV can exceed the weights, which is exactly why the disk
+          // size alone misleads.
+          predictedResidentBytes: 7_000_000_000,
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const memory = await screen.findByText(/~7\.0 GB in memory/);
+    expect(memory.closest('td')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/weights plus the KV cache/),
+    );
+    expect(memory.closest('td')?.textContent).toContain('2.6 GB');
+  });
+
   it('does not stack inventory requests while shared models are being verified', async () => {
     let finish!: (value: { models: never[] }) => void;
     const verification = new Promise<{ models: never[] }>((resolve) => {

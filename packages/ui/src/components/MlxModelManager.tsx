@@ -621,7 +621,18 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                           </span>
                         )}
                       </td>
-                      <td>{formatBytes(m.approxSizeBytes)}</td>
+                      <td
+                        title={
+                          m.predictedResidentBytes
+                            ? `${formatBytes(m.approxSizeBytes)} on disk. Expect about ${formatBytes(m.predictedResidentBytes)} of memory while running: weights plus the KV cache at the granted context window.`
+                            : `${formatBytes(m.approxSizeBytes)} on disk.`
+                        }
+                      >
+                        {formatBytes(m.approxSizeBytes)}
+                        {m.predictedResidentBytes ? (
+                          <span className="muted small">{` · ~${formatBytes(m.predictedResidentBytes)} in memory`}</span>
+                        ) : null}
+                      </td>
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
                       </td>

@@ -16,39 +16,57 @@ const installed = {
 
 describe('local model inventory context caps', () => {
   it('adds the live llama.cpp admission cap without replacing the advertised window', async () => {
-    const previewContextWindowForModel = vi.fn(async () => 65_536);
+    const previewLocalEnginePlan = vi.fn(async () => ({
+      contextWindow: 65_536,
+      plannedResidentBytes: 9_000_000_000,
+    }));
     const ctx = {
       llamaCppModels: {
         listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
       },
-      chat: { previewContextWindowForModel },
+      chat: { previewLocalEnginePlan },
     } as unknown as ServiceContext;
 
     const response = await llamaCppRoutes(ctx).request('http://test/models');
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      models: [{ contextWindow: 131_072, effectiveContextWindow: 65_536 }],
+      models: [
+        {
+          contextWindow: 131_072,
+          effectiveContextWindow: 65_536,
+          predictedResidentBytes: 9_000_000_000,
+        },
+      ],
     });
-    expect(previewContextWindowForModel).toHaveBeenCalledWith('llama-cpp', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model');
   });
 
   it('adds the configured MLX cap without replacing the advertised window', async () => {
-    const previewContextWindowForModel = vi.fn(async () => 65_536);
+    const previewLocalEnginePlan = vi.fn(async () => ({
+      contextWindow: 65_536,
+      plannedResidentBytes: 9_000_000_000,
+    }));
     const ctx = {
       mlxModels: {
         listInstalled: vi.fn(async () => [{ ...installed, modelDir: '/models/model' }]),
       },
-      chat: { previewContextWindowForModel },
+      chat: { previewLocalEnginePlan },
     } as unknown as ServiceContext;
 
     const response = await mlxRoutes(ctx).request('http://test/models');
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      models: [{ contextWindow: 131_072, effectiveContextWindow: 65_536 }],
+      models: [
+        {
+          contextWindow: 131_072,
+          effectiveContextWindow: 65_536,
+          predictedResidentBytes: 9_000_000_000,
+        },
+      ],
     });
-    expect(previewContextWindowForModel).toHaveBeenCalledWith('mlx', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('mlx', 'local-model');
   });
 
   it('marks a llama.cpp model whose selected context policy cannot fit', async () => {
@@ -57,7 +75,7 @@ describe('local model inventory context caps', () => {
         listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
       },
       chat: {
-        previewContextWindowForModel: vi.fn(async () => {
+        previewLocalEnginePlan: vi.fn(async () => {
           throw new CapacityDeniedError('strict context does not fit');
         }),
       },
@@ -79,7 +97,7 @@ describe('local model inventory context caps', () => {
         listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
       },
       chat: {
-        previewContextWindowForModel: vi.fn(async () => {
+        previewLocalEnginePlan: vi.fn(async () => {
           throw new CapacityDeniedError('already running below the required window', {
             reason: 'resident-below-minimum',
           });

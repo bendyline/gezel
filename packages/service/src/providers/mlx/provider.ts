@@ -323,6 +323,7 @@ export class MlxProvider implements LLMProvider {
   private readonly externalBaseUrl?: string;
   private readonly defaultModel: string;
   private readonly numCtx: number;
+  private readonly plannedReservation?: number;
   private readonly fetchImpl: typeof fetch;
   /** Set in {@link shutdown}; a disposed provider must never respawn its engine. */
   private disposed = false;
@@ -394,6 +395,12 @@ export class MlxProvider implements LLMProvider {
     baseUrl?: string;
     defaultModel?: string;
     numCtx?: number;
+    /**
+     * Broker-ledger reservation for this replica: resident weights plus
+     * KV at the admitted window, computed by the build-time admission
+     * pass (see `LLMProvider.plannedReservationBytes`).
+     */
+    plannedReservationBytes?: number;
     concurrency?: number;
     /**
      * Engine batch width — how many sequences the wrapped MLX server can
@@ -419,6 +426,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.defaultModel = opts.defaultModel ?? 'mlx';
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
+    this.plannedReservation = opts.plannedReservationBytes;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.modelManager) this.modelManager = opts.modelManager;
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
@@ -532,6 +540,11 @@ export class MlxProvider implements LLMProvider {
 
   getContextWindow(): number {
     return this.numCtx;
+  }
+
+  /** See `LLMProvider.plannedReservationBytes`. */
+  plannedReservationBytes(): number | undefined {
+    return this.plannedReservation;
   }
 
   async shutdown(): Promise<void> {

@@ -70,6 +70,8 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
+    // Legacy record (no representativeContext): the badge names the probe
+    // shape so the user knows a re-run gets realistic timing.
     expect(await screen.findByText('short prompt · 62 t/s')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('128K')).toBeInTheDocument();

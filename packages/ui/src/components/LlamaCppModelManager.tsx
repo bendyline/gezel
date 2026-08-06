@@ -2,6 +2,7 @@ import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyli
 import {
   composeFitnessBadge,
   computeModelFit,
+  estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
 } from '@bendyline/gezel';
@@ -671,9 +672,11 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   const fitnessKey = `llama-cpp:${m.id}`;
                   const entry = fitness.get(fitnessKey);
                   const catalogManifest = catalogById.get(m.id);
+                  const installedResidentBytes =
+                    m.predictedResidentBytes ?? m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
                   const ramFit = memory
                     ? computeModelFit({
-                        residentBytes: m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                        residentBytes: installedResidentBytes,
                         isMoE: isMoEFromTags(catalogManifest?.tags),
                         ...fitMachine(memory),
                       })
@@ -696,7 +699,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       ? hardwareHint(recoDeviceFromMemory(memory), {
                           isMoE: isMoEFromTags(catalogManifest.tags),
                           fitTier: ramFit?.tier ?? 'fits',
-                          residentBytes: m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                          residentBytes: installedResidentBytes,
                         })
                       : null;
                   return (
@@ -726,7 +729,18 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           </span>
                         )}
                       </td>
-                      <td>{formatBytes(m.approxSizeBytes)}</td>
+                      <td
+                        title={
+                          m.predictedResidentBytes
+                            ? `${formatBytes(m.approxSizeBytes)} on disk. Expect about ${formatBytes(m.predictedResidentBytes)} of memory while running: weights plus the KV cache at the granted context window.`
+                            : `${formatBytes(m.approxSizeBytes)} on disk.`
+                        }
+                      >
+                        {formatBytes(m.approxSizeBytes)}
+                        {m.predictedResidentBytes ? (
+                          <span className="muted small">{` · ~${formatBytes(m.predictedResidentBytes)} in memory`}</span>
+                        ) : null}
+                      </td>
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
                       </td>
@@ -871,7 +885,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // too-big. Replaces the old dense-naive `size > budget` hide,
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
-                residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                residentBytes:
+                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + estimateManifestKvBytes(m),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -890,7 +905,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 : null;
             const fit = memory
               ? computeModelFit({
-                  residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                  residentBytes:
+                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                    estimateManifestKvBytes(m),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })
@@ -928,7 +945,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           ? hardwareHint(recoDeviceFromMemory(memory), {
                               isMoE: isMoEFromTags(item.manifest.tags),
                               fitTier: fit.tier,
-                              residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                              residentBytes:
+                                m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                                estimateManifestKvBytes(m),
                             })
                           : null;
                       if (!hint) return null;

@@ -1436,6 +1436,13 @@ export interface LlamaCppInstalledModel {
   /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
   effectiveContextWindow?: number;
   /**
+   * Expected memory while running: resident weights (with runtime
+   * overhead) plus the KV cache at the granted context window and slot
+   * count — the launch path's own reservation math. Absent when the
+   * daemon could not price the launch (unreadable weights, older daemon).
+   */
+  predictedResidentBytes?: number;
+  /**
    * Present when the selected context policy cannot be admitted right now.
    * `insufficient-memory` — even one slot cannot hold the required window;
    * free memory, unload a model, or pick Adaptive. `restart-required` — the
@@ -1566,6 +1573,13 @@ export interface MlxInstalledModel {
   contextWindow?: number;
   /** Per-turn cap Gezel would actually grant after applying its configured limit. */
   effectiveContextWindow?: number;
+  /**
+   * Expected memory while running: resident weights (with runtime
+   * overhead) plus the KV cache at the granted context window and slot
+   * count — the launch path's own reservation math. Absent when the
+   * daemon could not price the launch (unreadable weights, older daemon).
+   */
+  predictedResidentBytes?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;

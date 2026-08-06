@@ -1509,6 +1509,18 @@ export const ChatModelManifestSchema = z.object({
   approxSizeBytes: z.number().int().positive(),
   supportsTools: z.boolean(),
   contextWindow: z.number().int().positive().optional(),
+  /**
+   * KV-cache slope at f16, bytes per context token — the windowed-cache
+   * slope for sliding-window models, the full-attention per-token cost
+   * otherwise. Architecture-determined (same across quants). Lets
+   * install-time fit badges price weights + KV at the practical 64K
+   * window BEFORE the weights are on disk — a small dense model's KV can
+   * exceed its weights, and a weights-only fit badge says "fits" on a
+   * machine the post-install admission will refuse.
+   */
+  kvBytesPerTokenF16: z.number().positive().optional(),
+  /** Context-independent KV bytes at f16 (SWA window blocks); pairs with `kvBytesPerTokenF16`. */
+  kvFixedBytesF16: z.number().nonnegative().optional(),
   upstream: z.string().url().optional(),
   category: ChatModelCategorySchema.optional(),
   /** Style + behaviors + tuning flow through from {@link ChatModelIdentitySchema}. */

@@ -23,13 +23,13 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     const models = await Promise.all(
       installed.map(async (model) => {
         try {
-          const effectiveContextWindow = await ctx.chat.previewContextWindowForModel(
-            'llama-cpp',
-            model.id,
-          );
+          const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id);
           return {
             ...model,
-            ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.plannedResidentBytes
+              ? { predictedResidentBytes: plan.plannedResidentBytes }
+              : {}),
           };
         } catch (error) {
           // Two distinct denials, two distinct remedies: a model RESIDENT

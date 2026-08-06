@@ -1574,6 +1574,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private disposed = false;
   private readonly numCtx: number;
+  private readonly plannedReservation?: number;
   /**
    * When true, append `stream_options:{include_usage:true}` to chat requests so
    * the engine emits a final usage chunk. Off for llama-server (it surfaces its
@@ -1721,6 +1722,14 @@ export class LlamaCppProvider implements LLMProvider {
      * can pressure-check. Default 16384 when omitted.
      */
     numCtx?: number;
+    /**
+     * Broker-ledger reservation for this replica: resident weights plus
+     * the KV the engine will allocate at the granted window and cache
+     * mode, computed by the launch admission pass. The pool builder
+     * prefers this over the catalog/weights-multiplier fallback so
+     * co-residency admission can see KV (M1).
+     */
+    plannedReservationBytes?: number;
     /** See {@link LlamaCppProvider.includeUsageInStream}. Default false. */
     includeUsageInStream?: boolean;
     /** See {@link LlamaCppProvider.replayReasoningContent}. Default false. */
@@ -1827,6 +1836,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
     if (opts.modelManager) this.modelManager = opts.modelManager;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
+    this.plannedReservation = opts.plannedReservationBytes;
     this.includeUsageInStream = opts.includeUsageInStream ?? false;
     this.replayReasoningContent = opts.replayReasoningContent ?? false;
     this.visionEnabled = opts.visionEnabled ?? false;
@@ -2072,6 +2082,14 @@ export class LlamaCppProvider implements LLMProvider {
    */
   engineLaunchSnapshot(): EngineLaunchSnapshot | undefined {
     return this.supervisor?.launchSnapshot();
+  }
+
+  /**
+   * Weights + KV at the granted window/cache mode, from the launch
+   * admission pass. See `LLMProvider.plannedReservationBytes`.
+   */
+  plannedReservationBytes(): number | undefined {
+    return this.plannedReservation;
   }
 
   /**

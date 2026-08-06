@@ -25,12 +25,13 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
     const installed = await ctx.mlxModels.listInstalled();
     const models = await Promise.all(
       installed.map(async (model) => {
-        const effectiveContextWindow = await ctx.chat
-          .previewContextWindowForModel('mlx', model.id)
-          .catch(() => undefined);
+        const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id).catch(() => null);
         return {
           ...model,
-          ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
+          ...(plan?.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+          ...(plan?.plannedResidentBytes
+            ? { predictedResidentBytes: plan.plannedResidentBytes }
+            : {}),
         };
       }),
     );

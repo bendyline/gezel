@@ -1035,6 +1035,16 @@ export interface LLMProvider {
    */
   engineLaunchSnapshot?(): EngineLaunchSnapshot | undefined;
   /**
+   * Broker-ledger reservation this provider's engine actually needs:
+   * resident weights plus KV at the granted context window and cache
+   * mode, computed by the build-time admission pass. The pool builder
+   * prefers this over catalog/weights-multiplier estimates so
+   * co-residency admission sees KV — a dense small model's KV can exceed
+   * its weights (qwen3.5-4b at 64K). Undefined when the provider could
+   * not price its launch (external base URL, unreadable weights).
+   */
+  plannedReservationBytes?(): number | undefined;
+  /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by
    * {@link createSession} call `queue.acquire()` in their
