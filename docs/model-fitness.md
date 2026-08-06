@@ -110,6 +110,14 @@ next to a model you deliberately want is information, not a veto.
 Which model to run is a function of *your* hardware, and the biggest lever is
 **dense vs Mixture-of-Experts (MoE)**:
 
+- **Low-acceleration Windows/Linux hosts** — no GPU, a consumer integrated
+  GPU sharing system RAM, or a discrete GPU below 8 GiB VRAM — receive the
+  smallest curated first-run model (currently Gemma E2B). A larger MoE may
+  technically load by streaming experts from RAM, but observed decode is
+  effectively CPU-paced and is not a usable default. Integrated adapters'
+  reported shared allocation is part of system RAM and is never added to it.
+  NVIDIA GB10 / DGX Spark is the explicit unified-memory exception: its large
+  CUDA-addressable pool remains on the normal high-capacity path.
 - **Bandwidth-bound hosts** — Apple Silicon (unified memory), NVIDIA GB10 / DGX
   Spark (unified memory pool), and small discrete GPUs (≤24 GB VRAM that must
   stream weights from RAM) — should **prefer MoE over a large dense model of

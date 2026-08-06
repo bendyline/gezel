@@ -6,7 +6,11 @@ import {
   type DeviceHealthStatusSnapshot,
   windowsDetachedSpawnOptions,
 } from '@bendyline/gezel/native';
-import { detectLlamaGpuVram } from '../providers/llama-cpp/devices.js';
+import {
+  type LlamaGpuMemoryKind,
+  type GpuVendor as LlamaGpuVendor,
+  detectLlamaGpuVram,
+} from '../providers/llama-cpp/devices.js';
 import {
   autoDetectBudgetBytes,
   computeCapacityBudget,
@@ -17,15 +21,27 @@ import type { GezelProcessMemorySnapshot } from './gezel-process-memory.js';
 
 const exec = promisify(execFile);
 
-export type MemorySource = 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+export type MemorySource =
+  | 'darwin-unified'
+  | 'gpu-nvidia'
+  | 'gpu-vulkan'
+  | 'gpu-integrated'
+  | 'system-ram-fallback';
 export type GpuVendor = 'amd' | 'nvidia' | 'intel';
+export type GpuMemoryKind = 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
 
 export interface MemoryProfile {
   platform: 'darwin' | 'win32' | 'linux' | string;
   /** Total system RAM in bytes. Always populated. */
   totalRamBytes: number;
-  /** Dedicated GPU VRAM in bytes, when detected. Null on macOS (unified) and when no GPU tool responds. */
+  /**
+   * GPU-addressable memory in bytes, when detected. For `gpu-integrated` this
+   * is a reported shared allocation inside `totalRamBytes`, not extra memory.
+   * Null on macOS and when no GPU tool responds.
+   */
   gpuVramBytes: number | null;
+  /** Whether the reported GPU pool is separate from or shared with system RAM. */
+  gpuMemoryKind: GpuMemoryKind;
   /** Where `usableBytes` comes from. Drives the UI's wording. */
   source: MemorySource;
   /**
@@ -81,6 +97,7 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
       platform: 'darwin',
       totalRamBytes: totalRam,
       gpuVramBytes: null,
+      gpuMemoryKind: 'unified',
       source: 'darwin-unified',
       usableBytes: autoDetectBudgetBytes(totalRam),
       budgetBytes: autoDetectBudgetBytes(totalRam),
@@ -100,10 +117,15 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   const nvidiaVram = await probeNvidiaVram();
   if (nvidiaVram !== null) {
     setDetectedGpuVramBytes(nvidiaVram);
+    const unified = nvidiaVram >= totalRam * 0.75;
     return {
       platform: plat,
       totalRamBytes: totalRam,
       gpuVramBytes: nvidiaVram,
+      // GB10 / DGX Spark reports nearly the whole unified pool through CUDA.
+      // It is shared memory, but it remains a high-performance accelerator and
+      // must not be routed to the consumer-iGPU small-model policy.
+      gpuMemoryKind: unified ? 'unified' : 'discrete',
       source: 'gpu-nvidia',
       ...gpuBudget(nvidiaVram),
       gpuVendor: 'nvidia',
@@ -117,19 +139,16 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   // lying) instead of the 50%-of-RAM CPU fallback below.
   const gpu = await detectLlamaGpuVram();
   if (gpu !== null) {
-    setDetectedGpuVramBytes(gpu.vramBytes);
+    const profile = memoryProfileForLlamaGpu(plat, totalRam, gpu);
+    // The ambient capacity broker accepts only a VRAM byte count. Publishing
+    // an integrated adapter's shared allocation there would add it to RAM a
+    // second time, so publish null for that host class.
+    setDetectedGpuVramBytes(profile.gpuMemoryKind === 'integrated' ? null : gpu.vramBytes);
     // Vendor comes from the device name in the SAME probe (e.g. "AMD Radeon
     // …" / "Intel Arc …"), so the label always matches the card we sized —
     // never "AMD" for an Intel GPU. Undefined for unrecognized names → the
     // UI shows a generic "GPU".
-    return {
-      platform: plat,
-      totalRamBytes: totalRam,
-      gpuVramBytes: gpu.vramBytes,
-      source: 'gpu-vulkan',
-      ...gpuBudget(gpu.vramBytes),
-      ...(gpu.vendor ? { gpuVendor: gpu.vendor } : {}),
-    };
+    return profile;
   }
 
   setDetectedGpuVramBytes(null);
@@ -137,6 +156,7 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
     platform: plat,
     totalRamBytes: totalRam,
     gpuVramBytes: null,
+    gpuMemoryKind: 'none',
     source: 'system-ram-fallback',
     // CPU inference needs the OS + your apps + inference buffers. Be
     // conservative — 50% of system RAM is a safer ceiling than 60%.
@@ -144,6 +164,46 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
     // The broker will still admit up to its 60% share; a model between the
     // two runs, just without comfortable headroom ("may run slowly").
     budgetBytes: autoDetectBudgetBytes(totalRam, { gpuVramBytes: null }),
+  };
+}
+
+/**
+ * Convert a llama.cpp Vulkan device into the service memory profile without
+ * double-counting an integrated adapter's shared allocation. Exported as the
+ * pure policy seam for regression tests and diagnostics tooling.
+ */
+export function memoryProfileForLlamaGpu(
+  platform: string,
+  totalRamBytes: number,
+  gpu: {
+    vramBytes: number;
+    name: string;
+    vendor?: LlamaGpuVendor;
+    memoryKind: LlamaGpuMemoryKind;
+  },
+): MemoryProfile {
+  const ratioLooksUnified = gpu.vramBytes >= totalRamBytes * 0.75;
+  const gpuMemoryKind: GpuMemoryKind =
+    gpu.memoryKind === 'integrated' ? 'integrated' : ratioLooksUnified ? 'unified' : gpu.memoryKind;
+  const shared = gpuMemoryKind === 'integrated' || gpuMemoryKind === 'unified';
+  const budget = computeCapacityBudget({
+    systemRamBytes: totalRamBytes,
+    gpuVramBytes: gpu.vramBytes,
+    ...(shared ? { unifiedMemory: true } : {}),
+  });
+  return {
+    platform,
+    totalRamBytes,
+    gpuVramBytes: gpu.vramBytes,
+    gpuMemoryKind,
+    source: gpuMemoryKind === 'integrated' ? 'gpu-integrated' : 'gpu-vulkan',
+    // A consumer iGPU is effectively system-memory-paced. Keep the same
+    // conservative fast-fit ceiling as CPU fallback while the broker may
+    // admit up to its single-pool unified ceiling.
+    usableBytes:
+      gpuMemoryKind === 'integrated' ? Math.floor(totalRamBytes * 0.5) : budget.fastBytes,
+    budgetBytes: budget.budgetBytes,
+    ...(gpu.vendor ? { gpuVendor: gpu.vendor } : {}),
   };
 }
 
@@ -219,6 +279,7 @@ export function sampleMachineMemoryUsage(
   const totalRamBytes = profile.totalRamBytes;
   const unified =
     profile.source === 'darwin-unified' ||
+    profile.source === 'gpu-integrated' ||
     (profile.gpuVramBytes !== null && profile.gpuVramBytes >= totalRamBytes * 0.75);
   const mainMemory =
     opts.forceMainMemory === true || profile.source === 'system-ram-fallback' || unified;

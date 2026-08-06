@@ -239,7 +239,11 @@ export class McpBridgePool {
     name: string,
     args: Record<string, unknown>,
     opts?: { budgetChars?: number; numCtxTokens?: number },
-  ): Promise<{ text: string; images: Array<{ base64: string; mimeType: string }> }> {
+  ): Promise<{
+    text: string;
+    images: Array<{ base64: string; mimeType: string }>;
+    isError: boolean;
+  }> {
     if (!this.isCallableByModel(name)) {
       throw new Error(`[mcp-bridge-pool] tool "${name}" is not available in this session`);
     }

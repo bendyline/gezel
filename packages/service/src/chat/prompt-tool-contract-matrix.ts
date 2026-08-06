@@ -251,6 +251,12 @@ function scenariosForRole(
         securityPolicy: normal,
       },
       {
+        id: 'meester-simple-build-prelude',
+        latestUserMessage: 'Can you create a Frogger-style browser game?',
+        workspaceFiles: [],
+        securityPolicy: normal,
+      },
+      {
         id: 'meester-craftbook-library-prelude',
         latestUserMessage:
           'Find and use an existing craftbook from the recipe library for reviewing a pull request.',
@@ -587,7 +593,17 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               prompt: about,
               availableTools: toolNames,
             });
+            const preludeContract = userPrelude
+              ? lintPromptToolContract({ prompt: userPrelude, availableTools: toolNames })
+              : { errors: [], warnings: [] };
             const promotedAboutFindings = aboutContract.warnings.map((finding) => ({
+              ...finding,
+              severity: 'error' as const,
+            }));
+            // Turn-scoped preludes are executable routing configuration, not
+            // advisory prose. A soft recommendation for a tool missing from
+            // the effective post-filter roster is therefore build-blocking.
+            const promotedPreludeFindings = preludeContract.warnings.map((finding) => ({
               ...finding,
               severity: 'error' as const,
             }));
@@ -596,6 +612,8 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               ...schemaContract.errors,
               ...aboutContract.errors,
               ...promotedAboutFindings,
+              ...preludeContract.errors,
+              ...promotedPreludeFindings,
             ];
             const rowWarnings = contract.warnings;
             const rowBase = {

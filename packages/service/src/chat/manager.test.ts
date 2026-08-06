@@ -4942,10 +4942,10 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      // Full meester surface survives — kickoff macros AND the tools the old
+      // Full meester surface survives — the kickoff macro AND the tools the old
       // 13-cap evicted (read_task_notes, write_artifact) are all present.
       expect(allow.has('start_project')).toBe(true);
-      expect(allow.has('start_job')).toBe(true);
+      expect(allow.has('start_job')).toBe(false);
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('ask_user_question')).toBe(true);
       // read_task_notes ranked below the old cut (rank 26) and was the tool
@@ -4958,7 +4958,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlockStart).toBeGreaterThanOrEqual(0);
       const toolsBlock = sys.slice(toolsBlockStart);
       expect(toolsBlock).toContain('`start_project`');
-      expect(toolsBlock).toContain('`start_job`');
+      expect(toolsBlock).not.toContain('`start_job`');
       expect(toolsBlock).toContain('`message_gezel`');
       expect(toolsBlock).toContain('`ask_user_question`');
       expect(toolsBlock).toContain('`write_artifact`');
@@ -5027,7 +5027,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('medium local meester cap keeps kickoff macros and trims the full MCP roster', async () => {
+  it('medium local meester cap keeps the project kickoff and trims the full MCP roster', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-medium-meester-cap-'));
     const localStore = new Store({ home });
     await localStore.ensureLayout();
@@ -5064,11 +5064,11 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(
         [...allow].filter((t) => !t.startsWith('delegate_') && !t.startsWith('consult_')).length,
       ).toBeLessThanOrEqual(16);
-      expect(allow.has('start_project')).toBe(false);
-      expect(allow.has('start_job')).toBe(true);
+      expect(allow.has('start_project')).toBe(true);
+      expect(allow.has('start_job')).toBe(false);
       const allowOrder = Array.from(allow);
-      expect(allowOrder).toContain('start_job');
-      expect(allow.has('message_gezel')).toBe(false);
+      expect(allowOrder).toContain('start_project');
+      expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('write_file')).toBe(false);
       expect(allow.has('write_artifact')).toBe(false);
 
@@ -5077,9 +5077,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlockStart).toBeGreaterThanOrEqual(0);
       const toolsBlock = sys.slice(toolsBlockStart);
       const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
-      expect(listedTools).not.toContain('`start_project`');
-      expect(listedTools).toContain('`start_job`');
-      expect(listedTools).not.toContain('`message_gezel`');
+      expect(listedTools).toContain('`start_project`');
+      expect(listedTools).not.toContain('`start_job`');
+      expect(listedTools).toContain('`message_gezel`');
       expect(listedTools).not.toContain('`write_file`');
       expect(listedTools).not.toContain('`write_artifact`');
     } finally {
@@ -5192,7 +5192,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(
         [...allow].filter((t) => !t.startsWith('delegate_') && !t.startsWith('consult_')).length,
       ).toBeLessThanOrEqual(14);
-      expect(allow.has('start_job')).toBe(true);
+      expect(allow.has('start_job')).toBe(false);
       expect(allow.has('start_project')).toBe(true);
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('suggest_craftbook')).toBe(true);
@@ -5208,7 +5208,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       if (toolsBlockStart >= 0) {
         const toolsBlock = sys.slice(toolsBlockStart);
         const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
-        expect(listedTools).toContain('`start_job`');
+        expect(listedTools).not.toContain('`start_job`');
         expect(listedTools).toContain('`start_project`');
         expect(listedTools).toContain('`message_gezel`');
         expect(listedTools).toContain('`suggest_craftbook`');
@@ -5274,9 +5274,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const firstCreate = localMock.calls.find((c) => c.kind === 'create');
       const firstAllow = firstCreate!.opts!.toolAllowlist!;
-      expect(firstAllow.has('start_job')).toBe(true);
-      expect(firstAllow.has('start_project')).toBe(false);
-      expect(firstAllow.has('message_gezel')).toBe(false);
+      expect(firstAllow.has('start_job')).toBe(false);
+      expect(firstAllow.has('start_project')).toBe(true);
+      expect(firstAllow.has('message_gezel')).toBe(true);
       expect(firstAllow.has('ask_user_question')).toBe(false);
       expect(firstAllow.has('ask_gezel')).toBe(false);
 

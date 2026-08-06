@@ -95,6 +95,40 @@ function mergeTerminalEntries(
 }
 
 /**
+ * Merge a newest-page snapshot into the rows already on screen. Older pages
+ * remain intact, while a matching durable user row retires its optimistic
+ * counterpart. Shared by completion refreshes and the initial
+ * snapshot/subscription handoff reconciliation.
+ */
+function mergeTimelineMessages(
+  existing: TimelineMessage[],
+  snapshot: TimelineMessage[],
+): TimelineMessage[] {
+  const canonicalUsers = snapshot.filter((message) => message.role === 'user');
+  const withoutReconciledOptimistic = existing.filter((message) => {
+    if (!(message as OptimisticTimelineMessage).optimistic) return true;
+    const optimisticAtMs = Date.parse(message.at);
+    return !canonicalUsers.some((real) => {
+      if (real.sessionId !== message.sessionId || real.content !== message.content) return false;
+      const realAtMs = Date.parse(real.at);
+      return Number.isFinite(optimisticAtMs) && Number.isFinite(realAtMs)
+        ? Math.abs(realAtMs - optimisticAtMs) < 2 * 60_000
+        : true;
+    });
+  });
+  const seen = new Set<string>();
+  const merged: TimelineMessage[] = [];
+  for (const message of [...withoutReconciledOptimistic, ...snapshot]) {
+    const key = `${message.sessionId}:${message.at}:${message.role}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(message);
+  }
+  merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  return merged;
+}
+
+/**
  * Human labels for the llama-cpp `engine_phase` event. Used by the
  * streaming bubble's status line — the detail string from the
  * stdout classifier gets used verbatim when available (e.g.
@@ -902,6 +936,21 @@ export function ChatTimelineView({
         } catch {
           /* non-fatal */
         }
+        // Close the initial snapshot → SSE subscription race. A turn can
+        // finish after the first disk read but before this component's stream
+        // is attached; in that window it is absent from both `inflight` and
+        // the stream replay. A trailing canonical read makes the handoff
+        // lossless without requiring the user to switch tabs to remount us.
+        try {
+          const latest = await loadTimeline({ limit: PAGE_SIZE });
+          if (cancelled) return;
+          setMessages((current) => mergeTimelineMessages(current, latest.messages));
+          setTerminalEntries((liveEntries) =>
+            mergeTerminalEntries(latest.terminalEntries, liveEntries),
+          );
+        } catch {
+          /* non-fatal — live SSE remains connected */
+        }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       } finally {
@@ -1343,34 +1392,9 @@ export function ChatTimelineView({
   const refreshLatest = useCallback(async () => {
     try {
       const res = await loadTimeline({ limit: PAGE_SIZE });
-      setMessages((prev) => {
-        // The server returned the most-recent slice. If we'd paged back
-        // past it, we still want to keep the older messages we'd loaded.
-        // Merge by `at`, dedup by (sessionId, at, role). Cheap because
-        // we only do this on `complete`.
-        const canonicalUsers = res.messages.filter((m) => m.role === 'user');
-        const prevWithoutOptimistic = prev.filter((m) => {
-          if (!(m as OptimisticTimelineMessage).optimistic) return true;
-          const optimisticAtMs = Date.parse(m.at);
-          return !canonicalUsers.some((real) => {
-            if (real.sessionId !== m.sessionId || real.content !== m.content) return false;
-            const realAtMs = Date.parse(real.at);
-            return Number.isFinite(optimisticAtMs) && Number.isFinite(realAtMs)
-              ? Math.abs(realAtMs - optimisticAtMs) < 2 * 60_000
-              : true;
-          });
-        });
-        const seen = new Set<string>();
-        const merged: TimelineMessage[] = [];
-        for (const m of [...prevWithoutOptimistic, ...res.messages]) {
-          const key = `${m.sessionId}:${m.at}:${m.role}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          merged.push(m);
-        }
-        merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-        return merged;
-      });
+      // The server returned the most-recent slice. Keep older pages already
+      // loaded while merging in the new durable rows.
+      setMessages((prev) => mergeTimelineMessages(prev, res.messages));
     } catch {
       /* non-fatal — the SSE complete event already updated the live state */
     }
@@ -1982,6 +2006,11 @@ export function ChatTimelineView({
             );
           }
         }
+        // `complete` normally performs this refresh, but it is a separate SSE
+        // envelope and can be the one frame lost during reconnect/backpressure.
+        // `done` is the authoritative end-of-turn fallback: reconcile the
+        // durable assistant row even when no live slot remains to retire.
+        void refreshLatest();
       } else if (event.type === 'engine_phase') {
         // llama-cpp fires these for supervised-process lifecycle
         // (starting / loading_model — parsed from stdout) and per-

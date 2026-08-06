@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MEESTER_ABOUT_MD } from '../meester/prompt.js';
 import { Store } from './store.js';
 
 let home: string;
@@ -69,6 +70,23 @@ describe('Store.ensureDefaultMeester', () => {
     const config = await store.readConfig();
     expect(config.meesterGezelId).not.toBe('ghost');
     expect(['ada', 'boz']).toContain(config.meesterGezelId);
+  });
+
+  it('refreshes persisted two-macro guidance to the single project kickoff', async () => {
+    const oldAbout = [
+      '## Identity',
+      'You are the Meester.',
+      '## Starting work — two macros, one decision',
+      'Use start_project for crews and start_job for a single specialist.',
+      'Use ask_specialist for advice.',
+    ].join('\n\n');
+    const meester = await store.createGezel({ name: 'Mira', role: 'Meester', about: oldAbout });
+    await store.writeConfig({ meesterGezelId: meester.id });
+
+    await store.ensureDefaultMeester();
+
+    expect((await store.getGezel(meester.id))?.about).toBe(MEESTER_ABOUT_MD);
+    expect(MEESTER_ABOUT_MD).not.toContain('start_job');
   });
 });
 

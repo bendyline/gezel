@@ -234,7 +234,6 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'message_gezel',
       'list_projects',
       'start_project',
-      'start_job',
       'fetch_repo',
       'fetch_diff',
       'update_project',

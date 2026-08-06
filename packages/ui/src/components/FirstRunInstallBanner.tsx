@@ -45,9 +45,10 @@ interface Props {
 }
 
 interface MemoryProfile {
-  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
   gpuVramBytes: number | null;
+  gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
 }
 
 interface InstallProgress {
@@ -591,9 +592,17 @@ function formatBytes(bytes: number): string {
 const LARGE_BUDGET_BYTES = 25_000_000_000;
 const MEDIUM_BUDGET_BYTES = 13_000_000_000;
 const SMALL_BUDGET_BYTES = 5_000_000_000;
+const SMALL_GPU_VRAM_BYTES = 8 * 1024 ** 3;
 
 function describeDeviceCapacity(memory: MemoryProfile | null): string {
   if (!memory) return 'You can run AI models on this device.';
+  const lowAcceleration =
+    memory.source === 'gpu-integrated' ||
+    memory.source === 'system-ram-fallback' ||
+    (memory.source !== 'darwin-unified' &&
+      memory.gpuMemoryKind !== 'unified' &&
+      (memory.gpuVramBytes == null || memory.gpuVramBytes < SMALL_GPU_VRAM_BYTES));
+  if (lowAcceleration) return 'This device is best suited to small AI models.';
   const tier =
     memory.usableBytes >= LARGE_BUDGET_BYTES
       ? 'large'
@@ -602,7 +611,10 @@ function describeDeviceCapacity(memory: MemoryProfile | null): string {
         : memory.usableBytes >= SMALL_BUDGET_BYTES
           ? 'small-size'
           : 'tiny';
-  const accelerated = memory.source === 'darwin-unified' || memory.gpuVramBytes != null;
+  const accelerated =
+    memory.source === 'darwin-unified' ||
+    memory.gpuMemoryKind === 'discrete' ||
+    memory.gpuMemoryKind === 'unified';
   const qualifier = accelerated ? ' comfortably' : '';
   return `You can run ${tier} AI models${qualifier} on this device.`;
 }

@@ -811,10 +811,10 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    * Emitted when a turn ends up waiting in the provider queue for more
    * than a brief grace period (~200ms). `aheadOf` is an approximate
    * count of turns that will dispatch before this one. The UI replaces
-   * its "thinking" indicator with a "queued — N ahead" muted line
-   * until the first `delta` or the wait clears. Sub-threshold waits
-   * don't emit this event — avoids flashing the indicator on the
-   * happy path where the queue is empty.
+   * its "thinking" indicator with a numbered place-in-line diagram
+   * until the first `delta` or the wait clears. Sub-threshold waits don't
+   * emit this event — avoids flashing the indicator on the happy path
+   * where the queue is empty.
    */
   z.object({ type: z.literal('queued'), aheadOf: z.number().int().min(0) }),
   /**
@@ -1024,6 +1024,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     phase: z.enum(['starting', 'loading_model', 'prefill', 'generating', 'ready']),
     detail: z.string().optional(),
     progress: z.number().min(0).max(1).optional(),
+    ttftMs: z.number().int().nonnegative().optional(),
   }),
   /**
    * Per-turn telemetry for locally-hosted providers (llama-cpp +

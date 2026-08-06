@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  gpuMemoryKindFromName,
   gpuVendorFromName,
   matchNvidiaRuntimeDevice,
   maxGpuVramBytes,
@@ -114,6 +115,16 @@ describe('pickBestGpuDevice', () => {
     expect(pickBestGpuDevice(d)?.id).toBe('CUDA1');
   });
 
+  it('prefers a real discrete card over a larger integrated shared allocation', () => {
+    const d = parseLlamaDevices(
+      [
+        '  Vulkan0: Intel(R) Graphics (16000 MiB, 12000 MiB free)',
+        '  Vulkan1: AMD Radeon RX 7800 XT (12288 MiB, 12000 MiB free)',
+      ].join('\n'),
+    );
+    expect(pickBestGpuDevice(d)?.name).toBe('AMD Radeon RX 7800 XT');
+  });
+
   it('returns null when there is no GPU (empty or all-zero)', () => {
     expect(pickBestGpuDevice([])).toBeNull();
     expect(
@@ -138,5 +149,32 @@ describe('gpuVendorFromName', () => {
   it('returns undefined for software / unrecognized devices (caller shows generic "GPU")', () => {
     expect(gpuVendorFromName('llvmpipe (LLVM 15.0.7, 256 bits)')).toBeUndefined();
     expect(gpuVendorFromName('SwiftShader Device')).toBeUndefined();
+  });
+});
+
+describe('gpuMemoryKindFromName', () => {
+  it('classifies Surface-class Intel graphics as integrated shared memory', () => {
+    expect(gpuMemoryKindFromName('Intel(R) UHD Graphics')).toBe('integrated');
+    expect(gpuMemoryKindFromName('Intel(R) Iris(R) Xe Graphics')).toBe('integrated');
+    expect(gpuMemoryKindFromName('Intel(R) Graphics')).toBe('integrated');
+    expect(gpuMemoryKindFromName('Intel(R) Arc(TM) Graphics')).toBe('integrated');
+  });
+
+  it('keeps discrete Intel Arc boards discrete', () => {
+    expect(gpuMemoryKindFromName('Intel(R) Arc(TM) A770 Graphics')).toBe('discrete');
+    expect(gpuMemoryKindFromName('Intel Arc B580 Graphics')).toBe('discrete');
+    expect(gpuMemoryKindFromName('Intel Arc Pro A60 Graphics')).toBe('discrete');
+  });
+
+  it('recognizes common integrated and discrete AMD/Qualcomm families', () => {
+    expect(gpuMemoryKindFromName('AMD Radeon 780M Graphics')).toBe('integrated');
+    expect(gpuMemoryKindFromName('AMD Radeon Graphics')).toBe('integrated');
+    expect(gpuMemoryKindFromName('Qualcomm Adreno X1-85 GPU')).toBe('integrated');
+    expect(gpuMemoryKindFromName('AMD Radeon RX 7900 XTX')).toBe('discrete');
+    expect(gpuMemoryKindFromName('AMD Radeon AI PRO R9700')).toBe('discrete');
+  });
+
+  it('does not guess for an unrecognized Vulkan device', () => {
+    expect(gpuMemoryKindFromName('Some Future Accelerator')).toBe('unknown');
   });
 });

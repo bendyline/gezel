@@ -5879,6 +5879,7 @@ export class ChatManager {
           phase: ev.phase,
           ...(ev.detail ? { detail: ev.detail } : {}),
           ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
+          ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
         });
       });
       // turn_stats — llama-cpp + Ollama per-turn token counts +
@@ -7090,13 +7091,13 @@ export class ChatManager {
           let voormanIdleVerdict: 'idle' | 'nothing-built' | null = null;
           const completedAsyncHandoff = drained.some(isSuccessfulAsyncHandoffToolCall);
           if (looksStalled(finalContent)) {
-            // Subdivide: stall + tools-ran is "you ran the tools, now
-            // wrap up with words" (CLOSING_SUMMARY_NUDGE). Stall +
-            // no-tools is the original "you said you would, but didn't
-            // actually call the tool" case (CONTINUATION_NUDGE). The
-            // wrong nudge is misleading: telling the model to "execute
-            // the tool now" when the tool already succeeded confuses it
-            // into running it again. drained is empty for Copilot (its
+            // Subdivide by what the successful tools accomplished. A real
+            // action that only lacks closing prose gets CLOSING_SUMMARY_NUDGE;
+            // a lookup is still intermediate progress and must continue
+            // toward the user's requested action. Treating every successful
+            // call as terminal caused the Ypres failure: suggest_craftbook
+            // ran, then the recovery prompt forbade invoke_craftbook.
+            // drained is empty for Copilot (its
             // SDK runs tools in-subprocess) — fall back to the original
             // text-stall nudge there.
             if (noopConfirmationAccepted) {
@@ -7126,16 +7127,20 @@ export class ChatManager {
                   `session ${sessionId}: file mutation completed — skipping tool-only closing nudge so validation can run`,
                 );
               } else if (
-                state.record.taskRef &&
-                drained.every((call) => call.success && isReadOnlyToolName(call.name))
+                drained.some((call) => call.success) &&
+                drained
+                  .filter((call) => call.success)
+                  .every((call) => isReadOnlyToolName(call.name))
               ) {
-                // A read is context acquisition, not completion, for a
-                // task-driving session. The old generic "No more tools"
-                // nudge made small models summarize the read and abandon
-                // the actual build/edit action.
+                // A lookup is context acquisition, not completion. This is
+                // true both inside a task and in an untasked Meester turn:
+                // suggest_craftbook must be followed by invoke_craftbook,
+                // not a closing summary that forbids more tools.
                 stallReason = 'tool-read-only';
-              } else {
+              } else if (drained.some((call) => call.success && !isReadOnlyToolName(call.name))) {
                 stallReason = 'tool-only';
+              } else {
+                stallReason = 'text';
               }
             } else {
               stallReason = 'text';
@@ -9643,17 +9648,24 @@ export class ChatManager {
     // told a 64 GB / 24 GB-VRAM box its models get "60% of your 63.9 GB
     // machine" and then refused a model that fit the card plus offload.
     // The probe caches, and a failure degrades to the RAM-only curve.
-    const gpuVramBytes = await (async () => {
+    const memoryProfile = await (async () => {
       try {
         const { detectMemoryProfileCached } = await import('../system/memory.js');
-        return (await detectMemoryProfileCached()).gpuVramBytes;
+        return await detectMemoryProfileCached();
       } catch {
         return null;
       }
     })();
     const broker = new CapacityBroker({
       ...(budgetBytes !== undefined ? { budgetBytes } : {}),
-      gpuVramBytes,
+      gpuVramBytes: memoryProfile?.gpuVramBytes ?? null,
+      ...(memoryProfile
+        ? {
+            unifiedMemory:
+              memoryProfile.gpuMemoryKind === 'integrated' ||
+              memoryProfile.gpuMemoryKind === 'unified',
+          }
+        : {}),
       allowRamSpillover: config.allowRamSpillover ?? null,
     });
     const pool = new ProviderPool({ broker, builders: {} });
@@ -12164,6 +12176,11 @@ export class ChatManager {
       (envLayeredOverride ??
         config.layeredPrefixCache?.enabled ??
         record.providerName === 'llama-cpp');
+    const executionDensity = resolveExecutionDensity(
+      config.executionDensity,
+      record.providerName,
+      localModelTier,
+    );
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
       ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
@@ -12177,11 +12194,7 @@ export class ChatManager {
         : {}),
       role: gezel?.role,
       providerName: record.providerName,
-      executionDensity: resolveExecutionDensity(
-        config.executionDensity,
-        record.providerName,
-        localModelTier,
-      ),
+      executionDensity,
       project,
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
@@ -12770,6 +12783,7 @@ export class ChatManager {
         GEZEL_PROJECT_ID: record.projectId,
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
+        GEZEL_EXECUTION_DENSITY: executionDensity,
         ...(record.expectedDeliverable
           ? { GEZEL_EXPECTED_DELIVERABLE: JSON.stringify(record.expectedDeliverable) }
           : {}),
@@ -14532,16 +14546,16 @@ export function buildFailedToolRecoveryNudge(calls: ReadonlyArray<ToolOutcome>):
 }
 
 /**
- * Nudge specific to "ran tools, then went silent" — small models often
- * emit a `tool_use` block as their entire turn output and stop, leaving
+ * Nudge specific to "ran an action tool, then went silent" — small models
+ * often emit a `tool_use` block as their entire turn output and stop, leaving
  * the user staring at an expanded tool-call card with no closing
  * narrative. The tier-keyed system-prompt rules already ask the model
  * to wrap up after tools (see {@link tinyTierPromptHints} +
  * {@link SMALL_TIER_PROMPT_HINTS}); this is the deterministic backstop
  * for when the model didn't follow that.
  *
- * Distinct from CONTINUATION_NUDGE on purpose: this case is "tool ran,
- * just say what happened" — telling the model to "execute the tool now"
+ * Distinct from CONTINUATION_NUDGE on purpose: this case is "the requested
+ * action ran, just say what happened" — telling the model to execute it again
  * (the CONTINUATION_NUDGE wording) would be misleading since the tool
  * already succeeded.
  */
@@ -14550,14 +14564,16 @@ const CLOSING_SUMMARY_NUDGE =
   'In one sentence, tell the user what happened. No more tools — just words.';
 
 /**
- * A task-scoped read-only call is an intermediate observation, not the
- * deliverable. Keep the model moving toward the first mutating/action tool
- * instead of applying the terminal closing-summary nudge.
+ * A read-only call is an intermediate observation, not the deliverable.
+ * Keep the model moving toward the first mutating/action tool instead of
+ * applying the terminal closing-summary nudge. This wording covers both
+ * task-scoped work and untasked coordinator lookups.
  */
 const READ_ONLY_PROGRESS_NUDGE =
-  'The read-only tool returned the context you needed, but the current task step is not finished. ' +
-  'Continue now with the next concrete action in the Step procedure, using the required tool. ' +
-  'Do not stop merely to say that you read, inspected, or retrieved something.';
+  "The read-only tool returned useful context, but it did not complete the user's request. " +
+  'Continue now with the next concrete action using the appropriate action tool. ' +
+  'If the lookup result named a next tool call, make that call now. ' +
+  'Do not stop merely to summarize what you read, inspected, retrieved, or were advised to invoke.';
 
 /**
  * Nudge specific to the voorman-idle case: the project's voorman just
@@ -14846,6 +14862,10 @@ const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'get_task',
   'read_task_notes',
   'search_history',
+  // Procedure discovery/inspection is not execution. A successful
+  // suggestion must still be followed by invoke_craftbook.
+  'suggest_craftbook',
+  'craftbook_read',
 ]);
 
 function truncate(s: string, max: number): string {
@@ -14878,7 +14898,7 @@ function isReadOnlyToolName(name: string): boolean {
   // as a mutation. Conservative — a mutating tool named `get_quote` would
   // be a false positive, but the project's naming discipline makes that
   // unlikely enough that the simpler rule wins.
-  return /^(?:list|read|get|search|has)_/.test(name);
+  return /^(?:list|read|get|search|has|suggest)_/.test(name);
 }
 
 function isSuccessfulAsyncHandoffToolCall(toolCall: ChatMessageToolCall): boolean {
@@ -15316,11 +15336,11 @@ export interface BuildInstructionsOptions {
    */
   providerName?: ProviderName;
   /**
-   * Resolved execution density for this session. `flat` flips the
-   * delegation-role routing prose to default to `start_job` (a solo
-   * ambachtsman) over `start_project` (a crew) — see
-   * {@link resolveExecutionDensity} and `docs/frontier-adaptive-execution.md`.
-   * Absent ⇒ `scaffold` (the historical crew-default behavior).
+   * Resolved execution density for this session. The model always calls
+   * `start_project`; this value lets the runtime choose a flat lead or a
+   * scaffolded crew without making the model select between two macros.
+   * See {@link resolveExecutionDensity} and
+   * `docs/frontier-adaptive-execution.md`.
    */
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
@@ -15678,7 +15698,6 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   ]);
   const projectTaskTools = toolsFrom([
     'start_project',
-    'start_job',
     'update_project',
     'create_task',
     'assign_task',
@@ -15687,26 +15706,21 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   ]);
   const artifactTools = toolsFrom(['list_artifacts', 'read_artifact', 'write_artifact']);
   const routingTail = `\n\n**Things you should never try:**\n\n- "I'll just write the file myself" / "Let me create that for you" → no. Even if writing the file feels faster, the answer is to delegate. The user's session with you is the lobby; the work happens in the project.\n- Searching the tool catalog for a workaround when a tool was denied. A denial is a signal that you're outside your role, not a puzzle to solve. Stop, route, hand off.\n- Naming or fabricating tools that are not in the Available tools list for this turn.\n\n**Things you DO do yourself:**\n\n- Talk to the user. Ask clarifying questions. Confirm scope.\n- Use the **artifacts drawer** for plans and scratch when available (${formatToolList(artifactTools)}).\n- Manage the team with the tools actually wired this turn (${formatToolList(teamTools)}).\n- Manage projects and tasks with the tools actually wired this turn (${formatToolList(projectTaskTools)}).`;
-  // FLAT density flips the routing default from crew→solo: one capable
-  // generalist (the ambachtsman, via `start_job`) owns the whole job, which
-  // also collapses the craftbook onto that single specialist. This is the
-  // frontier-adaptive path — a self-orchestrating model doesn't need a crew
-  // relay or per-step hand-offs. Emitted for any delegation role in flat
-  // mode (not just the cli providers); see docs/frontier-adaptive-execution.md.
+  // Execution density is deliberately absent from the model-facing tool
+  // choice. Every build enters through `start_project`; the MCP runtime
+  // selects a flat lead or scaffolded crew. This prevents prompt/toolset
+  // drift and leaves one unambiguous kickoff action for smaller models.
   const craftbookRoute =
     availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
-      ? 'For named output formats or multi-step production work, first call `suggest_craftbook`, then `invoke_craftbook` when it finds a match.'
+      ? 'For named output formats or multi-step production work, call `suggest_craftbook` once, then make `invoke_craftbook` your next tool call when it returns a match or fallback. Do not repeat the suggestion with a rephrased query or switch to a generic kickoff macro.'
       : '';
-  const flatPrimaryRoute = availableToolNameSet.has('start_job')
-    ? '`start_job({ name, about, missionObjectives, taskDescription, specialistRole })`'
+  const projectPrimaryRoute = availableToolNameSet.has('start_project')
+    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
     : availableToolNameSet.has('message_gezel')
       ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
       : 'the available project/task tools listed below';
-  const crewPrimaryRoute = availableToolNameSet.has('start_project')
-    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
-    : flatPrimaryRoute;
-  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD — and on this install, route SOLO\n\nYou are a router; specialists do the work. For concrete work, route through ${flatPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
-  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${crewPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
+  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
+  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail = !isDelegationRole
     ? ''
     : opts.executionDensity === 'flat'
@@ -15719,13 +15733,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     (availableToolNameSet.has('suggest_craftbook') ||
       availableToolNameSet.has('invoke_craftbook') ||
       availableToolNameSet.has('convert_document'))
-      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. Prefer the matching craftbook via ${availableToolNameSet.has('suggest_craftbook') ? '`suggest_craftbook`' : 'the available craftbook surface'}${availableToolNameSet.has('invoke_craftbook') ? ' + `invoke_craftbook`' : ''}. Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
+      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. The matching craftbook route takes precedence over generic project/job kickoff and direct delegation. ${availableToolNameSet.has('suggest_craftbook') ? 'Call `suggest_craftbook` exactly once.' : 'Use the available craftbook surface.'}${availableToolNameSet.has('invoke_craftbook') ? ' If it returns a match or fallback, your NEXT tool call in this same turn must be `invoke_craftbook` with the returned id; do not repeat the lookup with a rephrased query.' : ''} Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. Do not claim a project, task, or deliverable exists until the action tool returns success. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
       : '';
 
   let projectContext = '';
   if (project) {
     const isSolo = project.mode === 'solo';
-    projectContext = `\n\n---\n\nYou are working in the ${isSolo ? 'solo project (job)' : 'project'} "${project.name}".`;
+    projectContext = `\n\n---\n\nYou are working in the project "${project.name}".`;
     if (project.workingDir) {
       // Deliberately path-free: the model addresses workspace files by
       // paths relative to the root, so the host path is need-to-know it
@@ -15739,7 +15753,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
       const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
-        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the entire project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
+        ? ` The lead of this project is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
         : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
     if (project.about && project.about.trim().length > 0) {
@@ -17535,7 +17549,25 @@ export async function buildLlamaCppProvider(opts: {
                 weightsBytes: approxBytes,
                 kvCacheType,
               }) / REFERENCE_CTX;
-        const liveBudget = computeCapacityBudget({ gpuVramBytes: vramBytes || null });
+        const liveMemory = await (async () => {
+          try {
+            const { detectMemoryProfileCached } = await import('../system/memory.js');
+            return await detectMemoryProfileCached();
+          } catch {
+            return null;
+          }
+        })();
+        const liveBudget = computeCapacityBudget({
+          ...(liveMemory ? { systemRamBytes: liveMemory.totalRamBytes } : {}),
+          gpuVramBytes: (liveMemory?.gpuVramBytes ?? vramBytes) || null,
+          ...(liveMemory
+            ? {
+                unifiedMemory:
+                  liveMemory.gpuMemoryKind === 'integrated' ||
+                  liveMemory.gpuMemoryKind === 'unified',
+              }
+            : {}),
+        });
         const admission = clampCtxTokensForMemory({
           requestedPerTurnCtxTokens: effectiveNumCtx,
           slots,

@@ -5,7 +5,8 @@ interface MemoryProfile {
   platform: string;
   totalRamBytes: number;
   gpuVramBytes: number | null;
-  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+  gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
   gpuVendor?: 'amd' | 'nvidia' | 'intel';
 }
@@ -23,6 +24,21 @@ const LARGE_BUDGET_BYTES = 25_000_000_000;
 const MEDIUM_BUDGET_BYTES = 13_000_000_000;
 /** ~5 GB usable fits a 3-4B model in 4-bit quant with modest context. */
 const SMALL_BUDGET_BYTES = 5_000_000_000;
+const SMALL_GPU_VRAM_BYTES = 8 * 1024 ** 3;
+
+function isLowAccelerationDevice(memory: MemoryProfile): boolean {
+  if (memory.platform === 'darwin') return false;
+  if (memory.gpuMemoryKind === 'unified') return false;
+  if (
+    memory.gpuMemoryKind === 'integrated' ||
+    memory.gpuMemoryKind === 'none' ||
+    memory.source === 'gpu-integrated' ||
+    memory.source === 'system-ram-fallback'
+  ) {
+    return true;
+  }
+  return memory.gpuVramBytes == null || memory.gpuVramBytes < SMALL_GPU_VRAM_BYTES;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
@@ -36,6 +52,15 @@ function describe(memory: MemoryProfile): string {
   const vram = memory.gpuVramBytes ? formatBytes(memory.gpuVramBytes) : null;
   if (memory.source === 'darwin-unified') {
     return `Apple Silicon unified memory — ~${usable} usable for models (out of ${total} total).`;
+  }
+  if (memory.source === 'gpu-integrated') {
+    const who = memory.gpuVendor
+      ? `${VENDOR_LABEL[memory.gpuVendor]} integrated GPU`
+      : 'Integrated GPU';
+    const reported = vram
+      ? ` It reports ${vram} of shared graphics memory, which is part of that RAM, not additional memory.`
+      : '';
+    return `${who} — ~${usable} usable for models (out of ${total} shared system RAM).${reported}`;
   }
   if (memory.source === 'gpu-nvidia' || memory.source === 'gpu-vulkan') {
     // The GPU backs the budget — name the vendor when we know it ("AMD GPU"),
@@ -70,8 +95,9 @@ export function DeviceSummary() {
   }, []);
 
   if (!memory) return null;
-  const tierLabel =
-    memory.usableBytes >= LARGE_BUDGET_BYTES
+  const tierLabel = isLowAccelerationDevice(memory)
+    ? 'Your device is best suited to small models'
+    : memory.usableBytes >= LARGE_BUDGET_BYTES
       ? 'Your device can run large models'
       : memory.usableBytes >= MEDIUM_BUDGET_BYTES
         ? 'Your device can run some nice medium-size models'

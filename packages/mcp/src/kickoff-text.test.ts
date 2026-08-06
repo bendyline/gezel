@@ -5,7 +5,6 @@ import {
   inferSourceDeliverablePath,
   macroLooksLikeBuildMission,
   shouldPromoteStartJobToProject,
-  shouldRouteStartProjectToJob,
 } from './kickoff-text.js';
 
 const BUILD_BRIEF = {
@@ -124,30 +123,5 @@ describe('promotion + mission predicates', () => {
     ).toBe(true);
     expect(shouldPromoteStartJobToProject(BUILD_BRIEF)).toBe(false);
     expect(macroLooksLikeBuildMission('Notes', 'Organize notes', 'Tidy list')).toBe(false);
-  });
-
-  it('routes clearly solo crew-macro briefs to start_job without stealing complex builds', () => {
-    expect(shouldRouteStartProjectToJob(BUILD_BRIEF)).toBe(true);
-    expect(
-      shouldRouteStartProjectToJob({
-        name: 'Single module',
-        about: 'Implement the requested utility at src/utility.ts.',
-        missionObjectives: 'One working source file.',
-      }),
-    ).toBe(true);
-    expect(
-      shouldRouteStartProjectToJob({
-        name: 'Pet Shop',
-        about: 'Website with a generated logo.',
-        missionObjectives: 'index.html + assets/logo.png',
-      }),
-    ).toBe(false);
-    expect(
-      shouldRouteStartProjectToJob({
-        name: 'Product app',
-        about: 'A frontend and backend application for the team.',
-        missionObjectives: 'Implement the app.',
-      }),
-    ).toBe(false);
   });
 });

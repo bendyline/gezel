@@ -607,6 +607,19 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     expect(shared.fastBytes).toBe(shared.budgetBytes);
   });
 
+  it('accepts explicit integrated-memory classification when the reported share is below the ratio heuristic', () => {
+    // Surface-class Vulkan adapters may advertise ~12 GiB on a 32 GiB host:
+    // well below the 75% GB10 heuristic, but still the same physical RAM.
+    const integrated = computeCapacityBudget({
+      systemRamBytes: 32 * GB,
+      gpuVramBytes: 12 * GB,
+      unifiedMemory: true,
+    });
+    expect(integrated.kind).toBe('unified');
+    expect(integrated.vramBytes).toBe(0);
+    expect(integrated.budgetBytes).toBe(Math.floor(32 * GB * 0.7));
+  });
+
   it('a host with no card is unchanged', () => {
     const cpuOnly = computeCapacityBudget({
       systemRamBytes: RAM,

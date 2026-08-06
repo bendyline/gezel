@@ -16,7 +16,10 @@ function sseResponse(frames: unknown[]): Response {
 }
 
 function fakeBridge(
-  handlers: Record<string, (args: Record<string, unknown>) => Promise<string>>,
+  handlers: Record<
+    string,
+    (args: Record<string, unknown>) => Promise<string | { text: string; isError: boolean }>
+  >,
 ): McpBridgePool {
   return {
     isEmpty: () => Object.keys(handlers).length === 0,
@@ -27,10 +30,13 @@ function fakeBridge(
         description: '',
         parameters: { type: 'object' },
       })),
-    callToolRich: async (name: string, args: Record<string, unknown>) => ({
-      text: await handlers[name]!(args),
-      images: [],
-    }),
+    callToolRich: async (name: string, args: Record<string, unknown>) => {
+      const result = await handlers[name]!(args);
+      return {
+        ...(typeof result === 'string' ? { text: result, isError: false } : result),
+        images: [],
+      };
+    },
     stop: async () => {},
   } as unknown as McpBridgePool;
 }
@@ -157,6 +163,342 @@ describe('RemoteSession', () => {
     const tools = calls[0]!.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toContain('read_file');
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
+  });
+
+  it('forwards native-engine liveness, TTFT phases, and performance telemetry', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        { type: 'phase', provider: 'llama-cpp', phase: 'prefill', detail: 'prompt' },
+        { type: 'wire_pulse' },
+        { type: 'reasoning_delta', text: 'considering' },
+        { type: 'tool_args_delta', name: 'write_file', text: '{"path":"game.html"' },
+        {
+          type: 'phase',
+          provider: 'llama-cpp',
+          phase: 'generating',
+          detail: 'First token in 12.3s',
+          ttftMs: 12_345,
+        },
+        {
+          type: 'turn_stats',
+          provider: 'llama-cpp',
+          promptTokens: 100,
+          completionTokens: 20,
+          durationMs: 5000,
+          tokensPerSec: 4,
+        },
+        { type: 'engine_stats', provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 },
+        { type: 'delta', text: 'Ready.' },
+        { type: 'done' },
+      ])) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 'sys',
+      model: 'llama-cpp:gemma-e2b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+    const phases: Array<{ phase: string; ttftMs?: number }> = [];
+    const reasoning: string[] = [];
+    const toolArgs: Array<[string, string]> = [];
+    const turnStats: Array<{ tokensPerSec?: number }> = [];
+    const engineStats: Array<{ ramAllocBytes: number }> = [];
+    let pulses = 0;
+    session.onEnginePhase((event) => phases.push(event));
+    session.onReasoningDelta((text) => reasoning.push(text));
+    session.onToolArgsDelta((name, text) => toolArgs.push([name, text]));
+    session.onWirePulse(() => {
+      pulses += 1;
+    });
+    session.onTurnStats((event) => turnStats.push(event));
+    session.onEngineStats((event) => engineStats.push(event));
+
+    await expect(session.sendAndWait('build it')).resolves.toBe('Ready.');
+    expect(phases).toEqual([
+      { provider: 'llama-cpp', phase: 'prefill', detail: 'prompt' },
+      {
+        provider: 'llama-cpp',
+        phase: 'generating',
+        detail: 'First token in 12.3s',
+        ttftMs: 12_345,
+      },
+    ]);
+    expect(reasoning).toEqual(['considering']);
+    expect(toolArgs).toEqual([['write_file', '{"path":"game.html"']]);
+    expect(pulses).toBe(1);
+    expect(turnStats).toEqual([
+      {
+        provider: 'llama-cpp',
+        promptTokens: 100,
+        completionTokens: 20,
+        durationMs: 5000,
+        tokensPerSec: 4,
+      },
+    ]);
+    expect(engineStats).toEqual([{ provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 }]);
+  });
+
+  it('advances from acceptance note to deliverable write across remote forward passes', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const emitted = [
+      {
+        id: 'note-1',
+        name: 'write_task_note',
+        arguments: '{"ref":"frogger/1","stepId":"build","text":"Acceptance checklist"}',
+      },
+      {
+        id: 'write-1',
+        name: 'write_file',
+        arguments: '{"path":"index.html","content":"<!doctype html><canvas></canvas>"}',
+      },
+    ];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const call = emitted.shift();
+      return call
+        ? sseResponse([{ type: 'tool_call', calls: [call] }, { type: 'done' }])
+        : sseResponse([{ type: 'delta', text: 'Built the game.' }, { type: 'done' }]);
+    }) as unknown as typeof fetch;
+    const executed: string[] = [];
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_task_note: async () => {
+          executed.push('write_task_note');
+          return 'Appended acceptance checklist.';
+        },
+        write_file: async () => {
+          executed.push('write_file');
+          return 'Wrote index.html.';
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('Record the checklist, then build index.html.', {
+        attachments: [{ base64: 'aW1hZ2U=', mimeType: 'image/png', filename: 'reference.png' }],
+      }),
+    ).resolves.toBe('Built the game.');
+    expect(executed).toEqual(['write_task_note', 'write_file']);
+    expect(requests).toHaveLength(3);
+    expect(requests[0]!.attachments).toHaveLength(1);
+    expect(requests[1]!.prompt).toBe('');
+    expect(requests[1]!.attachments).toBeUndefined();
+    expect(requests[2]!.prompt).toBe('');
+    expect(requests[2]!.attachments).toBeUndefined();
+    expect(
+      (requests[2]!.priorMessages as Array<Record<string, unknown>>).filter(
+        (message) => message.role === 'user' && message.content === '',
+      ),
+    ).toEqual([]);
+  });
+
+  it('stops varying-text write_task_note spin in the outer remote loop', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let pass = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      pass += 1;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `note-${pass}`,
+              name: 'write_task_note',
+              arguments: JSON.stringify({
+                ref: 'frogger/1',
+                stepId: 'build',
+                text: `Acceptance checklist version ${pass}`,
+              }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    let noteWrites = 0;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_task_note: async () => {
+          noteWrites += 1;
+          return `Appended note ${noteWrites}.`;
+        },
+        write_file: async () => 'Wrote index.html.',
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      activeCraftbookStep: { name: 'Build' },
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('Record acceptance criteria, then write index.html.'),
+    ).rejects.toMatchObject({ code: 'turn-aborted' });
+    expect(noteWrites).toBe(5);
+    expect(requests).toHaveLength(5);
+    const fourthPrior = requests[3]!.priorMessages as Array<Record<string, unknown>>;
+    expect(fourthPrior.at(-1)?.content).toContain('Stop re-writing');
+  });
+
+  it('stops repeated tool failures across remote passes even when arguments change', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let pass = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      pass += 1;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `write-${pass}`,
+              name: 'write_file',
+              arguments: JSON.stringify({
+                path: `attempt-${pass}.html`,
+                content: `draft ${pass}`,
+              }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    let writes = 0;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_file: async () => {
+          writes += 1;
+          return { text: 'Write failed: validation rejected the draft', isError: true };
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('Write the deliverable.')).rejects.toMatchObject({
+      code: 'turn-aborted',
+    });
+    expect(writes).toBe(5);
+    expect(requests).toHaveLength(5);
+    const fourthPrior = requests[3]!.priorMessages as Array<Record<string, unknown>>;
+    expect(fourthPrior.at(-1)?.content).toContain('STOP retrying fragments');
+  });
+
+  it('ends the turn immediately after a successful project kickoff', async () => {
+    let forwardPasses = 0;
+    let kickoffCalls = 0;
+    const fetchImpl = (async () => {
+      forwardPasses++;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: 'kickoff-1',
+              name: 'start_project',
+              arguments: JSON.stringify({ name: 'Frogger Arcade' }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        start_project: async () => {
+          kickoffCalls++;
+          return 'Started project "Frogger Arcade" (frogger-arcade). Recruited Maya as lead (template: developer). Created task frogger-arcade/1.';
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma-e4b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    const text = await session.sendAndWait('Build me Frogger');
+
+    expect(forwardPasses).toBe(1);
+    expect(kickoffCalls).toBe(1);
+    expect(text).toContain('Project "Frogger Arcade" is kicked off');
+    expect(text).toContain('Maya is on it');
+  });
+
+  it('stops after two failed project kickoffs even when the model varies the arguments', async () => {
+    let forwardPasses = 0;
+    let kickoffCalls = 0;
+    const fetchImpl = (async () => {
+      forwardPasses++;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `kickoff-${forwardPasses}`,
+              name: 'start_project',
+              arguments: JSON.stringify({ name: `Frogger ${forwardPasses}` }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        start_project: async () => {
+          kickoffCalls++;
+          return { text: 'start_project failed: routing unavailable', isError: true };
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma-e4b',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    const text = await session.sendAndWait('Build me Frogger');
+
+    expect(forwardPasses).toBe(2);
+    expect(kickoffCalls).toBe(2);
+    expect(text).toContain("couldn't start the project after 2 attempts");
+    expect(text).toContain('routing unavailable');
   });
 
   it('throws when B sends an error frame', async () => {

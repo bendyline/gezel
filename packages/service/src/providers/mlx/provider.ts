@@ -78,6 +78,10 @@ import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { readSseEvents } from '../openai-compatible/sse.js';
+import {
+  PROJECT_MACRO_INTERCEPT_CAP,
+  deriveProjectMacroClosing,
+} from '../project-macro-loop-bail.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import {
@@ -101,10 +105,6 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
-import {
-  PROJECT_MACRO_INTERCEPT_CAP,
-  deriveProjectMacroClosing,
-} from './project-macro-loop-bail.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
@@ -1120,6 +1120,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // before this turn started.
     log.info(`turn#${seq} START prompt=${prompt.length}c msgs=${this.messages.length}`);
 
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || (opts?.attachments?.length ?? 0) > 0) {
+        throw new Error(
+          '[Mac AI] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      if (this.messages.at(-1)?.role !== 'tool') {
+        throw new Error('[Mac AI] a tool-result continuation requires a trailing tool result');
+      }
+    }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (opts?.attachments && opts.attachments.length > 0) {
       userMsg.images = opts.attachments.map((a: ImageAttachment) => a.base64);
@@ -1136,7 +1147,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // by manager after the turn resolves, populated only when the
     // salvage retry budget exhausts below.
     this.lastTurnAttemptedToolCalls = [];
-    this.messages.push(userMsg);
+    if (!continueFromToolResult) this.messages.push(userMsg);
 
     // Reset captures — each sendAndWait surfaces only its own externals.
     this.capturedCalls = [];
@@ -1792,6 +1803,27 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             const promptTps = usage?.prompt_tps;
             const generationTps = usage?.generation_tps;
             const cachedTokens = usage?.cached_tokens;
+            // A structured-tool response may never emit visible `content`.
+            // Count its first argument fragment as model activity so TTFT is
+            // still observable and the engine phase advances to generating.
+            if ((hasContent || hasToolCalls) && firstTokenAt === null) {
+              firstTokenAt = Date.now();
+              const ttft = firstTokenAt - start;
+              log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
+              // First-token detail folds in the prefill speed when
+              // the engine surfaces it. Prefill happens entirely
+              // inside `generate_step`, so this is the first chance
+              // we get to put a number on it.
+              const prefillSuffix =
+                promptTps && promptTps > 0 ? ` · prefill ${formatTps(promptTps)} tok/s` : '';
+              this.emitEnginePhase({
+                provider: 'mlx',
+                phase: 'generating',
+                detail: `First token in ${(ttft / 1000).toFixed(1)}s${prefillSuffix}`,
+                ttftMs: ttft,
+              });
+              lastPhaseAt = firstTokenAt;
+            }
             if (hasContent) {
               // Run the raw chunk through the marker stripper before
               // it lands anywhere user-visible. The TTFT / generating
@@ -1802,23 +1834,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // visible output is empty.
               const safeContent = stripper.push(delta!.content!);
               if (safeContent.length > 0) turnContent += safeContent;
-              if (firstTokenAt === null) {
-                firstTokenAt = Date.now();
-                const ttft = firstTokenAt - start;
-                log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
-                // First-token detail folds in the prefill speed when
-                // the engine surfaces it. Prefill happens entirely
-                // inside `generate_step`, so this is the first chance
-                // we get to put a number on it.
-                const prefillSuffix =
-                  promptTps && promptTps > 0 ? ` · prefill ${formatTps(promptTps)} tok/s` : '';
-                this.emitEnginePhase({
-                  provider: 'mlx',
-                  phase: 'generating',
-                  detail: `First token in ${(ttft / 1000).toFixed(1)}s${prefillSuffix}`,
-                });
-                lastPhaseAt = firstTokenAt;
-              } else {
+              if (firstTokenAt !== null) {
                 const now = Date.now();
                 if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
                   this.emitEnginePhase({

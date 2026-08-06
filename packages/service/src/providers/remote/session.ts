@@ -14,9 +14,15 @@
 import { createLogger } from '@bendyline/gezel';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
+import {
+  PROJECT_MACRO_FAILURE_CAP,
+  deriveProjectMacroClosing,
+} from '../project-macro-loop-bail.js';
 import type { ProviderQueue } from '../queue.js';
 import { runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
+import { ToolFailureTracker } from '../tool-failure-tracker.js';
+import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   ExternalToolCall,
   ImageAttachment,
@@ -40,6 +46,13 @@ const log = createLogger('remote-session');
 const MAX_TOOL_LOOPS = 24;
 const MID_LOOP_COMPACT_RATIO = 0.7;
 const MID_LOOP_COMPACT_MIN_PRIOR = 2;
+
+function nativeProviderFromModel(model: string): 'llama-cpp' | 'mlx' | 'ds4' | null {
+  const separator = model.indexOf(':');
+  if (separator <= 0) return null;
+  const provider = model.slice(0, separator);
+  return provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4' ? provider : null;
+}
 
 export interface RemoteSessionDeps {
   baseUrl: string;
@@ -65,6 +78,7 @@ export interface RemoteSessionDeps {
   /** Broker-reported post-admission context window. */
   numCtx: number;
   requestCompaction?: NonNullable<SessionOpts['requestCompaction']>;
+  activeCraftbookStep?: SessionOpts['activeCraftbookStep'];
   timeoutMs: number;
 }
 
@@ -182,6 +196,29 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     let userMessageAdded = false;
     let nextPrompt = prompt;
     let fullText = '';
+    let projectMacroResult: string | null = null;
+    let projectMacroFailureCount = 0;
+    let lastProjectMacroFailure = '';
+    const registeredTools = new Set(
+      this.deps.bridges.isEmpty()
+        ? []
+        : this.deps.bridges.getOpenAITools().map((tool) => tool.name),
+    );
+    const surgicalEditsAvailable =
+      registeredTools.has('replace_in_file') ||
+      registeredTools.has('insert_at_marker') ||
+      registeredTools.has('replace_lines') ||
+      registeredTools.has('append_to_file');
+    const delegationAvailable = [...registeredTools].some((name) => name.startsWith('delegate_'));
+    // B creates a fresh capture-mode provider session for every forward pass,
+    // so B-side trackers reset after every tool call. The loop lives here on A;
+    // its guards must live here too in order to span the whole user turn.
+    const failureTracker = new ToolFailureTracker({
+      surgicalEditsAvailable,
+      delegationAvailable,
+    });
+    const repeatTracker = new ToolRepeatTracker();
+    const providerLabel = `remote ${this.deps.model.split(':', 1)[0] || 'model'}`;
     this.activePriorMessages = priorMessages;
     this.pendingPrompt = prompt;
 
@@ -192,7 +229,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
             `[remote] turn timed out after ${Math.round(this.deps.timeoutMs / 1000)}s`,
           );
         }
-        const { text, toolCalls } = await this.postInfer(nextPrompt, priorMessages, opts);
+        const { text, toolCalls } = await this.postInfer(
+          nextPrompt,
+          priorMessages,
+          opts,
+          turn === 0,
+        );
         fullText += text;
 
         // The first forward pass carries the user message in `prompt`; every
@@ -221,22 +263,87 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           } catch {
             /* leave empty — the tool will surface its own validation error */
           }
+          const isProjectMacro = call.name === 'start_project' || call.name === 'start_job';
           let output: string;
-          try {
-            const budgetChars = computeToolBudgetChars(this.numCtx, this.estimatePromptChars());
-            const rich = await this.deps.bridges.callToolRich(call.name, args, {
-              budgetChars,
-              numCtxTokens: this.numCtx,
-            });
-            output = rich.text;
-          } catch (err) {
-            output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+          let outputIsError = false;
+          if (isProjectMacro && projectMacroResult) {
+            output =
+              'The project was already started successfully by an earlier kickoff call in this turn. This duplicate was suppressed; end the turn now.';
+          } else {
+            try {
+              const budgetChars = computeToolBudgetChars(this.numCtx, this.estimatePromptChars());
+              const rich = await this.deps.bridges.callToolRich(call.name, args, {
+                budgetChars,
+                numCtxTokens: this.numCtx,
+              });
+              output = rich.text;
+              outputIsError = rich.isError;
+            } catch (err) {
+              output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              outputIsError = true;
+            }
           }
-          priorMessages.push({ role: 'tool', content: output, toolCallId: call.id });
+          if (isProjectMacro && !projectMacroResult) {
+            if (outputIsError) {
+              projectMacroFailureCount++;
+              lastProjectMacroFailure = output;
+            } else {
+              projectMacroResult = output;
+            }
+          }
+          const trackableOutput =
+            outputIsError && !/^\s*ERROR:/i.test(output) ? `ERROR: ${output}` : output;
+          const tracked = failureTracker.recordResult(call.name, trackableOutput);
+          const repeated = repeatTracker.recordCall(call.name, args, tracked.output);
+          priorMessages.push({ role: 'tool', content: repeated.output, toolCallId: call.id });
+          if (tracked.shouldAbort) {
+            this.transcript = [...priorMessages];
+            throw ToolFailureTracker.buildAbort({
+              providerLabel,
+              toolName: call.name,
+              count: tracked.count,
+              surgicalEditsAvailable,
+              delegationAvailable,
+              ...(tracked.sourceFailureKind
+                ? { sourceFailureKind: tracked.sourceFailureKind }
+                : {}),
+              ...(tracked.transportFailure ? { transportFailure: true } : {}),
+            });
+          }
+          if (repeated.shouldAbort) {
+            this.transcript = [...priorMessages];
+            throw ToolRepeatTracker.buildAbort({
+              providerLabel,
+              toolName: call.name,
+              args,
+              count: repeated.count,
+              registeredTools,
+              ...(this.deps.activeCraftbookStep
+                ? { activeStep: this.deps.activeCraftbookStep }
+                : {}),
+            });
+          }
+        }
+        if (projectMacroResult) {
+          const closing = deriveProjectMacroClosing(projectMacroResult);
+          priorMessages.push({ role: 'assistant', content: closing });
+          this.transcript = [...priorMessages];
+          return fullText ? `${fullText}\n${closing}` : closing;
+        }
+        if (projectMacroFailureCount >= PROJECT_MACRO_FAILURE_CAP) {
+          const detail = lastProjectMacroFailure
+            .replace(/^ERROR:\s*/i, '')
+            .replace(/^start_(?:project|job) failed:\s*/i, '')
+            .trim();
+          const closing = `I couldn't start the project after ${PROJECT_MACRO_FAILURE_CAP} attempts.${detail ? ` ${detail}` : ''}`;
+          priorMessages.push({ role: 'assistant', content: closing });
+          this.transcript = [...priorMessages];
+          return fullText ? `${fullText}\n${closing}` : closing;
         }
         currentTurnStartIdx = await this.maybeCompactMidLoop(priorMessages, currentTurnStartIdx);
         nextPrompt = ''; // tool results drive the next forward-pass
       }
+      this.transcript = [...priorMessages];
       throw new Error('[remote] too many tool-call loops; aborting');
     } finally {
       this.activePriorMessages = null;
@@ -291,6 +398,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     prompt: string,
     priorMessages: PriorMessageWire[],
     opts?: SendAndWaitOpts,
+    includeAttachments = true,
   ): Promise<{ text: string; toolCalls: ExternalToolCall[] }> {
     const start = Date.now();
     const connection = this.deps.resolveConnection?.() ?? this.deps;
@@ -309,7 +417,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       prompt,
       priorMessages,
       ...(tools ? { tools } : {}),
-      ...(opts?.attachments && opts.attachments.length > 0
+      ...(includeAttachments && opts?.attachments && opts.attachments.length > 0
         ? {
             attachments: opts.attachments.map((a: ImageAttachment) => ({
               base64: a.base64,
@@ -362,6 +470,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           text += frame.text;
           this.emitDelta(frame.text);
           break;
+        case 'reasoning_delta':
+          this.emitReasoningDelta(frame.text);
+          break;
+        case 'tool_args_delta':
+          this.emitToolArgsDelta(frame.name, frame.text);
+          break;
+        case 'wire_pulse':
+          this.emitWirePulse();
+          break;
         case 'tool_call':
           toolCalls = frame.calls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }));
           break;
@@ -395,11 +512,50 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         case 'queued':
           opts?.queue?.onQueueWait?.({ aheadOf: frame.aheadOf ?? 0 });
           break;
+        case 'phase': {
+          // New brokers identify the native provider explicitly. Retain the
+          // model-prefix fallback so a newly upgraded user daemon can still
+          // consume phase frames from the first rolling-compatible broker.
+          const provider = frame.provider ?? nativeProviderFromModel(this.deps.model);
+          if (provider) {
+            if (typeof frame.ttftMs === 'number') {
+              // This is deliberately written by A as well as B: Settings →
+              // Open logs opens the per-user daemon log, while the machine
+              // broker's stdout is admin-protected on packaged installs.
+              log.info(
+                `[remote] TTFT ${frame.ttftMs}ms (engine=${provider} model=${this.deps.model})`,
+              );
+            }
+            this.emitEnginePhase({
+              provider,
+              phase: frame.phase,
+              ...(frame.detail ? { detail: frame.detail } : {}),
+              ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
+              ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+            });
+          }
+          break;
+        }
+        case 'turn_stats':
+          this.emitTurnStats({
+            provider: frame.provider,
+            promptTokens: frame.promptTokens,
+            completionTokens: frame.completionTokens,
+            durationMs: frame.durationMs,
+            ...(typeof frame.tokensPerSec === 'number' ? { tokensPerSec: frame.tokensPerSec } : {}),
+          });
+          break;
+        case 'engine_stats':
+          this.emitEngineStats({
+            provider: frame.provider,
+            ramAllocBytes: frame.ramAllocBytes,
+          });
+          break;
         case 'error':
           errFrame = { code: frame.code, message: frame.message };
           break;
         default:
-          break; // phase/done — no-op for now
+          break; // done
       }
     });
 

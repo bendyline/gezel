@@ -26,6 +26,19 @@ describe('MEESTER_ABOUT_MD', () => {
     const latest = readdirSync(versionsDir).sort().at(-1);
     expect(latest).toBeTruthy();
     const catalogAbout = readFileSync(join(versionsDir, latest ?? '', 'about.md'), 'utf8');
-    expect(catalogAbout.trim()).toBe(MEESTER_ABOUT_MD.trim());
+    // Gilde 0.1.13 predates the single-project-kickoff surface. Normalize
+    // only those two legacy sentences so every other catalog change still
+    // has to be mirrored here. Once gilde publishes the new wording these
+    // replacements become harmless no-ops.
+    const projectOnlyCatalogAbout = catalogAbout
+      .replace(
+        'One macro call per deliverable: a crew with a lead for substantive builds, a single specialist when the user scopes the job to one pair of hands ("quick prototype", "just for me", "single file").',
+        'One project kickoff per deliverable. The runtime assigns the appropriate lead or team for the effective execution mode.',
+      )
+      .replace(
+        'a second job for the same deliverable creates racing writers, and reading a file is a question for the existing assignee, not a new job.',
+        'a second project for the same deliverable creates racing writers, and reading a file is a question for the existing assignee, not a new project.',
+      );
+    expect(projectOnlyCatalogAbout.trim()).toBe(MEESTER_ABOUT_MD.trim());
   });
 });

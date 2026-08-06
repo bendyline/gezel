@@ -30,7 +30,7 @@ function turnCtx(overrides: Partial<TurnCtx>): TurnCtx {
 }
 
 describe('detectFabricatedToolClaim', () => {
-  it('catches the wild-caught "I have created the project" without a create_project call', () => {
+  it('catches the wild-caught "I have created the project" without a project kickoff', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the "Space Invaders" project.',
       firedToolNames: ['create_gezel_from_gilde', 'update_project', 'list_projects'],
@@ -38,7 +38,7 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
     expect(v.requiredTools).toContain('create_project');
-    expect(v.nudge).toMatch(/create_project/);
+    expect(v.nudge).toMatch(/start_project/);
   });
 
   it('catches "I\'ve created the **Space Invaders** project" (markdown-bold name)', () => {
@@ -216,6 +216,38 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.claim).toBe('created a project');
   });
 
+  it('catches the Ypres "I have initiated the project" wording', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have initiated the project "Battle of Ypres Presentation".',
+      firedToolNames: ['suggest_craftbook'],
+    });
+    expect(v.fabricated).toBe(true);
+    expect(v.claim).toBe('created a project');
+    expect(v.requiredTools).toEqual(
+      expect.arrayContaining(['create_project', 'start_project', 'start_job']),
+    );
+  });
+
+  it('catches a recruited voorman claim after lookup-only tools', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have recruited a `voorman` to begin drafting the presentation.',
+      firedToolNames: ['suggest_craftbook', 'list_projects'],
+    });
+    expect(v.fabricated).toBe(true);
+    expect(v.claim).toBe('recruited a voorman');
+    expect(v.requiredTools).toEqual(
+      expect.arrayContaining(['ensure_gezel', 'create_gezel_from_gilde', 'start_project']),
+    );
+  });
+
+  it('accepts start_project as proof that a voorman was recruited', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I recruited a voorman to lead the project.',
+      firedToolNames: ['start_project'],
+    });
+    expect(v.fabricated).toBe(false);
+  });
+
   it('covers other project-creation synonyms (set up / spun up / started / made / bootstrapped / kicked off)', () => {
     for (const verb of ['set up', 'spun up', 'started', 'made', 'bootstrapped', 'kicked off']) {
       const v = detectFabricatedToolClaim({
@@ -241,7 +273,7 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     );
     expect(verdict).not.toBeNull();
     expect(verdict?.warnUser).toBeUndefined();
-    expect(verdict?.promptForNextTurn).toMatch(/create_project/);
+    expect(verdict?.promptForNextTurn).toMatch(/start_project/);
     expect(verdict?.reason).toContain('created a project');
   });
 
@@ -254,6 +286,24 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
       undefined,
     );
     expect(verdict).toBeNull();
+  });
+
+  it('routes the exact Ypres fabrication back to invoke_craftbook', () => {
+    const verdict = FabricationDetectClaimWithoutTool.postTurnDetector!(
+      turnCtx({
+        userText: 'Can you create a PowerPoint about the Battle of Ypres?',
+        assistantContent:
+          'I have initiated the project "Battle of Ypres Presentation" and recruited a `voorman`.',
+        drained: [
+          { name: 'suggest_craftbook', durationMs: 12, success: true } as ChatMessageToolCall,
+        ],
+      }),
+      undefined,
+    );
+    expect(verdict).not.toBeNull();
+    expect(verdict?.promptForNextTurn).toContain('call `invoke_craftbook` now');
+    expect(verdict?.promptForNextTurn).toContain('Do not call `suggest_craftbook` again');
+    expect(verdict?.promptForNextTurn).toContain('do not switch to a project/job kickoff macro');
   });
 
   // ── File-write fabrication ───────────────────────────────────────

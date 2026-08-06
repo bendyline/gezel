@@ -8,6 +8,7 @@ import {
   isRecommendedModel,
   isUnifiedMemoryDevice,
   mediaModelFits,
+  needsSmallModelRecommendation,
   pickRecommendedModel,
   prefersMoE,
 } from './recommendation.js';
@@ -122,6 +123,73 @@ describe('pickRecommendedModel', () => {
     expect(pick?.id).toBe('qwen3.6-35b-a3b-q4');
   });
 
+  it('GTX 1650 class host (4 GB VRAM + 32 GB RAM): recommends Gemma E2B, not an offloaded MoE', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 4 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 32 * GB,
+      usableBytes: 3.8 * GB,
+      budgetBytes: 23 * GB,
+    });
+    expect(pick?.id).toBe('gemma4-e2b-q4');
+    expect(pick?.reason).toMatch(/below 8 GiB/);
+  });
+
+  it('consumer integrated GPU with a large shared allocation: recommends Gemma E2B', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'integrated',
+      totalRamBytes: 32 * GB,
+      usableBytes: 16 * GB,
+      budgetBytes: 22.4 * GB,
+    });
+    expect(pick?.id).toBe('gemma4-e2b-q4');
+  });
+
+  it('CPU-only 32 GB host still recommends Gemma E2B', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'linux',
+      gpuVramBytes: null,
+      gpuMemoryKind: 'none',
+      totalRamBytes: 32 * GB,
+      usableBytes: 16 * GB,
+    });
+    expect(pick?.id).toBe('gemma4-e2b-q4');
+  });
+
+  it('DGX Spark unified CUDA memory stays on the normal large-model path', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'linux',
+      gpuVramBytes: 119 * GB,
+      gpuMemoryKind: 'unified',
+      totalRamBytes: 121 * GB,
+      usableBytes: 96 * GB,
+    });
+    expect(
+      needsSmallModelRecommendation({
+        platform: 'linux',
+        gpuVramBytes: 119 * GB,
+        gpuMemoryKind: 'unified',
+        totalRamBytes: 121 * GB,
+        usableBytes: 96 * GB,
+      }),
+    ).toBe(false);
+    expect(pick?.id).not.toBe('gemma4-e2b-q4');
+  });
+
+  it('uses a strict below-8-GiB boundary for discrete cards', () => {
+    const base = {
+      platform: 'linux',
+      gpuMemoryKind: 'discrete' as const,
+      totalRamBytes: 32 * GB,
+      usableBytes: 8 * GB,
+    };
+    expect(needsSmallModelRecommendation({ ...base, gpuVramBytes: 8 * GB })).toBe(false);
+    expect(needsSmallModelRecommendation({ ...base, gpuVramBytes: 8 * GB - 1 })).toBe(true);
+  });
+
   it('CPU-only 16 GB: falls to the safe small dense Gemma', () => {
     const pick = pickRecommendedModel(CANDIDATES, {
       platform: 'linux',
@@ -184,17 +252,16 @@ describe('pickRecommendedModel', () => {
     expect(pick).toBeNull();
   });
 
-  it('best-effort: tiny device still gets the smallest recommended model', () => {
+  it('tiny CPU-only device gets the smallest recommended model', () => {
     const pick = pickRecommendedModel(CANDIDATES, {
       platform: 'linux',
       gpuVramBytes: null,
       totalRamBytes: 4 * GB,
       usableBytes: 2 * GB,
     });
-    // Nothing fits 2 GB comfortably → the smallest candidate is offered so
-    // first-run always has something.
+    // The low-acceleration policy chooses the smallest curated candidate.
     expect(pick?.id).toBe('gemma4-e2b-q4');
-    expect(pick?.reason).toMatch(/best-effort/);
+    expect(pick?.reason).toMatch(/safest small model/);
   });
 });
 
@@ -284,6 +351,30 @@ describe('hardware hints (C2 — advisory only)', () => {
   it('hint: nothing on a big discrete GPU, nothing for a too-big model', () => {
     expect(hardwareHint(bigDgpu, { isMoE: true, fitTier: 'fits' })).toBeNull();
     expect(hardwareHint(gb10, { isMoE: true, fitTier: 'too-big' })).toBeNull();
+  });
+
+  it('hint: large models get a usability caution on integrated graphics and sub-8-GiB cards', () => {
+    const integrated: RecoDevice = {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'integrated',
+      totalRamBytes: 32 * GB,
+      usableBytes: 16 * GB,
+    };
+    expect(
+      hardwareHint(integrated, {
+        isMoE: true,
+        fitTier: 'fits-offload',
+        residentBytes: 17 * GB,
+      })?.kind,
+    ).toBe('low-acceleration-caution');
+    expect(
+      hardwareHint(integrated, {
+        isMoE: false,
+        fitTier: 'fits',
+        residentBytes: 6 * GB,
+      }),
+    ).toBeNull();
   });
 
   it('scope guard: prefersMoE/excludesMoE are untouched by the hint work', () => {

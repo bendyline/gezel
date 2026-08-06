@@ -1,4 +1,5 @@
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
+import { CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 
 export type PromptToolContractSeverity = 'error' | 'warning';
 
@@ -22,7 +23,10 @@ export interface PromptToolContractReport {
 }
 
 const BUILTIN_TOOL_NAMES = Array.from(
-  new Set(BUILTIN_TOOLSETS.flatMap((group) => group.tools)),
+  new Set([
+    ...BUILTIN_TOOLSETS.flatMap((group) => group.tools),
+    ...Object.keys(CONDITIONALLY_REGISTERED_TOOLS),
+  ]),
 ).sort((a, b) => b.length - a.length);
 
 const FILE_READ_TOOLS = new Set(['read_file', 'list_dir', 'stat', 'search_code', 'search_files']);

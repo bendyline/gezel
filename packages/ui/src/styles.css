@@ -13590,7 +13590,7 @@ button.bench-step-foot:disabled {
    running yet. Drops the pulsing dot (nothing's happening) and dims
    the header text so the user can distinguish it at a glance from
    "thinking" (actively reasoning). The body shows a `.queued-pill`
-   with the hourglass + waiting label so the bubble doesn't look
+   with a numbered place-in-line diagram so the bubble doesn't look
    blank — same visual weight as `.thinking-dots` so the two states
    are obvious peers in the timeline. */
 .msg-queued .msg-live-status {
@@ -13600,8 +13600,8 @@ button.bench-step-foot:disabled {
 .msg-queued-icon {
   flex-shrink: 0;
   opacity: 0.7;
-  /* Slight vertical nudge so the hourglass bowls sit on the text
-     baseline instead of riding slightly high. */
+  /* Slight vertical nudge so the queue rows sit on the text baseline
+     instead of riding slightly high. */
   margin-top: 1px;
 }
 /* A turn parked inside a synchronous ask_gezel/ask_specialist
@@ -13643,24 +13643,58 @@ button.bench-step-foot:disabled {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
-.queued-pill-icon {
+.queue-position-visual {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   flex-shrink: 0;
-  /* Soft tickle so the pill feels alive without spinning the
-     thinking-dots animation (which would imply the model is
-     working — it's not, just waiting). */
-  animation: queued-pill-pulse 2s infinite ease-in-out;
+  color: var(--accent);
+}
+.queue-position-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding-inline: 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent-hover);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.queue-position-ahead {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+.queue-position-overflow {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.queue-position-arrow {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+.queued-pill-copy {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.05rem;
 }
 .queued-pill-label {
   font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
 }
-@keyframes queued-pill-pulse {
-  0%,
-  100% {
-    opacity: 0.5;
-  }
-  50% {
-    opacity: 1;
-  }
+.queued-pill-detail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Ghost bubble for a message waiting in the per-session queue. Styled

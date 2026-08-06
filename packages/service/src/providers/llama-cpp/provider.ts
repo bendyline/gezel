@@ -2817,6 +2817,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // the chat layer has already replaced them with a text digest, and base64
     // sent to a blind server just burns context on bytes it discards.
     const attachments = opts?.attachments ?? [];
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || attachments.length > 0) {
+        throw new Error(
+          '[llama.cpp] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      if (this.messages.at(-1)?.role !== 'tool') {
+        throw new Error('[llama.cpp] a tool-result continuation requires a trailing tool result');
+      }
+    }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (attachments.length > 0) {
       if (this.deps.visionEnabled) userMsg.attachments = [...attachments];
@@ -2834,7 +2845,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // Reset captured reasoning at the top of each turn — manager
     // reads `getLastTurnReasoning()` after this resolves.
     this.lastTurnReasoning = '';
-    this.messages.push(userMsg);
+    if (!continueFromToolResult) this.messages.push(userMsg);
 
     // Reset captures — each sendAndWait surfaces only its own externals.
     this.capturedCalls = [];
@@ -4398,6 +4409,22 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             const hasToolCalls = Boolean(delta?.tool_calls && delta.tool_calls.length > 0);
             const reasoningChunk = delta?.reasoning_content ?? null;
             const hasReasoning = reasoningChunk !== null && reasoningChunk.length > 0;
+            // TTFT means first model activity, not merely first user-visible
+            // prose. Reasoning-only and structured-tool turns can spend the
+            // entire generation without a `content` delta, so measuring only
+            // there made those turns look permanently stuck and produced no
+            // TTFT log at all.
+            if ((hasContent || hasReasoning || hasToolCalls) && firstTokenAt === null) {
+              firstTokenAt = Date.now();
+              const ttft = firstTokenAt - start;
+              log.info(`[llama-cpp] TTFT ${ttft}ms (session model=${this.deps.model})`);
+              this.emitEnginePhase({
+                provider: 'llama-cpp',
+                phase: 'generating',
+                detail: `First token in ${(ttft / 1000).toFixed(1)}s`,
+                ttftMs: ttft,
+              });
+            }
             // Prompt evaluation and server-side queueing can legitimately be
             // much longer than the constrained-action budget. Start that
             // budget only once the model has actually begun decoding visible
@@ -4471,16 +4498,6 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             }
             if (hasContent) {
               turnContent += delta!.content!;
-              if (firstTokenAt === null) {
-                firstTokenAt = Date.now();
-                const ttft = firstTokenAt - start;
-                log.info(`[llama-cpp] TTFT ${ttft}ms (session model=${this.deps.model})`);
-                this.emitEnginePhase({
-                  provider: 'llama-cpp',
-                  phase: 'generating',
-                  detail: `First token in ${(ttft / 1000).toFixed(1)}s`,
-                });
-              }
               this.emitDelta(delta!.content!);
               if (!rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;

@@ -23,6 +23,15 @@ describe('lintPromptToolContract', () => {
     expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool' }]);
   });
 
+  it('continues to flag directives for compatibility-only tools', () => {
+    const report = lintPromptToolContract({
+      prompt: 'Use `start_job({ name })` for a small build.',
+      availableTools: ['start_project'],
+    });
+
+    expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool', tool: 'start_job' }]);
+  });
+
   it('ignores negative and conditional references', () => {
     const report = lintPromptToolContract({
       prompt: [

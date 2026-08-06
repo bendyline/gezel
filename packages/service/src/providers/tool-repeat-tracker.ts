@@ -83,6 +83,12 @@ const ARG_KEY_NORMALIZERS: Record<string, (args: Record<string, unknown>) => unk
   // Surgical-edit loops have the same failure shape when the model keeps
   // changing the `find` string for one file. Count those by target path.
   replace_in_file: ({ path }) => ({ path }),
+  // Task procedures commonly require one acceptance-criteria note before a
+  // build. Weak models can rewrite that checklist indefinitely, changing the
+  // prose enough that raw-args fingerprints never repeat. Notes in the same
+  // task step are one mutation target for loop-detection purposes; three still
+  // permit acceptance/progress/handoff notes, while five in one turn is spin.
+  write_task_note: ({ ref, stepId }) => ({ ref, stepId: stepId ?? null }),
 };
 
 export interface ToolRepeatTrackerOpts {
@@ -419,6 +425,17 @@ function repeatTargetDescription(toolName: string, args: unknown, count: number)
     typeof (args as Record<string, unknown>).path === 'string'
   ) {
     return `the same path \`${(args as Record<string, unknown>).path}\` ${count} times`;
+  }
+  if (
+    toolName === 'write_task_note' &&
+    args &&
+    typeof args === 'object' &&
+    !Array.isArray(args) &&
+    typeof (args as Record<string, unknown>).ref === 'string'
+  ) {
+    const record = args as Record<string, unknown>;
+    const step = typeof record.stepId === 'string' ? ` step \`${record.stepId}\`` : '';
+    return `task \`${record.ref}\`${step} ${count} times`;
   }
   return `these exact arguments ${count} times`;
 }

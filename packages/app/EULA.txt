@@ -31,11 +31,17 @@ Gezel ships with open-source and third-party software that is licensed under its
 
   - the resvg SVG renderer is MPL-2.0;
   - the NVIDIA CUDA runtime libraries bundled with the CUDA engine builds are
-    proprietary, under the NVIDIA CUDA Toolkit EULA.
+    proprietary, under the NVIDIA CUDA Toolkit EULA;
+  - on Windows only, the installer carries the Microsoft Visual C++ 2015-2022
+    Redistributable and runs it during installation. Gezel's local-model
+    engines cannot load without it. It is Microsoft-proprietary, redistributed
+    under Microsoft's redistributable terms, and installed system-wide so that
+    Windows Update services it. Uninstalling Gezel leaves it in place, because
+    other software on your machine may depend on it.
 
 Where a bundled component's license conflicts with the MIT License above, that component's own license governs that component.
 
-The complete inventory - every bundled component, its license, and the full license text - is installed alongside Gezel:
+The inventory of bundled components and their licenses - with the full license text for every component whose text we are able to redistribute - is installed alongside Gezel:
 
   Windows   <install folder>\resources\licenses\NOTICE.md
   macOS     /Applications/Gezel.app/Contents/Resources/licenses/NOTICE.md

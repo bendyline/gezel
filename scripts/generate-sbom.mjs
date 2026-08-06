@@ -147,6 +147,52 @@ components.push({
   externalReferences: [{ type: 'website', url: 'https://docs.nvidia.com/cuda/eula/index.html' }],
 });
 
+// The Microsoft Visual C++ runtime, embedded in the NSIS installer and run
+// during customInstall (see packages/app/installer/nsis-hooks.nsh). Windows
+// only, and genuinely part of the payload rather than a prerequisite we merely
+// document: every engine DLL we ship imports MSVCP140/VCRUNTIME140, so the
+// installer carries the redistributable and executes it.
+//
+// Version-less for the same reason as CUDA above: stage-vc-redist.mjs takes the
+// copy belonging to the Visual Studio toolset that compiled those DLLs, and
+// nothing in this repo pins which toolset that is. What *is* asserted at
+// staging time is provenance — the file must carry a valid Authenticode
+// signature naming Microsoft Corporation before it may enter the installer.
+//
+// Unlike the CUDA payload, no licence text is staged into resources/licenses/:
+// the redistributable ships as a single self-extracting executable with its
+// terms held in the Visual Studio licence, not as a text file sitting beside
+// the binaries. The externalReference below is the authoritative text.
+components.push({
+  type: 'library',
+  'bom-ref': 'gezel:native/msvc-runtime-redistributable',
+  name: 'microsoft-visual-cpp-redistributable',
+  scope: 'required',
+  description:
+    'Microsoft Visual C++ 2015-2022 Redistributable (x64) embedded in the Windows installer and executed during install; supplies MSVCP140/VCRUNTIME140 for the bundled native engines',
+  licenses: [{ license: { name: 'Microsoft Visual C++ Redistributable Terms' } }],
+  properties: [
+    { name: 'gezel:component-kind', value: 'native-redistributable' },
+    {
+      name: 'gezel:platforms',
+      value: allPlatformKeys()
+        .filter((key) => key.startsWith('win32-'))
+        .join(','),
+    },
+    {
+      name: 'gezel:version-note',
+      value:
+        'tracks the Visual Studio toolset on the Windows build host; not pinned in-repo, Authenticode-verified as Microsoft-signed at staging time',
+    },
+  ],
+  externalReferences: [
+    {
+      type: 'website',
+      url: 'https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution',
+    },
+  ],
+});
+
 components.sort((a, b) => a['bom-ref'].localeCompare(b['bom-ref']));
 
 const rootPurl = npmPurl(rootPackage.name, rootPackage.version);

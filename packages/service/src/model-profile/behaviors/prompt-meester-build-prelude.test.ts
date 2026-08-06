@@ -8,11 +8,11 @@
 
 import type { ChatMessageToolCall, ProviderName } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import { lintPromptToolContract } from '../../chat/prompt-tool-contract.js';
 import type { TurnCtx } from '../types.js';
 import {
   PromptMeesterBuildPrelude,
   looksLikeNewBuildRequest,
-  looksLikeSingleSpecialistBuildRequest,
 } from './prompt-meester-build-prelude.js';
 
 function turnCtx(overrides: Partial<TurnCtx>): TurnCtx {
@@ -40,11 +40,11 @@ describe('PromptMeesterBuildPrelude', () => {
     );
     expect(out).not.toBeNull();
     expect(out).toContain('start_project');
-    expect(out).toContain('Do not use `start_job`');
-    expect(out).toContain('voorman');
+    expect(out).not.toContain('start_job');
+    expect(out).toContain('appropriate lead/team');
   });
 
-  it('tells the Meester to use start_job for single-file no-build requests', () => {
+  it('uses the same start_project macro for single-file no-build requests', () => {
     const out = PromptMeesterBuildPrelude.userPromptPrelude!(
       turnCtx({
         userText:
@@ -53,12 +53,22 @@ describe('PromptMeesterBuildPrelude', () => {
       undefined,
     );
     expect(out).not.toBeNull();
-    expect(out).toContain('start_job');
-    expect(out).not.toContain('`start_project({');
-    expect(out).toContain('single-file / no-build-step request');
-    expect(out).toContain('write `index.html` with `write_file`');
+    expect(out).toContain('`start_project({');
+    expect(out).not.toContain('start_job');
+    expect(out).toContain('name `index.html`');
     expect(out).toContain('do not prefix `workspace/`');
-    expect(out).toContain('write_file');
+  });
+
+  it('matches its effective tool surface', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({ userText: 'Can you create a Frogger-style browser game?' }),
+      undefined,
+    );
+    expect(out).not.toBeNull();
+    expect(lintPromptToolContract({ prompt: out!, availableTools: ['start_project'] })).toEqual({
+      errors: [],
+      warnings: [],
+    });
   });
 
   it('does not fire when the active gezel is not the Meester', () => {
@@ -75,20 +85,6 @@ describe('PromptMeesterBuildPrelude', () => {
       undefined,
     );
     expect(out).toBeNull();
-  });
-});
-
-describe('looksLikeSingleSpecialistBuildRequest', () => {
-  it('matches single-file and no-build wording', () => {
-    expect(
-      looksLikeSingleSpecialistBuildRequest(
-        'Build a tic-tac-toe game as a single HTML file in index.html with no build step.',
-      ),
-    ).toBe(true);
-  });
-
-  it('does NOT match a generic crew build', () => {
-    expect(looksLikeSingleSpecialistBuildRequest('Build a marketing site with a logo')).toBe(false);
   });
 });
 

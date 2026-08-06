@@ -38,6 +38,7 @@ interface ClaimRule {
 // equivalent so the claim catalog isn't a vocabulary game.
 const PROJECT_CREATION_VERBS = [
   'created',
+  'initiated',
   'initialized',
   'set\\s+up',
   'spun\\s+up',
@@ -58,6 +59,15 @@ const GEZEL_CREATION_VERBS = [
   'spun\\s+up',
   'hired',
   'made',
+].join('|');
+
+const VOORMAN_RECRUITMENT_VERBS = [
+  'recruited',
+  'hired',
+  'brought\\s+on',
+  'added',
+  'created',
+  'spun\\s+up',
 ].join('|');
 
 // Past-tense verbs that imply "the file was written to disk":
@@ -95,6 +105,22 @@ const DELIVERABLE_GATE_VERBS = [
 
 const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
   {
+    // A Meester can claim the project more indirectly by saying the lead
+    // exists. The Ypres incident used "recruited a `voorman`" after only
+    // suggest_craftbook calls; no gezel/project mutation had happened.
+    pattern: new RegExp(
+      String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
+        VOORMAN_RECRUITMENT_VERBS +
+        String.raw`)\s+(?:(?:the|a|an|our|your)\s+)?(?:new\s+)?[*"'\x60_]*voorman\b[*"'\x60_]*`,
+      'i',
+    ),
+    requiredTools: ['create_gezel', 'ensure_gezel', 'create_gezel_from_gilde', 'start_project'],
+    claim: 'recruited a voorman',
+    nudge:
+      'You told the user you recruited a voorman, but you did not call `create_gezel`, `ensure_gezel`, ' +
+      '`create_gezel_from_gilde`, or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
+  },
+  {
     pattern: new RegExp(
       String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
         PROJECT_CREATION_VERBS +
@@ -124,8 +150,8 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     requiredTools: ['create_project', 'start_project', 'start_job'],
     claim: 'created a project',
     nudge:
-      'You told the user you created the project, but you did not call `create_project`, `start_project`, or `start_job` this turn. ' +
-      'Call the right one now with the user-intended name and a real `about` + `missionObjectives` derived from their request.',
+      'You told the user you created the project, but you did not call `start_project` this turn. ' +
+      'Call it now with the user-intended name and a real `about` + `missionObjectives` derived from their request.',
   },
   {
     pattern: new RegExp(
@@ -144,7 +170,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     claim: 'created a gezel',
     nudge:
       'You told the user you created a gezel, but you did not call `create_gezel`, `ensure_gezel`, ' +
-      '`start_project`, or `start_job` this turn. Call the right one now.',
+      'or `start_project` this turn. Call the right one now.',
   },
   {
     pattern: new RegExp(
@@ -156,7 +182,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     requiredTools: ['create_task', 'start_project', 'start_job'],
     claim: 'created a task',
     nudge:
-      'You told the user you created a task, but you did not call `create_task`, `start_project`, or `start_job` this turn. Call the right one now.',
+      'You told the user you created a task, but you did not call `create_task` or `start_project` this turn. Call the right one now.',
   },
   {
     // Task-assignment fabrication — "I assigned the task to `dev-16a`"
@@ -346,9 +372,22 @@ export const FabricationDetectClaimWithoutTool: Behavior = {
       firedToolNames,
     });
     if (!claim.fabricated || !claim.nudge) return null;
+    const suggestedCraftbook = firedToolNames.includes('suggest_craftbook');
+    const invokedCraftbook = firedToolNames.includes('invoke_craftbook');
+    const exactFormatRequest =
+      /\b(?:powerpoint|pptx|word|docx|excel|xlsx|pdf|epub|mp4|gif|slide\s*deck|presentation)\b/i.test(
+        ctx.userText,
+      );
+    const promptForNextTurn =
+      ctx.isMeester && exactFormatRequest && suggestedCraftbook && !invokedCraftbook
+        ? 'You claimed the requested work or project was started, but only `suggest_craftbook` succeeded. ' +
+          'Use the best craftbook id from that result and call `invoke_craftbook` now. ' +
+          'Do not call `suggest_craftbook` again with a rephrased query, do not switch to a project/job kickoff macro, ' +
+          'and do not claim anything was created until `invoke_craftbook` returns success.'
+        : claim.nudge;
     return {
       reason: `claimed "${claim.claim}" without calling [${claim.requiredTools.join(', ')}]`,
-      promptForNextTurn: claim.nudge,
+      promptForNextTurn,
     };
   },
 };

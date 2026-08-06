@@ -580,6 +580,24 @@ export interface SendAndWaitOpts {
   timeoutMs?: number;
   attachments?: ImageAttachment[];
   /**
+   * Continue an externally-owned tool loop from the `tool` entry already at
+   * the end of `SessionOpts.priorMessages` without appending another `user`
+   * message.
+   *
+   * This is used by the machine-broker `/v1/remote/infer` boundary: Device A
+   * executes the tool, replays the assistant call + tool result to Device B,
+   * and asks B for the next forward pass. Appending `{ role: 'user', content:
+   * '' }` here makes small models interpret the continuation as a brand-new
+   * empty user turn and restart the first instruction (wild-caught: Gemma 4
+   * repeatedly called `start_project`, then a developer repeatedly called
+   * `write_task_note` instead of moving on to `write_file`).
+   *
+   * Local providers validate that `prompt` is empty, there are no new
+   * attachments, and the seeded transcript ends in a tool result before
+   * honoring this flag. Ordinary callers should omit it.
+   */
+  continueFromToolResult?: boolean;
+  /**
    * Request queue coordinates. When set, the session acquires a slot
    * in its provider's {@link ProviderQueue} before any HTTP work,
    * and the per-turn timer starts only after acquisition. Omit in

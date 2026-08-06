@@ -29,13 +29,17 @@ describe('buildInstructions coordinator routing', () => {
       'preview_document',
       'save_artifact',
     ]);
-    expect(prompt).toContain('first call `suggest_craftbook`');
+    expect(prompt).toContain('Call `suggest_craftbook` exactly once');
+    expect(prompt).toContain('NEXT tool call in this same turn must be `invoke_craftbook`');
+    expect(prompt).toContain('takes precedence over generic project/job kickoff');
+    expect(prompt).toContain('do not repeat the lookup with a rephrased query');
     expect(prompt).toContain('PowerPoint/PPTX');
     expect(prompt).toContain('Word/DOCX');
     expect(prompt).toContain('MP4, GIF');
     expect(prompt).toContain('do not silently substitute markdown');
     expect(prompt).toContain('author Markdown');
     expect(prompt).toContain('Do not recruit a developer');
+    expect(prompt).toContain('Do not claim a project, task, or deliverable exists');
     expect(prompt).toContain('`convert_document`');
     expect(prompt).toContain('`save_artifact`');
   });
@@ -147,9 +151,9 @@ describe('buildInstructions assigned pronouns', () => {
   } as unknown as ProjectDetail;
 
   it.each([
-    ['male', 'he/him', 'he will handle the entire project himself'],
-    ['female', 'she/her', 'she will handle the entire project herself'],
-    ['non-binary', 'they/them', 'they will handle the entire project themselves'],
+    ['male', 'he/him', 'he will handle the project himself'],
+    ['female', 'she/her', 'she will handle the project herself'],
+    ['non-binary', 'they/them', 'they will handle the project themselves'],
   ] as const)('uses %s voorman pronouns in solo-project context', (gender, label, sentence) => {
     const { full } = buildInstructions({
       name: 'Worker',

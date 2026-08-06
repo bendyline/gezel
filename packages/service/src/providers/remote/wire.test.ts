@@ -108,6 +108,9 @@ describe('remote wire contract', () => {
   it('parses every response frame variant', () => {
     const frames = [
       { type: 'delta', text: 'tok' },
+      { type: 'reasoning_delta', text: 'private thought' },
+      { type: 'tool_args_delta', name: 'write_file', text: '{"path":' },
+      { type: 'wire_pulse' },
       { type: 'tool_call', calls: [{ id: 'a', name: 'write_file', arguments: '{"path":"x"}' }] },
       {
         type: 'usage',
@@ -119,7 +122,22 @@ describe('remote wire contract', () => {
       { type: 'reasoning', text: 'thinking' },
       { type: 'warning', message: 'ramble aborted' },
       { type: 'queued', aheadOf: 2 },
-      { type: 'phase', phase: 'loading_model', progress: 0.5 },
+      {
+        type: 'phase',
+        provider: 'llama-cpp',
+        phase: 'generating',
+        progress: 0.5,
+        ttftMs: 12_345,
+      },
+      {
+        type: 'turn_stats',
+        provider: 'llama-cpp',
+        promptTokens: 100,
+        completionTokens: 20,
+        durationMs: 5000,
+        tokensPerSec: 4,
+      },
+      { type: 'engine_stats', provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 },
       { type: 'done' },
       { type: 'error', code: 'model_not_loaded', message: 'nope' },
     ];

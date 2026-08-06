@@ -18,6 +18,7 @@ function chatModel(input: {
   mlx?: boolean;
   licenseClass?: string;
   supportsTools?: boolean;
+  tags?: string[];
 }): CatalogItemSummary {
   const source = {
     huggingfaceRepo: 'test/model',
@@ -35,7 +36,7 @@ function chatModel(input: {
       id: input.id,
       name: input.name ?? input.id,
       description: '',
-      tags: [],
+      tags: input.tags ?? [],
       maintainer: { name: 'test' },
       licenseClass: input.licenseClass ?? 'open',
       recoScore: input.score,
@@ -115,6 +116,26 @@ describe('rankChatModels', () => {
 
     expect(ranked[0]?.id).toBe('recommended');
     expect(ranked.map((model) => model.id)).toContain('tool-less');
+  });
+
+  it('leads with the small safe model on a sub-8-GiB GPU even when a large MoE technically offloads', () => {
+    const ranked = rankChatModels(
+      [
+        chatModel({ id: 'gemma4-e2b-q4', score: 15, bytes: 6 * GB }),
+        chatModel({ id: 'gemma4-26b-q4', score: 15, bytes: 17 * GB, tags: ['moe'] }),
+      ],
+      {
+        platform: 'win32',
+        gpuVramBytes: 4 * GB,
+        gpuMemoryKind: 'discrete',
+        totalRamBytes: 32 * GB,
+        usableBytes: 3.8 * GB,
+        budgetBytes: 23 * GB,
+      },
+      'llama-cpp',
+    );
+
+    expect(ranked[0]?.id).toBe('gemma4-e2b-q4');
   });
 
   it('only offers MLX choices that actually ship an enabled MLX source', () => {

@@ -326,6 +326,42 @@ describe('OllamaSession priorMessages seeding', () => {
       ['user', 'current question'],
     ]);
   });
+
+  it('continues from a seeded tool result without appending an empty user turn', async () => {
+    const chatBodies: unknown[] = [];
+    const baseFetch = stubFetch({
+      '/api/tags': () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      '/api/chat': async () =>
+        ndjsonResponse([{ message: { role: 'assistant', content: 'Built it.' }, done: true }]),
+    });
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.body) {
+        chatBodies.push(JSON.parse(init.body as string));
+      }
+      return baseFetch(input, init);
+    }) as typeof fetch;
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'SYS',
+      model: 'llama3.2',
+      priorMessages: [
+        { role: 'user', content: 'Build index.html.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' }],
+        },
+        { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
+      ],
+    });
+
+    await session.sendAndWait('', { continueFromToolResult: true });
+
+    const body = chatBodies[0] as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages.at(-1)).toMatchObject({ role: 'tool', content: 'Appended note.' });
+    expect(body.messages).not.toContainEqual({ role: 'user', content: '' });
+  });
 });
 
 describe('ollama tool-loop bail', () => {

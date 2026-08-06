@@ -130,8 +130,9 @@ the `just-chat` project type, which hides the work-oriented tabs to match. Tests
 ## Channel two: the user-message channel
 
 - **Preludes** (`resolveUserPromptPrelude` — first non-null wins, prepended to the user's
-  text): `prompt.meester-build-prelude` (meester + build-shaped request → crew/single-job
-  steering) and `prompt.meester-craftbook-prelude` (meester + procedure/recurrence-shaped
+  text): `prompt.meester-build-prelude` (meester + build-shaped request → one
+  `start_project` kickoff; staffing is runtime-selected) and
+  `prompt.meester-craftbook-prelude` (meester + procedure/recurrence-shaped
   request → suggest-then-invoke or craftbook_write authoring steer).
 - **Nudges** (synthetic continuation turns after stall detection): `CONTINUATION_NUDGE`
   (described-but-stopped), `CLOSING_SUMMARY_NUDGE` (tool ran, no closing words),
@@ -246,8 +247,8 @@ and every one duplicates runtime-injected blocks. Worst offenses, verified line-
 - The **"HTML asset paths" block is triplicated verbatim** across developer, builder, and
   designer — copy-paste drift waiting to happen; it belongs in the runtime
   "Where work belongs" family (it's workspace mechanics, not character).
-- The **meester about duplicates the build-prelude** (`start_project`/`start_job`
-  selection guidance is delivered twice on every build-shaped turn), and its docblock
+- The historical **meester about duplicated the build-prelude** (project-vs-job
+  selection guidance was delivered twice on every build-shaped turn), and its docblock
   claims "no tool enumeration" while the body names ~9 tools.
 - **researcher ships eval-scenario references** ("the squisq-review scenario asks for…")
   — overfit fixture knowledge inside a generic persona.

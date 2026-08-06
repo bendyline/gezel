@@ -15,7 +15,7 @@ interface MemoryProfile {
   platform: string;
   totalRamBytes: number;
   gpuVramBytes: number | null;
-  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
 }
 

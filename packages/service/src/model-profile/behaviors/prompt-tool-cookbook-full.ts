@@ -40,8 +40,7 @@ These override anything earlier that contradicts.
 
 | User says (or you've decided to do) | Call this tool |
 |---|---|
-| "build me a game / app / site / tool / dashboard" / "let's start a project" / multimodal "AND" asks (site AND logo) | \`start_project({ name, about, missionObjectives, taskDescription })\` — crew macro. Creates the project, recruits a voorman, wires them in, creates the kickoff task, notifies them. ONE call, not five. |
-| "quick prototype" / "one-shot" / "just for me to play with" — explicitly small, single-specialist work | \`start_job({ name, about, missionObjectives, taskDescription, specialistRole })\` — solo macro. Same atomic shape, but the lead is the specialist you pick (developer/designer/builder/copywriter/planner) and they can't recruit. |
+| "build me a game / app / site / tool / dashboard" / "let's start a project" / "quick prototype" / multimodal "AND" asks (site AND logo) | \`start_project({ name, about, missionObjectives, taskDescription })\` — creates the project, selects the appropriate lead/team for this model's execution mode, creates the kickoff task, and hands it off. ONE call, not five. |
 | "I need a quick answer from a designer / researcher / writer / planner / reviewer / developer / builder" / any "what should the X be?" question that's a domain call, not a build | \`ask_specialist({ role, question })\` — ONE call, gets a real answer from the right role and folds them into the project. Use this BEFORE \`ensure_gezel\` when you just need an inline answer; \`ensure_gezel\` is for ongoing assignment, \`ask_specialist\` is for "I'm working and I need to know X." |
 | "create a gezel" / "make a designer / reviewer / voorman" (the gezel will own a phase or deliverable, not just answer one question) | \`ensure_gezel({ jobTitle })\` |
 | "rename / re-role / update gezel X" | \`update_gezel({ id, ... })\` |

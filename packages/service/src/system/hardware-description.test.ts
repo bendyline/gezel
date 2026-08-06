@@ -9,7 +9,7 @@ describe('handboek hardware summary', () => {
     expect(classifyHardwareTier(25_000_000_000)).toBe('large');
   });
 
-  it('describes unified-memory, discrete-GPU, and CPU-only devices', () => {
+  it('describes unified-memory, integrated-GPU, discrete-GPU, and CPU-only devices', () => {
     const apple = describeCurrentHardware({
       totalRamBytes: 64_000_000_000,
       gpuVramBytes: null,
@@ -31,6 +31,17 @@ describe('handboek hardware summary', () => {
     });
     expect(gpu.description).toContain('NVIDIA GPU: 12.0 GB VRAM');
     expect(gpu.tier).toBe('small');
+
+    const integrated = describeCurrentHardware({
+      totalRamBytes: 32_000_000_000,
+      gpuVramBytes: 12_000_000_000,
+      gpuMemoryKind: 'integrated',
+      usableBytes: 16_000_000_000,
+      source: 'gpu-integrated',
+      gpuVendor: 'intel',
+    });
+    expect(integrated.description).toContain('Intel integrated GPU');
+    expect(integrated.description).toContain('shared GPU memory is not additional RAM');
 
     const cpu = describeCurrentHardware({
       totalRamBytes: 16_000_000_000,
