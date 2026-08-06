@@ -68,9 +68,23 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(withScript).toContain('`run_playwright_script`');
 
     // Toolset installed, but the tool is not on this role's roster.
-    const withoutScript = prompt(['read_file'], installed);
+    const withoutScript = prompt(['read_file', 'validate'], installed);
     expect(withoutScript).not.toContain('run_playwright_script');
     expect(withoutScript).toContain('browser_*');
+    expect(withoutScript).toContain('validate({ path: "index.html" })');
+    expect(withoutScript).toContain('file:///workspace/index.html');
+    expect(withoutScript).toContain('automatically rewrites');
+  });
+
+  it('does not advertise bridge-only file URL rewriting to Copilot', () => {
+    const installed = { installedToolsetIds: new Set(['@playwright/mcp']) };
+    const copilot = prompt(['read_file', 'validate', 'browser_navigate'], {
+      ...installed,
+      providerName: 'copilot',
+    });
+    expect(copilot).not.toContain('file:///workspace/index.html');
+    expect(copilot).toContain('native MCP loop cannot rewrite `file:` navigation');
+    expect(copilot).toContain('validate({ path: "index.html" })');
   });
 
   it('names only the GitHub tools the role actually holds', () => {

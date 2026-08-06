@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { securityPolicyForLevel } from '@bendyline/gezel';
@@ -179,9 +180,8 @@ describe('preview capabilities (integration)', () => {
   });
 
   it('serves the same preview over a plain-HTTP browserUrl on a separate port', async () => {
-    // The main transport is TLS in this suite, so a browser-openable HTTP
-    // sidecar must exist and serve the identical capability-gated content
-    // without the self-signed-cert warning.
+    // A dedicated browser-openable sidecar serves the identical
+    // capability-gated content without exposing the API surface.
     expect(svc.cert).toBeTruthy();
     const minted = await mint(svc.clientToken);
     expect(minted.status).toBe(201);
@@ -201,5 +201,32 @@ describe('preview capabilities (integration)', () => {
     expect(await page.text()).toContain('CAP PREVIEW');
     // The sidecar is preview-only: the bearer-gated API surface is absent.
     expect((await fetch(`http://127.0.0.1:${browser.port}/api/config`)).status).toBe(404);
+
+    // Chromium's local-only mode points its proxy at this same listener.
+    // Absolute-form requests for preview URLs resolve here; external hosts
+    // are rejected rather than forwarded, so redirects and link clicks
+    // cannot escape even though upstream Playwright's origin list is not a
+    // security boundary.
+    const throughProxy = (target: string): Promise<number | undefined> =>
+      new Promise((resolve, reject) => {
+        const targetUrl = new URL(target);
+        const req = httpRequest(
+          {
+            hostname: browser.hostname,
+            port: browser.port,
+            method: 'GET',
+            path: target,
+            headers: { host: targetUrl.host },
+          },
+          (res) => {
+            res.resume();
+            res.on('end', () => resolve(res.statusCode));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+    expect(await throughProxy(lease.browserUrl as string)).toBe(200);
+    expect(await throughProxy('http://example.com/')).toBe(403);
   });
 });

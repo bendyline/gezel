@@ -62,6 +62,7 @@ import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
+import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
 import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -155,6 +156,10 @@ import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
 import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
 import type { OpenAIFunctionTool } from '../providers/mcp-bridge.js';
+import {
+  hasLocalPreviewBrowserNetworkOverride,
+  localPreviewBrowserLaunchArgs,
+} from '../providers/mcp-wrappers/playwright-arg-validator.js';
 import {
   MLX_DEFAULT_PACKAGE_SPEC,
   MLX_VENV_NAME,
@@ -441,10 +446,12 @@ async function resolveCatalogContextWindow(
 /**
  * Resolve one model id for every stage of a session build. Keeping this pure
  * prevents provider binding/admission from drifting away from the model later
- * placed in SessionOpts when the install default changes.
+ * placed in SessionOpts when the install default changes. Ordinary sessions
+ * follow that live default; capability-routed task sessions retain the
+ * router's explicit dispatch choice.
  */
 export function effectiveSessionModel(args: {
-  record: Pick<ChatSession, 'providerName' | 'model' | 'nightShift'>;
+  record: Pick<ChatSession, 'providerName' | 'model' | 'modelSource' | 'nightShift'>;
   frontmatterModel?: string;
   config: Pick<GezelConfig, 'defaultModel' | 'nightShift'>;
 }): string | undefined {
@@ -454,9 +461,12 @@ export function effectiveSessionModel(args: {
     args.config.nightShift.modelOverride.provider === args.record.providerName
       ? args.config.nightShift.modelOverride.model
       : undefined;
+  const capabilityRoutedModel =
+    args.record.modelSource === 'capability-routing' ? args.record.model : undefined;
   return (
     args.frontmatterModel ??
     nightShiftModel ??
+    capabilityRoutedModel ??
     args.config.defaultModel?.[args.record.providerName] ??
     args.record.model
   );
@@ -581,6 +591,8 @@ interface LiveSessionState {
   record: ChatSession;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
+  /** Model shared by provider binding, prompt construction, and live telemetry. */
+  effectiveModel?: string;
   /** Snapshot of the gezel's about at the moment the live session was built. */
   aboutSnapshot: string;
   /**
@@ -762,6 +774,19 @@ export interface ChatManagerOptions {
    */
   previewLog?: PreviewLogBuffer;
   /**
+   * Mint a short-lived output-pane preview URL for one file in the active
+   * project workspace. Browser MCP wrappers use this to translate `file:`
+   * navigation without exposing arbitrary filesystem paths.
+   */
+  createWorkspacePreviewUrl?: (projectId: string, relativePath: string) => Promise<string>;
+  /**
+   * Dedicated plain-HTTP listener that serves only capability-scoped preview
+   * content. In local-preview browser mode it also acts as a deliberately
+   * non-forwarding Chromium proxy: preview requests resolve, every other
+   * destination is rejected.
+   */
+  getWorkspacePreviewOrigin?: () => string | null;
+  /**
    * The daemon's TLS cert PEM, when serving HTTPS. Spawned MCP children
    * receive the cert path via `GEZEL_CERT_PATH` so their GezelClient
    * dispatcher trusts it; without HTTPS the env var is unset and the
@@ -895,6 +920,21 @@ export {
 
 function isMachineEngineChatProvider(name: string): name is LocalProviderName {
   return name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
+}
+
+/** Native SDK/CLI loops bypass Gezel's MCP wrapper layer. Local-preview-only
+ * Playwright is admitted only where schema pruning and call-time guards run. */
+function providerUsesManagedMcpBridge(name: string | undefined): boolean {
+  return name !== 'copilot' && name !== 'anthropic-cli' && name !== 'codex-cli';
+}
+
+function isManagedSystemPlaywright(toolset: InstalledToolset): boolean {
+  return (
+    toolset.toolsetId === '@playwright/mcp' &&
+    toolset.sourceId === 'system' &&
+    toolset.runtime.kind === 'npm-package' &&
+    toolset.runtime.package === '@playwright/mcp'
+  );
 }
 
 function providerQueueIsBusy(provider: LLMProvider): boolean {
@@ -1222,6 +1262,8 @@ export class ChatManager {
   private readonly getToken: () => string;
   private readonly getCert: () => string | null;
   private readonly previewLog?: PreviewLogBuffer;
+  private readonly createWorkspacePreviewUrl?: ChatManagerOptions['createWorkspacePreviewUrl'];
+  private readonly getWorkspacePreviewOrigin: () => string | null;
   private readonly issueSessionToken?: ChatManagerOptions['issueSessionToken'];
   private readonly revokeSessionToken?: ChatManagerOptions['revokeSessionToken'];
   private readonly home: string;
@@ -1272,6 +1314,8 @@ export class ChatManager {
     this.getToken = opts.getToken;
     this.getCert = opts.getCert ?? (() => null);
     if (opts.previewLog) this.previewLog = opts.previewLog;
+    this.createWorkspacePreviewUrl = opts.createWorkspacePreviewUrl;
+    this.getWorkspacePreviewOrigin = opts.getWorkspacePreviewOrigin ?? (() => null);
     this.issueSessionToken = opts.issueSessionToken;
     this.revokeSessionToken = opts.revokeSessionToken;
     this.home = opts.home;
@@ -2065,7 +2109,9 @@ export class ChatManager {
    * local-model turn and comes back, the assistant's "thinking dots"
    * bubble re-renders instead of disappearing until the next token
    * arrives. Each record carries enough context for the UI to anchor
-   * the live slot (gezelId, projectId, original user text).
+   * the live slot (gezelId, projectId, original user text). `model` is the
+   * effective runtime selection shared by binding and inference, not merely
+   * the historical model stamp in the session file.
    */
   listInflight(): Array<{
     sessionId: string;
@@ -2103,7 +2149,7 @@ export class ChatManager {
         gezelId: state.record.gezelId,
         projectId: state.record.projectId,
         providerName: state.record.providerName,
-        ...(state.record.model ? { model: state.record.model } : {}),
+        ...(state.effectiveModel ? { model: state.effectiveModel } : {}),
         userText: entry.userText,
         startedAt: entry.startedAt,
         elapsedMs: now - entry.startedAt,
@@ -2876,6 +2922,13 @@ export class ChatManager {
         : undefined;
     const now = nowIso();
     const numCtx = providerName === 'ollama' ? (fm.numCtx ?? config.ollamaNumCtx) : undefined;
+    const frontmatterModel = evalProviderLocked ? undefined : fm.model;
+    const routedModel =
+      frontmatterModel === undefined &&
+      nightShiftModel === undefined &&
+      args.routedModel?.provider === providerName
+        ? args.routedModel.model
+        : undefined;
     const record: ChatSession = {
       version: 1,
       id: randomUUID(),
@@ -2888,10 +2941,8 @@ export class ChatManager {
         // otherwise a local-only trial can silently leave the cohort or fail
         // on credentials/model availability. This env seam is never set in
         // ordinary product sessions.
-        (evalProviderLocked ? undefined : fm.model) ??
-        nightShiftModel ??
-        (args.routedModel?.provider === providerName ? args.routedModel.model : undefined) ??
-        config.defaultModel?.[providerName],
+        frontmatterModel ?? nightShiftModel ?? routedModel ?? config.defaultModel?.[providerName],
+      ...(routedModel ? { modelSource: 'capability-routing' as const } : {}),
       reasoningEffort: fm.reasoningEffort ?? config.defaultReasoningEffort?.[providerName],
       title: 'New session',
       createdAt: now,
@@ -10043,9 +10094,10 @@ export class ChatManager {
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
 
-    // `modelId` was resolved once for this build (gezel / Night Shift / live
-    // install default / historical record). Bail to the singleton path when
-    // nothing resolves — we can't pool-route without a modelId.
+    // `modelId` was resolved once for this build (gezel / Night Shift /
+    // capability route / live install default / historical record). Bail to
+    // the singleton path when nothing resolves — we can't pool-route without
+    // a modelId.
     if (!modelId) return this.ensureProvider(name);
 
     const { engineKey, provider } = await this.bindLocalReplica(router, name, modelId, {
@@ -11338,6 +11390,7 @@ export class ChatManager {
       // provider-neutral enough that the new provider either accepts
       // or ignores them.
       delete record.model;
+      delete record.modelSource;
       await this.store.writeSession(record);
     }
 
@@ -11495,9 +11548,11 @@ export class ChatManager {
       pendingUserText,
     );
 
+    const liveEffectiveModel = effectiveModel ?? provider.getEffectiveModelId?.();
     const state: LiveSessionState = {
       record,
       session,
+      ...(liveEffectiveModel ? { effectiveModel: liveEffectiveModel } : {}),
       aboutSnapshot: gezel.about,
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
@@ -12297,6 +12352,21 @@ export class ChatManager {
       ),
       ...discoveredProjectMcp.toolsets.map((entry) => entry.installed),
     ];
+    const stepDisabledToolsetIds = toolsetIdsExplicitlyDisabledForStep(
+      taskContext?.step,
+      taskContext?.task.craftbook.toolsets,
+    );
+    const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
+      entries.filter((entry) => !stepDisabledToolsetIds.has(entry.toolsetId));
+    const activePerGezel = activeToolsets(perGezel);
+    const activeShared = activeToolsets(shared);
+    const activeSystem = activeToolsets(system);
+    const activePerProject = activeToolsets(perProject);
+    if (stepDisabledToolsetIds.size > 0) {
+      log.debug(
+        `task-step toolsets: suppressed ${[...stepDisabledToolsetIds].join(', ')} for ${record.taskRef ?? record.id}/${taskContext?.step?.id ?? 'unknown-step'} by explicit step instruction`,
+      );
+    }
     // System-scope ids the user didn't explicitly install — same set the
     // bridge-spawn loop below uses to gate role-restricted system
     // toolsets. Computed here so the prompt-side and spawn-side gates
@@ -12306,7 +12376,7 @@ export class ChatManager {
     const userInstalledIdsForPrompt = new Set<string>();
     // Project-scope toolsets are user-intended (installed by a project type),
     // so treat them like gezel/shared installs — never system-gated.
-    for (const t of [...perGezel, ...shared, ...perProject])
+    for (const t of [...activePerGezel, ...activeShared, ...activePerProject])
       userInstalledIdsForPrompt.add(t.toolsetId);
 
     // Effective browser-facing taxonomy id: explicit user override wins,
@@ -12322,7 +12392,10 @@ export class ChatManager {
     let browserAutomationRoleExcluded = false;
     const providerSupportsHttpMcp =
       record.providerName !== 'copilot' && record.providerName !== 'anthropic-cli';
-    for (const t of [...perGezel, ...shared, ...system, ...perProject]) {
+    const providerUsesBrowserWrappers = providerUsesManagedMcpBridge(record.providerName);
+    const workspacePreviewOrigin = this.getWorkspacePreviewOrigin();
+    const securityPolicy = resolveSecurityPolicy(globalConfig);
+    for (const t of [...activePerGezel, ...activeShared, ...activeSystem, ...activePerProject]) {
       if (t.runtime.kind === 'http-mcp') {
         if (providerSupportsHttpMcp) installedToolsetIds.add(t.toolsetId);
         continue;
@@ -12344,6 +12417,20 @@ export class ChatManager {
         browserAutomationRoleExcluded = true;
         continue;
       }
+      // In strict postures, Playwright is admitted only as Gezel's managed,
+      // system-scope local-preview browser. User-installed copies and native
+      // SDK/CLI MCP loops do not get this exception because they bypass the
+      // wrapper's schema pruning and call-time URL guard.
+      if (
+        t.toolsetId === '@playwright/mcp' &&
+        !securityPolicy.allowExternalServices &&
+        (userInstalledIdsForPrompt.has(t.toolsetId) ||
+          !isManagedSystemPlaywright(t) ||
+          !providerUsesBrowserWrappers ||
+          !workspacePreviewOrigin)
+      ) {
+        continue;
+      }
       installedToolsetIds.add(t.toolsetId);
     }
 
@@ -12351,7 +12438,7 @@ export class ChatManager {
     // tool listing and the bridge-side provider config both feed it into the
     // session tool-surface resolver, so drift here would make the system
     // prompt promise a different surface than the runtime exposes.
-    const toolsetsGroupOverride = perGezel
+    const toolsetsGroupOverride = activePerGezel
       .filter((t) => t.runtime.kind === 'builtin')
       .map((t) => (t.runtime as { kind: 'builtin'; toolsetGroupId: string }).toolsetGroupId);
 
@@ -12375,7 +12462,6 @@ export class ChatManager {
       }
     }
 
-    const securityPolicy = resolveSecurityPolicy(globalConfig);
     // Per-project workspace writability — the single write gate (see
     // projectWorkspaceWritable in core). Drives the workspace-fs-write
     // tool strip and the prompt's "edits off" posture note; the global
@@ -12530,6 +12616,8 @@ export class ChatManager {
       profile: modelProfile,
       installedToolsetIds,
       browserAutomationRoleExcluded,
+      browserLocalPreviewOnly:
+        installedToolsetIds.has('@playwright/mcp') && !securityPolicy.allowExternalServices,
       availableTools: availableBuiltinTools,
       thirdPartyToolsetIds,
       ...(gezel?.toolsMd ? { toolsMd: gezel.toolsMd } : {}),
@@ -12607,8 +12695,8 @@ export class ChatManager {
     // effect on the next turn of existing sessions. `record.model`
     // was stamped at session-creation time and doesn't move when
     // the default does; prefer gezel-level override, then a Night Shift
-    // default for deferred tasks, then the current install default, and
-    // only fall back to the historical record.
+    // default for deferred tasks, then an explicit capability route, then the
+    // current install default, and only fall back to the historical record.
     const gezelFm = gezel?.parsed.frontmatter;
     const providerName = record.providerName;
     const resolvedModel =
@@ -12686,6 +12774,24 @@ export class ChatManager {
       artifactPersister: async (relPath: string, content: string) => {
         await this.store.writeProjectArtifact(record.projectId, relPath, content);
       },
+      ...(this.createWorkspacePreviewUrl
+        ? {
+            workspacePreview: {
+              projectId: record.projectId,
+              root: await this.store.projectWorkspaceDir(record.projectId),
+              ...(workspacePreviewOrigin ? { origin: workspacePreviewOrigin } : {}),
+              ...(!securityPolicy.allowExternalServices ? { localOnly: true } : {}),
+              createUrl: async (relativePath: string) => {
+                const entry = await this.store.statProjectWorkspacePath(
+                  record.projectId,
+                  relativePath,
+                );
+                if (entry.kind !== 'file') return null;
+                return this.createWorkspacePreviewUrl!(record.projectId, relativePath);
+              },
+            },
+          }
+        : {}),
     };
     // Surface the active craftbook step to the local-provider abort
     // path so the anti-spin corrective points at the step's onExit
@@ -12721,7 +12827,10 @@ export class ChatManager {
       // and install whatever we end up with.
       const scriptHooks =
         taskCraftbook.hooks && this.scriptRunnerForHooks ? taskCraftbook.hooks : [];
-      const autoAllowSet = await autoAllowedToolsForToolsets(this.catalog, taskCraftbook.toolsets);
+      const activeCraftbookToolsets = taskCraftbook.toolsets?.filter(
+        (need) => !stepDisabledToolsetIds.has(need.toolsetId),
+      );
+      const autoAllowSet = await autoAllowedToolsForToolsets(this.catalog, activeCraftbookToolsets);
       const autoAllowHook = buildAutoAllowHook(autoAllowSet, taskCraftbook.id);
       const hooks: HookSpec[] = [...(autoAllowHook ? [autoAllowHook] : []), ...scriptHooks];
       if (hooks.length > 0) {
@@ -13220,9 +13329,10 @@ export class ChatManager {
     // into a delegation gezel's toolsets still get it — only the silent
     // system-scope auto-load is gated.
     const userInstalledIds = new Set<string>();
-    for (const t of [...perGezel, ...shared, ...perProject]) userInstalledIds.add(t.toolsetId);
+    for (const t of [...activePerGezel, ...activeShared, ...activePerProject])
+      userInstalledIds.add(t.toolsetId);
     const systemOnlyIds = new Set<string>();
-    for (const t of system) {
+    for (const t of activeSystem) {
       if (!userInstalledIds.has(t.toolsetId)) systemOnlyIds.add(t.toolsetId);
     }
 
@@ -13247,8 +13357,9 @@ export class ChatManager {
       return candidate;
     };
     const trustedConstrainedExtraIds = new Set<string>();
+    const localPreviewBrowserExtraIds = new Set<string>();
     const knownSecretValues = new Set<string>();
-    for (const t of [...perGezel, ...shared, ...system, ...perProject]) {
+    for (const t of [...activePerGezel, ...activeShared, ...activeSystem, ...activePerProject]) {
       if (seen.has(t.toolsetId)) continue;
       seen.add(t.toolsetId);
 
@@ -13320,6 +13431,13 @@ export class ChatManager {
       // configures. The only one today is `@playwright/mcp`, which needs
       // `PLAYWRIGHT_BROWSERS_PATH` to find Chromium in our managed dir.
       const extraArgs: string[] = [];
+      const isLocalPreviewBrowser =
+        isManagedSystemPlaywright(t) &&
+        systemOnlyIds.has(t.toolsetId) &&
+        !securityPolicy.allowExternalServices &&
+        providerUsesBrowserWrappers &&
+        opts.workspacePreview?.localOnly === true &&
+        typeof opts.workspacePreview.origin === 'string';
       if (t.toolsetId === '@playwright/mcp') {
         const { playwrightBrowsersDir } = await import('@bendyline/gezel/paths');
         env.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersDir(this.home);
@@ -13351,6 +13469,23 @@ export class ChatManager {
           env.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS !== '0'
         ) {
           extraArgs.push('--ignore-https-errors');
+        }
+        // Boundary flags are Gezel-owned in local-only mode. A modified
+        // system manifest that tries to supply its own proxy/origin policy is
+        // refused instead of relying on CLI duplicate-option precedence.
+        if (isLocalPreviewBrowser && hasLocalPreviewBrowserNetworkOverride(t.runtime.args)) {
+          log.warn(
+            'security: refusing local-preview Playwright because its system manifest overrides network-boundary arguments',
+          );
+          continue;
+        }
+        if (isLocalPreviewBrowser && opts.workspacePreview?.origin) {
+          extraArgs.push(
+            ...localPreviewBrowserLaunchArgs(opts.workspacePreview.origin, [
+              ...t.runtime.args,
+              ...extraArgs,
+            ]),
+          );
         }
       }
 
@@ -13391,6 +13526,7 @@ export class ChatManager {
         args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
         env,
       });
+      if (isLocalPreviewBrowser) localPreviewBrowserExtraIds.add(extraServerId);
       if (
         isTrustedConstrainedToolset({
           toolsetId: t.toolsetId,
@@ -13404,12 +13540,17 @@ export class ChatManager {
     // Centralized security ceiling: arbitrary third-party MCP toolsets bypass
     // the builtin tool allowlist and cannot be confined, so strict postures
     // refuse to spawn them. Exact bundled toolsets whose runtime applies
-    // narrow physical authority (currently DocBlocks' project-root grants)
-    // remain available after their pinned package has been verified.
+    // narrow physical authority remain available after their pinned package
+    // has been verified. Managed Playwright is a separate narrow exception:
+    // only its local-preview surface is advertised, every call is guarded,
+    // and Chromium is forced through the non-forwarding preview listener.
     const allowNonBuiltinToolsets = securityPolicy.allowNonBuiltinToolsets;
     const permittedExtras = allowNonBuiltinToolsets
       ? extras
-      : extras.filter((extra) => trustedConstrainedExtraIds.has(extra.id));
+      : extras.filter(
+          (extra) =>
+            trustedConstrainedExtraIds.has(extra.id) || localPreviewBrowserExtraIds.has(extra.id),
+        );
     const blockedExtraCount = extras.length - permittedExtras.length;
     if (blockedExtraCount > 0) {
       log.info(
@@ -15731,6 +15872,11 @@ export interface BuildInstructionsOptions {
    */
   browserAutomationRoleExcluded?: boolean;
   /**
+   * Playwright is present as the constrained workspace-preview browser, not
+   * as general web automation. Keeps the prompt from suggesting web reads.
+   */
+  browserLocalPreviewOnly?: boolean;
+  /**
    * Built-in MCP tools the model will see this turn (post-allowlist
    * filter). Drives the auto-injected `## Tools available this turn`
    * block. Computed in `buildSessionOpts` via
@@ -15935,6 +16081,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     layeredPrefixCache,
     untrustedContentPresent,
     browserAutomationRoleExcluded,
+    browserLocalPreviewOnly,
   } = opts;
   // Provenance-framing block — present only when the session can surface
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
@@ -16357,13 +16504,22 @@ ${artifactsLine}
   // installed but no `run_playwright_script` on their post-allowlist
   // roster was still told to write and run one.
   const scriptedBrowsing = hasPlaywright && availableToolNameSet.has('run_playwright_script');
-  const browsingGuidance = scriptedBrowsing
-    ? `**Web work.** For anything re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
-    : hasPlaywright
-      ? "**Web work.** Use the `browser_*` tools on your function schema for reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake `<browser_*>` markup."
-      : browserAutomationRoleExcluded
-        ? "**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML you write is still runtime-checked automatically after each write. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake `<browser_*>` markup."
-        : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+  // Copilot and the CLI providers hand MCP execution to their own subprocess
+  // loops, outside McpBridge's argument-wrapper layer. Do not advertise the
+  // file-URL alias there until those native loops gain an equivalent proxy.
+  const browserUsesManagedBridge = providerUsesManagedMcpBridge(providerName);
+  const workspaceHtmlBrowserGuidance = browserUsesManagedBridge
+    ? 'For interactive testing of workspace HTML, call `browser_navigate({ url: "file:///workspace/index.html" })` with the real workspace-relative path. Gezel automatically rewrites it to the active project\'s capability-scoped preview server; never install a separate static server. Call `validate({ path: "index.html" })` for the HTML/JavaScript lint plus headless-load gate.'
+    : 'For workspace HTML, call `validate({ path: "index.html" })`; it runs the HTML/JavaScript lint plus a headless load through Gezel\'s scoped preview server. This provider\'s native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` and do not install a separate static server.';
+  const browsingGuidance = browserLocalPreviewOnly
+    ? `**Local preview browser.** ${workspaceHtmlBrowserGuidance} External URLs and arbitrary localhost services are blocked in this security mode. Use the available \`browser_*\` tools only to inspect and interact with that hosted workspace page; JavaScript evaluation, file upload, storage mutation, and unsafe browser code are intentionally absent.`
+    : scriptedBrowsing
+      ? `**Web work.** ${workspaceHtmlBrowserGuidance} For anything else re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot web reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
+      : hasPlaywright
+        ? `**Web work.** ${workspaceHtmlBrowserGuidance} Use the \`browser_*\` tools on your function schema for one-shot web reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake \`<browser_*>\` markup.`
+        : browserAutomationRoleExcluded
+          ? '**Browser tools are not part of this role\'s kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don\'t emit fake `<browser_*>` markup.'
+          : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?

@@ -1350,8 +1350,8 @@ html.embedded-chat #root {
 /* Engine telemetry carries two-column labels plus memory meters, so give it
    a little more breathing room than the compact quota popover. */
 .engine-pill-popover {
-  min-width: 22rem;
-  max-width: 30rem;
+  min-width: 33rem;
+  max-width: 45rem;
 }
 /* The pill lives in the dark titlebar, but its popover floats over the
    page body — so it has to follow the app theme, not the titlebar. In
@@ -6058,7 +6058,7 @@ button.danger {
 
 /* AI bubbles fill the wrapper's full width so they stay aligned with
    their sticky context-header and don't visibly resize as tokens stream
-   in. User bubbles keep the content-hugging shape. */
+   in. */
 .msg-assistant > .msg-body,
 .msg-assistant > .msg-body-rendered,
 .msg-from-gezel > .msg-body,
@@ -6163,10 +6163,9 @@ button.danger {
 }
 
 /* Per-gezel font size adjustment. Squisq's LinearDocView hard-codes a
-   16px font-size inline on its content; override with !important (same
-   pattern as the surface override above) so a font's `scale` factor can
-   normalize visual size across typefaces. `--gezel-font-scale` is set on
-   `.msg-body-rendered` by the bubble; absent/1 → 16px (unchanged).
+   16px font-size inline on its content; override with !important so chat
+   prose stays at the quieter 15px conversation size and a font's `scale`
+   factor can normalize visual size across typefaces.
 
    The font-family override keeps the chat register consistent: plain
    `.msg-body` text is the editorial serif, but LinearDocView inlines a
@@ -6174,16 +6173,22 @@ button.danger {
    sans. `--gezel-chat-font` (set inline by the bubble when the gezel has
    a custom chat font) still wins through the fallback chain. */
 .msg-body-rendered .squisq-linear-content {
-  font-size: calc(16px * var(--gezel-font-scale, 1)) !important;
+  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
   font-family: var(--gezel-chat-font, var(--font-display)) !important;
+  line-height: 1.5 !important;
 }
 
-/* Replies sit one quiet step below Squisq's 16px document default so the
-   conversation stays proportional to the surrounding timeline chrome.
-   Keep user-authored message text at the document default above. */
-.msg-assistant > .msg-body-rendered .squisq-linear-content,
-.msg-from-gezel > .msg-body-rendered .squisq-linear-content {
-  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
+/* Squisq's page prose resets itself to 1.05rem (16.8px), bypassing the
+   chat size above. Keep prose relative to the chat container instead. */
+.msg-body-rendered .squisq-page-prose {
+  font-size: 1em;
+}
+
+/* `thinMargins` removes horizontal page padding but retains 1.5rem above
+   and below every page section. That document rhythm is too loose inside
+   a bubble; the bubble itself already supplies the needed inset. */
+.msg-body-rendered .squisq-page--thin .squisq-page-section {
+  padding-block: 0.15rem;
 }
 
 /* Chat replies are a conversation, not a centered document: Squisq's
@@ -6204,44 +6209,37 @@ button.danger {
   border-color: rgba(176, 114, 76, 0.35);
 }
 
-/* User bubbles that render markdown (image refs, mention chips) hold a
-   squisq LinearDocView, whose root declares `container: squisq-page /
+/* User bubbles hold a squisq LinearDocView so prompts get the same complete
+   Markdown treatment as replies (links, lists, code, image refs, and
+   mention chips). Its root declares `container: squisq-page /
    inline-size`. Size containment means the squisq tree contributes ZERO
    intrinsic width — inside a content-sized bubble the whole message
    collapses into a ~1ch-wide, thousands-of-px-tall pill (the empty-pill
-   incident). Give these bubbles the assistant treatment instead:
-   stretch to the timeline with the same 92% cap, so the container has
-   a definite width to resolve against. Plain-text user bubbles keep
-   their content-hugging feel. */
+   incident). Give user bubbles a narrower definite width so the container
+   remains reliable without turning every prompt into a full-row panel. */
 .msg-user:has(.msg-body-rendered) {
-  align-self: stretch;
-  max-width: 92%;
+  align-self: flex-end;
+  width: min(82%, 64rem);
+  max-width: 82%;
 }
 
 .msg-user .msg-body-rendered {
   width: 100%;
 }
 
-/* Squisq paints its own light-brown reading surface on the inner
-   `.squisq-linear` div. In
-   user bubbles that surface sits on top of the warm-tan bubble fill
-   and reads as a stark white inset — let the bubble fill show through
-   instead. The same goes for from-gezel handoff bubbles, which have
-   their own dashed handoff tint. Assistant bubbles keep the Squisq
-   surface so the rendered prose has its own paper-toned reading
-   background distinct from the chat canvas. */
-.msg-user .squisq-linear,
-.msg-from-gezel .squisq-linear {
+/* LinearDocView paints both its outer scroller and inner page. Inside a
+   chat bubble those nested canvases read as an inset rectangle—especially
+   in dark mode. Let every bubble's own fill remain the single surface. */
+.msg-body-rendered .squisq-linear,
+.msg-body-rendered .squisq-page {
   background: transparent !important;
 }
 
 .msg-assistant {
   /* Stretch (not flex-start) so the wrapper fills the timeline's cross
-     axis up to its own `max-width: 92%` cap — the bubble width then
-     stays put as text streams in instead of breathing with content,
-     and lines up with the sticky context-header above it. Plain-text
-     user bubbles stay content-sized (rendered ones stretch — see the
-     containment note above). */
+      axis up to its own `max-width: 92%` cap — the bubble width then
+      stays put as text streams in instead of breathing with content,
+      and lines up with the sticky context-header above it. */
   align-self: stretch;
   max-width: 92%;
 }

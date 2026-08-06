@@ -47,6 +47,13 @@ describe('TaskCraftbookStepSchema — plateau-trail back-compat', () => {
 });
 
 describe('GateCheckSchema — grounding kinds', () => {
+  it('accepts the in-process HTML lint gate', () => {
+    expect(GateCheckSchema.parse({ kind: 'htmlLint', file: 'index.html' })).toEqual({
+      kind: 'htmlLint',
+      file: 'index.html',
+    });
+  });
+
   it('parses citationsResolve with and without options', () => {
     expect(GateCheckSchema.parse({ kind: 'citationsResolve', file: 'review.md' })).toMatchObject({
       kind: 'citationsResolve',

@@ -51,6 +51,9 @@ describe('PlaywrightToolDescriptions', () => {
     expect(nav!.description).toContain('https://');
     expect(nav!.description).toContain('Search queries');
     expect(nav!.description).toContain('NOT valid URLs');
+    expect(nav!.description).toContain('validate({ path: "index.html" })');
+    expect(nav!.description).toContain('file:///workspace/index.html');
+    expect(nav!.description).toContain('automatically rewritten');
   });
 
   it('preserves the JSON schema', () => {

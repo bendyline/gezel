@@ -4,8 +4,8 @@ import { requireFirstParty } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import {
   type PreviewCapabilityStore,
-  encodePreviewPath,
   normalizePreviewPath,
+  previewCapabilityPath,
 } from '../preview-capability.js';
 
 /**
@@ -67,8 +67,12 @@ export function previewCapabilityRoutes(
       entryPath: body.path,
       ...(additionalScopes.length > 0 ? { additionalScopes } : {}),
     });
-    const suffix = encodePreviewPath(entryPath);
-    const url = `/preview/${encodeURIComponent(minted.token)}/${body.source}/${encodeURIComponent(projectId)}/${suffix}`;
+    const url = previewCapabilityPath({
+      token: minted.token,
+      source: body.source,
+      projectId,
+      entryPath,
+    });
     const browserOrigin = previewBrowserOrigin();
     c.header('cache-control', 'no-store');
     return c.json(

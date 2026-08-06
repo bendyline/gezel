@@ -89,7 +89,12 @@ try {
     const f = r.failure();
     push('requestfailed', r.url() + ' (' + (f ? f.errorText : 'failed') + ')');
   });
-  await page.goto(url, { waitUntil: 'load', timeout: Math.max(1000, capMs - settleMs - 2000) });
+  const response = await page.goto(url, { waitUntil: 'load', timeout: Math.max(1000, capMs - settleMs - 2000) });
+  if (!response) {
+    push('load', 'navigation completed without an HTTP response');
+  } else if (!response.ok()) {
+    push('http', response.status() + ' ' + response.statusText() + ' for ' + response.url());
+  }
   await page.waitForTimeout(settleMs);
   clearTimeout(hardCap);
   await browser.close().catch(() => {});

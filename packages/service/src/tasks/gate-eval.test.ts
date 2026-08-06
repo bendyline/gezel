@@ -269,6 +269,25 @@ describe('evaluateGate', () => {
     expect(res.failures[0]).toMatch(/not found/);
   });
 
+  it('htmlLint: rejects duplicate handler declarations and passes a clean static page', async () => {
+    const duplicate = await evaluateGate(
+      [{ kind: 'htmlLint', file: 'index.html' }],
+      reader({
+        'index.html':
+          '<html><body><script>function act(){} function act(){}</script></body></html>',
+      }),
+    );
+    expect(duplicate.pass).toBe(false);
+    expect(duplicate.failures[0]).toContain('top-level-functions-unique');
+
+    const clean = await evaluateGate(
+      [{ kind: 'htmlLint', file: 'index.html' }],
+      reader({ 'index.html': '<!DOCTYPE html><html><body><h1>Static</h1></body></html>' }),
+    );
+    expect(clean.pass).toBe(true);
+    expect(clean.checks[0]?.label).toBe('htmlLint index.html');
+  });
+
   it('reports a missing file rather than throwing', async () => {
     const res = await evaluateGate(
       [{ kind: 'sniff', file: 'index.html', sniff: 'html-complete' }],

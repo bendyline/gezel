@@ -66,6 +66,14 @@ describe('ChatSessionSchema', () => {
     expect(out.resumeFailed).toBe(true);
     expect(out.aboutSnapshot).toBe('about text');
   });
+
+  it('accepts the capability-routing model source marker', () => {
+    const out = ChatSessionSchema.parse({
+      ...validSession,
+      modelSource: 'capability-routing',
+    });
+    expect(out.modelSource).toBe('capability-routing');
+  });
 });
 
 describe('ChatSessionSummarySchema', () => {

@@ -74,6 +74,13 @@ export const ChatSessionSchema = z.object({
   projectId: z.string(),
   providerName: ProviderNameSchema,
   model: z.string().optional(),
+  /**
+   * Why `model` was stamped onto this session. Ordinary session records keep
+   * following the install's live default between rebuilds, but a capability-
+   * routed task step is an explicit dispatch decision and must stay on the
+   * selected model. Optional so pre-routing session files remain valid.
+   */
+  modelSource: z.enum(['capability-routing']).optional(),
   /** True only when this session was dispatched as deferred Night Shift work. */
   nightShift: z.boolean().optional(),
   /**

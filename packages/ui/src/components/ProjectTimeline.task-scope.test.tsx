@@ -28,6 +28,7 @@ const stream = vi.hoisted(() => {
 });
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 vi.mock('../shared-chat-events.js', () => ({
   streamSharedProjectChatEvents: () => stream.consume(),
 }));

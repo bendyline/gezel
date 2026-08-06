@@ -477,6 +477,79 @@ interface ChatCompletionTool {
   function: { name: string; description: string; parameters: unknown };
 }
 
+/**
+ * Normalize JSON Schema regexes before llama-server turns tool definitions
+ * into a GBNF grammar.
+ *
+ * JavaScript's `RegExp#source` escapes forward slashes so the source can be
+ * embedded in a `/.../` literal (`https:\/\/...`). That escape is
+ * semantically identical to a plain `/` in an ECMA-262 pattern, but
+ * llama.cpp's JSON-Schema-to-GBNF converter used to copy it into a quoted
+ * GBNF terminal where `\/` is not a recognized escape. One otherwise-unused
+ * tool could therefore reject the entire request with "failed to parse
+ * grammar" before inference began.
+ *
+ * Keep this compatibility transform local to llama.cpp: cloud providers can
+ * consume the original schema, and callers retain ownership of their object.
+ */
+export function normalizeJsonSchemaForLlamaCpp(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    let changed = false;
+    const normalized = schema.map((entry) => {
+      const next = normalizeJsonSchemaForLlamaCpp(entry);
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? normalized : schema;
+  }
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const record = schema as Record<string, unknown>;
+  let changed = false;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const next =
+      key === 'pattern' && typeof value === 'string'
+        ? value.replace(/\\\//g, '/')
+        : normalizeJsonSchemaForLlamaCpp(value);
+    normalized[key] = next;
+    if (next !== value) changed = true;
+  }
+  return changed ? normalized : schema;
+}
+
+/** Last-resort recovery for a server build that still rejects a tool grammar. */
+export function stripJsonSchemaPatternsForLlamaCpp(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    let changed = false;
+    const stripped = schema.map((entry) => {
+      const next = stripJsonSchemaPatternsForLlamaCpp(entry);
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? stripped : schema;
+  }
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const record = schema as Record<string, unknown>;
+  let changed = false;
+  const stripped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'pattern' && typeof value === 'string') {
+      changed = true;
+      continue;
+    }
+    const next = stripJsonSchemaPatternsForLlamaCpp(value);
+    stripped[key] = next;
+    if (next !== value) changed = true;
+  }
+  return changed ? stripped : schema;
+}
+
+export function isLlamaCppGrammarParseError(text: string): boolean {
+  return /failed to (?:initialize samplers:[^\r\n]*failed to )?parse grammar/i.test(text);
+}
+
 function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
   return tool.function.name;
 }
@@ -2605,7 +2678,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
       (t) => ({
         type: 'function' as const,
-        function: { name: t.name, description: t.description ?? '', parameters: t.parameters },
+        function: {
+          name: t.name,
+          description: t.description ?? '',
+          parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
+        },
       }),
     );
     const tools = [...bridgeTools, ...externalAsChatCompletions];
@@ -2886,7 +2963,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         function: {
           name: t.name,
           description: t.description ?? '',
-          parameters: t.parameters,
+          parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
         },
       }),
     );
@@ -3000,6 +3077,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // drives `foldPostActionRumination` on later reply-only iterations
     // (the wrap-up wall a verbose model emits after its tool ran).
     let actionFiredEarlierThisTurn = false;
+    // Some llama.cpp builds reject otherwise-valid JSON Schema regexes while
+    // compiling the aggregate tool grammar. A single retry strips only
+    // `pattern` constraints; MCP/Zod still validates the eventual arguments.
+    let grammarPatternFallback = false;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -3747,6 +3828,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
+        if (grammarPatternFallback && Array.isArray(body.tools)) {
+          body.tools = (body.tools as ChatCompletionTool[]).map((tool) => ({
+            ...tool,
+            function: {
+              ...tool.function,
+              parameters: stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters),
+            },
+          }));
+        }
         // llama-server accepts the string choices `auto`, `none`, and
         // `required`. Its OpenAI-compatible endpoint currently rejects the
         // named-object form, even when the constrained surface has one tool.
@@ -4220,6 +4310,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           cleanupTurn();
           this.deps.markUsed();
           const txt = await res.text().catch(() => '');
+          if (
+            tools &&
+            tools.length > 0 &&
+            isLlamaCppGrammarParseError(txt) &&
+            !grammarPatternFallback
+          ) {
+            grammarPatternFallback = true;
+            log.warn(
+              '[llama-cpp] tool grammar rejected by server; retrying once without JSON Schema pattern constraints',
+            );
+            continue;
+          }
           if (
             tryParseStrictAlternationTemplateError(txt) &&
             !this.flattenToolMessagesForStrictAlternation
@@ -6479,7 +6581,7 @@ function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTool[] {
     function: {
       name: t.name,
       description: t.description,
-      parameters: t.parameters,
+      parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
     },
   }));
 }

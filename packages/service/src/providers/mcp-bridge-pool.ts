@@ -31,10 +31,10 @@ export class McpBridgePool {
    * schema is not enough to prevent an out-of-role built-in call.
    *
    * **Third-party MCP tools (anything not in `BUILTIN_TOOL_TO_GROUP`)
-   * always pass through this filter.** The user explicitly opted into
-   * the toolset by installing it in the gezel's toolsets; gating its
-   * tools per-role would be a confusing surprise. Per-tool exclusion
-   * for third-party MCPs is future work via the toolsets UI.
+   * pass through this pool-level filter.** A server-specific bridge wrapper
+   * may still prune its own advertised/callable surface (the managed
+   * local-preview Playwright profile does this). Ordinary user-installed
+   * toolsets remain untouched here; per-tool UI exclusion is future work.
    */
   private toolAllowlist: Set<string> | null = null;
 
@@ -57,6 +57,7 @@ export class McpBridgePool {
       if (opts.imagePersister) primary.imagePersister = opts.imagePersister;
       if (opts.audioPersister) primary.audioPersister = opts.audioPersister;
       if (opts.artifactPersister) primary.artifactPersister = opts.artifactPersister;
+      if (opts.workspacePreview) primary.workspacePreview = opts.workspacePreview;
       primary.knownSecretValues = secrets;
       if (opts.debug) primary.debug = opts.debug;
       primary.modelTier = modelTier;
@@ -96,6 +97,7 @@ export class McpBridgePool {
       if (opts.imagePersister) bridge.imagePersister = opts.imagePersister;
       if (opts.audioPersister) bridge.audioPersister = opts.audioPersister;
       if (opts.artifactPersister) bridge.artifactPersister = opts.artifactPersister;
+      if (opts.workspacePreview) bridge.workspacePreview = opts.workspacePreview;
       bridge.knownSecretValues = secrets;
       if (opts.debug) bridge.debug = opts.debug;
       bridge.modelTier = modelTier;

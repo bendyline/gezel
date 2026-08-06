@@ -60,7 +60,11 @@ import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
-import { PreviewCapabilityStore } from './http/preview-capability.js';
+import {
+  PreviewCapabilityStore,
+  normalizePreviewPath,
+  previewCapabilityPath,
+} from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
 import { invalidateModelsCache } from './http/routes/models.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
@@ -735,6 +739,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Preview-shim runtime errors → next-turn chat prelude. Shared between
   // the HTTP intake route and ChatManager's drain-on-send.
   const previewLog = new PreviewLogBuffer();
+  // Shared output-pane/browser-preview capability authority. It is created
+  // before ChatManager so browser MCP wrappers can mint through a narrow
+  // workspace-only callback; the HTTP routers and sidecar bind later.
+  const previewCapabilities = new PreviewCapabilityStore();
+  const previewBrowser = { origin: null as string | null };
 
   // Image recognition. Built before ChatManager because the chat turn needs
   // it to describe images for models that can't see them.
@@ -748,6 +757,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     events: chatEvents,
     memory,
     previewLog,
+    createWorkspacePreviewUrl: async (projectId, relativePath) => {
+      const entryPath = normalizePreviewPath(relativePath);
+      if (entryPath === null) throw new Error('invalid workspace preview path');
+      if (boundPort <= 0) throw new Error('preview server is not ready');
+      const minted = previewCapabilities.mint({
+        source: 'workspace',
+        projectId,
+        entryPath,
+      });
+      const path = previewCapabilityPath({
+        token: minted.token,
+        source: 'workspace',
+        projectId,
+        entryPath,
+      });
+      const mainOrigin = `${cert ? 'https' : 'http'}://127.0.0.1:${boundPort}`;
+      return `${previewBrowser.origin ?? mainOrigin}${path}`;
+    },
+    getWorkspacePreviewOrigin: () => previewBrowser.origin,
     getPort: () => boundPort,
     getToken: () => token,
     getCert: () => cert?.certPem ?? null,
@@ -1927,15 +1955,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     requestRestart: opts.onRestartRequested,
   };
 
-  // When the main transport is HTTPS (the default), a self-signed loopback
-  // cert makes external browsers reject preview URLs. We serve the same
-  // capability-authenticated `/preview` route on a separate plain-HTTP
-  // listener so "open in browser" gets a clean, warning-free URL. The mint
-  // endpoint reads the listener's origin lazily (it binds below, after the
-  // main app is built). No second listener when the whole transport is
-  // already plain HTTP — the existing same-origin URL works there.
-  const previewCapabilities = new PreviewCapabilityStore();
-  const previewBrowser = { origin: null as string | null };
+  // Serve capability-authenticated previews on a separate plain-HTTP origin.
+  // Besides avoiding the self-signed main-listener certificate in external
+  // browsers, the dedicated origin is the only network destination admitted
+  // by local-preview-only Playwright sessions. The mint endpoint reads its
+  // origin lazily because the sidecar binds after the main app is built.
   const app = buildApp(context, {
     onUnexpectedHttpError: opts.onUnexpectedHttpError,
     previewCapabilities,
@@ -2119,11 +2143,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     });
   }
 
-  // Plain-HTTP preview sidecar (only when the main transport is TLS). Serves
-  // the capability-gated `/preview` route on its own ephemeral loopback port
-  // so external browsers open previews without the self-signed-cert warning.
+  // Plain-HTTP preview sidecar. It always gets a dedicated loopback origin,
+  // even when the main transport is already HTTP: local-preview-only browser
+  // sessions use this listener as a deliberately non-forwarding Chromium
+  // proxy, keeping every request away from both the public web and the
+  // daemon's bearer-gated API surface.
   let previewServer: ServerType | null = null;
-  if (cert && serviceRole !== 'machine-engine') {
+  if (serviceRole !== 'machine-engine') {
     const previewApp = buildPreviewApp(context, previewCapabilities, {
       onUnexpectedHttpError: opts.onUnexpectedHttpError,
     });
@@ -2136,12 +2162,23 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       });
       previewServer = bound.server;
       previewBrowser.origin = `http://127.0.0.1:${bound.port}`;
+      // HTTPS and WebSocket proxy attempts never reach Hono's request path.
+      // Explicitly destroy both upgrade forms so this listener can never
+      // become a tunnel even if Node's default behavior changes.
+      const rawPreviewServer = previewServer as unknown as NodeJS.EventEmitter;
+      rawPreviewServer.on('connect', (_request: unknown, socket: { destroy: () => void }) =>
+        socket.destroy(),
+      );
+      rawPreviewServer.on('upgrade', (_request: unknown, socket: { destroy: () => void }) =>
+        socket.destroy(),
+      );
       log.info(`[service] serving preview (HTTP) on 127.0.0.1:${bound.port}`);
     } catch (err) {
-      // Non-fatal: previews still work in-app over the pinned-cert HTTPS
-      // iframe; only the external-browser convenience is lost.
+      // Non-fatal for the product shell: previews still work in-app over the
+      // main listener. The constrained MCP browser fails closed because no
+      // dedicated preview/proxy origin is published to ChatManager.
       log.warn(
-        `[service] preview HTTP listener failed to bind; open-in-browser will use the TLS URL: ${
+        `[service] preview HTTP listener failed to bind; open-in-browser will use the main URL and local-preview browser tools will stay unavailable: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );

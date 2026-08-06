@@ -897,6 +897,7 @@ describe('McpBridge', () => {
       expect(out).toContain('PASS');
       expect(out).toContain('script-tag-present');
       expect(out).toContain('script-body-parses');
+      expect(out).toContain('runtime-load');
     });
 
     it('routes a 4-byte image to the copy_artifact_to_workspace hint', async () => {

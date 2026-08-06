@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type FileContent, formatValidateResult, validateFile } from './validate.js';
+import {
+  type FileContent,
+  formatValidateResult,
+  runtimePageCheckToValidateCheck,
+  validateFile,
+} from './validate.js';
 
 function textContent(text: string): FileContent {
   const bytes = new TextEncoder().encode(text);
@@ -59,12 +64,57 @@ describe('validateFile — HTML', () => {
     expect(formatted).toMatch(/\d+ \|/);
   });
 
-  it('reports missing-script with an actionable fix hint on a static HTML page', () => {
+  it('accepts a static HTML page with no script', () => {
     const html = '<!DOCTYPE html><html><body><h1>Hi</h1></body></html>';
     const r = validateFile('workspace/index.html', textContent(html));
     const formatted = formatValidateResult(r);
+    expect(formatted).toMatch(/PASS/);
     expect(formatted).toMatch(/script-tag-present/);
-    expect(formatted).toMatch(/no inline <script>/);
+    expect(formatted).toMatch(/valid for a static page/);
+  });
+
+  it('fails a truncated document even when its script tag is balanced', () => {
+    const html = '<!DOCTYPE html><html><body><script>const x = 1;</script>';
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('document-structure');
+    expect(formatted).toContain('</html>');
+    expect(formatted).toContain('</body>');
+  });
+
+  it('fails duplicate static DOM ids with the second location', () => {
+    const html = [
+      '<!DOCTYPE html><html><body>',
+      '<button id="go">Go</button>',
+      '<div id="go"></div>',
+      '</body></html>',
+    ].join('\n');
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('dom-ids-unique');
+    expect(formatted).toContain('duplicate id="go"');
+    expect(formatted).toContain('at line 3');
+  });
+
+  it('fails duplicate top-level functions that silently replace behavior', () => {
+    const html = [
+      '<!DOCTYPE html><html><body><script>',
+      'function onMapClick() { return "select"; }',
+      'function onMapClick() { return "trade"; }',
+      '</script></body></html>',
+    ].join('\n');
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('top-level-functions-unique');
+    expect(formatted).toContain('silently replaces');
+  });
+
+  it('parses module scripts instead of treating them as automatically valid', () => {
+    const html =
+      '<!DOCTYPE html><html><body><script type="module">export const broken = ;</script></body></html>';
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('script-body-parses');
   });
 });
 
@@ -211,6 +261,30 @@ describe('validateFile — formatting', () => {
     expect(formatted).toMatch(/PASS/);
     expect(formatted).not.toContain('Fix hint:');
     expect(formatted).not.toContain('← here');
+  });
+
+  it('distinguishes a skipped runtime load from a pass or failure', () => {
+    const r = validateFile('workspace/index.html', textContent('<html><body></body></html>'));
+    r.checks.push(
+      runtimePageCheckToValidateCheck({ ran: false, reason: 'chromium-not-installed' }),
+    );
+    const formatted = formatValidateResult(r);
+    expect(formatted).toContain('1 skipped');
+    expect(formatted).toContain('runtime-load: skipped');
+    expect(formatted).toContain('chromium-not-installed');
+  });
+
+  it('turns a headless page error into a failing runtime-load check', () => {
+    const check = runtimePageCheckToValidateCheck({
+      ran: true,
+      ok: false,
+      errors: ['pageerror: addColorStop is not a valid color'],
+    });
+    const formatted = formatValidateResult({ path: 'index.html', checks: [check] });
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('runtime-load');
+    expect(formatted).toContain('addColorStop');
+    expect(formatted).toContain('Do not install a separate static server');
   });
 });
 

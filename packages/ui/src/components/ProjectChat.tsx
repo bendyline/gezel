@@ -390,6 +390,7 @@ function ProjectChatBody({
                       sessionId={sessionId || undefined}
                       gezelName={selectedName}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
+                      onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
                     />
                   }

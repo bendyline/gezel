@@ -75,6 +75,30 @@ describe('effectiveSessionModel', () => {
       }),
     ).toBe('night-model');
   });
+
+  it('keeps an explicit capability route ahead of the ordinary install default', () => {
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('routed-model');
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        frontmatterModel: 'gezel-model',
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('gezel-model');
+  });
 });
 
 describe('consultationIdleTimeoutMsForModel', () => {

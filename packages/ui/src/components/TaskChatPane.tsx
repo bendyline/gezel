@@ -31,6 +31,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
 
   const [sessionId, setSessionId] = useState<string>('');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
 
   // Reset session selection when the task changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: task.ref is the reset trigger.
@@ -73,6 +74,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
         gezelIconOverride={targetGezel.iconOverride}
         projectId={task.projectId}
         sessionId={sessionId || undefined}
+        focusRequestKey={composerFocusRequestKey}
         onSessionCreated={(sid) => {
           setSessionId(sid);
           setSessionRefreshKey((k) => k + 1);
@@ -86,6 +88,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
             projectId={task.projectId}
             sessionId={sessionId || undefined}
             onSessionIdChange={(next) => setSessionId(next ?? '')}
+            onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
             refreshKey={sessionRefreshKey}
             taskRef={task.ref}
             {...(task.activeStepId ? { stepId: task.activeStepId } : {})}

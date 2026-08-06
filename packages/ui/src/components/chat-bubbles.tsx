@@ -72,16 +72,6 @@ function bubbleBodyStyle(fontFamily?: string, fontScale?: number): CSSProperties
   };
 }
 
-/** Cheap test — does this message include any Squisq image markdown? */
-function hasImageMarkdown(content: string): boolean {
-  return /!\[[^\]]*\]\([^)]+\)/.test(content);
-}
-
-/** Cheap test — does this message include any `@[Name](gezel:id)` mentions? */
-function hasMentionMarkdown(content: string): boolean {
-  return /@\[[^\]]+\]\(gezel\\?:[^)\s]+\)/.test(content);
-}
-
 export interface ToolActivity {
   name: string;
   durationMs: number;
@@ -203,11 +193,10 @@ export interface MessageBubbleProps {
   dataMsgId?: string;
   dataSessionId?: string;
   /**
-   * Resolver for pasted-image references inside the content. When
-   * supplied, user messages containing `![...](images/…)` render through
-   * the markdown pipeline so the image is displayed inline; without it
-   * the raw markdown string is shown instead (useful for contexts that
-   * don't have a session scope yet, like the global timeline).
+   * Resolver for pasted-image references inside the content. User and
+   * assistant messages always render through Squisq's markdown pipeline;
+   * when this is supplied, relative image references such as
+   * `![...](images/…)` can additionally resolve against the session.
    */
   mediaProvider?: MediaProvider | null;
   /**
@@ -580,12 +569,6 @@ export function MessageBubble({
   // bubble's "You" is its alignment anchor and always renders.
   const headerless = suppressHeader && !isUser;
   const cls = `msg msg-${role}${headerless ? ' msg-headerless' : ''}${extraClass ? ` ${extraClass}` : ''}`;
-  // User messages stay plain-text by default to preserve their current
-  // feel, but route through the markdown pipeline whenever the body
-  // contains content that needs proper rendering (image refs, mention
-  // chips). Without this, `@[Name](gezel:id)` shows up as raw markdown
-  // syntax in the user's own bubble.
-  const userNeedsMarkdown = isUser && (hasImageMarkdown(content) || hasMentionMarkdown(content));
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
       {!headerless && (
@@ -626,9 +609,7 @@ export function MessageBubble({
       {!isUser && attemptedToolCalls && attemptedToolCalls.length > 0 && (
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
       )}
-      {isUser && !userNeedsMarkdown ? (
-        <div className="msg-body">{content}</div>
-      ) : !isUser && content.trim().length === 0 ? (
+      {!isUser && content.trim().length === 0 ? (
         // Assistant turn finished with no visible text. Build the
         // bubble body from whatever signal we DO have so the user
         // never sees a generic "No response" placeholder when the

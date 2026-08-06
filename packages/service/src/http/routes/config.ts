@@ -415,15 +415,17 @@ export function configRoutes(ctx: ServiceContext): Hono {
         details: { fieldIds: changedCredentials },
       });
     }
-    // Any credential / provider / endpoint change must tear down cached
-    // providers immediately so the next session picks up the new state —
-    // the old engine/auth is unusable, so killing any in-flight work on it
-    // is unavoidable.
+    // Any credential / provider / endpoint / security-boundary change must
+    // tear down cached sessions immediately so the next turn gets the new
+    // provider, tool surface, and process-level browser confinement. Hiding a
+    // tool in the refreshed prompt is insufficient while the old MCP child is
+    // still alive and callable.
     const hardResetFields: Array<keyof typeof body> = [
       'provider',
       'ollamaBaseUrl',
       'ollamaNumPredict',
       'ollamaThink',
+      'securityPolicy',
     ];
     // `defaultModel` / `defaultReasoningEffort` also need a reset because
     // live session objects bake the model in at construction — a plain

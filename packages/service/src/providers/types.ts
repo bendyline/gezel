@@ -320,6 +320,23 @@ export interface SessionOpts {
    */
   artifactPersister?: (relPath: string, content: string) => Promise<void>;
   /**
+   * Active-project preview hosting available to MCP wrappers. Used by the
+   * Playwright argument adapter to rewrite workspace `file:` navigation onto
+   * the daemon's short-lived, capability-scoped preview URL.
+   */
+  workspacePreview?: {
+    projectId: string;
+    root: string;
+    /** Dedicated loopback origin that serves only capability-scoped previews. */
+    origin?: string;
+    /**
+     * Restrict Playwright to the local-preview tool surface and network
+     * boundary. Set whenever External services are disabled.
+     */
+    localOnly?: boolean;
+    createUrl: (relativePath: string) => Promise<string | null>;
+  };
+  /**
    * Craftbook hooks active for the session — the `hooks?: HookSpec[]`
    * list from the session's active craftbook(s). The MCP bridge
    * installs these via `installCraftbookHooks` at session start and
