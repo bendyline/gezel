@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { posix } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -115,7 +115,7 @@ export async function scheduleMacUninstall(input: {
     };
   }
 
-  const scriptPath = join(input.resourcesPath, 'uninstall.sh');
+  const scriptPath = posix.join(input.resourcesPath, 'uninstall.sh');
   if (!(input.exists ?? existsSync)(scriptPath)) {
     return {
       ok: false,
