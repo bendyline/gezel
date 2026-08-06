@@ -22,7 +22,18 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/mlx', '/v1/remote/manage/mlx'));
 
   app.get('/models', async (c) => {
-    const models = await ctx.mlxModels.listInstalled();
+    const installed = await ctx.mlxModels.listInstalled();
+    const models = await Promise.all(
+      installed.map(async (model) => {
+        const effectiveContextWindow = await ctx.chat
+          .previewContextWindowForModel('mlx', model.id)
+          .catch(() => undefined);
+        return {
+          ...model,
+          ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
+        };
+      }),
+    );
     return c.json({ models });
   });
 

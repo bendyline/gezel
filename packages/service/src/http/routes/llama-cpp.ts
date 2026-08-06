@@ -18,7 +18,18 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/llama-cpp', '/v1/remote/manage/llama-cpp'));
 
   app.get('/models', async (c) => {
-    const models = await ctx.llamaCppModels.listInstalled();
+    const installed = await ctx.llamaCppModels.listInstalled();
+    const models = await Promise.all(
+      installed.map(async (model) => {
+        const effectiveContextWindow = await ctx.chat
+          .previewContextWindowForModel('llama-cpp', model.id)
+          .catch(() => undefined);
+        return {
+          ...model,
+          ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
+        };
+      }),
+    );
     return c.json({ models });
   });
 

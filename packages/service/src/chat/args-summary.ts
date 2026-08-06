@@ -153,6 +153,45 @@ export function renderFullToolArgs(args: Record<string, unknown> | undefined): s
   return out.length > ARGS_FULL_CAP ? `${out.slice(0, ARGS_FULL_CAP)}\n\n… (truncated)` : out;
 }
 
+/**
+ * Persist a tool's response without letting one verbose command/fetch turn
+ * every chat session into a transcript-sized output store. Short responses
+ * are preserved byte-for-byte. Longer responses become a deterministic
+ * beginning/end summary with their original line and character counts, so
+ * the details disclosure stays useful without pretending we generated a
+ * semantic summary we cannot guarantee.
+ */
+const TOOL_RESULT_FULL_CAP = 4_000;
+const TOOL_RESULT_SUMMARY_HEAD = 2_200;
+const TOOL_RESULT_SUMMARY_TAIL = 1_200;
+
+export interface ToolResultSummary {
+  text: string;
+  truncated: boolean;
+}
+
+export function summarizeToolResult(result: string | undefined): ToolResultSummary | undefined {
+  if (result === undefined || result.trim().length === 0) return undefined;
+  if (result.length <= TOOL_RESULT_FULL_CAP) return { text: result, truncated: false };
+
+  const head = result.slice(0, TOOL_RESULT_SUMMARY_HEAD);
+  const tail = result.slice(-TOOL_RESULT_SUMMARY_TAIL);
+  const omitted = result.length - head.length - tail.length;
+  const lines = result.split(/\r?\n/u).length;
+  return {
+    text: [
+      `Long response: ${lines.toLocaleString('en-US')} lines · ${result.length.toLocaleString('en-US')} characters. Showing the beginning and end.`,
+      '',
+      head,
+      '',
+      `… ${omitted.toLocaleString('en-US')} characters omitted …`,
+      '',
+      tail,
+    ].join('\n'),
+    truncated: true,
+  };
+}
+
 function renderValue(v: unknown, max: number): string | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') {

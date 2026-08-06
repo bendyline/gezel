@@ -224,6 +224,22 @@ describe('ChatEventSchema', () => {
       action: { kind: 'settings', section: 'mlx' },
     });
   });
+
+  it('accepts a short or summarized tool response', () => {
+    expect(
+      ChatEventSchema.parse({
+        type: 'tool',
+        name: 'suggest_craftbook',
+        durationMs: 42,
+        success: true,
+        resultText: 'Matched presentations/powerpoint',
+        resultTruncated: false,
+      }),
+    ).toMatchObject({
+      resultText: 'Matched presentations/powerpoint',
+      resultTruncated: false,
+    });
+  });
 });
 
 describe('ProjectFileEntrySchema', () => {

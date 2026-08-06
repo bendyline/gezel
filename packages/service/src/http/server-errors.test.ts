@@ -56,4 +56,13 @@ describe('opaqueServerErrors', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: 'machine_engine_unavailable' });
   });
+
+  it('preserves the fixed capacity-denial code without leaking model details', async () => {
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: () => {} }));
+    app.get('/capacity', (c) => c.json({ error: 'capacity_denied' }, 503));
+    const response = await app.request('/capacity');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'capacity_denied' });
+  });
 });

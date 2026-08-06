@@ -128,4 +128,40 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('Workspace-local (1):');
     expect(text).toContain('@project (Repository guide)');
   });
+
+  it('marks a missing message project as non-retryable without blaming the display name', async () => {
+    handler = (url) => {
+      if (url.pathname === '/api/projects') {
+        return {
+          projects: [
+            { id: 'default', name: 'Default' },
+            { id: 'squisq', name: 'squisq' },
+          ],
+        };
+      }
+      if (url.pathname.startsWith('/api/projects/')) {
+        throw new Error('project not found');
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await client.callTool({
+      name: 'message_gezel',
+      arguments: {
+        gezel: 'voorman',
+        project: 'Battle of Ypres Presentation',
+        message: 'Please start the outline.',
+      },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain('does not exist');
+    expect(text).toContain('[runtime: non-retryable]');
+    expect(text).toContain('Project ids and exact display names are both accepted');
+    expect(text).toContain('Call `list_projects`');
+    expect(text).not.toContain('not the display name');
+  });
 });

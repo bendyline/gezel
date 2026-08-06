@@ -377,6 +377,7 @@ describe('runCodexTurn — happy path', () => {
       name: string;
       args?: Record<string, unknown>;
       structuredContent?: Record<string, unknown>;
+      resultText?: string;
       success: boolean;
     }> = [];
 
@@ -399,6 +400,7 @@ describe('runCodexTurn — happy path', () => {
             name: ev.name,
             args: ev.args,
             structuredContent: ev.structuredContent,
+            resultText: ev.resultText,
             success: ev.success,
           });
         },
@@ -416,6 +418,7 @@ describe('runCodexTurn — happy path', () => {
           outputPreview: 'ok',
         },
         structuredContent: { status: 'completed', exitCode: 0, outputPreview: 'ok' },
+        resultText: 'ok',
         success: true,
       },
     ]);

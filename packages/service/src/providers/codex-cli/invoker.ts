@@ -76,6 +76,7 @@ export interface CodexInvokerHooks {
   emitUsage(usage: TurnUsage): void;
   emitWarning(message: string): void;
   onToolCall?: (ev: ToolCallEvent) => void | Promise<void>;
+  knownSecretValues?: Set<string>;
   /**
    * Fired exactly once per invocation when Codex emits `thread.started`.
    * The session caches the id for follow-up turns and persists it on
@@ -581,6 +582,13 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
             if (structuredContent) {
               toolEvent.structuredContent = structuredContent;
             }
+            const resultText = redactKnownSecrets(
+              extractToolResultText(event.raw),
+              opts.hooks.knownSecretValues,
+            );
+            if (resultText) {
+              toolEvent.resultText = resultText;
+            }
             const errorMessage = extractToolItemError(event.raw);
             if (errorMessage) {
               toolEvent.errorMessage = errorMessage;
@@ -752,6 +760,27 @@ function extractToolStructuredContent(
   if (typeof raw.stdout === 'string') out.stdoutPreview = truncateTelemetry(raw.stdout);
   if (typeof raw.stderr === 'string') out.stderrPreview = truncateTelemetry(raw.stderr);
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Best available user-readable response for a completed Codex tool item. */
+function extractToolResultText(raw: Record<string, unknown>): string | undefined {
+  for (const key of ['output', 'stdout', 'result', 'message'] as const) {
+    const value = raw[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
+function redactKnownSecrets(
+  value: string | undefined,
+  secrets: Set<string> | undefined,
+): string | undefined {
+  if (!value || !secrets || secrets.size === 0) return value;
+  let redacted = value;
+  for (const secret of secrets) {
+    if (secret.length > 0) redacted = redacted.split(secret).join('[REDACTED]');
+  }
+  return redacted;
 }
 
 function isToolItemError(raw: Record<string, unknown>): boolean {

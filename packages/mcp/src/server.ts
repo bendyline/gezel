@@ -8013,7 +8013,7 @@ async function resolveProjectId(input: string): Promise<string> {
   if (byName) return byName.id;
   const available = all.map((p) => `"${p.id}" (${p.name})`).join(', ');
   throw new Error(
-    `project "${input}" not found. Available: ${available || '(none)'}. Use the id (the slug), not the display name.`,
+    `project "${input}" does not exist. Available projects: ${available || '(none)'}. Project ids and exact display names are both accepted. [runtime: non-retryable] Do not retry this same project reference. Call \`list_projects\` and use an id it returns; if this is genuinely new work, launch it with \`start_project\` or the matching craftbook before messaging a gezel.`,
   );
 }
 

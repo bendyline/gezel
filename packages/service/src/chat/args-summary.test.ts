@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { humanizeToolCall, renderFullToolArgs, summarizeToolArgs } from './args-summary.js';
+import {
+  humanizeToolCall,
+  renderFullToolArgs,
+  summarizeToolArgs,
+  summarizeToolResult,
+} from './args-summary.js';
 
 describe('humanizeToolCall — non-nerdy summaries', () => {
   it('renders a message_gezel handoff as a sentence with target, gist, and file', () => {
@@ -76,5 +81,30 @@ describe('renderFullToolArgs — complete, copyable blob', () => {
   it('returns undefined for empty args', () => {
     expect(renderFullToolArgs(undefined)).toBeUndefined();
     expect(renderFullToolArgs({})).toBeUndefined();
+  });
+});
+
+describe('summarizeToolResult — bounded response details', () => {
+  it('preserves a short response exactly', () => {
+    expect(summarizeToolResult('matched craftbook: presentations/powerpoint')).toEqual({
+      text: 'matched craftbook: presentations/powerpoint',
+      truncated: false,
+    });
+  });
+
+  it('summarizes a long response with counts plus beginning and end', () => {
+    const result = `FIRST\n${'middle\n'.repeat(900)}LAST`;
+    const summary = summarizeToolResult(result)!;
+    expect(summary.truncated).toBe(true);
+    expect(summary.text).toContain('Long response:');
+    expect(summary.text).toContain('characters omitted');
+    expect(summary.text).toContain('FIRST');
+    expect(summary.text).toContain('LAST');
+    expect(summary.text.length).toBeLessThan(result.length);
+  });
+
+  it('omits empty responses', () => {
+    expect(summarizeToolResult(undefined)).toBeUndefined();
+    expect(summarizeToolResult('   \n')).toBeUndefined();
   });
 });

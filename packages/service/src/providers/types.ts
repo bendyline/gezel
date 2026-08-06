@@ -465,6 +465,12 @@ export interface ToolCallEvent {
   success: boolean;
   errorMessage?: string;
   /**
+   * Text returned by the tool when the provider exposes it. Producers must
+   * redact known secrets before firing the event. ChatManager bounds this
+   * into a short full response or a deterministic summary before persistence.
+   */
+  resultText?: string;
+  /**
    * Image artifacts the tool returned (Playwright `browser_*` screenshots,
    * etc.) — already written to disk by the bridge's image persister, paths
    * are relative to the project's artifacts/ root. Forwarded onto both

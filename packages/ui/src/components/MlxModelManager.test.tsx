@@ -23,6 +23,7 @@ const INSTALLED = {
       installedAt: '2026-08-01T00:00:00.000Z',
       modelDir: '/tmp/gemma4-12b-q4',
       contextWindow: 256_000,
+      effectiveContextWindow: 128_000,
       quantization: '4bit',
       chatTemplatePresent: true,
       catalogVersion: '1.0.0',
@@ -70,6 +71,8 @@ describe('MlxModelManager fitness column', () => {
     render(<MlxModelManager />);
 
     expect(await screen.findByText('runs well (62 t/s)')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Context cap' })).toBeInTheDocument();
+    expect(screen.getByText('128K')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-run' })).toBeInTheDocument();
   });
 

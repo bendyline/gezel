@@ -21,6 +21,7 @@ import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleC
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
+import { formatContextWindow } from './model-context.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -576,7 +577,9 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th>Context</th>
+                  <th title="Effective per-turn context window after Gezel's configured limit">
+                    Context cap
+                  </th>
                   <th>Fitness</th>
                   <th />
                 </tr>
@@ -620,7 +623,15 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
                       </td>
-                      <td>{m.contextWindow ? m.contextWindow.toLocaleString() : '—'}</td>
+                      <td
+                        title={
+                          m.effectiveContextWindow
+                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
+                            : 'The effective context cap is unavailable.'
+                        }
+                      >
+                        {formatContextWindow(m.effectiveContextWindow)}
+                      </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">
                           <span

@@ -158,7 +158,12 @@ import {
   mlxVenvPackages,
 } from '../providers/mlx/index.js';
 import { MockProvider } from '../providers/mock.js';
-import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
+import {
+  CapacityDeniedError,
+  availableSystemRamBytes,
+  formatContextCapacityDenial,
+  resolveLocalContextRequirement,
+} from '../providers/native/capacity-broker.js';
 import { type LocalProviderName, makeEngineKey } from '../providers/native/engine-key.js';
 import { pickFreePort } from '../providers/native/port.js';
 import { NativeEngineSupervisor } from '../providers/native/supervisor.js';
@@ -204,7 +209,12 @@ import {
   resolveMcpDefinition,
 } from '../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
-import { humanizeToolCall, renderFullToolArgs, summarizeToolArgs } from './args-summary.js';
+import {
+  humanizeToolCall,
+  renderFullToolArgs,
+  summarizeToolArgs,
+  summarizeToolResult,
+} from './args-summary.js';
 import { extractReferencedArtifacts } from './artifact-references.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
@@ -8941,7 +8951,17 @@ export class ChatManager {
       }
     }
     const provider = await this.ensureProvider(name);
-    return provider.listModels();
+    const models = await provider.listModels();
+    if (name !== 'ollama') return models;
+
+    // Ollama's provider-level list reports Gezel's parameter-size heuristic.
+    // A configured global num_ctx overrides that heuristic for every ordinary
+    // session, so the inventory must report the same cap the session receives.
+    // A gezel-specific numCtx can still differ; there is no single value for
+    // that override on a provider-wide model list.
+    const configuredContextWindow = (await this.store.readConfig()).ollamaNumCtx;
+    if (!configuredContextWindow) return models;
+    return models.map((model) => ({ ...model, contextWindow: configuredContextWindow }));
   }
 
   /**
@@ -10385,22 +10405,37 @@ export class ChatManager {
     name: LocalProviderName,
     modelId: string,
   ): Promise<number | undefined> {
+    let residentContextWindow: number | undefined;
     for (const resident of this.peekResidentLocalProviders(name, modelId)) {
       const residentModel = resident.getEffectiveModelId?.();
       if (residentModel && residentModel !== modelId) continue;
       const prepared = await resident.prepareContextWindow?.(modelId);
       const live = prepared ?? resident.getContextWindow?.();
-      if (live && Number.isFinite(live) && live > 0) return Math.floor(live);
+      if (live && Number.isFinite(live) && live > 0) {
+        residentContextWindow = Math.floor(live);
+        break;
+      }
     }
+
+    const useResidentOr = (planned: number, minimum: number): number => {
+      if (residentContextWindow === undefined) return planned;
+      if (residentContextWindow < minimum) {
+        throw new CapacityDeniedError(
+          `${modelId} is already running with only ${residentContextWindow.toLocaleString('en-US')} context tokens per turn, below its required ${minimum.toLocaleString('en-US')}-token working window. Restart the local engine so Gezel can re-admit it at the current context policy.`,
+        );
+      }
+      return residentContextWindow;
+    };
 
     const config = await this.store.readConfig();
     if (name === 'mlx') {
       const installed = await this.mlxModels?.resolveModel(modelId);
       if (!installed) throw new ModelNotInstalledError(name, modelId);
-      return resolveMlxEffectiveNumCtx({
+      const effective = resolveMlxEffectiveNumCtx({
         ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
         ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
       });
+      return useResidentOr(effective, Math.min(installed.contextWindow ?? 65_536, 65_536));
     }
 
     if (name === 'ds4') {
@@ -10416,11 +10451,12 @@ export class ChatManager {
       const ds4Source = detail?.manifest.kind === 'chat-model' ? detail.manifest.ds4 : undefined;
       const { totalmem } = await import('node:os');
       const ramTieredCtx = totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
-      return resolveDs4LaunchCtx({
+      const effective = resolveDs4LaunchCtx({
         configured: config.ds4NumCtx,
         ramTieredCtx,
         catalogMaxCtx: ds4Source?.maxLaunchCtx,
       });
+      return useResidentOr(effective, Math.min(effective, 65_536));
     }
 
     const installed = await this.llamaCppModels?.resolveModel(modelId);
@@ -10435,15 +10471,21 @@ export class ChatManager {
     const manifestEngineConfig = await resolveCatalogLlamaCppEngineConfig(this.catalog, modelId);
     const preferredCap =
       envNumCtx ?? config.llamaCppNumCtx ?? manifestEngineConfig?.contextSize ?? 65_536;
-    let effectiveNumCtx = Math.min(installed.contextWindow ?? preferredCap, preferredCap);
-    if (envNumCtx !== undefined) return effectiveNumCtx;
+    const contextRequirement = resolveLocalContextRequirement({
+      modelContextWindow: installed.contextWindow,
+      requestedContextWindow: preferredCap,
+    });
+    let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
+    if (residentContextWindow !== undefined || envNumCtx !== undefined) {
+      return useResidentOr(effectiveNumCtx, contextRequirement.minimumPerTurnCtxTokens);
+    }
 
     const {
-      clampCtxTokensForMemory,
       computeCapacityBudget,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
       llamaCppSlotCeiling,
+      planCtxTokensForMemory,
     } = await import('../providers/native/capacity-broker.js');
     const router = this.engineRouter ?? this.engineRouterCache;
     const brokerSnap = router?.broker.committed();
@@ -10502,17 +10544,26 @@ export class ChatManager {
               weightsBytes: installed.approxSizeBytes,
               kvCacheType,
             }) / referenceCtx;
-      effectiveNumCtx = clampCtxTokensForMemory({
+      const admission = planCtxTokensForMemory({
         requestedPerTurnCtxTokens: effectiveNumCtx,
         slots,
+        minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
         kvBytesPerToken,
         weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
         budgetBytes: admissionBudgetBytes,
         committedOtherBytes,
         freeSystemRamBytes: availableSystemRamBytes(),
         vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
-      }).perTurnCtxTokens;
+      });
+      if (!admission.minimumSatisfied) {
+        throw new CapacityDeniedError(
+          formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
+        );
+      }
+      slots = admission.slots;
+      effectiveNumCtx = admission.perTurnCtxTokens;
     } catch (error) {
+      if (error instanceof CapacityDeniedError) throw error;
       log.warn(
         `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -12599,6 +12650,7 @@ export class ChatManager {
       // the UI's expand + copy so a handoff's real content is verifiable.
       const argsSummary = humanizeToolCall(info.name, info.args) ?? summarizeToolArgs(info.args);
       const argsFull = renderFullToolArgs(info.args);
+      const result = summarizeToolResult(info.resultText);
       // Layer 4 surgical-edit tools surface `{diff, addedLines,
       // removedLines}` via MCP structuredContent. Pull the known fields
       // onto the persisted ChatMessageToolCall so the inline diff
@@ -12636,6 +12688,8 @@ export class ChatManager {
         ...(path ? { path } : {}),
         ...(argsSummary ? { argsSummary } : {}),
         ...(argsFull ? { argsFull } : {}),
+        ...(result ? { resultText: result.text } : {}),
+        ...(result?.truncated ? { resultTruncated: true } : {}),
         ...(info.images && info.images.length > 0 ? { images: info.images } : {}),
         ...(info.audios && info.audios.length > 0 ? { audios: info.audios } : {}),
         ...(videos ? { videos } : {}),
@@ -12659,6 +12713,8 @@ export class ChatManager {
           ...(path ? { path } : {}),
           ...(argsSummary ? { argsSummary } : {}),
           ...(argsFull ? { argsFull } : {}),
+          ...(result ? { resultText: result.text } : {}),
+          ...(result?.truncated ? { resultTruncated: true } : {}),
           ...(info.images && info.images.length > 0 ? { images: info.images } : {}),
           ...(info.audios && info.audios.length > 0 ? { audios: info.audios } : {}),
           ...(videos ? { videos } : {}),
@@ -15101,7 +15157,7 @@ function looksStalledImpl(text: string): boolean {
   // negatives leave the user hanging.
   const patterns: RegExp[] = [
     // First-person intent followed by a verb.
-    /^(?:I (?:will|am going to|am about to|am attempting to|am now|need to|am)\s+\w+|I'll\s+\w+|I'm (?:now |about to |going to |attempting to )\w+|Let me\b|Now,?\s+I\b|Next,?\s+I\b)/i,
+    /^(?:I (?:will|am going to|am about to|am attempting to|am now|need to|am)\s+\w+|I'll\s+\w+|I'm (?:now |about to |going to |attempting to )\w+|Let me\s+(?!know\b)\w+|Now,?\s+I\b|Next,?\s+I\b)/i,
     // Bare gerund opener — often a heading the model wrote in place of
     // doing the work ("Processing Mockup…", "Reading the spec…").
     /^(?:Processing|Reading|Checking|Searching|Loading|Analyzing|Computing|Generating|Drafting|Writing|Preparing|Reviewing|Examining|Looking)\b/i,
@@ -16684,20 +16740,26 @@ function ensureLlamaEngineStatus(
  * Resolve ds4's launch `--ctx` from the device tier and the model's catalog
  * cap.
  *
- * Precedence: an explicit `config.ds4NumCtx` is the user's word and wins
- * outright. Otherwise the RAM tier is an upper bound that a model may lower
- * but never raise — the tier is calibrated on DeepSeek V4 Flash's ~4 GiB of
- * resident non-routed weights, and a model holding five times that much can't
- * afford the same KV allocation on the same machine.
+ * A high explicit `config.ds4NumCtx` wins. A lower value cannot push a
+ * long-context model below Gezel's 64K viability floor; a catalog model whose
+ * native launch cap is genuinely smaller retains that smaller cap. Otherwise
+ * the RAM tier is an upper bound that a model may lower but never raise — the
+ * tier is calibrated on DeepSeek V4 Flash's ~4 GiB of resident non-routed
+ * weights, and a model holding five times that much cannot afford the same KV
+ * allocation on the same machine.
  */
 export function resolveDs4LaunchCtx(opts: {
   configured?: number | undefined;
   ramTieredCtx: number;
   catalogMaxCtx?: number | undefined;
 }): number {
-  if (opts.configured) return opts.configured;
-  if (!opts.catalogMaxCtx) return opts.ramTieredCtx;
-  return Math.min(opts.ramTieredCtx, opts.catalogMaxCtx);
+  const resolved =
+    opts.configured ??
+    (opts.catalogMaxCtx ? Math.min(opts.ramTieredCtx, opts.catalogMaxCtx) : opts.ramTieredCtx);
+  if (opts.catalogMaxCtx && opts.catalogMaxCtx < 65_536) {
+    return opts.catalogMaxCtx;
+  }
+  return Math.max(65_536, resolved);
 }
 
 /**
@@ -17301,10 +17363,13 @@ export async function buildLlamaCppProvider(opts: {
   // to the model's native GGUF train ctx (`modelCtx`) below, so a manifest
   // can only opt a model UP toward its own window, never past it.
   const preferredCap = numCtx ?? manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT;
-  const modelCtx = modelCatalogInfo?.contextWindow ?? preferredCap;
-  // `let`: the RAM-aware admission clamp below (inside the GGUF-summary
-  // block) may lower this before anything launch-visible consumes it.
-  let effectiveNumCtx = Math.min(modelCtx, preferredCap);
+  const contextRequirement = resolveLocalContextRequirement({
+    modelContextWindow: modelCatalogInfo?.contextWindow,
+    requestedContextWindow: preferredCap,
+  });
+  // `let`: RAM-aware admission below may lower this (but never below the
+  // model-aware minimum) before anything launch-visible consumes it.
+  let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
 
   // Auto-size supervised slots now that the model + context window are
   // known: a RAM-tier demand default, clamped by a per-model KV memory
@@ -17316,9 +17381,9 @@ export async function buildLlamaCppProvider(opts: {
     fastMemoryBudgetBytes,
     defaultLocalEngineSlots,
     llamaCppSlotCeiling,
-    clampCtxTokensForMemory,
     computeCapacityBudget,
     estimatePerSlotKvBytes,
+    planCtxTokensForMemory,
   } = await import('../providers/native/capacity-broker.js');
   // Subtract co-resident model reservations from the budget when the pool
   // broker is wired (multi-model path), using its actual (possibly config-
@@ -17391,7 +17456,7 @@ export async function buildLlamaCppProvider(opts: {
     envBatchedOverride ?? config.batchedInference?.enabled ?? slots > 1;
   // Only the SUPERVISED path controls `--parallel`, so co-batching is
   // forwarded only there; an external llama-server may be single-slot.
-  const batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+  let batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
 
   // Rolling log file at ~/.gezel/logs/llama-server-YYYY-MM-DD.log.
   // Captures raw stdout/stderr so users (and bug reports) have a
@@ -17568,9 +17633,10 @@ export async function buildLlamaCppProvider(opts: {
               }
             : {}),
         });
-        const admission = clampCtxTokensForMemory({
+        const admission = planCtxTokensForMemory({
           requestedPerTurnCtxTokens: effectiveNumCtx,
           slots,
+          minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
           weightsResidentBytes: residentBytes,
           budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes,
@@ -17578,6 +17644,21 @@ export async function buildLlamaCppProvider(opts: {
           freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: liveBudget.vramBytes,
         });
+        if (!admission.minimumSatisfied) {
+          throw new CapacityDeniedError(
+            formatContextCapacityDenial({
+              modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this local model',
+              plan: admission,
+            }),
+          );
+        }
+        if (admission.slots < slots) {
+          log.info(
+            `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: reducing engine slots ${slots} -> ${admission.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
+          );
+          slots = admission.slots;
+          batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+        }
         if (admission.clamped) {
           log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
           effectiveNumCtx = admission.perTurnCtxTokens;
@@ -17621,6 +17702,7 @@ export async function buildLlamaCppProvider(opts: {
         );
       }
     } catch (err) {
+      if (err instanceof CapacityDeniedError) throw err;
       log.warn(
         `[llama-cpp] offload planning skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -17966,8 +18048,10 @@ export function resolveMlxEffectiveNumCtx(opts: {
   modelContextWindow?: number;
   configuredLimit?: number;
 }): number {
-  const nativeLimit = opts.modelContextWindow ?? 65_536;
-  return Math.min(nativeLimit, opts.configuredLimit ?? nativeLimit);
+  return resolveLocalContextRequirement({
+    modelContextWindow: opts.modelContextWindow,
+    requestedContextWindow: opts.configuredLimit ?? opts.modelContextWindow,
+  }).requestedPerTurnCtxTokens;
 }
 
 /**

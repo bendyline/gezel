@@ -691,9 +691,43 @@ export function llamaCppSlotCeiling(opts: {
  */
 const CTX_CLAMP_OS_RESERVE_BYTES = 2 * GIB;
 
-/** Never clamp a turn's working window below this — sessions compact, tools
- * cap their output, and small-context failure modes are well handled; a
- * machine paging itself to death is not. */
+/** Minimum useful per-turn context for Gezel's standing prompt + tool surface. */
+export const MIN_VIABLE_LOCAL_CONTEXT_TOKENS = 65_536;
+
+export interface LocalContextRequirement {
+  nativeContextWindow: number;
+  minimumPerTurnCtxTokens: number;
+  requestedPerTurnCtxTokens: number;
+}
+
+/**
+ * Resolve the model-aware context contract. Long-context models must retain
+ * at least 64K; a model whose native window is genuinely smaller keeps that
+ * native limit instead of being asked to do something it cannot support.
+ */
+export function resolveLocalContextRequirement(opts: {
+  modelContextWindow?: number;
+  requestedContextWindow?: number;
+}): LocalContextRequirement {
+  const preferred =
+    opts.requestedContextWindow && opts.requestedContextWindow > 0
+      ? Math.floor(opts.requestedContextWindow)
+      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
+  const native =
+    opts.modelContextWindow && opts.modelContextWindow > 0
+      ? Math.floor(opts.modelContextWindow)
+      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
+  const minimum = Math.min(native, MIN_VIABLE_LOCAL_CONTEXT_TOKENS);
+  return {
+    nativeContextWindow: native,
+    minimumPerTurnCtxTokens: minimum,
+    requestedPerTurnCtxTokens: Math.min(native, Math.max(preferred, minimum)),
+  };
+}
+
+/** Numerical floor for the low-level clamp calculation. Production admission
+ * applies the model-aware policy above and refuses a launch when that
+ * requirement cannot fit. */
 const CTX_CLAMP_FLOOR_TOKENS = 8_192;
 
 export interface CtxMemoryClampInput {
@@ -736,6 +770,15 @@ export interface CtxMemoryClampResult {
   reason: string | null;
 }
 
+export interface CtxMemoryAdmissionPlanResult extends CtxMemoryClampResult {
+  /** Slot count that produced this admission result. */
+  slots: number;
+  /** The model/policy minimum this plan had to preserve. */
+  minimumPerTurnCtxTokens: number;
+  /** False means even one slot cannot fit the required working window. */
+  minimumSatisfied: boolean;
+}
+
 /**
  * Clamp the per-turn context window so the engine's projected footprint —
  * resident weights plus total KV plus the compute-headroom reserve — fits
@@ -750,9 +793,10 @@ export interface CtxMemoryClampResult {
  * (sessions compact sooner); paging does not degrade at all — it takes
  * the whole desktop with it.
  *
- * Never clamps below the floor: if even the floor doesn't fit, the engine
- * still launches at the floor and the existing OOM/recovery paths own the
- * outcome. Returns multiples of 1024 for tidy engine arguments.
+ * Never returns below the caller's floor. Production launch admission wraps
+ * this primitive with {@link planCtxTokensForMemory}, which tests the actual
+ * safe value and refuses a launch that cannot retain the model-aware floor.
+ * Returns multiples of 1024 for tidy engine arguments.
  */
 export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryClampResult {
   const requested = input.requestedPerTurnCtxTokens;
@@ -789,4 +833,55 @@ export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryCl
       `${committedOther > 0 ? `, ${gb(committedOther)} held by other models` : ''}); ` +
       `KV now ~${gb(kvAtClamped)}. Sessions compact sooner instead of the machine paging.`,
   };
+}
+
+/**
+ * Preserve useful context by reducing concurrency before context. If even a
+ * single slot cannot fit the required per-turn window, report a denial rather
+ * than silently launching a tool-using model with an unusably small window.
+ */
+export function planCtxTokensForMemory(
+  input: CtxMemoryClampInput & { minimumPerTurnCtxTokens: number },
+): CtxMemoryAdmissionPlanResult {
+  const requestedSlots = Math.max(1, Math.floor(input.slots));
+  const minimum = Math.max(1, Math.floor(input.minimumPerTurnCtxTokens));
+  let last: CtxMemoryClampResult | undefined;
+  for (let slots = requestedSlots; slots >= 1; slots -= 1) {
+    const safe = clampCtxTokensForMemory({
+      ...input,
+      slots,
+      // Reveal the actually safe context instead of pinning the low-level
+      // clamp to the policy floor; admission compares it below.
+      minPerTurnCtxTokens: 1,
+    });
+    last = safe;
+    if (safe.perTurnCtxTokens >= minimum) {
+      return {
+        ...safe,
+        slots,
+        minimumPerTurnCtxTokens: minimum,
+        minimumSatisfied: true,
+      };
+    }
+  }
+  const denied = last ?? clampCtxTokensForMemory({ ...input, slots: 1, minPerTurnCtxTokens: 1 });
+  return {
+    ...denied,
+    slots: 1,
+    minimumPerTurnCtxTokens: minimum,
+    minimumSatisfied: false,
+  };
+}
+
+/** Human-readable refusal for a model that cannot retain its viable context. */
+export function formatContextCapacityDenial(opts: {
+  modelLabel: string;
+  plan: CtxMemoryAdmissionPlanResult;
+}): string {
+  const minimum = opts.plan.minimumPerTurnCtxTokens.toLocaleString('en-US');
+  const safe = opts.plan.perTurnCtxTokens.toLocaleString('en-US');
+  return `Not enough memory to run ${opts.modelLabel} with its required ${minimum}-token working window. Even at one engine slot, this machine could safely admit only about ${safe} tokens per turn. ${opts.plan.reason ?? ''} Free memory or unload another local model, then restart the engine; otherwise choose a model that fits. Gezel will not silently launch the full tool surface below the required context.`.replace(
+    /\s+/g,
+    ' ',
+  );
 }

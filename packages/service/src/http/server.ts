@@ -166,11 +166,11 @@ export function opaqueServerErrors(
     try {
       const parsed = JSON.parse(raw) as { error?: unknown; requestId?: unknown };
       if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') return;
-      // A broker outage is an expected, actionable degraded state rather than
-      // a route exception. Preserve only its fixed code; the bridge logs the
-      // underlying socket/TLS detail and never puts that detail in this body.
+      // Broker outages and capacity denials are expected, actionable degraded
+      // states rather than route exceptions. Preserve only their fixed codes;
+      // the bridge logs the underlying detail and never puts it in this body.
       if (
-        parsed.error === 'machine_engine_unavailable' &&
+        (parsed.error === 'machine_engine_unavailable' || parsed.error === 'capacity_denied') &&
         Object.keys(parsed as Record<string, unknown>).length === 1
       ) {
         return;

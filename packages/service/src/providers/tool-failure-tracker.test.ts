@@ -96,6 +96,23 @@ describe('ToolFailureTracker', () => {
     expect(r.output).toContain('STOP retrying');
   });
 
+  it('redirects a stale project reference immediately and aborts a repeated failure', () => {
+    const t = new ToolFailureTracker();
+    const missing =
+      'ERROR: project "Battle of Ypres Presentation" does not exist. ' +
+      '[runtime: non-retryable] Do not retry this same project reference. Call `list_projects`.';
+
+    const first = t.recordResult('message_gezel', missing);
+    expect(first.count).toBe(1);
+    expect(first.shouldAbort).toBe(false);
+    expect(first.output).toContain('This reference is stale');
+    expect(first.output).toContain('Do not call `message_gezel` again');
+
+    const second = t.recordResult('message_gezel', missing);
+    expect(second.count).toBe(2);
+    expect(second.shouldAbort).toBe(true);
+  });
+
   it('uses a full-source soft warning for repeated source edit failures', () => {
     const t = new ToolFailureTracker();
     t.recordResult('write_file', 'ERROR: truncated');

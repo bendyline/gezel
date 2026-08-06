@@ -8,11 +8,14 @@ import {
   estimatePerSlotKvBytes,
   fastMemoryBudgetBytes,
   formatCapacityDenial,
+  formatContextCapacityDenial,
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
   localEngineSlotCeiling,
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
+  planCtxTokensForMemory,
+  resolveLocalContextRequirement,
 } from './capacity-broker.js';
 
 const GB = 1024 ** 3;
@@ -780,6 +783,70 @@ describe('clampCtxTokensForMemory', () => {
     expect(clampCtxTokensForMemory({ ...INCIDENT, requestedPerTurnCtxTokens: 8_192 }).clamped).toBe(
       false,
     );
+  });
+});
+
+describe('model-aware context admission', () => {
+  it('reduces slots before sacrificing the 64K working window', () => {
+    const result = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: 98_304,
+      minimumPerTurnCtxTokens: 65_536,
+      slots: 2,
+      kvBytesPerToken: 100 * 1024,
+      weightsResidentBytes: 4 * GB,
+      budgetBytes: 18 * GB,
+      freeSystemRamBytes: 64 * GB,
+      vramBytes: 0,
+    });
+    expect(result.minimumSatisfied).toBe(true);
+    expect(result.slots).toBe(1);
+    expect(result.perTurnCtxTokens).toBe(98_304);
+  });
+
+  it('denies admission when even one slot cannot retain 64K', () => {
+    const result = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: 65_536,
+      minimumPerTurnCtxTokens: 65_536,
+      slots: 2,
+      kvBytesPerToken: 380 * 1024,
+      weightsResidentBytes: 8 * GB,
+      budgetBytes: 30.7 * GB,
+      freeSystemRamBytes: 15 * GB,
+      vramBytes: 11.6 * GB,
+    });
+    expect(result.minimumSatisfied).toBe(false);
+    expect(result.slots).toBe(1);
+    expect(result.perTurnCtxTokens).toBeLessThan(65_536);
+    expect(formatContextCapacityDenial({ modelLabel: 'Gemma', plan: result })).toMatch(
+      /required 65,536-token working window/,
+    );
+  });
+
+  it('uses a genuinely smaller native window as the model floor', () => {
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 32_768,
+        requestedContextWindow: 16_384,
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 32_768,
+    });
+  });
+
+  it('raises low preferences to 64K while honoring useful higher requests', () => {
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 128_000,
+        requestedContextWindow: 16_384,
+      }).requestedPerTurnCtxTokens,
+    ).toBe(65_536);
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 128_000,
+        requestedContextWindow: 98_304,
+      }).requestedPerTurnCtxTokens,
+    ).toBe(98_304);
   });
 });
 

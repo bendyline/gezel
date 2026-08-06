@@ -33,6 +33,7 @@ import { TurnAbortError } from './turn-abort-error.js';
 const SOFT_WARNING_AT_DEFAULT = 3;
 const HARD_ABORT_AT_DEFAULT = 5;
 const TRANSPORT_ABORT_AT = 2;
+const NON_RETRYABLE_ABORT_AT = 2;
 
 /**
  * `write_artifact` refusals caused by an existing workspace file at the
@@ -132,6 +133,22 @@ export class ToolFailureTracker {
     }
     const fails = (this.failures.get(toolName) ?? 0) + 1;
     this.failures.set(toolName, fails);
+    // A tool may label a stale reference as non-retryable while still
+    // offering a different recovery tool (for example list_projects or
+    // start_project). Give the model one chance to follow that route, but
+    // stop the turn if it ignores the directive and submits another failing
+    // call to the same tool. A corrected call that succeeds still resets the
+    // counter through the success branch above.
+    if (isNonRetryableFailureOutput(output)) {
+      if (fails >= NON_RETRYABLE_ABORT_AT) {
+        return { output, shouldAbort: true, count: fails };
+      }
+      return {
+        output: `${output}\n\n[runtime] This reference is stale. Do not call \`${toolName}\` again with it. Use the recovery action named in the error instead.`,
+        shouldAbort: false,
+        count: fails,
+      };
+    }
     // Unrecoverable workspace-collision refusal: a short, handoff-shaped
     // nudge from the very first failure, and a lower abort ceiling. The
     // path (not the args) is wrong, so the generic "STOP retrying / pick a
@@ -297,6 +314,10 @@ function isTransportFailureOutput(output: string): boolean {
   return /\bfetch failed\b|\bECONNREFUSED\b|\bECONNRESET\b|\bsocket hang up\b|\bconnection refused\b/i.test(
     output,
   );
+}
+
+function isNonRetryableFailureOutput(output: string): boolean {
+  return /\[runtime:\s*non-retryable\]/i.test(output);
 }
 
 function isDraftPlanGateFailure(toolName: string, output: string): boolean {

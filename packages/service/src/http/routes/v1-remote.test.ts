@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockProvider } from '../../providers/mock.js';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -244,6 +245,34 @@ describe('remote model execution — B-side surface (e2e)', () => {
     } finally {
       preview.mockRestore();
       inferenceBind.mockRestore();
+    }
+  });
+
+  it('returns an explicit capacity denial instead of a sub-64K native window', async () => {
+    const token = await pairDevice('device-native-context-denied');
+    const preview = vi
+      .spyOn(svc.context.chat, 'previewContextWindowForModel')
+      .mockRejectedValue(
+        new CapacityDeniedError('Gemma cannot fit the required 65,536-token working window.'),
+      );
+
+    try {
+      const res = await httpFetch(`${baseUrl}/v1/remote/admit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          protocolVersion: 1,
+          model: 'llama-cpp:gemma',
+        }),
+      });
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toEqual({ error: 'capacity_denied' });
+    } finally {
+      preview.mockRestore();
     }
   });
 });

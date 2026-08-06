@@ -10,6 +10,7 @@ import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
+import { formatContextWindow } from './model-context.js';
 
 interface MemoryProfile {
   platform: string;
@@ -376,6 +377,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                 <tr>
                   <th>Name</th>
                   <th>Size</th>
+                  <th title="Default per-turn context window Gezel sends to Ollama">Context cap</th>
                   <th>Tools</th>
                   <th />
                 </tr>
@@ -387,6 +389,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                       <code>{m.id}</code>
                     </td>
                     <td>{m.parameterSize ?? '—'}</td>
+                    <td>{formatContextWindow(m.contextWindow)}</td>
                     <td>
                       {m.supportsTools ? (
                         <span className="home-status-pill home-status-ok">✓</span>

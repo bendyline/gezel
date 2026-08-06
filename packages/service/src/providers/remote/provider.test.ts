@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_REMOTE_CONCURRENCY,
-  LEGACY_REMOTE_CONTEXT_WINDOW,
-  RemoteGezelProvider,
-} from './provider.js';
+import { CapacityDeniedError } from '../native/capacity-broker.js';
+import { DEFAULT_REMOTE_CONCURRENCY, RemoteGezelProvider } from './provider.js';
 
 function doneResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -112,7 +109,7 @@ describe('RemoteGezelProvider', () => {
     await session.disconnect();
   });
 
-  it('fails safe to a diet-sized window when a rolling-upgrade broker lacks admission', async () => {
+  it('refuses an old broker that cannot prove the 64K minimum', async () => {
     const fetchImpl = (async (url: string | URL | Request) => {
       if (String(url).endsWith('/v1/remote/admit')) {
         return Response.json({ error: 'not_found' }, { status: 404 });
@@ -129,8 +126,24 @@ describe('RemoteGezelProvider', () => {
       defaultModel: 'llama-cpp:qwen.gguf',
     });
 
-    await expect(provider.prepareContextWindow()).resolves.toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
-    expect(provider.getContextWindow()).toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
+    await expect(provider.prepareContextWindow()).rejects.toThrow(/cannot prove.*65,536-token/i);
+    expect(provider.getContextWindow()).toBeUndefined();
+  });
+
+  it('preserves a broker context-capacity denial as a structured local error', async () => {
+    const fetchImpl = (async () =>
+      Response.json({ error: 'capacity_denied' }, { status: 503 })) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+      defaultModel: 'llama-cpp:qwen.gguf',
+    });
+
+    await expect(provider.prepareContextWindow()).rejects.toBeInstanceOf(CapacityDeniedError);
   });
 
   it('does not disguise a model-not-loaded response as legacy compatibility', async () => {

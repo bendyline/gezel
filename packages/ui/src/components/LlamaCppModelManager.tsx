@@ -30,6 +30,7 @@ import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { formatContextWindow } from './model-context.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -650,6 +651,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
+                  <th title="Effective per-turn context window after Gezel's settings and memory limits">
+                    Context cap
+                  </th>
                   <th>Fitness</th>
                   <th />
                 </tr>
@@ -718,6 +722,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       <td>{formatBytes(m.approxSizeBytes)}</td>
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
+                      </td>
+                      <td
+                        title={
+                          m.effectiveContextWindow
+                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The cap accounts for model tuning, settings, concurrency, and available memory.`
+                            : 'The effective context cap is unavailable.'
+                        }
+                      >
+                        {formatContextWindow(m.effectiveContextWindow)}
                       </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">

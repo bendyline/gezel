@@ -202,12 +202,22 @@ describe('QueueMeter — preparing window', () => {
       },
     });
 
-    render(<QueueMeter />);
+    const { container } = render(<QueueMeter />);
     const button = await screen.findByRole('button', {
       name: 'AI chat queue — click for details',
     });
 
     await waitFor(() => expect(button).toHaveTextContent('System'));
+    const chipAvatar = button.querySelector<HTMLElement>('.gezel-icon-fallback');
+    expect(chipAvatar?.style.background).toBe('var(--accent)');
+    expect(chipAvatar?.style.color).toBe('var(--accent-selection-ink)');
+
+    await userEvent.click(button);
+    const panel = await screen.findByLabelText('AI chat queue');
+    const panelAvatar = panel.querySelector<HTMLElement>('.gezel-icon-fallback');
+    expect(panelAvatar?.style.background).toBe('var(--accent)');
+    expect(panelAvatar?.style.color).toBe('var(--accent-selection-ink)');
+    expect(container.querySelectorAll('.gezel-icon-fallback')).toHaveLength(2);
     expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
   });
 

@@ -29,6 +29,9 @@ interface GezelIconProps {
    * hero (caller passes 'full' explicitly there).
    */
   variant?: PoppetjeVariant;
+  /** Optional semantic colors for the letter-avatar fallback. */
+  fallbackBackground?: string;
+  fallbackForeground?: string;
 }
 
 // Derive a stable hue from the name so fallback avatars look distinct per gezel.
@@ -56,6 +59,8 @@ export function GezelIcon({
   onClick,
   title,
   variant,
+  fallbackBackground,
+  fallbackForeground,
 }: GezelIconProps) {
   const showPoppetjes = useShowPoppetjes();
   const style = { width: size, height: size };
@@ -91,7 +96,11 @@ export function GezelIcon({
     // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized upstream
     <div className="gezel-icon-svg" dangerouslySetInnerHTML={{ __html: svg }} />
   ) : (
-    <FallbackAvatar name={name} />
+    <FallbackAvatar
+      name={name}
+      background={fallbackBackground}
+      foreground={fallbackForeground}
+    />
   );
 
   if (onClick) {
@@ -116,12 +125,20 @@ export function GezelIcon({
   );
 }
 
-function FallbackAvatar({ name }: { name: string }) {
+function FallbackAvatar({
+  name,
+  background,
+  foreground,
+}: {
+  name: string;
+  background?: string;
+  foreground?: string;
+}) {
   const letter = (name.trim()[0] ?? '?').toUpperCase();
   const hue = hueFromName(name);
-  const bg = `hsl(${hue}, 55%, 45%)`;
+  const bg = background ?? `hsl(${hue}, 55%, 45%)`;
   return (
-    <div className="gezel-icon-fallback" style={{ background: bg }}>
+    <div className="gezel-icon-fallback" style={{ background: bg, color: foreground }}>
       {letter}
     </div>
   );

@@ -1164,6 +1164,9 @@ export class McpBridge {
           const redactedError = errorMessage
             ? redactString(errorMessage, this.knownSecretValues)
             : undefined;
+          const redactedResult = combined
+            ? redactString(combined, this.knownSecretValues)
+            : undefined;
           await this.onToolCall({
             name: toolName,
             argKeys: Object.keys(args),
@@ -1171,6 +1174,7 @@ export class McpBridge {
             durationMs: Date.now() - start,
             success: !isError,
             ...(redactedError ? { errorMessage: redactedError } : {}),
+            ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
             ...(persistedAudios.length > 0 ? { audios: persistedAudios } : {}),
             ...(structuredContent ? { structuredContent } : {}),

@@ -1428,7 +1428,10 @@ export interface LlamaCppInstalledModel {
   approxSizeBytes: number;
   installedAt: string;
   weightsPath: string;
+  /** Context capacity advertised by the GGUF metadata. */
   contextWindow?: number;
+  /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
+  effectiveContextWindow?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -1536,7 +1539,10 @@ export interface MlxInstalledModel {
   installedAt: string;
   /** Absolute path of the model directory; `mlx_lm.server --model` takes this. */
   modelDir: string;
+  /** Context capacity advertised by the model metadata. */
   contextWindow?: number;
+  /** Per-turn cap Gezel would actually grant after applying its configured limit. */
+  effectiveContextWindow?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;

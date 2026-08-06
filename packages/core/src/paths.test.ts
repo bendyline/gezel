@@ -1,6 +1,7 @@
-import { homedir } from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   gezelDir,
   gezelHome,
@@ -56,6 +57,17 @@ describe('machineSharedHome', () => {
 // style in the test would lock us to one platform — exactly the kind of
 // thing this codebase is supposed to be portable across.
 const ROOT = '/tmp/lv';
+let isolatedSharedHome = '';
+
+beforeAll(async () => {
+  isolatedSharedHome = await mkdtemp(join(tmpdir(), 'gezel-paths-'));
+  vi.stubEnv('GEZEL_MACHINE_SHARED_HOME', isolatedSharedHome);
+});
+
+afterAll(async () => {
+  vi.unstubAllEnvs();
+  await rm(isolatedSharedHome, { recursive: true, force: true });
+});
 
 describe('gezelPaths', () => {
   it('builds the full directory structure from a root', () => {

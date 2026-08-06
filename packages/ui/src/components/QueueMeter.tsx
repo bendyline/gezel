@@ -127,6 +127,17 @@ interface QueueActorIdentity {
   label: string;
 }
 
+function systemFallbackColors(actor: QueueActorIdentity): {
+  fallbackBackground?: string;
+  fallbackForeground?: string;
+} {
+  if (actor.gezel || actor.label !== 'System') return {};
+  return {
+    fallbackBackground: 'var(--accent)',
+    fallbackForeground: 'var(--accent-selection-ink)',
+  };
+}
+
 interface QueueActorContext {
   actor: QueueActorIdentity;
   projectId?: string;
@@ -288,6 +299,7 @@ function QueueChipIdentity({
             size={20}
             variant="icon"
             title={tooltip}
+            {...systemFallbackColors(actor)}
           />
         </span>
         <span
@@ -344,6 +356,7 @@ function QueueItemMarker({
           variant="icon"
           pulsing={kind === 'active' || kind === 'preparing'}
           title={actor.label}
+          {...systemFallbackColors(actor)}
         />
       </span>
     );

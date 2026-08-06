@@ -985,10 +985,10 @@ export const GezelConfigSchema = z.object({
    * pre-turn context-pressure check in `ChatManager` — when the
    * estimated prompt approaches this limit, older messages get
    * collapsed into a synthetic compaction-summary bubble (same path
-   * as Ollama). Unset → default of 16384, which is a generous working
-   * window for 2–8B local models without burning VRAM on an unused
-   * 128k allocation. Raise for long coding sessions on capable
-   * hardware; lower on memory-constrained machines.
+   * as Ollama). Unset requests 65536. Long-context models are never
+   * launched below 65536: admission reduces engine slots first, then
+   * refuses the model if one slot still cannot fit. A model whose native
+   * context is genuinely smaller retains that native limit.
    */
   llamaCppNumCtx: z.number().int().positive().optional(),
   /**

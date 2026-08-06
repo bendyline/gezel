@@ -9,6 +9,7 @@
 import { createLogger } from '@bendyline/gezel';
 import { DEFAULT_TENANT_MAX_CONCURRENT } from '../../remotes/tenant-limits.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
+import { CapacityDeniedError, MIN_VIABLE_LOCAL_CONTEXT_TOKENS } from '../native/capacity-broker.js';
 import { ProviderQueue } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import {
@@ -30,14 +31,6 @@ import {
  * local-engine-class timeout, not the tight cloud one.
  */
 export const REMOTE_TURN_TIMEOUT_MS = 20 * 60 * 1000;
-
-/**
- * Mixed-version safety floor. Brokers predating `/v1/remote/admit` cannot
- * reveal their live capacity clamp, so A deliberately assumes a small window
- * and applies the coordinator/tool diet. This may under-use an old broker,
- * but it cannot recreate the first-turn OOM class during rolling upgrades.
- */
-export const LEGACY_REMOTE_CONTEXT_WINDOW = 8_192;
 
 /**
  * Match the remote server's default per-device admission ceiling. Keeping
@@ -156,8 +149,11 @@ export class RemoteGezelProvider implements LLMProvider {
       }
       const detail = await res.text().catch(() => '');
       let code: string | undefined;
+      let message: string | undefined;
       try {
-        code = (JSON.parse(detail) as { error?: string }).error;
+        const parsed = JSON.parse(detail) as { error?: string; message?: string };
+        code = parsed.error;
+        message = parsed.message;
       } catch {
         /* old brokers commonly return a plain 404 body */
       }
@@ -173,13 +169,16 @@ export class RemoteGezelProvider implements LLMProvider {
         );
         continue;
       }
-      if (res.status === 404 && code !== 'model_not_loaded') {
-        this.log.warn(
-          `[remote-provider] ${this.opts.label} predates context admission; using conservative ${LEGACY_REMOTE_CONTEXT_WINDOW}-token window for ${bLocal}`,
+      if (code === 'capacity_denied') {
+        throw new CapacityDeniedError(
+          message ??
+            `This machine cannot fit the required ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token local context.`,
         );
-        this.admittedContextWindows.set(admissionKey, LEGACY_REMOTE_CONTEXT_WINDOW);
-        this.lastAdmittedContextWindow = LEGACY_REMOTE_CONTEXT_WINDOW;
-        return LEGACY_REMOTE_CONTEXT_WINDOW;
+      }
+      if (res.status === 404 && code !== 'model_not_loaded') {
+        throw new CapacityDeniedError(
+          `[remote] ${this.opts.label} predates context admission and cannot prove that ${bLocal} meets Gezel's ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token minimum. Upgrade or restart the machine engine before using this model.`,
+        );
       }
       throw new Error(
         `[remote] /v1/remote/admit returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
@@ -215,7 +214,12 @@ export class RemoteGezelProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
-    const numCtx = (await this.prepareContextWindow(opts.model)) ?? LEGACY_REMOTE_CONTEXT_WINDOW;
+    const numCtx = await this.prepareContextWindow(opts.model);
+    if (!numCtx) {
+      throw new CapacityDeniedError(
+        `The remote model has no admitted context window. Gezel requires ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')} tokens unless the model's native limit is smaller.`,
+      );
+    }
     const bridges = await McpBridgePool.fromSessionOpts(opts, `[remote:${this.opts.label}]`);
     const bLocal = this.brokerModel(opts.model);
     this.log.info(`[remote-provider] session on ${this.opts.label} model=${bLocal}`);

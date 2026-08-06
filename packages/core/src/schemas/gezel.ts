@@ -456,6 +456,10 @@ export const ChatMessageToolCallSchema = z.object({
    * the toolset-config path), so this is not separately redacted.
    */
   argsFull: z.string().optional(),
+  /** Short full response, or a bounded beginning/end summary for a long response. */
+  resultText: z.string().optional(),
+  /** True when `resultText` is a bounded summary rather than the complete response. */
+  resultTruncated: z.boolean().optional(),
   /** Image artifacts the tool returned (e.g. browser_snapshot screenshots). */
   images: z.array(ToolCallImageSchema).optional(),
   /** Audio artifacts the tool returned (e.g. synthesize_speech WAV). */
@@ -763,6 +767,10 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     argsSummary: z.string().optional(),
     /** Full, readable args for the expand + copy affordance. See the persisted `ChatMessageToolCall.argsFull`. */
     argsFull: z.string().optional(),
+    /** Short full response, or a bounded beginning/end summary. */
+    resultText: z.string().optional(),
+    /** True when `resultText` is a bounded summary rather than the complete response. */
+    resultTruncated: z.boolean().optional(),
     /**
      * Image artifacts the tool returned (most commonly browser screenshots).
      * Paths are relative to the project's artifacts/ root and resolved

@@ -93,6 +93,10 @@ export interface ToolActivity {
   argsSummary?: string;
   /** Full, readable args (every field, untruncated) for the expand + copy affordance. */
   argsFull?: string;
+  /** Short full response, or a bounded beginning/end summary for a long response. */
+  resultText?: string;
+  /** True when `resultText` is a bounded summary rather than the complete response. */
+  resultTruncated?: boolean;
   /**
    * Project the tool fired against. Required on cross-project surfaces
    * like the Meester's global timeline so a `write_artifact` call in
@@ -2330,19 +2334,34 @@ export function isStalledSilence(silentFor: number | null, hasProgress: boolean)
 
 /**
  * Per-tool-call "details" disclosure: the full, untruncated arguments
- * (what `argsSummary` abbreviates) behind a click, with a copy button.
+ * (what `argsSummary` abbreviates) plus the returned response when the
+ * provider exposes it. Long responses arrive as bounded summaries.
  * Click-to-expand rather than a hover tooltip on purpose — you can't put
  * a working copy button inside something that vanishes on mouse-out, and
  * the whole point here is to grab the exact handoff/edit content (e.g.
  * verify a `message_gezel` actually carried the file body).
  */
-function ToolArgsBlock({ argsFull }: { argsFull: string }) {
+function ToolDetailsBlock({
+  argsFull,
+  resultText,
+  resultTruncated = false,
+}: {
+  argsFull?: string;
+  resultText?: string;
+  resultTruncated?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(argsFull);
+      const sections = [
+        ...(argsFull ? [`Request\n${argsFull}`] : []),
+        ...(resultText
+          ? [`${resultTruncated ? 'Response summary' : 'Response'}\n${resultText}`]
+          : []),
+      ];
+      await navigator.clipboard.writeText(sections.join('\n\n'));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -2352,7 +2371,11 @@ function ToolArgsBlock({ argsFull }: { argsFull: string }) {
   // Hover preview: a quick peek at the top of the blob without committing
   // to the full expand. Capped so a 100 KB handoff doesn't paint a giant
   // floating panel; click "details" for the whole thing + copy.
-  const preview = argsFull.length > 700 ? `${argsFull.slice(0, 700)}\n…` : argsFull;
+  const previewSource = [
+    ...(argsFull ? [`Request\n${argsFull}`] : []),
+    ...(resultText ? [`${resultTruncated ? 'Response summary' : 'Response'}\n${resultText}`] : []),
+  ].join('\n\n');
+  const preview = previewSource.length > 700 ? `${previewSource.slice(0, 700)}\n…` : previewSource;
   return (
     <div className="thinking-tool-detail">
       <button
@@ -2377,7 +2400,22 @@ function ToolArgsBlock({ argsFull }: { argsFull: string }) {
           <button type="button" className="thinking-tool-detail-copy" onClick={copy}>
             {copied ? 'Copied ✓' : 'Copy'}
           </button>
-          <pre>{argsFull}</pre>
+          {argsFull && (
+            <section className="thinking-tool-detail-section">
+              <div className="thinking-tool-detail-label">Request</div>
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: this overflow viewport must be keyboard-scrollable. */}
+              <pre tabIndex={0}>{argsFull}</pre>
+            </section>
+          )}
+          {resultText && (
+            <section className="thinking-tool-detail-section">
+              <div className="thinking-tool-detail-label">
+                {resultTruncated ? 'Response summary' : 'Response'}
+              </div>
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: this overflow viewport must be keyboard-scrollable. */}
+              <pre tabIndex={0}>{resultText}</pre>
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -2431,7 +2469,13 @@ function ToolActivityList({
               {...(t.removedLines !== undefined ? { removedLines: t.removedLines } : {})}
             />
           )}
-          {t.argsFull && <ToolArgsBlock argsFull={t.argsFull} />}
+          {(t.argsFull || t.resultText) && (
+            <ToolDetailsBlock
+              {...(t.argsFull ? { argsFull: t.argsFull } : {})}
+              {...(t.resultText ? { resultText: t.resultText } : {})}
+              {...(t.resultTruncated ? { resultTruncated: true } : {})}
+            />
+          )}
         </li>
       ))}
     </ul>

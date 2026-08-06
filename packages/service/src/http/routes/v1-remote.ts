@@ -14,6 +14,7 @@ import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ResolvedTuning } from '../../model-profile/index.js';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import {
   PROTOCOL_VERSION,
   RemoteAdmissionRequestSchema,
@@ -391,6 +392,9 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       if (err instanceof ModelNotInstalledError) {
         return c.json({ error: 'model_not_loaded', model: body.model }, 404);
+      }
+      if (err instanceof CapacityDeniedError) {
+        return c.json({ error: 'capacity_denied' }, 503);
       }
       throw err;
     } finally {
