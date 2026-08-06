@@ -7,6 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelConfig } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
+import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
   classifyTrial,
   readDaemonLogTailSync,
@@ -3094,6 +3095,7 @@ async function finalize(args: {
   // rules read the daemon log; classification must never block finalize.
   let classification = classifyTrial({ success: args.success, reason: args.reason });
   let nativeIncidentLog: string | null = null;
+  let engineContext: EngineContextRecord | null = null;
   try {
     const daemonLog = readDaemonLogTailSync(join(args.runDir, 'daemon.log'));
     const nativeIncidentPath = join(args.runDir, 'native-incidents.jsonl');
@@ -3107,6 +3109,11 @@ async function finalize(args: {
       daemonLog,
       nativeIncidentLog,
     });
+    // Granted-context provenance (Theme E / E4): the engine's actual
+    // context window per slot, plus any clamp/denial/swa-decline evidence,
+    // so the 64K admission policy is queryable from result.json instead of
+    // grep-only. Never blocks finalize.
+    engineContext = extractEngineContext(daemonLog);
   } catch {
     // Reason-only classification (already computed) stands.
   }
@@ -3133,6 +3140,7 @@ async function finalize(args: {
     runDir: args.runDir,
     ...(effectiveFailureMode ? { failureMode: effectiveFailureMode } : {}),
     ...(nativeEngineIncidents ? { nativeEngineIncidents } : {}),
+    ...(engineContext ? { engineContext } : {}),
     ...(args.finalSniff ? { finalSniff: args.finalSniff } : {}),
     ...(keurmeesterSummary ? { keurmeester: keurmeesterSummary } : {}),
     ...(classification.failureClass !== 'pass'

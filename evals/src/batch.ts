@@ -285,6 +285,7 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
       durationMs: r.durationMs,
       reason: r.reason,
       ...(r.failureMode ? { failureMode: r.failureMode } : {}),
+      ...(r.engineContext ? { engineContext: r.engineContext } : {}),
     })),
     preflight,
     ...(triage ? { triage } : {}),

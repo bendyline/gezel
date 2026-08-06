@@ -457,6 +457,17 @@ export interface TrialResult {
   /** Reliability signal retained even when the trial recovered and passed. */
   nativeEngineIncidents?: NativeEngineIncidentSummary;
   /**
+   * Granted-context provenance from the daemon log: the per-slot context
+   * window the engine ACTUALLY launched with, plus clamp/denial/swa-decline
+   * evidence. Makes the 64K admission policy
+   * (`MIN_VIABLE_LOCAL_CONTEXT_TOKENS`) assertable per trial — the
+   * 2026-08-05 gemma4-31b OOM ran 12 trials whose admission math said
+   * 12288 while the engine launched at 65536, and nothing structured
+   * recorded either number. Absent for providers with no engine launch
+   * line (mock, cloud, MLX today).
+   */
+  engineContext?: import('./engine-context.ts').EngineContextRecord;
+  /**
    * Structured salvage: the last scenario sniff state at the moment a
    * FAILED trial terminated. Makes "killed at 6/7 signals" queryable
    * without parsing reason strings — near-miss accounting for the
@@ -598,7 +609,10 @@ export interface BatchSummary {
   /** Preflight admission provenance for this cell's model (Theme E / E4). */
   preflight?: BatchPreflight;
   perTrial: Array<
-    Pick<TrialResult, 'trialId' | 'success' | 'durationMs' | 'reason' | 'failureMode'>
+    Pick<
+      TrialResult,
+      'trialId' | 'success' | 'durationMs' | 'reason' | 'failureMode' | 'engineContext'
+    >
   >;
   /** Set when auto-triage detected a consecutive-failure cluster (Theme E / E2). */
   triage?: TriageCluster;
