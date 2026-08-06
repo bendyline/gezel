@@ -18,6 +18,10 @@ import {
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from './capacity-broker.js';
+import {
+  estimateKvReserveBytes,
+  estimateWindowedKvLinearization,
+} from '../llama-cpp/offload-planner.js';
 
 const GB = 1024 ** 3;
 
@@ -860,6 +864,7 @@ describe('model-aware context admission', () => {
     ).toMatchObject({
       minimumPerTurnCtxTokens: 65_536,
       requestedPerTurnCtxTokens: 98_304,
+      strict: false,
     });
   });
 
@@ -874,6 +879,83 @@ describe('model-aware context admission', () => {
       nativeContextWindow: 262_144,
       minimumPerTurnCtxTokens: 262_144,
       requestedPerTurnCtxTokens: 262_144,
+      strict: true,
+    });
+  });
+
+  it('model-max on an SWA model: full-attention math denies, the windowed re-plan admits at native', () => {
+    // gemma4-12b's real header geometry: 48 layers in a 5:1 SWA:global
+    // pattern, SWA layers 8 KV heads × 256+256 dims, global layers 1 KV
+    // head × 512+512, sliding window 1024, native window 256000. The
+    // regression this pins: an early build gated the windowed re-plan on
+    // `!strict`, so model-max evaluated Gemma ONLY under full-attention
+    // math — which can never fit — and denied a model whose real windowed
+    // cache at the full native window is ~5 GB.
+    const NATIVE = 256_000;
+    const requirement = resolveLlamaCppContextRequirement({
+      modelContextWindow: NATIVE,
+      adaptiveContextWindow: 65_536,
+      contextSizing: 'model-max',
+    });
+    expect(requirement).toMatchObject({
+      minimumPerTurnCtxTokens: NATIVE,
+      requestedPerTurnCtxTokens: NATIVE,
+      strict: true,
+    });
+
+    const blockCount = 48;
+    const perLayerHeads = Array.from({ length: blockCount }, (_, i) => ((i + 1) % 6 === 0 ? 1 : 8));
+    const meanHeads = perLayerHeads.reduce((a, b) => a + b, 0) / blockCount;
+    const budget = {
+      weightsResidentBytes: 8.6 * GB,
+      budgetBytes: 44.8 * GB,
+      committedOtherBytes: 0,
+      freeSystemRamBytes: 40 * GB,
+      vramBytes: 0,
+    };
+
+    const fullKvAtReference = estimateKvReserveBytes({
+      blockCount,
+      headCountKv: meanHeads,
+      keyLength: 512,
+      valueLength: 512,
+      ctxTokens: 4096,
+      kvCacheType: 'f16',
+    });
+    const fullPlan = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: requirement.requestedPerTurnCtxTokens,
+      slots: 1,
+      minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+      kvBytesPerToken: (fullKvAtReference ?? 0) / 4096,
+      ...budget,
+    });
+    expect(fullPlan.minimumSatisfied).toBe(false);
+
+    const windowed = estimateWindowedKvLinearization({
+      blockCount,
+      headCountKvPerLayer: perLayerHeads,
+      slidingWindow: 1024,
+      slidingWindowPattern: Array.from({ length: blockCount }, (_, i) => (i + 1) % 6 !== 0),
+      keyLength: 512,
+      valueLength: 512,
+      keyLengthSwa: 256,
+      valueLengthSwa: 256,
+      kvCacheType: 'f16',
+    });
+    expect(windowed).toBeDefined();
+    const windowedPlan = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: requirement.requestedPerTurnCtxTokens,
+      slots: 1,
+      minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+      kvBytesPerToken: windowed?.bytesPerToken ?? 0,
+      ...budget,
+      weightsResidentBytes: budget.weightsResidentBytes + (windowed?.fixedBytes ?? 0),
+    });
+    expect(windowedPlan).toMatchObject({
+      minimumSatisfied: true,
+      clamped: false,
+      perTurnCtxTokens: NATIVE,
+      slots: 1,
     });
   });
 

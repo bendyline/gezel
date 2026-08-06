@@ -10461,6 +10461,7 @@ export class ChatManager {
       if (residentContextWindow < minimum) {
         throw new CapacityDeniedError(
           `${modelId} is already running with only ${residentContextWindow.toLocaleString('en-US')} context tokens per turn, below its required ${minimum.toLocaleString('en-US')}-token working window. Restart the local engine so Gezel can re-admit it at the current context policy.`,
+          { reason: 'resident-below-minimum' },
         );
       }
       return residentContextWindow;
@@ -10517,8 +10518,6 @@ export class ChatManager {
         : {}),
       contextSizing: config.llamaCppContextSizing ?? 'adaptive',
     });
-    const strictModelMax =
-      config.llamaCppContextSizing === 'model-max' && explicitContextWindow === undefined;
     let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
     if (residentContextWindow !== undefined || envNumCtx !== undefined) {
       return useResidentOr(effectiveNumCtx, contextRequirement.minimumPerTurnCtxTokens);
@@ -10605,9 +10604,13 @@ export class ChatManager {
       // full-attention plan above overstates the real allocation — re-plan
       // with the windowed linearization so the previewed window matches
       // what the engine will actually grant.
+      // Strict model-max deliberately does NOT gate this: for SWA models
+      // the windowed cache is the only layout whose native-window KV can
+      // fit real machines, and the strict minimum rides inside
+      // `contextRequirement.minimumPerTurnCtxTokens`, so the windowed
+      // re-plan sheds slots or denies but never shortens the window.
       const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
       const windowedCacheWillRun =
-        !strictModelMax &&
         (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
         (explicitSwaFull === false ||
           (explicitSwaFull === undefined &&
@@ -17455,7 +17458,6 @@ export async function buildLlamaCppProvider(opts: {
     adaptiveContextWindow: manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT,
     contextSizing: config.llamaCppContextSizing ?? 'adaptive',
   });
-  const strictModelMax = config.llamaCppContextSizing === 'model-max' && numCtx === undefined;
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.
   let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
@@ -17773,8 +17775,14 @@ export async function buildLlamaCppProvider(opts: {
         // hides its SWA layout — null (no safe estimate; launch untouched,
         // the pre-windowed-admission behavior).
         let ladderPlan: typeof admission | null = admission;
+        // Strict model-max deliberately does NOT gate this: for SWA models
+        // the windowed cache is the only layout whose native-window KV can
+        // fit real machines (gemma4-12b at 256K: 4.8 GB windowed vs 164 GB
+        // full-attention), and the strict minimum rides inside
+        // `contextRequirement.minimumPerTurnCtxTokens`, so the windowed
+        // re-plan below sheds slots or denies but never shortens the window.
         const windowedCacheWillRun =
-          !strictModelMax && fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
+          fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
         if (windowedCacheWillRun) {
           // The denial, the slot reduction, and the clamp above are all
           // driven by full-attention KV math, which overstates the windowed

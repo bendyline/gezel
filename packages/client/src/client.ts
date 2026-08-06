@@ -1435,8 +1435,15 @@ export interface LlamaCppInstalledModel {
   contextWindow?: number;
   /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
   effectiveContextWindow?: number;
-  /** Present when the selected context policy cannot be admitted safely. */
-  contextSizingStatus?: 'insufficient-memory';
+  /**
+   * Present when the selected context policy cannot be admitted right now.
+   * `insufficient-memory` — even one slot cannot hold the required window;
+   * free memory, unload a model, or pick Adaptive. `restart-required` — the
+   * model is already RUNNING with a smaller window than the current policy
+   * requires; restarting the local engine re-admits it (no memory change
+   * needed).
+   */
+  contextSizingStatus?: 'insufficient-memory' | 'restart-required';
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;

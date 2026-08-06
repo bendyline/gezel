@@ -32,10 +32,20 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
             ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
           };
         } catch (error) {
+          // Two distinct denials, two distinct remedies: a model RESIDENT
+          // below the new policy's minimum needs an engine restart, while a
+          // genuine can't-fit needs memory (or the Adaptive policy). Folding
+          // both into one status made the UI tell restart-case users to go
+          // free memory.
           return {
             ...model,
             ...(error instanceof CapacityDeniedError
-              ? { contextSizingStatus: 'insufficient-memory' as const }
+              ? {
+                  contextSizingStatus:
+                    error.reason === 'resident-below-minimum'
+                      ? ('restart-required' as const)
+                      : ('insufficient-memory' as const),
+                }
               : {}),
           };
         }

@@ -213,10 +213,19 @@ export function formatCapacityDenial(opts: {
  */
 export class CapacityDeniedError extends Error {
   readonly code = 'capacity-denied';
+  /**
+   * Machine-readable cause when the human message alone would mislead a
+   * downstream surface. `resident-below-minimum` = the model is ALREADY
+   * running with a window smaller than the current policy requires — the
+   * remedy is an engine restart, not freeing memory, and the models list
+   * must not render it as a generic "won't fit".
+   */
+  readonly reason?: 'resident-below-minimum';
 
-  constructor(message: string) {
+  constructor(message: string, opts?: { reason?: 'resident-below-minimum' }) {
     super(message);
     this.name = 'CapacityDeniedError';
+    if (opts?.reason) this.reason = opts.reason;
   }
 }
 
@@ -725,6 +734,22 @@ export function resolveLocalContextRequirement(opts: {
   };
 }
 
+export interface LlamaCppContextRequirement extends LocalContextRequirement {
+  /**
+   * True when strict model-max is in force (policy selected, no explicit
+   * numeric override): the requested native window is also the admission
+   * minimum. This flag is the SINGLE derivation of strictness — admission
+   * sites must consume `minimumPerTurnCtxTokens` (which already carries it)
+   * rather than re-deriving the predicate from config. Notably, strictness
+   * must NOT disable the SWA windowed re-plan: gemma's full-attention KV at
+   * its native window never fits any real host, while the windowed cache
+   * often holds the full native window cheaply (12b: 4.8 GB at 256K) — an
+   * early build gated the re-plan on `!strict` and thereby denied every
+   * Gemma model under model-max.
+   */
+  strict: boolean;
+}
+
 /**
  * Apply llama.cpp's user-selectable sizing policy on top of the shared local
  * context floor. Explicit numeric overrides keep their historical semantics
@@ -737,7 +762,7 @@ export function resolveLlamaCppContextRequirement(opts: {
   explicitContextWindow?: number;
   adaptiveContextWindow?: number;
   contextSizing?: LlamaCppContextSizing;
-}): LocalContextRequirement {
+}): LlamaCppContextRequirement {
   const strictModelMax =
     opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
   const requestedContextWindow =
@@ -750,8 +775,8 @@ export function resolveLlamaCppContextRequirement(opts: {
     ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
   });
   return strictModelMax
-    ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens }
-    : resolved;
+    ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens, strict: true }
+    : { ...resolved, strict: false };
 }
 
 /** Numerical floor for the low-level clamp calculation. Production admission

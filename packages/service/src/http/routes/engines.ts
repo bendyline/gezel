@@ -7,6 +7,7 @@ import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-man
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import type { ServiceContext } from '../context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
+import { invalidateModelsCache } from './models.js';
 
 const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
   'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
@@ -126,12 +127,24 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
 
   app.put('/llama-cpp/context-sizing', async (c) => {
     const body = LlamaCppContextSizingResponseSchema.parse(await c.req.json());
+    const previous = (await ctx.store.readConfig()).llamaCppContextSizing ?? 'adaptive';
     const updated = await ctx.store.writeConfig({
       // Keep the default sparse on disk; explicit model-max is the only
       // durable override needed.
       llamaCppContextSizing: body.policy === 'adaptive' ? null : body.policy,
     });
-    return c.json({ policy: updated.llamaCppContextSizing ?? 'adaptive' });
+    const effective = updated.llamaCppContextSizing ?? 'adaptive';
+    if (effective !== previous) {
+      // The policy governs engine LAUNCH arguments, so a resident engine
+      // holds its old window until it restarts. Tear idle providers down
+      // now (busy ones finish their in-flight turn first — same soft-reset
+      // contract as model-preference changes in the config route) so the
+      // next session actually launches under the new policy instead of
+      // waiting for an idle-timeout nobody can see.
+      invalidateModelsCache();
+      await ctx.chat.resetClient({ deferBusy: true });
+    }
+    return c.json({ policy: effective });
   });
 
   /**

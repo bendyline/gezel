@@ -92,10 +92,35 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager />);
 
-    expect(await screen.findByText("Won't fit")).toHaveAttribute(
-      'title',
-      expect.stringMatching(/Choose Adaptive/),
-    );
+    const cell = await screen.findByText("Won't fit");
+    expect(cell).toHaveAttribute('title', expect.stringMatching(/Choose Adaptive/));
+    // The tooltip names the window the policy is insisting on, so the scale
+    // of the ask is visible next to the refusal.
+    expect(cell).toHaveAttribute('title', expect.stringMatching(/262,144-token window/));
+  });
+
+  it('tells a resident-below-policy model to restart, not to free memory', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'gemma4-12b-q4',
+          name: 'Gemma 4 (12B)',
+          approxSizeBytes: 7 * GiB,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/gemma4-12b-q4/model.gguf',
+          contextWindow: 256_000,
+          contextSizingStatus: 'restart-required',
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const cell = await screen.findByText('Restart needed');
+    expect(cell).toHaveAttribute('title', expect.stringMatching(/Restart the local engine/));
+    expect(cell).toHaveAttribute('title', expect.not.stringMatching(/free memory/));
   });
 
   it('shows one continuous catalog without category filter buttons', async () => {

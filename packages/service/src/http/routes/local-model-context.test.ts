@@ -70,4 +70,28 @@ describe('local model inventory context caps', () => {
       models: [{ contextSizingStatus: 'insufficient-memory' }],
     });
   });
+
+  it('marks a model RESIDENT below the policy minimum as restart-required, not insufficient-memory', async () => {
+    // The remedy differs: this denial means "restart the engine", and the
+    // UI must not send the user off to free memory.
+    const ctx = {
+      llamaCppModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: {
+        previewContextWindowForModel: vi.fn(async () => {
+          throw new CapacityDeniedError('already running below the required window', {
+            reason: 'resident-below-minimum',
+          });
+        }),
+      },
+    } as unknown as ServiceContext;
+
+    const response = await llamaCppRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [{ contextSizingStatus: 'restart-required' }],
+    });
+  });
 });

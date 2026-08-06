@@ -471,8 +471,8 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
           <em>Adaptive</em> uses model tuning (64K by default), reducing concurrency before it
           shortens a larger tuned window. <em>Model maximum</em> requests the model's full
           advertised window; if one engine slot cannot hold it safely, the model will not start.
-          This is a machine-wide managed-engine setting and takes effect the next time the model
-          starts.
+          This is a machine-wide managed-engine setting. Changing it restarts idle local engines
+          right away; a model that is mid-conversation finishes its current turn first.
           {hasExternalBaseUrl ? ' External engine URLs manage their own context size.' : ''}
         </p>
 

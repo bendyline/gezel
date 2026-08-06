@@ -708,14 +708,18 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                         title={
                           m.effectiveContextWindow
                             ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory.`
-                            : m.contextSizingStatus === 'insufficient-memory'
-                              ? 'The selected context sizing policy cannot fit this model safely. Choose Adaptive, unload another model, or free memory before trying again.'
-                              : 'The effective context size is unavailable.'
+                            : m.contextSizingStatus === 'restart-required'
+                              ? 'This model is running with a smaller context window than the current sizing policy requires. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                              : m.contextSizingStatus === 'insufficient-memory'
+                                ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
+                                : 'The effective context size is unavailable.'
                         }
                       >
-                        {m.contextSizingStatus === 'insufficient-memory'
-                          ? "Won't fit"
-                          : formatContextWindow(m.effectiveContextWindow)}
+                        {m.contextSizingStatus === 'restart-required'
+                          ? 'Restart needed'
+                          : m.contextSizingStatus === 'insufficient-memory'
+                            ? "Won't fit"
+                            : formatContextWindow(m.effectiveContextWindow)}
                       </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">
