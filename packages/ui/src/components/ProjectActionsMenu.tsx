@@ -68,6 +68,15 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
     }
   };
 
+  const reveal = async (which: 'workspace' | 'artifacts') => {
+    try {
+      await api.revealProject(project.id, which);
+    } catch {
+      // The menu has already closed by the time the OS launcher answers.
+      // A failed launch is safe to retry from the same action.
+    }
+  };
+
   return {
     clearErrors,
     confirming,
@@ -77,6 +86,7 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
     isShared,
     openConfirm,
     removeWorkspace,
+    reveal,
     runDelete,
     setConfirming,
     setRemoveWorkspace,
@@ -98,6 +108,22 @@ function ProjectMenuItems({
 
   return (
     <>
+      <Item
+        className="app-nav-menu-item"
+        onSelect={() => {
+          void actions.reveal('workspace');
+        }}
+      >
+        Open workspace folder
+      </Item>
+      <Item
+        className="app-nav-menu-item"
+        onSelect={() => {
+          void actions.reveal('artifacts');
+        }}
+      >
+        Open artifacts folder
+      </Item>
       {hasError && (
         <Item
           className="app-nav-menu-item"
