@@ -139,6 +139,7 @@ import { readGgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
 import {
   type LlamaCppKvCacheType,
+  isGemmaModel,
   planLlamaCppKv,
   resolveLlamaCppKvCacheType,
 } from '../providers/llama-cpp/kv-cache-type.js';
@@ -17536,6 +17537,13 @@ export async function buildLlamaCppProvider(opts: {
   // WHY a model was — or wasn't — split. Best-effort: any failure falls
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
+  // Whether full-attention KV at the requested context fits the memory
+  // budget — gates the Gemma `--swa-full` auto-default (see
+  // `EngineFlagInput.swaFullAutoFits`). Set to false (decline, keep the
+  // full context on the windowed cache) when the admission math says the
+  // full cache cannot fit; stays undefined when it fits or the fit could
+  // not be computed.
+  let swaFullAutoFits: boolean | undefined;
   // Whether the model's GGUF ships MTP (`nextn`) layers — a safety
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
@@ -17592,9 +17600,25 @@ export async function buildLlamaCppProvider(opts: {
       // context so weights + total KV + compute headroom fit both the
       // capacity budget and live free memory. Exact per-token KV from the
       // GGUF header; the weights-scaled heuristic only as fallback.
-      // Skipped under GEZEL_LLAMA_NUM_CTX — eval runs lift ceilings
-      // deliberately and accept the memory consequences.
-      if (envNumCtx === undefined) {
+      // The admission ladder (deny → reduce slots → clamp) is skipped
+      // under GEZEL_LLAMA_NUM_CTX — eval runs lift ceilings deliberately
+      // and accept the memory consequences.
+      //
+      // The fit verdict additionally gates the Gemma `--swa-full`
+      // auto-default, in BOTH branches: the full cache is a session-switch
+      // performance trade (cross-request prefix reuse), while the context
+      // window is capability — so when full-attention KV at the requested
+      // context doesn't fit, prefer the full window on the windowed cache
+      // over clamping context to fit a full cache. gemma4-31b's KV is
+      // ~1.7 MB/token (60 layers × ~14 KV heads × 512+512 dims), i.e.
+      // ~105 GB at 65536 — `--swa-full` was never fittable there, and
+      // under evals (clamp skipped) it wired Metal past its limit
+      // mid-prefill and presented as empty model turns (2026-08-05).
+      // When swa-full is off the windowed cache is what the engine
+      // allocates, so the full-attention clamp math would over-clamp by
+      // the layer ratio — skip the clamp and keep the July-baseline
+      // behavior that demonstrably fit.
+      {
         const REFERENCE_CTX = 4096;
         const exactKvAtReference = estimateKvReserveBytes({
           blockCount: summary.blockCount,
@@ -17644,24 +17668,54 @@ export async function buildLlamaCppProvider(opts: {
           freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: liveBudget.vramBytes,
         });
-        if (!admission.minimumSatisfied) {
-          throw new CapacityDeniedError(
-            formatContextCapacityDenial({
-              modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this local model',
-              plan: admission,
-            }),
+        const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
+        const swaFullAutoDefault =
+          explicitSwaFull === undefined &&
+          isGemmaModel({
+            architecture: modelCatalogInfo?.architecture,
+            modelId: defaultModelId ?? undefined,
+          });
+        const fullKvOverBudget =
+          !admission.minimumSatisfied || admission.slots < slots || admission.clamped;
+        if (swaFullAutoDefault && fullKvOverBudget) {
+          // Declining `--swa-full` dominates every remedy below: the
+          // denial, the slot reduction, and the clamp are all driven by
+          // full-attention KV math, which overstates the windowed cache's
+          // real allocation by the global:SWA layer ratio. Weights-level
+          // admission stays with the capacity broker.
+          swaFullAutoFits = false;
+          log.warn(
+            [
+              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: full-attention KV at the requested `,
+              `${effectiveNumCtx * slots}-token total context does not fit — keeping the full `,
+              'context and declining the --swa-full auto-default instead; the windowed KV cache ',
+              'is what actually fits (cross-request prefix reuse unavailable). ',
+              `Fit detail: ${admission.reason ?? 'over budget at the requested slot count'}`,
+            ].join(''),
           );
-        }
-        if (admission.slots < slots) {
-          log.info(
-            `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: reducing engine slots ${slots} -> ${admission.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
-          );
-          slots = admission.slots;
-          batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
-        }
-        if (admission.clamped) {
-          log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
-          effectiveNumCtx = admission.perTurnCtxTokens;
+        } else if (explicitSwaFull === false && fullKvOverBudget) {
+          // Windowed cache pinned: the full-attention plan math would
+          // over-deny/over-clamp by the layer ratio; leave the launch alone.
+        } else if (envNumCtx === undefined) {
+          if (!admission.minimumSatisfied) {
+            throw new CapacityDeniedError(
+              formatContextCapacityDenial({
+                modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this local model',
+                plan: admission,
+              }),
+            );
+          }
+          if (admission.slots < slots) {
+            log.info(
+              `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: reducing engine slots ${slots} -> ${admission.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
+            );
+            slots = admission.slots;
+            batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+          }
+          if (admission.clamped) {
+            log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
+            effectiveNumCtx = admission.perTurnCtxTokens;
+          }
         }
       }
 
@@ -17856,6 +17910,7 @@ export async function buildLlamaCppProvider(opts: {
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
         architecture: modelCatalogInfo?.architecture,
         modelId: defaultModelId ?? undefined,
+        swaFullAutoFits,
       });
       return {
         command: binary,

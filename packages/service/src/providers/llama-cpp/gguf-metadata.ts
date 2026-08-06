@@ -90,9 +90,11 @@ export interface GgufSummary {
   /** `<arch>.attention.head_count` — query heads. */
   headCount?: number;
   /**
-   * `<arch>.attention.head_count_kv` — KV heads (GQA). Some archs store a
-   * per-layer array here; the scalar reader returns undefined for those and
-   * the KV estimate degrades to unavailable rather than guessing.
+   * `<arch>.attention.head_count_kv` — KV heads (GQA). Archs that store a
+   * per-layer array here (Gemma 4) yield the array MEAN, possibly
+   * fractional — the KV estimate multiplies by `block_count`, so the mean
+   * keeps the aggregate exact. See readUintScalarOrArrayMean for why
+   * "degrade to unavailable" was the wrong policy.
    */
   headCountKv?: number;
   /** `<arch>.attention.key_length` — per-head K dim when it differs from embd/heads. */
@@ -289,6 +291,33 @@ function readUintScalar(r: Reader, type: GgufValueType): number | undefined {
 }
 
 /**
+ * Like {@link readUintScalar}, but also accepts a per-layer ARRAY and
+ * returns the MEAN of its elements (possibly fractional). Gemma 4 stores
+ * `attention.head_count_kv` as one entry per layer; the KV-cache
+ * estimate multiplies the returned value by `block_count`, so the mean
+ * keeps the aggregate exactly equal to the per-layer sum. Skipping
+ * arrays here is what left `headCountKv` undefined and silently downgraded
+ * the RAM admission check to the weights-scaled heuristic — which judged a
+ * ~33 GB full-attention KV cache as fitting (2026-08-05 gemma4-31b Metal
+ * OOM under `--swa-full`).
+ */
+function readUintScalarOrArrayMean(r: Reader, type: GgufValueType): number | undefined {
+  if (type !== GgufValueType.ARRAY) return readUintScalar(r, type);
+  const elemType = r.u32() as GgufValueType;
+  const count = Number(r.u64());
+  let sum = 0;
+  let readable = 0;
+  for (let i = 0; i < count; i++) {
+    const v = readUintScalar(r, elemType);
+    if (v !== undefined) {
+      sum += v;
+      readable++;
+    }
+  }
+  return readable === count && count > 0 ? sum / count : undefined;
+}
+
+/**
  * The tensors `--cpu-moe` / `--n-cpu-moe` keep in system RAM — mirrors
  * llama.cpp's own buffer-type override pattern (`common/arg.cpp`), so the
  * planner's byte math matches what the engine will actually place.
@@ -376,7 +405,7 @@ export function readGgufSummary(
       } else if (key.endsWith('.attention.head_count')) {
         summary.headCount = readUintScalar(r, type);
       } else if (key.endsWith('.attention.head_count_kv')) {
-        summary.headCountKv = readUintScalar(r, type);
+        summary.headCountKv = readUintScalarOrArrayMean(r, type);
       } else if (key.endsWith('.attention.key_length')) {
         summary.keyLength = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length')) {

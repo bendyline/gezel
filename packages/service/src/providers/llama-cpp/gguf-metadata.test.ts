@@ -93,6 +93,16 @@ class GgufBuilder {
     return this;
   }
 
+  metaU32Array(key: string, values: number[]) {
+    this.parts.push(this.gguf_string(key));
+    this.parts.push(this.u32(VTYPE.ARRAY));
+    this.parts.push(this.u32(VTYPE.UINT32));
+    this.parts.push(this.u64(BigInt(values.length)));
+    for (const v of values) this.parts.push(this.u32(v));
+    this.metaCount++;
+    return this;
+  }
+
   /**
    * Add an array of strings — the most common metadata array shape
    * (e.g. tokenizer vocab) and the one the parser must skip
@@ -277,6 +287,28 @@ describe('readGgufSummary', () => {
     expect(s.headCountKv).toBe(8);
     expect(s.keyLength).toBe(128);
     expect(s.valueLength).toBe(128);
+  });
+
+  it('reads a per-layer head_count_kv array as its mean (Gemma 4)', () => {
+    // Gemma 4 stores one KV-head count per layer. Skipping the array left
+    // headCountKv undefined, the KV estimate degraded to the weights
+    // heuristic, and a ~105 GB full-attention cache passed admission
+    // (2026-08-05 gemma4-31b Metal OOM). The mean × block_count keeps the
+    // aggregate KV total exact.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'gemma4')
+      .metaU32('gemma4.block_count', 4)
+      .metaU32Array('gemma4.attention.head_count_kv', [16, 16, 8, 16])
+      .metaU32('gemma4.attention.key_length', 512)
+      .metaU32('gemma4.attention.value_length', 512)
+      .finish();
+    const path = join(dir, 'kv-dims-array.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.headCountKv).toBe(14);
+    expect(s.keyLength).toBe(512);
   });
 });
 

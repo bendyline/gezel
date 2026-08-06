@@ -169,6 +169,62 @@ describe('buildLlamaCppEngineArgs — SWA full cache (Gemma auto)', () => {
       ),
     ).toBe(true);
   });
+  it('swaFullAutoFits=false declines the Gemma auto-default (the 2026-08-05 31b Metal OOM)', () => {
+    expect(
+      has(
+        buildLlamaCppEngineArgs({ config: {}, architecture: 'gemma4', swaFullAutoFits: false }),
+        '--swa-full',
+      ),
+    ).toBe(false);
+  });
+  it('swaFullAutoFits true/undefined keeps the Gemma auto-default', () => {
+    expect(
+      has(
+        buildLlamaCppEngineArgs({ config: {}, architecture: 'gemma4', swaFullAutoFits: true }),
+        '--swa-full',
+      ),
+    ).toBe(true);
+    expect(
+      has(
+        buildLlamaCppEngineArgs({ config: {}, architecture: 'gemma4', swaFullAutoFits: undefined }),
+        '--swa-full',
+      ),
+    ).toBe(true);
+  });
+  it('an explicit swaFull overrides swaFullAutoFits in both directions', () => {
+    expect(
+      has(
+        buildLlamaCppEngineArgs({
+          config: { llamaCppSwaFull: true },
+          architecture: 'gemma4',
+          swaFullAutoFits: false,
+        }),
+        '--swa-full',
+      ),
+    ).toBe(true);
+    expect(
+      has(
+        buildLlamaCppEngineArgs({
+          config: {},
+          perModel: { swaFull: true },
+          architecture: 'gemma4',
+          swaFullAutoFits: false,
+        }),
+        '--swa-full',
+      ),
+    ).toBe(true);
+    expect(
+      has(
+        buildLlamaCppEngineArgs({
+          config: {},
+          perModel: { swaFull: false },
+          architecture: 'gemma4',
+          swaFullAutoFits: true,
+        }),
+        '--swa-full',
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('buildLlamaCppEngineArgs — precedence (global > perModel > planner)', () => {
