@@ -18,7 +18,7 @@
  *      `PendingHandoff` to an in-memory queue.
  *   2. A ticker (default 5s) walks the queue in FIFO order and
  *      dispatches anything whose target provider has a free slot
- *      (`provider.queue.snapshot().running < concurrency`).
+ *      (`provider.queue.hasCapacity('background')`).
  *   3. Dispatched handoffs call `startHandoffSession` as before —
  *      but because that path now goes through the ProviderQueue,
  *      the actual LLM turn just inherits a normal slot reservation.
@@ -115,9 +115,9 @@ export interface TaskRunnerDispatcher {
     fromGezelName?: string;
     kind?: 'handoff' | 'entry';
     /**
-     * Queue lane for the dispatched turn. Night-shift handoffs travel
-     * `'background'` so any interactive turn on the same provider preempts
-     * them; normal handoffs default to `'interactive'`.
+     * Queue lane for the dispatched turn. Task handoffs travel
+     * `'background'` so a typed chat always drains first; Night Shift also
+     * marks its turns ambient so they wait for the configured quiet window.
      */
     lane?: 'interactive' | 'background';
     /** Ambient handoff (night shift) — see `EnqueueRequest.ambient`. */
@@ -512,15 +512,15 @@ export class TaskRunner {
         });
       if (!providerName) continue;
       const provider = this.dispatcher.getProvider(providerName);
+      const lane = 'background' as const;
       if (provider?.queue) {
-        const snap = provider.queue.snapshot();
         const inFlight = inTickDispatches.get(providerName) ?? 0;
-        // Hold off when the provider is at its cap. Dispatching
-        // anyway would spawn a session whose acquire just blocks in
-        // the queue — but keeping the handoff pending here lets
-        // status-change cancellation (paused/canceled tasks) drop
-        // work cleanly before a session is ever created.
-        if (snap.running + inFlight >= provider.queue.concurrency) {
+        // Hold off when either the provider's total cap or its background
+        // cap is full. Keeping the handoff pending here lets status-change
+        // cancellation (paused/canceled tasks) drop work cleanly before a
+        // session is ever created, and preserves any reserved foreground
+        // capacity for typed chat.
+        if (!provider.queue.hasCapacity(lane, inFlight)) {
           handoff.heldFor = 'provider-busy';
           keep.push(handoff);
           continue;
@@ -547,7 +547,8 @@ export class TaskRunner {
           stepId: handoff.stepId,
           ...(handoff.fromGezelName ? { fromGezelName: handoff.fromGezelName } : {}),
           ...(handoff.kind ? { kind: handoff.kind } : {}),
-          ...(isNight ? { lane: 'background' as const, ambient: true } : {}),
+          lane,
+          ...(isNight ? { ambient: true } : {}),
           ...(isNight ? { nightShift: true } : {}),
           ...(floor
             ? { capabilityFloor: floor, bookCatalogId: mainBookSource(task).catalogId }

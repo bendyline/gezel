@@ -202,6 +202,7 @@ describe('TaskRunner — dispatch + FIFO', () => {
 
     expect(dispatcher.dispatches).toHaveLength(1);
     expect(dispatcher.dispatches[0]?.taskRef).toBe('p1/1');
+    expect(dispatcher.dispatches[0]?.lane).toBe('background');
     expect(runner.snapshot().pendingCount).toBe(0);
   });
 
@@ -286,6 +287,47 @@ describe('TaskRunner — dispatch + FIFO', () => {
     // the in-tick count gates.
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(3);
+    expect(runner.snapshot().pendingCount).toBe(2);
+  });
+
+  it('holds restored work at the background cap and preserves foreground headroom', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    for (let i = 1; i <= 5; i++) {
+      await store.writeTask({
+        projectId: 'p1',
+        num: i,
+        ref: `p1/${i}`,
+        title: `t${i}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook([
+          { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
+        ]),
+        activeStepId: 'plan',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'mlx']]));
+    dispatcher.setProvider('mlx', new ProviderQueue({ concurrency: 4, backgroundConcurrency: 3 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    for (let i = 1; i <= 5; i++) {
+      runner.enqueueHandoff({
+        taskRef: `p1/${i}`,
+        stepId: 'plan',
+        gezelId: 'bea',
+        projectId: 'p1',
+      });
+    }
+
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(3);
+    expect(dispatcher.dispatches.every((dispatch) => dispatch.lane === 'background')).toBe(true);
     expect(runner.snapshot().pendingCount).toBe(2);
   });
 

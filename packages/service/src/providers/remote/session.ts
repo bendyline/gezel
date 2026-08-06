@@ -33,6 +33,11 @@ import type {
 } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import {
+  isTenantConcurrencyResponse,
+  remoteBackpressureDelayMs,
+  waitForRemoteCapacity,
+} from './backpressure.js';
+import {
   PROTOCOL_VERSION,
   type PriorMessageWire,
   type RemoteCacheWarmRequest,
@@ -190,7 +195,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     this.lastReasoning = undefined;
     this.compactedThisTurn = false;
-    const deadline = Date.now() + (opts?.timeoutMs ?? this.deps.timeoutMs);
+    let deadline = Date.now() + (opts?.timeoutMs ?? this.deps.timeoutMs);
     const priorMessages: PriorMessageWire[] = [...this.transcript];
     let currentTurnStartIdx = priorMessages.length;
     let userMessageAdded = false;
@@ -229,12 +234,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
             `[remote] turn timed out after ${Math.round(this.deps.timeoutMs / 1000)}s`,
           );
         }
-        const { text, toolCalls } = await this.postInfer(
+        const { text, toolCalls, queueWaitMs } = await this.postInfer(
           nextPrompt,
           priorMessages,
           opts,
           turn === 0,
         );
+        // Broker-capacity waiting is queue time, just like ProviderQueue's
+        // local wait, so it must not consume the model/tool-loop timeout.
+        deadline += queueWaitMs;
         fullText += text;
 
         // The first forward pass carries the user message in `prompt`; every
@@ -399,9 +407,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     priorMessages: PriorMessageWire[],
     opts?: SendAndWaitOpts,
     includeAttachments = true,
-  ): Promise<{ text: string; toolCalls: ExternalToolCall[] }> {
-    const start = Date.now();
-    const connection = this.deps.resolveConnection?.() ?? this.deps;
+  ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
     const tools = this.deps.bridges.isEmpty()
       ? undefined
       : this.deps.bridges
@@ -439,18 +445,44 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       },
     };
 
-    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/infer`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${connection.token}`,
-        Accept: 'text/event-stream',
-      },
-      body: JSON.stringify(body),
-      ...(opts?.queue?.signal ? { signal: opts.queue.signal } : {}),
-    });
-    if (!res.ok || !res.body) {
+    let res: Response;
+    let start = Date.now();
+    let backpressureAttempt = 0;
+    let queueWaitMs = 0;
+    let queueWaitPublished = false;
+    for (;;) {
+      const connection = this.deps.resolveConnection?.() ?? this.deps;
+      start = Date.now();
+      res = await connection.fetch(`${connection.baseUrl}/v1/remote/infer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${connection.token}`,
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(body),
+        ...(opts?.queue?.signal ? { signal: opts.queue.signal } : {}),
+      });
+      if (res.ok && res.body) break;
+
       const detail = await res.text().catch(() => '');
+      if (isTenantConcurrencyResponse(res.status, detail)) {
+        if (!queueWaitPublished) {
+          queueWaitPublished = true;
+          // This is remote queue pressure, not a failed turn. Keep the same
+          // UI state as a local ProviderQueue wait and retry until capacity
+          // opens or the user cancels.
+          opts?.queue?.onQueueWait?.({ aheadOf: 1 });
+          log.info(`[remote] ${this.deps.model} waiting for broker tenant capacity`);
+        }
+        const waitStartedAt = Date.now();
+        await waitForRemoteCapacity(
+          remoteBackpressureDelayMs(res.headers.get('retry-after'), backpressureAttempt++),
+          opts?.queue?.signal,
+        );
+        queueWaitMs += Date.now() - waitStartedAt;
+        continue;
+      }
       throw new Error(`[remote] /v1/remote/infer returned HTTP ${res.status} ${detail}`.trim());
     }
 
@@ -564,7 +596,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         `[remote] ${(errFrame as { code: string }).code}: ${(errFrame as { message: string }).message}`,
       );
     }
-    return { text, toolCalls };
+    return { text, toolCalls, queueWaitMs };
   }
 }
 

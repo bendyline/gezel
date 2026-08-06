@@ -356,6 +356,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     const originDeviceId = auth?.appId ?? 'unknown';
     const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
     if (!release) {
+      c.header('Retry-After', '1');
       return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
     }
     let probe: LLMSession | null = null;
@@ -418,6 +419,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     // before we touch the GPU/engine. Released when the turn ends.
     const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
     if (!release) {
+      c.header('Retry-After', '1');
       return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
     }
 

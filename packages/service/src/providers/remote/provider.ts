@@ -7,9 +7,15 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import { DEFAULT_TENANT_MAX_CONCURRENT } from '../../remotes/tenant-limits.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { ProviderQueue } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
+import {
+  isTenantConcurrencyResponse,
+  remoteBackpressureDelayMs,
+  waitForRemoteCapacity,
+} from './backpressure.js';
 import { makeRemoteModelId, parseRemoteModelId } from './model-id.js';
 import { RemoteSession } from './session.js';
 import {
@@ -32,6 +38,14 @@ export const REMOTE_TURN_TIMEOUT_MS = 20 * 60 * 1000;
  * but it cannot recreate the first-turn OOM class during rolling upgrades.
  */
 export const LEGACY_REMOTE_CONTEXT_WINDOW = 8_192;
+
+/**
+ * Match the remote server's default per-device admission ceiling. Keeping
+ * this client queue at or below B's gate means ordinary saturation waits in
+ * ProviderQueue (where it is visible and cancellable) instead of crossing
+ * the wire and becoming an HTTP 429.
+ */
+export const DEFAULT_REMOTE_CONCURRENCY = DEFAULT_TENANT_MAX_CONCURRENT;
 
 export interface RemoteGezelProviderOpts {
   /** Stable id of the paired server this provider talks to. */
@@ -71,7 +85,14 @@ export class RemoteGezelProvider implements LLMProvider {
   private lastAdmittedContextWindow: number | undefined;
 
   constructor(private readonly opts: RemoteGezelProviderOpts) {
-    this.queue = new ProviderQueue({ concurrency: opts.concurrency ?? 8 });
+    const concurrency = opts.concurrency ?? DEFAULT_REMOTE_CONCURRENCY;
+    this.queue = new ProviderQueue({
+      concurrency,
+      // Task handoffs and one-shots use the background lane. Leave one
+      // socket available for a typed chat so restored work cannot occupy the
+      // tenant's entire broker allowance before the user gets a turn.
+      backgroundConcurrency: Math.max(1, concurrency - 1),
+    });
   }
 
   async initialize(): Promise<void> {
@@ -115,21 +136,42 @@ export class RemoteGezelProvider implements LLMProvider {
       return cached;
     }
 
-    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/admit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${connection.token}`,
-      },
-      body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
-    });
-    if (!res.ok) {
+    let backpressureAttempt = 0;
+    let waitLogged = false;
+    for (;;) {
+      const latestConnection = this.opts.resolveConnection?.() ?? connection;
+      const res = await latestConnection.fetch(`${latestConnection.baseUrl}/v1/remote/admit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${latestConnection.token}`,
+        },
+        body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
+      });
+      if (res.ok) {
+        const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
+        this.admittedContextWindows.set(admissionKey, admitted);
+        this.lastAdmittedContextWindow = admitted;
+        return admitted;
+      }
       const detail = await res.text().catch(() => '');
       let code: string | undefined;
       try {
         code = (JSON.parse(detail) as { error?: string }).error;
       } catch {
         /* old brokers commonly return a plain 404 body */
+      }
+      if (isTenantConcurrencyResponse(res.status, detail)) {
+        if (!waitLogged) {
+          waitLogged = true;
+          this.log.info(
+            `[remote-provider] ${this.opts.label} waiting for broker admission capacity`,
+          );
+        }
+        await waitForRemoteCapacity(
+          remoteBackpressureDelayMs(res.headers.get('retry-after'), backpressureAttempt++),
+        );
+        continue;
       }
       if (res.status === 404 && code !== 'model_not_loaded') {
         this.log.warn(
@@ -143,10 +185,6 @@ export class RemoteGezelProvider implements LLMProvider {
         `[remote] /v1/remote/admit returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
       );
     }
-    const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
-    this.admittedContextWindows.set(admissionKey, admitted);
-    this.lastAdmittedContextWindow = admitted;
-    return admitted;
   }
 
   async listModels(): Promise<ModelInfo[]> {

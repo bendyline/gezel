@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LEGACY_REMOTE_CONTEXT_WINDOW, RemoteGezelProvider } from './provider.js';
+import {
+  DEFAULT_REMOTE_CONCURRENCY,
+  LEGACY_REMOTE_CONTEXT_WINDOW,
+  RemoteGezelProvider,
+} from './provider.js';
 
 function doneResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -16,6 +20,19 @@ function admissionResponse(model: string, contextWindow = 35_840): Response {
 }
 
 describe('RemoteGezelProvider', () => {
+  it('keeps client admission within the broker cap and reserves typed-chat headroom', () => {
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch,
+    });
+
+    expect(provider.queue.concurrency).toBe(DEFAULT_REMOTE_CONCURRENCY);
+    expect(provider.queue.backgroundConcurrency).toBe(DEFAULT_REMOTE_CONCURRENCY - 1);
+  });
+
   it('re-reads broker inventory so a completed pull appears without reconnecting', async () => {
     let requests = 0;
     const fetchImpl = (async () => {
@@ -129,5 +146,30 @@ describe('RemoteGezelProvider', () => {
     });
 
     await expect(provider.prepareContextWindow()).rejects.toThrow(/model_not_loaded/);
+  });
+
+  it('waits through tenant saturation during context admission', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          { error: 'tenant_concurrency_exceeded' },
+          { status: 429, headers: { 'Retry-After': '0' } },
+        );
+      }
+      return admissionResponse('mlx:qwen', 24_576);
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      defaultModel: 'mlx:qwen',
+    });
+
+    await expect(provider.prepareContextWindow()).resolves.toBe(24_576);
+    expect(calls).toBe(2);
   });
 });

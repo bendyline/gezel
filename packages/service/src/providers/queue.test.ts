@@ -614,6 +614,24 @@ describe('ProviderQueue — backgroundConcurrency reservation (adaptive batching
     ).toBe(2);
   });
 
+  it('reports lane-aware capacity without consuming a slot', async () => {
+    const q = new ProviderQueue({ concurrency: 4, backgroundConcurrency: 3 });
+    expect(q.hasCapacity('background')).toBe(true);
+    expect(q.hasCapacity('background', 2)).toBe(true);
+    expect(q.hasCapacity('background', 3)).toBe(false);
+
+    const release = await q.acquire({ lane: 'background' });
+    expect(q.hasCapacity('background', 1)).toBe(true);
+    expect(q.hasCapacity('background', 2)).toBe(false);
+    expect(q.hasCapacity('interactive', 2)).toBe(true);
+    expect(q.snapshot()).toEqual({
+      running: 1,
+      queuedInteractive: 0,
+      queuedBackground: 0,
+    });
+    release();
+  });
+
   it('reserves a slot for interactive: a background cohort cannot fill the last slot', async () => {
     // Adaptive policy shape: concurrency 2, interactive may use both,
     // but background is capped at 1 — so one slot is always free for an
