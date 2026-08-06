@@ -232,8 +232,8 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   const macPkgSmoke = workflow.slice(macPkgSmokeStart, macPkgSmokeEnd);
   assert.equal(
     macPkgSmoke.match(/install_pkg "/g)?.length,
-    3,
-    'macOS PKG smoke must cover clean install, reinstall, and disabled-state recovery',
+    4,
+    'macOS PKG smoke must cover clean install, reinstall, disabled-state recovery, and reinstall after uninstall',
   );
   assert.equal(
     macPkgSmoke.match(/sudo \/usr\/sbin\/installer -pkg "\$pkg" -target \//g)?.length,
@@ -246,5 +246,9 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
+  assert.match(macPkgSmoke, /sudo \/bin\/bash "\$uninstaller"\n/);
+  assert.match(macPkgSmoke, /--remove-machine-data --remove-shared-data/);
+  assert.match(macPkgSmoke, /\[\[ -e "\$data_dir\/\.gezel-uninstall-preserve-smoke" \]\]/);
+  assert.match(macPkgSmoke, /! \/usr\/sbin\/pkgutil --pkg-info "\$package_id"/);
   assert.match(macPkgSmoke, /trap cleanup EXIT/);
 });

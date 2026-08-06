@@ -138,6 +138,23 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
+  it('offers the installed macOS uninstaller from About settings', async () => {
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: 'test-token',
+      platform: 'darwin',
+      uninstall: {
+        start: vi.fn(),
+        onShowRequested: vi.fn(() => () => undefined),
+      },
+    };
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-about'));
+
+    expect(await screen.findByRole('button', { name: 'Uninstall Gezel…' })).toBeInTheDocument();
+  });
+
   it('About shows the live local engine with its granted context window', async () => {
     const base = await api.getSystemDiagnostics();
     vi.mocked(api.getSystemDiagnostics).mockResolvedValue({

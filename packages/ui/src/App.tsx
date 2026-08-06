@@ -16,6 +16,7 @@ import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
 import { EngineStatusPill } from './components/EngineStatusPill.js';
 import { GrantConsentDialog } from './components/GrantConsentDialog.js';
+import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
@@ -608,6 +609,7 @@ function FullApp() {
           pending grant can surface from any view without the user having
           to navigate to Settings → Connected Apps. */}
       <GrantConsentDialog />
+      <MacUninstallDialog />
       <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
       {/* The top bar is now status-only — it remains the OS title bar (drag
           region + native window-control reservations via CSS padding). The

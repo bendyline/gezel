@@ -19,6 +19,7 @@ import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
+import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
@@ -3400,6 +3401,19 @@ export function SettingsView() {
                 <span>Show advanced features</span>
               </label>
             </section>
+            {isDarwin && window.__GEZEL__?.uninstall && (
+              <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>
+                <h3>Uninstall</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Remove Gezel and its machine-wide background service. You can keep downloaded
+                  models and your work for a later reinstall, or choose exactly which data to
+                  delete.
+                </p>
+                <button type="button" className="danger" onClick={requestMacUninstall}>
+                  Uninstall Gezel…
+                </button>
+              </section>
+            )}
             <section>
               <h3>Debug mode</h3>
               <p className="muted" style={{ marginTop: 0 }}>

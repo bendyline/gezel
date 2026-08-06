@@ -45,6 +45,7 @@ import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
+import { parseMacUninstallSelection, scheduleMacUninstall } from './uninstaller/macos.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
 import {
   type PublishedAppRelease,
@@ -99,6 +100,10 @@ let isQuitting = false;
 // app (removing the tray icon) instead of hiding to the tray. Off by default
 // (close-to-tray). Mirrors the `quitOnClose` preference; synced from config.
 let quitOnClose = false;
+/** Prevent duplicate administrator prompts while an uninstall is being scheduled. */
+let macUninstallInFlight = false;
+/** Native-menu request held while the branded startup splash is still active. */
+let macUninstallDialogRequested = false;
 // Held so the tray's "Check for updates" item can re-trigger a check.
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
 /** The exact app-tagged release selected for the current update check. */
@@ -695,6 +700,7 @@ async function navigateToApp(): Promise<void> {
   await loadAppUrl(mainWindow, `${connection.baseUrl}/`);
   splashShowing = false;
   flushOpenedModelBundles();
+  flushMacUninstallDialogRequest();
 }
 
 /**
@@ -914,6 +920,40 @@ ipcMain.handle('gezel:autostart:uninstall', async () => {
   } catch (err) {
     return { ok: false as const, error: (err as Error).message };
   }
+});
+
+// macOS PKG installs own a machine LaunchDaemon, service account, and shared
+// storage, so moving the .app to Trash is not a complete uninstall. The
+// renderer may choose only documented data scopes; this boundary resolves the
+// signed bundled script and performs the administrator-authenticated handoff.
+ipcMain.handle('gezel:uninstall:start', async (_event, payload: unknown) => {
+  if (macUninstallInFlight) {
+    return { ok: false as const, error: 'Gezel is already preparing to uninstall.' };
+  }
+  const selection = parseMacUninstallSelection(payload);
+  if (!selection) return { ok: false as const, error: 'Invalid uninstall choices.' };
+
+  macUninstallInFlight = true;
+  const result = await scheduleMacUninstall({
+    resourcesPath: process.resourcesPath,
+    appPid: process.pid,
+    userUid: process.getuid?.() ?? 0,
+    selection,
+    isPackaged: app.isPackaged,
+  });
+  if (!result.ok) {
+    macUninstallInFlight = false;
+    return result;
+  }
+
+  // The privileged script staged a detached, root-owned copy and is waiting
+  // for this PID to exit. A normal app.quit() lets QuitCoordinator stop the
+  // per-user daemon before that copy removes any selected user data.
+  setTimeout(() => {
+    isQuitting = true;
+    app.quit();
+  }, 200);
+  return result;
 });
 
 // Folders externalization: after a successful move the renderer offers
@@ -1339,6 +1379,23 @@ ipcMain.handle(
 function navigateTo(view: string): void {
   const win = mainWindow ?? BrowserWindow.getAllWindows()[0];
   if (win) win.webContents.send('gezel:navigate', view);
+}
+
+async function showMacUninstallDialog(): Promise<void> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  macUninstallDialogRequested = true;
+  if (!mainWindow || mainWindow.isDestroyed()) await createWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.show();
+  mainWindow.focus();
+  if (!connection || splashShowing) return;
+  flushMacUninstallDialogRequest();
+}
+
+function flushMacUninstallDialogRequest(): void {
+  if (!macUninstallDialogRequested || !mainWindow || mainWindow.isDestroyed()) return;
+  macUninstallDialogRequested = false;
+  mainWindow.webContents.send('gezel:show-uninstall');
 }
 
 /**
@@ -1891,6 +1948,19 @@ function installMenu(): void {
           : []),
       ],
     },
+    ...(isMac && app.isPackaged
+      ? ([
+          {
+            label: 'Help',
+            submenu: [
+              {
+                label: 'Uninstall Gezel…',
+                click: () => void showMacUninstallDialog(),
+              },
+            ],
+          },
+        ] as Electron.MenuItemConstructorOptions[])
+      : []),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

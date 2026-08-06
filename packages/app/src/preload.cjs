@@ -31,6 +31,19 @@ ipcRenderer.on('gezel:open-model-bundle', (_event, request) => {
   else pendingModelBundleOpens.push(request);
 });
 
+// The native Help menu can be clicked after the page load finishes but before
+// React's passive effects register the dialog callback. Buffer that one-shot
+// request in preload so the menu is reliable during the first paint.
+let pendingMacUninstallShow = false;
+const macUninstallShowCallbacks = new Set();
+ipcRenderer.on('gezel:show-uninstall', () => {
+  if (macUninstallShowCallbacks.size === 0) {
+    pendingMacUninstallShow = true;
+    return;
+  }
+  for (const callback of macUninstallShowCallbacks) callback();
+});
+
 contextBridge.exposeInMainWorld('__GEZEL__', {
   token,
   baseUrl,
@@ -51,6 +64,21 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     status: () => ipcRenderer.invoke('gezel:autostart:status'),
     install: () => ipcRenderer.invoke('gezel:autostart:install'),
     uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
+  },
+  // macOS PKG uninstall. The renderer sends only boolean data-retention
+  // choices; the main process resolves the signed bundled script and owns the
+  // administrator prompt. The menu uses the push callback to open the same
+  // dialog as Settings → About.
+  uninstall: {
+    start: (selection) => ipcRenderer.invoke('gezel:uninstall:start', selection),
+    onShowRequested: (callback) => {
+      macUninstallShowCallbacks.add(callback);
+      if (pendingMacUninstallShow) {
+        pendingMacUninstallShow = false;
+        queueMicrotask(callback);
+      }
+      return () => macUninstallShowCallbacks.delete(callback);
+    },
   },
   // App updates. `state` is the pull for a freshly-mounted renderer;
   // `onStateChanged` is the push for transitions while it is open. `install`

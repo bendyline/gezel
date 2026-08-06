@@ -17427,6 +17427,73 @@ a.license-button:hover {
   background: #d85555;
 }
 
+/* ── macOS uninstall ────────────────────────────────────────────────
+   One authenticated system action with explicit, independent retention
+   choices. Native checkboxes stay native; the surrounding rows carry the
+   consequence and filesystem scope so "purge" never hides what disappears. */
+.gz-uninstall-dialog {
+  max-width: 44rem;
+}
+
+.gz-uninstall-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-uninstall-choices legend {
+  margin-bottom: 0.15rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gz-uninstall-choices label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-uninstall-choices input {
+  margin-top: 0.18rem;
+}
+
+.gz-uninstall-choices label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-uninstall-choices small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.gz-uninstall-choices code {
+  font-size: 0.95em;
+}
+
+.gz-uninstall-preserve,
+.gz-uninstall-auth-note,
+.gz-uninstall-warning {
+  margin: 0.1rem 0 0;
+}
+
+.gz-uninstall-warning {
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
 /* ── Select ── */
 
 .gz-select-trigger {
