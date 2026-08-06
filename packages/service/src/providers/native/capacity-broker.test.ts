@@ -19,6 +19,7 @@ import {
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
   planCtxTokensForMemory,
+  plannedLocalEngineSlots,
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from './capacity-broker.js';
@@ -374,6 +375,25 @@ describe('defaultLocalEngineSlots — RAM-tier demand default', () => {
     expect(defaultLocalEngineSlots(63 * GB)).toBe(3);
     expect(defaultLocalEngineSlots(64 * GB)).toBe(4);
     expect(defaultLocalEngineSlots(128 * GB)).toBe(4);
+  });
+});
+
+describe('plannedLocalEngineSlots — one resolver for preview and launch', () => {
+  it('caps the RAM-tier default by what memory can hold', () => {
+    // The bug this pins: the launch-preview short-circuit quoted the bare
+    // tier default (3 on a 32-48 GB host) while the launch path clamped by
+    // the ceiling, so a resident 17 GB model advertised a ~49 GB reservation
+    // the broker would never have admitted.
+    expect(plannedLocalEngineSlots({ ceiling: 1, tierDefault: 3 })).toBe(1);
+    expect(plannedLocalEngineSlots({ ceiling: 4, tierDefault: 3 })).toBe(3);
+  });
+
+  it('honors an explicit operator setting verbatim, ceiling included', () => {
+    expect(plannedLocalEngineSlots({ configuredSlots: 4, ceiling: 1, tierDefault: 2 })).toBe(4);
+  });
+
+  it('never resolves below one slot', () => {
+    expect(plannedLocalEngineSlots({ ceiling: 0, tierDefault: 3 })).toBe(1);
   });
 });
 

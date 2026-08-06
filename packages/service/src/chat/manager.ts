@@ -10513,14 +10513,26 @@ export class ChatManager {
 
   /**
    * Full non-binding launch preview: the context window a native model
-   * would receive AND the resident footprint (weights + KV at that
-   * window) the launch would reserve. Powers the models-list "size in
-   * memory" column alongside {@link previewContextWindowForModel}.
+   * would receive AND the resident footprint at that window. Powers the
+   * models-list "size in memory" column alongside
+   * {@link previewContextWindowForModel}.
+   *
+   * Two footprints, deliberately: `plannedResidentBytes` is weights plus
+   * ONE slot's KV — what serving a single chat costs, and the only figure
+   * that tracks measured peak RSS. `reservedResidentBytes` is weights plus
+   * `plannedSlots` slots' KV — what the broker actually holds. Quoting the
+   * fleet as "size in memory" reads as the cost of using the model at all,
+   * which overstates a multi-slot host by the slot count.
    */
   async previewLocalEnginePlan(
     name: LocalProviderName,
     modelId: string,
-  ): Promise<{ contextWindow?: number; plannedResidentBytes?: number }> {
+  ): Promise<{
+    contextWindow?: number;
+    plannedResidentBytes?: number;
+    reservedResidentBytes?: number;
+    plannedSlots?: number;
+  }> {
     let residentContextWindow: number | undefined;
     for (const resident of this.peekResidentLocalProviders(name, modelId)) {
       const residentModel = resident.getEffectiveModelId?.();
@@ -10561,14 +10573,16 @@ export class ChatManager {
         ? estimateExactPerSlotKvBytesF16(geometry, effective)
         : undefined;
       let plannedResidentBytes: number | undefined;
+      let reservedResidentBytes: number | undefined;
+      let plannedSlots: number | undefined;
       if (geometry && exactPerSlotKvF16 !== undefined) {
         const {
           CapacityBroker,
           computeCapacityBudget,
-          defaultLocalEngineSlots,
           kvQuantScale,
           localEngineSlotCeiling,
           planCtxTokensForMemory,
+          plannedLocalEngineSlots,
         } = await import('../providers/native/capacity-broker.js');
         const router = this.engineRouter ?? this.engineRouterCache;
         const brokerSnap = router?.broker.committed();
@@ -10596,7 +10610,7 @@ export class ChatManager {
           committedOtherBytes,
           exactPerSlotKvBytesF16: exactPerSlotKvF16,
         });
-        let slots = configured ?? Math.min(defaultLocalEngineSlots(), ceiling);
+        let slots = plannedLocalEngineSlots({ configuredSlots: configured, ceiling });
         const admission = planCtxTokensForMemory({
           requestedPerTurnCtxTokens: effective,
           slots,
@@ -10615,11 +10629,15 @@ export class ChatManager {
         }
         slots = admission.slots;
         effective = admission.perTurnCtxTokens;
-        plannedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective * slots);
+        plannedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective);
+        reservedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective * slots);
+        plannedSlots = slots;
       }
       return {
         contextWindow: useResidentOr(effective, minimum),
         ...(plannedResidentBytes !== undefined ? { plannedResidentBytes } : {}),
+        ...(reservedResidentBytes !== undefined ? { reservedResidentBytes } : {}),
+        ...(plannedSlots !== undefined ? { plannedSlots } : {}),
       };
     }
 
@@ -10680,6 +10698,7 @@ export class ChatManager {
       kvQuantScale,
       llamaCppSlotCeiling,
       planCtxTokensForMemory,
+      plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
     const router = this.engineRouter ?? this.engineRouterCache;
     const brokerSnap = router?.broker.committed();
@@ -10724,9 +10743,15 @@ export class ChatManager {
           effectiveNumCtx,
         )
       : undefined;
-    // Weights + KV at a given window/slot count — the models-list "size
-    // in memory" estimate, matching the launch path's reservation math.
-    const plannedFor = (ctx: number, slotCount: number, kv: string): number | undefined => {
+    // Weights + KV at a given window/slot count. Two figures, because they
+    // answer different questions: `single` is what one chat costs (the
+    // models-list headline), `reserved` is what the broker holds for the
+    // whole slot fleet (the launch path's reservation math).
+    const plannedFor = (
+      ctx: number,
+      slotCount: number,
+      kv: string,
+    ): { single: number; reserved: number; slots: number } | undefined => {
       if (!summary) return undefined;
       const perSlotF16 = estimateExactPerSlotKvBytesF16(
         {
@@ -10745,34 +10770,52 @@ export class ChatManager {
         ctx,
       );
       if (perSlotF16 === undefined) return undefined;
-      return Math.round(
-        installed.approxSizeBytes * 1.2 + perSlotF16 * kvQuantScale(kv) * slotCount,
-      );
+      const weightsBytes = installed.approxSizeBytes * 1.2;
+      const perSlotBytes = perSlotF16 * kvQuantScale(kv);
+      return {
+        single: Math.round(weightsBytes + perSlotBytes),
+        reserved: Math.round(weightsBytes + perSlotBytes * slotCount),
+        slots: slotCount,
+      };
     };
+    const ceilingAt = (ctx: number, kv: LlamaCppKvCacheType) =>
+      llamaCppSlotCeiling({
+        budgetBytes: fastBudgetBytes,
+        weightsBytes: installed.approxSizeBytes,
+        perTurnCtxTokens: ctx,
+        kvCacheType: kv,
+        committedOtherBytes,
+        ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
+      });
     if (shortCircuit) {
       const contextWindow = useResidentOr(
         effectiveNumCtx,
         contextRequirement.minimumPerTurnCtxTokens,
       );
+      // Memory-aware slot count, same as the main path below. The raw tier
+      // default is what a launch would *like*; on a constrained host the
+      // ceiling is what it can actually have, and quoting the former made
+      // this branch advertise reservations the broker would never admit.
       const planned = plannedFor(
         contextWindow,
-        configuredSlots ?? defaultLocalEngineSlots(),
+        plannedLocalEngineSlots({
+          configuredSlots,
+          ceiling: ceilingAt(contextWindow, kvCacheType),
+        }),
         kvCacheType,
       );
       return {
         contextWindow,
-        ...(planned !== undefined ? { plannedResidentBytes: planned } : {}),
+        ...(planned !== undefined
+          ? {
+              plannedResidentBytes: planned.single,
+              reservedResidentBytes: planned.reserved,
+              plannedSlots: planned.slots,
+            }
+          : {}),
       };
     }
-    const ceilingFor = (kv: LlamaCppKvCacheType) =>
-      llamaCppSlotCeiling({
-        budgetBytes: fastBudgetBytes,
-        weightsBytes: installed.approxSizeBytes,
-        perTurnCtxTokens: effectiveNumCtx,
-        kvCacheType: kv,
-        committedOtherBytes,
-        ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
-      });
+    const ceilingFor = (kv: LlamaCppKvCacheType) => ceilingAt(effectiveNumCtx, kv);
     const kvPlan = planLlamaCppKv({
       architecture: installed.architecture,
       modelId,
@@ -10782,7 +10825,7 @@ export class ChatManager {
       maxSlots: defaultLocalEngineSlots(),
     });
     kvCacheType = kvPlan.kvCacheType;
-    let slots = configuredSlots ?? Math.min(defaultLocalEngineSlots(), ceilingFor(kvCacheType));
+    let slots = plannedLocalEngineSlots({ configuredSlots, ceiling: ceilingFor(kvCacheType) });
     if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
     try {
@@ -10888,7 +10931,13 @@ export class ChatManager {
     const planned = plannedFor(effectiveNumCtx, slots, kvCacheType);
     return {
       contextWindow: effectiveNumCtx,
-      ...(planned !== undefined ? { plannedResidentBytes: planned } : {}),
+      ...(planned !== undefined
+        ? {
+            plannedResidentBytes: planned.single,
+            reservedResidentBytes: planned.reserved,
+            plannedSlots: planned.slots,
+          }
+        : {}),
     };
   }
 
@@ -17806,6 +17855,7 @@ export async function buildLlamaCppProvider(opts: {
     computeCapacityBudget,
     estimatePerSlotKvBytes,
     planCtxTokensForMemory,
+    plannedLocalEngineSlots,
   } = await import('../providers/native/capacity-broker.js');
   // Subtract co-resident model reservations from the budget when the pool
   // broker is wired (multi-model path), using its actual (possibly config-
@@ -17882,7 +17932,7 @@ export async function buildLlamaCppProvider(opts: {
       `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
     );
   }
-  let slots = configuredSlots ?? Math.min(defaultLocalEngineSlots(), ceilingFor(kvCacheType));
+  let slots = plannedLocalEngineSlots({ configuredSlots, ceiling: ceilingFor(kvCacheType) });
   // The bundled llama.cpp line still has known multi-slot MTP allocation
   // failures. Keep an explicitly selected MTP mode on one slot so its first
   // decode is reliable; `spec.mtp` alone is capability metadata, not an

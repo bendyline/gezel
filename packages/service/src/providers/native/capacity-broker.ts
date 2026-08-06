@@ -584,6 +584,26 @@ export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): nu
 }
 
 /**
+ * Slots a launch would be admitted at before the context-admission ladder
+ * gets its say: an explicit operator setting, else the RAM tier default
+ * capped by what memory can actually hold.
+ *
+ * Exists so every caller resolves slots the same way. The launch-preview
+ * short-circuit once used the bare tier default while the main path clamped
+ * by the ceiling, so a resident model on a 32-48 GB host advertised a
+ * 3-slot reservation (~49 GB for a 17 GB model) the broker would never have
+ * admitted.
+ */
+export function plannedLocalEngineSlots(opts: {
+  configuredSlots?: number | undefined;
+  ceiling: number;
+  tierDefault?: number;
+}): number {
+  if (opts.configuredSlots !== undefined) return opts.configuredSlots;
+  return Math.max(1, Math.min(opts.tierDefault ?? defaultLocalEngineSlots(), opts.ceiling));
+}
+
+/**
  * Conservative estimate of the KV-cache bytes ONE slot needs at a given
  * per-turn context window. We have no model attention-architecture metadata
  * (layers / KV-heads / head-dim) anywhere in the app, so we scale off the

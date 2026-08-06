@@ -1436,12 +1436,20 @@ export interface LlamaCppInstalledModel {
   /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
   effectiveContextWindow?: number;
   /**
-   * Expected memory while running: resident weights (with runtime
-   * overhead) plus the KV cache at the granted context window and slot
-   * count — the launch path's own reservation math. Absent when the
-   * daemon could not price the launch (unreadable weights, older daemon).
+   * Expected memory to serve ONE chat: resident weights (with runtime
+   * overhead) plus a single slot's KV cache at the granted context
+   * window. This is the figure that tracks measured peak RSS. Absent when
+   * the daemon could not price the launch (unreadable weights, older
+   * daemon).
    */
   predictedResidentBytes?: number;
+  /**
+   * What the capacity broker actually holds: weights plus {@link plannedSlots}
+   * slots' KV. Equals `predictedResidentBytes` on a single-slot host.
+   */
+  reservedResidentBytes?: number;
+  /** Concurrent engine slots the launch would be admitted at. */
+  plannedSlots?: number;
   /**
    * Present when the selected context policy cannot be admitted right now.
    * `insufficient-memory` — even one slot cannot hold the required window;
@@ -1574,12 +1582,20 @@ export interface MlxInstalledModel {
   /** Per-turn cap Gezel would actually grant after applying its configured limit. */
   effectiveContextWindow?: number;
   /**
-   * Expected memory while running: resident weights (with runtime
-   * overhead) plus the KV cache at the granted context window and slot
-   * count — the launch path's own reservation math. Absent when the
-   * daemon could not price the launch (unreadable weights, older daemon).
+   * Expected memory to serve ONE chat: resident weights (with runtime
+   * overhead) plus a single slot's KV cache at the granted context
+   * window. This is the figure that tracks measured peak RSS. Absent when
+   * the daemon could not price the launch (unreadable weights, older
+   * daemon).
    */
   predictedResidentBytes?: number;
+  /**
+   * What the capacity broker actually holds: weights plus {@link plannedSlots}
+   * slots' KV. Equals `predictedResidentBytes` on a single-slot host.
+   */
+  reservedResidentBytes?: number;
+  /** Concurrent engine slots the launch would be admitted at. */
+  plannedSlots?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;

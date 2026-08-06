@@ -109,6 +109,66 @@ describe('LlamaCppModelManager local model list', () => {
     expect(memory.closest('td')?.textContent).toContain('2.6 GB');
   });
 
+  it('headlines the single-chat cost and keeps the slot reservation in the tooltip', async () => {
+    // The regression this pins: the headline used to quote weights + N
+    // slots of KV, which on a 3-slot host read as ~49 GB for a model whose
+    // measured peak RSS was ~32 GB. One chat is what the number should mean.
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'qwen3.6-27b-q4',
+          name: 'Qwen 3.6 (27B)',
+          approxSizeBytes: 17_100_000_000,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/qwen3.6-27b-q4/model.gguf',
+          contextWindow: 262_144,
+          effectiveContextWindow: 65_536,
+          predictedResidentBytes: 30_100_000_000,
+          reservedResidentBytes: 49_300_000_000,
+          plannedSlots: 3,
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const memory = await screen.findByText(/~30\.1 GB in memory/);
+    expect(screen.queryByText(/49\.3 GB in memory/)).not.toBeInTheDocument();
+    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/about 30\.1 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 3 chats at once reserves about 49\.3 GB/);
+  });
+
+  it('omits the concurrency sentence on a single-slot host', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'gemma4-e4b-q4',
+          name: 'Gemma 4 (E4B)',
+          approxSizeBytes: 4_200_000_000,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/gemma4-e4b-q4/model.gguf',
+          contextWindow: 128_000,
+          effectiveContextWindow: 65_536,
+          predictedResidentBytes: 9_000_000_000,
+          reservedResidentBytes: 9_000_000_000,
+          plannedSlots: 1,
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const memory = await screen.findByText(/~9\.0 GB in memory/);
+    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/serve one chat/);
+    expect(title).not.toMatch(/at once reserves/);
+  });
+
   it('does not stack inventory requests while shared models are being verified', async () => {
     let finish!: (value: { models: never[] }) => void;
     const verification = new Promise<{ models: never[] }>((resolve) => {

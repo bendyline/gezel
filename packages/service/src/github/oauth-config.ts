@@ -10,7 +10,7 @@
  * github.com. Scopes are requested per-call against `startDeviceFlow`.
  */
 
-const FALLBACK_CLIENT_ID = 'Ov23liFK9GVcQek9WRqo';
+const FALLBACK_CLIENT_ID = 'Ov23liIszlOUQx24tett';
 
 export function githubOauthClientId(): string {
   const fromEnv = process.env.GEZEL_GITHUB_CLIENT_ID?.trim();

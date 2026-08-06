@@ -32,6 +32,10 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
           ...(plan?.plannedResidentBytes
             ? { predictedResidentBytes: plan.plannedResidentBytes }
             : {}),
+          ...(plan?.reservedResidentBytes
+            ? { reservedResidentBytes: plan.reservedResidentBytes }
+            : {}),
+          ...(plan?.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
         };
       }),
     );

@@ -30,6 +30,10 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
             ...(plan.plannedResidentBytes
               ? { predictedResidentBytes: plan.plannedResidentBytes }
               : {}),
+            ...(plan.reservedResidentBytes
+              ? { reservedResidentBytes: plan.reservedResidentBytes }
+              : {}),
+            ...(plan.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
           };
         } catch (error) {
           // Two distinct denials, two distinct remedies: a model RESIDENT

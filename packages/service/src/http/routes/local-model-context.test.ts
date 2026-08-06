@@ -42,6 +42,38 @@ describe('local model inventory context caps', () => {
     expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model');
   });
 
+  it('carries the slot reservation alongside the single-chat footprint', async () => {
+    // Both figures reach the client because they answer different questions:
+    // the headline is what one chat costs, the reservation is what the broker
+    // holds. Collapsing them made a 3-slot host advertise ~49 GB for a model
+    // whose measured peak RSS was ~32 GB.
+    const previewLocalEnginePlan = vi.fn(async () => ({
+      contextWindow: 65_536,
+      plannedResidentBytes: 30_100_000_000,
+      reservedResidentBytes: 49_300_000_000,
+      plannedSlots: 3,
+    }));
+    const ctx = {
+      llamaCppModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: { previewLocalEnginePlan },
+    } as never;
+
+    const response = await llamaCppRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [
+        {
+          predictedResidentBytes: 30_100_000_000,
+          reservedResidentBytes: 49_300_000_000,
+          plannedSlots: 3,
+        },
+      ],
+    });
+  });
+
   it('adds the configured MLX cap without replacing the advertised window', async () => {
     const previewLocalEnginePlan = vi.fn(async () => ({
       contextWindow: 65_536,

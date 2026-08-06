@@ -27,6 +27,7 @@ import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleC
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { formatContextWindow } from './model-context.js';
+import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -77,12 +78,6 @@ function recoDeviceFromMemory(memory: MemoryProfile): RecoDevice {
     usableBytes: memory.usableBytes,
     ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
   };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
-  return `${bytes} B`;
 }
 
 function formatApprox(bytes: number): string {
@@ -672,6 +667,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   const fitnessKey = `llama-cpp:${m.id}`;
                   const entry = fitness.get(fitnessKey);
                   const catalogManifest = catalogById.get(m.id);
+                  // Single-slot, not the fleet reservation: the admission
+                  // ladder sheds slots to fit, so a model is never unusable
+                  // because of slot count. Pricing the fleet here would flag
+                  // models as too big that the daemon would happily run.
                   const installedResidentBytes =
                     m.predictedResidentBytes ?? m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
                   const ramFit = memory
@@ -729,16 +728,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           </span>
                         )}
                       </td>
-                      <td
-                        title={
-                          m.predictedResidentBytes
-                            ? `${formatBytes(m.approxSizeBytes)} on disk. Expect about ${formatBytes(m.predictedResidentBytes)} of memory while running: weights plus the KV cache at the granted context window.`
-                            : `${formatBytes(m.approxSizeBytes)} on disk.`
-                        }
-                      >
+                      <td title={modelSizeTitle(m)}>
                         {formatBytes(m.approxSizeBytes)}
-                        {m.predictedResidentBytes ? (
-                          <span className="muted small">{` · ~${formatBytes(m.predictedResidentBytes)} in memory`}</span>
+                        {modelMemoryHeadline(m) ? (
+                          <span className="muted small">{modelMemoryHeadline(m)}</span>
                         ) : null}
                       </td>
                       <td title={quantizationTitle(m.quantization)}>

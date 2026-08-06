@@ -93,6 +93,28 @@ describe('MlxModelManager fitness column', () => {
     });
   });
 
+  it('headlines the single-chat cost and keeps the slot reservation in the tooltip', async () => {
+    vi.mocked(api.listMlxModels).mockResolvedValue({
+      models: [
+        {
+          ...INSTALLED.models[0],
+          predictedResidentBytes: 18_000_000_000,
+          reservedResidentBytes: 30_000_000_000,
+          plannedSlots: 2,
+        },
+      ],
+    } as never);
+    vi.mocked(api.listModelFitness).mockResolvedValue({ records: [], probing: [] } as never);
+
+    render(<MlxModelManager />);
+
+    const memory = await screen.findByText(/~18\.0 GB in memory/);
+    expect(screen.queryByText(/30\.0 GB in memory/)).not.toBeInTheDocument();
+    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/about 18\.0 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 2 chats at once reserves about 30\.0 GB/);
+  });
+
   it('shows a live pill while a probe is running', async () => {
     vi.mocked(api.listModelFitness).mockResolvedValue({
       records: [],

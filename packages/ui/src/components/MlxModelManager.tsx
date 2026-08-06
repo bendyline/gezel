@@ -22,6 +22,7 @@ import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { formatContextWindow } from './model-context.js';
+import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -29,12 +30,6 @@ interface MemoryProfile {
   gpuVramBytes: number | null;
   source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
-  return `${bytes} B`;
 }
 
 function formatApprox(bytes: number): string {
@@ -621,16 +616,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                           </span>
                         )}
                       </td>
-                      <td
-                        title={
-                          m.predictedResidentBytes
-                            ? `${formatBytes(m.approxSizeBytes)} on disk. Expect about ${formatBytes(m.predictedResidentBytes)} of memory while running: weights plus the KV cache at the granted context window.`
-                            : `${formatBytes(m.approxSizeBytes)} on disk.`
-                        }
-                      >
+                      <td title={modelSizeTitle(m)}>
                         {formatBytes(m.approxSizeBytes)}
-                        {m.predictedResidentBytes ? (
-                          <span className="muted small">{` · ~${formatBytes(m.predictedResidentBytes)} in memory`}</span>
+                        {modelMemoryHeadline(m) ? (
+                          <span className="muted small">{modelMemoryHeadline(m)}</span>
                         ) : null}
                       </td>
                       <td title={quantizationTitle(m.quantization)}>
