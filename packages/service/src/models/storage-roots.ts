@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 
 const execFileAsync = promisify(execFile);
 
@@ -464,8 +465,8 @@ export async function makeSharedModelReadable(
 async function resetWindowsAclToInherited(target: string): Promise<void> {
   try {
     await execFileAsync('icacls.exe', [target, '/reset', '/T', '/L', '/Q'], {
-      windowsHide: true,
       maxBuffer: 256 * 1024,
+      ...windowsDetachedSpawnOptions(),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

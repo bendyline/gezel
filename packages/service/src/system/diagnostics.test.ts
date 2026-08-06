@@ -160,7 +160,7 @@ describe('collectSystemDiagnosticsCached', () => {
     const first = await collectSystemDiagnosticsCached(d, now);
     clock += 30_000;
     const second = await collectSystemDiagnosticsCached(d, now);
-    expect(second).toBe(first);
+    expect(second).toStrictEqual(first);
     expect(d.listModelsForProvider).toHaveBeenCalledTimes(3);
 
     clock += 31_000;

@@ -70,7 +70,7 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
-    expect(await screen.findByText('runs well (62 t/s)')).toBeInTheDocument();
+    expect(await screen.findByText('short prompt · 62 t/s')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('128K')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-run' })).toBeInTheDocument();
