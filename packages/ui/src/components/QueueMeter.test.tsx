@@ -211,6 +211,33 @@ describe('QueueMeter — preparing window', () => {
     expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
   });
 
+  it('refreshes a newly recruited gezel instead of mislabeling their turn as System', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      roleBasedNameOnlyMode: false,
+      showPoppetjes: true,
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+    vi.mocked(api.listGezels)
+      .mockResolvedValueOnce({ gezels: [] } as never)
+      .mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+
+    await waitFor(() => expect(button).toHaveTextContent('gez-1'));
+    expect(button).not.toHaveTextContent('System');
+
+    window.dispatchEvent(
+      new CustomEvent('gezel:gezel-updated', { detail: { id: 'gez-1', name: 'Alejandro' } }),
+    );
+
+    await waitFor(() => expect(button).toHaveTextContent('Alejandro'));
+    expect(api.listGezels).toHaveBeenCalledTimes(2);
+  });
+
   it('stays visible while the on-device engine is still loading', async () => {
     // A turn is in flight on the not-yet-registered provider.
     mockLiveTurns.set('sess-1', liveTurn({ gezelId: 'gez-1' }));

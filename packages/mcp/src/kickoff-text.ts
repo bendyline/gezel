@@ -139,14 +139,13 @@ export function buildKickoffStepDescription(
   return `Start with the first shippable workspace file or a concrete specialist handoff for that file. Do not spend this step on wireframes, architecture proposals, task notes, or plans unless those are the requested deliverable.${crewDelegation}`;
 }
 
-// Code/doc/data extensions plus raster+svg images — an image IS the primary
-// deliverable for render/logo briefs (tool-routing names `workspace/sunset.png`),
-// and policyForDeliverable gives any non-HTML deliverable the file-exists
-// `nonempty` gate, which is the right floor for a generated PNG. Briefs that
-// name BOTH (petshop: index.html + assets/logo.png) infer the first-named =
-// the primary page, so adding images here doesn't steal those.
+// Code/doc/data extensions plus raster+svg images and capability-owned binary
+// formats. Binary paths are detected here so start_project can route them to
+// their exact production craftbook before the generic build-loop fallback.
+// Briefs that name BOTH (petshop: index.html + assets/logo.png) infer the
+// first-named path, so adding formats here doesn't steal those.
 export const DELIVERABLE_EXT =
-  'html|css|js|ts|tsx|jsx|mjs|cjs|md|json|ndjson|yaml|yml|csv|tsv|py|png|jpe?g|webp|gif|svg';
+  'html|css|js|ts|tsx|jsx|mjs|cjs|md|json|ndjson|yaml|yml|csv|tsv|py|png|jpe?g|webp|gif|svg|pptx|docx|pdf|xlsx|epub|dbk|mp4';
 
 export function inferSourceDeliverablePath(input: {
   name: string;

@@ -36,7 +36,7 @@ function percent(bytes: number, totalBytes: number): number {
 function describeReservation(usage: MachineMemoryUsage): string {
   const reserved = `~${formatBytes(usage.engineReservedBytes)}`;
   if (usage.engineBudgetBytes === null || usage.engineBudgetBytes <= 0) {
-    return `Models reserve ${reserved} for capacity planning`;
+    return `Models reserve ${reserved} for capacity planning; this can include models that are not running`;
   }
   const budget = `~${formatBytes(usage.engineBudgetBytes)}`;
   return usage.kind === 'vram'
@@ -128,26 +128,40 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
   const cachedBytes = typeof usage.cachedBytes === 'number' ? usage.cachedBytes : null;
   const cachedPercent = cachedBytes === null ? 0 : percent(cachedBytes, usage.totalBytes);
-  const gezelSegments = [
-    {
-      key: 'infra',
-      label: 'Core Gezel infra',
-      detail: 'daemon and local-engine runtime',
-      bytes: usage.gezelInfraBytes,
-    },
-    {
-      key: 'weights',
-      label: 'Model weights',
-      detail: 'resident model parameters',
-      bytes: usage.gezelModelWeightsBytes,
-    },
-    {
-      key: 'cache',
-      label: 'Model cache',
-      detail: 'KV cache and inference buffers',
-      bytes: usage.gezelModelCacheBytes,
-    },
-  ] as const;
+  // macOS gives us a trustworthy total physical footprint, but not a
+  // trustworthy per-model split. The broker can retain capacity for a cold
+  // provider whose process is not running, so applying its weights/cache
+  // estimate to the observed footprint invents detail. Keep the measured
+  // total whole; only show the estimated split on fallback/driver paths.
+  const gezelSegments = observed
+    ? [
+        {
+          key: 'observed',
+          label: 'Gezel',
+          detail: 'measured daemon and running local-engine footprint',
+          bytes: gezelBytes,
+        },
+      ]
+    : [
+        {
+          key: 'infra',
+          label: 'Core Gezel infra',
+          detail: 'daemon and local-engine runtime',
+          bytes: usage.gezelInfraBytes,
+        },
+        {
+          key: 'weights',
+          label: 'Model weights',
+          detail: 'resident model parameters',
+          bytes: usage.gezelModelWeightsBytes,
+        },
+        {
+          key: 'cache',
+          label: 'Model cache',
+          detail: 'KV cache and inference buffers',
+          bytes: usage.gezelModelCacheBytes,
+        },
+      ];
   const residentModels = usage.residentModels ?? [];
   const attributed = gezelBytes > 0;
   const hasMeasuredLegend =
@@ -193,7 +207,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
         ...reservationSegments.map(
           (segment) => `${segment.label} about ${formatBytes(segment.bytes)} reserved`,
         ),
-        'Reservation is capacity planning, not measured use',
+        'Reservation is capacity planning, not measured use; it can include models that are not running',
       ]
         .filter(Boolean)
         .join(', ')
@@ -294,7 +308,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
       {hasReservationMeter && (
         <div className="machine-memory-reservation">
           <div className="machine-memory-reservation-heading">
-            <span>Model capacity</span>
+            <span>Reserved model capacity</span>
             <span>
               ~{formatBytes(usage.engineReservedBytes)} of ~{formatBytes(reservationBudgetBytes)}{' '}
               reserved
@@ -338,9 +352,32 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
           {capacityPoolSummary && (
             <div className="machine-memory-reservation-pools-label">{capacityPoolSummary}</div>
           )}
+          {residentModels.length > 0 && (
+            <div className="machine-memory-reservation-models" aria-label="Model reservations">
+              {reservationSegments.map((segment) => (
+                <div className="machine-memory-reservation-model" key={segment.key}>
+                  <span>{segment.label}</span>
+                  <span>~{formatBytes(segment.bytes)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="machine-memory-note">
+            Capacity planning only; includes models that are not currently running.
+          </div>
         </div>
       )}
       {reservationNote && <div className="machine-memory-note">{reservationNote}</div>}
+      {!hasReservationMeter && usage.engineReservedBytes > 0 && residentModels.length > 0 && (
+        <div className="machine-memory-reservation-models" aria-label="Model reservations">
+          {reservationSegments.map((segment) => (
+            <div className="machine-memory-reservation-model" key={segment.key}>
+              <span>{segment.label}</span>
+              <span>~{formatBytes(segment.bytes)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {usage.orphanedGezelEngineProcessCount > 0 && (
         <div className="machine-memory-note">
           Includes {usage.orphanedGezelEngineProcessCount} leftover Gezel engine{' '}

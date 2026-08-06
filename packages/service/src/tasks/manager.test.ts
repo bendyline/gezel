@@ -111,11 +111,29 @@ describe('TaskManager', () => {
           craftbook: {
             id,
             name: 'PowerPoint Deck',
-            steps: [{ id: 'produce', name: 'Produce', terminal: true }],
+            steps: [
+              {
+                id: 'produce',
+                name: 'Produce',
+                prompt:
+                  'Author deck.md first, then use DocBlocks to publish and preview {{outputPath}}.',
+                advanceWhen: {
+                  file: '{{outputPath}}',
+                  artifact: true,
+                  minBytes: 1,
+                },
+                terminal: true,
+              },
+            ],
             entryStepId: 'produce',
+            paramSchema: {
+              type: 'object',
+              properties: { outputPath: { type: 'string' } },
+            },
             toolsets: [
               {
                 toolsetId: 'docblocks',
+                autoAllow: true,
                 reason: 'produce and visually verify the real PPTX',
               },
             ],
@@ -123,6 +141,7 @@ describe('TaskManager', () => {
             updatedAt: '2026-07-27T00:00:00Z',
           },
           sourceId: 'bundled',
+          version: '1.3.0',
         };
       },
     });
@@ -141,8 +160,29 @@ describe('TaskManager', () => {
       title: 'D-Day deck',
       assignee: { kind: 'user' },
       craftbookId: 'powerpoint-deck',
+      craftbookParams: { outputPath: 'marne-battle.pptx' },
     });
-    expect(created.craftbook.toolsets?.[0]?.toolsetId).toBe('docblocks');
+    expect(created.craftbook.id).toBe('powerpoint-deck');
+    expect(created.craftbook.toolsets).toEqual([
+      {
+        toolsetId: 'docblocks',
+        autoAllow: true,
+        reason: 'produce and visually verify the real PPTX',
+      },
+    ]);
+    expect(created.sourceCraftbookIds).toEqual([
+      {
+        role: 'main',
+        catalogId: 'powerpoint-deck',
+        version: '1.3.0',
+        sourceId: 'bundled',
+      },
+    ]);
+    expect(created.craftbookParams).toEqual({ outputPath: 'marne-battle.pptx' });
+    expect(created.craftbook.steps[0]?.prompt).toContain(
+      'DocBlocks to publish and preview marne-battle.pptx',
+    );
+    expect(created.craftbook.steps[0]?.advanceWhen?.file).toBe('marne-battle.pptx');
   });
 
   it('emits task.created history', async () => {

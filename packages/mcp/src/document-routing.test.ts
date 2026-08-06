@@ -21,9 +21,10 @@ describe('binary document craftbook routing', () => {
     expect(binaryDocumentCraftbookRoute('model.xlsx')).toBeNull();
   });
 
-  it('preserves the requested name while normalizing workspace prefixes', () => {
+  it('preserves the requested name while normalizing workspace and artifact drawer prefixes', () => {
     expect(normalizeDocumentOutputPath('workspace/presentations/D-Day.pptx')).toBe(
       'presentations/D-Day.pptx',
     );
+    expect(normalizeDocumentOutputPath('artifacts/marne-battle.pptx')).toBe('marne-battle.pptx');
   });
 });

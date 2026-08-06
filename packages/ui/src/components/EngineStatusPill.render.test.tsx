@@ -304,14 +304,17 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     expect(capacityMeter).toHaveAccessibleName(/30\.4 GiB VRAM \+ ~38\.0 GiB system RAM/i);
     expect(capacityMeter.querySelectorAll('.machine-memory-reservation-segment')).toHaveLength(2);
-    expect(screen.getByText('Model capacity')).toBeInTheDocument();
+    expect(screen.getByText('Reserved model capacity')).toBeInTheDocument();
     expect(screen.getByText('Capacity: ~30.4 GiB VRAM + ~38.0 GiB system RAM')).toBeInTheDocument();
     expect(
-      screen.queryByText('Reserved capacity for loaded models; not live usage.'),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText('2 models loaded')).not.toBeInTheDocument();
-    // The uncluttered meter still exposes model detail accessibly. Known ids
-    // take their catalog name; the rest fall back to the id.
+      screen.getByText('Capacity planning only; includes models that are not currently running.'),
+    ).toBeInTheDocument();
+    // Capacity holders are visible as well as accessible. Known ids take
+    // their catalog name; the rest fall back to the id.
+    expect(screen.getByText('Talkie 1930 13B ×2')).toBeInTheDocument();
+    expect(screen.getByText('~30.9 GiB')).toBeInTheDocument();
+    expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
+    expect(screen.getByText('~19.1 GiB')).toBeInTheDocument();
     expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
   });
@@ -351,15 +354,22 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     const strip = await screen.findByRole('img', {
       name: /Gezel observed footprint 76\.0 GiB/i,
     });
-    expect(strip).toHaveAccessibleName(/Core Gezel infra about 40\.0 GiB/i);
-    expect(strip).toHaveAccessibleName(/Model weights about 30\.0 GiB/i);
-    expect(strip).toHaveAccessibleName(/Model cache about 6\.0 GiB/i);
-    expect(strip).toHaveAccessibleName(/Models reserve ~36\.0 GiB for capacity planning/i);
+    expect(strip).toHaveAccessibleName(/Gezel about 76\.0 GiB/i);
+    expect(strip).not.toHaveAccessibleName(/Core Gezel infra/i);
+    expect(strip).not.toHaveAccessibleName(/Model weights/i);
+    expect(strip).not.toHaveAccessibleName(/Model cache/i);
+    expect(strip).toHaveAccessibleName(
+      /Models reserve ~36\.0 GiB for capacity planning; this can include models that are not running/i,
+    );
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
     expect(screen.getByText('Cached 20.0 GiB')).toBeInTheDocument();
     expect(strip).toHaveAccessibleName(/cached files 20\.0 GiB, available to apps/i);
-    expect(screen.getByText('Models reserve ~36.0 GiB for capacity planning')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Models reserve ~36.0 GiB for capacity planning; this can include models that are not running',
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         'Includes 2 leftover Gezel engine processes from an earlier service session',

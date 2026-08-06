@@ -23,13 +23,18 @@ function extension(path: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
-/** Normalize an expected workspace deliverable to a project-relative path. */
+/**
+ * Normalize a user-facing workspace/artifact deliverable to the relative path
+ * expected by document craftbooks. The craftbook writes this path inside the
+ * artifact root and copies the same relative path into the workspace, so a
+ * drawer prefix must not become a literal nested `artifacts/` directory.
+ */
 export function normalizeDocumentOutputPath(path: string): string {
   return path
     .trim()
     .replace(/\\/g, '/')
     .replace(/^\.\//, '')
-    .replace(/^workspace\//i, '');
+    .replace(/^(?:workspace|artifacts)\//i, '');
 }
 
 export function isBinaryDocumentOutputPath(path: string): boolean {

@@ -62,6 +62,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { commandResultIsError } from './command-result.js';
 import {
+  type BinaryDocumentCraftbookRequest,
+  CraftbookInvocationParamsArgSchema,
+  binaryDocumentCraftbookRequest,
+  buildBinaryDocumentTaskDescription,
+  normalizeCraftbookInvocationParams,
+} from './craftbook-routing.js';
+import {
   binaryDocumentCraftbookRoute,
   isBinaryDocumentOutputPath,
   normalizeDocumentOutputPath,
@@ -4074,10 +4081,7 @@ server.tool(
       ),
     version: z.string().optional().describe('Specific craftbook version. Defaults to latest.'),
     assignee: assigneeArg().optional(),
-    params: z
-      .record(z.string(), z.string())
-      .optional()
-      .describe('Invocation parameters declared by the craftbook, such as outputPath.'),
+    params: CraftbookInvocationParamsArgSchema,
     outputPath: z
       .string()
       .optional()
@@ -4088,10 +4092,7 @@ server.tool(
   async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const invocationParams = {
-        ...(params ?? {}),
-        ...(outputPath ? { outputPath: normalizeDocumentOutputPath(outputPath) } : {}),
-      };
+      const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
       const launch = await launchCraftbookTask({
         craftbookId,
         project: resolvedProject,
@@ -6159,6 +6160,126 @@ async function macroEntryAssigneeName(
   return name ?? leadName;
 }
 
+/**
+ * Named binary outputs are capability workflows, not generic builds. Preserve
+ * the catalog craftbook identity so its toolsets, role sequence, Markdown
+ * authoring step, invocation params, and source provenance reach the task.
+ */
+async function runBinaryDocumentProject(
+  input: {
+    name: string;
+    about?: string;
+    missionObjectives?: string;
+    taskDescription?: string;
+    taskTitle?: string;
+    kickoffMessage?: string;
+  },
+  request: BinaryDocumentCraftbookRequest,
+  cacheTool: 'start_project' | 'start_job',
+) {
+  const brief = resolveMacroBrief(input);
+  const repoRedirect = repoFetchRedirectForMacro({ tool: cacheTool, ...brief });
+  if (repoRedirect) {
+    if (repoRedirect.url) {
+      return fetchRepoProject({
+        url: repoRedirect.url,
+        projectName: repoRedirect.projectName,
+        about: brief.about,
+        missionObjectives: brief.missionObjectives,
+        note: `[runtime] ${repoRedirect.message}`,
+        handoffReview: true,
+      });
+    }
+    return {
+      content: [{ type: 'text' as const, text: repoRedirect.message }],
+      isError: true,
+    };
+  }
+  if (!request.route) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `No production craftbook is registered for binary deliverable "${request.requestedPath}". The project was not created; do not send this output to a Builder or substitute source code for the requested file.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const idempotent = lookupMacroIdempotent(brief.name);
+  if (idempotent) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the recipe-selected specialist from the original call is already on it.\n\n${idempotent.resultText}`,
+        },
+      ],
+    };
+  }
+  const existingProject = await findActiveMacroProject(brief.name);
+  if (existingProject) return duplicateMacroProjectNotice(cacheTool, existingProject);
+
+  try {
+    // Document craftbooks are multi-capability recipes (plan → Markdown
+    // authoring → DocBlocks publish → review), so retain their recipe roles
+    // even when the install's generic execution density is flat.
+    const project = await api.createProject({
+      name: brief.name,
+      about: normalizeMarkdown(brief.about),
+      missionObjectives: normalizeMarkdown(brief.missionObjectives),
+      mode: 'crew',
+    });
+    const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+    const voorman = await api.createGezelFromTemplate('voorman', {
+      name: gezelName,
+      gender: gezelGender,
+    });
+    await api.updateProject(project.id, { voormanGezelId: voorman.id });
+    const effectiveTaskDescription = buildBinaryDocumentTaskDescription(
+      {
+        name: brief.name,
+        ...(brief.taskDescription ? { taskDescription: brief.taskDescription } : {}),
+        ...(input.kickoffMessage ? { kickoffMessage: input.kickoffMessage } : {}),
+      },
+      { ...request, route: request.route },
+    );
+    const launch = await launchCraftbookTask({
+      craftbookId: request.route.craftbookId,
+      project: project.id,
+      title: input.taskTitle ?? `Create ${request.outputPath}`,
+      description: effectiveTaskDescription,
+      params: { outputPath: request.outputPath },
+    });
+    if (launch.kind === 'setup-required') {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: craftbookSetupRequiredText(request.route.craftbookId, launch.missing),
+          },
+        ],
+        isError: true,
+      };
+    }
+    const task = launch.task;
+    const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
+    const installedText =
+      launch.installed.length > 0
+        ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+        : '';
+    const resultText = `Started project "${brief.name}" (${project.id}) with the exact \`${request.route.craftbookId}\` catalog craftbook for \`${request.outputPath}\`. Created task ${task.ref} ("${task.title}") and dispatched its entry step to ${entryName}; the recipe retains its source provenance, role sequence, and declared toolsets.${installedText} No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks).`;
+    recordMacroResult(cacheTool, brief.name, project.id, resultText);
+    return { content: [{ type: 'text' as const, text: resultText }] };
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: `${cacheTool} failed: ${unwrapApiError(err)}` }],
+      isError: true,
+    };
+  }
+}
+
 async function runPromotedStartJobAsProject(input: {
   name: string;
   about?: string;
@@ -6274,6 +6395,14 @@ server.tool(
   },
   async ({ name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage }) => {
     const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
+    const binaryRequest = binaryDocumentCraftbookRequest(brief);
+    if (binaryRequest) {
+      return runBinaryDocumentProject(
+        { ...brief, taskTitle, kickoffMessage },
+        binaryRequest,
+        'start_project',
+      );
+    }
     if (process.env.GEZEL_EXECUTION_DENSITY === 'flat') {
       return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
     }
@@ -6416,6 +6545,14 @@ async function runFlatProject(
     kickoffMessage,
   } = input;
   const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
+  const binaryRequest = binaryDocumentCraftbookRequest(brief);
+  if (binaryRequest) {
+    return runBinaryDocumentProject(
+      { ...brief, taskTitle, kickoffMessage },
+      binaryRequest,
+      cacheTool,
+    );
+  }
   const primaryDeliverablePath = inferSourceDeliverablePath(brief);
   const inferredProducerRole =
     !specialistRole && primaryDeliverablePath

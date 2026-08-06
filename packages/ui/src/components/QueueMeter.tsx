@@ -142,6 +142,7 @@ function resolveQueueActor(
     if (remote) return { label: `Remote · ${remote[1]!.slice(0, 8)}` };
     const gezel = gezels.get(gezelId);
     if (gezel) return { gezel, label: gezel.name };
+    return { label: gezelId };
   }
   return { label: actorLabel?.trim() || 'System' };
 }
@@ -416,6 +417,7 @@ export function QueueMeter() {
   // Mirrors EngineStatusPill, which stays visible across the same gap.
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const gezelRefreshSeqRef = useRef(0);
   const boringMode = useRoleBasedNameOnlyMode();
 
   const refresh = useCallback(() => {
@@ -431,14 +433,32 @@ export function QueueMeter() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Gezel names are looked up for the detail panel. One fetch on
-  // mount is enough — if a new gezel appears mid-session, its id will
-  // render without a name, not hard-fail.
-  useEffect(() => {
+  const refreshGezels = useCallback(() => {
+    const seq = ++gezelRefreshSeqRef.current;
     api
       .listGezels()
-      .then((r) => setGezels(new Map(r.gezels.map((g) => [g.id, g]))))
+      .then((r) => {
+        if (seq !== gezelRefreshSeqRef.current) return;
+        setGezels(new Map(r.gezels.map((g) => [g.id, g])));
+      })
       .catch(() => {});
+  }, []);
+
+  // Keep queue attribution in sync with gezels recruited or edited after
+  // this header mounted. The global SSE bridge emits the same event for
+  // service-created gezels, including task/craftbook crew recruitment.
+  useEffect(() => {
+    refreshGezels();
+    const onGezelChanged = () => refreshGezels();
+    window.addEventListener('gezel:gezel-updated', onGezelChanged);
+    window.addEventListener('gezel:gezel-deleted', onGezelChanged);
+    return () => {
+      window.removeEventListener('gezel:gezel-updated', onGezelChanged);
+      window.removeEventListener('gezel:gezel-deleted', onGezelChanged);
+    };
+  }, [refreshGezels]);
+
+  useEffect(() => {
     api
       .listProjects()
       .then((r) => setProjects(new Map(r.projects.map((p) => [p.id, p]))))

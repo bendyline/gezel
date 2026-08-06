@@ -100,6 +100,16 @@ describe('inferSourceDeliverablePath', () => {
     ).toBe('assets/poster.webp');
   });
 
+  it('preserves an explicitly named PPTX path for craftbook routing', () => {
+    expect(
+      inferSourceDeliverablePath({
+        name: 'Battle of the Marne presentation',
+        about: 'Prepare an accessible history presentation for a general audience.',
+        missionObjectives: 'Publish artifacts/marne-battle.pptx.',
+      }),
+    ).toBe('artifacts/marne-battle.pptx');
+  });
+
   it('build missions without a named file default to index.html; non-builds to undefined', () => {
     expect(inferSourceDeliverablePath(BUILD_BRIEF)).toBe('index.html');
     expect(

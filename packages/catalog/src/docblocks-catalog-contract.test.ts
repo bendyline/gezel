@@ -98,7 +98,7 @@ describe('DocBlocks catalog contract', () => {
     const expected = new Map([
       ['report-pdf', { version: '1.1.0', artifacts: ['report.pdf'] }],
       ['research-to-document', { version: '1.2.0', artifacts: ['report.docx'] }],
-      ['powerpoint-deck', { version: '1.3.0', artifacts: [], workspace: ['{{outputPath}}'] }],
+      ['powerpoint-deck', { version: '1.4.0', artifacts: [], workspace: ['{{outputPath}}'] }],
       ['narrated-slideshow', { version: '1.1.0', artifacts: ['slideshow.gif', 'slideshow.mp4'] }],
     ]);
 

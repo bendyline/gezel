@@ -324,8 +324,9 @@ export const TaskSchema = z.object({
    * Invocation-time parameter values supplied when this task was
    * launched from a parameterized craftbook (the command launcher).
    * Stringified for the CLI round-trip; the declared types live on the
-   * craftbook's `paramSchema`. Surfaced to the gezel via an entry-step
-   * note + the task description.
+   * craftbook's `paramSchema`. Surfaced directly in every task-scoped
+   * prompt so later specialists retain the authoritative inputs even when
+   * an invocation path did not also stamp an entry-step note.
    */
   craftbookParams: z.record(z.string(), z.string()).optional(),
   /**

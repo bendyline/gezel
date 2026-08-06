@@ -16077,6 +16077,19 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    if (t.craftbookParams && Object.keys(t.craftbookParams).length > 0) {
+      const params = Object.entries(t.craftbookParams)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => {
+          const safeKey = key.replaceAll('`', '\\`');
+          const safeValue = JSON.stringify(value).replaceAll('`', '\\`');
+          return `- \`${safeKey}\`: ${safeValue}`;
+        })
+        .join('\n');
+      lines.push(
+        `### Invocation parameters\n\nThese values were supplied when the task was launched and are authoritative task inputs. Do not replace them with unrelated workspace files or recalled context. A \`content\` value is inline source material; a \`sourcePath\` value names the workspace file to read.\n\n${params}`,
+      );
+    }
     if (t.description) lines.push(t.description.trim());
     if (step) {
       const stepAssignee =
