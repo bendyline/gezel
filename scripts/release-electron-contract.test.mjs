@@ -69,6 +69,11 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(windowsSmoke, /RedirectStandardError/);
   assert.match(windowsSmoke, /Get-Content -LiteralPath \$path -Tail 400/);
   assert.match(windowsSmoke, /timed out after 360 seconds/);
+  assert.match(windowsSmoke, /name: Preserve Windows packaged-smoke diagnostics/);
+  assert.match(windowsSmoke, /if: failure\(\)/);
+  assert.match(windowsSmoke, /service-bundle\.tar\.gz/);
+  assert.match(windowsSmoke, /service\/node_modules\/entities/);
+  assert.match(windowsSmoke, /service\/node_modules\/parse5/);
   assert.ok(
     (workflow.match(/180(?:s| seconds)/g)?.length ?? 0) >= 2,
     'macOS and Linux packaged smoke tests must have bounded timeouts',

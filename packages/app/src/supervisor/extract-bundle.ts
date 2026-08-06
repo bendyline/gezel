@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
@@ -244,6 +244,17 @@ async function installTarball(tarballPath: string, dest: string, meta: BundleMet
     throw err;
   }
   try {
+    // `fileCount` used to be write-only metadata. A Windows release proved
+    // that a tarball can pass size/SHA validation yet leave an incomplete
+    // extracted dependency tree. Count regular files + symlinks before the
+    // staging swap so a partial install never becomes the live service.
+    const extractedFileCount = await countExtractedBundleFiles(staging);
+    if (extractedFileCount !== meta.fileCount) {
+      throw new Error(
+        `[supervisor] post-extract file count mismatch (extracted=${extractedFileCount} expected=${meta.fileCount})`,
+      );
+    }
+
     // Ensure the bin stays executable on POSIX. Tarballs preserve modes, but
     // belt-and-braces it for cross-platform safety.
     const gezeldBin = join(staging, 'dist', 'bin', 'gezeld.js');
@@ -286,6 +297,22 @@ async function installTarball(tarballPath: string, dest: string, meta: BundleMet
     throw err;
   }
   if (existsSync(backup)) await rm(backup, { recursive: true, force: true });
+}
+
+async function countExtractedBundleFiles(root: string): Promise<number> {
+  let count = 0;
+  async function walk(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink() || entry.isFile()) {
+        count += 1;
+      } else if (entry.isDirectory()) {
+        await walk(join(dir, entry.name));
+      }
+    }
+  }
+  await walk(root);
+  return count;
 }
 
 async function recoverInterruptedInstall(dest: string): Promise<void> {

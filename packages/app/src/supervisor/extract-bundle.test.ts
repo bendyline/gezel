@@ -61,7 +61,11 @@ async function seedTarballBundle(
   const sizeBytes = (await stat(tarballPath)).size;
   await writeFile(
     metaPath,
-    JSON.stringify({ version: opts.version, sha256, sizeBytes, fileCount: 2 }, null, 2),
+    JSON.stringify(
+      { version: opts.version, sha256, sizeBytes, fileCount: 2 + (opts.extraFile ? 1 : 0) },
+      null,
+      2,
+    ),
   );
   await rm(staging, { recursive: true, force: true });
   return sha256;
@@ -314,6 +318,21 @@ describe('extractBundleIfNeeded', () => {
 
     await expect(extractBundleIfNeeded({ tarballPath, metaPath, installDir })).rejects.toThrow(
       /does not match/,
+    );
+    expect(await readFile(join(installDir, 'still-live.txt'), 'utf8')).toBe('good');
+    const installedPkg = JSON.parse(await readFile(join(installDir, 'package.json'), 'utf8'));
+    expect(installedPkg.version).toBe('0.1.0');
+  });
+
+  it('rejects an extracted tree whose file count does not match the bundle metadata', async () => {
+    await seedTarballBundle(root, tarballPath, metaPath, { version: '0.2.0' });
+    const meta = JSON.parse(await readFile(metaPath, 'utf8')) as { fileCount: number };
+    meta.fileCount += 1;
+    await writeFile(metaPath, JSON.stringify(meta));
+    await seedInstalledTree(installDir, '0.1.0', { path: 'still-live.txt', content: 'good' });
+
+    await expect(extractBundleIfNeeded({ tarballPath, metaPath, installDir })).rejects.toThrow(
+      /post-extract file count mismatch \(extracted=2 expected=3\)/,
     );
     expect(await readFile(join(installDir, 'still-live.txt'), 'utf8')).toBe('good');
     const installedPkg = JSON.parse(await readFile(join(installDir, 'package.json'), 'utf8'));

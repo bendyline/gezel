@@ -463,6 +463,25 @@ jobs:
           }
           Write-Host "[packaged-smoke] Windows app imported and reached ready"
 
+      # The normal Windows artifact upload is skipped after a smoke failure.
+      # Preserve both sides of the archive boundary so the next failure can be
+      # classified without guessing: the shipped tarball plus the dependency
+      # directories produced by extraction on the runner.
+      - name: Preserve Windows packaged-smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-packaged-smoke-diagnostics-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/gezel-packaged-smoke.stdout.log
+            ${{ runner.temp }}/gezel-packaged-smoke.stderr.log
+            ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/entities
+            ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/parse5
+            packages/app/dist/service-bundle.tar.gz
+            packages/app/dist/service-bundle.meta.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Verify Windows signatures
         shell: pwsh
         run: |
