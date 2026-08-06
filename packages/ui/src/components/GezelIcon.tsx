@@ -96,11 +96,7 @@ export function GezelIcon({
     // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized upstream
     <div className="gezel-icon-svg" dangerouslySetInnerHTML={{ __html: svg }} />
   ) : (
-    <FallbackAvatar
-      name={name}
-      background={fallbackBackground}
-      foreground={fallbackForeground}
-    />
+    <FallbackAvatar name={name} background={fallbackBackground} foreground={fallbackForeground} />
   );
 
   if (onClick) {
