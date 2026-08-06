@@ -8,8 +8,8 @@
 
 import type { ChatMessageToolCall, ProviderName } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import type { TurnCtx } from '../types.js';
 import { lintPromptToolContract } from '../../chat/prompt-tool-contract.js';
+import type { TurnCtx } from '../types.js';
 import {
   PromptMeesterBuildPrelude,
   looksLikeNewBuildRequest,
