@@ -58,6 +58,48 @@ describe('ToolRepeatTracker', () => {
     expect(hard.shouldAbort).toBe(true);
   });
 
+  it('counts repeated task notes by task + step even when the checklist text changes', () => {
+    const t = new ToolRepeatTracker();
+    t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'build', text: 'Checklist version one' },
+      'Appended note one',
+    );
+    t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'build', text: 'Checklist version two' },
+      'Appended note two',
+    );
+    const soft = t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'build', text: 'Checklist version three' },
+      'Appended note three',
+    );
+    expect(soft.count).toBe(3);
+    expect(soft.output).toContain('task `frogger/1` step `build` 3 times');
+    expect(soft.output).toContain('Stop re-writing');
+
+    t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'build', text: 'Checklist version four' },
+      'Appended note four',
+    );
+    const hard = t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'build', text: 'Checklist version five' },
+      'Appended note five',
+    );
+    expect(hard.count).toBe(5);
+    expect(hard.shouldAbort).toBe(true);
+
+    const otherStep = t.recordCall(
+      'write_task_note',
+      { ref: 'frogger/1', stepId: 'evaluate', text: 'Evaluation note' },
+      'Appended evaluation note',
+    );
+    expect(otherStep.count).toBe(1);
+  });
+
   it('does not spend the persisted-write repeat budget on different atomically rejected drafts', () => {
     const t = new ToolRepeatTracker();
     const rejected =

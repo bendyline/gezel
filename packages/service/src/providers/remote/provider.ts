@@ -197,6 +197,7 @@ export class RemoteGezelProvider implements LLMProvider {
       priorMessages: opts.priorMessages ?? [],
       numCtx,
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
+      ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       timeoutMs: REMOTE_TURN_TIMEOUT_MS,
     });
   }

@@ -470,8 +470,11 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       );
 
       try {
+        const continueFromToolResult =
+          body.prompt.length === 0 && body.priorMessages.at(-1)?.role === 'tool';
         await session.sendAndWait(body.prompt, {
           timeoutMs: REMOTE_INFER_TIMEOUT_MS,
+          ...(continueFromToolResult ? { continueFromToolResult: true } : {}),
           ...(body.attachments && body.attachments.length > 0
             ? {
                 attachments: body.attachments.map((a) => ({

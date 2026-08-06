@@ -2817,6 +2817,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // the chat layer has already replaced them with a text digest, and base64
     // sent to a blind server just burns context on bytes it discards.
     const attachments = opts?.attachments ?? [];
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || attachments.length > 0) {
+        throw new Error(
+          '[llama.cpp] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      if (this.messages.at(-1)?.role !== 'tool') {
+        throw new Error('[llama.cpp] a tool-result continuation requires a trailing tool result');
+      }
+    }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (attachments.length > 0) {
       if (this.deps.visionEnabled) userMsg.attachments = [...attachments];
@@ -2834,7 +2845,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // Reset captured reasoning at the top of each turn — manager
     // reads `getLastTurnReasoning()` after this resolves.
     this.lastTurnReasoning = '';
-    this.messages.push(userMsg);
+    if (!continueFromToolResult) this.messages.push(userMsg);
 
     // Reset captures — each sendAndWait surfaces only its own externals.
     this.capturedCalls = [];

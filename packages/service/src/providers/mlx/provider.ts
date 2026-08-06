@@ -78,6 +78,10 @@ import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { readSseEvents } from '../openai-compatible/sse.js';
+import {
+  PROJECT_MACRO_INTERCEPT_CAP,
+  deriveProjectMacroClosing,
+} from '../project-macro-loop-bail.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import {
@@ -101,10 +105,6 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
-import {
-  PROJECT_MACRO_INTERCEPT_CAP,
-  deriveProjectMacroClosing,
-} from '../project-macro-loop-bail.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
@@ -1120,6 +1120,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // before this turn started.
     log.info(`turn#${seq} START prompt=${prompt.length}c msgs=${this.messages.length}`);
 
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || (opts?.attachments?.length ?? 0) > 0) {
+        throw new Error(
+          '[Mac AI] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      if (this.messages.at(-1)?.role !== 'tool') {
+        throw new Error('[Mac AI] a tool-result continuation requires a trailing tool result');
+      }
+    }
     const userMsg: ChatMessage = { role: 'user', content: prompt };
     if (opts?.attachments && opts.attachments.length > 0) {
       userMsg.images = opts.attachments.map((a: ImageAttachment) => a.base64);
@@ -1136,7 +1147,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // by manager after the turn resolves, populated only when the
     // salvage retry budget exhausts below.
     this.lastTurnAttemptedToolCalls = [];
-    this.messages.push(userMsg);
+    if (!continueFromToolResult) this.messages.push(userMsg);
 
     // Reset captures — each sendAndWait surfaces only its own externals.
     this.capturedCalls = [];

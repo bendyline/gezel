@@ -26,6 +26,34 @@ function completionResponse(
 }
 
 describe('MlxProvider cache request wiring', () => {
+  it('continues from a seeded tool result without appending an empty user turn', async () => {
+    let body: Record<string, unknown> | undefined;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return completionResponse('Built it.');
+    }) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const session = await provider.createSession({
+      systemMessage: 'system',
+      priorMessages: [
+        { role: 'user', content: 'Build index.html.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' }],
+        },
+        { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
+      ],
+    });
+
+    await session.sendAndWait('', { timeoutMs: 5_000, continueFromToolResult: true });
+
+    const messages = body?.messages as Array<{ role: string; content?: string }>;
+    expect(messages.at(-1)).toMatchObject({ role: 'tool', content: 'Appended note.' });
+    expect(messages).not.toContainEqual({ role: 'user', content: '' });
+    await session.disconnect();
+  });
+
   it('uses one stable fallback cache id when queue session metadata is absent', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetchImpl = (async (_url: string, init?: RequestInit) => {

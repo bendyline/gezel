@@ -647,6 +647,17 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
     const deadline = Date.now() + totalTimeoutMs;
     const start = Date.now();
     // Ollama wants `images` as bare base64 on the user message itself.
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || (opts?.attachments?.length ?? 0) > 0) {
+        throw new Error(
+          '[ollama] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      if (this.messages.at(-1)?.role !== 'tool') {
+        throw new Error('[ollama] a tool-result continuation requires a trailing tool result');
+      }
+    }
     // Non-vision models ignore the field, so it's safe to always attach
     // when present.
     const userMsg: OllamaMessage = { role: 'user', content: prompt };
@@ -657,7 +668,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
     // LlamaCppSession.sendAndWaitInner for the rationale.
     this.currentTurnStartIdx = this.messages.length;
     this.compactedThisTurn = false;
-    this.messages.push(userMsg);
+    if (!continueFromToolResult) this.messages.push(userMsg);
 
     // Reset captures — each sendAndWait surfaces only its own externals.
     this.capturedCalls = [];

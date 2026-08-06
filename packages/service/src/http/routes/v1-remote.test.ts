@@ -136,6 +136,50 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text).not.toContain('"type":"error"');
   });
 
+  it('marks a trailing tool-result request as a continuation, not an empty user turn', async () => {
+    const token = await pairDevice('device-tool-continuation');
+    const provider = (await svc.context.chat.getProviderForModel(
+      'copilot',
+      'mock-fast',
+    )) as MockProvider;
+    const callStart = provider.calls.length;
+    provider.script('continued after tool result');
+
+    const res = await httpFetch(`${baseUrl}/v1/remote/infer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        model: 'copilot:mock-fast',
+        systemMessage: 'You are a test.',
+        prompt: '',
+        priorMessages: [
+          { role: 'user', content: 'Build index.html.' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              { id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' },
+            ],
+          },
+          { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
+        ],
+        queue: { lane: 'interactive', affinity: true, sessionId: 's-tool', gezelId: 'g1' },
+      }),
+    });
+    expect(res.ok).toBe(true);
+    expect(await res.text()).toContain('"type":"done"');
+
+    const send = provider.calls
+      .slice(callStart)
+      .find((call) => call.kind === 'send' && call.prompt === '');
+    expect(send?.sendOpts?.continueFromToolResult).toBe(true);
+  });
+
   it('reports the provider post-admission context before inference', async () => {
     const token = await pairDevice('device-admit');
     const provider = (await svc.context.chat.getProviderForModel(

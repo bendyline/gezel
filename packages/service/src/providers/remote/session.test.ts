@@ -165,6 +165,174 @@ describe('RemoteSession', () => {
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
+  it('advances from acceptance note to deliverable write across remote forward passes', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const emitted = [
+      {
+        id: 'note-1',
+        name: 'write_task_note',
+        arguments: '{"ref":"frogger/1","stepId":"build","text":"Acceptance checklist"}',
+      },
+      {
+        id: 'write-1',
+        name: 'write_file',
+        arguments: '{"path":"index.html","content":"<!doctype html><canvas></canvas>"}',
+      },
+    ];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const call = emitted.shift();
+      return call
+        ? sseResponse([{ type: 'tool_call', calls: [call] }, { type: 'done' }])
+        : sseResponse([{ type: 'delta', text: 'Built the game.' }, { type: 'done' }]);
+    }) as unknown as typeof fetch;
+    const executed: string[] = [];
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_task_note: async () => {
+          executed.push('write_task_note');
+          return 'Appended acceptance checklist.';
+        },
+        write_file: async () => {
+          executed.push('write_file');
+          return 'Wrote index.html.';
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('Record the checklist, then build index.html.', {
+        attachments: [{ base64: 'aW1hZ2U=', mimeType: 'image/png', filename: 'reference.png' }],
+      }),
+    ).resolves.toBe('Built the game.');
+    expect(executed).toEqual(['write_task_note', 'write_file']);
+    expect(requests).toHaveLength(3);
+    expect(requests[0]!.attachments).toHaveLength(1);
+    expect(requests[1]!.prompt).toBe('');
+    expect(requests[1]!.attachments).toBeUndefined();
+    expect(requests[2]!.prompt).toBe('');
+    expect(requests[2]!.attachments).toBeUndefined();
+    expect(
+      (requests[2]!.priorMessages as Array<Record<string, unknown>>).filter(
+        (message) => message.role === 'user' && message.content === '',
+      ),
+    ).toEqual([]);
+  });
+
+  it('stops varying-text write_task_note spin in the outer remote loop', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let pass = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      pass += 1;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `note-${pass}`,
+              name: 'write_task_note',
+              arguments: JSON.stringify({
+                ref: 'frogger/1',
+                stepId: 'build',
+                text: `Acceptance checklist version ${pass}`,
+              }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    let noteWrites = 0;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_task_note: async () => {
+          noteWrites += 1;
+          return `Appended note ${noteWrites}.`;
+        },
+        write_file: async () => 'Wrote index.html.',
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      activeCraftbookStep: { name: 'Build' },
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('Record acceptance criteria, then write index.html.'),
+    ).rejects.toMatchObject({ code: 'turn-aborted' });
+    expect(noteWrites).toBe(5);
+    expect(requests).toHaveLength(5);
+    const fourthPrior = requests[3]!.priorMessages as Array<Record<string, unknown>>;
+    expect(fourthPrior.at(-1)?.content).toContain('Stop re-writing');
+  });
+
+  it('stops repeated tool failures across remote passes even when arguments change', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let pass = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      pass += 1;
+      return sseResponse([
+        {
+          type: 'tool_call',
+          calls: [
+            {
+              id: `write-${pass}`,
+              name: 'write_file',
+              arguments: JSON.stringify({
+                path: `attempt-${pass}.html`,
+                content: `draft ${pass}`,
+              }),
+            },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    let writes = 0;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 'tok',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        write_file: async () => {
+          writes += 1;
+          return { text: 'Write failed: validation rejected the draft', isError: true };
+        },
+      }),
+      systemMessage: 'sys',
+      model: 'mlx:gemma4-e4b-q4',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('Write the deliverable.')).rejects.toMatchObject({
+      code: 'turn-aborted',
+    });
+    expect(writes).toBe(5);
+    expect(requests).toHaveLength(5);
+    const fourthPrior = requests[3]!.priorMessages as Array<Record<string, unknown>>;
+    expect(fourthPrior.at(-1)?.content).toContain('STOP retrying fragments');
+  });
+
   it('ends the turn immediately after a successful project kickoff', async () => {
     let forwardPasses = 0;
     let kickoffCalls = 0;

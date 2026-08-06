@@ -209,6 +209,36 @@ describe('LlamaCppProvider constructor', () => {
     expect((session as unknown as { numCtx: number }).numCtx).toBe(65_536);
   });
 
+  it('continues from a seeded tool result without appending an empty user turn', async () => {
+    let body: { messages?: Array<{ role: string; content?: string }> } = {};
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? '{}')) as typeof body;
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Built it.' } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'system',
+      priorMessages: [
+        { role: 'user', content: 'Build index.html.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' }],
+        },
+        { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
+      ],
+    });
+
+    await session.sendAndWait('', { continueFromToolResult: true });
+
+    expect(body.messages?.at(-1)).toMatchObject({ role: 'tool', content: 'Appended note.' });
+    expect(body.messages).not.toContainEqual({ role: 'user', content: '' });
+  });
+
   it('emits wire pulse on framing chunks with no visible content', async () => {
     // Two chunks with empty delta, one real content, one final with
     // usage. The empty-delta chunks should fire `wire_pulse`; the
