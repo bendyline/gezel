@@ -3,6 +3,7 @@ import {
   type NightShiftReport,
   type NightShiftReviewResponse,
   type NightShiftWindow,
+  type Question,
   type Task,
   findFirstH1,
   lastNightShiftWindow,
@@ -135,6 +136,19 @@ export async function buildNightShiftReview(
     tasksCompleted,
     reports,
   };
+}
+
+export function nightShiftReportAttachmentPath(
+  report: Pick<NightShiftReport, 'projectId' | 'path'>,
+): string {
+  return `projects/${report.projectId}/artifacts/${report.path}`;
+}
+
+export function normalizeNightShiftReportAttachment(question: Question): Question {
+  const report = question.intent?.kind === 'night-shift-review' ? question.intent.reports[0] : null;
+  if (!report) return question;
+  const documentPath = nightShiftReportAttachmentPath(report);
+  return question.documentPath === documentPath ? question : { ...question, documentPath };
 }
 
 /** Artifact paths a task's embedded craftbook declares as deliverables. */

@@ -244,6 +244,7 @@ const { readBundleMeta } = await import('./extract-bundle.js');
 const ENV_KEYS = [
   'GEZEL_PNPM_PATH',
   'GEZEL_NODE_PATH',
+  'GEZEL_DS4_SERVER_BIN',
   'GEZEL_SD_SERVER_BIN',
   'GEZEL_LLAMA_SERVER_BIN',
   'GEZEL_LLAMA_DETECTED_BACKEND',
@@ -849,6 +850,11 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(ctx.nativeRoot);
+    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
+      candidates: [ctx.nativeRoot],
+      allowStandaloneMacPayload: true,
+    });
     await svc.shutdown();
   });
 
@@ -885,6 +891,42 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
+    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
+      candidates: [installedRoot],
+    });
+    await svc.shutdown();
+  });
+
+  it('keeps the standalone exception scoped to dev when falling back to an installed app', async () => {
+    ctx.nativeRoot = join(testHome, 'native-bin');
+    const installedRoot = join(testHome, 'installed-native-bin');
+    ctx.installedNativeCandidates = [installedRoot];
+    await mkdir(ctx.nativeRoot, { recursive: true });
+    await mkdir(installedRoot, { recursive: true });
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    vi.mocked(reuseVerifiedElectronNativeBinaries)
+      .mockResolvedValueOnce({ reused: false, reason: 'dev hash mismatch' })
+      .mockImplementationOnce(async () => {
+        process.env.GEZEL_NATIVE_BIN_DIR = installedRoot;
+        return {
+          reused: true,
+          nativeBinDir: installedRoot,
+          reason: 'verified Electron native release test',
+        };
+      });
+
+    const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
+
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
+    expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(1, {
+      candidates: [ctx.nativeRoot],
+      allowStandaloneMacPayload: true,
+    });
+    expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(2, {
+      candidates: [installedRoot],
+    });
     await svc.shutdown();
   });
 });

@@ -128,7 +128,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
-import { buildNightShiftReview } from './tasks/night-review.js';
+import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
@@ -1621,7 +1621,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       choices: ['Dismiss'],
       allowWriteIn: false,
       multiSelect: false,
-      ...(review.reports[0] ? { documentPath: review.reports[0].path } : {}),
+      ...(review.reports[0]
+        ? { documentPath: nightShiftReportAttachmentPath(review.reports[0]) }
+        : {}),
       intent: {
         kind: 'night-shift-review',
         windowKey: review.windowKey,

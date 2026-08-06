@@ -2000,9 +2000,10 @@ html.embedded-chat #root {
   font-size: 0.75rem;
 }
 
-/* Per-item action cluster: ▲ ▼ ✕. Hidden until the row is hovered
+/* Per-item action cluster: ▲ ▼ ✕ plus the active chat's Stop key. Hidden until the row is hovered
  * so the resting list stays scannable; appears in-place on hover so
- * the row layout never reflows under the cursor. */
+ * the row layout never reflows under the cursor. Stop stays visible because
+ * ending the one running turn is the active row's primary purpose. */
 .queue-meter-panel-actions {
   position: relative;
   z-index: 2;
@@ -2017,6 +2018,9 @@ html.embedded-chat #root {
 }
 .queue-meter-panel-item:hover .queue-meter-panel-actions,
 .queue-meter-panel-actions:focus-within {
+  opacity: 1;
+}
+.queue-meter-panel-actions-active {
   opacity: 1;
 }
 .queue-meter-panel-action {
@@ -2043,6 +2047,25 @@ html.embedded-chat #root {
 .queue-meter-panel-action-cancel:hover {
   color: #d97a6c;
   background: rgba(217, 122, 108, 0.12);
+}
+.queue-meter-panel-action-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+.queue-meter-panel-action-stop:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.queue-meter-panel-action-stop:disabled {
+  opacity: 0.65;
 }
 
 .nav {

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MachineMemoryUsageSchema } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../service.js';
@@ -78,6 +79,76 @@ describe('split user + machine services', () => {
     expect((await api('/api/video-gen/models')).status).toBe(200);
     expect((await api('/api/audio/stt/models')).status).toBe(200);
     expect((await api('/api/model-fitness')).status).toBe(200);
+  });
+
+  it('sources memory reservations and pool boundaries from the machine engine', async () => {
+    const GiB = 1024 ** 3;
+    const machineChat = machine.context.chat;
+    const userChat = user.context.chat;
+    const originalMachinePeek = machineChat.peekEngineStatus;
+    const originalUserPeek = userChat.peekEngineStatus;
+    machineChat.peekEngineStatus = (() => ({
+      entries: [
+        {
+          key: 'llama-cpp:gemma4-e4b-q4:0',
+          provider: 'llama-cpp',
+          modelId: 'gemma4-e4b-q4',
+          replicaIdx: 0,
+          residentBytes: 6 * GiB,
+          modelWeightsBytes: 5 * GiB,
+          lastUsedAt: 1,
+          createdAt: 1,
+          draining: false,
+        },
+      ],
+      committedBytes: 6 * GiB,
+      budgetBytes: 24.8 * GiB,
+      enforced: true,
+      systemRamBytes: 16 * GiB,
+      autoBudgetBytes: 24.8 * GiB,
+      overridden: false,
+      pools: {
+        kind: 'discrete-gpu',
+        vramBytes: 15.2 * GiB,
+        ramShareBytes: 9.6 * GiB,
+        fastBytes: 15.2 * GiB,
+      },
+      ramSpillover: {
+        allowed: false,
+        auto: false,
+        overridden: false,
+        coResidencyBytes: 15.2 * GiB,
+      },
+    })) as typeof machineChat.peekEngineStatus;
+    userChat.peekEngineStatus = (() => {
+      throw new Error('memory telemetry must not inspect the retired user-daemon engine pool');
+    }) as typeof userChat.peekEngineStatus;
+
+    try {
+      const response = await api('/api/system/memory/usage');
+      expect(response.status).toBe(200);
+      const usage = MachineMemoryUsageSchema.parse(await response.json());
+      expect(usage).toMatchObject({
+        engineReservedBytes: 6 * GiB,
+        engineBudgetBytes: 24.8 * GiB,
+        enginePools: {
+          kind: 'discrete-gpu',
+          vramBytes: 15.2 * GiB,
+          ramShareBytes: 9.6 * GiB,
+        },
+        residentModels: [
+          {
+            provider: 'llama-cpp',
+            modelId: 'gemma4-e4b-q4',
+            reservedBytes: 6 * GiB,
+            replicaCount: 1,
+          },
+        ],
+      });
+    } finally {
+      machineChat.peekEngineStatus = originalMachinePeek;
+      userChat.peekEngineStatus = originalUserPeek;
+    }
   });
 
   it('merges split queue ownership and routes cache operations to the correct daemon', async () => {

@@ -110,6 +110,40 @@ describe('POST /api/questions — cross-turn dedup', () => {
   });
 });
 
+describe('GET /api/questions — night-shift report attachments', () => {
+  it('qualifies a legacy bare report path from the persisted review intent', async () => {
+    const questionId = crypto.randomUUID();
+    await svc.context.store.writeQuestion({
+      id: questionId,
+      projectId: 'default',
+      gezelId: 'wren',
+      sessionId: '',
+      prompt: 'The night shift finished.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      documentPath: 'night-shift-report.md',
+      intent: {
+        kind: 'night-shift-review',
+        windowKey: '2026-08-04',
+        tasksCompleted: 1,
+        reports: [
+          {
+            projectId: 'default',
+            path: 'night-shift-report.md',
+            title: 'Night Shift Report — 2026-08-04',
+            actionCount: 0,
+          },
+        ],
+      },
+      createdAt: new Date().toISOString(),
+    });
+
+    const question = (await pendingFor('default')).find((entry) => entry.id === questionId);
+    expect(question?.documentPath).toBe('projects/default/artifacts/night-shift-report.md');
+  });
+});
+
 describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
   async function seedScheduleHost(projectName: string): Promise<{
     projectId: string;

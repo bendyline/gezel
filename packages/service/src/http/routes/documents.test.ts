@@ -75,6 +75,21 @@ describe('PUT /api/documents/write + GET /read', () => {
     const res = await api('GET', '/api/documents/read?path=does/not/exist.md');
     expect(res.status).toBe(404);
   });
+
+  it('reads a Default-project report through its qualified artifact attachment path', async () => {
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'night-shift-report.md',
+      '# Night Shift Report\n',
+    );
+
+    const path = encodeURIComponent('projects/default/artifacts/night-shift-report.md');
+    const res = await api('GET', `/api/documents/read?path=${path}`);
+    expect(res.status).toBe(200);
+    const got = (await res.json()) as { content: string; kind: string };
+    expect(got.kind).toBe('artifact');
+    expect(got.content).toContain('Night Shift Report');
+  });
 });
 
 describe('GET /api/documents — listing', () => {

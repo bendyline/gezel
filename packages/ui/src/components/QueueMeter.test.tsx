@@ -122,6 +122,25 @@ describe('QueueMeter — preparing window', () => {
     expect(within(panel).queryByText(/project-7/)).not.toBeInTheDocument();
   });
 
+  it('stops an active chat from its in-flight row', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+    vi.mocked(api.cancelChatSessionTurn).mockResolvedValue({ cancelled: true });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const stop = await screen.findByRole('button', { name: 'Stop active chat with Alejandro' });
+    expect(stop).toBeVisible();
+    expect(stop).toHaveTextContent('■ Stop');
+    await userEvent.click(stop);
+
+    expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('sess-1');
+    expect(stop).toBeDisabled();
+    expect(stop).toHaveTextContent('Stopping…');
+  });
+
   it('keeps provider labels and plain status markers in boring mode', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'llama-cpp',
@@ -219,6 +238,9 @@ describe('QueueMeter — preparing window', () => {
     expect(panelAvatar?.style.color).toBe('var(--accent-selection-ink)');
     expect(container.querySelectorAll('.gezel-icon-fallback')).toHaveLength(2);
     expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
+    expect(
+      within(panel).queryByRole('button', { name: /Stop active chat/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('refreshes a newly recruited gezel instead of mislabeling their turn as System', async () => {

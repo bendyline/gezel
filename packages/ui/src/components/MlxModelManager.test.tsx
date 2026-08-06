@@ -29,7 +29,7 @@ const INSTALLED = {
       catalogVersion: '1.0.0',
     },
   ],
-} as never;
+} satisfies Awaited<ReturnType<typeof api.listMlxModels>>;
 
 function fitnessRecord(overrides: Record<string, unknown> = {}) {
   const ok = { ok: true, detail: 'fine' };

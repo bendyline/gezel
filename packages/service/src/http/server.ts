@@ -80,7 +80,7 @@ import { searchRoutes } from './routes/search.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
-import { systemRoutes } from './routes/system.js';
+import { systemMemoryRoutes, systemRoutes } from './routes/system.js';
 import { terminalRoutes } from './routes/terminals.js';
 import { timelineRoutes } from './routes/timeline.js';
 import { toolRoutes } from './routes/tools.js';
@@ -465,6 +465,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.route('/v1/remote/manage/engines', enginesRoutes(ctx));
     app.route('/v1/remote/manage/queues', queueRoutes(ctx));
     app.route('/v1/remote/manage/cache', cacheRoutes(ctx));
+    app.route('/v1/remote/manage/system/memory', systemMemoryRoutes(ctx));
     app.route('/v1/remote/manage/model-fitness', modelFitnessRoutes(ctx));
     app.route('/v1/remote/manage/model-bundles', modelBundleRoutes(ctx));
     // These routers mix project-persisting execution with model lifecycle.

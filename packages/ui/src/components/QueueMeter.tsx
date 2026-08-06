@@ -707,6 +707,7 @@ function QueueMeterPanel({
    *  parent can refresh the snapshot without waiting for the 3s poll. */
   onItemChanged: () => void;
 }) {
+  const [stoppingSessionIds, setStoppingSessionIds] = useState<Set<string>>(() => new Set());
   const providers = PROVIDER_ORDER.map((name) => ({
     name,
     state: status.providers[name],
@@ -717,6 +718,31 @@ function QueueMeterPanel({
   const showPreparing = onDeviceProvider !== null && preparingTurns.length > 0;
   const handoffs = taskHandoffSplit(status.taskRunner);
   const holdNote = handoffHoldNote(status.taskRunner);
+
+  const stopActiveChat = useCallback(
+    async (sessionId: string) => {
+      setStoppingSessionIds((current) => new Set(current).add(sessionId));
+      try {
+        const result = await api.cancelChatSessionTurn(sessionId);
+        if (!result.cancelled) {
+          setStoppingSessionIds((current) => {
+            const next = new Set(current);
+            next.delete(sessionId);
+            return next;
+          });
+        }
+        onItemChanged();
+      } catch {
+        // Keep the control retryable if the service could not be reached.
+        setStoppingSessionIds((current) => {
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
+    },
+    [onItemChanged],
+  );
 
   return (
     <div className="queue-meter-panel" aria-label="AI chat queue">
@@ -841,6 +867,12 @@ function QueueMeterPanel({
                           .find((c) => c.providerName === name)
                           ?.sessions.find((s) => s.sessionId === a.sessionId)
                       : undefined;
+                  const actor = describeActor(a.gezelId, a.actorLabel, gezels, boringMode);
+                  const activeSessionId =
+                    a.sessionId && !a.sessionId.startsWith('dev:') ? a.sessionId : undefined;
+                  const stopping = activeSessionId
+                    ? stoppingSessionIds.has(activeSessionId)
+                    : false;
                   return (
                     <li
                       key={`active-${a.sessionId ?? i}`}
@@ -848,7 +880,7 @@ function QueueMeterPanel({
                     >
                       <QueueItemOpenButton
                         sessionId={a.sessionId}
-                        actor={describeActor(a.gezelId, a.actorLabel, gezels, boringMode)}
+                        actor={actor}
                         onClose={onClose}
                       />
                       <QueueItemMarker
@@ -872,6 +904,20 @@ function QueueMeterPanel({
                       <span className="queue-meter-panel-time muted">
                         {formatMs(a.runningForMs)}
                       </span>
+                      {activeSessionId && (
+                        <span className="queue-meter-panel-actions queue-meter-panel-actions-active">
+                          <button
+                            type="button"
+                            className="queue-meter-panel-action queue-meter-panel-action-stop"
+                            aria-label={`Stop active chat with ${actor}`}
+                            title="Stop this active chat"
+                            disabled={stopping}
+                            onClick={() => void stopActiveChat(activeSessionId)}
+                          >
+                            {stopping ? 'Stopping…' : '■ Stop'}
+                          </button>
+                        </span>
+                      )}
                     </li>
                   );
                 })}

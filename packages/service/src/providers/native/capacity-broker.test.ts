@@ -22,6 +22,7 @@ import {
   plannedLocalEngineSlots,
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
+  setDetectedGpuVramBytes,
 } from './capacity-broker.js';
 
 const GB = 1024 ** 3;
@@ -604,6 +605,18 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     // The model from the report: ~42.2 GB resident. Admitted now, denied before.
     expect(budget.budgetBytes).toBeGreaterThan(42.2 * GB);
     expect(autoDetectBudgetBytes(RAM, host)).toBe(budget.budgetBytes);
+  });
+
+  it('keeps an explicitly detected 16 GiB card discrete beside 16 GiB RAM', () => {
+    setDetectedGpuVramBytes(16 * GB, false);
+    try {
+      const budget = computeCapacityBudget({ systemRamBytes: 16 * GB });
+      expect(budget.kind).toBe('discrete-gpu');
+      expect(budget.vramBytes).toBe(Math.floor(16 * GB * 0.95));
+      expect(budget.ramShareBytes).toBe(Math.floor(16 * GB * 0.6));
+    } finally {
+      setDetectedGpuVramBytes(null);
+    }
   });
 
   it('keeps the RAM share bounded no matter what the card absorbs', () => {
