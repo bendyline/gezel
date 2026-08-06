@@ -15,6 +15,7 @@ import {
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
   planCtxTokensForMemory,
+  resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from './capacity-broker.js';
 
@@ -847,6 +848,47 @@ describe('model-aware context admission', () => {
         requestedContextWindow: 98_304,
       }).requestedPerTurnCtxTokens,
     ).toBe(98_304);
+  });
+
+  it('adaptive llama.cpp sizing keeps the practical target and 64K floor', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        adaptiveContextWindow: 98_304,
+        contextSizing: 'adaptive',
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 65_536,
+      requestedPerTurnCtxTokens: 98_304,
+    });
+  });
+
+  it('model-max sizing makes the advertised window a strict admission minimum', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        adaptiveContextWindow: 65_536,
+        contextSizing: 'model-max',
+      }),
+    ).toMatchObject({
+      nativeContextWindow: 262_144,
+      minimumPerTurnCtxTokens: 262_144,
+      requestedPerTurnCtxTokens: 262_144,
+    });
+  });
+
+  it('an explicit numeric override wins over model-max and retains adaptive fallback', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        explicitContextWindow: 131_072,
+        adaptiveContextWindow: 65_536,
+        contextSizing: 'model-max',
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 65_536,
+      requestedPerTurnCtxTokens: 131_072,
+    });
   });
 });
 

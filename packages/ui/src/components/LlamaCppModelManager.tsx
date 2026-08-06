@@ -1,9 +1,4 @@
-import type {
-  CatalogItemSummary,
-  ChatModelCategory,
-  ChatModelManifest,
-  RecoDevice,
-} from '@bendyline/gezel';
+import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyline/gezel';
 import {
   composeFitnessBadge,
   computeModelFit,
@@ -165,8 +160,6 @@ interface Props {
   compact?: boolean;
 }
 
-type CategoryTab = ChatModelCategory | 'all';
-
 /**
  * llama.cpp local model install/list/delete UX. Mirrors
  * OllamaModelManager structurally but talks to /api/llama-cpp/* and
@@ -195,7 +188,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [toDelete, setToDelete] = useState<string | null>(null);
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
   const [probing, setProbing] = useState<string[]>([]);
@@ -546,17 +538,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     return map;
   }, [catalogItems]);
 
-  const availableCategories = useMemo<CategoryTab[]>(() => {
-    const present = new Set<ChatModelCategory>();
-    for (const item of catalogItems) {
-      const m = asLlamaCppEntry(item.manifest);
-      if (!m) continue;
-      present.add(m.category ?? 'general');
-    }
-    const order: ChatModelCategory[] = ['general', 'coding', 'reasoning', 'vision', 'embedding'];
-    return ['all' as CategoryTab, ...order.filter((c) => present.has(c))];
-  }, [catalogItems]);
-
   return (
     <div className="ollama-model-manager">
       {installs.size > 0 && (
@@ -651,8 +632,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th title="Effective per-turn context window after Gezel's settings and memory limits">
-                    Context cap
+                  <th title="Effective per-turn context size after Gezel's settings and memory limits">
+                    Context size
                   </th>
                   <th>Fitness</th>
                   <th />
@@ -726,11 +707,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       <td
                         title={
                           m.effectiveContextWindow
-                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The cap accounts for model tuning, settings, concurrency, and available memory.`
-                            : 'The effective context cap is unavailable.'
+                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory.`
+                            : m.contextSizingStatus === 'insufficient-memory'
+                              ? 'The selected context sizing policy cannot fit this model safely. Choose Adaptive, unload another model, or free memory before trying again.'
+                              : 'The effective context size is unavailable.'
                         }
                       >
-                        {formatContextWindow(m.effectiveContextWindow)}
+                        {m.contextSizingStatus === 'insufficient-memory'
+                          ? "Won't fit"
+                          : formatContextWindow(m.effectiveContextWindow)}
                       </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">
@@ -842,18 +827,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             </button>
           </p>
         )}
-        <div className="provider-switch" style={{ marginBottom: '0.5rem' }}>
-          {availableCategories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`provider-pill${activeCategory === c ? ' provider-pill-active' : ''}`}
-              onClick={() => setActiveCategory(c)}
-            >
-              {c === 'all' ? 'All' : c[0]?.toUpperCase() + c.slice(1)}
-            </button>
-          ))}
-        </div>
         <CatalogBrowser
           kind="chat-model"
           emptyMessage="No on-device models in the catalog yet."
@@ -862,9 +835,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           filter={(item: CatalogItemSummary) => {
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
-            if (activeCategory !== 'all' && (m.category ?? 'general') !== activeCategory) {
-              return false;
-            }
             if (!showAll && memory) {
               // MoE-aware: keep any model that can RUN (incl. big MoE that
               // fits only via expert-offload to RAM) — hide only the truly

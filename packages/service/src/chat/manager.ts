@@ -164,6 +164,7 @@ import {
   CapacityDeniedError,
   availableSystemRamBytes,
   formatContextCapacityDenial,
+  resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from '../providers/native/capacity-broker.js';
 import { type LocalProviderName, makeEngineKey } from '../providers/native/engine-key.js';
@@ -10507,12 +10508,17 @@ export class ChatManager {
       return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
     })();
     const manifestEngineConfig = await resolveCatalogLlamaCppEngineConfig(this.catalog, modelId);
-    const preferredCap =
-      envNumCtx ?? config.llamaCppNumCtx ?? manifestEngineConfig?.contextSize ?? 65_536;
-    const contextRequirement = resolveLocalContextRequirement({
+    const explicitContextWindow = envNumCtx ?? config.llamaCppNumCtx;
+    const contextRequirement = resolveLlamaCppContextRequirement({
       modelContextWindow: installed.contextWindow,
-      requestedContextWindow: preferredCap,
+      ...(explicitContextWindow !== undefined ? { explicitContextWindow } : {}),
+      ...(manifestEngineConfig?.contextSize !== undefined
+        ? { adaptiveContextWindow: manifestEngineConfig.contextSize }
+        : {}),
+      contextSizing: config.llamaCppContextSizing ?? 'adaptive',
     });
+    const strictModelMax =
+      config.llamaCppContextSizing === 'model-max' && explicitContextWindow === undefined;
     let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
     if (residentContextWindow !== undefined || envNumCtx !== undefined) {
       return useResidentOr(effectiveNumCtx, contextRequirement.minimumPerTurnCtxTokens);
@@ -10601,6 +10607,7 @@ export class ChatManager {
       // what the engine will actually grant.
       const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
       const windowedCacheWillRun =
+        !strictModelMax &&
         (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
         (explicitSwaFull === false ||
           (explicitSwaFull === undefined &&
@@ -17397,18 +17404,15 @@ export async function buildLlamaCppProvider(opts: {
   // We want a generous working window without allocating a full 128K
   // slot on a 2B model where most of it would sit empty and eat VRAM.
   //
-  //   preferredCap          — env/`config.llamaCppNumCtx`, else the
-  //                           per-model manifest
+  //   adaptive target       — per-model manifest
   //                           `tuning.engine.llamaCpp.contextSize`, else
   //                           the 65K global default (see below).
-  //   modelCtx              — advertised native context from the GGUF
-  //                           metadata the catalog captured on install.
-  //                           Unknown → fall back to preferredCap.
-  //   effectiveNumCtx       — min of the two. Users who explicitly pin
-  //                           a high number get honored up to the
-  //                           model's native max. Semantics: PER SLOT
-  //                           (i.e. per concurrent turn), not the
-  //                           total KV cache.
+  //   model maximum         — advertised native context from the GGUF
+  //                           metadata captured on install.
+  //   effectiveNumCtx       — the selected policy's target, clamped to the
+  //                           native max and then admitted against memory.
+  //                           Semantics: PER SLOT (i.e. per concurrent turn),
+  //                           not the total KV cache.
   //
   // The launch passes `--ctx-size ${effectiveNumCtx * slots}` because
   // llama-server divides total ctx evenly across `--parallel`, so the
@@ -17430,7 +17434,7 @@ export async function buildLlamaCppProvider(opts: {
   // the 32+ GB hosts this size model already requires.
   // Per-model engine-launch defaults from the catalog manifest
   // (`tuning.engine.llamaCpp`). Resolved here (stable catalog data) so
-  // `contextSize` can feed `preferredCap` below; also consumed later by
+  // `contextSize` can feed the Adaptive target below; also consumed later by
   // specDraft / MTP resolution and merged UNDER the user's global
   // `config.llamaCpp*` overrides by `buildLlamaCppEngineArgs`.
   const manifestEngineConfig = opts.catalog
@@ -17441,16 +17445,17 @@ export async function buildLlamaCppProvider(opts: {
     : undefined;
 
   const PREFERRED_CTX_DEFAULT = 65_536;
-  // Precedence: env (`GEZEL_LLAMA_NUM_CTX`) / user `config.llamaCppNumCtx`
-  // override the per-model manifest `tuning.engine.llamaCpp.contextSize`,
-  // which overrides the 64K global default. `effectiveNumCtx` still clamps
-  // to the model's native GGUF train ctx (`modelCtx`) below, so a manifest
-  // can only opt a model UP toward its own window, never past it.
-  const preferredCap = numCtx ?? manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT;
-  const contextRequirement = resolveLocalContextRequirement({
+  // Explicit env/config numeric values win. Otherwise Adaptive uses the
+  // per-model manifest recommendation (or the 64K practical default), while
+  // Model maximum requests the GGUF's native window and makes it the strict
+  // admission floor. Every path still clamps to the native train context.
+  const contextRequirement = resolveLlamaCppContextRequirement({
     modelContextWindow: modelCatalogInfo?.contextWindow,
-    requestedContextWindow: preferredCap,
+    ...(numCtx !== undefined ? { explicitContextWindow: numCtx } : {}),
+    adaptiveContextWindow: manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT,
+    contextSizing: config.llamaCppContextSizing ?? 'adaptive',
   });
+  const strictModelMax = config.llamaCppContextSizing === 'model-max' && numCtx === undefined;
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.
   let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
@@ -17769,7 +17774,7 @@ export async function buildLlamaCppProvider(opts: {
         // the pre-windowed-admission behavior).
         let ladderPlan: typeof admission | null = admission;
         const windowedCacheWillRun =
-          fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
+          !strictModelMax && fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
         if (windowedCacheWillRun) {
           // The denial, the slot reduction, and the clamp above are all
           // driven by full-attention KV math, which overstates the windowed

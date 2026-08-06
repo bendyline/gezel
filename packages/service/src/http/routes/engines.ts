@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import type { NativeEngineName } from '@bendyline/gezel';
+import { LlamaCppContextSizingResponseSchema, type NativeEngineName } from '@bendyline/gezel';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
@@ -110,6 +110,28 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       });
     }
     return c.json(snap);
+  });
+
+  /**
+   * Machine-owned llama.cpp context policy. This deliberately lives under
+   * the engine-management boundary instead of `/api/config`: packaged user
+   * daemons proxy this route to the machine engine, while local/dev installs
+   * persist it in their own store. The selector therefore controls the
+   * process that actually performs admission in both hosting shapes.
+   */
+  app.get('/llama-cpp/context-sizing', async (c) => {
+    const config = await ctx.store.readConfig();
+    return c.json({ policy: config.llamaCppContextSizing ?? 'adaptive' });
+  });
+
+  app.put('/llama-cpp/context-sizing', async (c) => {
+    const body = LlamaCppContextSizingResponseSchema.parse(await c.req.json());
+    const updated = await ctx.store.writeConfig({
+      // Keep the default sparse on disk; explicit model-max is the only
+      // durable override needed.
+      llamaCppContextSizing: body.policy === 'adaptive' ? null : body.policy,
+    });
+    return c.json({ policy: updated.llamaCppContextSizing ?? 'adaptive' });
   });
 
   /**

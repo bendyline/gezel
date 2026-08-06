@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { llamaCppRoutes } from './llama-cpp.js';
 import { mlxRoutes } from './mlx.js';
@@ -48,5 +49,25 @@ describe('local model inventory context caps', () => {
       models: [{ contextWindow: 131_072, effectiveContextWindow: 65_536 }],
     });
     expect(previewContextWindowForModel).toHaveBeenCalledWith('mlx', 'local-model');
+  });
+
+  it('marks a llama.cpp model whose selected context policy cannot fit', async () => {
+    const ctx = {
+      llamaCppModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: {
+        previewContextWindowForModel: vi.fn(async () => {
+          throw new CapacityDeniedError('strict context does not fit');
+        }),
+      },
+    } as unknown as ServiceContext;
+
+    const response = await llamaCppRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [{ contextSizingStatus: 'insufficient-memory' }],
+    });
   });
 });

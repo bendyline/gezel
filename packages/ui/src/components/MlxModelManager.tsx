@@ -577,8 +577,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th title="Effective per-turn context window after Gezel's configured limit">
-                    Context cap
+                  <th title="Effective per-turn context size after Gezel's configured limit">
+                    Context size
                   </th>
                   <th>Fitness</th>
                   <th />
@@ -627,7 +627,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                         title={
                           m.effectiveContextWindow
                             ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
-                            : 'The effective context cap is unavailable.'
+                            : 'The effective context size is unavailable.'
                         }
                       >
                         {formatContextWindow(m.effectiveContextWindow)}

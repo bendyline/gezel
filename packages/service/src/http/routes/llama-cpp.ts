@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -21,13 +22,23 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     const installed = await ctx.llamaCppModels.listInstalled();
     const models = await Promise.all(
       installed.map(async (model) => {
-        const effectiveContextWindow = await ctx.chat
-          .previewContextWindowForModel('llama-cpp', model.id)
-          .catch(() => undefined);
-        return {
-          ...model,
-          ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
-        };
+        try {
+          const effectiveContextWindow = await ctx.chat.previewContextWindowForModel(
+            'llama-cpp',
+            model.id,
+          );
+          return {
+            ...model,
+            ...(effectiveContextWindow ? { effectiveContextWindow } : {}),
+          };
+        } catch (error) {
+          return {
+            ...model,
+            ...(error instanceof CapacityDeniedError
+              ? { contextSizingStatus: 'insufficient-memory' as const }
+              : {}),
+          };
+        }
       }),
     );
     return c.json({ models });

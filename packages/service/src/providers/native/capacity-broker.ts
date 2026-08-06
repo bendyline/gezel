@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { freemem, totalmem } from 'node:os';
-import { createLogger } from '@bendyline/gezel';
+import { type LlamaCppContextSizing, createLogger } from '@bendyline/gezel';
 import {
   type CapacityBudget,
   autoAllowRamSpillover,
@@ -723,6 +723,35 @@ export function resolveLocalContextRequirement(opts: {
     minimumPerTurnCtxTokens: minimum,
     requestedPerTurnCtxTokens: Math.min(native, Math.max(preferred, minimum)),
   };
+}
+
+/**
+ * Apply llama.cpp's user-selectable sizing policy on top of the shared local
+ * context floor. Explicit numeric overrides keep their historical semantics
+ * and win over the selector. In strict model-max mode the requested native
+ * window is also the admission minimum, so the planner may reduce slots but
+ * cannot silently shorten the context window to make the model fit.
+ */
+export function resolveLlamaCppContextRequirement(opts: {
+  modelContextWindow?: number;
+  explicitContextWindow?: number;
+  adaptiveContextWindow?: number;
+  contextSizing?: LlamaCppContextSizing;
+}): LocalContextRequirement {
+  const strictModelMax =
+    opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
+  const requestedContextWindow =
+    opts.explicitContextWindow ??
+    (strictModelMax ? opts.modelContextWindow : opts.adaptiveContextWindow);
+  const resolved = resolveLocalContextRequirement({
+    ...(opts.modelContextWindow !== undefined
+      ? { modelContextWindow: opts.modelContextWindow }
+      : {}),
+    ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
+  });
+  return strictModelMax
+    ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens }
+    : resolved;
 }
 
 /** Numerical floor for the low-level clamp calculation. Production admission

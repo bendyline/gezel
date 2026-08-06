@@ -36,22 +36,21 @@ describe('LlamaCppSettings', () => {
     vi.mocked(api.updateConfig).mockImplementation(
       async (patch) => ({ ...BASE_CONFIG, ...patch }) as ConfigResponse,
     );
+    vi.mocked(api.getLlamaCppContextSizing).mockResolvedValue({ policy: 'adaptive' });
+    vi.mocked(api.updateLlamaCppContextSizing).mockImplementation(async (policy) => ({ policy }));
     vi.mocked(api.getLlamaCppLog).mockResolvedValue({
       path: '/tmp/llamacpp.log',
       tail: 'engine started ok',
     } as never);
   });
 
-  it('renders the installed model count and the default-model dropdown', async () => {
+  it('renders the default-model dropdown without repeating the installed model count', async () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
-    await waitFor(() => {
-      expect(screen.getByText(/Local models:/)).toBeInTheDocument();
-    });
-    expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /First local model/ })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /First local model/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Llama 3 8B \(llama-3-8b\)/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Local models:/)).not.toBeInTheDocument();
   });
 
   it('shows model selection and downloads before engine memory management', async () => {
@@ -136,9 +135,7 @@ describe('LlamaCppSettings', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Local models:/)).toBeInTheDocument();
-    });
+    await screen.findByRole('option', { name: /First local model/ });
     expect(screen.queryByRole('heading', { name: 'Machine health' })).not.toBeInTheDocument();
   });
 
@@ -151,11 +148,9 @@ describe('LlamaCppSettings', () => {
         health={BASE_HEALTH}
       />,
     );
-    await waitFor(() => {
-      expect(screen.getByText(/Local models:/)).toBeInTheDocument();
-    });
+    await screen.findByRole('option', { name: /First local model/ });
 
-    // The default-model select is the first <select>; backend is second.
+    // The default-model select remains first even as Advanced gains controls.
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
     fireEvent.change(selects[0]!, { target: { value: 'qwen-2.5-7b' } });
 
@@ -175,9 +170,7 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/Engine backend/)).toBeInTheDocument();
     });
 
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    // Backend select is the second one (default-model select is first).
-    fireEvent.change(selects[1]!, { target: { value: 'cpu' } });
+    fireEvent.change(screen.getByLabelText('Engine backend'), { target: { value: 'cpu' } });
 
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppBackendOverride: 'cpu' });
@@ -193,8 +186,7 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/Engine backend/)).toBeInTheDocument();
     });
 
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    fireEvent.change(selects[1]!, { target: { value: 'auto' } });
+    fireEvent.change(screen.getByLabelText('Engine backend'), { target: { value: 'auto' } });
 
     // null, not undefined: undefined is stripped by JSON.stringify, so only
     // an explicit null clears the pinned value on the store side.
@@ -211,6 +203,23 @@ describe('LlamaCppSettings', () => {
     await waitFor(() => {
       expect(screen.getByText(/Restart the app to apply/)).toBeInTheDocument();
     });
+  });
+
+  it('loads and persists the machine-owned context sizing policy', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+
+    const selector = await screen.findByLabelText('Context sizing');
+    expect(selector).toHaveValue('adaptive');
+
+    fireEvent.change(selector, { target: { value: 'model-max' } });
+
+    await waitFor(() => {
+      expect(api.updateLlamaCppContextSizing).toHaveBeenCalledWith('model-max');
+    });
+    expect(selector).toHaveValue('model-max');
+    expect(screen.getByText(/model's full advertised window/i)).toBeInTheDocument();
   });
 
   it('does NOT show the restart hint when override matches running backend', async () => {

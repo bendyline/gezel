@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CapacityDeniedError } from '../native/capacity-broker.js';
-import { DEFAULT_REMOTE_CONCURRENCY, RemoteGezelProvider } from './provider.js';
+import {
+  DEFAULT_REMOTE_CONCURRENCY,
+  REMOTE_ADMISSION_CACHE_TTL_MS,
+  RemoteGezelProvider,
+} from './provider.js';
 
 function doneResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -84,6 +88,36 @@ describe('RemoteGezelProvider', () => {
     expect(provider.getContextWindow()).toBe(35_840);
     expect(session.numCtx).toBe(35_840);
     await session.disconnect();
+  });
+
+  it('refreshes admission after the short session-start cache expires', async () => {
+    let requests = 0;
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fetchImpl = (async () => {
+      requests += 1;
+      return admissionResponse('llama-cpp:qwen.gguf', requests === 1 ? 65_536 : 131_072);
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+    });
+
+    try {
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(65_536);
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(65_536);
+      expect(requests).toBe(1);
+
+      now += REMOTE_ADMISSION_CACHE_TTL_MS;
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(131_072);
+      expect(requests).toBe(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('does not duplicate an engine namespace already present on the wire', async () => {

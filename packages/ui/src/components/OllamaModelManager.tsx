@@ -377,7 +377,9 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                 <tr>
                   <th>Name</th>
                   <th>Size</th>
-                  <th title="Default per-turn context window Gezel sends to Ollama">Context cap</th>
+                  <th title="Effective per-turn context size Gezel sends to Ollama">
+                    Context size
+                  </th>
                   <th>Tools</th>
                   <th />
                 </tr>

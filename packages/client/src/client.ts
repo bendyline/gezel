@@ -16,6 +16,8 @@ import type {
   ListInstalledAudioModelsResponse,
   ListInstalledImageModelsResponse,
   ListInstalledVideoModelsResponse,
+  LlamaCppContextSizing,
+  LlamaCppContextSizingResponse,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -775,8 +777,9 @@ export interface ConfigResponse {
   llamaCppBaseUrl?: string;
   /**
    * llama-cpp: context window (tokens) llama-server is booted with.
-   * When unset, the service picks a model-aware default (32 k or the
-   * model's advertised max, whichever is smaller).
+   * This explicit numeric override wins over the engine-owned context-sizing
+   * selector. When unset, Adaptive uses model tuning or a 64K practical
+   * target; Model maximum requests the advertised native window.
    */
   llamaCppNumCtx?: number;
   /** ds4 (DeepSeek-V4): base URL of an already-running ds4-server (external mode). */
@@ -1432,6 +1435,8 @@ export interface LlamaCppInstalledModel {
   contextWindow?: number;
   /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
   effectiveContextWindow?: number;
+  /** Present when the selected context policy cannot be admitted safely. */
+  contextSizingStatus?: 'insufficient-memory';
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -1467,6 +1472,17 @@ export interface ModelFitnessEntry {
     status: 'probed' | 'failed' | 'deferred' | 'blocked';
     admitted: boolean;
     genTokensPerSec: number | null;
+    shortPromptGenTokensPerSec?: number | null;
+    representativeContext?: {
+      targetPromptTokens: number;
+      promptTokens: number | null;
+      cachedPromptTokens: number | null;
+      completionTokens: number | null;
+      durationMs: number | null;
+      ttftMs: number | null;
+      promptTokensPerSec: number | null;
+      genTokensPerSec: number | null;
+    };
     createdAt: string;
     durationMs: number;
     trigger: 'install' | 'manual';
@@ -3010,6 +3026,18 @@ export class GezelClient {
   /** Live pool snapshot for the engines budget bar. */
   getEngineStatus(): Promise<EngineStatusResponse> {
     return this.request('GET', '/api/engines/status');
+  }
+
+  /** Effective context-sizing policy owned by the managed llama.cpp engine. */
+  getLlamaCppContextSizing(): Promise<LlamaCppContextSizingResponse> {
+    return this.request('GET', '/api/engines/llama-cpp/context-sizing');
+  }
+
+  /** Persist the managed llama.cpp context-sizing policy on the engine owner. */
+  updateLlamaCppContextSizing(
+    policy: LlamaCppContextSizing,
+  ): Promise<LlamaCppContextSizingResponse> {
+    return this.request('PUT', '/api/engines/llama-cpp/context-sizing', { policy });
   }
 
   /** Source-pinned native release and executable availability in the daemon. */

@@ -469,6 +469,18 @@ describe('Codex CLI config', () => {
   });
 });
 
+describe('llama.cpp context sizing config', () => {
+  it('accepts the two engine policies and rejects unknown modes', () => {
+    expect(
+      GezelConfigSchema.parse({ llamaCppContextSizing: 'adaptive' }).llamaCppContextSizing,
+    ).toBe('adaptive');
+    expect(
+      GezelConfigSchema.parse({ llamaCppContextSizing: 'model-max' }).llamaCppContextSizing,
+    ).toBe('model-max');
+    expect(() => GezelConfigSchema.parse({ llamaCppContextSizing: 'unsafe-max' })).toThrow();
+  });
+});
+
 describe('openaiEndpoints config', () => {
   it('parses the Connected Apps endpoint controls and tolerates absence', () => {
     const cfg = GezelConfigSchema.parse({

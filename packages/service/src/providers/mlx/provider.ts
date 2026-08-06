@@ -2899,6 +2899,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               promptTokens: lastUsage.prompt_tokens,
               completionTokens: lastUsage.completion_tokens,
               durationMs,
+              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
+                ? { promptTokensPerSec: lastUsage.prompt_tps }
+                : {}),
+              ...(lastUsage.cached_tokens !== undefined
+                ? { cachedPromptTokens: lastUsage.cached_tokens }
+                : {}),
               ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
             });
           }
@@ -3272,6 +3279,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               promptTokens: lastUsage.prompt_tokens,
               completionTokens: lastUsage.completion_tokens,
               durationMs,
+              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
+                ? { promptTokensPerSec: lastUsage.prompt_tps }
+                : {}),
+              ...(lastUsage.cached_tokens !== undefined
+                ? { cachedPromptTokens: lastUsage.cached_tokens }
+                : {}),
               ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
             });
           }

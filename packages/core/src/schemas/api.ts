@@ -514,6 +514,21 @@ export const DocumentExportOptionsSchema = z.object({
 });
 export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
 
+/**
+ * How the managed llama.cpp engine chooses its per-turn context window.
+ *
+ * `adaptive` keeps Gezel's practical model/tuning target and may reduce a
+ * larger requested window after reducing concurrency. `model-max` requests
+ * the model's advertised native window and treats that full window as a hard
+ * admission requirement: concurrency may fall, but context may not.
+ */
+export const LlamaCppContextSizingSchema = z.enum(['adaptive', 'model-max']);
+export type LlamaCppContextSizing = z.infer<typeof LlamaCppContextSizingSchema>;
+export const LlamaCppContextSizingResponseSchema = z.object({
+  policy: LlamaCppContextSizingSchema,
+});
+export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
+
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
@@ -1018,6 +1033,13 @@ export const GezelConfigSchema = z.object({
    * context is genuinely smaller retains that native limit.
    */
   llamaCppNumCtx: z.number().int().positive().optional(),
+  /**
+   * Managed llama.cpp context policy. Unset is `adaptive`. `model-max`
+   * requests the model's advertised native window and refuses admission when
+   * one engine slot cannot safely retain it. Stored by the engine owner so a
+   * machine-engine broker and an in-process/dev engine use identical policy.
+   */
+  llamaCppContextSizing: LlamaCppContextSizingSchema.optional(),
   /**
    * ds4-only: base URL of an already-running `ds4-server` to talk to
    * instead of supervising the bundled binary. Mirrors `llamaCppBaseUrl`

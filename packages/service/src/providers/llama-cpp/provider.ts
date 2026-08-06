@@ -2929,6 +2929,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       completion_tokens: number;
       /** From llama-server's `timings.predicted_per_second` — decode rate. */
       predicted_per_second?: number;
+      /** From llama-server's `timings.prompt_per_second` — prefill rate. */
+      prompt_per_second?: number;
       /** From llama-server's `timings.cache_n` — prompt tokens reused. */
       cache_n?: number;
     } | null = null;
@@ -4607,13 +4609,28 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // `timings` rides alongside `usage` when `timings_per_token` is
               // set; it is the only HTTP source of decode/prefill rate.
               const t = (chunk as { timings?: Record<string, unknown> }).timings;
+              const extendedUsage = chunk.usage as typeof chunk.usage & {
+                prompt_tps?: number;
+                generation_tps?: number;
+                cached_tokens?: number;
+              };
               const perSec =
-                typeof t?.predicted_per_second === 'number' ? t.predicted_per_second : undefined;
-              const cacheN = typeof t?.cache_n === 'number' ? t.cache_n : undefined;
+                typeof t?.predicted_per_second === 'number'
+                  ? t.predicted_per_second
+                  : extendedUsage.generation_tps;
+              const promptPerSec =
+                typeof t?.prompt_per_second === 'number'
+                  ? t.prompt_per_second
+                  : extendedUsage.prompt_tps;
+              const cacheN =
+                typeof t?.cache_n === 'number' ? t.cache_n : extendedUsage.cached_tokens;
               iterationUsage = {
                 prompt_tokens: chunk.usage.prompt_tokens,
                 completion_tokens: chunk.usage.completion_tokens,
                 ...(perSec !== undefined && perSec > 0 ? { predicted_per_second: perSec } : {}),
+                ...(promptPerSec !== undefined && promptPerSec > 0
+                  ? { prompt_per_second: promptPerSec }
+                  : {}),
                 ...(cacheN !== undefined && cacheN > 0 ? { cache_n: cacheN } : {}),
               };
               lastUsage = iterationUsage;
@@ -5477,23 +5494,32 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 durationMs,
               }),
             );
-            // Per-turn telemetry for the UI engine pill. Base
-            // tokens/sec on the *generation* phase — first-token
-            // time through end — since prefill speed is dominated by
-            // batch sizing, not model throughput. Fall back to the
-            // full durationMs when TTFT wasn't recorded (shouldn't
-            // happen in normal flow, but a zero-chunk reply could).
+            // Per-turn telemetry for the UI engine pill and fitness probe.
+            // Prefer llama-server's own decode-loop timing. Re-deriving from
+            // `completion_tokens / (end - first streamed token)` overstates
+            // thinking models because completion_tokens includes private
+            // reasoning the server may finish before it emits any SSE delta.
+            // Keep the wall-clock estimate only for older servers that omit
+            // the timings block.
             const generationMs =
               firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const tokensPerSec =
+            const wallTokensPerSec =
               lastUsage.completion_tokens > 0 && generationMs > 0
                 ? lastUsage.completion_tokens / (generationMs / 1000)
                 : undefined;
+            const tokensPerSec = lastUsage.predicted_per_second ?? wallTokensPerSec;
             this.emitTurnStats({
               provider: 'llama-cpp',
               promptTokens: lastUsage.prompt_tokens,
               completionTokens: lastUsage.completion_tokens,
               durationMs,
+              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+              ...(lastUsage.prompt_per_second !== undefined
+                ? { promptTokensPerSec: lastUsage.prompt_per_second }
+                : {}),
+              ...(lastUsage.cache_n !== undefined
+                ? { cachedPromptTokens: lastUsage.cache_n }
+                : {}),
               ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
             });
           }

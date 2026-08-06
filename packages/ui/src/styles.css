@@ -2612,6 +2612,14 @@ html.embedded-chat #root {
   padding: 0;
 }
 
+/* Settings owns two independent scroll viewports. Let them reach the frame
+   edges so wheel input over the space between them cannot scroll `.app-main`,
+   and keep their breathing room inside their own scrollbar gutters. */
+.app-main:has(> .settings-layout) {
+  overflow: hidden;
+  padding: 0;
+}
+
 /* ── Left navigation sidebar ───────────────────────────────────── */
 .app-sidebar {
   flex: 0 0 auto;
@@ -7742,9 +7750,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-layout {
   display: flex;
-  gap: 1.5rem;
+  gap: 0;
   align-items: stretch;
-  /* Fill the scroll container (`.app-main`) exactly so the nav and panel
+  /* Fill the host (`.app-main`) exactly so the nav and panel
      each scroll independently rather than the whole page scrolling as one.
      This keeps the tab list reachable when the window is too short to show
      every tab — the list gets its own scrollbar (see `.settings-nav ul`). */
@@ -7754,8 +7762,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-nav {
   /* Wide enough that the longest tab label ("Artificial Intelligence") sits
-     on one line rather than wrapping. */
-  width: 14.5rem;
+     on one line rather than wrapping. This also absorbs the old outer inset,
+     keeping the panel content aligned while the nav scrollbar reaches its
+     full vertical extent. */
+  width: 16rem;
   flex: 0 0 auto;
   /* Column so the "Settings" heading stays put and only the tab list
      (the `ul` below) scrolls when it overflows. */
@@ -7766,16 +7776,17 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-nav h2 {
   margin: 0 0 0.75rem;
+  padding: 1rem 1.25rem 0;
   flex: 0 0 auto;
 }
 
 .settings-nav ul {
   list-style: none;
   margin: 0;
-  /* Small horizontal gutter so an active item's selection bubble (border +
-     rounded corners) isn't drawn flush against the list edge — on the right
-     it would otherwise abut the overflow scrollbar and read as cropped. */
-  padding: 0 0.35rem;
+  /* This is the scroll viewport, so its inset belongs here rather than on the
+     outer app canvas. The scrollbar can then run to the pane edge while the
+     active item's selection bubble keeps comfortable clearance inside it. */
+  padding: 0 0.75rem 1rem 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -7783,6 +7794,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-width: thin;
 }
 
@@ -7913,12 +7925,13 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   /* Fill the available width on wide windows rather than stopping at a fixed
      column (long prose is kept readable via the `p` cap below). */
   max-width: none;
-  /* The layout fills the scroll container, so the content pane scrolls
-     itself instead of the whole page. Bottom padding keeps the last
-     section clear of the frame edge when scrolled to the end. */
+  /* The layout fills the host, so the content pane scrolls itself instead of
+     the whole page. Insets live on this scrolling box, leaving the scrollbar
+     flush with the pane edge and keeping the final section clear of it. */
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 1rem;
+  overscroll-behavior-y: contain;
+  padding: 1rem 1.25rem;
 }
 
 /* Keep long-form descriptions at a comfortable reading measure even though the

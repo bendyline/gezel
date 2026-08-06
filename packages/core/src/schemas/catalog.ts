@@ -2177,6 +2177,8 @@ export const SharedModelMigrationCandidateSchema = z.object({
   name: z.string().min(1).max(256),
   approxSizeBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   catalogVersion: z.string().min(1),
+  /** The user daemon is currently copying and verifying this candidate. */
+  moving: z.boolean().default(false),
 });
 export type SharedModelMigrationCandidate = z.infer<typeof SharedModelMigrationCandidateSchema>;
 

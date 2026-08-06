@@ -1019,8 +1019,10 @@ export interface LLMProvider {
    * Native providers usually know this synchronously via
    * {@link getContextWindow}. A broker-backed provider must first ask the
    * broker to admit/load the selected model, because live RAM/VRAM pressure
-   * can clamp the configured window. Implementations should cache the result;
-   * ChatManager may call this again while refreshing a warm session prompt.
+   * can clamp the configured window. Implementations may briefly cache the
+   * result because ChatManager can call this twice while opening one session,
+   * but must not retain it across later starts where policy or pressure may
+   * have changed.
    */
   prepareContextWindow?(model?: string): Promise<number | undefined>;
   /**

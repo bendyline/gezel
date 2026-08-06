@@ -40,6 +40,12 @@ export const REMOTE_TURN_TIMEOUT_MS = 20 * 60 * 1000;
  */
 export const DEFAULT_REMOTE_CONCURRENCY = DEFAULT_TENANT_MAX_CONCURRENT;
 
+/**
+ * Coalesce the duplicate admission checks ChatManager performs while opening
+ * one session, without carrying a stale context policy into a later start.
+ */
+export const REMOTE_ADMISSION_CACHE_TTL_MS = 1_000;
+
 export interface RemoteGezelProviderOpts {
   /** Stable id of the paired server this provider talks to. */
   remoteId: string;
@@ -74,7 +80,10 @@ export class RemoteGezelProvider implements LLMProvider {
   readonly supportsExternalTools = false;
   readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
-  private readonly admittedContextWindows = new Map<string, number>();
+  private readonly admittedContextWindows = new Map<
+    string,
+    { contextWindow: number; admittedAt: number }
+  >();
   private lastAdmittedContextWindow: number | undefined;
 
   constructor(private readonly opts: RemoteGezelProviderOpts) {
@@ -124,10 +133,11 @@ export class RemoteGezelProvider implements LLMProvider {
     // clamp across that identity boundary.
     const admissionKey = `${connection.baseUrl}\0${connection.token}\0${bLocal}`;
     const cached = this.admittedContextWindows.get(admissionKey);
-    if (cached !== undefined) {
-      this.lastAdmittedContextWindow = cached;
-      return cached;
+    if (cached && Date.now() - cached.admittedAt < REMOTE_ADMISSION_CACHE_TTL_MS) {
+      this.lastAdmittedContextWindow = cached.contextWindow;
+      return cached.contextWindow;
     }
+    this.admittedContextWindows.delete(admissionKey);
 
     let backpressureAttempt = 0;
     let waitLogged = false;
@@ -143,7 +153,10 @@ export class RemoteGezelProvider implements LLMProvider {
       });
       if (res.ok) {
         const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
-        this.admittedContextWindows.set(admissionKey, admitted);
+        this.admittedContextWindows.set(admissionKey, {
+          contextWindow: admitted,
+          admittedAt: Date.now(),
+        });
         this.lastAdmittedContextWindow = admitted;
         return admitted;
       }
