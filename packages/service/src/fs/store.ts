@@ -2719,6 +2719,8 @@ export class Store {
       indexingEnabled?: boolean;
       workspaceScriptTimeoutMs?: number;
       status?: 'active' | 'readonly' | 'inactive' | 'stable';
+      /** Buried in project navigation. Archiving always forces inactive. */
+      archived?: boolean;
       grantedCredentials?: string[];
       credentialAllowedOrigins?: Record<string, string[]>;
       /** `null` clears the user override (back to auto-detection). */
@@ -2750,6 +2752,8 @@ export class Store {
       const detected = await autoDetectGitHubLink(patch.workingDir, nextGitHub);
       if (detected) nextGitHub = detected;
     }
+    const nextArchived = patch.archived ?? meta.archived ?? false;
+    const nextStatus = nextArchived ? 'inactive' : patch.status;
     const updated: Project = {
       ...meta,
       updatedAt: nowIso(),
@@ -2793,7 +2797,8 @@ export class Store {
       ...(patch.workspaceScriptTimeoutMs !== undefined
         ? { workspaceScriptTimeoutMs: patch.workspaceScriptTimeoutMs }
         : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(nextStatus !== undefined ? { status: nextStatus } : {}),
+      ...(patch.archived !== undefined ? { archived: patch.archived ? true : undefined } : {}),
       ...(patch.grantedCredentials !== undefined
         ? { grantedCredentials: patch.grantedCredentials }
         : {}),
@@ -2861,6 +2866,9 @@ export class Store {
     ) {
       metaChanged.push('indexingEnabled');
     }
+    if (patch.archived !== undefined && patch.archived !== (meta.archived ?? false)) {
+      metaChanged.push('archived');
+    }
     if (metaChanged.length > 0) {
       await this.history?.log({
         kind: 'project.updated',
@@ -2869,13 +2877,13 @@ export class Store {
         details: { changed: metaChanged, patch },
       });
     }
-    if (patch.status !== undefined && patch.status !== (meta.status ?? 'active')) {
+    if ((detail.status ?? 'active') !== (meta.status ?? 'active')) {
       const previous = meta.status ?? 'active';
       await this.history?.log({
         kind: 'project.status.changed',
         projectId: id,
-        summary: `Project "${detail.name}" status: ${previous} → ${patch.status}`,
-        details: { previousStatus: previous, status: patch.status },
+        summary: `Project "${detail.name}" status: ${previous} → ${detail.status ?? 'active'}`,
+        details: { previousStatus: previous, status: detail.status ?? 'active' },
       });
     }
     if (patch.voormanGezelId !== undefined) {

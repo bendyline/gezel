@@ -148,6 +148,19 @@ describe('Sidebar', () => {
     expect(await screen.findByText('No projects yet.')).toBeInTheDocument();
   });
 
+  it('hides archived projects from the primary navigation list', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'p1', name: 'Alpha' } as Project,
+        { id: 'p2', name: 'Buried', archived: true, status: 'inactive' } as Project,
+      ],
+    } as never);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Buried')).not.toBeInTheDocument();
+  });
+
   it('lists projects (group expanded by default) and selects one on click', async () => {
     const onSelect = vi.fn();
     render(<Sidebar selection={null} onSelect={onSelect} onOpenArea={vi.fn()} />);
@@ -216,7 +229,7 @@ describe('Sidebar', () => {
     ['readonly', 'Read-only — automatic project work is paused for review; chat still works.'],
     [
       'inactive',
-      'Inactive — the project is archived and automatic project work is paused; chat still works.',
+      'Inactive — automatic project work is paused; chat still works. Archived projects are hidden from this list.',
     ],
   ] as const)('explains the %s project status', async (status, description) => {
     vi.mocked(api.listProjects).mockResolvedValue({

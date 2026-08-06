@@ -129,6 +129,68 @@ describe('ProjectsView', () => {
     expect(screen.getByRole('button', { name: 'Alpha' })).toHaveAttribute('title', 'Alpha');
   });
 
+  it('groups archived projects at the bottom of the full project list', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'pj-alpha', name: 'Alpha' } as Project,
+        { id: 'pj-buried', name: 'Buried', archived: true, status: 'inactive' } as Project,
+      ],
+    } as never);
+
+    render(<ProjectsView />);
+
+    const heading = await screen.findByRole('heading', { name: 'Archived projects' });
+    const archivedSection = heading.closest('section');
+    expect(archivedSection).not.toBeNull();
+    expect(within(archivedSection!).getByRole('button', { name: 'Buried' })).toBeInTheDocument();
+    expect(within(archivedSection!).queryByRole('button', { name: 'Alpha' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Alpha' }).compareDocumentPosition(heading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('archives the open project from its header and exposes Restore', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      status: 'active',
+    } as never);
+    vi.mocked(api.updateProject)
+      .mockResolvedValueOnce({
+        id: 'pj-alpha',
+        name: 'Alpha',
+        packages: [],
+        archived: true,
+        status: 'inactive',
+      } as never)
+      .mockResolvedValueOnce({
+        id: 'pj-alpha',
+        name: 'Alpha',
+        packages: [],
+        status: 'inactive',
+      } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('button', { name: 'Archive project' }));
+
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { archived: true }),
+    );
+    expect(await screen.findByText('Archived')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore project' })).toBeInTheDocument();
+    expect(screen.getAllByRole('combobox')[0]).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore project' }));
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenLastCalledWith('pj-alpha', { archived: false }),
+    );
+    await waitFor(() => expect(screen.queryByText('Archived')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Archive project' })).toBeInTheDocument();
+  });
+
   it('shows labeled creation keys when the project list is collapsed', async () => {
     render(<ProjectsView />);
     await screen.findByText('Alpha');

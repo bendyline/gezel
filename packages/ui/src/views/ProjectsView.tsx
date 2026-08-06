@@ -432,6 +432,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const editorTheme = useEffectiveTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
   // Consume a pending "+" intent from the sidebar synchronously on first
   // render (the event below covers the already-mounted case). Never in
@@ -518,8 +519,37 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     }
   }, []);
 
+  const activeProjects = useMemo(() => projects.filter((project) => !project.archived), [projects]);
+  const archivedProjects = useMemo(
+    () => projects.filter((project) => project.archived),
+    [projects],
+  );
+
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  // Archive/restore originates from either a rail menu or the open-project
+  // header. Keep both the grouped list and the loaded detail in sync from one
+  // event; the global sidebar listens to the same event and hides/reveals its
+  // row immediately.
+  useEffect(() => {
+    const onUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ projectId?: string; project?: ProjectDetail }>).detail;
+      if (!detail?.projectId) return;
+      if (!detail.project) {
+        void refresh();
+        return;
+      }
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === detail.projectId ? { ...project, ...detail.project } : project,
+        ),
+      );
+      setSelected((current) => (current?.id === detail.projectId ? detail.project! : current));
+    };
+    window.addEventListener('gezel:project-updated', onUpdated);
+    return () => window.removeEventListener('gezel:project-updated', onUpdated);
   }, [refresh]);
 
   // Already-mounted case: a "+" click while the listing is open arrives as
@@ -1289,6 +1319,65 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [detailOnly, openProject],
   );
 
+  const toggleSelectedArchive = useCallback(async () => {
+    if (!selected || selected.id === 'default' || changingArchive) return;
+    setChangingArchive(true);
+    try {
+      const updated = await api.updateProject(selected.id, { archived: !selected.archived });
+      window.dispatchEvent(
+        new CustomEvent('gezel:project-updated', {
+          detail: { projectId: selected.id, project: updated },
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChangingArchive(false);
+    }
+  }, [changingArchive, selected]);
+
+  const renderProjectRailRows = (items: Project[], archived: boolean) =>
+    items.map((p) => (
+      <ProjectContextMenu
+        key={p.id}
+        project={p}
+        onDeleted={() => void refresh()}
+        onChanged={() => void refresh()}
+      >
+        <li className={`project-rail-row${archived ? ' project-rail-row-archived' : ''}`}>
+          <button
+            type="button"
+            className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
+            onClick={() => handleProjectRowClick(p.id)}
+            title={p.name}
+          >
+            {sidebarCollapsed ? (
+              projectInitial(p.name)
+            ) : (
+              <>
+                {p.name}
+                {p.storageScope === 'machine-shared' && (
+                  <span
+                    className="machine-shared-badge"
+                    title="Shared with accounts on this machine"
+                  >
+                    Shared
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+          {!sidebarCollapsed && (
+            <ProjectActionsMenu
+              project={p}
+              onDeleted={() => void refresh()}
+              onChanged={() => void refresh()}
+            />
+          )}
+        </li>
+      </ProjectContextMenu>
+    ));
+
   // Restore the most recently inline-selected project when the listing
   // mounts (Tab area remounts whenever the user switches away and back).
   // Skip in detail-only mode — `forceProjectId` is the source of truth there.
@@ -1380,39 +1469,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               </button>
             </div>
           )}
-          <ul>
-            {projects.map((p) => (
-              <ProjectContextMenu key={p.id} project={p} onDeleted={() => void refresh()}>
-                <li className="project-rail-row">
-                  <button
-                    type="button"
-                    className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
-                    onClick={() => handleProjectRowClick(p.id)}
-                    title={p.name}
-                  >
-                    {sidebarCollapsed ? (
-                      projectInitial(p.name)
-                    ) : (
-                      <>
-                        {p.name}
-                        {p.storageScope === 'machine-shared' && (
-                          <span
-                            className="machine-shared-badge"
-                            title="Shared with accounts on this machine"
-                          >
-                            Shared
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </button>
-                  {!sidebarCollapsed && (
-                    <ProjectActionsMenu project={p} onDeleted={() => void refresh()} />
-                  )}
-                </li>
-              </ProjectContextMenu>
-            ))}
-          </ul>
+          <ul>{renderProjectRailRows(activeProjects, false)}</ul>
+          {archivedProjects.length > 0 && (
+            <section
+              className={`project-archive-section${sidebarCollapsed ? ' is-collapsed' : ''}`}
+              aria-labelledby="archived-projects-heading"
+            >
+              <h3 id="archived-projects-heading">Archived projects</h3>
+              <ul>{renderProjectRailRows(archivedProjects, true)}</ul>
+            </section>
+          )}
           {error && !sidebarCollapsed && <p className="error">{error}</p>}
         </aside>
       )}
@@ -1538,6 +1604,38 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   the standalone tab — the project would just re-activate
                   the tab the user is already on. */}
               {!detailOnly && <PromoteToTabButton target={{ kind: 'project', id: selected.id }} />}
+              {selected.archived && (
+                <span className="project-archived-badge" title="Hidden from primary navigation">
+                  Archived
+                </span>
+              )}
+              {selected.id !== 'default' && (
+                <button
+                  type="button"
+                  className="project-archive-header-action"
+                  onClick={() => void toggleSelectedArchive()}
+                  disabled={changingArchive}
+                  title={selected.archived ? 'Restore project' : 'Archive project'}
+                  aria-label={selected.archived ? 'Restore project' : 'Archive project'}
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.35"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M2.5 5.2h11v8.1h-11z" />
+                    <path d="M1.8 2.7h12.4v2.5H1.8zM6 8h4" />
+                    {selected.archived && <path d="m5.5 11 2.5-2.5 2.5 2.5" />}
+                  </svg>
+                  <span>{selected.archived ? 'Restore' : 'Archive'}</span>
+                </button>
+              )}
             </div>
 
             <div
@@ -2340,6 +2438,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               }}
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
               status={selected.status ?? 'active'}
+              statusLocked={selected.archived === true}
               onStatusChange={async (v) => {
                 const updated = await api.updateProject(selected.id, { status: v });
                 setSelected(updated);

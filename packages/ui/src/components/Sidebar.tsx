@@ -57,7 +57,7 @@ const PROJECT_STATUS_DESCRIPTIONS: Record<ProjectLifecycleStatus, string> = {
     'Stable — work is at rest because its tasks are finished or canceled; new or resumed tasks reactivate it.',
   readonly: 'Read-only — automatic project work is paused for review; chat still works.',
   inactive:
-    'Inactive — the project is archived and automatic project work is paused; chat still works.',
+    'Inactive — automatic project work is paused; chat still works. Archived projects are hidden from this list.',
 };
 
 function roleDescription(role?: string, roleBasedName?: string): string {
@@ -196,7 +196,7 @@ export function Sidebar({
   // The project whose pending-question resolution dialog is open, if any.
   const [resolveProjectId, setResolveProjectId] = useState<string | null>(null);
   const visibleProjects = useMemo(
-    () => projects.filter((p) => !HIDDEN_PROJECT_IDS.has(p.id)),
+    () => projects.filter((p) => !HIDDEN_PROJECT_IDS.has(p.id) && !p.archived),
     [projects],
   );
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
@@ -319,6 +319,9 @@ export function Sidebar({
     // anywhere — including a `start_project` macro a gezel runs
     // mid-chat — so the list folds it in without a manual refresh.
     window.addEventListener('gezel:project-created', onProject);
+    // Archive/restore and other local project metadata changes use this
+    // event so buried projects disappear (or return) without a reload.
+    window.addEventListener('gezel:project-updated', onProject);
     // Fired locally by the Project Actions menu and re-broadcast by App's
     // SSE bridge when a project is deleted anywhere, so the row drops live.
     window.addEventListener('gezel:project-deleted', onProject);
@@ -332,6 +335,7 @@ export function Sidebar({
       window.removeEventListener('gezel:config-updated', onConfig);
       window.removeEventListener('gezel:project-opened', onProject);
       window.removeEventListener('gezel:project-created', onProject);
+      window.removeEventListener('gezel:project-updated', onProject);
       window.removeEventListener('gezel:project-deleted', onProject);
       window.removeEventListener('gezel:document-created', onDoc);
       window.removeEventListener('gezel:document-renamed', onDoc);
@@ -582,6 +586,7 @@ export function Sidebar({
                     project={p}
                     hasError={!!poisoned}
                     onDeleted={() => void refreshProjects()}
+                    onChanged={() => void refreshProjects()}
                   />
                   {/* Right-aligned per-project signal, by precedence:
                       needs-intervention > poisoned > working > status light.

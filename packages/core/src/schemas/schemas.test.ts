@@ -335,6 +335,11 @@ describe('CreateTypedProjectRequestSchema', () => {
 });
 
 describe('UpdateProjectRequestSchema', () => {
+  it('accepts the project archive flag', () => {
+    expect(UpdateProjectRequestSchema.parse({ archived: true }).archived).toBe(true);
+    expect(UpdateProjectRequestSchema.parse({ archived: false }).archived).toBe(false);
+  });
+
   it('accepts a per-project workspace-indexing switch', () => {
     expect(UpdateProjectRequestSchema.parse({ indexingEnabled: false }).indexingEnabled).toBe(
       false,
@@ -590,5 +595,17 @@ describe('projectAllowsAmbientWork', () => {
       updatedAt: 't',
     });
     expect(parsed.status).toBe('stable');
+  });
+
+  it('accepts the optional project archive flag', () => {
+    const parsed = ProjectSchema.parse({
+      id: 'p',
+      name: 'P',
+      archived: true,
+      status: 'inactive',
+      createdAt: 't',
+      updatedAt: 't',
+    });
+    expect(parsed.archived).toBe(true);
   });
 });

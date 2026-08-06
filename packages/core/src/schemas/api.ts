@@ -3435,6 +3435,12 @@ export const UpdateProjectRequestSchema = z.object({
    * resumes. Chat remains functional in all states.
    */
   status: z.enum(['active', 'readonly', 'inactive', 'stable']).optional(),
+  /**
+   * Move the project into or out of the archived section. Archiving also
+   * forces the operational status to `inactive`; restoring only clears this
+   * flag so the user can choose when to reactivate background work.
+   */
+  archived: z.boolean().optional(),
   /** Per-project override of the `run_nodejs_script` wall-clock timeout. */
   workspaceScriptTimeoutMs: z
     .number()

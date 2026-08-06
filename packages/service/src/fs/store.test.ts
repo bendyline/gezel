@@ -310,6 +310,26 @@ describe('projects', () => {
     expect(crew!.mode).toBeUndefined();
     expect(defaultProj!.mode).toBeUndefined();
   });
+
+  it('archives a project as inactive and restores it without reactivating ambient work', async () => {
+    const created = await store.createProject({ name: 'Finished work' });
+
+    const archived = await store.updateProject(created.id, { archived: true });
+    expect(archived.archived).toBe(true);
+    expect(archived.status).toBe('inactive');
+
+    // Status cannot be reactivated while the project remains buried.
+    const stillArchived = await store.updateProject(created.id, { status: 'active' });
+    expect(stillArchived.archived).toBe(true);
+    expect(stillArchived.status).toBe('inactive');
+
+    const restored = await store.updateProject(created.id, { archived: false });
+    expect(restored.archived).toBeUndefined();
+    expect(restored.status).toBe('inactive');
+
+    const reactivated = await store.updateProject(created.id, { status: 'active' });
+    expect(reactivated.status).toBe('active');
+  });
 });
 
 describe('deleteProject', () => {

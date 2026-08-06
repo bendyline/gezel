@@ -3010,6 +3010,39 @@ html.embedded-chat #root {
 .project-rail-name.active + .project-actions-trigger {
   --project-action-overlay-bg: color-mix(in srgb, var(--bg) 85%, var(--accent));
 }
+
+/* Archived work stays discoverable in the full Projects screen, but below
+   the ordinary list and with a quieter register. The collapsed rail keeps a
+   divider so the grouping survives even when its heading cannot fit. */
+.project-archive-section {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.project-archive-section h3 {
+  margin: 0 0 0.35rem 0.75rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.project-archive-section.is-collapsed h3 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.project-rail-row-archived {
+  opacity: 0.68;
+}
+.project-rail-row-archived:hover,
+.project-rail-row-archived:has(.project-rail-name.active) {
+  opacity: 1;
+}
 .project-rail-row:hover > .project-rail-name.active + .project-actions-trigger,
 .project-rail-name.active + .project-actions-trigger[data-state="open"],
 .project-rail-name.active + .project-actions-trigger:focus-visible {
@@ -17503,6 +17536,57 @@ a.license-button:hover {
 .entity-tabs-row.project-tabs-row {
   padding-top: 2px;
   padding-left: 4px;
+}
+
+/* The open project keeps archive/restore one click away. Archived is a
+   read-only status annotation (capsule); the adjacent action is a small key. */
+.project-archived-badge {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.08rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.project-archive-header-action {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.8rem;
+  margin: 0 0.25rem 1px 0;
+  padding: 0.24rem 0.5rem;
+  border: 1px solid var(--key-border, var(--border));
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--key-bg, var(--surface));
+  box-shadow: var(--key-shadow, none);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.project-archive-header-action:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--key-bg-hover, var(--bg-subtle));
+}
+.project-archive-header-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.project-archive-header-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.two-col.is-compact .project-archive-header-action span {
+  display: none;
 }
 
 /* ---------- Output pane (persistent workspace preview) ---------- */

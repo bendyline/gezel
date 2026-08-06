@@ -5,7 +5,7 @@ import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 interface ProjectActionProps {
-  project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github' | 'storageScope'>;
+  project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github' | 'storageScope' | 'archived'>;
   /**
    * Whether the project currently shows the red failed-turn indicator.
    * Gates the "Clear error indicator" item so the menu never offers a
@@ -13,16 +13,18 @@ interface ProjectActionProps {
    */
   hasError?: boolean;
   onDeleted?: (projectId: string) => void;
+  onChanged?: (project: Project) => void;
 }
 
 interface ProjectActionsMenuProps extends ProjectActionProps {
   align?: 'start' | 'center' | 'end';
 }
 
-function useProjectActions({ project, onDeleted }: ProjectActionProps) {
+function useProjectActions({ project, onDeleted, onChanged }: ProjectActionProps) {
   const [confirming, setConfirming] = useState(false);
   const [removeWorkspace, setRemoveWorkspace] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [changingArchive, setChangingArchive] = useState(false);
 
   const isDefault = project.id === 'default';
   const isShared = project.storageScope === 'machine-shared';
@@ -77,12 +79,33 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
     }
   };
 
+  const toggleArchived = async () => {
+    if (isDefault || changingArchive) return;
+    setChangingArchive(true);
+    try {
+      const updated = await api.updateProject(project.id, { archived: !project.archived });
+      window.dispatchEvent(
+        new CustomEvent('gezel:project-updated', {
+          detail: { projectId: project.id, project: updated },
+        }),
+      );
+      onChanged?.(updated);
+    } catch {
+      // The menu has closed by the time the request settles. Leave the row in
+      // place so the user can retry; the next list refresh remains authoritative.
+    } finally {
+      setChangingArchive(false);
+    }
+  };
+
   return {
+    changingArchive,
     clearErrors,
     confirming,
     error,
     hasInternalWorkspace,
     isDefault,
+    isArchived: project.archived === true,
     isShared,
     openConfirm,
     removeWorkspace,
@@ -90,6 +113,7 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
     runDelete,
     setConfirming,
     setRemoveWorkspace,
+    toggleArchived,
   };
 }
 
@@ -134,6 +158,16 @@ function ProjectMenuItems({
           Clear error indicator
         </Item>
       )}
+      <Item
+        className="app-nav-menu-item"
+        disabled={actions.isDefault || actions.changingArchive}
+        onSelect={() => {
+          if (actions.isDefault || actions.changingArchive) return;
+          void actions.toggleArchived();
+        }}
+      >
+        {actions.isArchived ? 'Restore project' : 'Archive project'}
+      </Item>
       <Item
         className="app-nav-menu-item danger"
         disabled={actions.isDefault || actions.isShared}
@@ -222,9 +256,10 @@ export function ProjectActionsMenu({
   project,
   hasError = false,
   onDeleted,
+  onChanged,
   align = 'end',
 }: ProjectActionsMenuProps) {
-  const actions = useProjectActions({ project, onDeleted });
+  const actions = useProjectActions({ project, onDeleted, onChanged });
 
   return (
     <>
@@ -265,8 +300,9 @@ export function ProjectContextMenu({
   project,
   hasError = false,
   onDeleted,
+  onChanged,
 }: ProjectActionProps & { children: ReactElement }) {
-  const actions = useProjectActions({ project, onDeleted });
+  const actions = useProjectActions({ project, onDeleted, onChanged });
 
   return (
     <>
