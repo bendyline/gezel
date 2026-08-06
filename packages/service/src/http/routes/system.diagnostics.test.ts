@@ -74,6 +74,14 @@ describe('GET /api/system/diagnostics', () => {
     expect(['tiny', 'small', 'medium', 'large']).toContain(body.hardware.tier);
   });
 
+  it('omits localEngines when no local engine process is up', async () => {
+    // Mock provider = no supervised native engines. A phantom entry here
+    // would claim a granted context window for an engine that never
+    // launched — the opposite of what the field is for.
+    const body = await fetchDiagnostics();
+    expect(body.localEngines).toBeUndefined();
+  });
+
   it('contains no absolute path, username, or hostname', async () => {
     const body = await fetchDiagnostics();
 

@@ -138,6 +138,31 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
+  it('About shows the live local engine with its granted context window', async () => {
+    const base = await api.getSystemDiagnostics();
+    vi.mocked(api.getSystemDiagnostics).mockResolvedValue({
+      ...base,
+      localEngines: [
+        {
+          provider: 'llama-cpp',
+          model: 'gemma4-e4b-q8',
+          pid: 4242,
+          contextPerSlot: 65_536,
+          slots: 1,
+          kvCacheType: 'q8_0',
+          backend: 'metal',
+        },
+      ],
+    });
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-about'));
+    const dd = await screen.findByText(/gemma4-e4b-q8/);
+    expect(dd.textContent).toContain('65,536-token context window');
+    expect(dd.textContent).toContain('q8_0 KV');
+    expect(dd.textContent).toContain('pid 4242');
+  });
+
   // About is the only full home for install-health notices — the rail just
   // points here. See system-notices.ts.
   describe('install-health notices in About', () => {

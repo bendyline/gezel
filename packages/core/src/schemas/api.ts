@@ -323,6 +323,33 @@ export const SystemDiagnosticsSchema = z.object({
       }),
     ),
   }),
+  /**
+   * Local engines currently resident, with what each ACTUALLY granted at
+   * launch. `contextPerSlot` is the one-glance answer to "is this model
+   * looping because its window is smaller than its prompt?" — the field
+   * support asks for first on any small-model misbehavior report. Catalog
+   * ids and engine names only, never paths. Collected fresh on every
+   * request (engines start and stop between dialog openings); absent when
+   * no local engine is up.
+   */
+  localEngines: z
+    .array(
+      z.object({
+        provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+        /** Catalog id the engine launched with. */
+        model: z.string().optional(),
+        pid: z.number().optional(),
+        startedAt: z.string().optional(),
+        /** Per-slot context window in tokens — the granted working window. */
+        contextPerSlot: z.number().optional(),
+        /** Total context across slots (`--ctx-size`). */
+        contextTotal: z.number().optional(),
+        slots: z.number().optional(),
+        kvCacheType: z.string().optional(),
+        backend: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 

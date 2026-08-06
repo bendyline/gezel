@@ -884,6 +884,30 @@ export class ProviderPool {
    * can still be finishing in-flight turns. Replicas whose provider
    * exposes no queue (cloud, test fakes) contribute nothing.
    */
+  /**
+   * Launch provenance of every pooled provider whose engine process is
+   * live right now — provider + model attribution from the pool key, the
+   * snapshot (pid, start time, granted context) from the provider's
+   * supervisor. Providers without a supervised engine contribute nothing.
+   */
+  engineLaunchSnapshots(): Array<{
+    provider: LocalProviderName;
+    modelId: string;
+    snapshot: import('../types.js').EngineLaunchSnapshot;
+  }> {
+    const out: Array<{
+      provider: LocalProviderName;
+      modelId: string;
+      snapshot: import('../types.js').EngineLaunchSnapshot;
+    }> = [];
+    for (const entry of this.entries.values()) {
+      const snapshot = entry.provider.engineLaunchSnapshot?.();
+      if (!snapshot) continue;
+      out.push({ provider: entry.parsed.provider, modelId: entry.parsed.modelId, snapshot });
+    }
+    return out;
+  }
+
   queueSummaries(): Map<LocalProviderName, PooledQueueSummary> {
     const out = new Map<LocalProviderName, PooledQueueSummary>();
     for (const entry of this.entries.values()) {

@@ -501,6 +501,20 @@ export interface ToolCallEvent {
 }
 
 /** Provider-specific state we persist after each turn so the session can resume. */
+/**
+ * Live launch provenance of a supervised native engine — see
+ * `LLMProvider.engineLaunchSnapshot`. `diagnostics` carries the launch
+ * payload the spawner attached (the `launch {...}` log line fields:
+ * `model`, `contextPerSlot`, `contextTotal`, `slots`, `kvCacheType`,
+ * `backend`, …), safe request-independent facts only.
+ */
+export interface EngineLaunchSnapshot {
+  pid?: number;
+  /** Epoch ms when the current child was spawned. */
+  startedAt: number;
+  diagnostics?: Record<string, string | number | boolean>;
+}
+
 export interface ProviderSessionState {
   copilotSessionId?: string;
   openaiPreviousResponseId?: string;
@@ -1009,6 +1023,15 @@ export interface LLMProvider {
    * ChatManager may call this again while refreshing a warm session prompt.
    */
   prepareContextWindow?(model?: string): Promise<number | undefined>;
+  /**
+   * Launch provenance of the provider's LIVE engine process — pid, start
+   * time, and the request-independent launch facts (granted context
+   * window, slots, KV dtype, backend). Supervised native providers
+   * delegate to their supervisor; undefined when no process is up or the
+   * provider has no supervised engine (cloud, external base URL). Powers
+   * `/api/system/diagnostics` `localEngines` and Settings → About.
+   */
+  engineLaunchSnapshot?(): EngineLaunchSnapshot | undefined;
   /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by

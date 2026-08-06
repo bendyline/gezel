@@ -57,7 +57,50 @@ function asBackend(value: string | undefined): LlamaBackend | undefined {
 export interface SystemDiagnosticsDeps {
   home: string;
   store: Store;
-  chat: Pick<ChatManager, 'listModelsForProvider'>;
+  chat: Pick<ChatManager, 'listModelsForProvider' | 'localEngineLaunchSummaries'>;
+}
+
+/**
+ * Live local engines with what each actually granted at launch. Names and
+ * numbers only — the launch payload the supervisor retains already honors
+ * the "never paths" rule (command is a basename and is dropped here
+ * anyway). Collected OUTSIDE the cache: engines start and stop between two
+ * openings of the report dialog, and a stale pid/window would misdirect
+ * exactly the "model is looping" triage this field exists for.
+ */
+function collectLocalEngines(deps: SystemDiagnosticsDeps): SystemDiagnostics['localEngines'] {
+  const numberField = (value: string | number | boolean | undefined): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const stringField = (value: string | number | boolean | undefined): string | undefined =>
+    typeof value === 'string' && value.length > 0 ? value : undefined;
+  const out: NonNullable<SystemDiagnostics['localEngines']> = [];
+  let summaries: ReturnType<ChatManager['localEngineLaunchSummaries']>;
+  try {
+    summaries = deps.chat.localEngineLaunchSummaries();
+  } catch (err) {
+    log.debug(`diagnostics: engine launch summaries failed: ${String(err)}`);
+    return undefined;
+  }
+  for (const { provider, modelId, snapshot } of summaries) {
+    if (provider !== 'llama-cpp' && provider !== 'mlx' && provider !== 'ds4') continue;
+    const d = snapshot.diagnostics ?? {};
+    out.push({
+      provider,
+      ...(stringField(d.model) ?? modelId ? { model: stringField(d.model) ?? modelId } : {}),
+      ...(snapshot.pid !== undefined ? { pid: snapshot.pid } : {}),
+      ...(snapshot.startedAt > 0 ? { startedAt: new Date(snapshot.startedAt).toISOString() } : {}),
+      ...(numberField(d.contextPerSlot) !== undefined
+        ? { contextPerSlot: numberField(d.contextPerSlot) }
+        : {}),
+      ...(numberField(d.contextTotal) !== undefined
+        ? { contextTotal: numberField(d.contextTotal) }
+        : {}),
+      ...(numberField(d.slots) !== undefined ? { slots: numberField(d.slots) } : {}),
+      ...(stringField(d.kvCacheType) ? { kvCacheType: stringField(d.kvCacheType) } : {}),
+      ...(stringField(d.backend) ? { backend: stringField(d.backend) } : {}),
+    });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 async function collectGpuDevices(
@@ -133,6 +176,7 @@ async function collectLlamaBuild(): Promise<Partial<SystemDiagnostics['engine']>
 export async function collectSystemDiagnostics(
   deps: SystemDiagnosticsDeps,
 ): Promise<SystemDiagnostics> {
+  const localEngines = collectLocalEngines(deps);
   const memory = await detectMemoryProfileCached();
   const hardware = describeCurrentHardware(memory);
 
@@ -191,6 +235,7 @@ export async function collectSystemDiagnostics(
       ...(defaultModel ? { defaultModel } : {}),
       installed,
     },
+    ...(localEngines !== undefined ? { localEngines } : {}),
   };
 }
 
@@ -208,7 +253,15 @@ export async function collectSystemDiagnosticsCached(
   now: () => number = Date.now,
 ): Promise<SystemDiagnostics> {
   const at = now();
-  if (cache && at - cache.at < CACHE_MS) return cache.value;
+  if (cache && at - cache.at < CACHE_MS) {
+    // `localEngines` is the one live field: engines start and stop between
+    // two openings of the dialog, and a cached pid/window would misdirect
+    // the exact triage the field exists for. Overlay it fresh — the walk
+    // is in-memory and spawns nothing.
+    const localEngines = collectLocalEngines(deps);
+    const { localEngines: _stale, ...rest } = cache.value;
+    return { ...rest, ...(localEngines !== undefined ? { localEngines } : {}) };
+  }
   const value = await collectSystemDiagnostics(deps);
   cache = { at, value };
   return value;

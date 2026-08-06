@@ -85,6 +85,7 @@ import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   BatchCapability,
+  EngineLaunchSnapshot,
   ExternalToolCall,
   ExternalToolSpec,
   ImageAttachment,
@@ -2062,6 +2063,15 @@ export class LlamaCppProvider implements LLMProvider {
 
   getContextWindow(): number {
     return this.numCtx;
+  }
+
+  /**
+   * Live engine launch provenance (granted context, slots, KV dtype) from
+   * the supervisor — undefined in external base-URL mode or when no child
+   * process is up. See `LLMProvider.engineLaunchSnapshot`.
+   */
+  engineLaunchSnapshot(): EngineLaunchSnapshot | undefined {
+    return this.supervisor?.launchSnapshot();
   }
 
   /**

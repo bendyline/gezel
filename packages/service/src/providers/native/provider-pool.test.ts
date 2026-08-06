@@ -107,7 +107,42 @@ function mkQueueBuilder(bytes: number, made: QueueFakeProvider[]): ProviderBuild
   };
 }
 
+class LaunchFakeProvider extends FakeProvider {
+  engineLaunchSnapshot() {
+    return {
+      pid: 4242,
+      startedAt: 1_700_000_000_000,
+      diagnostics: { model: this.label, contextPerSlot: 65_536, slots: 1 },
+    };
+  }
+}
+
 describe('ProviderPool', () => {
+  it('engineLaunchSnapshots() attributes live launches to provider + model, skipping engines without one', async () => {
+    const broker = new CapacityBroker({ budgetBytes: 64 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: {
+        mlx: async ({ modelId, replicaIdx }) => ({
+          provider: new LaunchFakeProvider(`${modelId}:${replicaIdx}`),
+          residentBytes: 10 * GB,
+        }),
+        'llama-cpp': mkBuilder(10 * GB),
+      },
+    });
+
+    await pool.ensure('mlx', 'gemma4-26b', 0, 10 * GB);
+    await pool.ensure('llama-cpp', 'qwen3.5-4b-q4', 0, 10 * GB);
+
+    const snapshots = pool.engineLaunchSnapshots();
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      provider: 'mlx',
+      modelId: 'gemma4-26b',
+      snapshot: { pid: 4242, diagnostics: { contextPerSlot: 65_536 } },
+    });
+  });
+
   it('ensure() builds on miss and hits cache on second call', async () => {
     const builder = vi.fn(mkBuilder(10 * GB, 8 * GB));
     const broker = new CapacityBroker({ budgetBytes: 32 * GB });

@@ -10384,6 +10384,42 @@ export class ChatManager {
   }
 
   /**
+   * Launch provenance of every live local engine — the granted context
+   * window, slots, and KV dtype each engine ACTUALLY started with, from
+   * the supervisors' retained launch payloads. Non-building and cheap:
+   * walks resident providers only, never starts an engine. Feeds
+   * `/api/system/diagnostics` `localEngines` (Settings → About), so a
+   * "model is looping" report carries the grant without log spelunking.
+   */
+  localEngineLaunchSummaries(): Array<{
+    provider: LocalProviderName;
+    modelId?: string;
+    snapshot: import('../providers/types.js').EngineLaunchSnapshot;
+  }> {
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const out: Array<{
+      provider: LocalProviderName;
+      modelId?: string;
+      snapshot: import('../providers/types.js').EngineLaunchSnapshot;
+    }> = router?.pool.engineLaunchSnapshots() ?? [];
+    // The singleton map can hold the same provider object (and therefore
+    // the same engine process) a pool entry already reported — dedupe by
+    // pid, the process identity the snapshot is about.
+    const seenPids = new Set(
+      out.map((entry) => entry.snapshot.pid).filter((pid) => pid !== undefined),
+    );
+    for (const name of ['llama-cpp', 'mlx', 'ds4'] as const) {
+      const singleton = this.providers.get(name);
+      const snapshot = singleton?.engineLaunchSnapshot?.();
+      if (!snapshot) continue;
+      if (snapshot.pid !== undefined && seenPids.has(snapshot.pid)) continue;
+      const modelId = singleton?.getEffectiveModelId?.();
+      out.push({ provider: name, ...(modelId !== undefined ? { modelId } : {}), snapshot });
+    }
+    return out;
+  }
+
+  /**
    * Non-building lookup for an already-created native provider. Unlike
    * `getProviderForModel`, this cannot allocate a replica, evict another model,
    * or start an engine. The caller still checks the provider's live base URL
