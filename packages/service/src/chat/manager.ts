@@ -9647,17 +9647,24 @@ export class ChatManager {
     // told a 64 GB / 24 GB-VRAM box its models get "60% of your 63.9 GB
     // machine" and then refused a model that fit the card plus offload.
     // The probe caches, and a failure degrades to the RAM-only curve.
-    const gpuVramBytes = await (async () => {
+    const memoryProfile = await (async () => {
       try {
         const { detectMemoryProfileCached } = await import('../system/memory.js');
-        return (await detectMemoryProfileCached()).gpuVramBytes;
+        return await detectMemoryProfileCached();
       } catch {
         return null;
       }
     })();
     const broker = new CapacityBroker({
       ...(budgetBytes !== undefined ? { budgetBytes } : {}),
-      gpuVramBytes,
+      gpuVramBytes: memoryProfile?.gpuVramBytes ?? null,
+      ...(memoryProfile
+        ? {
+            unifiedMemory:
+              memoryProfile.gpuMemoryKind === 'integrated' ||
+              memoryProfile.gpuMemoryKind === 'unified',
+          }
+        : {}),
       allowRamSpillover: config.allowRamSpillover ?? null,
     });
     const pool = new ProviderPool({ broker, builders: {} });
@@ -17541,7 +17548,25 @@ export async function buildLlamaCppProvider(opts: {
                 weightsBytes: approxBytes,
                 kvCacheType,
               }) / REFERENCE_CTX;
-        const liveBudget = computeCapacityBudget({ gpuVramBytes: vramBytes || null });
+        const liveMemory = await (async () => {
+          try {
+            const { detectMemoryProfileCached } = await import('../system/memory.js');
+            return await detectMemoryProfileCached();
+          } catch {
+            return null;
+          }
+        })();
+        const liveBudget = computeCapacityBudget({
+          ...(liveMemory ? { systemRamBytes: liveMemory.totalRamBytes } : {}),
+          gpuVramBytes: (liveMemory?.gpuVramBytes ?? vramBytes) || null,
+          ...(liveMemory
+            ? {
+                unifiedMemory:
+                  liveMemory.gpuMemoryKind === 'integrated' ||
+                  liveMemory.gpuMemoryKind === 'unified',
+              }
+            : {}),
+        });
         const admission = clampCtxTokensForMemory({
           requestedPerTurnCtxTokens: effectiveNumCtx,
           slots,

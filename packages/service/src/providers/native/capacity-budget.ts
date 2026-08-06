@@ -94,8 +94,8 @@ export function getDetectedGpuVramBytes(): number | null {
 /**
  * True when CPU and GPU share one physical memory pool, so a byte spent on
  * weights is a byte the OS cannot use. Apple Silicon is the case that
- * matters; Intel Macs and integrated-GPU PCs technically share too, but
- * they don't run GPU inference through this path.
+ * matters for this platform fallback. Integrated-GPU PCs are supplied as
+ * `unifiedMemory: true` by the async memory profile instead.
  */
 export function isUnifiedMemoryHost(): boolean {
   return platform() === 'darwin' && arch() === 'arm64';

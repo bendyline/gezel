@@ -145,8 +145,15 @@ export function maxGpuVramBytes(devices: LlamaDevice[]): number {
  * (e.g. "AMD Radeon RX 7900 XTX") in a tier rationale. Pure — unit-tested.
  */
 export function pickBestGpuDevice(devices: LlamaDevice[]): LlamaDevice | null {
+  const dedicated = devices.filter(
+    (device) => device.totalMiB > 0 && gpuMemoryKindFromName(device.name) === 'discrete',
+  );
+  // An iGPU can advertise a larger shared allocation than a real card's
+  // dedicated VRAM. Prefer a known discrete device first so a 16-GiB shared
+  // Intel heap cannot hide a 12-GiB Radeon board.
+  const candidates = dedicated.length > 0 ? dedicated : devices;
   let best: LlamaDevice | null = null;
-  for (const d of devices) {
+  for (const d of candidates) {
     if (d.totalMiB > 0 && (!best || d.totalMiB > best.totalMiB)) best = d;
   }
   return best;
@@ -230,6 +237,7 @@ export async function probeLlamaDevices(opts: {
  * falling through to the nvidia-only "no GPU detected → system RAM" path.
  */
 export type GpuVendor = 'amd' | 'nvidia' | 'intel';
+export type LlamaGpuMemoryKind = 'discrete' | 'integrated' | 'unknown';
 
 /**
  * Infer the GPU vendor from the device NAME `--list-devices` reports (e.g.
@@ -249,9 +257,59 @@ export function gpuVendorFromName(name: string): GpuVendor | undefined {
   return undefined;
 }
 
+/**
+ * Best-effort classification of the memory reported by llama.cpp's Vulkan
+ * device probe. Integrated adapters commonly expose a large slice of system
+ * RAM as their `totalMiB`; treating that number as dedicated VRAM counts the
+ * same physical memory twice.
+ *
+ * Names intentionally identify only strong, well-known families. Unknown
+ * hardware keeps the historical behavior rather than being silently demoted.
+ * Intel is the useful exception: consumer Intel Graphics/UHD/Iris adapters
+ * are integrated unless the name carries a discrete Arc board SKU (A770,
+ * B580, Pro A60, etc.).
+ */
+export function gpuMemoryKindFromName(name: string): LlamaGpuMemoryKind {
+  const n = name.toLowerCase().replaceAll('(tm)', ' ').replaceAll('(r)', ' ');
+
+  if (n.includes('qualcomm') || n.includes('adreno')) return 'integrated';
+
+  if (n.includes('intel')) {
+    // Discrete Intel Arc boards include a letter+number SKU. Plain "Intel Arc
+    // Graphics" is the integrated Meteor/Lunar Lake branding.
+    if (/\barc\b.*\b(?:pro\s+)?[ab]\d{2,4}\b/.test(n)) return 'discrete';
+    return 'integrated';
+  }
+
+  if (n.includes('amd') || n.includes('radeon')) {
+    if (
+      /\bradeon\s+(?:rx\s*\d|vii\b|pro\s+w\d|ai\s+pro\b)/.test(n) ||
+      /\b(?:instinct|firepro)\b/.test(n)
+    ) {
+      return 'discrete';
+    }
+    if (
+      /\b(?:vega|radeon\s+graphics)\b/.test(n) ||
+      /\bradeon\s+\d{3,4}[ms]\b/.test(n)
+    ) {
+      return 'integrated';
+    }
+  }
+
+  if (n.includes('nvidia') || n.includes('geforce') || n.includes('quadro')) {
+    return 'discrete';
+  }
+  return 'unknown';
+}
+
 export async function detectLlamaGpuVram(
   homeOverride?: string,
-): Promise<{ vramBytes: number; name: string; vendor?: GpuVendor } | null> {
+): Promise<{
+  vramBytes: number;
+  name: string;
+  vendor?: GpuVendor;
+  memoryKind: LlamaGpuMemoryKind;
+} | null> {
   const binaryPath = process.env.GEZEL_LLAMA_SERVER_BIN;
   if (!binaryPath) return null;
   try {
@@ -263,6 +321,7 @@ export async function detectLlamaGpuVram(
     return {
       vramBytes: best.totalMiB * 1024 * 1024,
       name: best.name,
+      memoryKind: gpuMemoryKindFromName(best.name),
       ...(vendor ? { vendor } : {}),
     };
   } catch {

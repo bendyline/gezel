@@ -195,6 +195,7 @@ export function BootstrapGate(props: {
         device: {
           platform: memory.platform,
           gpuVramBytes: memory.gpuVramBytes,
+          ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
           totalRamBytes: memory.totalRamBytes,
           usableBytes: memory.usableBytes,
           ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),

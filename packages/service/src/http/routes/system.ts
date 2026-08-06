@@ -88,6 +88,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
     const forceMainMemory = configuredBackend === 'cpu';
     const unifiedMemory =
       profile.source === 'darwin-unified' ||
+      profile.source === 'gpu-integrated' ||
       (profile.gpuVramBytes !== null && profile.gpuVramBytes >= profile.totalRamBytes * 0.75);
     // Main/UMA memory comes from host counters (`vm_stat` on macOS). Avoid
     // spawning any SMI adapter there or on CPU-only hosts, where it cannot

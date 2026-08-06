@@ -13,8 +13,9 @@ import { detectMemoryProfile } from '../../system/memory.js';
  * fits. See `packages/core/src/recommendation.ts` for the ranking rules; this
  * module just supplies the two live inputs:
  *
- *   1. the machine's memory profile (`detectMemoryProfile` — RAM + discrete
- *      GPU VRAM via nvidia-smi / the bundled `llama-server --list-devices`),
+ *   1. the machine's memory profile (`detectMemoryProfile` — RAM + GPU memory
+ *      via nvidia-smi / the bundled `llama-server --list-devices`, including
+ *      integrated-vs-discrete classification so shared RAM is not counted twice),
  *   2. the catalog candidates, each mapped to the working set of the on-device
  *      provider for this platform (MLX on Mac, llama.cpp elsewhere).
  *
@@ -41,6 +42,7 @@ export interface TierDecision {
     platform: string;
     totalRamBytes: number;
     gpuVramBytes?: number;
+    gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
     usableBytes: number;
   };
 }
@@ -79,6 +81,7 @@ export async function detectModelTier(models: readonly ChatModelManifest[]): Pro
     platform: mem.platform,
     totalRamBytes: mem.totalRamBytes,
     ...(mem.gpuVramBytes != null ? { gpuVramBytes: mem.gpuVramBytes } : {}),
+    gpuMemoryKind: mem.gpuMemoryKind,
     usableBytes: mem.usableBytes,
   };
 
@@ -89,6 +92,7 @@ export async function detectModelTier(models: readonly ChatModelManifest[]): Pro
   const pick = pickRecommendedModel(candidates, {
     platform: mem.platform,
     gpuVramBytes: mem.gpuVramBytes,
+    gpuMemoryKind: mem.gpuMemoryKind,
     totalRamBytes: mem.totalRamBytes,
     usableBytes: mem.usableBytes,
     // The broker's ceiling, so first run never installs a model the very

@@ -2600,7 +2600,13 @@ export class GezelClient {
     platform: string;
     totalRamBytes: number;
     gpuVramBytes: number | null;
-    source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+    gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
+    source:
+      | 'darwin-unified'
+      | 'gpu-nvidia'
+      | 'gpu-vulkan'
+      | 'gpu-integrated'
+      | 'system-ram-fallback';
     /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
     usableBytes: number;
     /**

@@ -262,6 +262,7 @@ export const SystemDiagnosticsSchema = z.object({
   hardware: z.object({
     totalRamBytes: z.number().nonnegative(),
     gpuVramBytes: z.number().nonnegative().nullable(),
+    gpuMemoryKind: z.enum(['discrete', 'integrated', 'unified', 'none', 'unknown']).optional(),
     /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
     usableBytes: z.number().nonnegative(),
     /**
@@ -271,7 +272,13 @@ export const SystemDiagnosticsSchema = z.object({
      * refusal was measured against.
      */
     budgetBytes: z.number().nonnegative().optional(),
-    source: z.enum(['darwin-unified', 'gpu-nvidia', 'gpu-vulkan', 'system-ram-fallback']),
+    source: z.enum([
+      'darwin-unified',
+      'gpu-nvidia',
+      'gpu-vulkan',
+      'gpu-integrated',
+      'system-ram-fallback',
+    ]),
     gpuVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
     /** Prose sentence — the same copy local-model onboarding shows. */
     description: z.string(),

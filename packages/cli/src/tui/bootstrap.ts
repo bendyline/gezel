@@ -141,6 +141,14 @@ export function rankChatModels(
   );
   if (!picked) return pool;
   const bestIndex = pool.findIndex((model) => model.id === picked.id);
+  if (bestIndex < 0) {
+    // The low-acceleration recommendation can deliberately be a `tight`
+    // small dense model while a much larger MoE is technically
+    // `fits-offload`. Keep the daemon's safe first choice visible and first.
+    const best = candidates.find((model) => model.id === picked.id);
+    if (best) pool.unshift(best);
+    return pool;
+  }
   if (bestIndex > 0) {
     const [best] = pool.splice(bestIndex, 1);
     if (best) pool.unshift(best);

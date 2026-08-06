@@ -11,6 +11,12 @@
  *   2. MoE-alignment (see below),
  *   3. size (largest that still fits — "the highest model that comfortably fits").
  *
+ * One usability floor runs before that ranking: non-Mac CPU/integrated hosts
+ * and discrete GPUs below 8 GiB get the smallest curated candidate. Combined
+ * RAM+VRAM admission can make a large MoE load there, but it is effectively
+ * CPU-paced and is not a functional first-run default. High-throughput
+ * unified accelerators such as DGX Spark are explicitly exempt.
+ *
  * MoE-alignment encodes the expert-offload trade-off:
  *   - A big discrete GPU (> 24 GB VRAM, Windows/Linux) has room to run a dense
  *     model fully in VRAM — MoE offload buys nothing there, so MoE models are
@@ -18,8 +24,8 @@
  *   - Apple Silicon (unified memory) and smaller discrete GPUs (≤ 24 GB) gain
  *     from streaming MoE experts out of system RAM, so MoE models are PREFERRED
  *     (they outrank an equally-scored dense model).
- *   - CPU-only hosts get neither exclusion nor preference; the fit check
- *     already drops the MoEs they can't offload.
+ *   - CPU-only and consumer-iGPU hosts take the small-model usability floor
+ *     above instead of selecting by technical loadability alone.
  *
  * Pure + deterministic → unit-tested. The service supplies the catalog
  * candidates (with provider-appropriate `residentBytes`) and the live memory
@@ -86,8 +92,19 @@ export interface RecoModelInput extends RecoGateInput {
 
 export interface RecoDevice {
   platform: string;
-  /** Discrete GPU VRAM in bytes, or null (Apple unified memory / CPU-only). */
+  /** GPU-addressable memory in bytes, or null when no accelerator was detected. */
   gpuVramBytes: number | null;
+  /**
+   * How that GPU memory relates to system RAM. Optional for compatibility
+   * with older daemons/callers; absent values are inferred from
+   * `gpuVramBytes` as far as possible.
+   *
+   * `integrated` is the consumer iGPU/UMA case where a Vulkan adapter may
+   * advertise part of system RAM as device memory. `unified` is reserved for
+   * high-throughput unified accelerators such as Apple Silicon and NVIDIA
+   * GB10/DGX Spark, which must not be collapsed onto the CPU-only path.
+   */
+  gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
   totalRamBytes: number;
   /** The fast memory budget (VRAM on a discrete card, a RAM fraction otherwise). */
   usableBytes: number;
@@ -105,6 +122,29 @@ export interface RecoPick {
   recoScore: number;
   /** One-line human-readable rationale (logged + surfaced to the user). */
   reason: string;
+}
+
+/**
+ * Below 8 GiB, a discrete card cannot keep even a useful medium local model
+ * resident. Expert offload may make a much larger MoE technically load, but
+ * decode is then paced by system RAM/CPU and is not a functional first-run
+ * recommendation.
+ */
+export const SMALL_MODEL_VRAM_THRESHOLD = 8 * GB;
+
+/**
+ * Non-Mac hosts that should receive the smallest safe recommended model:
+ * CPU-only, consumer integrated/UMA graphics, or a discrete card below 8 GiB.
+ * High-performance unified accelerators (notably GB10/DGX Spark) stay on the
+ * normal large-model path.
+ */
+export function needsSmallModelRecommendation(device: RecoDevice): boolean {
+  if (device.platform === 'darwin') return false;
+  const kind =
+    device.gpuMemoryKind ?? (device.gpuVramBytes == null ? ('none' as const) : ('unknown' as const));
+  if (kind === 'unified') return false;
+  if (kind === 'integrated' || kind === 'none') return true;
+  return device.gpuVramBytes == null || device.gpuVramBytes < SMALL_MODEL_VRAM_THRESHOLD;
 }
 
 interface Scored {
@@ -144,6 +184,7 @@ export function excludesMoE(device: RecoDevice): boolean {
  */
 export function isUnifiedMemoryDevice(device: RecoDevice): boolean {
   if (device.platform === 'darwin') return true;
+  if (device.gpuMemoryKind === 'integrated' || device.gpuMemoryKind === 'unified') return true;
   return device.gpuVramBytes != null && device.gpuVramBytes >= 0.75 * device.totalRamBytes;
 }
 
@@ -159,7 +200,7 @@ export function isBandwidthBoundHost(device: RecoDevice): boolean {
 }
 
 export interface HardwareHint {
-  kind: 'moe-good-match' | 'large-dense-caution';
+  kind: 'moe-good-match' | 'large-dense-caution' | 'low-acceleration-caution';
   /** Short pill label. */
   label: string;
   /** Longer tooltip explanation. */
@@ -176,6 +217,19 @@ export function hardwareHint(
   device: RecoDevice,
   model: { isMoE: boolean; fitTier: string; residentBytes?: number },
 ): HardwareHint | null {
+  if (
+    needsSmallModelRecommendation(device) &&
+    model.fitTier !== 'too-big' &&
+    model.residentBytes != null &&
+    model.residentBytes > SMALL_MODEL_VRAM_THRESHOLD
+  ) {
+    return {
+      kind: 'low-acceleration-caution',
+      label: 'large model — likely very slow here',
+      detail:
+        'This model may load by using system memory, but this machine has no fast accelerator large enough to run it well. A small model will be substantially more usable.',
+    };
+  }
   if (!isBandwidthBoundHost(device)) return null;
   const runnable = model.fitTier !== 'too-big';
   if (model.isMoE && runnable) {
@@ -244,6 +298,26 @@ export function pickRecommendedModel(
   });
 
   if (scored.length === 0) return null;
+
+  // Loading is not the same thing as being usable. On CPU/iGPU hosts and
+  // sub-8-GiB cards, combined RAM+VRAM accounting can make a 20+ GiB MoE pass
+  // the admission check while generation is effectively CPU-paced. First run
+  // should be useful, so choose the smallest curated candidate outright.
+  if (needsSmallModelRecommendation(device)) {
+    scored.sort((a, b) =>
+      a.m.residentBytes !== b.m.residentBytes
+        ? a.m.residentBytes - b.m.residentBytes
+        : a.isMoE !== b.isMoE
+          ? Number(a.isMoE) - Number(b.isMoE)
+          : b.score - a.score,
+    );
+    const top = scored[0] as Scored;
+    return {
+      id: top.m.id,
+      recoScore: top.score,
+      reason: `${top.m.id} (recoScore ${top.score}) — safest small model for CPU, integrated graphics, or a GPU below 8 GiB`,
+    };
+  }
 
   const comfortable = scored.filter((s) => s.comfortable && !(excludeMoE && s.isMoE));
   if (comfortable.length > 0) {

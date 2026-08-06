@@ -48,8 +48,14 @@ const GPU_VENDOR_LABEL = {
 export function describeCurrentHardware(profile: {
   totalRamBytes: number;
   gpuVramBytes: number | null;
+  gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
   usableBytes: number;
-  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+  source:
+    | 'darwin-unified'
+    | 'gpu-nvidia'
+    | 'gpu-vulkan'
+    | 'gpu-integrated'
+    | 'system-ram-fallback';
   gpuVendor?: keyof typeof GPU_VENDOR_LABEL;
 }): HardwareDescription {
   const total = formatBytes(profile.totalRamBytes);
@@ -57,6 +63,13 @@ export function describeCurrentHardware(profile: {
   let description: string;
   if (profile.source === 'darwin-unified') {
     description = `Apple Silicon unified memory: ${total} total, with about ${usable} available for local models.`;
+  } else if (profile.source === 'gpu-integrated') {
+    const vendor = profile.gpuVendor ? `${GPU_VENDOR_LABEL[profile.gpuVendor]} ` : '';
+    const shared =
+      profile.gpuVramBytes == null
+        ? ''
+        : ` (the GPU reports ${formatBytes(profile.gpuVramBytes)} shared)`;
+    description = `${vendor}integrated GPU: ${total} unified system memory${shared}, with about ${usable} available for local models; shared GPU memory is not additional RAM.`;
   } else if (profile.gpuVramBytes != null) {
     const vendor = profile.gpuVendor ? `${GPU_VENDOR_LABEL[profile.gpuVendor]} ` : '';
     description = `${vendor}GPU: ${formatBytes(profile.gpuVramBytes)} VRAM (about ${usable} available for local models), with ${total} system RAM.`;

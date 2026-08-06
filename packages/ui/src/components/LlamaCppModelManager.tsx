@@ -35,7 +35,13 @@ import { approximateQuantizationLabel, quantizationTitle } from './model-quantiz
 interface MemoryProfile {
   totalRamBytes: number;
   gpuVramBytes: number | null;
-  source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+  gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
+  source:
+    | 'darwin-unified'
+    | 'gpu-nvidia'
+    | 'gpu-vulkan'
+    | 'gpu-integrated'
+    | 'system-ram-fallback';
   usableBytes: number;
   /**
    * What the daemon's capacity broker will admit across VRAM + system RAM.
@@ -56,7 +62,10 @@ function fitMachine(memory: MemoryProfile) {
   return {
     usableBytes: memory.usableBytes,
     totalRamBytes: memory.totalRamBytes,
-    gpuVramBytes: memory.gpuVramBytes,
+    // An integrated adapter's advertised allocation is shared system RAM,
+    // not a fast offload pool separate from it. Treat it as RAM-paced for fit
+    // copy so a 26B MoE says "may run slowly", not "runs (expert offload)".
+    gpuVramBytes: memory.gpuMemoryKind === 'integrated' ? null : memory.gpuVramBytes,
     ...(memory.budgetBytes !== undefined ? { admissibleBytes: memory.budgetBytes } : {}),
   };
 }
@@ -71,6 +80,7 @@ function recoDeviceFromMemory(memory: MemoryProfile): RecoDevice {
   return {
     platform: memory.source === 'darwin-unified' ? 'darwin' : 'other',
     gpuVramBytes: memory.gpuVramBytes,
+    ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
     totalRamBytes: memory.totalRamBytes,
     usableBytes: memory.usableBytes,
     ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),

@@ -226,7 +226,7 @@ describe('data macros', () => {
     const { markdown } = await expandMacros('::handboek-role-tools{role=voorman scope=tiers}', {
       ...ctx('site'),
     });
-    expect(markdown).toContain('| medium | 12–45B | full kit (80 tools) |');
+    expect(markdown).toContain('| medium | 12–45B | full kit (79 tools) |');
     expect(markdown).not.toContain('| medium | 12–45B | 57 of');
   });
 

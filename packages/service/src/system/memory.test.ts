@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { MemoryProfile } from './memory.js';
-import { sampleMachineMemoryUsage, summarizeResidentModels } from './memory.js';
+import {
+  memoryProfileForLlamaGpu,
+  sampleMachineMemoryUsage,
+  summarizeResidentModels,
+} from './memory.js';
 
 const GiB = 1024 ** 3;
 
@@ -9,6 +13,7 @@ function profile(overrides: Partial<MemoryProfile> = {}): MemoryProfile {
     platform: 'linux',
     totalRamBytes: 64 * GiB,
     gpuVramBytes: 24 * GiB,
+    gpuMemoryKind: 'discrete',
     source: 'gpu-nvidia',
     usableBytes: 22 * GiB,
     budgetBytes: 60 * GiB,
@@ -16,6 +21,51 @@ function profile(overrides: Partial<MemoryProfile> = {}): MemoryProfile {
     ...overrides,
   };
 }
+
+describe('memoryProfileForLlamaGpu', () => {
+  it('does not add a Surface-class integrated GPU shared allocation to system RAM', () => {
+    const result = memoryProfileForLlamaGpu('win32', 32 * GiB, {
+      vramBytes: 12 * GiB,
+      name: 'Intel(R) Graphics',
+      vendor: 'intel',
+      memoryKind: 'integrated',
+    });
+
+    expect(result).toMatchObject({
+      source: 'gpu-integrated',
+      gpuMemoryKind: 'integrated',
+      gpuVramBytes: 12 * GiB,
+      usableBytes: 16 * GiB,
+    });
+    // One 32-GiB pool at the ordinary 70% unified broker ceiling. The old discrete
+    // path incorrectly produced ~30.6 GiB by adding 95% of the same 12 GiB.
+    expect(result.budgetBytes).toBe(Math.floor(32 * GiB * 0.7));
+  });
+
+  it('still adds real discrete VRAM to the system-RAM share', () => {
+    const result = memoryProfileForLlamaGpu('linux', 32 * GiB, {
+      vramBytes: 12 * GiB,
+      name: 'Intel Arc A770 Graphics',
+      vendor: 'intel',
+      memoryKind: 'discrete',
+    });
+    expect(result.source).toBe('gpu-vulkan');
+    expect(result.gpuMemoryKind).toBe('discrete');
+    expect(result.budgetBytes).toBeGreaterThan(19.2 * GiB);
+  });
+
+  it('keeps a large non-Mac unified accelerator distinct from a consumer iGPU', () => {
+    const result = memoryProfileForLlamaGpu('linux', 121 * GiB, {
+      vramBytes: 119 * GiB,
+      name: 'NVIDIA GB10',
+      vendor: 'nvidia',
+      memoryKind: 'unknown',
+    });
+    expect(result.gpuMemoryKind).toBe('unified');
+    expect(result.source).toBe('gpu-vulkan');
+    expect(result.budgetBytes).toBeLessThanOrEqual(96 * GiB);
+  });
+});
 
 describe('sampleMachineMemoryUsage', () => {
   it('uses main memory for Apple/UMA and attributes resident engines plus daemon RSS', () => {
