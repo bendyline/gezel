@@ -82,7 +82,8 @@ files:
   - assets/icon.ico
   # macOS menu-bar (tray) template icon + its @2x HiDPI variant, read by
   # the main process via nativeImage.createFromPath (see src/tray.ts).
-  # Windows/Linux derive their tray icon from icon.png above.
+  # Windows uses the multi-resolution icon.ico above so the shell can select
+  # a pixel-aligned 16/20/24 px frame; Linux derives its tray icon from icon.png.
   - assets/trayTemplate.png
   - assets/trayTemplate@2x.png
   # Five indeterminate activity frames. The main process cycles these only
@@ -427,7 +428,7 @@ linux:
         - arm64
   icon: assets/icon.png
   category: Office
-  synopsis: Your crew of AI companions
+  synopsis: Your team of AI craftsmen
   description: Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.
   # The systemd unit file ships into /opt/Gezel/gezeld.service so the
   # afterInstall script can copy it into /etc/systemd/system/ as root.

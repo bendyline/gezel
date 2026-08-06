@@ -177,11 +177,11 @@ export function MlxSettings({
         )}
       </section>
 
-      <EngineBudgetStrip provider="mlx" />
-
       <section style={{ marginBottom: '2rem' }}>
         <MlxModelManager onModelsChanged={() => void refreshRuntime()} />
       </section>
+
+      <EngineBudgetStrip provider="mlx" />
 
       <section style={{ marginBottom: '2rem' }}>
         <h4 style={{ marginBottom: '0.5rem' }}>Concurrent replicas</h4>

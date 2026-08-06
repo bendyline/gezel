@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
-import { DropdownChevron, DropdownMenu } from '../primitives/index.js';
+import { DropdownChevron, DropdownMenu, Tabs } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -64,17 +64,21 @@ const MAX_SIDE_FRACTION = 0.65;
 const DEFAULT_SIDE_FRACTION = 0.34;
 
 /**
- * Minimum widths for the split chat/reference layout. The side rail drops
- * before the conversation can shrink below 480 px; while the split remains,
- * CSS caps the resizable side track against the same constraint. This is
- * measured on the rail itself because an output pane can squeeze chat even
- * while the surrounding project view is still wide.
+ * Minimum widths for the split chat/reference layout. The split is
+ * technically able to fit at 686 px, but at that width both panes read as
+ * cramped utility columns. Below 1100 px the rail becomes a single-pane tab
+ * surface instead: Chat keeps the whole canvas, while Task, Commands, and
+ * References remain one click away. This is measured on the rail itself
+ * because an output pane can squeeze chat even while the surrounding project
+ * view is still wide.
  */
 export const CHAT_RAIL_MIN_CHAT_PX = 480;
 const CHAT_RAIL_MIN_SIDE_PX = 192;
 const CHAT_RAIL_GRIP_TRACK_PX = 14;
-export const CHAT_RAIL_MIN_SPLIT_PX =
-  CHAT_RAIL_MIN_CHAT_PX + CHAT_RAIL_MIN_SIDE_PX + CHAT_RAIL_GRIP_TRACK_PX;
+export const CHAT_RAIL_MIN_SPLIT_PX = 1100;
+
+type RailSection = 'tasks' | 'references' | 'commands';
+type CompactPane = 'chat' | RailSection;
 
 function clampFraction(f: number): number {
   if (!Number.isFinite(f)) return DEFAULT_SIDE_FRACTION;
@@ -196,14 +200,9 @@ export function ChatReferences({
    */
   commandsProjectId?: string;
   /**
-   * Narrow-form-factor mode (VS Code chat panel, mobile, anywhere the
-   * pane is under ~500 px wide). The side rail — commands listing,
-   * artifact previewer, resize grip — is suppressed entirely; only
-   * the chat surface renders. Tool-activity is still tracked (so
-   * follow-up surfaces could surface references differently) but no
-   * preview UI is offered. Callers should also avoid passing
-   * `commandsProjectId` in compact mode if they want a guarantee the
-   * commands list never spawns its fetch loop.
+   * Narrow-form-factor mode (VS Code chat panel, mobile, or an explicitly
+   * compact host). The side-by-side rail and resize grip are suppressed;
+   * Chat, Task, Commands, and References become full-width tabs instead.
    */
   compact?: boolean;
   /**
@@ -226,9 +225,10 @@ export function ChatReferences({
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'tasks' | 'references' | 'commands'>(
+  const [activeTab, setActiveTab] = useState<RailSection>(
     commandsProjectId ? 'commands' : 'references',
   );
+  const [compactPane, setCompactPane] = useState<CompactPane>('chat');
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey is the reset trigger — the effect body doesn't read it, but changing it must re-fire.
   useEffect(() => {
@@ -236,6 +236,7 @@ export function ChatReferences({
     setActiveRef(null);
     setTaskRefs([]);
     setActiveTaskRef(null);
+    setCompactPane('chat');
   }, [chatKey]);
 
   const handleTaskReference = useCallback((ref: string, opts?: { scoped?: boolean }) => {
@@ -331,7 +332,10 @@ export function ChatReferences({
     });
     // Promote the clicked artifact to the viewer. `ref` is assigned
     // synchronously inside the updater so it's defined by now.
-    if (ref) setActiveRef(ref);
+    if (ref) {
+      setActiveRef(ref);
+      setCompactPane('references');
+    }
   }, []);
 
   const handleWorkspaceReference = useCallback((path: string, messageProjectId?: string) => {
@@ -352,7 +356,10 @@ export function ChatReferences({
       };
       return [...prev, ref];
     });
-    if (ref) setActiveRef(ref);
+    if (ref) {
+      setActiveRef(ref);
+      setCompactPane('references');
+    }
   }, []);
 
   const api = useMemo<ChatReferencesApi>(
@@ -495,14 +502,106 @@ export function ChatReferences({
     [sideFraction, commitSideFraction],
   );
 
-  // Compact short-circuit: skip the grid layout (and the empty `<aside>`
-  // that the default chat-rail-body grid reserves a 22 rem column for)
-  // so the chat surface gets the full pane width. No side rail, no
-  // grip, no commands panel — what the VS Code chat webview wants.
+  // Compact short-circuit: replace the split rail with one full-width pane.
+  // Keep Chat mounted while another tab is selected so streaming state,
+  // session focus, and an in-progress draft survive the round trip.
   if (isCompact) {
     return (
       <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
-        <div className="chat-rail-main">{children(api)}</div>
+        <Tabs.Root
+          className="chat-rail-compact-root"
+          value={compactPane}
+          onValueChange={(value) => setCompactPane(value as CompactPane)}
+        >
+          <Tabs.List className="chat-rail-compact-tabs" aria-label="Conversation panels">
+            <Tabs.Trigger className="chat-rail-compact-tab" value="chat">
+              Chat
+            </Tabs.Trigger>
+            {hasTasks && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="tasks">
+                Task
+              </Tabs.Trigger>
+            )}
+            {hasCommands && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="commands">
+                Commands
+              </Tabs.Trigger>
+            )}
+            {hasReferences && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="references">
+                References
+              </Tabs.Trigger>
+            )}
+          </Tabs.List>
+
+          <Tabs.Content
+            forceMount
+            className="chat-rail-compact-panel chat-rail-compact-chat"
+            value="chat"
+          >
+            <div className="chat-rail-main">{children(api)}</div>
+          </Tabs.Content>
+
+          {hasTasks && effectiveTaskRef && (
+            <Tabs.Content className="chat-rail-compact-panel" value="tasks">
+              {orderedTasks.length > 1 && (
+                <div className="chat-rail-compact-picker-row">
+                  <span className="muted small">Showing</span>
+                  <TaskTabMenu
+                    variant="picker"
+                    tasks={orderedTasks}
+                    activeRef={effectiveTaskRef}
+                    selected
+                    onSelect={setActiveTaskRef}
+                  />
+                </div>
+              )}
+              <TaskRailCard
+                key={effectiveTaskRef}
+                taskRef={effectiveTaskRef}
+                onOpenTask={(ref) =>
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
+                  )
+                }
+              />
+            </Tabs.Content>
+          )}
+
+          {hasCommands && commandsProjectId && (
+            <Tabs.Content className="chat-rail-compact-panel" value="commands">
+              <CommandsPanel
+                projectId={commandsProjectId}
+                {...(onStageTerminalCommand ? { onStageCommand: onStageTerminalCommand } : {})}
+              />
+            </Tabs.Content>
+          )}
+
+          {hasReferences && effectiveActive && (
+            <Tabs.Content className="chat-rail-compact-panel" value="references">
+              {references.length > 1 && (
+                <div className="chat-rail-compact-picker-row">
+                  <span className="muted small">Showing</span>
+                  <ReferenceTabMenu
+                    variant="picker"
+                    refs={references}
+                    activeKey={effectiveActive.key}
+                    selected
+                    onSelect={setActiveRef}
+                  />
+                </div>
+              )}
+              <div className="chat-rail-viewer-wrap">
+                <ReferenceViewer
+                  key={effectiveActive.key}
+                  projectId={effectiveActive.projectId ?? resolvedProjectId}
+                  reference={effectiveActive}
+                  onResolved={handleResolved}
+                />
+              </div>
+            </Tabs.Content>
+          )}
+        </Tabs.Root>
       </div>
     );
   }
@@ -837,29 +936,33 @@ function TaskTabMenu({
   selected,
   onOpen,
   onSelect,
+  variant = 'tab',
 }: {
   tasks: TaskRef[];
   activeRef: string | null;
   selected: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
   onSelect: (ref: string) => void;
+  variant?: 'tab' | 'picker';
 }) {
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
-        if (open) onOpen();
+        if (open) onOpen?.();
       }}
     >
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          role="tab"
-          className={`chat-rail-section-tab chat-rail-section-tab-menu${
-            selected ? ' is-active' : ''
-          }`}
-          aria-selected={selected}
+          role={variant === 'tab' ? 'tab' : undefined}
+          className={
+            variant === 'tab'
+              ? `chat-rail-section-tab chat-rail-section-tab-menu${selected ? ' is-active' : ''}`
+              : 'chat-rail-compact-picker chat-rail-section-tab-menu'
+          }
+          aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>Tasks</span>
+          <span>{variant === 'tab' ? 'Tasks' : (activeRef ?? 'Choose task')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
@@ -910,29 +1013,37 @@ function ReferenceTabMenu({
   selected,
   onOpen,
   onSelect,
+  variant = 'tab',
 }: {
   refs: Reference[];
   activeKey: string | null;
   selected: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
   onSelect: (r: Reference) => void;
+  variant?: 'tab' | 'picker';
 }) {
+  const activeName = refs
+    .find((reference) => reference.key === activeKey)
+    ?.path.split('/')
+    .pop();
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
-        if (open) onOpen();
+        if (open) onOpen?.();
       }}
     >
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          role="tab"
-          className={`chat-rail-section-tab chat-rail-section-tab-menu${
-            selected ? ' is-active' : ''
-          }`}
-          aria-selected={selected}
+          role={variant === 'tab' ? 'tab' : undefined}
+          className={
+            variant === 'tab'
+              ? `chat-rail-section-tab chat-rail-section-tab-menu${selected ? ' is-active' : ''}`
+              : 'chat-rail-compact-picker chat-rail-section-tab-menu'
+          }
+          aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>References</span>
+          <span>{variant === 'tab' ? 'References' : (activeName ?? 'Choose reference')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>

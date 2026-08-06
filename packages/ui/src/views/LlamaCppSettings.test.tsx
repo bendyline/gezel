@@ -10,6 +10,9 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../components/LlamaCppModelManager.js', () => ({
   LlamaCppModelManager: () => <div data-testid="llamacpp-manager">mock-manager</div>,
 }));
+vi.mock('../components/EngineBudgetStrip.js', () => ({
+  EngineBudgetStrip: () => <div data-testid="engine-memory">mock-engine-memory</div>,
+}));
 
 const { LlamaCppSettings } = await import('./LlamaCppSettings.js');
 const { api } = await import('../api.js');
@@ -49,6 +52,23 @@ describe('LlamaCppSettings', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /First local model/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Llama 3 8B \(llama-3-8b\)/ })).toBeInTheDocument();
+  });
+
+  it('shows model selection and downloads before engine memory management', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+
+    const defaultModel = await screen.findByRole('heading', { name: 'Default model' });
+    const models = screen.getByTestId('llamacpp-manager');
+    const memory = screen.getByTestId('engine-memory');
+
+    expect(defaultModel.compareDocumentPosition(models) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(models.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it('shows machine-health controls on Windows and persists Manage mode', async () => {

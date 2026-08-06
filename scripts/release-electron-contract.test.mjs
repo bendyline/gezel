@@ -146,7 +146,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /appstreamcli validate packages\/app\/assets\/com\.bendyline\.gezel\.metainfo\.xml/,
   );
 
-  const productTagline = 'Your crew of AI companions';
+  const productTagline = 'Your team of AI craftsmen';
   const productDescription =
     'Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.';
   assert.ok(builder.includes(`synopsis: ${productTagline}`));

@@ -112,15 +112,26 @@ function task(ref: string, title: string): Task {
 }
 
 describe('ChatReferences responsive split', () => {
-  it('drops the right pane before the chat would fall below its minimum width', async () => {
+  it('replaces the right pane with full-width tabs below the split threshold', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    const user = userEvent.setup();
     const { container } = renderProjectRail();
 
     await waitFor(() => {
       expect(container.querySelector('.chat-rail-body-compact')).not.toBeNull();
     });
     expect(container.querySelector('aside')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Commands' })).toBeInTheDocument();
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Commands' }));
+
+    expect(screen.getByTestId('commands-panel')).toBeVisible();
+    expect(screen.getByTestId('chat-main').closest('.gz-tabs-content')).toHaveAttribute(
+      'data-state',
+      'inactive',
+    );
   });
 
   it('keeps the right pane at the minimum viable split width', async () => {
@@ -132,6 +143,37 @@ describe('ChatReferences responsive split', () => {
     });
     expect(container.querySelector('aside')).not.toBeNull();
     expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+  });
+
+  it('offers Chat, Task, and Commands as peer tabs when a narrow chat has a task', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1', { scoped: true })}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+        'Chat',
+        'Task',
+        'Commands',
+      ]);
+    });
+
+    await user.click(screen.getByRole('tab', { name: 'Task' }));
+
+    expect(await screen.findByRole('heading', { name: 'First task' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Task' })).toHaveAttribute('aria-selected', 'true');
   });
 });
 

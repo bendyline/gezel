@@ -9,6 +9,9 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../components/MlxModelManager.js', () => ({
   MlxModelManager: () => <div data-testid="mlx-manager">mock-mlx-manager</div>,
 }));
+vi.mock('../components/EngineBudgetStrip.js', () => ({
+  EngineBudgetStrip: () => <div data-testid="engine-memory">mock-engine-memory</div>,
+}));
 vi.mock('../components/CacheControlsPanel.js', () => ({
   CacheControlsPanel: ({ providerName }: { providerName: string }) => (
     <div data-testid={`cache-${providerName}`}>cache-{providerName}</div>
@@ -43,6 +46,16 @@ describe('MlxSettings', () => {
     expect(screen.getByText('system')).toBeInTheDocument();
     expect(screen.getByText('0.5.0')).toBeInTheDocument();
     expect(screen.getByText('3.11.7')).toBeInTheDocument();
+  });
+
+  it('shows model management before engine memory management', () => {
+    render(<MlxSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} />);
+
+    const models = screen.getByTestId('mlx-manager');
+    const memory = screen.getByTestId('engine-memory');
+    expect(models.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it('shows "No Python runtime available" when the runtime info has source=null', async () => {

@@ -383,12 +383,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         </section>
       )}
 
-      <EngineBudgetStrip provider="llama-cpp" />
-
       <section style={{ marginBottom: '2rem' }}>
         <h4>Models</h4>
         <LlamaCppModelManager onModelsChanged={refreshInstalled} />
       </section>
+
+      <EngineBudgetStrip provider="llama-cpp" />
 
       <section style={{ marginBottom: '2rem' }}>
         <h4 style={{ marginBottom: '0.5rem' }}>Concurrent replicas</h4>

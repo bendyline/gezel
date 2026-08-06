@@ -292,13 +292,9 @@ function ProjectChatBody({
   return (
     <ChatReferences
       projectId={project.id}
-      // Compact mode (narrow VS Code chat panel, mobile, …) suppresses
-      // the right-rail commands listing AND the reference-preview UI
-      // — there isn't horizontal room for either. Skipping
-      // `commandsProjectId` here is the belt to ChatReferences'
-      // `compact` braces: belt suppresses the fetch loop; braces hide
-      // the rail layout.
-      {...(compact ? {} : { commandsProjectId: project.id })}
+      // Compact mode turns Commands into a full-width peer of Chat rather
+      // than removing it, so keep the project scope available at every size.
+      commandsProjectId={project.id}
       compact={compact}
       chatKey={`${project.id}:timeline`}
       onStageTerminalCommand={stageTerminalCommand}

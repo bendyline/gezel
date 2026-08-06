@@ -68,6 +68,41 @@ test('the Windows installer uses the product name in the UAC prompt', async () =
   );
 });
 
+test('the Windows tray gives the shell the multi-resolution ICO path', async () => {
+  const [traySource, icon] = await Promise.all([
+    readFile(join(root, 'packages', 'app', 'src', 'tray.ts'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'assets', 'icon.ico')),
+  ]);
+
+  const windowsBranch = traySource.slice(
+    traySource.indexOf("if (process.platform === 'win32')"),
+    traySource.indexOf('// Linux (and platform fallbacks)'),
+  );
+  assert.match(
+    windowsBranch,
+    /const ico = join\(this\.deps\.assetsDir, 'icon\.ico'\);/,
+    'the Windows tray must use the pixel-aligned ICO instead of shrinking the padded app PNG',
+  );
+  assert.match(
+    windowsBranch,
+    /if \(existsSync\(ico\)\) return ico;/,
+    'pass the ICO path to Tray so Windows can select a frame; createFromPath collapses it',
+  );
+
+  assert.equal(icon.readUInt16LE(0), 0, 'icon.ico must have the ICO reserved word');
+  assert.equal(icon.readUInt16LE(2), 1, 'icon.ico must identify itself as an icon');
+  const imageCount = icon.readUInt16LE(4);
+  const sizes = Array.from({ length: imageCount }, (_, index) => {
+    const offset = 6 + index * 16;
+    const width = icon.readUInt8(offset) || 256;
+    const height = icon.readUInt8(offset + 1) || 256;
+    return `${width}x${height}`;
+  });
+  for (const size of ['16x16', '20x20', '24x24']) {
+    assert.ok(sizes.includes(size), `icon.ico must include a ${size} tray frame`);
+  }
+});
+
 test('the assisted installer and uninstaller ship Gezel sidebar art', async () => {
   const builder = await readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8');
   const sidebars = {

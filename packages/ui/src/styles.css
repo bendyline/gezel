@@ -14043,13 +14043,8 @@ button.bench-step-foot:disabled {
   min-height: 0;
 }
 
-/* Compact / narrow form factor (VS Code chat panel, ≤ 500 px sidebars,
-   future mobile shells). Drop the 22 rem side column entirely so the
-   chat surface gets the full pane width and no empty rail wraps below
-   the composer. ChatReferences only renders this branch with no
-   <aside> child, so flex-column is all we need — `.chat-rail-main`
-   stretches to fill its parent the same way the grid `1fr` row would
-   have. */
+/* Compact / narrow form factor. The split rail becomes a single-pane tab
+   surface so chat never competes with context for width or height. */
 .chat-rail-body-compact {
   display: flex;
   flex-direction: column;
@@ -14060,6 +14055,87 @@ button.bench-step-foot:disabled {
 .chat-rail-body-compact > .chat-rail-main {
   flex: 1;
   min-height: 0;
+}
+
+.chat-rail-compact-root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-rail-compact-tabs.gz-tabs-list {
+  flex: 0 0 auto;
+  gap: 0;
+  padding-inline: 0.35rem;
+  background: color-mix(in srgb, var(--panel) 82%, var(--surface));
+}
+
+.chat-rail-compact-tabs .chat-rail-compact-tab {
+  flex: 1 1 0;
+  min-width: max-content;
+  padding: 0.45rem 0.7rem;
+  text-align: center;
+}
+
+.chat-rail-compact-panel.gz-tabs-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="active"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+.chat-rail-compact-chat.gz-tabs-content {
+  background: transparent;
+}
+
+.chat-rail-compact-panel > .chat-rail-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail-compact-picker-row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-rail-compact-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: min(24rem, 100%);
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.chat-rail-compact-picker > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* When a reference is active, the component renders a draggable
@@ -15869,32 +15945,6 @@ button.timeline-session-divider-continuing::before {
 .chat-rail-viewer-markdown h4 {
   overflow-wrap: break-word;
   word-break: break-word;
-}
-
-/* Narrow layout: stack the side panel under the chat. */
-@media (max-width: 1100px) {
-  .chat-rail-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  .chat-rail-side {
-    max-height: 20rem;
-  }
-}
-
-/* A short, narrow window cannot spare enough vertical room for the
-   accessory pane below the conversation. Keep the timeline and composer
-   usable by suppressing the pane (and its split grip) at that size. */
-@media (max-width: 1100px) and (max-height: 720px) {
-  .chat-rail-body {
-    grid-template-rows: minmax(0, 1fr);
-    gap: 0;
-  }
-
-  .chat-rail-grip,
-  .chat-rail-side {
-    display: none;
-  }
 }
 
 /* ── Ollama settings ── */

@@ -93,7 +93,7 @@ export function MeesterConversation({
 
   return (
     <section className="home-workshop-conversation" data-testid="meester-chat">
-      <ChatReferences chatKey="meester:global">
+      <ChatReferences chatKey="meester:global" projectId={projectId} commandsProjectId={projectId}>
         {({ onToolActivity, onArtifactReference, onTaskReference }) => (
           <>
             <GlobalTimeline
