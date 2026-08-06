@@ -227,6 +227,8 @@ import type {
   ReadSymbolResponse,
   ReferenceFileLocationRequest,
   ReferenceFileLocationResponse,
+  ReferencePreviewRequest,
+  ReferencePreviewResponse,
   RenameGezelRequest,
   RenderImageRequest,
   RenderImageResponse,
@@ -4496,6 +4498,21 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/reference-file-location?${params.toString()}`,
+    );
+  }
+
+  /**
+   * Classify a References-pane file and prepare any document markdown
+   * companion. Binary bytes are never returned through this JSON endpoint.
+   */
+  previewReference(
+    projectId: string,
+    request: ReferencePreviewRequest,
+  ): Promise<ReferencePreviewResponse> {
+    const params = new URLSearchParams({ kind: request.kind, path: request.path });
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/reference-preview?${params.toString()}`,
     );
   }
 

@@ -531,7 +531,6 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
             const availableTools = availableBuiltinToolsForAllowlist(surface.allowlist);
             const instructions = buildInstructions({
               name: roleManifest.name,
-              roleBasedName: roleManifest.id,
               about,
               role: roleManifest.role,
               providerName: provider,

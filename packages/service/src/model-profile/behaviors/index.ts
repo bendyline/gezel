@@ -74,9 +74,8 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   PromptPrivateReasoningGuidance as Behavior<unknown>,
   PromptVerboseReasoningHintThink as Behavior<unknown>,
   PromptVerboseReasoningHintChannel as Behavior<unknown>,
-  // Placed AFTER the cookbook + reasoning-guidance entries so their
-  // `promptAppend` override blocks concatenate last (recency wins for
-  // local models). See each behavior's header for the override rationale.
+  // Placed after the cookbook so its `promptAppend` override lands later
+  // (recency wins for local models). See the behavior header for rationale.
   PromptPreferWritefileEdits as Behavior<unknown>,
   PromptDeriveByExecution as Behavior<unknown>,
   // After prefer-writefile-edits: that behavior steers small models toward

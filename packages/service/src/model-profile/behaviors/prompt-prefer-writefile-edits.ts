@@ -17,11 +17,10 @@
  * editing, not "which tool." Wild-caught, gemma4-12b on a 9 KB
  * `game.ts`.)
  *
- * This OVERRIDES the cookbook's "patch it with replace_in_file" guidance and
- * the `prompt.private-reasoning-guidance` "use replace_in_file, not a full
- * rewrite" line, so it must land LATE in the system prompt (placed after
- * those entries in `ALL_BEHAVIORS`). Scope to sub-20B models that fumble
- * byte-exact matching; the larger gemmas reproduce text reliably.
+ * This OVERRIDES the cookbook's "patch it with replace_in_file" guidance, so
+ * it must land LATE in the system prompt (placed after the cookbook in
+ * `ALL_BEHAVIORS`). Scope to sub-20B models that fumble byte-exact matching;
+ * the larger gemmas reproduce text reliably.
  *
  * Pairs with the role-tool-filter rule that exposes `replace_lines` wherever
  * `replace_in_file` is available — this guidance is only actionable when

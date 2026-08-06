@@ -141,14 +141,6 @@ function isHtml(path: string): boolean {
   return /\.html?$/i.test(path);
 }
 
-function isImage(path: string): boolean {
-  return /\.(png|jpg|jpeg|gif|webp|bmp|ico|avif)$/i.test(path);
-}
-
-function isVideo(path: string): boolean {
-  return /\.(mp4|webm|ogv|mov|m4v)$/i.test(path);
-}
-
 export interface ChatReferencesApi {
   /** Fed by tool-call events from the timeline / composer. */
   onToolActivity: (tool: ToolActivity) => void;
@@ -996,7 +988,9 @@ function ReferenceTabMenu({
  */
 type ResolvedReference =
   | { kind: RefKind; mode: 'text'; content: string }
-  | { kind: RefKind; mode: 'blob'; blob: Blob };
+  | { kind: RefKind; mode: 'markdown'; content: string; sidecarPath: string }
+  | { kind: RefKind; mode: 'media'; mediaKind: 'image' | 'video' | 'audio'; blob: Blob }
+  | { kind: RefKind; mode: 'binary' };
 
 async function resolveReference(
   projectId: string,
@@ -1006,16 +1000,15 @@ async function resolveReference(
     reference.kind,
     ...(['artifact', 'workspace', 'document'] as const).filter((k) => k !== reference.kind),
   ];
-  const wantBlob = isImage(reference.path) || isVideo(reference.path);
   let lastErr: unknown = null;
   for (const kind of order) {
     try {
-      if (wantBlob) {
+      const preview = await api.previewReference(projectId, { kind, path: reference.path });
+      if (preview.mode === 'media') {
         const blob = await readBlobByKind(projectId, kind, reference.path);
-        return { kind, mode: 'blob', blob };
+        return { kind, mode: 'media', mediaKind: preview.mediaKind, blob };
       }
-      const content = await readByKind(projectId, kind, reference.path);
-      return { kind, mode: 'text', content };
+      return { kind, ...preview };
     } catch (err) {
       lastErr = err;
       if (err instanceof GezelApiError && err.status === 404) {
@@ -1027,19 +1020,6 @@ async function resolveReference(
   throw lastErr ?? new Error(`not found: ${reference.path}`);
 }
 
-async function readByKind(projectId: string, kind: RefKind, path: string): Promise<string> {
-  if (kind === 'artifact') {
-    const r = await api.readProjectArtifact(projectId, path);
-    return r.content;
-  }
-  if (kind === 'document') {
-    const r = await api.readDocument(path);
-    return r.content;
-  }
-  const r = await api.readProjectWorkspaceFile(projectId, path);
-  return r.content;
-}
-
 async function readBlobByKind(projectId: string, kind: RefKind, path: string): Promise<Blob> {
   if (kind === 'artifact') {
     return api.fetchProjectArtifactBlob(projectId, path);
@@ -1047,12 +1027,7 @@ async function readBlobByKind(projectId: string, kind: RefKind, path: string): P
   if (kind === 'workspace') {
     return api.fetchProjectWorkspaceBlob(projectId, path);
   }
-  // Documents are global and currently text-only — fall back to fetching
-  // the text body and wrapping it in a Blob so the caller's image branch
-  // can still render whatever was returned (rare path; mostly here so the
-  // kind-cascade doesn't dead-end).
-  const r = await api.readDocument(path);
-  return new Blob([r.content]);
+  return api.fetchDocumentBlob(path);
 }
 
 function ReferenceViewer({
@@ -1067,7 +1042,10 @@ function ReferenceViewer({
   onResolved?: (refKey: string, resolvedKind: RefKind) => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [contentMode, setContentMode] = useState<'text' | 'markdown' | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [mediaKind, setMediaKind] = useState<'image' | 'video' | 'audio' | null>(null);
+  const [machineFile, setMachineFile] = useState(false);
   const [resolvedKind, setResolvedKind] = useState<RefKind>(reference.kind);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1078,7 +1056,10 @@ function ReferenceViewer({
     let createdUrl: string | null = null;
     setLoading(true);
     setContent(null);
-    setImageUrl(null);
+    setContentMode(null);
+    setBlobUrl(null);
+    setMediaKind(null);
+    setMachineFile(false);
     setError(null);
     setActionError(null);
     setResolvedKind(reference.kind);
@@ -1086,11 +1067,15 @@ function ReferenceViewer({
       try {
         const res = await resolveReference(projectId, reference);
         if (cancelled) return;
-        if (res.mode === 'blob') {
+        if (res.mode === 'media') {
           createdUrl = URL.createObjectURL(res.blob);
-          setImageUrl(createdUrl);
+          setBlobUrl(createdUrl);
+          setMediaKind(res.mediaKind);
+        } else if (res.mode === 'binary') {
+          setMachineFile(true);
         } else {
           setContent(res.content);
+          setContentMode(res.mode);
         }
         setResolvedKind(res.kind);
         if (res.kind !== reference.kind) {
@@ -1186,7 +1171,7 @@ function ReferenceViewer({
                   className="app-nav-menu-item"
                   onSelect={() => void showContainingFolder()}
                 >
-                  Show containing folder
+                  Open containing folder
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1202,16 +1187,26 @@ function ReferenceViewer({
       <div className="chat-rail-viewer-body">
         {loading && <p className="muted small">Loading…</p>}
         {error && <p className="error">{error}</p>}
-        {imageUrl !== null && !loading && !error && isVideo(reference.path) && (
-          <ReferenceVideoPreview path={reference.path} src={imageUrl} />
+        {blobUrl !== null && !loading && !error && mediaKind === 'video' && (
+          <ReferenceVideoPreview path={reference.path} src={blobUrl} />
         )}
-        {imageUrl !== null && !loading && !error && !isVideo(reference.path) && (
-          <ReferenceImagePreview path={reference.path} src={imageUrl} />
+        {blobUrl !== null && !loading && !error && mediaKind === 'audio' && (
+          <ReferenceAudioPreview path={reference.path} src={blobUrl} />
+        )}
+        {blobUrl !== null && !loading && !error && mediaKind === 'image' && (
+          <ReferenceImagePreview path={reference.path} src={blobUrl} />
+        )}
+        {machineFile && !loading && !error && (
+          <ReferenceMachineFile
+            path={reference.path}
+            onSaveCopy={() => void saveCopy()}
+            onOpenContainingFolder={() => void showContainingFolder()}
+          />
         )}
         {content !== null &&
           !loading &&
           !error &&
-          (isMarkdown(reference.path) ? (
+          (contentMode === 'markdown' || isMarkdown(reference.path) ? (
             <RenderedMarkdownPreview
               markdown={content}
               projectId={projectId}
@@ -1306,6 +1301,51 @@ function ReferenceVideoPreview({ path, src }: { path: string; src: string }) {
           background: '#000',
         }}
       />
+    </div>
+  );
+}
+
+function ReferenceAudioPreview({ path, src }: { path: string; src: string }) {
+  return (
+    <div className="chat-rail-viewer-code chat-rail-audio-preview">
+      {/* biome-ignore lint/a11y/useMediaCaption: user-created audio has no caption track. */}
+      <audio key={path} src={src} controls preload="metadata" />
+    </div>
+  );
+}
+
+function ReferenceMachineFile({
+  path,
+  onSaveCopy,
+  onOpenContainingFolder,
+}: {
+  path: string;
+  onSaveCopy: () => void;
+  onOpenContainingFolder: () => void;
+}) {
+  return (
+    <div className="chat-rail-machine-file">
+      <svg
+        className="chat-rail-machine-file-icon"
+        width="40"
+        height="40"
+        viewBox="0 0 40 40"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M10 4h13l7 7v25H10z" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M23 4v8h7M15 21h10M15 26h10" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+      <p className="chat-rail-machine-file-label">{'<Machine File>'}</p>
+      <code className="chat-rail-machine-file-path">{path}</code>
+      <div className="chat-rail-machine-file-actions">
+        <button type="button" onClick={onSaveCopy}>
+          Save copy as…
+        </button>
+        <button type="button" onClick={onOpenContainingFolder}>
+          Open containing folder
+        </button>
+      </div>
     </div>
   );
 }

@@ -35,7 +35,6 @@
   },
   "behaviors": [
     "reasoning.strip-think-tags",
-    "prompt.private-reasoning-guidance",
     "prompt.tool-cookbook-condensed",
     "prompt.meester-build-prelude",
     "mcp.compact-tool-schemas",

@@ -15,7 +15,7 @@
       ordinary files.
     </p>
   </description>
-  <launchable type="desktop-id">gezel.desktop</launchable>
+  <launchable type="desktop-id">com.bendyline.gezel.desktop</launchable>
   <provides>
     <binary>gezel</binary>
   </provides>

@@ -69,6 +69,7 @@ import { projectRoutes } from './routes/projects.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
+import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -499,6 +500,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Interactive type pages: the first-party bridge relaying page tool
   // invokes at /api/projects/:id/page-invoke (see routes/page-invoke.ts).
   app.route('/api/projects', pageInvokeRoutes(ctx));
+  app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*
   app.route('/api/projects', projectGezelRoutes(ctx));

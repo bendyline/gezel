@@ -135,7 +135,10 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(metainfo, /<id>\s*com\.bendyline\.gezel\s*<\/id>/);
   assert.match(metainfo, /<metadata_license>\s*MIT\s*<\/metadata_license>/);
   assert.match(metainfo, /<project_license>\s*MIT\s*<\/project_license>/);
-  assert.match(metainfo, /<launchable\s+type="desktop-id">\s*gezel\.desktop\s*<\/launchable>/);
+  assert.match(
+    metainfo,
+    /<launchable\s+type="desktop-id">\s*com\.bendyline\.gezel\.desktop\s*<\/launchable>/,
+  );
   assert.match(installerVerifier, /verifyLinuxAppStreamMetadata/);
   assert.match(installerVerifier, /declares the MIT project license in AppStream metadata/);
   assert.match(

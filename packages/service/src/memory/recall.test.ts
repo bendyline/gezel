@@ -216,6 +216,57 @@ describe('index-enriched recall', () => {
     expect(hits![1]!.text).not.toContain('  '); // snippet whitespace collapsed
   });
 
+  it('keeps package and TypeScript config payloads out of prompt recall', async () => {
+    const memory = stubMemory([]);
+    const searchCode = async () => ({
+      results: [
+        {
+          path: 'package.json',
+          lineStart: 1,
+          lineEnd: 4,
+          kind: 'chunk',
+          snippet: '{ "name": "default", "private": true }',
+          score: 0.99,
+          source: 'vector' as const,
+        },
+        {
+          path: 'packages/app/tsconfig.json',
+          lineStart: 1,
+          lineEnd: 5,
+          kind: 'chunk',
+          snippet: '{ "compilerOptions": { "strict": true } }',
+          score: 0.98,
+          source: 'vector' as const,
+        },
+        {
+          path: 'src/limiter.ts',
+          lineStart: 10,
+          lineEnd: 20,
+          kind: 'chunk',
+          snippet: 'export function rateLimit() { … }',
+          score: 0.8,
+          source: 'vector' as const,
+        },
+      ],
+      engine: 'semantic' as const,
+      truncated: false,
+    });
+    const hits = await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'rate limiting',
+      providerName: 'openai',
+      config: {},
+      memory,
+      embedQuery: stubEmbed,
+      contentIndex: { searchCode } as never,
+    });
+
+    expect(hits!.map((hit) => hit.text)).toEqual([
+      '`src/limiter.ts:10` — export function rateLimit() { … }',
+    ]);
+  });
+
   it('memory hits still return when the code search throws', async () => {
     const memory = stubMemory([{ text: 'A fact', scope: 'gezel', day: '2026-06-10', score: 0.9 }]);
     const hits = await runAutoRecall({
@@ -356,6 +407,46 @@ describe('renderRecallBlock', () => {
     ]);
     expect(block).toContain('- [workspace] `src/limiter.ts:10` — export function rateLimit()');
     expect(block).not.toContain('[workspace/]');
+  });
+
+  it('filters manifest and TypeScript config hits from frozen recall snapshots', () => {
+    const block = renderRecallBlock([
+      {
+        text: '`package.json:1` — { "name": "default" }',
+        scope: 'workspace',
+        day: '',
+        score: 0.99,
+      },
+      {
+        text: '`packages/app/tsconfig.json:1` — { "compilerOptions": {} }',
+        scope: 'workspace',
+        day: '',
+        score: 0.98,
+      },
+      {
+        text: '`src/limiter.ts:10` — export function rateLimit()',
+        scope: 'workspace',
+        day: '',
+        score: 0.8,
+      },
+    ]);
+
+    expect(block).not.toContain('package.json');
+    expect(block).not.toContain('tsconfig.json');
+    expect(block).toContain('src/limiter.ts');
+  });
+
+  it('returns no recall block when a frozen config hit was the only result', () => {
+    const block = renderRecallBlock([
+      {
+        text: '`package.json:1` — { "name": "default" }',
+        scope: 'workspace',
+        day: '',
+        score: 0.99,
+      },
+    ]);
+
+    expect(block).toBe('');
   });
 
   it('renders non-status kinds with the legacy line shape', () => {

@@ -6,9 +6,9 @@ import { indexFileSecurity } from '../security/extract.js';
 import { classifyFile, isDenseBlob } from './classify.js';
 import {
   chunkMarkdown,
-  convertDocToMarkdown,
+  docFilesPaths,
+  ensureConvertedMarkdownSidecar,
   isConvertibleDoc,
-  writeConvertedMarkdown,
 } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { ensureIndexGitignore } from './gitignore.js';
@@ -279,9 +279,11 @@ export async function indexWorkspaceContent(
       stats.changed++;
       store.upsertFile(record);
       if (isConvertibleDoc(extname(file.rel))) {
-        const conv = await convertDocToMarkdown(file.abs);
+        const conv = await ensureConvertedMarkdownSidecar(
+          file.abs,
+          docFilesPaths(workspaceDir, file.rel),
+        );
         if (conv.markdown != null) {
-          await writeConvertedMarkdown(workspaceDir, file.rel, conv.markdown).catch(() => {});
           store.putChunks(file.rel, hash, chunkMarkdown(conv.markdown));
           stats.docsConverted++;
         } else if (conv.blocked) {

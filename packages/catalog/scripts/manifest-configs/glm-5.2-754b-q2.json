@@ -23,7 +23,6 @@
   },
   "behaviors": [
     "reasoning.strip-think-tags",
-    "prompt.private-reasoning-guidance",
     "prompt.tool-cookbook-condensed",
     "mcp.compact-tool-schemas",
     "fabrication.detect-past-tense-no-tools",

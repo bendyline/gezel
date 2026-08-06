@@ -66,6 +66,16 @@ describe('verifyBundleArchiveRoundTrip', () => {
     );
   });
 
+  it('reports metadata files injected into the archive', async () => {
+    await writeFile(join(archiveSourceDir, '._package.json'), 'appledouble');
+    await archive();
+    const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
+    await assert.rejects(
+      verifyBundleArchiveRoundTrip({ sourceDir, archivePath, expectedFileCount }),
+      /unexpected 1: \._package\.json/,
+    );
+  });
+
   it('rejects stale metadata even when the archive mirrors the source', async () => {
     await archive();
     await assert.rejects(

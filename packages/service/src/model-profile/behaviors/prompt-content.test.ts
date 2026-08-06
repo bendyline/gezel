@@ -92,30 +92,15 @@ describe('PromptToolCookbookCondensed', () => {
 });
 
 describe('PromptPrivateReasoningGuidance', () => {
-  it('keeps reasoning guidance format-neutral', () => {
-    const out = PromptPrivateReasoningGuidance.promptAppend!(promptCtx({}), undefined);
-    expect(out).toContain('Do not print private reasoning');
-    expect(out).toContain('Act first, narrate after');
-    expect(out).toContain('hand off to a developer');
-    expect(out).toContain('Use `write_artifact` only');
-    expect(out).toContain('Concise but substantive single files');
-    expect(out).toContain('Do not impose an artificial byte or line cap');
-    expect(out).not.toContain('Target under ~2.5 KB / 65 lines');
-    expect(out).not.toContain('<think>');
-    expect(out).not.toContain('</think>');
-    expect(out).not.toContain('<|channel|>');
-    expect(out).not.toContain('<|message|>');
-    expect(out).not.toContain('<|end|>');
+  it('stays registered for manifest compatibility without injecting prompt text', () => {
+    expect(PromptPrivateReasoningGuidance.promptAppend).toBeUndefined();
   });
 });
 
 describe('legacy verbose reasoning prompt aliases', () => {
-  it('emit the same format-neutral guidance as the canonical behavior', () => {
-    const generic = PromptPrivateReasoningGuidance.promptAppend!(promptCtx({}), undefined);
-    const channel = PromptVerboseReasoningHintChannel.promptAppend!(promptCtx({}), undefined);
-    const think = PromptVerboseReasoningHintThink.promptAppend!(promptCtx({}), undefined);
-    expect(channel).toEqual(generic);
-    expect(think).toEqual(generic);
+  it('stay registered without injecting retired prompt coaching', () => {
+    expect(PromptVerboseReasoningHintChannel.promptAppend).toBeUndefined();
+    expect(PromptVerboseReasoningHintThink.promptAppend).toBeUndefined();
   });
 });
 

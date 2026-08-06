@@ -3011,6 +3011,36 @@ export const ReferenceFileLocationResponseSchema = z.object({
 export type ReferenceFileLocationResponse = z.infer<typeof ReferenceFileLocationResponseSchema>;
 
 /**
+ * Classify and prepare a file for the References viewer without decoding
+ * arbitrary binary bytes as UTF-8 in the renderer. Convertible documents are
+ * represented by their generated markdown sidecar; media stays binary and is
+ * fetched through the authenticated raw-file endpoints.
+ */
+export const ReferencePreviewRequestSchema = ReferenceFileLocationRequestSchema;
+export type ReferencePreviewRequest = z.infer<typeof ReferencePreviewRequestSchema>;
+
+export const ReferencePreviewResponseSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('text'),
+    content: z.string(),
+  }),
+  z.object({
+    mode: z.literal('markdown'),
+    content: z.string(),
+    /** Path to the generated markdown companion, relative to its source root. */
+    sidecarPath: z.string().min(1),
+  }),
+  z.object({
+    mode: z.literal('media'),
+    mediaKind: z.enum(['image', 'video', 'audio']),
+  }),
+  z.object({
+    mode: z.literal('binary'),
+  }),
+]);
+export type ReferencePreviewResponse = z.infer<typeof ReferencePreviewResponseSchema>;
+
+/**
  * Resolve-and-read for project artifacts. Agents frequently guess paths
  * (pass the basename alone, or include a redundant `artifacts/` prefix);
  * this endpoint tries the exact path first, then falls back to a

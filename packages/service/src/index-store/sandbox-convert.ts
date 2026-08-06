@@ -168,7 +168,12 @@ export async function convertInSandbox(
       extraReadPaths: roots, // node_modules (incl. pnpm store) + linked workspace pkgs
     });
     if (res.timedOut) return { markdown: null, blocked: 'conversion timed out' };
-    if (res.exitCode !== 0) return { markdown: null };
+    if (res.exitCode !== 0) {
+      log.warn(
+        `sandboxed ${ext} conversion failed (exit ${res.exitCode}): ${res.stderr || res.stdout || 'no worker output'}`,
+      );
+      return { markdown: null };
+    }
     const md = await readFile(join(scratch, 'output.md'), 'utf8').catch(() => null);
     return { markdown: md };
   } finally {

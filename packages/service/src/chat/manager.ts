@@ -12183,8 +12183,6 @@ export class ChatManager {
     );
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
-      ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
-      ...(gezel?.parsed.frontmatter.gender ? { gender: gezel.parsed.frontmatter.gender } : {}),
       roleBasedNameOnlyMode: config.roleBasedNameOnlyMode ?? false,
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
@@ -15268,28 +15266,16 @@ export interface BuiltInstructions {
 }
 
 export interface BuildInstructionsOptions {
+  /** Friendly name retained for diagnostics; never rendered to the active gezel. */
   name: string;
   /**
-   * Kebab-case role-based identifier for this gezel. When
-   * `roleBasedNameOnlyMode` is true, this string replaces `name` as
-   * the identifier the model sees in the prompt header.
-   */
-  roleBasedName?: string;
-  /**
-   * "Boring mode" — when true, every name-shaped string in the rendered
-   * prompt (gezel header, voorman reference) uses `roleBasedName` /
-   * `voormanRoleBasedName` in place of the friendly name.
+   * "Boring mode" — when true, references to other gezels in the rendered
+   * prompt use their role-based identifiers in place of friendly names.
+   * The active gezel's own identifier is never rendered.
    */
   roleBasedNameOnlyMode?: boolean;
   /** Voorman's role-based name; pairs with `voormanName` for boring mode. */
   voormanRoleBasedName?: string;
-  /**
-   * This gezel's gender (`male` / `female` / `non-binary`). When set,
-   * the system-prompt header surfaces the matching pronouns so the
-   * model knows what to use when referring to itself. Legacy gezels
-   * without a gender render no pronoun line.
-   */
-  gender?: GezelGender;
   /**
    * Voorman's gender. When the project mentions the voorman, their
    * pronouns are appended so the active gezel knows what to use when
@@ -15591,7 +15577,6 @@ function capAboutForMinimalContext(about: string, maxChars: number): string {
 export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstructions {
   const leanProfile = opts.leanProfile === true;
   const {
-    name,
     gezelId,
     about,
     role,
@@ -15602,7 +15587,6 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     documentFiles,
     voormanName,
     voormanRoleBasedName,
-    roleBasedName,
     roleBasedNameOnlyMode,
     task,
     assignedTasks,
@@ -15617,7 +15601,6 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     bridgeFailed,
     consultationMode,
     expectedDeliverable,
-    gender,
     voormanGender,
     trimExecutorContext,
     minimalContext,
@@ -15637,15 +15620,19 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const fileEditsDisabled = workspaceWritable === false;
   const hasPlaywright = installedToolsetIds?.has('@playwright/mcp') ?? false;
   const availableToolNameSet = new Set((availableTools ?? []).map((tool) => tool.name));
-  const displayedName = displayName({ name, roleBasedName }, roleBasedNameOnlyMode ?? false);
-  const displayedVoormanName = voormanName
-    ? displayName(
-        { name: voormanName, roleBasedName: voormanRoleBasedName },
-        roleBasedNameOnlyMode ?? false,
-      )
-    : undefined;
-  const pronounSuffix = gender ? ` Pronouns: ${pronounsForGender(gender)}.` : '';
-  const header = `You are acting as the agent "${displayedName}".${pronounSuffix}`;
+  const isProjectStrategicOwner =
+    project?.voormanGezelId !== undefined &&
+    project.voormanGezelId !== '' &&
+    project.voormanGezelId === gezelId;
+  const displayedVoormanName =
+    !isProjectStrategicOwner && voormanName
+      ? displayName(
+          { name: voormanName, roleBasedName: voormanRoleBasedName },
+          roleBasedNameOnlyMode ?? false,
+        )
+      : undefined;
+  const displayedRole = role?.trim();
+  const header = displayedRole ? `Your role is "${displayedRole}".` : 'You are a gezel.';
   const body = about.trim().length > 0 ? about.trim() : '(no about.md written yet)';
   // Stable-prefix band: traits (identity) then lessons (experience) sit
   // right after the about body so the gezel's earned behaviors and
@@ -15749,7 +15736,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       projectContext +=
         ' The workspace is a real folder on your disk (outside `~/.gezel`) — address files by paths relative to the workspace root (e.g. `package.json`), never by absolute path, and remember writes are permanent.';
     }
-    if (displayedVoormanName) {
+    if (isProjectStrategicOwner) {
+      projectContext += isSolo
+        ? ' You are the lead of this project and will handle it yourself; team-management tools are intentionally not available here.'
+        : ' You are the voorman of this project.';
+    } else if (displayedVoormanName) {
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
       const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
@@ -15801,10 +15792,6 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     // tuning.ts editing guide), so it gets the tightest gate. About
     // stays for everyone — that's "what is this thing", which every
     // role needs to do coherent work.
-    const isProjectStrategicOwner =
-      project.voormanGezelId !== undefined &&
-      project.voormanGezelId !== '' &&
-      project.voormanGezelId === gezelId;
     if (
       isProjectStrategicOwner &&
       project.missionObjectives &&
@@ -16532,7 +16519,7 @@ ${artifactsLine}
     : '';
 
   const aboutIntro =
-    '\n\nThe section below is your "about" document — it describes who you are, what you know, and how you should behave.\n\n---\n\n';
+    '\n\nThe section below is your "about" document — it describes your role, what you know, and how you should behave.\n\n---\n\n';
 
   // Per-section size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). Prints what
   // actually fills the system prefix so we can see where the prefill tokens go

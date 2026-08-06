@@ -24,7 +24,6 @@
   },
   "behaviors": [
     "reasoning.strip-channel-tags",
-    "prompt.private-reasoning-guidance",
     "prompt.tool-cookbook-full",
     "fabrication.detect-past-tense-no-tools",
     "fabrication.detect-claim-without-tool",

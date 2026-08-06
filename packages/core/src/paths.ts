@@ -854,7 +854,7 @@ export function projectLocalIndexDbFile(workspaceDir: string): string {
 
 /**
  * Converted-document artifacts (squisq-flavored markdown + media + CSV),
- * mirroring the source tree under `.gezel/files/<mirror>/<name>.<ext>_files/`.
+ * mirroring the source tree under `.gezel/files/<mirror>/<name>_files/`.
  */
 export function projectLocalFilesDir(workspaceDir: string): string {
   return join(projectLocalRoot(workspaceDir), 'files');

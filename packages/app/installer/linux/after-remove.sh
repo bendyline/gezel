@@ -50,10 +50,10 @@ if ! is_final_removal "${1:-}"; then
   exit 0
 fi
 
-# The package payload containing gezel.desktop and gezel.png has already been
-# removed when this hook runs. Rebuild the public indexes with a deliberately
-# public umask so they forget Gezel without making unrelated desktop metadata
-# root-only.
+# The package payload containing com.bendyline.gezel.desktop and gezel.png has
+# already been removed when this hook runs. Rebuild the public indexes with a
+# deliberately public umask so they forget Gezel without making unrelated
+# desktop metadata root-only.
 refresh_desktop_caches() (
   umask 022
 

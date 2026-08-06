@@ -24,6 +24,24 @@ const OLLAMA_TOP_K = 3;
 /** Cap + floor for index-derived code hits appended after the memory hits. */
 const CODE_TOP_K = 3;
 const CODE_MIN_SCORE = 0.45;
+/**
+ * Useful when explicitly read, but noisy as unsolicited prompt recall: their
+ * raw JSON/config payload consumes context without orienting the model to the
+ * user's actual work. Keep them indexed for search and tool-driven reads.
+ */
+const WORKSPACE_RECALL_EXCLUDED_BASENAMES = new Set(['package.json', 'tsconfig.json']);
+
+function isEligibleWorkspaceRecallPath(path: string): boolean {
+  const basename = path.split(/[\\/]/).at(-1)?.toLowerCase();
+  return !basename || !WORKSPACE_RECALL_EXCLUDED_BASENAMES.has(basename);
+}
+
+/** Legacy/frozen recall snapshots store the path inside the rendered text. */
+function isEligibleWorkspaceRecallHit(hit: RecallHit): boolean {
+  if (hit.scope !== 'workspace') return true;
+  const path = hit.text.match(/^`(.+):\d+`/)?.[1];
+  return !path || isEligibleWorkspaceRecallPath(path);
+}
 
 /**
  * e-folding constant (days) for status-kind decay:
@@ -167,12 +185,15 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     try {
       const code = await args.contentIndex.searchCode(args.projectId, args.query, {
         queryVector: vector,
-        maxResults: CODE_TOP_K * 2,
+        // Fetch beyond the render cap so excluded manifest/config hits do not
+        // crowd useful source or document results out of the prompt.
+        maxResults: CODE_TOP_K * 4,
       });
       const seenPaths = new Set<string>();
       let added = 0;
       for (const r of code.results) {
         if (r.score < CODE_MIN_SCORE) continue;
+        if (!isEligibleWorkspaceRecallPath(r.path)) continue;
         if (seenPaths.has(r.path)) continue;
         seenPaths.add(r.path);
         const snippet = r.snippet.replace(/\s+/g, ' ').trim().slice(0, 160);
@@ -221,8 +242,9 @@ function agePhrase(ageDays: number): string {
  * a session spans days.
  */
 export function renderRecallBlock(hits: RecallHit[], now: Date = new Date()): string {
-  if (hits.length === 0) return '';
-  const lines = hits
+  const eligibleHits = hits.filter(isEligibleWorkspaceRecallHit);
+  if (eligibleHits.length === 0) return '';
+  const lines = eligibleHits
     .map((h) => {
       if (h.scope === 'workspace') return `- [workspace] ${h.text}`;
       if (h.kind === 'status') {

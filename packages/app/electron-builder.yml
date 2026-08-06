@@ -403,6 +403,12 @@ pkg:
 # Both formats install to /opt/Gezel/ by default.
 linux:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  # Electron derives its Wayland app_id / X11 WM_CLASS from package.json's
+  # `desktopName`. Keep the installed desktop filename on that same identity
+  # so GNOME/KDE can associate the live window with this entry and use its
+  # polished Name + icon instead of showing `bendyline-gezel-app` with a
+  # generic gear. electron-builder 26 leaves this opt-in; v27 will default it.
+  syncDesktopName: true
   # Without this, electron-builder falls back to the package name and ships
   # `/opt/Gezel/@bendylinegezel-app` plus a matching .desktop file and icon —
   # the `@bendyline/gezel-app` scope mangled into a filename. Set here rather

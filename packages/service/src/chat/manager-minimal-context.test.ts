@@ -7,7 +7,7 @@ import { type BuildInstructionsOptions, buildInstructions } from './manager.js';
  * `prompt.minimal-context` fixes the "can't even say hi" failure on a 2K
  * model: the standing prompt (guardrail + about + project + conduct core +
  * tools block) overflowed the window before the first token. In minimal
- * mode buildInstructions must return ONLY header + capped about + a short
+ * mode buildInstructions must return ONLY role header + capped about + a short
  * conduct line, dropping every other layer.
  */
 describe('buildInstructions — minimal-context mode', () => {
@@ -22,7 +22,7 @@ describe('buildInstructions — minimal-context mode', () => {
   const opts = {
     name: 'Liesel',
     role: 'writer',
-    about: 'You are Liesel, a writer with a warm 1930s voice.',
+    about: 'You are a writer with a warm 1930s voice.',
     project,
     workspaceFiles: ['a.ts', 'b.ts', 'c.ts'],
     availableTools: [
@@ -31,9 +31,11 @@ describe('buildInstructions — minimal-context mode', () => {
     ],
   } as unknown as BuildInstructionsOptions;
 
-  it('keeps the header and the about body', () => {
+  it('keeps the role header and the about body without exposing the name', () => {
     const { full } = buildInstructions({ ...opts, minimalContext: true });
-    expect(full).toContain('You are acting as the agent "Liesel".');
+    expect(full).toContain('Your role is "writer".');
+    expect(full).not.toContain('acting as the agent');
+    expect(full).not.toContain('Liesel');
     expect(full).toContain('warm 1930s voice');
   });
 

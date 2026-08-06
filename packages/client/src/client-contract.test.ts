@@ -265,6 +265,16 @@ const cases: ContractCase[] = [
       }),
   },
   {
+    name: 'reference preview',
+    method: 'GET',
+    path: '/api/projects/project%2Fone/reference-preview?kind=workspace&path=decks%2Fone.pptx',
+    invoke: (c) =>
+      c.previewReference('project/one', {
+        kind: 'workspace',
+        path: 'decks/one.pptx',
+      }),
+  },
+  {
     name: 'project update',
     method: 'PUT',
     path: '/api/projects/project%2Fone',

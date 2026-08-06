@@ -331,6 +331,11 @@ async function emitArchive(src, archivePath) {
       : 'tar';
   await exec(tarBin, ['-czf', archivePath, '-C', src, '.'], {
     maxBuffer: 64 * 1024 * 1024,
+    // macOS bsdtar otherwise serializes extended attributes/resource forks as
+    // AppleDouble `._*` entries. The service does not consume them; one local
+    // round-trip produced 56k metadata files on top of 32k runtime files,
+    // invalidating fileCount and multiplying first-launch extraction work.
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
   });
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
   const sz = statSync(archivePath).size;

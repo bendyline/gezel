@@ -33,7 +33,6 @@
   },
   "behaviors": [
     "reasoning.strip-think-tags",
-    "prompt.private-reasoning-guidance",
     "fabrication.detect-past-tense-no-tools",
     "turn.preamble-folding"
   ],

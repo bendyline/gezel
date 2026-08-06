@@ -167,3 +167,46 @@ describe('buildInstructions assigned pronouns', () => {
     expect(full).toContain(sentence);
   });
 });
+
+describe('buildInstructions active gezel identity', () => {
+  it('renders the role without the active gezel name or pronouns', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      role: 'Developer',
+      about: 'Build reliable software.',
+    });
+
+    expect(full).toContain('Your role is "Developer".');
+    expect(full).not.toContain('Wren');
+    expect(full).not.toContain('Pronouns:');
+  });
+
+  it('uses a neutral gezel header when no role is configured', () => {
+    const { full } = buildInstructions({ name: 'Wren', about: 'Help with general work.' });
+
+    expect(full).toContain('You are a gezel.');
+    expect(full).not.toContain('Wren');
+  });
+
+  it('describes an active project lead in second person without repeating their identity', () => {
+    const project = {
+      id: 'wren-project',
+      name: 'Workshop',
+      mode: 'crew',
+      voormanGezelId: 'wren',
+    } as unknown as ProjectDetail;
+    const { full } = buildInstructions({
+      name: 'Wren',
+      gezelId: 'wren',
+      role: 'Developer',
+      about: 'Build reliable software.',
+      project,
+      voormanName: 'Wren',
+      voormanGender: 'male',
+    });
+
+    expect(full).toContain('You are the voorman of this project.');
+    expect(full).not.toContain('Wren');
+    expect(full).not.toContain('(he/him)');
+  });
+});

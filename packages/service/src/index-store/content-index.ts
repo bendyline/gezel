@@ -55,7 +55,7 @@ import { runSecurityScan } from '../security/scan.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
 import { classifyFile } from './classify.js';
 import { type ContentIndexStats, indexWorkspaceContent } from './content-indexer.js';
-import { convertDocToMarkdown, docFilesPaths, writeConvertedMarkdown } from './docs.js';
+import { docFilesPaths, ensureConvertedMarkdownSidecar } from './docs.js';
 import { type EnrichDeps, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
@@ -1261,13 +1261,9 @@ export class ContentIndex {
     if (!absSource) return { found: false, truncated: false };
 
     const paths = docFilesPaths(workspaceDir, relPath);
-    let md = await readFile(paths.mdPath, 'utf8').catch(() => null);
-    if (md == null) {
-      // Convert on demand if the _files markdown isn't there yet.
-      const conv = await convertDocToMarkdown(absSource);
-      md = conv.markdown;
-      if (md != null) await writeConvertedMarkdown(workspaceDir, relPath, md).catch(() => {});
-    }
+    // Reuse the same freshness + sandboxed-conversion path as indexing and
+    // the References viewer so every document consumer agrees on sidecars.
+    const md = (await ensureConvertedMarkdownSidecar(absSource, paths)).markdown;
     if (md == null) return { found: false, sourcePath: relPath, truncated: false };
     const truncated = md.length > MAX_READ_BYTES;
     return {
