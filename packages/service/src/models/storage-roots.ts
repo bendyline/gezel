@@ -752,11 +752,13 @@ async function updateVerificationCache(
   identities: unknown,
 ): Promise<void> {
   const previous = verificationCacheWrites.get(path) ?? Promise.resolve();
-  const write = previous.catch(() => {}).then(async () => {
-    const latest = await readVerificationCache(path);
-    latest[key] = identities;
-    await writeVerificationCache(path, latest);
-  });
+  const write = previous
+    .catch(() => {})
+    .then(async () => {
+      const latest = await readVerificationCache(path);
+      latest[key] = identities;
+      await writeVerificationCache(path, latest);
+    });
   verificationCacheWrites.set(path, write);
   try {
     await write;

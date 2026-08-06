@@ -88,7 +88,9 @@ describe('LlamaCppModelManager local model list', () => {
     expect(api.listLlamaCppModels).toHaveBeenCalledTimes(1);
 
     await act(async () => finish({ models: [] }));
-    await waitFor(() => expect(screen.queryByText(/Checking shared models/)).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText(/Checking shared models/)).not.toBeInTheDocument(),
+    );
   });
 
   it('explains when the selected context policy will not fit', async () => {

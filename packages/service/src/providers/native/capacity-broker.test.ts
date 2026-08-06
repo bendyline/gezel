@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  estimateKvReserveBytes,
+  estimateWindowedKvLinearization,
+} from '../llama-cpp/offload-planner.js';
+import {
   CapacityBroker,
   autoDetectBudgetBytes,
   clampCtxTokensForMemory,
@@ -18,10 +22,6 @@ import {
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from './capacity-broker.js';
-import {
-  estimateKvReserveBytes,
-  estimateWindowedKvLinearization,
-} from '../llama-cpp/offload-planner.js';
 
 const GB = 1024 ** 3;
 
