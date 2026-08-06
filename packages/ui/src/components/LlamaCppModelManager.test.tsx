@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
@@ -43,6 +43,10 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
 }
 
 describe('LlamaCppModelManager local model list', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
@@ -91,6 +95,50 @@ describe('LlamaCppModelManager local model list', () => {
     await waitFor(() =>
       expect(screen.queryByText(/Checking shared models/)).not.toBeInTheDocument(),
     );
+  });
+
+  it('refreshes inventory when an install finishes, not on every idle poll', async () => {
+    vi.useFakeTimers();
+    let active = false;
+    vi.mocked(api.listLlamaCppActiveInstalls).mockImplementation(
+      async () =>
+        ({
+          installs: active
+            ? [
+                {
+                  catalogId: 'new-model',
+                  bytesWritten: 1,
+                  totalBytes: 2,
+                  phase: 'downloading',
+                },
+              ]
+            : [],
+        }) as never,
+    );
+
+    render(<LlamaCppModelManager />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.listLlamaCppModels).toHaveBeenCalledTimes(1);
+
+    active = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(api.listLlamaCppModels).toHaveBeenCalledTimes(1);
+
+    active = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(api.listLlamaCppModels).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(api.listLlamaCppModels).toHaveBeenCalledTimes(2);
   });
 
   it('explains when the selected context policy will not fit', async () => {

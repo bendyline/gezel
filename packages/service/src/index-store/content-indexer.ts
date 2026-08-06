@@ -1,8 +1,9 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { nowIso } from '@bendyline/gezel';
 import { projectLocalIndexDbFile } from '@bendyline/gezel/paths';
 import { indexFileSecurity } from '../security/extract.js';
+import { discoverWorkspaceFiles } from '../workspace/file-walk.js';
 import { classifyFile, isDenseBlob } from './classify.js';
 import {
   chunkMarkdown,
@@ -28,23 +29,6 @@ import {
  * and for changed code/markdown files extract symbols into the IndexStore. This
  * is the deterministic structural tier (Phase 1) — no LLM, fully offline.
  */
-
-const SKIP_DIRS = new Set([
-  '.git',
-  '.gezel',
-  'node_modules',
-  '.next',
-  '.cache',
-  '.turbo',
-  'dist',
-  'build',
-  'out',
-  'coverage',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.DS_Store',
-]);
 
 /** Generous safety cap so a runaway tree can't index forever. */
 const MAX_FILES = 50_000;
@@ -90,44 +74,6 @@ export interface ContentIndexStats {
   skipped: number;
 }
 
-interface WalkedFile {
-  rel: string;
-  abs: string;
-  size: number;
-  mtimeMs: number;
-}
-
-async function* walk(root: string, dir: string, count: { n: number }): AsyncGenerator<WalkedFile> {
-  if (count.n >= MAX_FILES) return;
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (count.n >= MAX_FILES) return;
-    if (SKIP_DIRS.has(e.name)) continue;
-    const abs = join(dir, e.name);
-    if (e.isDirectory()) {
-      yield* walk(root, abs, count);
-    } else if (e.isFile()) {
-      try {
-        const st = await stat(abs);
-        count.n++;
-        yield {
-          rel: relative(root, abs).replaceAll('\\', '/'),
-          abs,
-          size: st.size,
-          mtimeMs: st.mtimeMs,
-        };
-      } catch {
-        /* unreadable — skip */
-      }
-    }
-  }
-}
-
 /**
  * Index (or refresh) one already-open collection store against `workspaceDir`.
  * Returns stats. Pure structural tier: files + symbols.
@@ -148,15 +94,15 @@ export async function indexWorkspaceContent(
   const indexedAt = nowIso();
   const forceCode = store.getMeta('extractor_version') !== String(EXTRACTOR_VERSION);
 
-  const counter = { n: 0 };
-  for await (const file of walk(workspaceDir, workspaceDir, counter)) {
+  const walkedFiles = await discoverWorkspaceFiles(workspaceDir, { maxFiles: MAX_FILES });
+  for (const file of walkedFiles) {
     stats.scanned++;
-    seen.add(file.rel);
+    seen.add(file.path);
 
-    const cls = classifyFile(file.rel, file.size);
+    const cls = classifyFile(file.path, file.size);
     const forceThis = forceCode && cls.kind === 'code';
 
-    const existing = store.getFile(file.rel);
+    const existing = store.getFile(file.path);
     // Cheap change gate: same mtime + size ⇒ unchanged, no read/hash.
     if (
       !forceThis &&
@@ -171,7 +117,7 @@ export async function indexWorkspaceContent(
     if (cls.trivial) {
       // Record the file (so deletions/later phases see it) but do no content work.
       store.upsertFile({
-        path: file.rel,
+        path: file.path,
         hash: null,
         size: file.size,
         mtimeMs: file.mtimeMs,
@@ -198,7 +144,7 @@ export async function indexWorkspaceContent(
       }
       const hash = sha256(bytes);
       const record = {
-        path: file.rel,
+        path: file.path,
         hash,
         size: file.size,
         mtimeMs: file.mtimeMs,
@@ -224,8 +170,8 @@ export async function indexWorkspaceContent(
       if (meta.likelyScreenshot) metaRows.push({ key: 'screenshot', value: '1' });
       const software = meta.pngText?.Software ?? meta.exif?.software;
       if (software) metaRows.push({ key: 'software', value: software });
-      store.setMetadata(file.rel, metaRows);
-      const nameWords = file.rel
+      store.setMetadata(file.path, metaRows);
+      const nameWords = file.path
         .replace(/\.[^.]+$/, '')
         .split(/[^a-zA-Z0-9]+/)
         .filter(Boolean)
@@ -238,7 +184,7 @@ export async function indexWorkspaceContent(
       // it in makes generated images findable by what they were asked to be,
       // long before any captioning model runs.
       const provenance = embeddablePngText(meta.pngText);
-      store.putChunks(file.rel, hash, [
+      store.putChunks(file.path, hash, [
         {
           kind: 'image',
           lineStart: 1,
@@ -261,7 +207,7 @@ export async function indexWorkspaceContent(
       }
       const hash = sha256(bytes);
       const record = {
-        path: file.rel,
+        path: file.path,
         hash,
         size: file.size,
         mtimeMs: file.mtimeMs,
@@ -278,18 +224,18 @@ export async function indexWorkspaceContent(
       }
       stats.changed++;
       store.upsertFile(record);
-      if (isConvertibleDoc(extname(file.rel))) {
+      if (isConvertibleDoc(extname(file.path))) {
         const conv = await ensureConvertedMarkdownSidecar(
           file.abs,
-          docFilesPaths(workspaceDir, file.rel),
+          docFilesPaths(workspaceDir, file.path),
         );
         if (conv.markdown != null) {
-          store.putChunks(file.rel, hash, chunkMarkdown(conv.markdown));
+          store.putChunks(file.path, hash, chunkMarkdown(conv.markdown));
           stats.docsConverted++;
         } else if (conv.blocked) {
           // Refused for safety — index a stub so the file is visible/searchable
           // as "held" without its (unconverted) content entering the index.
-          store.putChunks(file.rel, hash, [
+          store.putChunks(file.path, hash, [
             {
               kind: 'doc',
               lineStart: 1,
@@ -319,7 +265,7 @@ export async function indexWorkspaceContent(
     // Content unchanged despite mtime touch — just refresh the stat row.
     if (!forceThis && existing && existing.hash === hash) {
       store.upsertFile({
-        path: file.rel,
+        path: file.path,
         hash,
         size: file.size,
         mtimeMs: file.mtimeMs,
@@ -335,7 +281,7 @@ export async function indexWorkspaceContent(
 
     stats.changed++;
     store.upsertFile({
-      path: file.rel,
+      path: file.path,
       hash,
       size: file.size,
       mtimeMs: file.mtimeMs,
@@ -353,12 +299,12 @@ export async function indexWorkspaceContent(
     if (cls.kind === 'code' && isCodeLangSupported(cls.lang)) {
       const syms = await extractCodeSymbols(cls.lang!, content);
       if (syms) {
-        store.putSymbols(file.rel, hash, syms);
+        store.putSymbols(file.path, hash, syms);
         stats.symbols += syms.length;
       }
       // Dependency edges (the map's "roads"); best-effort, resolved at build time.
       const edges = await extractImportEdges(cls.lang!, content);
-      if (edges) store.putImports(file.rel, hash, edges);
+      if (edges) store.putImports(file.path, hash, edges);
     } else if (cls.kind === 'markdown') {
       // Lift YAML frontmatter into metadata (email from/to/date, etc.) so it's
       // filterable; outline for code-intel; chunk the body so the document is
@@ -366,18 +312,18 @@ export async function indexWorkspaceContent(
       // emails, etc. — become searchable "for free").
       const { data, body } = parseFrontmatter(content);
       const entries = Object.entries(data).map(([key, value]) => ({ key, value }));
-      if (entries.length > 0) store.setMetadata(file.rel, entries);
+      if (entries.length > 0) store.setMetadata(file.path, entries);
       const syms = extractMarkdownOutline(content);
-      store.putSymbols(file.rel, hash, syms);
+      store.putSymbols(file.path, hash, syms);
       stats.symbols += syms.length;
-      store.putChunks(file.rel, hash, chunkMarkdown(body));
+      store.putChunks(file.path, hash, chunkMarkdown(body));
     }
 
     // Built-in security signals for any code file (regex + entropy — cheap, and
     // independent of tree-sitter grammar support). Empty result clears stale
     // findings for a now-clean file.
     if (cls.kind === 'code') {
-      indexFileSecurity(store, file.rel, hash, content);
+      indexFileSecurity(store, file.path, hash, content);
     }
   }
 

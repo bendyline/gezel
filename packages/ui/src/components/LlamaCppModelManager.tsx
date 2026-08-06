@@ -194,6 +194,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [probing, setProbing] = useState<string[]>([]);
   const probingRef = useRef<string[]>([]);
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const hadRemoteInstallRef = useRef(false);
 
   const refreshFitness = useCallback(async () => {
     try {
@@ -298,10 +299,13 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           }
           return next;
         });
-        // A polled install transitioning out usually means new
-        // models have just landed on disk; refresh the installed
-        // list so the catalog cards flip to "Installed".
-        if (res.installs.length === 0) {
+        // Refresh only on the non-empty -> empty transition. Refreshing on
+        // every empty poll reloaded every installed GGUF every two seconds,
+        // including expensive metadata previews, even while Settings was
+        // otherwise idle.
+        const hadRemoteInstall = hadRemoteInstallRef.current;
+        hadRemoteInstallRef.current = res.installs.length > 0;
+        if (hadRemoteInstall && res.installs.length === 0) {
           void refresh();
         }
       } catch {

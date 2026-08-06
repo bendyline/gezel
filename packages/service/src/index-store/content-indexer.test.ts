@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isGitInstalled, runGit } from '../git/git.js';
 import { classifyFile } from './classify.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import { IndexStore } from './index-store.js';
@@ -129,6 +130,26 @@ describe('runWorkspaceContentIndex', () => {
     await rm(join(dir, 'src', 'a.ts'));
     const third = await runWorkspaceContentIndex(dir, 'col-1');
     expect(third!.removed).toBe(1);
+  });
+
+  it('does not put gitignored files into the content database', async () => {
+    if (!(await isGitInstalled())) return;
+    await runGit(['init', '-q'], { cwd: dir });
+    await mkdir(join(dir, 'src'), { recursive: true });
+    await mkdir(join(dir, 'generated'), { recursive: true });
+    await writeFile(join(dir, '.gitignore'), 'generated/\n');
+    await writeFile(join(dir, 'src', 'visible.ts'), 'export const visible = true;\n');
+    await writeFile(join(dir, 'generated', 'ignored.ts'), 'export const ignored = true;\n');
+
+    await runWorkspaceContentIndex(dir, 'gitignore');
+    const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+      collectionId: 'gitignore',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    expect(store.getFile('src/visible.ts')).toBeDefined();
+    expect(store.getFile('generated/ignored.ts')).toBeUndefined();
+    store.close();
   });
 
   it('re-extracts when content changes but mtime-only touches do not', async () => {

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readGgufSummaryAsync } from './gguf-metadata-async.js';
 import { readGgufSummary } from './gguf-metadata.js';
 
 /**
@@ -249,6 +250,39 @@ describe('readGgufSummary', () => {
     const s = readGgufSummary(path);
     expect(s.architecture).toBe('llama');
     expect(s.contextLength).toBe(4096n);
+  });
+
+  it('skips a production-sized tokenizer vocabulary with bounded file reads', () => {
+    const tokens = Array.from({ length: 50_000 }, (_, i) => `token-${i}`);
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'llama')
+      .metaStringArray('tokenizer.ggml.tokens', tokens)
+      .metaU32('llama.context_length', 131_072)
+      .finish();
+    const path = join(dir, 'large-vocab.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.contextLength).toBe(131_072n);
+    // The former reader issued one readSync per string length (50K+ calls).
+    // Read-ahead should keep this proportional to metadata bytes instead.
+    expect(s.readOperations).toBeLessThan(32);
+  });
+
+  it('caches async inspection results by file identity and options', async () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'llama')
+      .metaU32('llama.context_length', 8192)
+      .finish();
+    const path = join(dir, 'async-cache.gguf');
+    writeFileSync(path, blob);
+
+    const first = await readGgufSummaryAsync(path);
+    const second = await readGgufSummaryAsync(path);
+    expect(first.contextLength).toBe(8192n);
+    expect(second).toBe(first);
   });
 
   it('rejects a non-GGUF file', () => {

@@ -167,13 +167,25 @@ export interface GgufSummary {
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
   bytesRead: number;
+  /** Physical read(2) calls made by the buffered reader. A large tokenizer
+   *  vocabulary should cost tens of reads, not one syscall per token. */
+  readOperations: number;
 }
 
-// Small streaming reader over a file descriptor. GGUF metadata size
-// depends on the model but is typically <1 MB; we pre-fetch in chunks.
+// Small buffered reader over a file descriptor. Tokenizer vocabularies can
+// contain hundreds of thousands of strings. Reading each 8-byte length with a
+// separate readSync pinned Electron's main thread for minutes when Settings
+// previewed context sizing. One bounded read-ahead window turns that syscall
+// storm into sequential I/O, while skip() avoids reading ignored payloads.
+const READ_AHEAD_BYTES = 256 * 1024;
+
 class Reader {
   private pos = 0;
   private bytesRead = 0;
+  private readOperations = 0;
+  private readonly readAhead = Buffer.allocUnsafe(READ_AHEAD_BYTES);
+  private readAheadStart = -1;
+  private readAheadEnd = -1;
   private fd: number;
   private fileSize: number;
 
@@ -183,18 +195,60 @@ class Reader {
   }
 
   bytes(n: number): Buffer {
-    const buf = Buffer.alloc(n);
+    this.assertRange(n);
+    if (n === 0) return Buffer.alloc(0);
+
+    if (
+      n <= this.readAhead.length &&
+      this.pos >= this.readAheadStart &&
+      this.pos + n <= this.readAheadEnd
+    ) {
+      const offset = this.pos - this.readAheadStart;
+      this.pos += n;
+      return this.readAhead.subarray(offset, offset + n);
+    }
+
+    if (n <= this.readAhead.length) {
+      const available = Math.min(this.readAhead.length, this.fileSize - this.pos);
+      const got = readSync(this.fd, this.readAhead, 0, available, this.pos);
+      this.readOperations++;
+      this.bytesRead += got;
+      if (got < n) throw new Error(`unexpected EOF at offset ${this.pos + got}`);
+      this.readAheadStart = this.pos;
+      this.readAheadEnd = this.pos + got;
+      this.pos += n;
+      return this.readAhead.subarray(0, n);
+    }
+
+    // Large values we intentionally retain (notably chat templates) bypass
+    // the read-ahead window so they don't require an equally large permanent
+    // buffer. Ignored strings take skipString() and never land here.
+    const buf = Buffer.allocUnsafe(n);
     let total = 0;
     while (total < n) {
       const got = readSync(this.fd, buf, total, n - total, this.pos + total);
+      this.readOperations++;
       if (got === 0) {
         throw new Error(`unexpected EOF at offset ${this.pos + total}`);
       }
       total += got;
     }
     this.pos += n;
-    this.bytesRead += n;
+    this.bytesRead += total;
+    this.readAheadStart = -1;
+    this.readAheadEnd = -1;
     return buf;
+  }
+
+  skip(n: number): void {
+    this.assertRange(n);
+    this.pos += n;
+  }
+
+  private assertRange(n: number): void {
+    if (!Number.isSafeInteger(n) || n < 0 || this.pos + n > this.fileSize) {
+      throw new Error(`invalid GGUF read length ${n} at offset ${this.pos}`);
+    }
   }
 
   u8(): number {
@@ -242,6 +296,14 @@ class Reader {
     return this.bytes(len).toString('utf8');
   }
 
+  skipString(): void {
+    const len = Number(this.u64());
+    if (len > 16 * 1024 * 1024) {
+      throw new Error(`absurdly large string length ${len} at offset ${this.pos - 8}`);
+    }
+    this.skip(len);
+  }
+
   // Read a value of the given type. For ARRAY, recurse one level —
   // most of the arrays in GGUF metadata are token vocabularies which
   // we don't care about, so we skip them without materialising.
@@ -250,28 +312,36 @@ class Reader {
       case GgufValueType.UINT8:
       case GgufValueType.INT8:
       case GgufValueType.BOOL:
-        this.bytes(1);
+        this.skip(1);
         return;
       case GgufValueType.UINT16:
       case GgufValueType.INT16:
-        this.bytes(2);
+        this.skip(2);
         return;
       case GgufValueType.UINT32:
       case GgufValueType.INT32:
       case GgufValueType.FLOAT32:
-        this.bytes(4);
+        this.skip(4);
         return;
       case GgufValueType.UINT64:
       case GgufValueType.INT64:
       case GgufValueType.FLOAT64:
-        this.bytes(8);
+        this.skip(8);
         return;
       case GgufValueType.STRING:
-        this.string();
+        this.skipString();
         return;
       case GgufValueType.ARRAY: {
         const elemType = this.u32() as GgufValueType;
         const count = Number(this.u64());
+        if (!Number.isSafeInteger(count) || count < 0) {
+          throw new Error(`invalid GGUF array length ${count} at offset ${this.pos - 8}`);
+        }
+        const width = fixedWidth(elemType);
+        if (width !== null) {
+          this.skip(count * width);
+          return;
+        }
         for (let i = 0; i < count; i++) this.skipValue(elemType);
         return;
       }
@@ -284,12 +354,38 @@ class Reader {
     return this.bytesRead;
   }
 
+  totalReadOperations(): number {
+    return this.readOperations;
+  }
+
   currentPos(): number {
     return this.pos;
   }
 
   size(): number {
     return this.fileSize;
+  }
+}
+
+function fixedWidth(type: GgufValueType): number | null {
+  switch (type) {
+    case GgufValueType.UINT8:
+    case GgufValueType.INT8:
+    case GgufValueType.BOOL:
+      return 1;
+    case GgufValueType.UINT16:
+    case GgufValueType.INT16:
+      return 2;
+    case GgufValueType.UINT32:
+    case GgufValueType.INT32:
+    case GgufValueType.FLOAT32:
+      return 4;
+    case GgufValueType.UINT64:
+    case GgufValueType.INT64:
+    case GgufValueType.FLOAT64:
+      return 8;
+    default:
+      return null;
   }
 }
 
@@ -425,6 +521,7 @@ export function readGgufSummary(
       chatTemplateMissing: true,
       fileSizeBytes: stat.size,
       bytesRead: 0,
+      readOperations: 0,
     };
 
     let alignment = DEFAULT_ALIGNMENT;
@@ -546,6 +643,7 @@ export function readGgufSummary(
     }
 
     summary.bytesRead = r.totalBytesRead();
+    summary.readOperations = r.totalReadOperations();
     return summary;
   } finally {
     closeSync(fd);

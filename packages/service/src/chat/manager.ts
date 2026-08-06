@@ -135,7 +135,7 @@ import {
   type PlannerOffloadDecision,
   buildLlamaCppEngineArgs,
 } from '../providers/llama-cpp/engine-flags.js';
-import { readGgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
+import { readGgufSummaryAsync } from '../providers/llama-cpp/gguf-metadata-async.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
 import {
   type LlamaCppKvCacheType,
@@ -10567,7 +10567,9 @@ export class ChatManager {
     if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
     try {
-      const summary = readGgufSummary(installed.weightsPath, { includeTensorSizes: true });
+      const summary = await readGgufSummaryAsync(installed.weightsPath, {
+        includeTensorSizes: true,
+      });
       const referenceCtx = 4096;
       const exactKvAtReference = estimateKvReserveBytes({
         blockCount: summary.blockCount,
@@ -17658,12 +17660,12 @@ export async function buildLlamaCppProvider(opts: {
       // `includeTensorSizes` walks the tensor table (~5 MB read on a 100 GB
       // GGUF, <500 ms) so the planner can budget the exact expert/non-expert
       // byte split instead of a flat resident estimate.
-      const summary = readGgufSummary(modelPath, { includeTensorSizes: true });
+      const summary = await readGgufSummaryAsync(modelPath, { includeTensorSizes: true });
       const isMoE = (summary.expertCount ?? 0) > 1;
       mtpLayerCount = summary.nextnPredictLayers ?? 0;
       ggufHasMtp = mtpLayerCount > 0;
       if (!ggufHasMtp && modelCatalogInfo?.draftModelPath) {
-        const draftSummary = readGgufSummary(modelCatalogInfo.draftModelPath);
+        const draftSummary = await readGgufSummaryAsync(modelCatalogInfo.draftModelPath);
         mtpLayerCount = draftSummary.nextnPredictLayers ?? 0;
         ggufHasMtp = mtpLayerCount > 0;
       }
