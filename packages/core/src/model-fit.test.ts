@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { computeModelFit, estimateManifestKvBytes, isMoEFromTags } from './model-fit.js';
+import {
+  computeModelFit,
+  estimateManifestKvBytes,
+  isMemoryConstrainedMachine,
+  isMoEFromTags,
+  localContextFloorTokens,
+} from './model-fit.js';
 
 const GiB = 1024 ** 3;
 
@@ -182,5 +188,53 @@ describe('estimateManifestKvBytes', () => {
   it('degrades to 0 when the manifest predates the fields', () => {
     expect(estimateManifestKvBytes({})).toBe(0);
     expect(estimateManifestKvBytes({ kvBytesPerTokenF16: 0 })).toBe(0);
+  });
+});
+
+describe('isMemoryConstrainedMachine', () => {
+  it('judges a discrete card on VRAM alone, not on system RAM', () => {
+    // 24 GB card + 16 GB of system RAM: the KV lives on the card, so this is
+    // not a context-constrained host despite the modest RAM.
+    expect(
+      isMemoryConstrainedMachine({
+        totalRamBytes: 16 * GiB,
+        gpuVramBytes: Math.floor(24 * GiB * 0.95),
+      }),
+    ).toBe(false);
+    expect(
+      isMemoryConstrainedMachine({
+        totalRamBytes: 64 * GiB,
+        gpuVramBytes: Math.floor(8 * GiB * 0.95),
+      }),
+    ).toBe(true);
+    // 10 GB usable clears the line; 8 GB usable does not.
+    expect(
+      isMemoryConstrainedMachine({
+        totalRamBytes: 64 * GiB,
+        gpuVramBytes: Math.floor(10 * GiB * 0.95),
+      }),
+    ).toBe(false);
+  });
+
+  it('judges unified / CPU-only hosts on system RAM', () => {
+    expect(isMemoryConstrainedMachine({ totalRamBytes: 16 * GiB, gpuVramBytes: null })).toBe(true);
+    expect(isMemoryConstrainedMachine({ totalRamBytes: 18 * GiB, gpuVramBytes: null })).toBe(false);
+    expect(isMemoryConstrainedMachine({ totalRamBytes: 64 * GiB, gpuVramBytes: null })).toBe(false);
+  });
+});
+
+describe('localContextFloorTokens', () => {
+  it('halves the floor on a constrained host and keeps 64K elsewhere', () => {
+    expect(localContextFloorTokens({ totalRamBytes: 16 * GiB, gpuVramBytes: null })).toBe(32_768);
+    expect(localContextFloorTokens({ totalRamBytes: 64 * GiB, gpuVramBytes: null })).toBe(65_536);
+    expect(localContextFloorTokens()).toBe(65_536);
+  });
+
+  it('is what fit badges price KV at, so a 16 GB Mac is not badged at 64K', () => {
+    const manifest = { kvBytesPerTokenF16: 140_000 };
+    const small = { totalRamBytes: 16 * GiB, gpuVramBytes: null };
+    expect(estimateManifestKvBytes(manifest, { ctxTokens: localContextFloorTokens(small) })).toBe(
+      Math.round(140_000 * 32_768 * 0.55),
+    );
   });
 });

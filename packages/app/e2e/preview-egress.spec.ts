@@ -9,6 +9,7 @@ import { _electron as electron } from 'playwright';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const UI_LOAD_TIMEOUT_MS = 60_000;
 
 test.describe('preview network boundary', () => {
   let home: string;
@@ -19,6 +20,7 @@ test.describe('preview network boundary', () => {
   const requests: string[] = [];
 
   test.beforeAll(async () => {
+    test.setTimeout(UI_LOAD_TIMEOUT_MS + 30_000);
     home = await mkdtemp(join(tmpdir(), 'gezel-preview-egress-'));
     sink = createServer((req, res) => {
       requests.push(req.url ?? '/');
@@ -38,11 +40,13 @@ test.describe('preview network boundary', () => {
         GEZEL_HOME: home,
         GEZEL_MOCK_PROVIDER: '1',
         GEZEL_EMBEDDED: '1',
+        GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
       }),
     });
     page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    await expect.poll(() => page.evaluate(() => Boolean(window.__GEZEL__?.token))).toBe(true);
+    await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
+    expect(await page.evaluate(() => Boolean(window.__GEZEL__?.token))).toBe(true);
 
     const workspace = join(home, 'projects', 'default', 'workspace');
     await mkdir(workspace, { recursive: true });

@@ -14,6 +14,8 @@
   "approxSizeBytes": 37000000000,
   "supportsTools": true,
   "contextWindow": 262144,
+  "kvBytesPerTokenF16": 20480,
+  "kvFixedBytesF16": 64389120,
   "upstream": "https://huggingface.co/deepreinforce-ai/Ornith-1.0-35B",
   "style": {
     "family": "qwen",

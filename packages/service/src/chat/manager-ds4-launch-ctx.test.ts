@@ -40,6 +40,24 @@ describe('resolveDs4LaunchCtx', () => {
     ).toBe(32_768);
   });
 
+  it('a memory-constrained host raises a low limit only to its 32K floor', () => {
+    expect(
+      resolveDs4LaunchCtx({
+        configured: 16_384,
+        ramTieredCtx: 131_072,
+        minViableContextTokens: 32_768,
+      }),
+    ).toBe(32_768);
+    // The tier is still an upper bound, and a smaller catalog cap still wins.
+    expect(
+      resolveDs4LaunchCtx({
+        ramTieredCtx: 131_072,
+        catalogMaxCtx: 24_576,
+        minViableContextTokens: 32_768,
+      }),
+    ).toBe(24_576);
+  });
+
   it('treats an absent cap and an absent override as unset, not as zero', () => {
     expect(
       resolveDs4LaunchCtx({

@@ -59,6 +59,8 @@ export const BASE_FIELDS = [
   'approxSizeBytes',
   'supportsTools',
   'contextWindow',
+  'kvBytesPerTokenF16',
+  'kvFixedBytesF16',
   'upstream',
 ] as const;
 

@@ -987,6 +987,17 @@ function mergeIdentityAndVersion(
       approxSizeBytes: version.approxSizeBytes,
       supportsTools: identity.supportsTools,
       ...(identity.contextWindow !== undefined ? { contextWindow: identity.contextWindow } : {}),
+      // KV geometry is architecture-determined, so it rides on identity and
+      // must be forwarded explicitly — this merge builds the resolved
+      // manifest from a fixed field list, which is why authoring the fields
+      // alone did nothing: they were silently dropped here and the
+      // pre-install fit badge kept pricing weights only.
+      ...(identity.kvBytesPerTokenF16 !== undefined
+        ? { kvBytesPerTokenF16: identity.kvBytesPerTokenF16 }
+        : {}),
+      ...(identity.kvFixedBytesF16 !== undefined
+        ? { kvFixedBytesF16: identity.kvFixedBytesF16 }
+        : {}),
       ...(identity.upstream !== undefined ? { upstream: identity.upstream } : {}),
       ...(identity.category ? { category: identity.category } : {}),
       ...(identity.style ? { style: identity.style } : {}),

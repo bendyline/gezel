@@ -2489,6 +2489,64 @@ export class TaskManager {
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
+        researchEvidence: async ({ sourcePath, tools }) => {
+          if (!this.history) return { observable: false, matches: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: ['tool.called'],
+            ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+          });
+          const allowed = new Set(tools);
+          const normalizePath = (value: string | undefined): string =>
+            (value ?? '')
+              .trim()
+              .replace(/\\/g, '/')
+              .replace(/^workspace\//i, '')
+              .replace(/^\.\//, '')
+              .toLocaleLowerCase();
+          const expectedPath = normalizePath(sourcePath);
+          const matches: Array<{
+            tool: string;
+            path?: string;
+            target?: string;
+            at?: string;
+          }> = [];
+          for (const event of events) {
+            const details = event.details as Record<string, unknown> | undefined;
+            if (!details || details.success !== true) continue;
+            if (details.taskRef !== task.ref || details.stepId !== step.id) continue;
+            const tool = typeof details.name === 'string' ? details.name : '';
+            const path = typeof details.path === 'string' ? details.path : undefined;
+            const target =
+              typeof details.researchTarget === 'string' ? details.researchTarget : undefined;
+            const exactLocalRead =
+              expectedPath.length > 0 &&
+              tool === 'read_file' &&
+              path !== undefined &&
+              normalizePath(path) === expectedPath;
+            let externalAcquisition = allowed.has(tool) && target !== undefined;
+            if (externalAcquisition && tool === 'run_playwright_script') {
+              const scriptPath = target?.startsWith('script:')
+                ? target.slice('script:'.length)
+                : '';
+              const script = scriptPath
+                ? ((await ws.readArtifact?.(scriptPath)) ?? (await ws.read(scriptPath)))
+                : null;
+              // A successful Playwright run is source acquisition only when
+              // the script itself targets an external URL. Local preview/QA
+              // scripts must not satisfy a research gate by accident.
+              externalAcquisition = Boolean(script && /https?:\/\//i.test(script));
+            }
+            if (!exactLocalRead && !externalAcquisition) continue;
+            matches.push({
+              tool,
+              ...(path ? { path } : {}),
+              ...(target ? { target } : {}),
+              at: event.at,
+            });
+          }
+          return { observable: true, matches };
+        },
       },
     });
 

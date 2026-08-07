@@ -820,7 +820,7 @@ function pushFenced(lines: string[], content: string): void {
  * thing the receiving conversation reads — the system prompt and
  * thread are context.
  */
-function formatDebugBundle(opts: {
+export function formatDebugBundle(opts: {
   snapshot: import('@bendyline/gezel').SessionDebugSnapshot;
   response: string;
 }): string {
@@ -840,6 +840,7 @@ function formatDebugBundle(opts: {
   if (s.reasoningEffort) lines.push(`- Reasoning effort: \`${s.reasoningEffort}\``);
   if (s.numCtx) lines.push(`- num_ctx: \`${s.numCtx}\``);
   lines.push(`- Session: \`${s.sessionId}\``);
+  lines.push(`- Turn status at export: \`${s.turnStatus}\``);
   if (s.registeredTools.length > 0) {
     lines.push(
       `- Registered tools (${s.registeredTools.length}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
@@ -857,7 +858,14 @@ function formatDebugBundle(opts: {
   lines.push('');
   lines.push('## Response under investigation');
   lines.push('');
-  pushFenced(lines, opts.response.trim());
+  const response = opts.response.trim();
+  if (!response && s.turnStatus !== 'idle') {
+    lines.push(
+      `> This turn was still ${s.turnStatus} when the bundle was exported. An empty block below is not a completed empty model response.`,
+    );
+    lines.push('');
+  }
+  pushFenced(lines, response);
   lines.push('');
   lines.push('## System prompt (freshly computed)');
   lines.push('');

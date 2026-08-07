@@ -635,7 +635,35 @@ FunctionEnd
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to runtime state (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" /L'
+  ; Two ACEs, and the second one is load-bearing.
+  ;
+  ; The asset store is public-read by design: BUILTIN\Users gets (OI)(CI)(RX)
+  ; above so per-user daemons and standalone CLI runs can reuse whatever the
+  ; broker downloaded.  A model bundle only reaches that state if something
+  ; re-inherits it: NTFS keeps a directory's explicit DACL across a rename
+  ; within the volume, so a bundle moved in from the broker's private staging
+  ; area (or from the pre-asset-store private model tree) arrives carrying its
+  ; old private ACL and stays invisible to every other account.  gezeld fixes
+  ; that with `icacls <model> /reset /T` — see makeSharedModelReadable in
+  ; packages/service/src/models/storage-roots.ts.
+  ;
+  ; `/reset` REWRITES A DACL, so it needs WRITE_DAC, and Modify does not
+  ; include WRITE_DAC.  With (M) alone the broker could not publish any bundle
+  ; whose owner it does not hold — and SanitizeDescendants above has just made
+  ; BUILTIN\Administrators the owner of every pre-existing model.  On an
+  ; upgrade over an install that already had models, every publish attempt
+  ; therefore failed with "Access is denied", makeSharedModelReadable threw out
+  ; of startService, and the service crash-looped on SCM 1066 forever.  Fresh
+  ; installs were unaffected (nothing to migrate, and the broker owns what it
+  ; downloads itself), which is exactly why CI never saw it.
+  ;
+  ; (IO) — inherit-only — keeps the fix scoped.  The FullControl ACE applies to
+  ; DESCENDANTS ONLY, so the broker can re-inherit model subtrees while the
+  ; `assets` container's own DACL stays outside its reach; a compromised daemon
+  ; still cannot rewrite the boundary that makes this store read-only to users.
+  ; The (M) ACE is what covers the container itself, so creating and deleting
+  ; bundles under assets\models keeps working.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)" /L'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to shared assets (exit $0)."
@@ -664,16 +692,44 @@ FunctionEnd
     Goto SkipNssm
   ${EndIf}
 
+  ; A registration that cannot start is not a working machine engine, and the
+  ; breadcrumb below is the app's ONLY signal that the shared broker is absent.
+  ; Recording "installed" purely because `sc create` succeeded made the one
+  ; control designed to surface a missing engine report health while the
+  ; service crash-looped: MachineServiceInstalled stayed 1, machineServiceMissing()
+  ; in packages/app/src/supervisor/index.ts only fires on a positive 0, and the
+  ; UI said nothing at all. Treat the start result as the outcome that matters.
+  ;
+  ; `sc start` returns before the service reaches RUNNING, so a service that
+  ; dies during startup still exits 0 here. Re-query after a bounded wait and
+  ; believe the state, not the launch call.
   nsExec::ExecToLog '"$SYSDIR\sc.exe" start ${GEZEL_SERVICE_NAME}'
   Pop $0
   ${If} $0 != 0
     DetailPrint "WARNING: GezelService failed to start (exit $0); Gezel will use an account-local model engine."
-  ${Else}
-    DetailPrint "GezelService installed under restricted LocalService."
+    Goto SkipNssm
   ${EndIf}
+  StrCpy $8 0
+  ${Do}
+    nsExec::ExecToLog '"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME} | "$SYSDIR\find.exe" "RUNNING" >NUL"'
+    Pop $9
+    ${If} $9 == 0
+      ${ExitDo}
+    ${EndIf}
+    IntOp $8 $8 + 1
+    ${If} $8 >= 30
+      ${ExitDo}
+    ${EndIf}
+    Sleep 1000
+  ${Loop}
+  ${If} $9 != 0
+    DetailPrint "WARNING: GezelService was registered but did not reach RUNNING; Gezel will use an account-local model engine."
+    Goto SkipNssm
+  ${EndIf}
+  DetailPrint "GezelService installed under restricted LocalService."
 
-  ; Registered. Clear any breadcrumb a prior failed install left behind so the
-  ; app stops reporting a fallback that no longer applies.
+  ; Registered AND running. Clear any breadcrumb a prior failed install left
+  ; behind so the app stops reporting a fallback that no longer applies.
   ; 64-bit view explicitly: the installer is 32-bit, so an unqualified HKLM
   ; write lands in Wow6432Node where the 64-bit Electron app would never find
   ; it. Same reason InstallVCRedist brackets its read.
@@ -685,12 +741,17 @@ FunctionEnd
   SkipNssm:
   ; Record that this install fell back to the per-user daemon.
   ;
-  ; Every path reaching this label has already shown the user a dialog — except
-  ; under `/S`, and electron-updater runs the NSIS installer silently for every
-  ; Windows auto-update. NSIS skips MessageBox entirely in silent mode, so
-  ; without this an update can delete a working shared model engine, fail to
-  ; replace it, and leave no dialog, no service, and no trace. The user just
-  ; gets slow launches and no background work.
+  ; Most paths reaching this label have already shown the user a dialog. The
+  ; two startup paths above deliberately have not: a registration that did not
+  ; come up is recoverable on the next boot (it stays `start= auto`) and the app
+  ; degrades cleanly to its per-user daemon, so a modal would be noise. They
+  ; still have to land here, because the flag is what the app reads.
+  ;
+  ; And no path shows a dialog under `/S` — electron-updater runs the NSIS
+  ; installer silently for every Windows auto-update, and NSIS skips MessageBox
+  ; entirely in silent mode. Without this an update can delete a working shared
+  ; model engine, fail to replace it, and leave no dialog, no service, and no
+  ; trace. The user just gets slow launches and no background work.
   ;
   ; HKLM rather than a marker file under GEZEL_DATA_DIR on purpose: the
   ; failures that land here are usually ACL or ownership problems in exactly

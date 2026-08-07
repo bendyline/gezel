@@ -177,6 +177,17 @@ describe('resolveMlxEffectiveNumCtx', () => {
   it('falls back to 64K for a manual model path with no catalog metadata', () => {
     expect(resolveMlxEffectiveNumCtx({})).toBe(65_536);
   });
+
+  it('raises a low limit only to the floor a memory-constrained host can back', () => {
+    expect(
+      resolveMlxEffectiveNumCtx({
+        modelContextWindow: 262_144,
+        configuredLimit: 16_384,
+        minViableContextTokens: 32_768,
+      }),
+    ).toBe(32_768);
+    expect(resolveMlxEffectiveNumCtx({ minViableContextTokens: 32_768 })).toBe(32_768);
+  });
 });
 
 describe('ChatManager — clamped first-turn context', () => {
@@ -5468,10 +5479,26 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
 
     const snap = await manager.getSessionDebug(session.id);
+    expect(snap.turnStatus).toBe('idle');
     expect(snap.diagnostics?.sessionRecordPath).toContain(session.id);
     expect(snap.diagnostics?.sessionRecordPath.endsWith('.json')).toBe(true);
     expect(snap.diagnostics?.logsDir.endsWith('logs')).toBe(true);
     expect(snap.diagnostics?.engineLogGlob).toBeUndefined();
+  });
+
+  it('marks debug snapshots exported during an active turn as in progress', async () => {
+    await store.createGezel({ name: 'Dev', role: 'developer' });
+    const project = await store.createProject({ name: 'Live debug' });
+    const session = await manager.createSession({ gezelId: 'dev', projectId: project.id });
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+    };
+    internals.inflight.set(session.id, { userText: 'research it', startedAt: Date.now() });
+    try {
+      expect((await manager.getSessionDebug(session.id)).turnStatus).toBe('in-progress');
+    } finally {
+      internals.inflight.delete(session.id);
+    }
   });
 
   it('uses persisted project script tools in a cold debug snapshot', async () => {

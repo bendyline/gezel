@@ -549,6 +549,56 @@ describe('evaluateGate — hardened kinds', () => {
     expect(grounded.pass).toBe(true);
   });
 
+  it('researchEvidence fails closed without observable successful source retrieval', async () => {
+    const check = {
+      kind: 'researchEvidence' as const,
+      sourcePath: '',
+      tools: ['wikipedia_search', 'fetch_url', 'browser_navigate'],
+    };
+    const unavailable = await evaluateGate([check], reader({}));
+    expect(unavailable.pass).toBe(false);
+    expect(unavailable.failures.join('\n')).toContain('unavailable');
+
+    const empty = await evaluateGate([check], reader({}), {
+      researchEvidence: async () => ({ observable: true, matches: [] }),
+    });
+    expect(empty.pass).toBe(false);
+    expect(empty.failures.join('\n')).toContain('No verifiable source acquisition');
+
+    const observed = await evaluateGate([check], reader({}), {
+      researchEvidence: async () => ({
+        observable: true,
+        matches: [
+          {
+            tool: 'wikipedia_search',
+            target: 'Battle of Trafalgar',
+            at: '2026-08-06T00:00:00.000Z',
+          },
+        ],
+      }),
+    });
+    expect(observed.pass).toBe(true);
+  });
+
+  it('markdownHeadingsMatch rejects a deck that drops a locked outline slide', async () => {
+    const result = await evaluateGate(
+      [
+        {
+          kind: 'markdownHeadingsMatch',
+          file: 'deck.md',
+          outlineFile: 'notes/outline.md',
+        },
+      ],
+      reader({
+        'notes/outline.md':
+          '## Slide 1 — Opening\n## Slide 2 — Turning point\n## Slide 3 — Next step',
+        'deck.md': '# Opening\n# Next step',
+      }),
+    );
+    expect(result.pass).toBe(false);
+    expect(result.failures.join('\n')).toContain('2 H1 slide headings');
+  });
+
   it('valueGrounding: rejects decoy values and quotes the offending pattern', async () => {
     const facts = [{ id: 'q3-revenue', required: ['\\$4\\.2M'], forbidden: ['\\$7\\.9M'] }];
     const decoyed = await evaluateGate(

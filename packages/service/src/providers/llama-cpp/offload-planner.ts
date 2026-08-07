@@ -256,6 +256,17 @@ export interface KvReserveInput {
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
   keyLengthSwa?: number | undefined;
   valueLengthSwa?: number | undefined;
+  /**
+   * `<arch>.full_attention_interval` — linear-attention hybrids
+   * (`qwen35moe`) make only every Nth layer full attention; the rest keep
+   * a context-independent recurrent state. Counting all layers as
+   * KV-scaling overstates a 40-layer/interval-4 model 4x.
+   */
+  fullAttentionInterval?: number | undefined;
+  /** `<arch>.ssm.*` — recurrent-state geometry on the linear layers. */
+  ssmInnerSize?: number | undefined;
+  ssmStateSize?: number | undefined;
+  ssmConvKernel?: number | undefined;
   /** Total launch context (`--ctx-size`, i.e. per-slot ctx × slots). */
   ctxTokens: number;
   /** The launcher's `--cache-type-k/v` value (assumed symmetric). */
@@ -304,7 +315,47 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
     if (elemsPerToken > 0) return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
   }
   if (!headCountKv) return undefined;
-  return Math.round(blockCount * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
+  // Linear-attention hybrids: only the full-attention layers hold a cache
+  // that grows with context. Deliberately slope-only (no recurrent-state
+  // term) because callers derive bytes-per-token by dividing this by a
+  // reference context — folding a fixed cost in there would inflate the
+  // slope. The fixed part belongs to the linearization below.
+  const scalingLayers = fullAttentionLayerCount(blockCount, input.fullAttentionInterval);
+  return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
+}
+
+/**
+ * Layers whose KV grows with the context window. Every layer on an
+ * ordinary model; every `interval`-th layer on a linear-attention hybrid
+ * (llama.cpp marks layer `i` full-attention when `(i + 1) % interval == 0`,
+ * so 40 layers at interval 4 gives 10).
+ */
+function fullAttentionLayerCount(blockCount: number, interval: number | undefined): number {
+  if (!interval || interval <= 1) return blockCount;
+  let n = 0;
+  for (let layer = 0; layer < blockCount; layer++) if ((layer + 1) % interval === 0) n++;
+  return n > 0 ? n : blockCount;
+}
+
+/**
+ * Bytes one linear-attention layer holds per slot, independent of context:
+ * a short causal-conv window plus the recurrent state. Approximate — the
+ * exact allocation is engine-internal — and biased high (f32 state, which
+ * is what `mamba_ssm_dtype` asks for) so the estimate never under-reserves.
+ * Returns 0 when the header omits the SSM geometry, which only makes the
+ * estimate more conservative in the direction that matters: the term is
+ * tens of MB against weights measured in GB.
+ */
+function linearLayerStateBytes(input: {
+  ssmInnerSize?: number | undefined;
+  ssmStateSize?: number | undefined;
+  ssmConvKernel?: number | undefined;
+}): number {
+  const inner = input.ssmInnerSize;
+  if (!inner) return 0;
+  const conv = input.ssmConvKernel ? inner * Math.max(0, input.ssmConvKernel - 1) : 0;
+  const recurrent = input.ssmStateSize ? inner * input.ssmStateSize : 0;
+  return (conv + recurrent) * 4;
 }
 
 export interface WindowedKvInput {
@@ -324,6 +375,17 @@ export interface WindowedKvInput {
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
   keyLengthSwa?: number | undefined;
   valueLengthSwa?: number | undefined;
+  /**
+   * `<arch>.full_attention_interval` — linear-attention hybrids
+   * (`qwen35moe`) make only every Nth layer full attention; the rest keep
+   * a context-independent recurrent state. Counting all layers as
+   * KV-scaling overstates a 40-layer/interval-4 model 4x.
+   */
+  fullAttentionInterval?: number | undefined;
+  /** `<arch>.ssm.*` — recurrent-state geometry on the linear layers. */
+  ssmInnerSize?: number | undefined;
+  ssmStateSize?: number | undefined;
+  ssmConvKernel?: number | undefined;
   kvCacheType?: string | undefined;
 }
 
@@ -384,11 +446,50 @@ export function estimateExactPerSlotKvBytesF16(
   if (windowed) {
     return Math.round(windowed.fixedBytes + windowed.bytesPerToken * perTurnCtxTokens);
   }
+  const hybrid = estimateLinearHybridKvLinearization({ ...input, kvCacheType: 'f16' });
+  if (hybrid) {
+    return Math.round(hybrid.fixedBytes + hybrid.bytesPerToken * perTurnCtxTokens);
+  }
   return estimateKvReserveBytes({
     ...input,
     ctxTokens: perTurnCtxTokens,
     kvCacheType: 'f16',
   });
+}
+
+/**
+ * Price a linear-attention hybrid (`qwen35moe`: Qwen 3.5 MoE, Ornith,
+ * BTL-4) as `fixed + slope × ctx`, the same shape the SWA linearization
+ * returns and the same shape `planCtxTokensForMemory` consumes.
+ *
+ * Only the full-attention layers scale with the window; the linear layers
+ * carry a recurrent state whose size does not depend on context at all.
+ * A 40-layer model at interval 4 therefore caches 10 layers, not 40 —
+ * ~20 KB/token instead of ~80 KB/token, which is a 4x difference on the
+ * exact models whose selling point is a cheap 256K context. Pricing them
+ * as full attention would clamp or deny windows the engine holds easily.
+ *
+ * Returns undefined when the header shows no interval (ordinary models)
+ * or lacks the dims, so callers fall back to full-attention math.
+ */
+export function estimateLinearHybridKvLinearization(
+  input: WindowedKvInput,
+): WindowedKvLinearization | undefined {
+  const { blockCount, fullAttentionInterval, headCountKv } = input;
+  if (!blockCount || !fullAttentionInterval || fullAttentionInterval <= 1) return undefined;
+  if (!headCountKv) return undefined;
+  const headDim =
+    input.headCount && input.embeddingLength ? input.embeddingLength / input.headCount : undefined;
+  const kDim = input.keyLength ?? headDim;
+  const vDim = input.valueLength ?? headDim;
+  if (!kDim || !vDim) return undefined;
+  const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const scalingLayers = fullAttentionLayerCount(blockCount, fullAttentionInterval);
+  const linearLayers = blockCount - scalingLayers;
+  return {
+    bytesPerToken: scalingLayers * headCountKv * (kDim + vDim) * bytesPerElement,
+    fixedBytes: Math.round(linearLayers * linearLayerStateBytes(input)),
+  };
 }
 
 export function estimateWindowedKvLinearization(

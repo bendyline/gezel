@@ -23,6 +23,19 @@ import {
 
 export { firstActionForKind };
 
+/**
+ * Source-acquisition tools that must survive a Markdown deliverable kit for
+ * research work. A research step still writes an ordinary notes/report file,
+ * but collapsing it to FILE_CORE turns "research" into model-memory prose.
+ */
+export const RESEARCH_STEP_TOOLS: readonly string[] = [
+  'web_search',
+  'wikipedia_search',
+  'fetch_url',
+  'browser_find_page_element',
+  'run_playwright_script',
+];
+
 /** Read/inspect/write/edit — the core of every file-producing step. */
 const FILE_CORE: readonly string[] = [
   'read_file',
@@ -72,6 +85,9 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
       case 'unsupportedClaims':
         out.add('search_files');
         out.add('find_files');
+        break;
+      case 'researchEvidence':
+        for (const tool of RESEARCH_STEP_TOOLS) out.add(tool);
         break;
       case 'csvShape':
       case 'recordSchema':

@@ -172,6 +172,7 @@ import {
   CapacityDeniedError,
   availableSystemRamBytes,
   formatContextCapacityDenial,
+  minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from '../providers/native/capacity-broker.js';
@@ -2838,6 +2839,11 @@ export class ChatManager {
       ...(sessionOpts.volatileContext ? { volatileContext: sessionOpts.volatileContext } : {}),
       customToolsMd,
       registeredTools,
+      turnStatus: this.inflight.has(sessionId)
+        ? 'in-progress'
+        : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+          ? 'queued'
+          : 'idle',
       recentMessages,
       diagnostics: {
         sessionRecordPath: this.store.sessionRecordPath(record.gezelId, sessionId),
@@ -10567,14 +10573,19 @@ export class ChatManager {
     };
 
     const config = await this.store.readConfig();
+    // The floor this host is held to — 64K, or 32K where memory forces the
+    // trade. Read once so every branch of the preview prices the same window
+    // the launch path will ask for.
+    const contextFloor = minViableLocalContextTokens();
     if (name === 'mlx') {
       const installed = await this.mlxModels?.resolveModel(modelId);
       if (!installed) throw new ModelNotInstalledError(name, modelId);
       let effective = resolveMlxEffectiveNumCtx({
         ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
         ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
+        minViableContextTokens: contextFloor,
       });
-      const minimum = Math.min(installed.contextWindow ?? 65_536, 65_536);
+      const minimum = Math.min(installed.contextWindow ?? contextFloor, contextFloor);
       // Memory-priced preview (M4): mirror buildMlxProvider's admission so
       // the advertised window is what memory admits, not the native max —
       // before this an MLX 26B on a 16 GB Mac previewed 256K.
@@ -10668,9 +10679,10 @@ export class ChatManager {
         configured: config.ds4NumCtx,
         ramTieredCtx,
         catalogMaxCtx: ds4Source?.maxLaunchCtx,
+        minViableContextTokens: contextFloor,
       });
       return {
-        contextWindow: useResidentOr(effective, Math.min(effective, 65_536)),
+        contextWindow: useResidentOr(effective, Math.min(effective, contextFloor)),
         // ds4's catalog residentBytes is an authored SSD-streaming working
         // set (weights cache + KV allowance) — already the honest number.
         plannedResidentBytes: await this.resolveResidentBytes('ds4', modelId),
@@ -10690,6 +10702,7 @@ export class ChatManager {
     const explicitContextWindow = envNumCtx ?? config.llamaCppNumCtx;
     const contextRequirement = resolveLlamaCppContextRequirement({
       modelContextWindow: installed.contextWindow,
+      minViableContextTokens: contextFloor,
       ...(explicitContextWindow !== undefined ? { explicitContextWindow } : {}),
       ...(manifestEngineConfig?.contextSize !== undefined
         ? { adaptiveContextWindow: manifestEngineConfig.contextSize }
@@ -10749,6 +10762,10 @@ export class ChatManager {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
           },
           effectiveNumCtx,
         )
@@ -10776,6 +10793,10 @@ export class ChatManager {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
         },
         ctx,
       );
@@ -10852,6 +10873,10 @@ export class ChatManager {
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
         valueLengthSwa: summary.valueLengthSwa,
+        fullAttentionInterval: summary.fullAttentionInterval,
+        ssmInnerSize: summary.ssmInnerSize,
+        ssmStateSize: summary.ssmStateSize,
+        ssmConvKernel: summary.ssmConvKernel,
         ctxTokens: referenceCtx,
         kvCacheType,
       });
@@ -10904,6 +10929,10 @@ export class ChatManager {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
           kvCacheType,
         });
         if (windowed) {
@@ -13089,6 +13118,7 @@ export class ChatManager {
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
       const rawPath = info.args?.path;
       const path = typeof rawPath === 'string' ? rawPath : undefined;
+      const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
       // the UI's expand + copy so a handoff's real content is verifiable.
@@ -13177,9 +13207,14 @@ export class ChatManager {
             : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
           details: {
             name: info.name,
+            sessionId: record.id,
+            ...(record.taskRef ? { taskRef: record.taskRef } : {}),
+            ...(record.stepId ? { stepId: record.stepId } : {}),
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
+            ...(path ? { path } : {}),
+            ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
             ...(addedLines !== undefined ? { addedLines } : {}),
@@ -14234,6 +14269,32 @@ function normalizeExpectedDeliverablePath(path: string): string {
     .replace(/^workspace\//i, '')
     .replace(/^\.\//, '')
     .toLowerCase();
+}
+
+/**
+ * Retain a compact, non-secret proof that a successful tool call was aimed at
+ * source acquisition. Full arguments already live on the session turn; the
+ * history event only needs enough to distinguish an external lookup from a
+ * local preview/navigation call when a research gate completes mid-turn.
+ */
+function researchTargetForToolCall(
+  name: string,
+  args: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!args) return undefined;
+  if (name === 'web_search' || name === 'wikipedia_search') {
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    return query ? `query:${query.slice(0, 240)}` : undefined;
+  }
+  if (name === 'fetch_url' || name === 'browser_navigate') {
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    return /^https?:\/\//i.test(url) ? url.slice(0, 500) : undefined;
+  }
+  if (name === 'run_playwright_script') {
+    const path = typeof args.path === 'string' ? args.path.trim() : '';
+    return path ? `script:${path.slice(0, 240)}` : 'scripted-browser-run';
+  }
+  return undefined;
 }
 
 function isExpectedBinaryDocumentDeliverablePath(path: string): boolean {
@@ -16499,7 +16560,7 @@ ${artifactsLine}
   if (project && workspaceFiles && workspaceFiles.length > 0) {
     const listing = workspaceFiles
       .slice(0, 200)
-      .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
+      .map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}${f.isDirectory ? '/' : ''}`)
       .join('\n');
     workspaceFilesBlock = `\n\n---\n\n### Workspace files\n\nFiles currently in the project:\n\`\`\`\n${listing}\n\`\`\``;
     if (workspaceFilesTruncated) {
@@ -17232,25 +17293,31 @@ function ensureLlamaEngineStatus(
  * cap.
  *
  * A high explicit `config.ds4NumCtx` wins. A lower value cannot push a
- * long-context model below Gezel's 64K viability floor; a catalog model whose
- * native launch cap is genuinely smaller retains that smaller cap. Otherwise
- * the RAM tier is an upper bound that a model may lower but never raise — the
- * tier is calibrated on DeepSeek V4 Flash's ~4 GiB of resident non-routed
- * weights, and a model holding five times that much cannot afford the same KV
- * allocation on the same machine.
+ * long-context model below Gezel's viability floor (64K, or 32K on a
+ * memory-constrained host); a catalog model whose native launch cap is
+ * genuinely smaller retains that smaller cap. Otherwise the RAM tier is an
+ * upper bound that a model may lower but never raise — the tier is calibrated
+ * on DeepSeek V4 Flash's ~4 GiB of resident non-routed weights, and a model
+ * holding five times that much cannot afford the same KV allocation on the
+ * same machine.
  */
 export function resolveDs4LaunchCtx(opts: {
   configured?: number | undefined;
   ramTieredCtx: number;
   catalogMaxCtx?: number | undefined;
+  minViableContextTokens?: number | undefined;
 }): number {
+  const floor =
+    opts.minViableContextTokens && opts.minViableContextTokens > 0
+      ? opts.minViableContextTokens
+      : minViableLocalContextTokens();
   const resolved =
     opts.configured ??
     (opts.catalogMaxCtx ? Math.min(opts.ramTieredCtx, opts.catalogMaxCtx) : opts.ramTieredCtx);
-  if (opts.catalogMaxCtx && opts.catalogMaxCtx < 65_536) {
+  if (opts.catalogMaxCtx && opts.catalogMaxCtx < floor) {
     return opts.catalogMaxCtx;
   }
-  return Math.max(65_536, resolved);
+  return Math.max(floor, resolved);
 }
 
 /**
@@ -17419,6 +17486,7 @@ export async function buildDs4Provider(opts: {
     configured: config.ds4NumCtx,
     ramTieredCtx,
     catalogMaxCtx: ds4Source?.maxLaunchCtx,
+    minViableContextTokens: minViableLocalContextTokens(),
   });
   if (numCtx !== (config.ds4NumCtx ?? ramTieredCtx)) {
     log.info(
@@ -17854,6 +17922,7 @@ export async function buildLlamaCppProvider(opts: {
     ...(numCtx !== undefined ? { explicitContextWindow: numCtx } : {}),
     adaptiveContextWindow: manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT,
     contextSizing: config.llamaCppContextSizing ?? 'adaptive',
+    minViableContextTokens: minViableLocalContextTokens(),
   });
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.
@@ -18157,6 +18226,10 @@ export async function buildLlamaCppProvider(opts: {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
           ctxTokens: REFERENCE_CTX,
           kvCacheType,
         });
@@ -18243,6 +18316,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
           if (swaFullAutoDefault) {
@@ -18338,6 +18415,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
       const kvReserveBytes = windowedKvPlan
@@ -18356,6 +18437,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             ctxTokens: effectiveNumCtx * slots,
             kvCacheType,
           });
@@ -18739,15 +18824,20 @@ export async function buildLlamaCppProvider(opts: {
  * the correct denominator for overflow checks, compaction, tool-output caps,
  * and user-facing context warnings. An explicit operator limit still wins,
  * clamped to the model's native maximum. Manual model paths have no catalog
- * metadata, so they retain a conservative 64K fallback.
+ * metadata, so they fall back to the host's context floor (64K, or 32K on a
+ * memory-constrained machine).
  */
 export function resolveMlxEffectiveNumCtx(opts: {
   modelContextWindow?: number;
   configuredLimit?: number;
+  minViableContextTokens?: number;
 }): number {
   return resolveLocalContextRequirement({
     modelContextWindow: opts.modelContextWindow,
     requestedContextWindow: opts.configuredLimit ?? opts.modelContextWindow,
+    ...(opts.minViableContextTokens !== undefined
+      ? { minViableContextTokens: opts.minViableContextTokens }
+      : {}),
   }).requestedPerTurnCtxTokens;
 }
 
@@ -18880,11 +18970,13 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
+  const mlxContextFloor = minViableLocalContextTokens();
   let effectiveNumCtx = resolveMlxEffectiveNumCtx({
     ...(modelCatalogInfo?.contextWindow
       ? { modelContextWindow: modelCatalogInfo.contextWindow }
       : {}),
     ...(numCtx ? { configuredLimit: numCtx } : {}),
+    minViableContextTokens: mlxContextFloor,
   });
 
   // Ensure the mlx venv + mlx-vlm package exist. We use `mlx-vlm`
@@ -19077,6 +19169,7 @@ export async function buildMlxProvider(opts: {
         ? { modelContextWindow: modelCatalogInfo.contextWindow }
         : {}),
       requestedContextWindow: effectiveNumCtx,
+      minViableContextTokens: mlxContextFloor,
     });
     const kvBytesPerToken =
       (mlxExactPerSlotKvF16 / Math.max(1, effectiveNumCtx)) * kvQuantScale(mlxKvCacheType);

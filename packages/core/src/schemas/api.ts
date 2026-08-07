@@ -6067,6 +6067,8 @@ export const SessionDebugSnapshotSchema = z.object({
    * MLX sessions whose MCP subprocess is up.
    */
   registeredTools: z.array(z.string()),
+  /** Live session state at export time; prevents an unfinished turn looking like an empty reply. */
+  turnStatus: z.enum(['idle', 'in-progress', 'queued']),
   /**
    * Recent messages in source order, sliced to the requested window.
    * Includes role + content + (optional) tool_calls — same shape used in

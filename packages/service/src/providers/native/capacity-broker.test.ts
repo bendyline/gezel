@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   estimateKvReserveBytes,
+  estimateLinearHybridKvLinearization,
   estimateWindowedKvLinearization,
 } from '../llama-cpp/offload-planner.js';
 import {
@@ -16,6 +17,7 @@ import {
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
   localEngineSlotCeiling,
+  minViableLocalContextTokens,
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
   planCtxTokensForMemory,
@@ -992,6 +994,48 @@ describe('model-aware context admission', () => {
     });
   });
 
+  it('prices a linear-attention hybrid on its full-attention layers only', () => {
+    // qwen35moe (Qwen 3.5 MoE / Ornith / BTL-4): 40 layers, every 4th full
+    // attention, the other 30 carrying a context-independent recurrent
+    // state. Counting all 40 gave 80 KB/token; the truth is 20 KB/token,
+    // which is what the publisher documents and what the engine allocates.
+    const geometry = {
+      blockCount: 40,
+      headCountKv: 2,
+      keyLength: 256,
+      valueLength: 256,
+      fullAttentionInterval: 4,
+      ssmInnerSize: 4096,
+      ssmStateSize: 128,
+      ssmConvKernel: 4,
+    };
+    const hybrid = estimateLinearHybridKvLinearization({ ...geometry, kvCacheType: 'f16' });
+    expect(hybrid).toBeDefined();
+    // 10 full-attention layers x 2 kv heads x (256+256) x 2 bytes.
+    expect(hybrid?.bytesPerToken).toBe(20 * 1024);
+    // 30 linear layers, each holding conv + recurrent state at f32. Tens of
+    // MB against GB of weights — real, but never the deciding term.
+    expect(hybrid?.fixedBytes).toBeGreaterThan(50 * 1024 * 1024);
+    expect(hybrid?.fixedBytes).toBeLessThan(100 * 1024 * 1024);
+
+    // The slope-only estimator agrees, so the bytes-per-token a caller
+    // derives by dividing through a reference context stays correct.
+    const atRef = estimateKvReserveBytes({ ...geometry, ctxTokens: 4096, kvCacheType: 'f16' });
+    expect((atRef ?? 0) / 4096).toBe(20 * 1024);
+  });
+
+  it('leaves ordinary full-attention models on every-layer math', () => {
+    const dense = {
+      blockCount: 40,
+      headCountKv: 2,
+      keyLength: 256,
+      valueLength: 256,
+    };
+    expect(estimateLinearHybridKvLinearization({ ...dense, kvCacheType: 'f16' })).toBeUndefined();
+    const atRef = estimateKvReserveBytes({ ...dense, ctxTokens: 4096, kvCacheType: 'f16' });
+    expect((atRef ?? 0) / 4096).toBe(80 * 1024);
+  });
+
   it('an explicit numeric override wins over model-max and retains adaptive fallback', () => {
     expect(
       resolveLlamaCppContextRequirement({
@@ -1003,6 +1047,102 @@ describe('model-aware context admission', () => {
     ).toMatchObject({
       minimumPerTurnCtxTokens: 65_536,
       requestedPerTurnCtxTokens: 131_072,
+    });
+  });
+});
+
+describe('minViableLocalContextTokens', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const ambient = () => {
+    // The suite pins GEZEL_MIN_CONTEXT_TOKENS so context assertions are
+    // host-independent; these cases are about the host derivation itself.
+    vi.stubEnv('GEZEL_MIN_CONTEXT_TOKENS', '');
+  };
+
+  it('holds a roomy host to the 64K floor', () => {
+    ambient();
+    const budget = computeCapacityBudget({ systemRamBytes: 64 * GB, unifiedMemory: true });
+    expect(minViableLocalContextTokens({ systemRamBytes: 64 * GB, budget })).toBe(65_536);
+  });
+
+  it('drops a 16 GB unified host to 32K rather than denying the launch', () => {
+    ambient();
+    const budget = computeCapacityBudget({ systemRamBytes: 16 * GB, unifiedMemory: true });
+    expect(minViableLocalContextTokens({ systemRamBytes: 16 * GB, budget })).toBe(32_768);
+  });
+
+  it('judges a discrete card on its VRAM, not the system RAM beside it', () => {
+    ambient();
+    const smallCard = computeCapacityBudget({
+      systemRamBytes: 64 * GB,
+      gpuVramBytes: 8 * GB,
+      unifiedMemory: false,
+    });
+    expect(minViableLocalContextTokens({ systemRamBytes: 64 * GB, budget: smallCard })).toBe(
+      32_768,
+    );
+
+    const bigCardSmallHost = computeCapacityBudget({
+      systemRamBytes: 16 * GB,
+      gpuVramBytes: 24 * GB,
+      unifiedMemory: false,
+    });
+    expect(minViableLocalContextTokens({ systemRamBytes: 16 * GB, budget: bigCardSmallHost })).toBe(
+      65_536,
+    );
+  });
+
+  it('honors GEZEL_MIN_CONTEXT_TOKENS over the host derivation', () => {
+    vi.stubEnv('GEZEL_MIN_CONTEXT_TOKENS', '49152');
+    const budget = computeCapacityBudget({ systemRamBytes: 16 * GB, unifiedMemory: true });
+    expect(minViableLocalContextTokens({ systemRamBytes: 16 * GB, budget })).toBe(49_152);
+  });
+
+  it('a constrained floor admits the launch that 64K would have denied', () => {
+    // ~1 MB/token of KV: 64K needs ~64 GB, 32K needs ~32 GB, and the host
+    // has ~34 GB of headroom after the weights.
+    const input = {
+      requestedPerTurnCtxTokens: 65_536,
+      slots: 1,
+      kvBytesPerToken: 1024 * 1024,
+      weightsResidentBytes: 6 * GB,
+      budgetBytes: 52 * GB,
+      freeSystemRamBytes: 56 * GB,
+      vramBytes: 0,
+    };
+    expect(planCtxTokensForMemory({ ...input, minimumPerTurnCtxTokens: 65_536 })).toMatchObject({
+      minimumSatisfied: false,
+    });
+    const constrained = planCtxTokensForMemory({ ...input, minimumPerTurnCtxTokens: 32_768 });
+    expect(constrained.minimumSatisfied).toBe(true);
+    expect(constrained.perTurnCtxTokens).toBeGreaterThanOrEqual(32_768);
+  });
+
+  it('a constrained floor lets a model keep a 32K manifest recommendation', () => {
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 262_144,
+        requestedContextWindow: 32_768,
+        minViableContextTokens: 32_768,
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 32_768,
+    });
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        adaptiveContextWindow: 65_536,
+        contextSizing: 'adaptive',
+        minViableContextTokens: 32_768,
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 65_536,
+      strict: false,
     });
   });
 });

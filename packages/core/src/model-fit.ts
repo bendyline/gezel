@@ -73,8 +73,73 @@ const RAM_OFFLOAD_FRACTION = 0.8;
  */
 export const MOE_NON_EXPERT_FRACTION_ESTIMATE = 0.15;
 
-/** The practical working window fit badges price KV at — Gezel's 64K floor. */
-export const FIT_KV_CONTEXT_TOKENS = 65_536;
+/**
+ * The working window Gezel guarantees a local chat model on a host with room
+ * to spare. Tool loops, a project brief, and a few file reads spend most of a
+ * 32K window before the user's second question, so this is the floor admission
+ * defends by shedding engine slots rather than shortening context.
+ */
+export const LOCAL_CONTEXT_FLOOR_TOKENS = 65_536;
+
+/**
+ * The same floor on a memory-constrained host ({@link isMemoryConstrainedMachine}).
+ * Half a working window still runs agentic loops — sessions just compact
+ * sooner — while insisting on 64K there denies the launch outright: the KV at
+ * 64K is what pushes a small machine past its budget, and a denial gives the
+ * user nothing at all.
+ */
+export const CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS = 32_768;
+
+/**
+ * System RAM at or below which a unified-memory or CPU-only host counts as
+ * memory-constrained. On those hosts the KV cache competes with the OS, the
+ * Electron shell, and the weights for the same pool.
+ */
+export const CONSTRAINED_HOST_RAM_BYTES = 16 * 1024 ** 3;
+
+/**
+ * Usable VRAM at or below which a discrete card counts as memory-constrained.
+ * Compared against the USABLE figure (~95% of the card), so an 8 GB card lands
+ * under the line and a 10 GB one does not.
+ */
+export const CONSTRAINED_HOST_VRAM_BYTES = 8 * 1024 ** 3;
+
+/** The memory shape of a host, as much of it as the context floor depends on. */
+export interface MachineMemoryShape {
+  totalRamBytes: number;
+  /** Usable VRAM on a discrete card; null on unified / integrated / CPU-only hosts. */
+  gpuVramBytes: number | null;
+}
+
+/**
+ * Whether this host has to trade context for memory. A discrete card is judged
+ * on VRAM alone — that is where its KV lives, so a 24 GB card next to 16 GB of
+ * system RAM is not context-constrained. Everything else (Apple Silicon,
+ * integrated GPUs, CPU-only) is judged on system RAM, the one pool it has.
+ */
+export function isMemoryConstrainedMachine(machine: MachineMemoryShape): boolean {
+  const vram = machine.gpuVramBytes;
+  if (vram !== null && vram > 0) return vram <= CONSTRAINED_HOST_VRAM_BYTES;
+  return machine.totalRamBytes > 0 && machine.totalRamBytes <= CONSTRAINED_HOST_RAM_BYTES;
+}
+
+/**
+ * The context floor to hold this host to. The single derivation both the
+ * daemon's admission ladder and the install browser's fit badges read, so a
+ * model is never badged against a window admission would not have asked for.
+ */
+export function localContextFloorTokens(machine?: MachineMemoryShape | null): number {
+  return machine && isMemoryConstrainedMachine(machine)
+    ? CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS
+    : LOCAL_CONTEXT_FLOOR_TOKENS;
+}
+
+/**
+ * The working window fit badges price KV at when the caller knows nothing
+ * about the host. Prefer {@link localContextFloorTokens} with the machine's
+ * memory profile — a constrained host launches at half this.
+ */
+export const FIT_KV_CONTEXT_TOKENS = LOCAL_CONTEXT_FLOOR_TOKENS;
 
 /**
  * KV bytes a model would carry at the fit window, from the catalog's

@@ -4,9 +4,11 @@ import { createReadStream } from 'node:fs';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { createLogger } from '@bendyline/gezel';
 import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 
 const execFileAsync = promisify(execFile);
+const log = createLogger('assets');
 
 // A first adoption can require hashing tens of gigabytes. Model inventory is
 // requested by several UI paths, so share that work instead of letting each
@@ -84,6 +86,7 @@ export async function migrateLegacySystemModels(
 ): Promise<number> {
   if (env.GEZEL_SYSTEM_SCOPE !== '1' || !env[SHARED_ASSETS_ENV]?.trim()) return 0;
   let moved = 0;
+  const publishFailures: string[] = [];
   for (const engine of SHARED_MODEL_ENGINES) {
     const roots = modelStorageRoots({ home, engine, env });
     const legacyRoot = join(home, 'engines', engine, 'models');
@@ -115,8 +118,36 @@ export async function migrateLegacySystemModels(
     );
     for (const entry of sharedEntries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      await publishMigratedModel(join(roots.writableRoot, entry.name), env);
+      const modelDir = join(roots.writableRoot, entry.name);
+      try {
+        await publishMigratedModel(modelDir, env);
+      } catch (error) {
+        // Publishing widens read access on ONE bundle. It must never decide
+        // whether the daemon boots.
+        //
+        // This ran unguarded through v1.26219.44 and took the whole service
+        // down: the Windows installer had just made Administrators the owner
+        // of every pre-existing model while granting the service only Modify,
+        // so `icacls /reset` — which needs WRITE_DAC — failed with "Access is
+        // denied", the throw escaped startService, and gezeld crash-looped on
+        // SCM 1066. The installer grant is fixed (see nsis-hooks.nsh), but the
+        // structural bug was that a per-model permission repair was allowed to
+        // be fatal at all. Degrade the bundle, not the machine.
+        //
+        // Consequence of skipping: that bundle keeps its narrower ACL, so other
+        // accounts cannot read it until the next successful publish. The broker
+        // itself still uses it, so on-device inference is unaffected.
+        publishFailures.push(
+          `${entry.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
+  }
+  if (publishFailures.length > 0) {
+    log.warn(
+      `${publishFailures.length} shared model bundle(s) could not be published for ` +
+        `cross-account read access and stay broker-only: ${publishFailures.join('; ')}`,
+    );
   }
   return moved;
 }

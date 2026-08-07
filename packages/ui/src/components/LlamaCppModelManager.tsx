@@ -5,6 +5,7 @@ import {
   estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
+  localContextFloorTokens,
 } from '@bendyline/gezel';
 import type {
   IncompleteModelDownload,
@@ -61,6 +62,21 @@ function fitMachine(memory: MemoryProfile) {
     gpuVramBytes: memory.gpuMemoryKind === 'integrated' ? null : memory.gpuVramBytes,
     ...(memory.budgetBytes !== undefined ? { admissibleBytes: memory.budgetBytes } : {}),
   };
+}
+
+/**
+ * KV a model would carry at the window this machine will actually launch it
+ * with. A 16 GB Mac or an 8 GB card runs at the 32K floor, so pricing its
+ * badges at 64K buries models the daemon would happily admit.
+ */
+function fitKvBytes(
+  manifest: { kvBytesPerTokenF16?: number; kvFixedBytesF16?: number },
+  memory: MemoryProfile,
+): number {
+  const { totalRamBytes, gpuVramBytes } = fitMachine(memory);
+  return estimateManifestKvBytes(manifest, {
+    ctxTokens: localContextFloorTokens({ totalRamBytes, gpuVramBytes }),
+  });
 }
 
 /**
@@ -879,7 +895,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
                 residentBytes:
-                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + estimateManifestKvBytes(m),
+                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -899,8 +915,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const fit = memory
               ? computeModelFit({
                   residentBytes:
-                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
-                    estimateManifestKvBytes(m),
+                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })
@@ -940,7 +955,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               fitTier: fit.tier,
                               residentBytes:
                                 m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
-                                estimateManifestKvBytes(m),
+                                fitKvBytes(m, memory),
                             })
                           : null;
                       if (!hint) return null;

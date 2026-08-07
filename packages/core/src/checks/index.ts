@@ -85,6 +85,10 @@ export {
   type WordBandResult,
 } from './prose.js';
 export { wrapperReturnHint } from './runtime-hints.js';
+export {
+  markdownHeadingsMatch,
+  type MarkdownHeadingsMatchResult,
+} from './markdown.js';
 export { explainSniff, type ExplainableSniff } from './sniff-explain.js';
 export {
   MIN_JUDGE_EVIDENCE_SUBSTRING,
