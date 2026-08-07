@@ -240,4 +240,38 @@ describe('machine-shared Store mount', () => {
     expect(existsSync(join(sharedHome, 'projects', 'shared-project', 'questions.json'))).toBe(true);
     expect(existsSync(join(sharedHome, 'projects', 'shared-project', 'terminals'))).toBe(false);
   });
+  // Regression: v1.26219.45 could not be installed over any machine whose
+  // broker had ever booted. `ensureLayout` created the product scopes for
+  // every role, so a machine-engine daemon mounting the shared tree recreated
+  // `gezels/` and `projects/` under its own home and let
+  // adoptMachineSharedGezelPrivateState fill them with per-entity stubs. The
+  // installer's migration then saw legacy and shared both populated and
+  // divergent, refused, and abandoned the machine-service registration.
+  it('creates no product state when serving the machine-engine role', async () => {
+    process.env.GEZEL_MACHINE_SHARED_HOME = sharedHome;
+    const brokerHome = join(root, 'broker');
+    const broker = new Store({ home: brokerHome, serviceRole: 'machine-engine' });
+    await broker.ensureLayout();
+
+    // Operational directories it genuinely owns.
+    expect(existsSync(join(brokerHome, 'runtime'))).toBe(true);
+    expect(existsSync(join(brokerHome, 'logs'))).toBe(true);
+
+    // Product scopes it must never own — these are exactly the paths the
+    // installer's migrate-legacy-shared step drains into `shared/`.
+    for (const scope of ['gezels', 'projects', 'documents']) {
+      expect(existsSync(join(brokerHome, scope))).toBe(false);
+    }
+    // And no adopted per-entity stubs for the shared entities.
+    expect(existsSync(join(brokerHome, 'gezels', 'ada'))).toBe(false);
+    expect(existsSync(join(brokerHome, 'projects', 'shared-project'))).toBe(false);
+  });
+
+  it('still builds the full product layout for a user daemon', async () => {
+    const home = join(root, 'user-role');
+    await new Store({ home, serviceRole: 'user' }).ensureLayout();
+    for (const scope of ['gezels', 'projects', 'runtime', 'logs']) {
+      expect(existsSync(join(home, scope))).toBe(true);
+    }
+  });
 });

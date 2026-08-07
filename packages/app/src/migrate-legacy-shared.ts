@@ -20,9 +20,17 @@ async function main(): Promise<void> {
     sourceHome: args.source,
     sharedHome: args.dest,
   });
+  const quarantined = result.quarantined.projects + result.quarantined.gezels;
   process.stdout.write(
     `[migrate-legacy-shared] ready: projects=${result.moved.projects + result.recovered.projects} gezels=${result.moved.gezels + result.recovered.gezels} root=${result.sharedHome}\n`,
   );
+  if (quarantined > 0) {
+    // Not an error: the shared copy is authoritative and the install proceeds.
+    // Say where the preserved bytes went so an operator can reconcile later.
+    process.stdout.write(
+      `[migrate-legacy-shared] ${quarantined} legacy entit${quarantined === 1 ? 'y' : 'ies'} held content the shared copy did not and were preserved under ${args.source}/.gezel-migration-quarantine/\n`,
+    );
+  }
 }
 
 main().catch((err: unknown) => {

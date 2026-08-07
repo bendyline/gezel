@@ -121,9 +121,7 @@ export class GpuArbiter {
     const heldMs = Date.now() - this.activeLeaseSince;
     if (heldMs < this.staleLeaseBreakMs) return false;
     arbiterLog.error(
-      `[gpu-arbiter] breaking stale ${this.activeLease} lease held ${Math.round(heldMs / 1000)}s ` +
-        `(ceiling ${Math.round(this.staleLeaseBreakMs / 1000)}s) — its holder never released it. ` +
-        `This is a leak: every GPU acquirer was blocked behind it.`,
+      `[gpu-arbiter] breaking stale ${this.activeLease} lease held ${Math.round(heldMs / 1000)}s (ceiling ${Math.round(this.staleLeaseBreakMs / 1000)}s) — its holder never released it. This is a leak: every GPU acquirer was blocked behind it.`,
     );
     this.activeLease = null;
     this.activeLeaseSince = null;

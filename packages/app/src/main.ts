@@ -784,8 +784,9 @@ async function showStartupError(win: Electron.BrowserWindow, err: Error): Promis
   .detail { font-size: 12px; opacity: 0.7; word-break: break-word; }
 </style></head><body><main>
   <h1>Gezel couldn't start its background service</h1>
-  <p>Nothing has been lost — your gezellen, projects, and chats are still on disk.
-     Quit Gezel and open it again. If it keeps happening, reinstall Gezel.</p>
+  <p>Nothing has been lost — your gezellen, projects, and chats are still on disk.</p>
+  <p>Open Gezel again. If it keeps happening, restart your computer — a
+     background service from a previous version may still be holding on.</p>
   <div class="detail">${escapeHtml(err.message)}</div>
 </main></body></html>`;
   try {

@@ -706,7 +706,36 @@ describe('Branch 2 — local-adopt', () => {
     await svc.shutdown();
   });
 
-  it('refuses embedded fallback while an unhealthy adopted pid is still alive', async () => {
+  // The case that matters most, because it is the common one. Right after an
+  // upgrade the adopted daemon is alive but still re-extracting its ~32k-file
+  // service bundle, so a single 5s probe fails. Killing it there would throw
+  // away a perfectly good daemon mid-boot; a v1.26219.45 Linux upgrade showed
+  // the symptom exactly — launch failed immediately after install, then simply
+  // worked later once the daemon had finished starting.
+  it('waits for an adopted daemon that is still starting instead of giving up', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:6666',
+      token: 'adopt-tok',
+      cert: null,
+      pid: 99999,
+    });
+    let attempts = 0;
+    ctx.health = () => {
+      attempts += 1;
+      return attempts < 3
+        ? Promise.reject(new Error('still booting'))
+        : Promise.resolve({ ok: true, version: '9.9.9' });
+    };
+    ctx.processAlive = true;
+
+    const svc = await connectOrStart(baseOpts({ packaged: false, adoptHealthWaitMs: 5_000 }));
+    expect(svc.mode).toBe('local-adopt');
+    expect(attempts).toBeGreaterThanOrEqual(3);
+    await svc.shutdown();
+  });
+
+  it('stops a wedged adopted daemon once its start budget expires, then recovers', async () => {
     vi.mocked(resolveMode).mockResolvedValue({
       kind: 'local-adopt',
       baseUrl: 'https://127.0.0.1:6666',
@@ -717,8 +746,30 @@ describe('Branch 2 — local-adopt', () => {
     ctx.health = () => Promise.reject(new Error('wedged listener'));
     ctx.processAlive = true;
 
-    await expect(connectOrStart(baseOpts())).rejects.toThrow(
-      /refusing to start an embedded writer/i,
+    // Budget 0: no patience, straight to the give-up path. Previously this
+    // threw and left the app with nothing; now the daemon is stopped and the
+    // supervisor recovers, matching what the two neighbouring branches do.
+    const svc = await connectOrStart(baseOpts({ adoptHealthWaitMs: 0 }));
+    expect(svc.mode).toBe('embedded');
+    expect(stopDaemonProcessByPid).toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
+  it('still refuses a second writer if the wedged daemon will not die', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:6666',
+      token: 'adopt-tok',
+      cert: null,
+      pid: 99999,
+    });
+    ctx.health = () => Promise.reject(new Error('wedged listener'));
+    ctx.processAlive = true;
+    // The real stopProcessByPid delegates to this; make the ladder fail.
+    vi.mocked(stopDaemonProcessByPid).mockResolvedValueOnce(false);
+
+    await expect(connectOrStart(baseOpts({ adoptHealthWaitMs: 0 }))).rejects.toThrow(
+      /did not exit when asked; refusing to start a second writer/i,
     );
   });
 

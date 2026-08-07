@@ -290,9 +290,28 @@ if [ ! -f "$MIGRATE_SHARED_CLI" ]; then
 fi
 assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
 echo "[gezel postinstall] migrating legacy projects and gezels into $SHARED_DIR"
+# `set -Eeuo pipefail` is in force, so an unguarded call here makes any
+# migration failure abort the entire postinstall — and therefore the whole
+# package install. That is the wrong blast radius: the migration is a
+# compatibility exit for pre-split installs, not a precondition for having
+# Gezel on the machine. v1.26219.45 failed to install at all on upgraded Macs
+# for exactly this reason, while the same failure on Windows only skipped the
+# machine service and left a working app behind.
+#
+# The migration itself never destroys data: it moves, verifies, or sets aside.
+# So on failure, leave the legacy tree exactly as it is, skip the LaunchDaemon,
+# and let the desktop app fall back to its per-user daemon — the same outcome
+# Windows produces, reached deliberately instead of by aborting.
+migration_ok=1
 ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI" \
   --source="$DATA_DIR" \
-  --dest="$SHARED_DIR"
+  --dest="$SHARED_DIR" || migration_ok=0
+if [ "$migration_ok" -ne 1 ]; then
+  echo "[gezel postinstall] WARNING: legacy shared-data migration did not complete." >&2
+  echo "[gezel postinstall] WARNING: nothing was overwritten. Skipping the shared model" >&2
+  echo "[gezel postinstall] WARNING: engine; Gezel will use an account-local model engine." >&2
+  exit 0
+fi
 assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
 
 # Upgrade migration: remove legacy world/group permissions without following
