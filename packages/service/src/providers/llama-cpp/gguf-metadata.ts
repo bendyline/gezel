@@ -129,6 +129,27 @@ export interface GgufSummary {
   /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
   valueLengthSwa?: number;
   /**
+   * `<arch>.full_attention_interval` — on linear-attention hybrids
+   * (`qwen35moe`: Qwen 3.5 MoE, Ornith, BTL-4), every Nth layer is full
+   * attention and the rest are SSM/linear layers whose state is
+   * context-INDEPENDENT. Only the full-attention layers grow their KV with
+   * the context window.
+   *
+   * Load-bearing for memory pricing: a 40-layer model at interval 4 has 10
+   * KV-scaling layers, not 40. Reading this key is what stops the estimate
+   * being 4x high — the same class of error as skipping Gemma's per-layer
+   * `head_count_kv` array (which overstated a 31b by ~6x and OOM'd Metal).
+   */
+  fullAttentionInterval?: number;
+  /**
+   * `<arch>.ssm.*` — recurrent-state geometry on those linear layers.
+   * Present alongside {@link fullAttentionInterval}; recorded so the fixed
+   * per-slot state can be priced instead of guessed.
+   */
+  ssmInnerSize?: number;
+  ssmStateSize?: number;
+  ssmConvKernel?: number;
+  /**
    * `<arch>.nextn_predict_layers` — number of multi-token-prediction
    * (MTP / "nextn") layers. `> 0` means the GGUF carries an MTP head,
    * i.e. `--spec-type draft-mtp` is applicable. Absent on models whose
@@ -585,6 +606,14 @@ export function readGgufSummary(
         summary.keyLengthSwa = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length_swa')) {
         summary.valueLengthSwa = readUintScalar(r, type);
+      } else if (key.endsWith('.full_attention_interval')) {
+        summary.fullAttentionInterval = readUintScalar(r, type);
+      } else if (key.endsWith('.ssm.inner_size')) {
+        summary.ssmInnerSize = readUintScalar(r, type);
+      } else if (key.endsWith('.ssm.state_size')) {
+        summary.ssmStateSize = readUintScalar(r, type);
+      } else if (key.endsWith('.ssm.conv_kernel')) {
+        summary.ssmConvKernel = readUintScalar(r, type);
       } else {
         r.skipValue(type);
       }

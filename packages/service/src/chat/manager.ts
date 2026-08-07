@@ -10754,6 +10754,10 @@ export class ChatManager {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
           },
           effectiveNumCtx,
         )
@@ -10781,6 +10785,10 @@ export class ChatManager {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
         },
         ctx,
       );
@@ -10857,6 +10865,10 @@ export class ChatManager {
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
         valueLengthSwa: summary.valueLengthSwa,
+        fullAttentionInterval: summary.fullAttentionInterval,
+        ssmInnerSize: summary.ssmInnerSize,
+        ssmStateSize: summary.ssmStateSize,
+        ssmConvKernel: summary.ssmConvKernel,
         ctxTokens: referenceCtx,
         kvCacheType,
       });
@@ -10909,6 +10921,10 @@ export class ChatManager {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
           kvCacheType,
         });
         if (windowed) {
@@ -18194,6 +18210,10 @@ export async function buildLlamaCppProvider(opts: {
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
           valueLengthSwa: summary.valueLengthSwa,
+          fullAttentionInterval: summary.fullAttentionInterval,
+          ssmInnerSize: summary.ssmInnerSize,
+          ssmStateSize: summary.ssmStateSize,
+          ssmConvKernel: summary.ssmConvKernel,
           ctxTokens: REFERENCE_CTX,
           kvCacheType,
         });
@@ -18280,6 +18300,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
           if (swaFullAutoDefault) {
@@ -18375,6 +18399,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
       const kvReserveBytes = windowedKvPlan
@@ -18393,6 +18421,10 @@ export async function buildLlamaCppProvider(opts: {
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
             valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
             ctxTokens: effectiveNumCtx * slots,
             kvCacheType,
           });

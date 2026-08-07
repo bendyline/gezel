@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   estimateKvReserveBytes,
+  estimateLinearHybridKvLinearization,
   estimateWindowedKvLinearization,
 } from '../llama-cpp/offload-planner.js';
 import {
@@ -990,6 +991,48 @@ describe('model-aware context admission', () => {
       perTurnCtxTokens: NATIVE,
       slots: 1,
     });
+  });
+
+  it('prices a linear-attention hybrid on its full-attention layers only', () => {
+    // qwen35moe (Qwen 3.5 MoE / Ornith / BTL-4): 40 layers, every 4th full
+    // attention, the other 30 carrying a context-independent recurrent
+    // state. Counting all 40 gave 80 KB/token; the truth is 20 KB/token,
+    // which is what the publisher documents and what the engine allocates.
+    const geometry = {
+      blockCount: 40,
+      headCountKv: 2,
+      keyLength: 256,
+      valueLength: 256,
+      fullAttentionInterval: 4,
+      ssmInnerSize: 4096,
+      ssmStateSize: 128,
+      ssmConvKernel: 4,
+    };
+    const hybrid = estimateLinearHybridKvLinearization({ ...geometry, kvCacheType: 'f16' });
+    expect(hybrid).toBeDefined();
+    // 10 full-attention layers x 2 kv heads x (256+256) x 2 bytes.
+    expect(hybrid?.bytesPerToken).toBe(20 * 1024);
+    // 30 linear layers, each holding conv + recurrent state at f32. Tens of
+    // MB against GB of weights — real, but never the deciding term.
+    expect(hybrid?.fixedBytes).toBeGreaterThan(50 * 1024 * 1024);
+    expect(hybrid?.fixedBytes).toBeLessThan(100 * 1024 * 1024);
+
+    // The slope-only estimator agrees, so the bytes-per-token a caller
+    // derives by dividing through a reference context stays correct.
+    const atRef = estimateKvReserveBytes({ ...geometry, ctxTokens: 4096, kvCacheType: 'f16' });
+    expect((atRef ?? 0) / 4096).toBe(20 * 1024);
+  });
+
+  it('leaves ordinary full-attention models on every-layer math', () => {
+    const dense = {
+      blockCount: 40,
+      headCountKv: 2,
+      keyLength: 256,
+      valueLength: 256,
+    };
+    expect(estimateLinearHybridKvLinearization({ ...dense, kvCacheType: 'f16' })).toBeUndefined();
+    const atRef = estimateKvReserveBytes({ ...dense, ctxTokens: 4096, kvCacheType: 'f16' });
+    expect((atRef ?? 0) / 4096).toBe(80 * 1024);
   });
 
   it('an explicit numeric override wins over model-max and retains adaptive fallback', () => {
