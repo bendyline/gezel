@@ -177,6 +177,17 @@ describe('resolveMlxEffectiveNumCtx', () => {
   it('falls back to 64K for a manual model path with no catalog metadata', () => {
     expect(resolveMlxEffectiveNumCtx({})).toBe(65_536);
   });
+
+  it('raises a low limit only to the floor a memory-constrained host can back', () => {
+    expect(
+      resolveMlxEffectiveNumCtx({
+        modelContextWindow: 262_144,
+        configuredLimit: 16_384,
+        minViableContextTokens: 32_768,
+      }),
+    ).toBe(32_768);
+    expect(resolveMlxEffectiveNumCtx({ minViableContextTokens: 32_768 })).toBe(32_768);
+  });
 });
 
 describe('ChatManager — clamped first-turn context', () => {

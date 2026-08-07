@@ -20,7 +20,13 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { freemem, totalmem } from 'node:os';
-import { type LlamaCppContextSizing, createLogger } from '@bendyline/gezel';
+import {
+  CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS,
+  LOCAL_CONTEXT_FLOOR_TOKENS,
+  type LlamaCppContextSizing,
+  createLogger,
+  localContextFloorTokens,
+} from '@bendyline/gezel';
 import {
   type CapacityBudget,
   autoAllowRamSpillover,
@@ -735,8 +741,48 @@ export function llamaCppSlotCeiling(opts: {
  */
 const CTX_CLAMP_OS_RESERVE_BYTES = 2 * GIB;
 
-/** Minimum useful per-turn context for Gezel's standing prompt + tool surface. */
-export const MIN_VIABLE_LOCAL_CONTEXT_TOKENS = 65_536;
+/**
+ * Minimum useful per-turn context for Gezel's standing prompt + tool surface
+ * on a host with memory to spare. Read {@link minViableLocalContextTokens}
+ * rather than this constant when the answer has to fit the running machine.
+ */
+export const MIN_VIABLE_LOCAL_CONTEXT_TOKENS = LOCAL_CONTEXT_FLOOR_TOKENS;
+
+/** The same minimum on a host that has to trade context for memory. */
+export const MIN_VIABLE_CONSTRAINED_CONTEXT_TOKENS = CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS;
+
+function envMinContextTokens(): number | null {
+  const raw = process.env.GEZEL_MIN_CONTEXT_TOKENS;
+  if (!raw) return null;
+  const tokens = Number.parseInt(raw, 10);
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
+/**
+ * The context floor THIS host is held to. A 16 GB Mac or an 8 GB card cannot
+ * back a 64K window next to the weights, and the admission ladder's only
+ * remaining move there is to deny the launch — so those hosts run at
+ * {@link MIN_VIABLE_CONSTRAINED_CONTEXT_TOKENS} instead, and sessions compact
+ * sooner rather than the model being unusable.
+ *
+ * Reads the same host shape the budget does, so the two cannot disagree:
+ * a discrete card is judged on its usable VRAM, every other host on system
+ * RAM. `GEZEL_MIN_CONTEXT_TOKENS` overrides both, for operators and for tests
+ * that need a host-independent floor.
+ */
+export function minViableLocalContextTokens(opts?: {
+  systemRamBytes?: number;
+  budget?: CapacityBudget;
+}): number {
+  const override = envMinContextTokens();
+  if (override !== null) return override;
+  const systemRamBytes = opts?.systemRamBytes ?? totalmem();
+  const budget = opts?.budget ?? computeCapacityBudget({ systemRamBytes });
+  return localContextFloorTokens({
+    totalRamBytes: systemRamBytes,
+    gpuVramBytes: budget.kind === 'discrete-gpu' ? budget.vramBytes : null,
+  });
+}
 
 export interface LocalContextRequirement {
   nativeContextWindow: number;
@@ -746,22 +792,32 @@ export interface LocalContextRequirement {
 
 /**
  * Resolve the model-aware context contract. Long-context models must retain
- * at least 64K; a model whose native window is genuinely smaller keeps that
- * native limit instead of being asked to do something it cannot support.
+ * at least the host's floor ({@link minViableLocalContextTokens} — 64K, or 32K
+ * on a memory-constrained machine); a model whose native window is genuinely
+ * smaller keeps that native limit instead of being asked to do something it
+ * cannot support.
+ *
+ * `minViableContextTokens` exists so callers that already know the host (and
+ * every test) pin the floor instead of re-probing the machine underneath them.
  */
 export function resolveLocalContextRequirement(opts: {
   modelContextWindow?: number;
   requestedContextWindow?: number;
+  minViableContextTokens?: number;
 }): LocalContextRequirement {
+  const floor =
+    opts.minViableContextTokens && opts.minViableContextTokens > 0
+      ? Math.floor(opts.minViableContextTokens)
+      : minViableLocalContextTokens();
   const preferred =
     opts.requestedContextWindow && opts.requestedContextWindow > 0
       ? Math.floor(opts.requestedContextWindow)
-      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
+      : floor;
   const native =
     opts.modelContextWindow && opts.modelContextWindow > 0
       ? Math.floor(opts.modelContextWindow)
-      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
-  const minimum = Math.min(native, MIN_VIABLE_LOCAL_CONTEXT_TOKENS);
+      : floor;
+  const minimum = Math.min(native, floor);
   return {
     nativeContextWindow: native,
     minimumPerTurnCtxTokens: minimum,
@@ -797,6 +853,7 @@ export function resolveLlamaCppContextRequirement(opts: {
   explicitContextWindow?: number;
   adaptiveContextWindow?: number;
   contextSizing?: LlamaCppContextSizing;
+  minViableContextTokens?: number;
 }): LlamaCppContextRequirement {
   const strictModelMax =
     opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
@@ -808,6 +865,9 @@ export function resolveLlamaCppContextRequirement(opts: {
       ? { modelContextWindow: opts.modelContextWindow }
       : {}),
     ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
+    ...(opts.minViableContextTokens !== undefined
+      ? { minViableContextTokens: opts.minViableContextTokens }
+      : {}),
   });
   return strictModelMax
     ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens, strict: true }

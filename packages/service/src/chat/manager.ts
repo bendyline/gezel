@@ -172,6 +172,7 @@ import {
   CapacityDeniedError,
   availableSystemRamBytes,
   formatContextCapacityDenial,
+  minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
 } from '../providers/native/capacity-broker.js';
@@ -10572,14 +10573,19 @@ export class ChatManager {
     };
 
     const config = await this.store.readConfig();
+    // The floor this host is held to — 64K, or 32K where memory forces the
+    // trade. Read once so every branch of the preview prices the same window
+    // the launch path will ask for.
+    const contextFloor = minViableLocalContextTokens();
     if (name === 'mlx') {
       const installed = await this.mlxModels?.resolveModel(modelId);
       if (!installed) throw new ModelNotInstalledError(name, modelId);
       let effective = resolveMlxEffectiveNumCtx({
         ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
         ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
+        minViableContextTokens: contextFloor,
       });
-      const minimum = Math.min(installed.contextWindow ?? 65_536, 65_536);
+      const minimum = Math.min(installed.contextWindow ?? contextFloor, contextFloor);
       // Memory-priced preview (M4): mirror buildMlxProvider's admission so
       // the advertised window is what memory admits, not the native max —
       // before this an MLX 26B on a 16 GB Mac previewed 256K.
@@ -10673,9 +10679,10 @@ export class ChatManager {
         configured: config.ds4NumCtx,
         ramTieredCtx,
         catalogMaxCtx: ds4Source?.maxLaunchCtx,
+        minViableContextTokens: contextFloor,
       });
       return {
-        contextWindow: useResidentOr(effective, Math.min(effective, 65_536)),
+        contextWindow: useResidentOr(effective, Math.min(effective, contextFloor)),
         // ds4's catalog residentBytes is an authored SSD-streaming working
         // set (weights cache + KV allowance) — already the honest number.
         plannedResidentBytes: await this.resolveResidentBytes('ds4', modelId),
@@ -10695,6 +10702,7 @@ export class ChatManager {
     const explicitContextWindow = envNumCtx ?? config.llamaCppNumCtx;
     const contextRequirement = resolveLlamaCppContextRequirement({
       modelContextWindow: installed.contextWindow,
+      minViableContextTokens: contextFloor,
       ...(explicitContextWindow !== undefined ? { explicitContextWindow } : {}),
       ...(manifestEngineConfig?.contextSize !== undefined
         ? { adaptiveContextWindow: manifestEngineConfig.contextSize }
@@ -17285,25 +17293,31 @@ function ensureLlamaEngineStatus(
  * cap.
  *
  * A high explicit `config.ds4NumCtx` wins. A lower value cannot push a
- * long-context model below Gezel's 64K viability floor; a catalog model whose
- * native launch cap is genuinely smaller retains that smaller cap. Otherwise
- * the RAM tier is an upper bound that a model may lower but never raise — the
- * tier is calibrated on DeepSeek V4 Flash's ~4 GiB of resident non-routed
- * weights, and a model holding five times that much cannot afford the same KV
- * allocation on the same machine.
+ * long-context model below Gezel's viability floor (64K, or 32K on a
+ * memory-constrained host); a catalog model whose native launch cap is
+ * genuinely smaller retains that smaller cap. Otherwise the RAM tier is an
+ * upper bound that a model may lower but never raise — the tier is calibrated
+ * on DeepSeek V4 Flash's ~4 GiB of resident non-routed weights, and a model
+ * holding five times that much cannot afford the same KV allocation on the
+ * same machine.
  */
 export function resolveDs4LaunchCtx(opts: {
   configured?: number | undefined;
   ramTieredCtx: number;
   catalogMaxCtx?: number | undefined;
+  minViableContextTokens?: number | undefined;
 }): number {
+  const floor =
+    opts.minViableContextTokens && opts.minViableContextTokens > 0
+      ? opts.minViableContextTokens
+      : minViableLocalContextTokens();
   const resolved =
     opts.configured ??
     (opts.catalogMaxCtx ? Math.min(opts.ramTieredCtx, opts.catalogMaxCtx) : opts.ramTieredCtx);
-  if (opts.catalogMaxCtx && opts.catalogMaxCtx < 65_536) {
+  if (opts.catalogMaxCtx && opts.catalogMaxCtx < floor) {
     return opts.catalogMaxCtx;
   }
-  return Math.max(65_536, resolved);
+  return Math.max(floor, resolved);
 }
 
 /**
@@ -17472,6 +17486,7 @@ export async function buildDs4Provider(opts: {
     configured: config.ds4NumCtx,
     ramTieredCtx,
     catalogMaxCtx: ds4Source?.maxLaunchCtx,
+    minViableContextTokens: minViableLocalContextTokens(),
   });
   if (numCtx !== (config.ds4NumCtx ?? ramTieredCtx)) {
     log.info(
@@ -17907,6 +17922,7 @@ export async function buildLlamaCppProvider(opts: {
     ...(numCtx !== undefined ? { explicitContextWindow: numCtx } : {}),
     adaptiveContextWindow: manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT,
     contextSizing: config.llamaCppContextSizing ?? 'adaptive',
+    minViableContextTokens: minViableLocalContextTokens(),
   });
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.
@@ -18808,15 +18824,20 @@ export async function buildLlamaCppProvider(opts: {
  * the correct denominator for overflow checks, compaction, tool-output caps,
  * and user-facing context warnings. An explicit operator limit still wins,
  * clamped to the model's native maximum. Manual model paths have no catalog
- * metadata, so they retain a conservative 64K fallback.
+ * metadata, so they fall back to the host's context floor (64K, or 32K on a
+ * memory-constrained machine).
  */
 export function resolveMlxEffectiveNumCtx(opts: {
   modelContextWindow?: number;
   configuredLimit?: number;
+  minViableContextTokens?: number;
 }): number {
   return resolveLocalContextRequirement({
     modelContextWindow: opts.modelContextWindow,
     requestedContextWindow: opts.configuredLimit ?? opts.modelContextWindow,
+    ...(opts.minViableContextTokens !== undefined
+      ? { minViableContextTokens: opts.minViableContextTokens }
+      : {}),
   }).requestedPerTurnCtxTokens;
 }
 
@@ -18949,11 +18970,13 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
+  const mlxContextFloor = minViableLocalContextTokens();
   let effectiveNumCtx = resolveMlxEffectiveNumCtx({
     ...(modelCatalogInfo?.contextWindow
       ? { modelContextWindow: modelCatalogInfo.contextWindow }
       : {}),
     ...(numCtx ? { configuredLimit: numCtx } : {}),
+    minViableContextTokens: mlxContextFloor,
   });
 
   // Ensure the mlx venv + mlx-vlm package exist. We use `mlx-vlm`
@@ -19146,6 +19169,7 @@ export async function buildMlxProvider(opts: {
         ? { modelContextWindow: modelCatalogInfo.contextWindow }
         : {}),
       requestedContextWindow: effectiveNumCtx,
+      minViableContextTokens: mlxContextFloor,
     });
     const kvBytesPerToken =
       (mlxExactPerSlotKvF16 / Math.max(1, effectiveNumCtx)) * kvQuantScale(mlxKvCacheType);

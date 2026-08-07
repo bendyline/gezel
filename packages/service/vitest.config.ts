@@ -124,6 +124,12 @@ export default defineConfig({
     env: {
       GEZEL_EMBED_MODEL: 'Xenova/all-MiniLM-L6-v2',
       GEZEL_HF_CACHE_DIR: join(homedir(), '.cache', 'gezel-test-hf'),
+      // The local context floor is host-derived (64K, or 32K on a
+      // memory-constrained machine — see minViableLocalContextTokens), and a
+      // 16 GB CI runner IS such a machine. Pin it so context assertions mean
+      // the same thing on a workstation and on the runner; the tests that
+      // exercise the constrained floor set it themselves.
+      GEZEL_MIN_CONTEXT_TOKENS: '65536',
     },
     projects: [
       {

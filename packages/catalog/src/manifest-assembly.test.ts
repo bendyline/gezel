@@ -29,6 +29,8 @@ describe('assembleManifest merge semantics', () => {
     approxSizeBytes: 1,
     supportsTools: true,
     contextWindow: 4096,
+    kvBytesPerTokenF16: 16_384,
+    kvFixedBytesF16: 1_000_000,
     upstream: 'https://example.com',
     tuning: { sampling: { temperature: 0.5 } },
     behaviors: ['seed-behavior'],
@@ -42,6 +44,8 @@ describe('assembleManifest merge semantics', () => {
       existing: null,
     });
     expect(manifest.name).toBe('Demo');
+    expect(manifest.kvBytesPerTokenF16).toBe(16_384);
+    expect(manifest.kvFixedBytesF16).toBe(1_000_000);
     expect(manifest.tuning).toEqual({ sampling: { temperature: 0.5 } });
     expect(manifest.llamaCpp).toEqual(freshLlama);
   });

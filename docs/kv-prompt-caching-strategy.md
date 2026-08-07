@@ -201,7 +201,8 @@ requests**, keyed by a `cache_id` (`providers/mlx/python/gezel_mlx_server.py:5-1
 context/`max-kv-size` flag** — the cache grows with the request up to the model's native context
 window. Gezel uses that catalog-native window for overflow checks, compaction, tool-output caps,
 and user-facing pressure warnings; `mlxNumCtx` is an optional lower operator cap. Manual model
-paths without catalog metadata use a 64K fallback. The cache is a non-rotating full `KVCache`
+paths without catalog metadata fall back to the host's context floor — 64K, or 32K on a
+memory-constrained machine (`minViableLocalContextTokens`). The cache is a non-rotating full `KVCache`
 (we never pass `max_kv_size`).
 
 ```
