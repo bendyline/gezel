@@ -58,6 +58,20 @@ describe('macOS machine-service filesystem security', () => {
     );
   });
 
+  it('fails the package instead of accepting an unpublished partial migration', () => {
+    const migration = position(
+      macPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"',
+    );
+    const aclSetup = macPostinstall.indexOf('assert_not_symlink "$SHARED_DIR"', migration);
+    expect(aclSetup).toBeGreaterThan(migration);
+    const migrationBlock = macPostinstall.slice(migration, aclSetup);
+
+    expect(migrationBlock).not.toContain('|| migration_ok=0');
+    expect(migrationBlock).not.toContain('exit 0');
+    expect(macPostinstall).not.toContain('migration_ok=');
+  });
+
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(macPostinstall).toContain('umask 077');
     expect(macPostinstall).toContain(

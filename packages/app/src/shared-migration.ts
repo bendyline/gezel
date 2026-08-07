@@ -49,6 +49,15 @@ export interface SharedMigrationResult {
   marker: string;
 }
 
+interface MigrationTransaction {
+  /** Pre-publication mutations that must be undone if a later entity fails. */
+  rollbacks: Array<() => Promise<void>>;
+  /** Best-effort duplicate cleanup after the shared root is safely published. */
+  cleanups: Array<() => Promise<void>>;
+  /** Operator notices that are true only if the transaction is published. */
+  announcements: string[];
+}
+
 /**
  * Move pre-split machine product entities into the explicit shared root.
  * The machine service must be stopped by the caller. Publication is per
@@ -72,56 +81,92 @@ export async function migrateLegacyMachineDataToShared(opts: {
   const moved = { projects: 0, gezels: 0 };
   const recovered = { projects: 0, gezels: 0 };
   const quarantined = { projects: 0, gezels: 0 };
+  const transaction: MigrationTransaction = { rollbacks: [], cleanups: [], announcements: [] };
   try {
-    for (const kind of LEGACY_KINDS) {
-      const sourceRoot = join(sourceHome, kind);
-      const destinationRoot = join(sharedHome, kind);
-      await assertPlainDirectoryIfPresent(sourceRoot, `legacy ${kind} root`);
-      await assertPlainDirectoryIfPresent(destinationRoot, `shared ${kind} root`);
-      await mkdir(destinationRoot, { recursive: true });
+    try {
+      for (const kind of LEGACY_KINDS) {
+        const sourceRoot = join(sourceHome, kind);
+        const destinationRoot = join(sharedHome, kind);
+        await assertPlainDirectoryIfPresent(sourceRoot, `legacy ${kind} root`);
+        await assertPlainDirectoryIfPresent(destinationRoot, `shared ${kind} root`);
+        await mkdir(destinationRoot, { recursive: true });
 
-      let entries: Dirent<string>[];
-      try {
-        entries = await readdir(sourceRoot, { withFileTypes: true });
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw err;
-      }
-      for (const entry of entries) {
-        if (entry.isSymbolicLink()) {
-          throw new Error(`refusing symlinked legacy ${kind} entry: ${entry.name}`);
+        let entries: Dirent<string>[];
+        try {
+          entries = await readdir(sourceRoot, { withFileTypes: true });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw err;
         }
-        if (!entry.isDirectory()) continue;
-        const outcome = await migrateEntity({
-          source: join(sourceRoot, entry.name),
-          destination: join(destinationRoot, entry.name),
-          kind,
-          id: entry.name,
-          quarantineRoot: join(sourceHome, QUARANTINE_DIR),
+        for (const entry of entries) {
+          if (entry.isSymbolicLink()) {
+            throw new Error(`refusing symlinked legacy ${kind} entry: ${entry.name}`);
+          }
+          if (!entry.isDirectory()) continue;
+          const outcome = await migrateEntity({
+            source: join(sourceRoot, entry.name),
+            destination: join(destinationRoot, entry.name),
+            kind,
+            id: entry.name,
+            quarantineRoot: join(sourceHome, QUARANTINE_DIR),
+            transaction,
+          });
+          if (outcome === 'moved') moved[kind]++;
+          else if (outcome === 'quarantined') quarantined[kind]++;
+          else recovered[kind]++;
+        }
+        // Once the marker is durable these roots are only duplicate cleanup.
+        // Deferring rmdir is load-bearing: a later failure may need the parent
+        // in order to roll an already-renamed entity back into the legacy tree.
+        transaction.cleanups.push(async () => {
+          await rmdir(sourceRoot).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== 'ENOENT' && err.code !== 'ENOTEMPTY' && err.code !== 'EEXIST') {
+              throw err;
+            }
+          });
         });
-        if (outcome === 'moved') moved[kind]++;
-        else if (outcome === 'quarantined') quarantined[kind]++;
-        else recovered[kind]++;
       }
-      // Files such as .DS_Store are harmless and deliberately retained. The
-      // service's legacy-state detector keys only on entity directories.
-      await rmdir(sourceRoot).catch((err: NodeJS.ErrnoException) => {
-        if (err.code !== 'ENOENT' && err.code !== 'ENOTEMPTY' && err.code !== 'EEXIST') throw err;
-      });
-    }
 
-    const marker = join(sharedHome, MACHINE_SHARED_MARKER);
-    await writeJsonAtomic(marker, {
-      version: 1,
-      migratedAt: new Date().toISOString(),
-      sourceHome,
-      scopes: ['projects', 'gezels'],
-      privateStatePolicy: 'copy-legacy-gezel-runtime-per-user-on-first-mount',
-      moved,
-      recovered,
-      quarantined,
-    });
-    return { sourceHome, sharedHome, moved, recovered, quarantined, marker };
+      const marker = join(sharedHome, MACHINE_SHARED_MARKER);
+      await writeJsonAtomic(marker, {
+        version: 1,
+        migratedAt: new Date().toISOString(),
+        sourceHome,
+        scopes: ['projects', 'gezels'],
+        privateStatePolicy: 'copy-legacy-gezel-runtime-per-user-on-first-mount',
+        moved,
+        recovered,
+        quarantined,
+      });
+
+      for (const announcement of transaction.announcements) {
+        process.stderr.write(`${announcement}\n`);
+      }
+
+      // From this point the complete destination is the published source of
+      // truth. Cleanup failures retain an extra verified copy; they must not
+      // turn a successful publication into a misleading failed transaction.
+      for (const cleanup of transaction.cleanups) {
+        await cleanup().catch((err) => {
+          process.stderr.write(
+            `[migrate-legacy-shared] cleanup deferred to a later run: ${errorMessage(err)}\n`,
+          );
+        });
+      }
+      return { sourceHome, sharedHome, moved, recovered, quarantined, marker };
+    } catch (err) {
+      const rollbackErrors: unknown[] = [];
+      for (const rollback of [...transaction.rollbacks].reverse()) {
+        await rollback().catch((rollbackErr) => rollbackErrors.push(rollbackErr));
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [err, ...rollbackErrors],
+          `shared-data migration failed and ${rollbackErrors.length} rollback(s) also failed`,
+        );
+      }
+      throw err;
+    }
   } finally {
     await lock.close();
     await rm(lockPath, { force: true });
@@ -134,6 +179,7 @@ async function migrateEntity(opts: {
   kind: (typeof LEGACY_KINDS)[number];
   id: string;
   quarantineRoot: string;
+  transaction: MigrationTransaction;
 }): Promise<'moved' | 'recovered' | 'quarantined'> {
   await assertPlainDirectoryIfPresent(opts.source, `legacy ${opts.kind}/${opts.id}`);
   const destinationExists = await pathExists(opts.destination);
@@ -150,9 +196,11 @@ async function migrateEntity(opts: {
         dereference: false,
         preserveTimestamps: true,
       });
-      await rm(join(opts.destination, IN_PROGRESS_MARKER), { force: true });
       await assertTreesEqual(opts.source, opts.destination);
-      await rm(opts.source, { recursive: true });
+      opts.transaction.cleanups.push(async () => {
+        await rm(opts.source, { recursive: true });
+        await rm(join(opts.destination, IN_PROGRESS_MARKER), { force: true });
+      });
       return 'recovered';
     }
 
@@ -175,21 +223,20 @@ async function migrateEntity(opts: {
     // machine service and no way forward.
     const unique = await filesMissingFrom(opts.source, opts.destination);
     if (unique.length === 0) {
-      await rm(opts.source, { recursive: true });
+      opts.transaction.cleanups.push(() => rm(opts.source, { recursive: true }));
       return 'recovered';
     }
     const quarantine = await quarantineEntity(opts);
-    process.stderr.write(
-      `[migrate-legacy-shared] ${opts.kind}/${opts.id}: legacy copy holds ${unique.length} ` +
-        `file(s) the shared copy does not (${unique.slice(0, 3).join(', ')}` +
-        `${unique.length > 3 ? ', …' : ''}). Shared copy kept; legacy copy preserved at ` +
-        `${quarantine}\n`,
+    opts.transaction.rollbacks.push(() => moveTreeVerified(quarantine, opts.source));
+    opts.transaction.announcements.push(
+      `[migrate-legacy-shared] ${opts.kind}/${opts.id}: legacy copy holds ${unique.length} file(s) the shared copy does not (${unique.slice(0, 3).join(', ')}${unique.length > 3 ? ', …' : ''}). Shared copy kept; legacy copy preserved at ${quarantine}`,
     );
     return 'quarantined';
   }
 
   try {
     await rename(opts.source, opts.destination);
+    opts.transaction.rollbacks.push(() => rename(opts.destination, opts.source));
     return 'moved';
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
@@ -209,9 +256,12 @@ async function migrateEntity(opts: {
     dereference: false,
     preserveTimestamps: true,
   });
-  await rm(join(opts.destination, IN_PROGRESS_MARKER), { force: true });
   await assertTreesEqual(opts.source, opts.destination);
-  await rm(opts.source, { recursive: true });
+  opts.transaction.rollbacks.push(() => rm(opts.destination, { recursive: true, force: true }));
+  opts.transaction.cleanups.push(async () => {
+    await rm(opts.source, { recursive: true });
+    await rm(join(opts.destination, IN_PROGRESS_MARKER), { force: true });
+  });
   return 'moved';
 }
 
@@ -300,9 +350,27 @@ async function quarantineEntity(opts: {
       dereference: false,
       preserveTimestamps: true,
     });
+    await assertTreesEqual(opts.source, target);
     await rm(opts.source, { recursive: true });
   }
   return target;
+}
+
+/** Move a tree without ever deleting the source before the copy is verified. */
+async function moveTreeVerified(source: string, destination: string): Promise<void> {
+  try {
+    await rename(source, destination);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+  }
+  await cp(source, destination, {
+    recursive: true,
+    dereference: false,
+    preserveTimestamps: true,
+  });
+  await assertTreesEqual(source, destination);
+  await rm(source, { recursive: true });
 }
 
 async function treeDigest(root: string): Promise<string> {
@@ -416,4 +484,8 @@ async function pathExists(path: string): Promise<boolean> {
 function resolveAbsolute(path: string, label: string): string {
   if (!path || !isAbsolute(path)) throw new Error(`${label} must be an absolute path`);
   return resolve(path);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

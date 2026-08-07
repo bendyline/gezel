@@ -31,6 +31,7 @@ const ctx = vi.hoisted(() => ({
     | undefined
     | ((
         signal?: AbortSignal,
+        connection?: { baseUrl: string; token: string },
       ) => Promise<{ ok: boolean; version: string; machineEngineConnected?: boolean }>),
   runtime: null as null | {
     pid: number;
@@ -177,9 +178,10 @@ vi.mock('./log-rotator.js', () => ({
 }));
 vi.mock('@bendyline/gezel-client/node', () => ({
   GezelClient: class MockGezelClient {
+    constructor(private readonly connection: { baseUrl: string; token: string }) {}
     health(signal?: AbortSignal) {
       if (!ctx.health) throw new Error('test forgot to set ctx.health');
-      return ctx.health(signal);
+      return ctx.health(signal, this.connection);
     }
     getSystemHomeInfo() {
       if (!ctx.systemHomeInfo) {
@@ -732,6 +734,39 @@ describe('Branch 2 — local-adopt', () => {
     const svc = await connectOrStart(baseOpts({ packaged: false, adoptHealthWaitMs: 5_000 }));
     expect(svc.mode).toBe('local-adopt');
     expect(attempts).toBeGreaterThanOrEqual(3);
+    await svc.shutdown();
+  });
+
+  it('refreshes rotated runtime credentials instead of killing the healthy daemon', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:6666',
+      token: 'stale-token',
+      cert: 'STALE-CERT',
+      pid: 99999,
+    });
+    ctx.runtime = {
+      baseUrl: 'https://127.0.0.1:7777',
+      port: 7777,
+      token: 'fresh-token',
+      cert: 'FRESH-CERT',
+      pid: 99999,
+    };
+    ctx.health = (_signal, connection) =>
+      connection?.token === 'fresh-token'
+        ? Promise.resolve({ ok: true, version: '1.0.0' })
+        : Promise.reject(new Error('stale bearer token'));
+    ctx.processAlive = true;
+
+    // Even with no remaining wait budget, a newly published runtime
+    // generation gets one bounded health probe before any stop is considered.
+    const svc = await connectOrStart(baseOpts({ adoptHealthWaitMs: 0 }));
+
+    expect(svc.mode).toBe('local-adopt');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:7777');
+    expect(svc.token).toBe('fresh-token');
+    expect(svc.cert).toBe('FRESH-CERT');
+    expect(stopDaemonProcessByPid).not.toHaveBeenCalled();
     await svc.shutdown();
   });
 
