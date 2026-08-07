@@ -21,6 +21,19 @@ const LOCK_FILE = '.gezel-machine-shared-migration.lock';
 const LEGACY_KINDS = ['projects', 'gezels'] as const;
 /** Holding area for legacy entities the migration declines to merge. */
 const QUARANTINE_DIR = '.gezel-migration-quarantine';
+/**
+ * Bookkeeping files Gezel writes about a tree, rather than content belonging to
+ * it. Ignored when deciding whether a legacy copy holds anything unique: their
+ * presence says something about how a directory was produced, not about what
+ * the user would lose.
+ *
+ * `.machine-shared-import-v1.json` earns its place from the real repair. On the
+ * audited machine every adopted gezel differed from its shared original by that
+ * one marker and nothing else, so each would have been quarantined — three
+ * dated copies of data already safe in `shared/`, for every affected install.
+ * Correct, but noise the operator then has to reason about.
+ */
+const GENERATED_MARKERS = new Set([IN_PROGRESS_MARKER, '.machine-shared-import-v1.json']);
 
 export interface SharedMigrationResult {
   sourceHome: string;
@@ -226,7 +239,7 @@ async function filesMissingFrom(candidate: string, reference: string): Promise<s
   const missing: string[] = [];
   async function visit(path: string): Promise<void> {
     const rel = relative(candidate, path).split(sep).join('/');
-    if (rel === IN_PROGRESS_MARKER) return;
+    if (GENERATED_MARKERS.has(rel)) return;
     const info = await lstat(path);
     const peer = join(reference, ...(rel ? rel.split('/') : []));
     if (info.isDirectory()) {

@@ -98,6 +98,7 @@ describe('migrateLegacyMachineDataToShared', () => {
     // The legacy bytes still exist — moved aside, not deleted.
     const held = join(source, '.gezel-migration-quarantine', 'projects');
     const [dir] = await readdir(held);
+    if (!dir) throw new Error('expected the conflicting project to be quarantined');
     expect(dir).toMatch(/^same-/);
     expect(await readFile(join(held, dir, 'project.json'), 'utf8')).toBe('source');
     // And it is not left where a later run would re-enumerate it as an entity.
@@ -151,6 +152,31 @@ describe('migrateLegacyMachineDataToShared', () => {
     expect(result.moved.gezels).toBe(1);
     expect(result.quarantined.gezels).toBe(0);
     expect(await readFile(join(shared, 'gezels', 'ilse', 'gezel.md'), 'utf8')).toBe('id: ilse');
+    expect(await readFile(join(shared, 'gezels', 'rasmus', 'gezel.md'), 'utf8')).toBe('id: rasmus');
+  });
+  // Observed during the real repair: every adopted gezel differed from its
+  // shared original by exactly one file — the adoption marker the daemon
+  // writes. Quarantining on that alone would leave a dated copy of already-safe
+  // data behind for every affected install.
+  it('ignores Gezel-generated markers when deciding a legacy copy is unique', async () => {
+    const source = join(root, 'machine');
+    const shared = join(root, 'shared');
+    await mkdir(join(source, 'gezels', 'rasmus'), { recursive: true });
+    await writeFile(join(source, 'gezels', 'rasmus', 'gezel.md'), 'id: rasmus');
+    await writeFile(
+      join(source, 'gezels', 'rasmus', '.machine-shared-import-v1.json'),
+      '{"importedAt":"..."}',
+    );
+    await mkdir(join(shared, 'gezels', 'rasmus'), { recursive: true });
+    await writeFile(join(shared, 'gezels', 'rasmus', 'gezel.md'), 'id: rasmus');
+
+    const result = await migrateLegacyMachineDataToShared({
+      sourceHome: source,
+      sharedHome: shared,
+    });
+    expect(result.quarantined.gezels).toBe(0);
+    expect(result.recovered.gezels).toBe(1);
+    await expect(stat(join(source, '.gezel-migration-quarantine'))).rejects.toThrow();
     expect(await readFile(join(shared, 'gezels', 'rasmus', 'gezel.md'), 'utf8')).toBe('id: rasmus');
   });
 });
