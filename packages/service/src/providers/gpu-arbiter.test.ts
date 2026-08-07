@@ -267,6 +267,65 @@ describe('detectGpuPolicy', () => {
   });
 });
 
+describe('GpuArbiter stale-lease breaker', () => {
+  // Regression: a llama-cpp turn that threw between acquiring the GPU lease and
+  // installing its cleanup used to leak the lease forever. `activeLease` stayed
+  // set, and because the wait only woke on a release that would never come,
+  // every later acquirer parked indefinitely — the whole daemon stopped serving
+  // with a healthy, idle engine until gezeld restarted. Wild-caught on
+  // qwen3.6-35b-a3b-q8 / conflict-synthesis (2026-08-07).
+  it('breaks a leaked lease instead of parking acquirers forever', async () => {
+    const arb = new GpuArbiter({ policy: 'swap', log: () => {}, staleLeaseBreakMs: 20 });
+
+    // Take a lease and never release it — exactly what the leak looked like.
+    await arb.acquireLease('llm');
+
+    // Without the breaker this never settles.
+    const release = await arb.acquireLease('llm');
+
+    expect(typeof release).toBe('function');
+  });
+
+  it('does not break a lease that is still within its ceiling', async () => {
+    const arb = new GpuArbiter({ policy: 'swap', log: () => {}, staleLeaseBreakMs: 60_000 });
+    const releaseFirst = await arb.acquireLease('image');
+
+    let acquired = false;
+    const pending = arb.acquireLease('llm').then((release) => {
+      acquired = true;
+      return release;
+    });
+
+    // A held, healthy lease must still block — that is what keeps a chat nudge
+    // from evicting sd-server halfway through a VAE decode.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(acquired).toBe(false);
+
+    releaseFirst();
+    await pending;
+    expect(acquired).toBe(true);
+  });
+
+  it('releases the lease when admission throws', async () => {
+    const arb = new GpuArbiter({
+      policy: 'swap',
+      log: () => {},
+      healthGate: {
+        admit: vi.fn(async () => {
+          throw new Error('too hot');
+        }),
+        setPolicy: vi.fn(),
+      } as never,
+    });
+
+    await expect(arb.acquireLease('llm')).rejects.toThrow('too hot');
+
+    // The next acquirer must not inherit a wedged arbiter.
+    const arb2 = new GpuArbiter({ policy: 'swap', log: () => {} });
+    await expect(arb2.acquireLease('llm')).resolves.toBeTypeOf('function');
+  });
+});
+
 describe('resolveGpuPolicy', () => {
   it('passes through explicit settings', () => {
     expect(resolveGpuPolicy('coexist')).toBe('coexist');

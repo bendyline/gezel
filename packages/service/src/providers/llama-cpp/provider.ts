@@ -3081,6 +3081,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // compiling the aggregate tool grammar. A single retry strips only
     // `pattern` constraints; MCP/Zod still validates the eventual arguments.
     let grammarPatternFallback = false;
+    // The GPU lease is acquired per loop iteration and normally released by
+    // that iteration's `cleanupTurn`. The loop body is thousands of lines with
+    // many `throw` sites (bounded-repair guardrails, deadline checks, grammar
+    // fallbacks), and any one of them escaping before `cleanupTurn` is
+    // installed used to leak the lease permanently: the arbiter's `activeLease`
+    // stayed `'llm'`, and every later acquirer parked forever on a promise only
+    // a release could resolve. That wedged the whole daemon — every session,
+    // not just this one — with a healthy, idle engine, until gezeld restarted.
+    // Holding the release here lets the outer `finally` guarantee it no matter
+    // how the loop exits.
+    let releaseActiveGpuLease: (() => void) | null = null;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -3100,8 +3111,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         const releaseGpuLeaseOnce = () => {
           if (gpuLeaseReleased) return;
           gpuLeaseReleased = true;
+          releaseActiveGpuLease = null;
           releaseGpuLease?.();
         };
+        releaseActiveGpuLease = releaseGpuLeaseOnce;
         let baseUrl: string;
         try {
           baseUrl = await this.deps.resolveBaseUrl();
@@ -6321,6 +6334,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         `[llama-cpp] too many tool-call loops (>${MAX_TOOL_LOOP_TURNS}); aborting to prevent runaway`,
       );
     } finally {
+      // Safety net for every escape the per-iteration `cleanupTurn` misses.
+      // No-ops on the normal path — `releaseGpuLeaseOnce` is idempotent and
+      // nulls this handle when it runs.
+      releaseActiveGpuLease?.();
       this.deps.provider._deregisterActiveSession(this);
     }
   }

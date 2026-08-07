@@ -1045,6 +1045,64 @@ export function inflightDeferMsForEngine(engine?: ChatProvider): number {
 const SELF_ORCHESTRATING_MIN_SOFT_PROGRESS_MS = 20 * 60 * 1000;
 
 /**
+ * Roles that actually write workspace files, and their complement.
+ *
+ * The service refuses a file handoff to a coordination-only role — see the
+ * pure-delegation guard in `chat/manager.ts`, which is correct: a voorman
+ * routes work, it does not produce deliverables. Attaching an
+ * `expectedDeliverable` to a nudge aimed at one is a guaranteed HTTP 400, and
+ * the nudge then never lands at all. Wild-caught 2026-08-07 on
+ * gemma4-e4b-q8 / data-wrangle, where both escalation nudges 400'd and the
+ * trial still failed claiming the model had ignored them.
+ */
+const WRITE_CAPABLE_ROLES = /^(builder|developer|implementer|engineer)$/i;
+const COORDINATION_ONLY_ROLES = /^(voorman|coordinator|planner|meester|foreman)$/i;
+
+export function isCoordinationOnlyRole(role: string | null | undefined): boolean {
+  return role != null && COORDINATION_ONLY_ROLES.test(role.trim());
+}
+
+/**
+ * The `expectedDeliverable` fragment for a nudge, dropped when the recipient
+ * cannot own a file. Delivering the prose without the file contract beats a
+ * rejected send: the recipient can still act, or re-delegate.
+ */
+export function attachableDeliverable(
+  filePath: string | null | undefined,
+  role: string | null,
+  log: (msg: string) => void,
+): { expectedDeliverable?: { kind: 'file'; filePath: string } } {
+  if (!filePath) return {};
+  if (isCoordinationOnlyRole(role)) {
+    log(
+      `[poll] nudge target has coordination-only role "${role}" — sending without the ${filePath} file contract (the service rejects file handoffs to these roles)`,
+    );
+    return {};
+  }
+  return { expectedDeliverable: { kind: 'file', filePath } };
+}
+
+/**
+ * Surface the service's own error text. The client wraps failures as
+ * `Gezel API error <status> on <method> <path>` and drops the response body,
+ * which left "400" as the only clue and made this class of bug undiagnosable
+ * from run artifacts alone.
+ */
+export function describeSendFailure(err: unknown): string {
+  if (err instanceof Error) {
+    const body = (err as { body?: unknown }).body;
+    const detail =
+      typeof body === 'string'
+        ? body
+        : body && typeof body === 'object' && 'error' in body
+          ? String((body as { error: unknown }).error)
+          : null;
+    return detail ? `${err.message} — ${detail}` : err.message;
+  }
+  return String(err);
+}
+
+/**
  * Default hard no-progress window. If the HARD digest (real product
  * progress: tool calls, workspace, sessions, sniff) hasn't moved for
  * this long, the model is busy but not delivering — kill.
@@ -1061,6 +1119,15 @@ const SELF_ORCHESTRATING_MIN_SOFT_PROGRESS_MS = 20 * 60 * 1000;
  * and `DEFAULT_MAX_DURATION_MS` (8 h) is the runaway backstop.
  */
 const DEFAULT_HARD_PROGRESS_TIMEOUT_MS = 45 * 60 * 1000;
+
+/**
+ * Soft-clock flatness at which a hard-watchdog kill is described as an idle
+ * engine rather than a busy one. Deliberately short: the soft digest moves on
+ * any token stream or slot update, so a full minute of silence already means
+ * no turn is producing anything. This only selects wording — it never changes
+ * whether the watchdog fires.
+ */
+const HARD_FAIL_IDLE_SOFT_THRESHOLD_MS = 60_000;
 
 /**
  * Build the daemon env fragment carrying per-run behavior overrides
@@ -1712,7 +1779,10 @@ export async function pollUntilDone(
   // independent of the soft-timeout nudge budget.
   const RETRY_LOOP_NUDGE_WINDOW_MS = Math.floor(RETRY_LOOP_FAST_WINDOW_MS * 0.8);
   const RETRY_LOOP_NUDGE_TOOL_THRESHOLD = 12;
-  let retryLoopNudgeSent = false;
+  // See the re-engage pair below: attempted gates the budget, delivered gates
+  // what the failure reason is allowed to assert.
+  let retryLoopNudgeAttempted = false;
+  let retryLoopNudgeDelivered = false;
   let sniffPlateauKey: string | null = null;
   let sniffPlateauStartedAt = Date.now();
   // One plateau reset per delivered escalation rung (stage 0/1/2), cleared
@@ -1734,9 +1804,16 @@ export async function pollUntilDone(
   // idle and the soft timer killed the trial. Issued at most once per
   // trial; if it doesn't unstick the chat, the regular soft timeout
   // fires and the failure is honest.
-  let reEngageNudgeSent = false;
+  // `Attempted` gates the one-shot budget; `Delivered` gates what the failure
+  // reason may claim. They differ when the send itself fails, and conflating
+  // them is how a trial came to report "nudge was sent and ignored" about a
+  // message the service had rejected with a 400.
+  let reEngageNudgeAttempted = false;
+  let reEngageNudgeDelivered = false;
   const reEngageThresholdMs = Math.floor(args.softProgressTimeoutMs * 0.8);
   let inflightSoftDeferralLoggedAt = 0;
+  let silentRecoveryLoggedAt = 0;
+  let silentRecoveryNote: string | null = null;
   let imageRetryLoopDeferralLoggedAt = 0;
   let inflightRetryLoopDeferralLoggedAt = 0;
   const poisonedSessionRecovery = new PoisonedSessionRecoveryTracker();
@@ -1922,6 +1999,9 @@ export async function pollUntilDone(
         );
         lastHardDigest = digest.hard;
         lastHardChangeAt = Date.now();
+        // Progress is the proof a dispatched repair turn actually landed.
+        poisonedSessionRecovery.confirmResponded();
+        silentRecoveryNote = null;
       }
       if (digest.soft !== lastSoftDigest) {
         lastSoftDigest = digest.soft;
@@ -1945,10 +2025,27 @@ export async function pollUntilDone(
       // never defer on it, and the soft path below converts a silent
       // open render into an explicit `engine-hung` failure.
       const imageGenerationActive = fp.daemonActivity?.imageGenerationActive ?? false;
+      // A recovery dispatched but never answered is the failure shape this
+      // block exists to name. Probing in-flight is what separates "silent"
+      // from "slow": at ~5 t/s a legitimate repair turn holds the slot for
+      // minutes, and that turn IS in flight the whole time.
+      const pendingRecoveries = poisonedSessionRecovery.unconfirmedRecoveries();
       const inflightTurns =
-        softStuckMs >= reEngageThresholdMs
+        softStuckMs >= reEngageThresholdMs || pendingRecoveries.length > 0
           ? await listInflightTurnsForWatchdog(args.client).catch(() => [])
           : [];
+      const silentSummary = summarizeSilentRecoveries(
+        selectSilentRecoveries(pendingRecoveries, inflightTurns),
+      );
+      silentRecoveryNote = silentSummary
+        ? ` poisoned-session repair drew no response: ${silentSummary}`
+        : null;
+      if (silentSummary && Date.now() - silentRecoveryLoggedAt >= 60_000) {
+        silentRecoveryLoggedAt = Date.now();
+        args.log(
+          `[poll] poisoned-session recovery unanswered: ${silentSummary} — repair turn dispatched, no turn in flight and no progress since; the session is not working on it`,
+        );
+      }
       const deferSoftForInflight = shouldDeferSoftWatchdog(inflightTurns, args.inflightDeferMs);
       if (deferSoftForInflight && Date.now() - inflightSoftDeferralLoggedAt >= 60_000) {
         inflightSoftDeferralLoggedAt = Date.now();
@@ -1978,15 +2075,18 @@ export async function pollUntilDone(
       if (
         !deferSoftForInflight &&
         !imageGenerationActive &&
-        !reEngageNudgeSent &&
+        !reEngageNudgeAttempted &&
         softStuckMs >= reEngageThresholdMs &&
         hadAnyProgress
       ) {
-        reEngageNudgeSent = true;
+        reEngageNudgeAttempted = true;
         const sniffNote = sniff
           ? `sniff=${sniff.score}/${sniff.bytes}B`
           : 'sniff=none (team active but no recognized artifact yet)';
-        const downstream = await pickReEngageTarget(args.client, args.meesterId).catch(() => null);
+        const reEngagePlan = buildReEngageNudge({ sniff, downstream: true });
+        const downstream = await pickReEngageTarget(args.client, args.meesterId, {
+          preferWritableRole: Boolean(reEngagePlan.filePath),
+        }).catch(() => null);
         const targetId = downstream?.gezelId ?? args.meesterId;
         const targetLabel = downstream
           ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
@@ -2004,7 +2104,7 @@ export async function pollUntilDone(
               fromGezelId: args.meesterId,
               text: nudge,
               projectId: downstream.projectId,
-              ...(filePath ? { expectedDeliverable: { kind: 'file' as const, filePath } } : {}),
+              ...(attachableDeliverable(filePath, downstream.role, args.log)),
             });
           } else {
             await args.client.sendChatMessage(targetId, {
@@ -2012,9 +2112,10 @@ export async function pollUntilDone(
               projectId: 'default',
             });
           }
+          reEngageNudgeDelivered = true;
         } catch (err) {
           args.log(
-            `[poll] re-engage nudge send failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            `[poll] re-engage nudge send failed (non-fatal): ${describeSendFailure(err)}`,
           );
         }
         // Don't reset clocks — if the nudge produces real activity,
@@ -2030,7 +2131,11 @@ export async function pollUntilDone(
         // for the whole soft window; if we got here, the chat manager
         // simply stopped issuing turns — petshop case.
         const stallSeconds = Math.round(softStuckMs / 1000);
-        const nudgeNote = reEngageNudgeSent ? ' (re-engage nudge was sent and ignored)' : '';
+        const nudgeNote = reEngageNudgeDelivered
+          ? ' (re-engage nudge was sent and ignored)'
+          : reEngageNudgeAttempted
+            ? ' (re-engage nudge could not be delivered — the model never saw it)'
+            : '';
         // An active render normally keeps the soft digest moving via
         // sd-server log lines; if we got here WITH a render open
         // (started, never completed) the image engine wedged mid-job.
@@ -2058,12 +2163,20 @@ export async function pollUntilDone(
         };
       }
       if (hardStuckMs >= args.hardProgressTimeoutMs) {
+        // This watchdog catches two opposite shapes, and naming the wrong one
+        // sends triage after a slow model when the real fault is a session
+        // that stopped responding. The soft clock is the discriminator: it
+        // tracks token streams and slot updates, so a flat soft clock means
+        // the engine is issuing nothing at all. Wild-caught on
+        // conflict-synthesis / qwen3.6-27b-q8 (2026-08-05), where a chat idle
+        // for 722s was reported as "model busy but not delivering".
+        const shape = hardStallShape(softStuckMs);
         args.log(
-          `[poll] no-progress (hard): no real progress for ${Math.round(hardStuckMs / 1000)}s (threshold=${Math.round(args.hardProgressTimeoutMs / 1000)}s); model busy but not delivering — failing trial`,
+          `[poll] no-progress (hard): no real progress for ${Math.round(hardStuckMs / 1000)}s (threshold=${Math.round(args.hardProgressTimeoutMs / 1000)}s); ${shape}${silentRecoveryNote ?? ''} — failing trial`,
         );
         return {
           success: false,
-          reason: `no real progress for ${Math.round(hardStuckMs / 1000)}s — model busy but not delivering (hard digest stuck at ${digest.hard})`,
+          reason: `no real progress for ${Math.round(hardStuckMs / 1000)}s — ${shape} (hard digest stuck at ${digest.hard})${silentRecoveryNote ?? ''}`,
           failureMode: 'model-stuck',
           ...finalSniffOf(),
         };
@@ -2117,15 +2230,15 @@ export async function pollUntilDone(
         // existing file in place.
         const artifactExists = sniffArtifactHasScored(latestSniff, scoredSniffKeys);
         if (
-          !retryLoopNudgeSent &&
+          !retryLoopNudgeAttempted &&
           !imageGenerationActive &&
           plateauMs >= RETRY_LOOP_NUDGE_WINDOW_MS &&
           toolCallsInPlateau >= RETRY_LOOP_NUDGE_TOOL_THRESHOLD
         ) {
-          retryLoopNudgeSent = true;
-          const downstream = await pickReEngageTarget(args.client, args.meesterId).catch(
-            () => null,
-          );
+          retryLoopNudgeAttempted = true;
+          const downstream = await pickReEngageTarget(args.client, args.meesterId, {
+            preferWritableRole: Boolean(recoveryFilePathForSniff(latestSniff)),
+          }).catch(() => null);
           const targetId = downstream?.gezelId ?? args.meesterId;
           const targetLabel = downstream
             ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
@@ -2145,7 +2258,7 @@ export async function pollUntilDone(
                 fromGezelId: args.meesterId,
                 text: nudge,
                 projectId: downstream.projectId,
-                ...(filePath ? { expectedDeliverable: { kind: 'file' as const, filePath } } : {}),
+                ...(attachableDeliverable(filePath, downstream.role, args.log)),
               });
             } else {
               await args.client.sendChatMessage(targetId, {
@@ -2153,9 +2266,10 @@ export async function pollUntilDone(
                 projectId: 'default',
               });
             }
+            retryLoopNudgeDelivered = true;
           } catch (err) {
             args.log(
-              `[poll] retry-loop nudge send failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+              `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
             );
           }
         }
@@ -2297,7 +2411,11 @@ export async function pollUntilDone(
               : longPathTripped
                 ? `team idle (${toolCallsInPlateau} new tool calls) with no sniff movement for ${plateauMin}m`
                 : `artifact scored but stalled ${plateauMin}m despite ${toolCallsInPlateau} tool calls (${writeCallsInPlateau} re-writes)`;
-          const nudgeNote = retryLoopNudgeSent ? ' (retry-loop nudge was sent and ignored)' : '';
+          const nudgeNote = retryLoopNudgeDelivered
+            ? ' (retry-loop nudge was sent and ignored)'
+            : retryLoopNudgeAttempted
+              ? ' (retry-loop nudge could not be delivered — the model never saw it)'
+              : '';
           args.log(
             `[poll] retry-loop (${path}): sniff "${currentSniffKey}" stuck ${plateauMin}m — ${detail}${nudgeNote}; failing trial`,
           );
@@ -2582,6 +2700,29 @@ export function poisonedRecoveryFailureFingerprint(failReason?: string): string 
   return normalized.length > 0 ? normalized.slice(0, 4_000) : null;
 }
 
+/**
+ * Grace period before a dispatched recovery that produced no in-flight turn is
+ * called silent. A repair turn registers as in-flight the moment it starts, so
+ * this only needs to cover dispatch + scheduling latency — it is NOT a decode
+ * budget. Slow turns are handled by the in-flight check, not by waiting longer.
+ */
+export const POISONED_RECOVERY_RESPONSE_GRACE_MS = 120_000;
+
+/**
+ * A dispatched recovery that never draws a response is invisible today: the
+ * session clears from the poisoned list, so {@link
+ * PoisonedSessionRecoveryTracker.observe} filters it out, and the trial then
+ * idles until the generic no-progress watchdog fires with an unrelated
+ * explanation. Wild-caught on conflict-synthesis / qwen3.6-27b-q8 (2026-08-05):
+ * the repair turn drew nothing, the chat sat idle 12 minutes, and the trial
+ * died reporting "model busy but not delivering".
+ */
+export interface UnconfirmedRecovery {
+  sessionId: string;
+  gezelId: string;
+  ageMs: number;
+}
+
 export class PoisonedSessionRecoveryTracker {
   private readonly attempts = new Map<
     string,
@@ -2592,6 +2733,9 @@ export class PoisonedSessionRecoveryTracker {
       scoreCheckpoint: number | null;
       bytesCheckpoint: number | null;
       failReasonFingerprint: string | null;
+      gezelId: string;
+      attemptedAtMs: number;
+      confirmed: boolean;
     }
   >();
   private readonly recoveryCounts = new Map<
@@ -2603,7 +2747,11 @@ export class PoisonedSessionRecoveryTracker {
     return this.attempts.has(sessionId);
   }
 
-  markAttempted(session: PoisonedSessionSnapshot, checkpoint?: PoisonedRecoveryCheckpoint): void {
+  markAttempted(
+    session: PoisonedSessionSnapshot,
+    checkpoint?: PoisonedRecoveryCheckpoint,
+    nowMs: number = Date.now(),
+  ): void {
     const scoreCheckpoint = finiteRecoveryCheckpointNumber(checkpoint?.score);
     const priorCount = this.recoveryCounts.get(session.sessionId);
     const count = priorCount?.scoreCheckpoint === scoreCheckpoint ? priorCount.count + 1 : 1;
@@ -2615,7 +2763,37 @@ export class PoisonedSessionRecoveryTracker {
       scoreCheckpoint,
       bytesCheckpoint: finiteRecoveryCheckpointNumber(checkpoint?.bytes),
       failReasonFingerprint: poisonedRecoveryFailureFingerprint(checkpoint?.failReason),
+      gezelId: session.gezelId,
+      attemptedAtMs: nowMs,
+      confirmed: false,
     });
+  }
+
+  /**
+   * Real progress after a dispatch proves the recovery landed. Called on every
+   * hard-digest move, which is the same signal the watchdog treats as progress.
+   */
+  confirmResponded(): void {
+    for (const attempt of this.attempts.values()) attempt.confirmed = true;
+  }
+
+  /**
+   * Recoveries dispatched at least `graceMs` ago with no observed response.
+   * The caller must exclude sessions with a turn in flight — a slow turn is
+   * working, not silent.
+   */
+  unconfirmedRecoveries(
+    nowMs: number = Date.now(),
+    graceMs: number = POISONED_RECOVERY_RESPONSE_GRACE_MS,
+  ): UnconfirmedRecovery[] {
+    const out: UnconfirmedRecovery[] = [];
+    for (const [sessionId, attempt] of this.attempts) {
+      if (attempt.confirmed) continue;
+      const ageMs = nowMs - attempt.attemptedAtMs;
+      if (ageMs < graceMs) continue;
+      out.push({ sessionId, gezelId: attempt.gezelId, ageMs });
+    }
+    return out;
   }
 
   observe(
@@ -2679,6 +2857,45 @@ export function repeatedPoisonedSessionFailure(session: PoisonedSessionSnapshot)
     reason: `repair-aborted: ${session.gezelId}/${session.sessionId.slice(0, 8)} exhausted its bounded automatic recovery allowance at the current checked progress; last error: ${error}`,
     failureMode: 'model-stuck',
   };
+}
+
+/**
+ * Which of the two shapes a hard-watchdog kill actually is. The soft clock is
+ * the discriminator: it moves on any token stream or slot update, so flatness
+ * means the engine is issuing nothing — an idle or dead session rather than a
+ * working one. Naming the wrong shape sends triage after a slow model.
+ */
+export function hardStallShape(
+  softStuckMs: number,
+  idleThresholdMs: number = HARD_FAIL_IDLE_SOFT_THRESHOLD_MS,
+): string {
+  return softStuckMs >= idleThresholdMs
+    ? `engine idle — no token stream or slot update for ${Math.round(softStuckMs / 1000)}s`
+    : 'model busy but not delivering';
+}
+
+/**
+ * Drop recoveries whose session has a turn in flight. That turn IS the
+ * response, however slow it decodes — treating it as silence is the same
+ * mistake as the 0.1.29 STALL false-fire, in a new place.
+ */
+export function selectSilentRecoveries(
+  pending: readonly UnconfirmedRecovery[],
+  inflightTurns: readonly InflightTurnSnapshot[],
+): UnconfirmedRecovery[] {
+  return pending.filter(
+    (recovery) => !inflightTurns.some((turn) => turn.sessionId === recovery.sessionId),
+  );
+}
+
+export function summarizeSilentRecoveries(silent: readonly UnconfirmedRecovery[]): string | null {
+  if (silent.length === 0) return null;
+  return silent
+    .map(
+      (recovery) =>
+        `${recovery.gezelId}/${recovery.sessionId.slice(0, 8)} (${Math.round(recovery.ageMs / 1000)}s ago)`,
+    )
+    .join(', ');
 }
 
 export function shouldDeferSoftWatchdog(
@@ -3199,6 +3416,7 @@ async function finalize(args: {
 async function pickReEngageTarget(
   client: GezelClient,
   meesterId: string,
+  args?: { preferWritableRole?: boolean },
 ): Promise<{ gezelId: string; projectId: string; role: string | null } | null> {
   let sessions: Array<{
     gezelId: string;
@@ -3233,11 +3451,21 @@ async function pickReEngageTarget(
   const byRecency = [...candidates].sort((a, b) => tsOf(b) - tsOf(a));
 
   const builderRoles = /^(builder|developer|voorman)$/i;
-  const builderHit = byRecency.find((s) => {
-    const role = gezelRoles.get(s.gezelId);
-    return role !== null && role !== undefined && builderRoles.test(role);
-  });
-  const chosen = builderHit ?? byRecency[0];
+  const roleOf = (s: { gezelId: string }): string | null => gezelRoles.get(s.gezelId) ?? null;
+  const matches = (s: { gezelId: string }, re: RegExp): boolean => {
+    const role = roleOf(s);
+    return role !== null && re.test(role);
+  };
+  // A nudge that names a deliverable file has to reach someone who can write
+  // one. `voorman` is coordination-only, so preferring it for a file nudge
+  // guarantees an HTTP 400 from the service's pure-delegation guard and the
+  // nudge silently never lands. Prefer a write-capable role when a file is in
+  // play; otherwise keep the original recency-with-builder-preference order.
+  const writableHit = args?.preferWritableRole
+    ? byRecency.find((s) => matches(s, WRITE_CAPABLE_ROLES))
+    : undefined;
+  const builderHit = byRecency.find((s) => matches(s, builderRoles));
+  const chosen = writableHit ?? builderHit ?? byRecency[0];
   if (!chosen) return null;
   return {
     gezelId: chosen.gezelId,

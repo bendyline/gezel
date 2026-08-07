@@ -9198,6 +9198,97 @@ describe('LlamaCppProvider pool lifecycle', () => {
     await expect(provider.createSession({ systemMessage: 's' })).rejects.toThrow(/disposed/);
   });
 
+  // Regression: the tool loop acquires a GPU lease per iteration and normally
+  // releases it in that iteration's `cleanupTurn`. The bounded-repair guardrails
+  // throw ~1000 lines BEFORE `cleanupTurn` is installed, so those throws used to
+  // escape with the lease still held. A leaked lease blocked EVERY later
+  // acquirer forever — the whole daemon went silent with a healthy, idle engine
+  // until gezeld restarted. Wild-caught on qwen3.6-35b-a3b-q8 /
+  // conflict-synthesis (2026-08-07): a repair turn sat 309s having never reached
+  // the engine, and a second session starved 941s behind it.
+  //
+  // Drives the real trigger — `prerequisite source-read repair exceeded its
+  // bounded read allowance` — by burning read-only calls on an unrelated file so
+  // the required read never lands. A fetch-level throw does NOT reproduce this:
+  // that path is already caught and cleaned up.
+  it('releases the GPU lease when a bounded-repair guardrail throws', async () => {
+    const stops = { n: 0 };
+    const arbiter = new GpuArbiter({ policy: 'swap', log: () => {} });
+    const fetchImpl = (async () =>
+      sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_read_unrelated',
+                    type: 'function',
+                    function: {
+                      name: 'read_file',
+                      arguments: '{"path":"unrelated.md"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ])) as unknown as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      supervisor: fakePoolSupervisor(stops),
+      arbiter,
+      fetchImpl,
+    });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
+      ],
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
+      callTool: async (_name: string, args: Record<string, unknown>) =>
+        `contents of ${String(args.path)}`,
+    };
+
+    const prompt = [
+      "[scenario check] I looked at `synthesis.md` and the success criteria aren't met yet.",
+      'Specific failure: source-read provenance is missing.',
+      'SOURCE_READ_REQUIRED: the final claims are not backed by successful, ordered source reads.',
+      'First call read_file on memo-product.md.',
+      'Then patch `synthesis.md` using only the values you observed in those files.',
+    ].join(' ');
+    expect(extractPrerequisiteRepairReadPaths(prompt).length).toBeGreaterThan(0);
+
+    await expect(session.sendAndWait(prompt)).rejects.toThrow(/bounded read allowance/);
+
+    // The lease must be free. Before the fix this call never settled, and every
+    // other session in the install was stuck behind it.
+    const release = await arbiter.acquireLease('llm');
+    expect(typeof release).toBe('function');
+    release();
+  });
+
   it('shutdown unregisters its keyed llm evictor so later image acquires skip it', async () => {
     const stops = { n: 0 };
     const arbiter = new GpuArbiter({ policy: 'swap', log: () => {} });

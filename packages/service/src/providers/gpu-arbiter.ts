@@ -61,7 +61,32 @@ export interface GpuArbiterOptions {
    * accidentally disappear on large-memory systems.
    */
   healthGate?: DeviceHealthAdmissionGate;
+  /**
+   * How long a single lease may be held before the arbiter treats it as
+   * leaked and breaks it. Backstop only — see {@link STALE_LEASE_BREAK_MS}.
+   */
+  staleLeaseBreakMs?: number;
 }
+
+/**
+ * Ceiling above which a held lease is assumed leaked rather than slow.
+ *
+ * Sized against the longest *legitimate* holder, not against typical use: the
+ * video provider's own request timeout is 1 h, so anything at or below that
+ * would break real renders mid-decode — precisely what the lease exists to
+ * prevent. Every legitimate holder is bounded by its own operation timeout, so
+ * a lease older than this one has no owner that will ever release it.
+ *
+ * This is a backstop, not the fix. A turn that throws now releases its lease in
+ * a `finally` (see the llama-cpp provider's tool loop). Before that, a leaked
+ * lease parked every later acquirer forever and the whole daemon stopped
+ * serving until gezeld restarted; this bounds that outage instead of letting it
+ * run indefinitely.
+ */
+const STALE_LEASE_BREAK_MS = 90 * 60_000;
+
+/** How often a blocked acquirer re-reports that it is still waiting. */
+const LEASE_WAIT_POLL_MS = 60_000;
 
 export class GpuArbiter {
   private policy: GpuPolicy;
@@ -76,12 +101,34 @@ export class GpuArbiter {
   private readonly log: (msg: string) => void;
   private readonly healthGate?: DeviceHealthAdmissionGate;
   private activeLease: GpuSlot | null = null;
+  private activeLeaseSince: number | null = null;
   private leaseWaiters: Array<() => void> = [];
+  private readonly staleLeaseBreakMs: number;
 
   constructor(opts: GpuArbiterOptions) {
     this.policy = opts.policy;
     this.log = opts.log ?? ((msg) => arbiterLog.info(msg));
     if (opts.healthGate) this.healthGate = opts.healthGate;
+    this.staleLeaseBreakMs = opts.staleLeaseBreakMs ?? STALE_LEASE_BREAK_MS;
+  }
+
+  /**
+   * Drop a lease the holder can no longer release, so blocked acquirers make
+   * progress. Returns true when a lease was actually broken.
+   */
+  private breakStaleLease(): boolean {
+    if (this.activeLease === null || this.activeLeaseSince === null) return false;
+    const heldMs = Date.now() - this.activeLeaseSince;
+    if (heldMs < this.staleLeaseBreakMs) return false;
+    arbiterLog.error(
+      `[gpu-arbiter] breaking stale ${this.activeLease} lease held ${Math.round(heldMs / 1000)}s ` +
+        `(ceiling ${Math.round(this.staleLeaseBreakMs / 1000)}s) — its holder never released it. ` +
+        `This is a leak: every GPU acquirer was blocked behind it.`,
+    );
+    this.activeLease = null;
+    this.activeLeaseSince = null;
+    this.wakeLeaseWaiters();
+    return true;
   }
 
   /**
@@ -141,17 +188,20 @@ export class GpuArbiter {
       return () => {};
     }
     while (this.getPolicy() === 'swap' && this.activeLease !== null) {
+      if (this.breakStaleLease()) break;
       this.log(`[gpu-arbiter] ${slot} requested GPU — waiting for active ${this.activeLease} job`);
       await this.waitForLeaseRelease();
     }
     if (this.getPolicy() === 'coexist') return () => {};
     this.activeLease = slot;
+    this.activeLeaseSince = Date.now();
     try {
       await this.evictOthers(slot);
       await this.healthGate?.admit(`${slot} workload`);
     } catch (error) {
       if (this.activeLease === slot) {
         this.activeLease = null;
+        this.activeLeaseSince = null;
         this.wakeLeaseWaiters();
       }
       throw error;
@@ -162,6 +212,7 @@ export class GpuArbiter {
       released = true;
       if (this.activeLease === slot) {
         this.activeLease = null;
+        this.activeLeaseSince = null;
         this.wakeLeaseWaiters();
       }
     };
@@ -169,14 +220,31 @@ export class GpuArbiter {
 
   private async waitForForeignLease(slot: GpuSlot): Promise<void> {
     while (this.getPolicy() === 'swap' && this.activeLease !== null && this.activeLease !== slot) {
+      if (this.breakStaleLease()) break;
       this.log(`[gpu-arbiter] ${slot} requested GPU — waiting for active ${this.activeLease} job`);
       await this.waitForLeaseRelease();
     }
   }
 
+  /**
+   * Resolves on the next release, or after {@link LEASE_WAIT_POLL_MS} so the
+   * caller re-evaluates. The timed wake is what makes the stale-lease breaker
+   * reachable: a leaked lease produces no release, so a wake-on-release-only
+   * wait would never re-check and the caller would park forever.
+   */
   private waitForLeaseRelease(): Promise<void> {
     return new Promise((resolve) => {
-      this.leaseWaiters.push(resolve);
+      let settled = false;
+      const settleOnce = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(settleOnce, Math.min(LEASE_WAIT_POLL_MS, this.staleLeaseBreakMs));
+      // Never hold the process open on a lease wait.
+      timer.unref?.();
+      this.leaseWaiters.push(settleOnce);
     });
   }
 

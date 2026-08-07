@@ -5,15 +5,18 @@ import type { GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PoisonedSessionRecoveryTracker,
+  attachableDeliverable,
   behaviorEnvForTrial,
   buildPoisonedSessionRecoveryMessage,
   buildReEngageNudge,
   canDispatchPoisonedSessionRecovery,
+  describeSendFailure,
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
   ds4EvalLaunchOverridesForModel,
   ds4EvalShouldUseSsdStreaming,
   evalDaemonEnvForTrial,
+  hardStallShape,
   inflightDeferMsForEngine,
   llamaCppEvalLaunchOverridesForModel,
   localEvalDeviceSafetyConfig,
@@ -26,6 +29,7 @@ import {
   recoveryFilePathForSniff,
   repeatedPoisonedSessionFailure,
   retryLoopSniffKey,
+  selectSilentRecoveries,
   shouldDeferRetryLoopForInflight,
   shouldDeferRetryLoopForRecentEscalation,
   shouldDeferSoftWatchdog,
@@ -33,6 +37,7 @@ import {
   sniffArtifactHasScored,
   sniffKeyToWorkspaceFilePath,
   summarizeInflightTurnsForLog,
+  summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
 } from './runner.ts';
@@ -131,6 +136,35 @@ describe('scenario terminal failure handoff', () => {
       },
     });
     expect(logs.join('\n')).toContain('terminal (scenario handoff)');
+  });
+
+  it('carries the stall shape into the hard-watchdog reason, not a hard-coded phrase', async () => {
+    // Proves the wiring, not just the helper: a hard kill with a live soft
+    // clock must still read "busy". The idle branch needs 60s of wall-clock
+    // to reach through the loop, so its wording is covered by hardStallShape.
+    const logs: string[] = [];
+    const scenario: EvalScenario = {
+      id: 'hard-stall-shape-test',
+      description: 'test',
+      prompt: 'test',
+      successCheck: async () => ({ done: false }),
+    };
+
+    const verdict = await pollUntilDone(scenario, {
+      client: terminalHandoffTestClient(),
+      meesterId: 'meester',
+      log: (line) => logs.push(line),
+      pollIntervalMs: 10,
+      maxDurationMs: 60_000,
+      hardProgressTimeoutMs: 1,
+      softProgressTimeoutMs: 60_000,
+    });
+
+    expect(verdict.failureMode).toBe('model-stuck');
+    expect(verdict.reason).toContain('model busy but not delivering');
+    // No recovery was dispatched, so the reason must not accuse one.
+    expect(verdict.reason).not.toContain('poisoned-session repair');
+    expect(logs.join('\n')).toContain('no-progress (hard)');
   });
 
   it('lets a same-poll scenario success win over an earlier helper request', async () => {
@@ -838,6 +872,80 @@ describe('poisoned-session recovery', () => {
     expect(tracker.hasAttempted(first.sessionId)).toBe(true);
   });
 
+  it('names a flat soft clock as an idle engine, not a busy model', () => {
+    // The wild-caught case: conflict-synthesis / qwen3.6-27b-q8 idled 722s
+    // after an unanswered repair turn and was reported as "model busy".
+    expect(hardStallShape(722_000)).toBe('engine idle — no token stream or slot update for 722s');
+    expect(hardStallShape(60_000)).toMatch(/^engine idle/);
+  });
+
+  it('still names a moving soft clock as a busy model', () => {
+    expect(hardStallShape(0)).toBe('model busy but not delivering');
+    expect(hardStallShape(59_999)).toBe('model busy but not delivering');
+  });
+
+  it('never calls a recovery silent while its turn is in flight, however slow', () => {
+    const pending = [{ sessionId: 'researcher-session', gezelId: 'tamsin', ageMs: 600_000 }];
+    // A 27B model at ~5 t/s legitimately holds the slot for minutes. Age
+    // alone must not convict it — only the absence of an in-flight turn.
+    expect(
+      selectSilentRecoveries(pending, [
+        { sessionId: 'researcher-session', elapsedMs: 600_000 } as never,
+      ]),
+    ).toEqual([]);
+    expect(
+      selectSilentRecoveries(pending, [{ sessionId: 'other-session', elapsedMs: 10 } as never]),
+    ).toEqual(pending);
+  });
+
+  it('summarizes silent recoveries for the log and the failure reason', () => {
+    expect(summarizeSilentRecoveries([])).toBeNull();
+    expect(
+      summarizeSilentRecoveries([
+        { sessionId: '32be03fd-aaaa-bbbb', gezelId: 'tamsin', ageMs: 890_000 },
+        { sessionId: 'deadbeef-cccc', gezelId: 'nils', ageMs: 130_500 },
+      ]),
+    ).toBe('tamsin/32be03fd (890s ago), nils/deadbeef (131s ago)');
+  });
+
+  it('reports a dispatched recovery that never drew a response, after the grace period', () => {
+    const tracker = new PoisonedSessionRecoveryTracker();
+    const session = {
+      sessionId: 'researcher-session',
+      gezelId: 'tamsin',
+      projectId: 'skylark-launch-synthesis',
+      lastTurnError: 'turn aborted',
+    };
+    const dispatchedAt = 1_000_000;
+    tracker.markAttempted(session, undefined, dispatchedAt);
+
+    // Inside the grace window a silent session is not yet suspicious.
+    expect(tracker.unconfirmedRecoveries(dispatchedAt + 60_000)).toEqual([]);
+
+    const unconfirmed = tracker.unconfirmedRecoveries(dispatchedAt + 180_000);
+    expect(unconfirmed).toHaveLength(1);
+    expect(unconfirmed[0]).toMatchObject({
+      sessionId: 'researcher-session',
+      gezelId: 'tamsin',
+      ageMs: 180_000,
+    });
+  });
+
+  it('stops reporting a recovery once real progress confirms it landed', () => {
+    const tracker = new PoisonedSessionRecoveryTracker();
+    const session = {
+      sessionId: 'researcher-session',
+      gezelId: 'tamsin',
+      projectId: 'skylark-launch-synthesis',
+      lastTurnError: 'turn aborted',
+    };
+    const dispatchedAt = 1_000_000;
+    tracker.markAttempted(session, undefined, dispatchedAt);
+    tracker.confirmResponded();
+
+    expect(tracker.unconfirmedRecoveries(dispatchedAt + 600_000)).toEqual([]);
+  });
+
   it('does not re-arm same-score recovery for byte-only churn', () => {
     const tracker = new PoisonedSessionRecoveryTracker();
     const first = {
@@ -1474,5 +1582,57 @@ describe('shouldDeferRetryLoopForRecentEscalation', () => {
         now: 1_000_000,
       }),
     ).toBe(false);
+  });
+});
+
+describe('nudge deliverability', () => {
+  // Regression: both escalation nudge sites addressed the Voorman with an
+  // `expectedDeliverable`, which the service refuses (a coordination-only role
+  // cannot own a file). Every such nudge 400'd and silently never landed, and
+  // the trial then failed asserting the model had ignored it. Wild-caught
+  // 2026-08-07 on gemma4-e4b-q8 / data-wrangle, where the harness held the
+  // exact diagnosis and never delivered it across three re-writes.
+  it('drops the file contract for a coordination-only role', () => {
+    const logged: string[] = [];
+    expect(attachableDeliverable('out/customers.json', 'voorman', (m) => logged.push(m))).toEqual(
+      {},
+    );
+    expect(logged.join('\n')).toMatch(/coordination-only role "voorman"/);
+  });
+
+  it('keeps the file contract for a role that can write', () => {
+    expect(attachableDeliverable('out/customers.json', 'developer', () => {})).toEqual({
+      expectedDeliverable: { kind: 'file', filePath: 'out/customers.json' },
+    });
+  });
+
+  it('treats every routing role as coordination-only', () => {
+    for (const role of ['voorman', 'Voorman', 'coordinator', 'planner', 'meester']) {
+      expect(attachableDeliverable('a.md', role, () => {})).toEqual({});
+    }
+  });
+
+  it('omits the contract when there is no file, without warning', () => {
+    const logged: string[] = [];
+    expect(attachableDeliverable(null, 'developer', (m) => logged.push(m))).toEqual({});
+    expect(logged).toEqual([]);
+  });
+});
+
+describe('describeSendFailure', () => {
+  it('surfaces the service error body alongside the status line', () => {
+    const err = Object.assign(new Error('Gezel API error 400 on POST /api/gezels/x/message'), {
+      body: { error: 'gezel "caoimhe" has role "voorman", which cannot write workspace file' },
+    });
+    expect(describeSendFailure(err)).toMatch(/cannot write workspace file/);
+    expect(describeSendFailure(err)).toMatch(/Gezel API error 400/);
+  });
+
+  it('falls back to the message when no body is attached', () => {
+    expect(describeSendFailure(new Error('boom'))).toBe('boom');
+  });
+
+  it('handles non-Error rejections', () => {
+    expect(describeSendFailure('nope')).toBe('nope');
   });
 });
