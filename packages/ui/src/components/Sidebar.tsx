@@ -16,12 +16,14 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
+import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Tooltip } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
 import { AreaIcon } from './AreaIcon.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import { type FileEntry, FileTree } from './FileTree.js';
 import { GezelActionsMenu } from './GezelActionsMenu.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -203,6 +205,10 @@ export function Sidebar({
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>(undefined);
   const [docs, setDocs] = useState<FileEntry[]>([]);
   const [showNewDoc, setShowNewDoc] = useState(false);
+  const [renameDocTarget, setRenameDocTarget] = useState<FileEntry | null>(null);
+  const [renameDocError, setRenameDocError] = useState<string | null>(null);
+  const [deleteDocTarget, setDeleteDocTarget] = useState<FileEntry | null>(null);
+  const [deleteDocError, setDeleteDocError] = useState<string | null>(null);
   const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
@@ -492,6 +498,80 @@ export function Sidebar({
     [onSelect],
   );
 
+  const openRenameDocument = useCallback((entry: FileEntry) => {
+    setRenameDocError(null);
+    setRenameDocTarget(entry);
+  }, []);
+
+  const confirmRenameDocument = useCallback(
+    async (newName: string) => {
+      const entry = renameDocTarget;
+      if (!entry) return;
+      const cleanName = newName.trim();
+      if (!cleanName || /[\\/]/.test(cleanName)) {
+        setRenameDocError('Enter a name without slashes.');
+        return;
+      }
+
+      const slash = entry.path.lastIndexOf('/');
+      const parent = slash >= 0 ? entry.path.slice(0, slash + 1) : '';
+      const toPath = `${parent}${cleanName}`;
+      if (toPath === entry.path) {
+        setRenameDocTarget(null);
+        setRenameDocError(null);
+        return;
+      }
+
+      try {
+        const selectedPath = selection?.kind === 'document' ? selection.path : null;
+        if (
+          selectedPath &&
+          (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
+        ) {
+          await flushSerializedAutosave(`document:${selectedPath}`);
+        }
+        await api.renameDocument(entry.path, toPath);
+        window.dispatchEvent(
+          new CustomEvent('gezel:document-renamed', {
+            detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
+          }),
+        );
+        setRenameDocTarget(null);
+        setRenameDocError(null);
+      } catch (err) {
+        setRenameDocError((err as Error).message || 'Rename failed.');
+      }
+    },
+    [renameDocTarget, selection],
+  );
+
+  const openDeleteDocument = useCallback((entry: FileEntry) => {
+    setDeleteDocError(null);
+    setDeleteDocTarget(entry);
+  }, []);
+
+  const confirmDeleteDocument = useCallback(async () => {
+    const entry = deleteDocTarget;
+    if (!entry) return;
+    try {
+      const selectedPath = selection?.kind === 'document' ? selection.path : null;
+      if (
+        selectedPath &&
+        (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
+      ) {
+        await flushSerializedAutosave(`document:${selectedPath}`);
+      }
+      await api.deleteDocument(entry.path);
+      window.dispatchEvent(
+        new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
+      );
+      setDeleteDocTarget(null);
+      setDeleteDocError(null);
+    } catch (err) {
+      setDeleteDocError((err as Error).message || 'Delete failed.');
+    }
+  }, [deleteDocTarget, selection]);
+
   const activeKey = selection ? tabKey(selection) : null;
   // A group header reads as "selected" only when its full area screen
   // (the Projects / Documents / Gezellen list + view) is open — NOT when
@@ -704,6 +784,8 @@ export function Sidebar({
                   if (entry.isDirectory) return;
                   onSelect(toRecentTab({ kind: 'document', path: entry.path }));
                 }}
+                onRename={openRenameDocument}
+                onDelete={openDeleteDocument}
                 defaultExpandedDepth={1}
               />
             </li>
@@ -867,6 +949,54 @@ export function Sidebar({
         suffix=".md"
         onSubmit={handleCreateDocument}
         onCancel={() => setShowNewDoc(false)}
+      />
+
+      <NewPathDialog
+        open={renameDocTarget !== null}
+        title={renameDocTarget?.isDirectory ? 'Rename folder' : 'Rename document'}
+        fieldLabel="Name"
+        placeholder="New name"
+        submitLabel="Rename"
+        initialValue={renameDocTarget?.name ?? ''}
+        suffix={
+          renameDocTarget &&
+          !renameDocTarget.isDirectory &&
+          (!renameDocTarget.name.includes('.') || /\.md$/i.test(renameDocTarget.name))
+            ? '.md'
+            : undefined
+        }
+        error={renameDocError}
+        onSubmit={confirmRenameDocument}
+        onCancel={() => {
+          setRenameDocTarget(null);
+          setRenameDocError(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteDocTarget !== null}
+        title={deleteDocTarget?.isDirectory ? 'Delete folder?' : 'Delete document?'}
+        message={
+          <>
+            {deleteDocTarget?.isDirectory
+              ? `This will remove "${deleteDocTarget.path}" and everything inside it. This cannot be undone.`
+              : deleteDocTarget
+                ? `"${deleteDocTarget.path}" will be permanently removed.`
+                : ''}
+            {deleteDocError && (
+              <span className="gz-dialog-error" role="alert">
+                Delete failed: {deleteDocError}
+              </span>
+            )}
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        onCancel={() => {
+          setDeleteDocTarget(null);
+          setDeleteDocError(null);
+        }}
+        onConfirm={confirmDeleteDocument}
       />
 
       {resolveProjectId && (

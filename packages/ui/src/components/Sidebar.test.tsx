@@ -8,10 +8,31 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('./GezelIcon.js', () => ({
   GezelIcon: ({ name }: { name: string }) => <span data-testid="gezel-icon" data-name={name} />,
 }));
-// FileTree is exercised by its own tests; stub it to a marker here.
+// FileTree's menu mechanics are exercised by its own tests; expose its action
+// callbacks here so this suite can verify the sidebar wiring and dialogs.
 vi.mock('./FileTree.js', () => ({
-  FileTree: ({ entries }: { entries: unknown[] }) => (
-    <div data-testid="file-tree">{entries.length} docs</div>
+  FileTree: ({
+    entries,
+    onRename,
+    onDelete,
+  }: {
+    entries: Array<{ name: string; path: string; isDirectory: boolean }>;
+    onRename?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    onDelete?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+  }) => (
+    <div data-testid="file-tree">
+      {entries.length} docs
+      {entries.map((entry) => (
+        <span key={entry.path}>
+          <button type="button" onClick={() => onRename?.(entry)}>
+            Rename {entry.name}
+          </button>
+          <button type="button" onClick={() => onDelete?.(entry)}>
+            Delete {entry.name}
+          </button>
+        </span>
+      ))}
+    </div>
   ),
 }));
 
@@ -415,6 +436,54 @@ describe('Sidebar', () => {
     });
     expect(created).toHaveBeenCalled();
     window.removeEventListener('gezel:document-created', created);
+  });
+
+  it('renames a document from the sidebar row menu and broadcasts the new path', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+    } as never);
+    vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
+    const renamed = vi.fn();
+    window.addEventListener('gezel:document-renamed', renamed);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename notes.md' }));
+    const nameInput = await screen.findByPlaceholderText('New name');
+    fireEvent.change(nameInput, { target: { value: 'meeting-notes' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(api.renameDocument).toHaveBeenCalledWith('notes.md', 'meeting-notes.md');
+    });
+    expect(renamed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: expect.objectContaining({ fromPath: 'notes.md', toPath: 'meeting-notes.md' }),
+      }),
+    );
+    window.removeEventListener('gezel:document-renamed', renamed);
+  });
+
+  it('confirms before deleting a document from the sidebar row menu', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ name: 'notes.md', path: 'notes.md', isDirectory: false }],
+    } as never);
+    vi.mocked(api.deleteDocument).mockResolvedValue({ ok: true } as never);
+    const deleted = vi.fn();
+    window.addEventListener('gezel:document-deleted', deleted);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete notes.md' }));
+    expect(await screen.findByText('Delete document?')).toBeInTheDocument();
+    expect(api.deleteDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledWith('notes.md'));
+    expect(deleted).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.objectContaining({ path: 'notes.md' }) }),
+    );
+    window.removeEventListener('gezel:document-deleted', deleted);
   });
 
   it('folds in a new project live on the gezel:project-created event (e.g. a start_project macro)', async () => {

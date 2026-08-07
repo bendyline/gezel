@@ -1518,9 +1518,9 @@ export function SettingsView() {
             <section style={{ marginBottom: '2rem' }}>
               <h3>Meester</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                The Meester is your team concierge — they help you decide which gezellen you need
-                and can spin them up through their MCP tools. Change which gezel wears the hat here;
-                their prompt is untouched when you do.
+                The Meester is your team concierge — they help you start new projects, answer
+                questions, and check in on projects to keep them moving. Change which gezel wears
+                the hat here; their prompt is untouched when you do.
               </p>
               <div className="meester-picker">
                 {config?.meesterGezelId &&
@@ -1620,9 +1620,7 @@ export function SettingsView() {
               <p className="muted" style={{ marginTop: 0 }}>
                 The Klerk is your workshop scribe — they handle utility text work (about.md drafts,
                 rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
-                tasks to a different model than your conversational gezellen. Their{' '}
-                <code>provider</code> and <code>model</code> overrides on the gezel itself decide
-                what runs.
+                tasks to a different model than your conversational gezellen.
               </p>
               <div className="meester-picker">
                 {config?.klerkGezelId &&

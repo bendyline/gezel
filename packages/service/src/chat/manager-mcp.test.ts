@@ -74,6 +74,7 @@ beforeEach(async () => {
 }, 20_000);
 
 afterEach(async () => {
+  await manager?.drainBackground();
   await manager?.shutdown();
   await svc?.stop();
   await rm(home, { recursive: true, force: true }).catch(() => {});

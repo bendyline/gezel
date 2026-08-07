@@ -49,14 +49,21 @@ export async function inventoryBundleTree(root) {
  * inspect and extract it. Windows' bundled bsdtar has returned success while
  * silently omitting individual files from large service trees, so it is not a
  * safe release-artifact creator.
+ *
+ * node-tar's async Pack deadlocks on trees containing hardlinked files. In
+ * file mode that leaves its promise unsettled, drains Node's event loop, and
+ * exits 0 with a truncated archive. pnpm deployment trees use hardlinks on
+ * Windows and Linux, so archive synchronously until the upstream async Pack
+ * invariant is fixed: https://github.com/isaacs/node-tar/issues/460
  */
-export async function createBundleArchive({ sourceDir, archivePath }) {
-  await tar.create(
+export function createBundleArchive({ sourceDir, archivePath }) {
+  tar.create(
     {
       cwd: sourceDir,
       file: archivePath,
       gzip: true,
       strict: true,
+      sync: true,
     },
     ['.'],
   );

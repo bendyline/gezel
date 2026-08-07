@@ -2856,7 +2856,14 @@ export class ChatManager {
    */
   trackBackground(promise: Promise<unknown>): void {
     this.backgroundPromises.add(promise);
-    void promise.finally(() => this.backgroundPromises.delete(promise));
+    // Do not use a detached `finally()` here. The promise returned by
+    // `finally()` adopts the original rejection, so discarding it creates an
+    // unhandled rejection even though `drainBackground()` later observes the
+    // tracked promise with `Promise.allSettled()`.
+    void promise.then(
+      () => this.backgroundPromises.delete(promise),
+      () => this.backgroundPromises.delete(promise),
+    );
   }
 
   /** Await every currently-tracked background promise, then return. */
@@ -8951,11 +8958,14 @@ export class ChatManager {
     this.telemetryGpuUnsub = null;
     // Fire any deferred memory extractions immediately so any
     // mid-conversation work that was waiting on idle gets persisted
-    // before we tear down. Best-effort — drainBackground (called by
-    // tests / service.stop) is what actually awaits the resulting
-    // promises. Done first so the trackBackground registrations land
-    // before resetClient starts disconnecting providers.
+    // before we tear down. Done first so the trackBackground registrations
+    // land before the drain, then await every tracked task before
+    // resetClient disconnects and removes its providers. Direct callers of
+    // shutdown() must get the same safe ordering as service.stop(); otherwise
+    // a half-finished one-shot can resume after its injected mock is removed
+    // and fall through to a real provider.
     this.flushDeferredExtractions();
+    await this.drainBackground();
     // Final service teardown must not re-arm injected providers.
     await this.resetClient({ restoreSeededProviders: false });
   }
@@ -11027,6 +11037,13 @@ export class ChatManager {
 
     const existing = this.providers.get(name);
     if (existing) return existing;
+
+    // Teardown clears the provider cache deliberately. Never let late
+    // background work interpret that empty cache as permission to construct a
+    // fresh backend — especially a cloud SDK — after shutdown has begun.
+    if (this.shuttingDown) {
+      throw new Error(`Chat manager is shutting down; refusing to initialize provider "${name}"`);
+    }
 
     // Backstop against unbudgeted local-engine spawns. Building a local
     // provider here creates a NativeEngineSupervisor that is invisible to

@@ -70,4 +70,54 @@ describe('ChatManager pooled-engine shutdown', () => {
 
     expect(router.shutdown).not.toHaveBeenCalled();
   });
+
+  it('awaits tracked background work before shutting down providers', async () => {
+    const provider = {
+      initialize: vi.fn(async () => {}),
+      shutdown: vi.fn(async () => {}),
+    };
+    const manager = new ChatManager({
+      store: { readConfig: async () => ({}) } as never,
+      events: new ChatEventBus(),
+      memory: {} as never,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home: '/tmp/gezel-manager-shutdown-test',
+      catalog: {} as never,
+      secrets: {} as never,
+      providers: [['copilot', provider as never]],
+    });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    manager.trackBackground(pending);
+
+    const stopping = manager.shutdown();
+    await Promise.resolve();
+    expect(provider.shutdown).not.toHaveBeenCalled();
+
+    release();
+    await stopping;
+
+    expect(provider.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to construct a provider after shutdown', async () => {
+    const manager = makeManager();
+    await manager.shutdown();
+
+    await expect(manager.getProvider('copilot')).rejects.toThrow(
+      'Chat manager is shutting down; refusing to initialize provider "copilot"',
+    );
+  });
+
+  it('tracks rejected background work without emitting a detached rejection', async () => {
+    const manager = makeManager();
+    manager.trackBackground(Promise.reject(new Error('expected background failure')));
+
+    await manager.drainBackground();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await manager.shutdown();
+  });
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -109,6 +109,40 @@ describe('verifyBundleArchiveRoundTrip', () => {
         'node_modules/@bendyline/gilde/data/community/toolsets/br/brilliantdirectories-brilliant-directories-mcp/versions/6.40.26/manifest.json',
       ),
     );
+    await verifyBundleArchiveRoundTrip({
+      sourceDir,
+      archivePath,
+      expectedFileCount,
+    });
+  });
+
+  it('archives hardlinked files across sibling directories without stalling', async () => {
+    const relativeDir = join('node_modules', 'hardlinked-package');
+
+    for (const dir of [sourceDir, archiveSourceDir]) {
+      const hardlinkRoot = join(dir, relativeDir);
+      for (let index = 0; index < 20; index += 1) {
+        const siblingDir = join(hardlinkRoot, `dir${String(index).padStart(3, '0')}`);
+        await mkdir(siblingDir, { recursive: true });
+        await writeFile(join(siblingDir, 'plain.txt'), `content-${index}\n`);
+      }
+
+      const linkSource = join(hardlinkRoot, 'dir000', 'hardlink-source.txt');
+      await writeFile(linkSource, 'shared inode\n');
+      for (let index = 1; index < 15; index += 1) {
+        await link(
+          linkSource,
+          join(hardlinkRoot, `dir${String(index).padStart(3, '0')}`, 'hardlink.txt'),
+        );
+      }
+    }
+
+    await archive();
+
+    const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
+    const archivedPaths = await inventoryBundleArchivePaths(archivePath);
+    assert.equal(archivedPaths.length, expectedFileCount);
+    assert.ok(archivedPaths.includes('node_modules/hardlinked-package/dir014/hardlink.txt'));
     await verifyBundleArchiveRoundTrip({
       sourceDir,
       archivePath,
