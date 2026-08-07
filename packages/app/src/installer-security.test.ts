@@ -73,6 +73,59 @@ describe('Windows machine-service installer security', () => {
     expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
   });
 
+  // Regression: v1.26219.44 granted the service SID only (M) on the asset
+  // store. Modify does not include WRITE_DAC, so gezeld's `icacls <model>
+  // /reset` — the step that re-inherits a moved bundle into the public
+  // read-only ACL, i.e. the whole point of sharing models across accounts —
+  // failed with "Access is denied" on every model SanitizeDescendants had just
+  // re-owned to Administrators. The daemon crash-looped on SCM 1066.
+  it('lets the broker re-inherit model bundles without opening the asset boundary', () => {
+    const assetsGrant = commandLine('"${GEZEL_DATA_DIR}\\assets" /grant:r');
+
+    // Modify on the container: create and delete bundles under assets\models.
+    expect(assetsGrant).toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
+
+    // FullControl on DESCENDANTS ONLY, so the broker holds the WRITE_DAC that
+    // `icacls /reset` requires on each bundle. (IO) keeps it off the container.
+    expect(assetsGrant).toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)');
+
+    // The inherit-only marker is what stops a compromised daemon from
+    // rewriting the `assets` DACL itself and handing users write access.
+    expect(assetsGrant).not.toMatch(
+      /NT SERVICE\\\$\{GEZEL_SERVICE_NAME}:\((?!.*\(IO\))[^"]*\)\(F\)/,
+    );
+
+    // Users keep read-only inheritance — the sharing contract is unchanged.
+    expect(commandLine('"${GEZEL_DATA_DIR}\\assets" /inheritance:r')).toContain(
+      '*S-1-5-32-545:(OI)(CI)(RX)',
+    );
+  });
+
+  // Regression: the installer wrote MachineServiceInstalled = 1 as soon as
+  // `sc create` succeeded, so a service that registered and then failed to run
+  // reported healthy. machineServiceMissing() only fires on a positive 0, which
+  // made a crash-looping broker completely invisible — including on the silent
+  // auto-update path, where NSIS shows no dialog at all.
+  it('records the breadcrumb from the service START outcome, not registration', () => {
+    const start = position('sc.exe" start ${GEZEL_SERVICE_NAME}');
+    const success = position(
+      'WriteRegDWORD SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "MachineServiceInstalled" 1',
+    );
+    expect(start).toBeLessThan(success);
+
+    // Both failure modes must reach the SkipNssm branch that writes 0: the
+    // launch call itself failing, and the service dying during startup (which
+    // `sc start` cannot report, because it returns before RUNNING).
+    const startBlock = hook.slice(start, success);
+    expect(startBlock).toContain('Goto SkipNssm');
+    expect(startBlock).toContain('find.exe" "RUNNING"');
+    expect(startBlock.match(/Goto SkipNssm/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+    expect(hook).toContain(
+      'WriteRegDWORD SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "MachineServiceInstalled" 0',
+    );
+  });
+
   it('publishes migrated product data through a separate shared ACL boundary', () => {
     expect(hook).toContain('migrate-legacy-shared.js');
     expect(hook).toContain('--source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"');

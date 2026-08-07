@@ -428,8 +428,16 @@ export class SupervisedService extends EventEmitter {
       const health = await healthWithTimeout(client, HEALTH_REQUEST_TIMEOUT_MS, probe.controller);
       if (generation !== this.healthGeneration) return;
       this.consecutiveHealthFailures = 0;
+      // `machine-service-not-installed` is included deliberately. The installer
+      // now records the START outcome rather than the `sc create` result, so a
+      // service that was registered but could not come up during install
+      // leaves a 0 behind. That is the honest reading at install time, but the
+      // registration survives with start=auto and usually succeeds on the next
+      // boot — at which point the breadcrumb is stale and the notice is a false
+      // alarm. A live, connected machine engine outranks a disk breadcrumb.
       if (
-        this._fallbackReason?.code === 'machine-engine-unavailable' &&
+        (this._fallbackReason?.code === 'machine-engine-unavailable' ||
+          this._fallbackReason?.code === 'machine-service-not-installed') &&
         health.machineEngineConnected
       ) {
         this.opts.logger?.info?.(

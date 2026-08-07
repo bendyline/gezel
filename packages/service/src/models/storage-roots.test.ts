@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -247,6 +247,53 @@ describe('model storage overlay', () => {
     // The kept and non-candidate files survive on disk.
     expect(await readFile(join(modelDir, 'new-qat-Q4_K_XL.gguf'), 'utf8')).toBe('new-weights');
     expect(await readFile(join(modelDir, 'other.gguf.partial'), 'utf8')).toBe('in-flight');
+  });
+
+  // Regression: v1.26219.44 shipped this loop with publishMigratedModel
+  // unguarded. On Windows the installer had just made Administrators the owner
+  // of every pre-existing model while granting the service only Modify, so the
+  // `icacls /reset` inside makeSharedModelReadable failed with "Access is
+  // denied", the throw escaped startService, and gezeld crash-looped on SCM
+  // 1066 — on every upgrade over an install that already had models. Widening
+  // read access on one bundle must never decide whether the daemon boots.
+  it('keeps migrating when one bundle cannot be published for shared reading', async () => {
+    const home = await tempRoot();
+    const shared = join(home, 'public-assets');
+    const legacyRoot = join(home, 'engines', 'llama-cpp', 'models');
+
+    // A bundle that publishes cleanly.
+    const healthy = join(legacyRoot, 'healthy');
+    await mkdir(healthy, { recursive: true });
+    await writeFile(join(healthy, 'weights.gguf'), 'good');
+    await writeFile(join(healthy, 'manifest.json'), '{"id":"healthy"}\n');
+
+    // A bundle whose publish step throws. A symlink in the payload is the
+    // portable stand-in for the Windows ACL denial — listModelPayloadFiles
+    // refuses it while backfilling hashes, so the throw escapes
+    // publishMigratedModel exactly where the icacls failure did.
+    const poisoned = join(legacyRoot, 'poisoned');
+    await mkdir(poisoned, { recursive: true });
+    await writeFile(join(poisoned, 'weights.gguf'), 'also-good');
+    await writeFile(join(poisoned, 'manifest.json'), '{"id":"poisoned"}\n');
+    await symlink(join(poisoned, 'weights.gguf'), join(poisoned, 'alias.gguf'));
+
+    const env = { GEZEL_SYSTEM_SCOPE: '1', GEZEL_SHARED_ASSETS_DIR: shared };
+
+    // Boots rather than throwing, and still reports both moves.
+    await expect(migrateLegacySystemModels(home, env)).resolves.toBe(2);
+
+    // The healthy bundle was fully published — hashes backfilled.
+    const healthyManifest = JSON.parse(
+      await readFile(join(shared, 'models', 'llama-cpp', 'healthy', 'manifest.json'), 'utf8'),
+    );
+    expect(healthyManifest.fileSha256).toEqual({
+      'weights.gguf': createHash('sha256').update('good').digest('hex'),
+    });
+
+    // The poisoned bundle still moved; only its permission widening was skipped.
+    await expect(
+      readFile(join(shared, 'models', 'llama-cpp', 'poisoned', 'weights.gguf'), 'utf8'),
+    ).resolves.toBe('also-good');
   });
 
   it('moves legacy system models and backfills their public payload hashes', async () => {
