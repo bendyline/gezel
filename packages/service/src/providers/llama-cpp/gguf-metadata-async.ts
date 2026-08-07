@@ -1,9 +1,8 @@
-import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '../../utils/service-worker-entry.js';
 import { type GgufSummary, readGgufSummary } from './gguf-metadata.js';
 
 const log = createLogger('gguf:metadata-worker');
@@ -106,12 +105,7 @@ function ensureWorker(): Worker | null {
 }
 
 function workerEntry(): string | null {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, 'providers', 'llama-cpp', 'gguf-metadata-worker.js'),
-    join(here, 'gguf-metadata-worker.js'),
-  ];
-  return candidates.find((path) => existsSync(path)) ?? null;
+  return findServiceWorkerEntry(import.meta.url, 'gguf-metadata');
 }
 
 function onMessage(reply: WorkerReply): void {
