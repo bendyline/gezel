@@ -102,8 +102,9 @@ describe('machine-engine service boundary', () => {
     }
   });
 
-  it('does not bootstrap the machine home as a user project store', async () => {
-    await expect(access(join(home, 'projects', 'default'))).rejects.toBeDefined();
-    await expect(access(join(home, 'gezels'))).resolves.toBeUndefined();
+  it('does not bootstrap the machine home as a user product store', async () => {
+    for (const scope of ['projects', 'gezels', 'documents']) {
+      await expect(access(join(home, scope))).rejects.toBeDefined();
+    }
   });
 });
