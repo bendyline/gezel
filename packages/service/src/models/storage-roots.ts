@@ -1,7 +1,18 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+
+const execFileAsync = promisify(execFile);
+
+// A first adoption can require hashing tens of gigabytes. Model inventory is
+// requested by several UI paths, so share that work instead of letting each
+// request start another full read of the same payload.
+const readOnlyVerificationInFlight = new Map<string, Promise<string | null>>();
+const verificationCacheWrites = new Map<string, Promise<void>>();
 
 /**
  * Public machine assets are intentionally separate from the machine
@@ -300,14 +311,47 @@ export async function verifyReadOnlyModelPayload(
   expected: Record<string, string> | undefined,
   onReject?: (reason: string) => void,
 ): Promise<boolean> {
-  let reason: string | null;
-  try {
-    reason = await verifyReadOnlyModelPayloadUnchecked(roots, modelRoot, id, expected);
-  } catch (err) {
-    reason = err instanceof Error ? err.message : String(err);
+  if (resolve(modelRoot) === resolve(roots.writableRoot)) return true;
+
+  const key = readOnlyVerificationKey(roots, modelRoot, id, expected);
+  let verification = readOnlyVerificationInFlight.get(key);
+  if (!verification) {
+    verification = (async () => {
+      try {
+        return await verifyReadOnlyModelPayloadUnchecked(roots, modelRoot, id, expected);
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    })();
+    readOnlyVerificationInFlight.set(key, verification);
+    void verification.then(() => {
+      if (readOnlyVerificationInFlight.get(key) === verification) {
+        readOnlyVerificationInFlight.delete(key);
+      }
+    });
   }
+
+  const reason = await verification;
   if (reason !== null) onReject?.(reason);
   return reason === null;
+}
+
+function readOnlyVerificationKey(
+  roots: ModelStorageRoots,
+  modelRoot: string,
+  id: string,
+  expected: Record<string, string> | undefined,
+): string {
+  const expectedFingerprint = createHash('sha256')
+    .update(
+      JSON.stringify(
+        Object.entries(expected ?? {})
+          .map(([path, sha]) => [path, sha.toLowerCase()] as const)
+          .sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    )
+    .digest('hex');
+  return `${resolve(roots.writableRoot)}\n${resolve(modelRoot)}\n${id}\n${expectedFingerprint}`;
 }
 
 /** Returns null when the payload verifies, else a human-readable rejection reason. */
@@ -367,16 +411,21 @@ async function verifyReadOnlyModelPayloadUnchecked(
       return `shared payload hash mismatch for ${path}`;
     }
   }
-  cache[cacheKey] = identities;
-  await writeVerificationCache(cachePath, cache);
+  await updateVerificationCache(cachePath, cacheKey, identities);
   return null;
 }
 
 /**
  * Machine daemons use a restrictive umask for private state. After a model
  * has been fully downloaded and hash-verified, make only that published
- * bundle traversable/readable by ordinary users. Windows gets this access
- * from the installer's inherited DACL; chmod is a harmless no-op there.
+ * bundle traversable/readable by ordinary users.
+ *
+ * Windows needs an explicit inheritance reset. A model imported through the
+ * private transaction area, or moved from the legacy private model store,
+ * keeps its old DACL when it is renamed within the ProgramData volume. Merely
+ * placing that directory below the public `assets` container therefore does
+ * not make it readable. Resetting the published tree makes it inherit the
+ * installer's read-only BUILTIN\Users ACE without granting users write access.
  */
 export async function makeSharedModelReadable(
   modelDir: string,
@@ -394,6 +443,9 @@ export async function makeSharedModelReadable(
   }
 
   await chmodTree(target);
+  if (process.platform === 'win32') {
+    await resetWindowsAclToInherited(target);
+  }
   let ancestor = dirname(target);
   while (ancestor === sharedModels || ancestor.startsWith(`${sharedModels}${sep}`)) {
     const info = await lstat(ancestor);
@@ -407,6 +459,18 @@ export async function makeSharedModelReadable(
     }
     if (ancestor === sharedModels) break;
     ancestor = dirname(ancestor);
+  }
+}
+
+async function resetWindowsAclToInherited(target: string): Promise<void> {
+  try {
+    await execFileAsync('icacls.exe', [target, '/reset', '/T', '/L', '/Q'], {
+      maxBuffer: 256 * 1024,
+      ...windowsDetachedSpawnOptions(),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not publish shared model permissions for ${target}: ${detail}`);
   }
 }
 
@@ -679,4 +743,27 @@ async function writeVerificationCache(path: string, cache: VerificationCache): P
     encoding: 'utf8',
     mode: 0o600,
   });
+}
+
+/** Merge cache entries serially so concurrent checks for different models do
+ * not overwrite each other's freshly verified identity records. */
+async function updateVerificationCache(
+  path: string,
+  key: string,
+  identities: unknown,
+): Promise<void> {
+  const previous = verificationCacheWrites.get(path) ?? Promise.resolve();
+  const write = previous
+    .catch(() => {})
+    .then(async () => {
+      const latest = await readVerificationCache(path);
+      latest[key] = identities;
+      await writeVerificationCache(path, latest);
+    });
+  verificationCacheWrites.set(path, write);
+  try {
+    await write;
+  } finally {
+    if (verificationCacheWrites.get(path) === write) verificationCacheWrites.delete(path);
+  }
 }

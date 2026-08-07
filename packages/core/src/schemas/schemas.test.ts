@@ -224,6 +224,22 @@ describe('ChatEventSchema', () => {
       action: { kind: 'settings', section: 'mlx' },
     });
   });
+
+  it('accepts a short or summarized tool response', () => {
+    expect(
+      ChatEventSchema.parse({
+        type: 'tool',
+        name: 'suggest_craftbook',
+        durationMs: 42,
+        success: true,
+        resultText: 'Matched presentations/powerpoint',
+        resultTruncated: false,
+      }),
+    ).toMatchObject({
+      resultText: 'Matched presentations/powerpoint',
+      resultTruncated: false,
+    });
+  });
 });
 
 describe('ProjectFileEntrySchema', () => {
@@ -319,6 +335,11 @@ describe('CreateTypedProjectRequestSchema', () => {
 });
 
 describe('UpdateProjectRequestSchema', () => {
+  it('accepts the project archive flag', () => {
+    expect(UpdateProjectRequestSchema.parse({ archived: true }).archived).toBe(true);
+    expect(UpdateProjectRequestSchema.parse({ archived: false }).archived).toBe(false);
+  });
+
   it('accepts a per-project workspace-indexing switch', () => {
     expect(UpdateProjectRequestSchema.parse({ indexingEnabled: false }).indexingEnabled).toBe(
       false,
@@ -448,6 +469,18 @@ describe('Codex CLI config', () => {
   });
 });
 
+describe('llama.cpp context sizing config', () => {
+  it('accepts the two engine policies and rejects unknown modes', () => {
+    expect(
+      GezelConfigSchema.parse({ llamaCppContextSizing: 'adaptive' }).llamaCppContextSizing,
+    ).toBe('adaptive');
+    expect(
+      GezelConfigSchema.parse({ llamaCppContextSizing: 'model-max' }).llamaCppContextSizing,
+    ).toBe('model-max');
+    expect(() => GezelConfigSchema.parse({ llamaCppContextSizing: 'unsafe-max' })).toThrow();
+  });
+});
+
 describe('openaiEndpoints config', () => {
   it('parses the Connected Apps endpoint controls and tolerates absence', () => {
     const cfg = GezelConfigSchema.parse({
@@ -574,5 +607,17 @@ describe('projectAllowsAmbientWork', () => {
       updatedAt: 't',
     });
     expect(parsed.status).toBe('stable');
+  });
+
+  it('accepts the optional project archive flag', () => {
+    const parsed = ProjectSchema.parse({
+      id: 'p',
+      name: 'P',
+      archived: true,
+      status: 'inactive',
+      createdAt: 't',
+      updatedAt: 't',
+    });
+    expect(parsed.archived).toBe(true);
   });
 });

@@ -105,7 +105,12 @@ import {
   canonicalToolName,
   resolveToolNameSpelling,
 } from './tool-inventory.js';
-import { type FileContent, formatValidateResult, validateFile } from './validate.js';
+import {
+  type FileContent,
+  formatValidateResult,
+  runtimePageCheckToValidateCheck,
+  validateFile,
+} from './validate.js';
 import { normalizeWorkspaceWriteContent } from './workspace-write-normalization.js';
 import {
   rejectHtmlWithScriptOutsideScriptTag,
@@ -681,7 +686,7 @@ server.tool(
 
 server.tool(
   'validate',
-  'Validate a file against checks appropriate for its type — parse HTML/JS/TS/JSON, check image magic-bytes, etc. Returns one PASS/FAIL line per check, with line numbers + 5-line excerpts + fix hints on failure. Use this **before** calling `set_task_status({ ref, status: \'complete\', verification })` to gather concrete evidence per mission objective. Looks in the project workspace by default; pass `where: "artifact"` to check a file in the artifacts drawer.',
+  "Validate a file against checks appropriate for its type — lint HTML structure and duplicate DOM ids/functions, parse inline and standalone JS/TS, parse JSON, check image magic-bytes, etc. Workspace HTML also loads through gezel's scoped preview server in headless Chromium, so this is the one-step gate for local pages: do NOT navigate to a file:// URL and do NOT install a separate static server. Returns one PASS/FAIL line per check, with line numbers + 5-line excerpts + fix hints on failure. Use this **before** calling `set_task_status({ ref, status: 'complete', verification })` to gather concrete evidence per mission objective. Looks in the project workspace by default; pass `where: \"artifact\"` to check a file in the artifacts drawer.",
   {
     path: z
       .string()
@@ -707,7 +712,25 @@ server.tool(
       };
     }
     const result = validateFile(filePath, content);
-    const failed = result.checks.some((c) => !c.ok);
+    if (
+      drawer === 'workspace' &&
+      /\.html?$/i.test(filePath) &&
+      !result.checks.some((c) => c.ok === false)
+    ) {
+      try {
+        result.checks.push(
+          runtimePageCheckToValidateCheck(await api.checkProjectPage(projectId, filePath)),
+        );
+      } catch (err) {
+        result.checks.push(
+          runtimePageCheckToValidateCheck({
+            ran: false,
+            reason: `runtime check unavailable: ${unwrapApiError(err)}`,
+          }),
+        );
+      }
+    }
+    const failed = result.checks.some((c) => c.ok === false);
     return {
       content: [{ type: 'text' as const, text: formatValidateResult(result) }],
       ...(failed ? { isError: true } : {}),
@@ -8013,7 +8036,7 @@ async function resolveProjectId(input: string): Promise<string> {
   if (byName) return byName.id;
   const available = all.map((p) => `"${p.id}" (${p.name})`).join(', ');
   throw new Error(
-    `project "${input}" not found. Available: ${available || '(none)'}. Use the id (the slug), not the display name.`,
+    `project "${input}" does not exist. Available projects: ${available || '(none)'}. Project ids and exact display names are both accepted. [runtime: non-retryable] Do not retry this same project reference. Call \`list_projects\` and use an id it returns; if this is genuinely new work, launch it with \`start_project\` or the matching craftbook before messaging a gezel.`,
   );
 }
 

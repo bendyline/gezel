@@ -370,7 +370,7 @@ function EngineStatusPillForProvider({
     };
   }, [onDeviceProvider]);
 
-  // An in-flight session's pinned model wins over the install default.
+  // An in-flight session's runtime-selected model wins over the install default.
   // This is what lets a secondary llama.cpp pill say "Talkie" while the
   // default DwarfStar pill continues to show its own model. For an idle
   // provider, only honour the configured default when its weights are on

@@ -88,20 +88,75 @@ afterEach(async () => {
 
 async function extraSpecsAfterSend(
   projectId?: string,
+  taskScope?: { taskRef: string; stepId: string },
 ): Promise<Array<{ id: string; kind?: string; args?: string[] }>> {
   const session = await manager.createSession({
     gezelId: 'ada',
     ...(projectId ? { projectId } : {}),
+    ...taskScope,
   });
   mock.script('done');
   await manager.send(session.id, 'hello');
-  const create = mock.calls.find((c) => c.kind === 'create');
+  const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
   expect(create).toBeTruthy();
-  return (create as { opts: { extraMcpServers?: Array<{ id: string; args?: string[] }> } }).opts
-    .extraMcpServers as Array<{ id: string; kind?: string; args?: string[] }>;
+  return ((create as { opts: { extraMcpServers?: Array<{ id: string; args?: string[] }> } }).opts
+    .extraMcpServers ?? []) as Array<{ id: string; kind?: string; args?: string[] }>;
 }
 
 describe('ChatManager — docblocks toolset spawn grants project roots', () => {
+  it('suppresses DocBlocks only while the active craftbook step explicitly forbids it', async () => {
+    const now = '2026-08-06T00:00:00.000Z';
+    await store.writeInstalledToolsets({ kind: 'shared' }, [docblocksToolset(join(home, 'stub'))]);
+    await store.writeTask({
+      projectId: 'default',
+      num: 1,
+      ref: 'default/1',
+      title: 'PowerPoint from Content',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        id: 'powerpoint-deck',
+        name: 'PowerPoint from Content',
+        steps: [
+          {
+            id: 'outline',
+            name: 'Outline the deck',
+            prompt: 'Write notes/outline.md. Do not write slide content or call DocBlocks.',
+            createdAt: now,
+          },
+          {
+            id: 'publish',
+            name: 'Publish the PowerPoint',
+            prompt: 'Call convert_document once, then preview_document and save_artifact.',
+            createdAt: now,
+          },
+        ],
+        entryStepId: 'outline',
+        toolsets: [{ toolsetId: 'docblocks', sourceId: 'bundled', autoAllow: true }],
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'outline',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const outlineExtras = await extraSpecsAfterSend('default', {
+      taskRef: 'default/1',
+      stepId: 'outline',
+    });
+    expect(outlineExtras.find((entry) => entry.id === 'docblocks')).toBeUndefined();
+
+    const task = await store.readTask('default', 1);
+    await store.writeTask({ ...task!, activeStepId: 'publish', updatedAt: now });
+    const publishExtras = await extraSpecsAfterSend('default', {
+      taskRef: 'default/1',
+      stepId: 'publish',
+    });
+    expect(publishExtras.find((entry) => entry.id === 'docblocks')).toBeTruthy();
+  });
+
   it('keeps the exact bundled, root-confined runtime available under super-lockdown', async () => {
     await store.writeConfig({ securityPolicy: securityPolicyForLevel('super-lockdown') });
     await store.writeInstalledToolsets({ kind: 'shared' }, [docblocksToolset(join(home, 'stub'))]);

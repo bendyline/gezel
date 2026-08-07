@@ -25,6 +25,7 @@ const MIME_BY_EXT: Record<string, string> = {
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
   '.avif': 'image/avif',
   '.ico': 'image/x-icon',
   // Fonts
@@ -35,9 +36,19 @@ const MIME_BY_EXT: Record<string, string> = {
   // Media
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.opus': 'audio/opus',
   // Misc
   '.pdf': 'application/pdf',
   '.wasm': 'application/wasm',

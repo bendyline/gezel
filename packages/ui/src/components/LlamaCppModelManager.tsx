@@ -1,12 +1,8 @@
-import type {
-  CatalogItemSummary,
-  ChatModelCategory,
-  ChatModelManifest,
-  RecoDevice,
-} from '@bendyline/gezel';
+import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyline/gezel';
 import {
   composeFitnessBadge,
   computeModelFit,
+  estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
 } from '@bendyline/gezel';
@@ -30,6 +26,8 @@ import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { formatContextWindow } from './model-context.js';
+import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -80,12 +78,6 @@ function recoDeviceFromMemory(memory: MemoryProfile): RecoDevice {
     usableBytes: memory.usableBytes,
     ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
   };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
-  return `${bytes} B`;
 }
 
 function formatApprox(bytes: number): string {
@@ -164,8 +156,6 @@ interface Props {
   compact?: boolean;
 }
 
-type CategoryTab = ChatModelCategory | 'all';
-
 /**
  * llama.cpp local model install/list/delete UX. Mirrors
  * OllamaModelManager structurally but talks to /api/llama-cpp/* and
@@ -174,6 +164,7 @@ type CategoryTab = ChatModelCategory | 'all';
 export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<LlamaCppInstalledModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
   // Interrupted/unverified downloads holding disk with no install manifest —
   // invisible to the installed list. Surfaced so the user can resume or
   // delete them before the daemon's 7-day reclaim sweep.
@@ -194,11 +185,12 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [toDelete, setToDelete] = useState<string | null>(null);
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
   const [probing, setProbing] = useState<string[]>([]);
   const probingRef = useRef<string[]>([]);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const hadRemoteInstallRef = useRef(false);
 
   const refreshFitness = useCallback(async () => {
     try {
@@ -220,16 +212,28 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     }
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await api.listLlamaCppModels();
-      setModels(res.models);
-      setModelsError(null);
-    } catch (err) {
-      setModelsError(err instanceof Error ? err.message : String(err));
-    }
-    void refreshFitness();
-    void refreshIncomplete();
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+
+    setModelsLoading(true);
+    const request = (async () => {
+      try {
+        const res = await api.listLlamaCppModels();
+        setModels(res.models);
+        setModelsError(null);
+      } catch (err) {
+        setModelsError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setModelsLoading(false);
+      }
+      void refreshFitness();
+      void refreshIncomplete();
+    })();
+    refreshInFlight.current = request;
+    void request.then(() => {
+      if (refreshInFlight.current === request) refreshInFlight.current = null;
+    });
+    return request;
   }, [refreshFitness, refreshIncomplete]);
 
   useEffect(() => {
@@ -291,10 +295,13 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           }
           return next;
         });
-        // A polled install transitioning out usually means new
-        // models have just landed on disk; refresh the installed
-        // list so the catalog cards flip to "Installed".
-        if (res.installs.length === 0) {
+        // Refresh only on the non-empty -> empty transition. Refreshing on
+        // every empty poll reloaded every installed GGUF every two seconds,
+        // including expensive metadata previews, even while Settings was
+        // otherwise idle.
+        const hadRemoteInstall = hadRemoteInstallRef.current;
+        hadRemoteInstallRef.current = res.installs.length > 0;
+        if (hadRemoteInstall && res.installs.length === 0) {
           void refresh();
         }
       } catch {
@@ -545,17 +552,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     return map;
   }, [catalogItems]);
 
-  const availableCategories = useMemo<CategoryTab[]>(() => {
-    const present = new Set<ChatModelCategory>();
-    for (const item of catalogItems) {
-      const m = asLlamaCppEntry(item.manifest);
-      if (!m) continue;
-      present.add(m.category ?? 'general');
-    }
-    const order: ChatModelCategory[] = ['general', 'coding', 'reasoning', 'vision', 'embedding'];
-    return ['all' as CategoryTab, ...order.filter((c) => present.has(c))];
-  }, [catalogItems]);
-
   return (
     <div className="ollama-model-manager">
       {installs.size > 0 && (
@@ -639,9 +635,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
         <SharedModelMigrationPanel engine="llama-cpp" onModelsChanged={onModelsChanged} />
       )}
 
-      {(models.length > 0 || modelsError) && (
+      {(modelsLoading || models.length > 0 || modelsError) && (
         <div className="ollama-section">
           <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
+          {modelsLoading && models.length === 0 && !modelsError && (
+            <p className="muted small" aria-live="polite">
+              Checking shared models… Large models can take a few minutes the first time; later
+              starts use the local verification cache.
+            </p>
+          )}
           {modelsError && <p className="error">{modelsError}</p>}
           {models.length > 0 && (
             <table className="ollama-model-table">
@@ -650,7 +652,12 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th>Fitness</th>
+                  <th title="Effective per-turn context size after Gezel's settings and memory limits">
+                    Context size
+                  </th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -660,9 +667,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   const fitnessKey = `llama-cpp:${m.id}`;
                   const entry = fitness.get(fitnessKey);
                   const catalogManifest = catalogById.get(m.id);
+                  // Single-slot, not the fleet reservation: the admission
+                  // ladder sheds slots to fit, so a model is never unusable
+                  // because of slot count. Pricing the fleet here would flag
+                  // models as too big that the daemon would happily run.
+                  const installedResidentBytes =
+                    m.predictedResidentBytes ?? m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
                   const ramFit = memory
                     ? computeModelFit({
-                        residentBytes: m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                        residentBytes: installedResidentBytes,
                         isMoE: isMoEFromTags(catalogManifest?.tags),
                         ...fitMachine(memory),
                       })
@@ -685,7 +698,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       ? hardwareHint(recoDeviceFromMemory(memory), {
                           isMoE: isMoEFromTags(catalogManifest.tags),
                           fitTier: ramFit?.tier ?? 'fits',
-                          residentBytes: m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                          residentBytes: installedResidentBytes,
                         })
                       : null;
                   return (
@@ -715,9 +728,31 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           </span>
                         )}
                       </td>
-                      <td>{formatBytes(m.approxSizeBytes)}</td>
+                      <td title={modelSizeTitle(m)}>
+                        {formatBytes(m.approxSizeBytes)}
+                        {modelMemoryHeadline(m) ? (
+                          <span className="muted small">{modelMemoryHeadline(m)}</span>
+                        ) : null}
+                      </td>
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
+                      </td>
+                      <td
+                        title={
+                          m.effectiveContextWindow
+                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory.`
+                            : m.contextSizingStatus === 'restart-required'
+                              ? 'This model is running with a smaller context window than the current sizing policy requires. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                              : m.contextSizingStatus === 'insufficient-memory'
+                                ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
+                                : 'The effective context size is unavailable.'
+                        }
+                      >
+                        {m.contextSizingStatus === 'restart-required'
+                          ? 'Restart needed'
+                          : m.contextSizingStatus === 'insufficient-memory'
+                            ? "Won't fit"
+                            : formatContextWindow(m.effectiveContextWindow)}
                       </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">
@@ -739,7 +774,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                             type="button"
                             className="home-link"
                             disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
                             onClick={() => {
                               void api
                                 .runModelFitnessProbe('llama-cpp', m.id)
@@ -829,18 +864,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             </button>
           </p>
         )}
-        <div className="provider-switch" style={{ marginBottom: '0.5rem' }}>
-          {availableCategories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`provider-pill${activeCategory === c ? ' provider-pill-active' : ''}`}
-              onClick={() => setActiveCategory(c)}
-            >
-              {c === 'all' ? 'All' : c[0]?.toUpperCase() + c.slice(1)}
-            </button>
-          ))}
-        </div>
         <CatalogBrowser
           kind="chat-model"
           emptyMessage="No on-device models in the catalog yet."
@@ -849,16 +872,14 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           filter={(item: CatalogItemSummary) => {
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
-            if (activeCategory !== 'all' && (m.category ?? 'general') !== activeCategory) {
-              return false;
-            }
             if (!showAll && memory) {
               // MoE-aware: keep any model that can RUN (incl. big MoE that
               // fits only via expert-offload to RAM) — hide only the truly
               // too-big. Replaces the old dense-naive `size > budget` hide,
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
-                residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                residentBytes:
+                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + estimateManifestKvBytes(m),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -877,7 +898,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 : null;
             const fit = memory
               ? computeModelFit({
-                  residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                  residentBytes:
+                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                    estimateManifestKvBytes(m),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })
@@ -915,7 +938,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           ? hardwareHint(recoDeviceFromMemory(memory), {
                               isMoE: isMoEFromTags(item.manifest.tags),
                               fitTier: fit.tier,
-                              residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
+                              residentBytes:
+                                m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                                estimateManifestKvBytes(m),
                             })
                           : null;
                       if (!hint) return null;

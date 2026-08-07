@@ -52,6 +52,12 @@ export function SharedModelMigrationPanel({
     return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
   }, [engine, refresh]);
 
+  useEffect(() => {
+    if (!candidates.some((candidate) => candidate.moving)) return;
+    const timer = window.setInterval(() => void refresh(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [candidates, refresh]);
+
   const move = useCallback(
     async (candidate: SharedModelMigrationCandidate) => {
       const key = candidateKey(candidate);
@@ -69,13 +75,22 @@ export function SharedModelMigrationPanel({
         onModelsChanged?.();
         await refresh();
       } catch (error) {
-        setNotice({ kind: 'error', text: describe(error) });
+        const message = describe(error);
+        if (message.includes('already being moved')) {
+          // The move may have started from an earlier mount of this panel.
+          // Reconcile with the daemon instead of presenting its lock as an error.
+          await refresh();
+        } else {
+          setNotice({ kind: 'error', text: message });
+        }
       } finally {
         setMoving(null);
       }
     },
     [onModelsChanged, refresh],
   );
+
+  const moveInProgress = moving !== null || candidates.some((candidate) => candidate.moving);
 
   if ((!available || candidates.length === 0) && !notice) return null;
 
@@ -100,7 +115,7 @@ export function SharedModelMigrationPanel({
         <ul className="shared-model-migration-list">
           {candidates.map((candidate) => {
             const key = candidateKey(candidate);
-            const isMoving = moving === key;
+            const isMoving = moving === key || candidate.moving;
             return (
               <li key={key}>
                 <div>
@@ -111,7 +126,7 @@ export function SharedModelMigrationPanel({
                 </div>
                 <button
                   type="button"
-                  disabled={moving !== null}
+                  disabled={moveInProgress}
                   onClick={() => setSelected(candidate)}
                 >
                   {isMoving ? 'Moving and verifying…' : 'Move to shared location'}

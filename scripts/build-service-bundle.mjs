@@ -45,6 +45,7 @@ import {
 } from './prune-runtime-files.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
+import { verifyBundleArchiveRoundTrip } from './verify-bundle-archive.mjs';
 import { verifyPeTree } from './verify-pe-tree.mjs';
 
 const exec = promisify(execFile);
@@ -217,7 +218,14 @@ async function main() {
   }
   console.log('[build-service-bundle] verified bundled browser UI');
 
-  console.log('[build-service-bundle] verifying the bundle imports cleanly');
+  // Runtime import verification happens after archive creation against a
+  // freshly extracted copy. Checking only this loose tree missed a Windows
+  // release whose archive/extraction lost entities/dist/esm/decode.js.
+  await finishBundle();
+}
+
+async function verifyBundleRuntime(root) {
+  console.log(`[build-service-bundle] verifying extracted runtime: ${root}`);
   // Importing the service module resolves the whole dep graph, including
   // native modules. We spawn a throwaway node process, let it import
   // `index.js` (which exports `startService` without *calling* it — so no
@@ -228,22 +236,22 @@ async function main() {
   // Node's ESM loader on Windows rejects bare absolute paths (`D:\…`)
   // because `D:` is parsed as the URL scheme. file:// works on every
   // platform.
-  const indexPath = join(target, 'dist', 'index.js');
+  const indexPath = join(root, 'dist', 'index.js');
   const indexUrl = pathToFileURL(indexPath).href;
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
-    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
 
   // The service imports Transformers/Kokoro lazily. Exercise that complete
   // distribution path explicitly so the dependency merge and Sharp stub are
   // proven before packaging.
   const transformersUrl = pathToFileURL(
-    join(target, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
+    join(root, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
   ).href;
   const kokoroUrl = pathToFileURL(
-    join(target, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'),
+    join(root, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'),
   ).href;
   await exec(
     process.execPath,
@@ -252,7 +260,7 @@ async function main() {
       '-e',
       `const t=await import(${JSON.stringify(transformersUrl)}); const k=await import(${JSON.stringify(kokoroUrl)}); if(typeof t.pipeline!=='function'||typeof k.KokoroTTS!=='function') throw new Error('bundled ML runtime exports missing');`,
     ],
-    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
 
   // TypeScript is deliberately external in the service bundle and is used at
@@ -260,7 +268,7 @@ async function main() {
   // after declarations have been pruned; importing the service alone does not
   // call it and would miss an over-aggressive prune.
   const typescriptUrl = pathToFileURL(
-    join(target, 'node_modules', 'typescript', 'lib', 'typescript.js'),
+    join(root, 'node_modules', 'typescript', 'lib', 'typescript.js'),
   ).href;
   await exec(
     process.execPath,
@@ -269,10 +277,13 @@ async function main() {
       '-e',
       `const ts=(await import(${JSON.stringify(typescriptUrl)})).default; const out=ts.transpileModule('const value: number = 1;', { compilerOptions: { module: ts.ModuleKind.ESNext } }); if (!out.outputText.includes('const value = 1')) throw new Error('bundled TypeScript transpile smoke failed');`,
     ],
-    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
+}
 
+async function finishBundle() {
   if (process.env.GEZEL_SKIP_BUNDLE_ARCHIVE === '1') {
+    await verifyBundleRuntime(target);
     console.log('[build-service-bundle] ✓ bundle ready (archive skipped)');
     return;
   }
@@ -286,7 +297,15 @@ async function main() {
   await verifyPeTree(target);
 
   await emitArchive(target, archivePath);
-  await emitMeta(target, archivePath, metaPath);
+  const meta = await emitMeta(target, archivePath, metaPath);
+  console.log('[build-service-bundle] round-tripping the shipped archive');
+  const roundTrip = await verifyBundleArchiveRoundTrip({
+    sourceDir: target,
+    archivePath,
+    expectedFileCount: meta.fileCount,
+    validateExtracted: verifyBundleRuntime,
+  });
+  console.log(`[build-service-bundle] verified archive round-trip (${roundTrip.fileCount} files)`);
   console.log('[build-service-bundle] ✓ bundle ready');
 }
 
@@ -312,6 +331,11 @@ async function emitArchive(src, archivePath) {
       : 'tar';
   await exec(tarBin, ['-czf', archivePath, '-C', src, '.'], {
     maxBuffer: 64 * 1024 * 1024,
+    // macOS bsdtar otherwise serializes extended attributes/resource forks as
+    // AppleDouble `._*` entries. The service does not consume them; one local
+    // round-trip produced 56k metadata files on top of 32k runtime files,
+    // invalidating fileCount and multiplying first-launch extraction work.
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
   });
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
   const sz = statSync(archivePath).size;
@@ -341,6 +365,7 @@ async function emitMeta(src, archivePath, metaPath) {
   console.log(
     `[build-service-bundle] meta: v${meta.version} sha256=${sha256.slice(0, 12)}… files=${fileCount}`,
   );
+  return meta;
 }
 
 function hashFile(path) {

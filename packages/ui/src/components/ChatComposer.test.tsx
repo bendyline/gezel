@@ -40,6 +40,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       const [draft, setDraft] = useState(initialMarkdown);
       return (
         <div>
+          <textarea className="squisq-wysiwyg-editor" aria-label="Message" value={draft} readOnly />
           <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
           <span data-testid="editor-draft">{draft}</span>
           <button
@@ -87,6 +88,33 @@ describe('ChatComposer keyboard hints', () => {
       'title',
       'Enter to send, ⌘⏎ for newline',
     );
+  });
+
+  it('focuses the editor when its focus request key changes', async () => {
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        focusRequestKey={0}
+      />,
+    );
+
+    const editor = screen.getByTestId('chat-composer').querySelector('.squisq-wysiwyg-editor');
+    expect(document.activeElement).not.toBe(editor);
+
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        focusRequestKey={1}
+      />,
+    );
+
+    await waitFor(() => expect(document.activeElement).toBe(editor));
   });
 });
 

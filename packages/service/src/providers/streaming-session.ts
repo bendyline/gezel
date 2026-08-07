@@ -26,6 +26,13 @@ export interface TurnStatsEvent {
   promptTokens: number;
   completionTokens: number;
   durationMs: number;
+  /** Time from request dispatch until the first model-produced stream fragment. */
+  ttftMs?: number;
+  /** Engine-reported prompt-evaluation throughput, excluding cache hits when available. */
+  promptTokensPerSec?: number;
+  /** Prompt tokens served from the engine's KV/prompt cache. */
+  cachedPromptTokens?: number;
+  /** Engine-reported decode throughput; wall-clock estimate only as a fallback. */
   tokensPerSec?: number;
 }
 

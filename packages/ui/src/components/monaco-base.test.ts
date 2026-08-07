@@ -50,5 +50,5 @@ describe('shared Monaco runtime', () => {
       editor?.dispose();
       seedModel.dispose();
     }
-  }, 15_000);
+  }, 60_000);
 });

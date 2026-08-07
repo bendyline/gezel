@@ -67,8 +67,8 @@ const RAM_SPILLOVER_AUTO_MAX_VRAM_BYTES = 12 * GIB;
 const UNIFIED_VRAM_RATIO = 0.75;
 
 /**
- * Last VRAM figure `detectMemoryProfile` measured on this host, or null when
- * nothing has probed yet / no discrete card exists.
+ * Last accelerator-memory figure `detectMemoryProfile` measured on this host,
+ * or null when nothing has probed yet / no GPU memory figure was published.
  *
  * The probe is async (`nvidia-smi`, `llama-server --list-devices`) while the
  * budget is read from synchronous paths — the engine-slot sizing in
@@ -79,14 +79,22 @@ const UNIFIED_VRAM_RATIO = 0.75;
  * exactly the old RAM-only behavior rather than to a wrong GPU number.
  */
 let detectedGpuVramBytes: number | null = null;
+let detectedGpuUnifiedMemory: boolean | undefined;
 
-/** Publish a measured discrete-GPU VRAM figure. Called by `detectMemoryProfile`. */
-export function setDetectedGpuVramBytes(bytes: number | null): void {
+/**
+ * Publish the measured accelerator pool. Called by `detectMemoryProfile`.
+ *
+ * `unifiedMemory` is deliberately separate from the byte count: equal-sized
+ * VRAM and RAM are common on small discrete-GPU machines, so their ratio is
+ * not enough to tell a GeForce from a genuinely shared GB10/iGPU pool.
+ */
+export function setDetectedGpuVramBytes(bytes: number | null, unifiedMemory?: boolean): void {
   detectedGpuVramBytes =
     typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? bytes : null;
+  detectedGpuUnifiedMemory = unifiedMemory;
 }
 
-/** The published VRAM figure, or null when no discrete card has been measured. */
+/** The published accelerator-memory figure, or null when none was measured. */
 export function getDetectedGpuVramBytes(): number | null {
   return detectedGpuVramBytes;
 }
@@ -170,10 +178,16 @@ export function computeCapacityBudget(input: CapacityBudgetInput = {}): Capacity
       : input.unifiedMemory === undefined
         ? detectedGpuVramBytes
         : null;
+  const measuredUnifiedMemory =
+    input.unifiedMemory !== undefined
+      ? input.unifiedMemory
+      : input.gpuVramBytes === undefined
+        ? detectedGpuUnifiedMemory
+        : undefined;
   const hasCard =
     typeof measuredVram === 'number' && Number.isFinite(measuredVram) && measuredVram > 0;
   const sharedPool = hasCard && (measuredVram as number) >= systemRamBytes * UNIFIED_VRAM_RATIO;
-  const unified = input.unifiedMemory ?? (isUnifiedMemoryHost() || sharedPool);
+  const unified = measuredUnifiedMemory ?? (isUnifiedMemoryHost() || sharedPool);
   const discrete = hasCard && !unified;
 
   const highMemory = systemRamBytes >= HIGH_MEMORY_THRESHOLD_BYTES;

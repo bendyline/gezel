@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { reuseVerifiedElectronNativeBinaries } from './electron-native-reuse.js';
+import {
+  type ElectronNativeReuseOptions,
+  reuseVerifiedElectronNativeBinaries,
+} from './electron-native-reuse.js';
 import type { VerifyOptions } from './signature.js';
 
 const roots: string[] = [];
@@ -149,6 +152,59 @@ describe('Electron native reuse', () => {
     expect(verifySignature.mock.calls[1]?.[1]).toMatchObject({
       requireNotarizedApp: true,
     });
+  });
+
+  it('requires explicit opt-in for an exactly pinned standalone macOS release', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-standalone-native-'));
+    roots.push(root);
+    const dir = join(root, 'darwin-arm64');
+    await mkdir(dir, { recursive: true });
+    const bytes = Buffer.from('signed standalone fixture');
+    await writeFile(join(dir, 'gezel-ds4-server'), bytes, { mode: 0o755 });
+    const verifySignature = vi.fn(async (_path: string, _opts: VerifyOptions) => ({
+      accepted: true,
+      result: { status: 'valid' as const, detail: 'Bendyline LLC' },
+    }));
+
+    const options: ElectronNativeReuseOptions = {
+      candidates: [root],
+      platform: 'darwin',
+      arch: 'arm64',
+      release: '9.9.9',
+      manifest: {
+        schemaVersion: 2,
+        release: '9.9.9',
+        platforms: {
+          'darwin-arm64': {
+            files: {
+              'gezel-ds4-server': {
+                sha256: createHash('sha256').update(bytes).digest('hex'),
+                sizeBytes: bytes.length,
+                signature: 'bendyline',
+              },
+            },
+            symlinks: {},
+          },
+        },
+      },
+      verifySignature,
+    };
+
+    const rejected = await reuseVerifiedElectronNativeBinaries(options);
+    expect(rejected.reused).toBe(false);
+    expect(rejected.reason).toContain('native payload is not inside a macOS app bundle');
+
+    verifySignature.mockClear();
+    const result = await reuseVerifiedElectronNativeBinaries({
+      ...options,
+      allowStandaloneMacPayload: true,
+    });
+
+    expect(result.reused).toBe(true);
+    expect(result.nativeBinDir).toBe(root);
+    expect(verifySignature).toHaveBeenCalledOnce();
+    expect(verifySignature.mock.calls[0]?.[0]).toBe(join(dir, 'gezel-ds4-server'));
+    expect(verifySignature.mock.calls[0]?.[1]).not.toHaveProperty('requireNotarizedApp');
   });
 
   it.runIf(process.platform !== 'win32')(

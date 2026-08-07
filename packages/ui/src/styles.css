@@ -1350,8 +1350,8 @@ html.embedded-chat #root {
 /* Engine telemetry carries two-column labels plus memory meters, so give it
    a little more breathing room than the compact quota popover. */
 .engine-pill-popover {
-  min-width: 22rem;
-  max-width: 30rem;
+  min-width: 33rem;
+  max-width: 45rem;
 }
 /* The pill lives in the dark titlebar, but its popover floats over the
    page body — so it has to follow the app theme, not the titlebar. In
@@ -2000,9 +2000,10 @@ html.embedded-chat #root {
   font-size: 0.75rem;
 }
 
-/* Per-item action cluster: ▲ ▼ ✕. Hidden until the row is hovered
+/* Per-item action cluster: ▲ ▼ ✕ plus the active chat's Stop key. Hidden until the row is hovered
  * so the resting list stays scannable; appears in-place on hover so
- * the row layout never reflows under the cursor. */
+ * the row layout never reflows under the cursor. Stop stays visible because
+ * ending the one running turn is the active row's primary purpose. */
 .queue-meter-panel-actions {
   position: relative;
   z-index: 2;
@@ -2017,6 +2018,9 @@ html.embedded-chat #root {
 }
 .queue-meter-panel-item:hover .queue-meter-panel-actions,
 .queue-meter-panel-actions:focus-within {
+  opacity: 1;
+}
+.queue-meter-panel-actions-active {
   opacity: 1;
 }
 .queue-meter-panel-action {
@@ -2043,6 +2047,25 @@ html.embedded-chat #root {
 .queue-meter-panel-action-cancel:hover {
   color: #d97a6c;
   background: rgba(217, 122, 108, 0.12);
+}
+.queue-meter-panel-action-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+.queue-meter-panel-action-stop:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.queue-meter-panel-action-stop:disabled {
+  opacity: 0.65;
 }
 
 .nav {
@@ -2612,6 +2635,14 @@ html.embedded-chat #root {
   padding: 0;
 }
 
+/* Settings owns two independent scroll viewports. Let them reach the frame
+   edges so wheel input over the space between them cannot scroll `.app-main`,
+   and keep their breathing room inside their own scrollbar gutters. */
+.app-main:has(> .settings-layout) {
+  overflow: hidden;
+  padding: 0;
+}
+
 /* ── Left navigation sidebar ───────────────────────────────────── */
 .app-sidebar {
   flex: 0 0 auto;
@@ -3009,6 +3040,39 @@ html.embedded-chat #root {
 }
 .project-rail-name.active + .project-actions-trigger {
   --project-action-overlay-bg: color-mix(in srgb, var(--bg) 85%, var(--accent));
+}
+
+/* Archived work stays discoverable in the full Projects screen, but below
+   the ordinary list and with a quieter register. The collapsed rail keeps a
+   divider so the grouping survives even when its heading cannot fit. */
+.project-archive-section {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.project-archive-section h3 {
+  margin: 0 0 0.35rem 0.75rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.project-archive-section.is-collapsed h3 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.project-rail-row-archived {
+  opacity: 0.68;
+}
+.project-rail-row-archived:hover,
+.project-rail-row-archived:has(.project-rail-name.active) {
+  opacity: 1;
 }
 .project-rail-row:hover > .project-rail-name.active + .project-actions-trigger,
 .project-rail-name.active + .project-actions-trigger[data-state="open"],
@@ -3536,6 +3600,62 @@ html.embedded-chat #root {
 
 :root[data-sidebar-side="right"] .app-sidebar-footer {
   justify-content: flex-start;
+}
+
+/* Settings already exposes a full-height content scrollbar against this seam.
+   When the navigation rail is also on the right, keeping its secondary track
+   painted at rest reads as a duplicate scrollbar. Preserve its gutter (and
+   therefore the layout), but reveal the track and thumb only while the rail is
+   hovered or contains keyboard focus. */
+:root[data-sidebar-side="right"] .app-body:has(> .app-main > .settings-layout) .app-sidebar-scroll {
+  scrollbar-color: transparent transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-color: transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll::-webkit-scrollbar-track,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-color: var(--border);
+}
+
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:hover
+  .app-sidebar-scroll::-webkit-scrollbar-thumb,
+:root[data-sidebar-side="right"]
+  .app-body:has(> .app-main > .settings-layout)
+  .app-sidebar:has(:focus-visible)
+  .app-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
 }
 
 /* Mirror the connected tab when the navigation rail lives on the right.
@@ -5961,7 +6081,7 @@ button.danger {
 
 /* AI bubbles fill the wrapper's full width so they stay aligned with
    their sticky context-header and don't visibly resize as tokens stream
-   in. User bubbles keep the content-hugging shape. */
+   in. */
 .msg-assistant > .msg-body,
 .msg-assistant > .msg-body-rendered,
 .msg-from-gezel > .msg-body,
@@ -6066,10 +6186,9 @@ button.danger {
 }
 
 /* Per-gezel font size adjustment. Squisq's LinearDocView hard-codes a
-   16px font-size inline on its content; override with !important (same
-   pattern as the surface override above) so a font's `scale` factor can
-   normalize visual size across typefaces. `--gezel-font-scale` is set on
-   `.msg-body-rendered` by the bubble; absent/1 → 16px (unchanged).
+   16px font-size inline on its content; override with !important so chat
+   prose stays at the quieter 15px conversation size and a font's `scale`
+   factor can normalize visual size across typefaces.
 
    The font-family override keeps the chat register consistent: plain
    `.msg-body` text is the editorial serif, but LinearDocView inlines a
@@ -6077,16 +6196,22 @@ button.danger {
    sans. `--gezel-chat-font` (set inline by the bubble when the gezel has
    a custom chat font) still wins through the fallback chain. */
 .msg-body-rendered .squisq-linear-content {
-  font-size: calc(16px * var(--gezel-font-scale, 1)) !important;
+  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
   font-family: var(--gezel-chat-font, var(--font-display)) !important;
+  line-height: 1.5 !important;
 }
 
-/* Replies sit one quiet step below Squisq's 16px document default so the
-   conversation stays proportional to the surrounding timeline chrome.
-   Keep user-authored message text at the document default above. */
-.msg-assistant > .msg-body-rendered .squisq-linear-content,
-.msg-from-gezel > .msg-body-rendered .squisq-linear-content {
-  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
+/* Squisq's page prose resets itself to 1.05rem (16.8px), bypassing the
+   chat size above. Keep prose relative to the chat container instead. */
+.msg-body-rendered .squisq-page-prose {
+  font-size: 1em;
+}
+
+/* `thinMargins` removes horizontal page padding but retains 1.5rem above
+   and below every page section. That document rhythm is too loose inside
+   a bubble; the bubble itself already supplies the needed inset. */
+.msg-body-rendered .squisq-page--thin .squisq-page-section {
+  padding-block: 0.15rem;
 }
 
 /* Chat replies are a conversation, not a centered document: Squisq's
@@ -6107,44 +6232,37 @@ button.danger {
   border-color: rgba(176, 114, 76, 0.35);
 }
 
-/* User bubbles that render markdown (image refs, mention chips) hold a
-   squisq LinearDocView, whose root declares `container: squisq-page /
+/* User bubbles hold a squisq LinearDocView so prompts get the same complete
+   Markdown treatment as replies (links, lists, code, image refs, and
+   mention chips). Its root declares `container: squisq-page /
    inline-size`. Size containment means the squisq tree contributes ZERO
    intrinsic width — inside a content-sized bubble the whole message
    collapses into a ~1ch-wide, thousands-of-px-tall pill (the empty-pill
-   incident). Give these bubbles the assistant treatment instead:
-   stretch to the timeline with the same 92% cap, so the container has
-   a definite width to resolve against. Plain-text user bubbles keep
-   their content-hugging feel. */
+   incident). Give user bubbles a narrower definite width so the container
+   remains reliable without turning every prompt into a full-row panel. */
 .msg-user:has(.msg-body-rendered) {
-  align-self: stretch;
-  max-width: 92%;
+  align-self: flex-end;
+  width: min(82%, 64rem);
+  max-width: 82%;
 }
 
 .msg-user .msg-body-rendered {
   width: 100%;
 }
 
-/* Squisq paints its own light-brown reading surface on the inner
-   `.squisq-linear` div. In
-   user bubbles that surface sits on top of the warm-tan bubble fill
-   and reads as a stark white inset — let the bubble fill show through
-   instead. The same goes for from-gezel handoff bubbles, which have
-   their own dashed handoff tint. Assistant bubbles keep the Squisq
-   surface so the rendered prose has its own paper-toned reading
-   background distinct from the chat canvas. */
-.msg-user .squisq-linear,
-.msg-from-gezel .squisq-linear {
+/* LinearDocView paints both its outer scroller and inner page. Inside a
+   chat bubble those nested canvases read as an inset rectangle—especially
+   in dark mode. Let every bubble's own fill remain the single surface. */
+.msg-body-rendered .squisq-linear,
+.msg-body-rendered .squisq-page {
   background: transparent !important;
 }
 
 .msg-assistant {
   /* Stretch (not flex-start) so the wrapper fills the timeline's cross
-     axis up to its own `max-width: 92%` cap — the bubble width then
-     stays put as text streams in instead of breathing with content,
-     and lines up with the sticky context-header above it. Plain-text
-     user bubbles stay content-sized (rendered ones stretch — see the
-     containment note above). */
+      axis up to its own `max-width: 92%` cap — the bubble width then
+      stays put as text streams in instead of breathing with content,
+      and lines up with the sticky context-header above it. */
   align-self: stretch;
   max-width: 92%;
 }
@@ -7709,9 +7827,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-layout {
   display: flex;
-  gap: 1.5rem;
+  gap: 0;
   align-items: stretch;
-  /* Fill the scroll container (`.app-main`) exactly so the nav and panel
+  /* Fill the host (`.app-main`) exactly so the nav and panel
      each scroll independently rather than the whole page scrolling as one.
      This keeps the tab list reachable when the window is too short to show
      every tab — the list gets its own scrollbar (see `.settings-nav ul`). */
@@ -7721,8 +7839,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-nav {
   /* Wide enough that the longest tab label ("Artificial Intelligence") sits
-     on one line rather than wrapping. */
-  width: 14.5rem;
+     on one line rather than wrapping. This also absorbs the old outer inset,
+     keeping the panel content aligned while the nav scrollbar reaches its
+     full vertical extent. */
+  width: 16rem;
   flex: 0 0 auto;
   /* Column so the "Settings" heading stays put and only the tab list
      (the `ul` below) scrolls when it overflows. */
@@ -7733,16 +7853,17 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .settings-nav h2 {
   margin: 0 0 0.75rem;
+  padding: 1rem 1.25rem 0;
   flex: 0 0 auto;
 }
 
 .settings-nav ul {
   list-style: none;
   margin: 0;
-  /* Small horizontal gutter so an active item's selection bubble (border +
-     rounded corners) isn't drawn flush against the list edge — on the right
-     it would otherwise abut the overflow scrollbar and read as cropped. */
-  padding: 0 0.35rem;
+  /* This is the scroll viewport, so its inset belongs here rather than on the
+     outer app canvas. The scrollbar can then run to the pane edge while the
+     active item's selection bubble keeps comfortable clearance inside it. */
+  padding: 0 0.75rem 1rem 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -7750,6 +7871,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-width: thin;
 }
 
@@ -7880,12 +8002,13 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   /* Fill the available width on wide windows rather than stopping at a fixed
      column (long prose is kept readable via the `p` cap below). */
   max-width: none;
-  /* The layout fills the scroll container, so the content pane scrolls
-     itself instead of the whole page. Bottom padding keeps the last
-     section clear of the frame edge when scrolled to the end. */
+  /* The layout fills the host, so the content pane scrolls itself instead of
+     the whole page. Insets live on this scrolling box, leaving the scrollbar
+     flush with the pane edge and keeping the final section clear of it. */
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 1rem;
+  overscroll-behavior-y: contain;
+  padding: 1rem 1.25rem;
 }
 
 /* Keep long-form descriptions at a comfortable reading measure even though the
@@ -7935,6 +8058,51 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .settings-panel a,
 .settings-panel .home-link {
   font-family: var(--font-ui);
+}
+
+/* llama.cpp's low-level launch controls stay out of the way until explicitly
+   requested. Native <details> supplies the disclosure semantics and keyboard
+   behavior; the custom marker matches the Settings navigation chevrons. */
+.llama-advanced-settings {
+  margin-bottom: 2rem;
+}
+
+.llama-advanced-summary {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem 0.25rem 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.llama-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.llama-advanced-summary h4 {
+  margin: 0;
+}
+
+.llama-advanced-caret {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.llama-advanced-settings[open] .llama-advanced-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .llama-advanced-caret {
+    transition: none;
+  }
 }
 
 /* Machine health is a device-level policy: the mode is a prominent binary
@@ -13480,8 +13648,23 @@ button.bench-step-foot:disabled {
 .thinking-tool-detail-body {
   position: relative;
   margin: 0.25rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
-.thinking-tool-detail-body pre {
+.thinking-tool-detail-section {
+  min-width: 0;
+}
+.thinking-tool-detail-label {
+  margin: 0 0 0.2rem 0.1rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.thinking-tool-detail-section pre {
   margin: 0;
   padding: 0.45rem 0.6rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -13491,10 +13674,13 @@ button.bench-step-foot:disabled {
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
   max-height: 24rem;
-  overflow-y: auto;
+  overflow: auto;
+}
+.thinking-tool-detail-section pre:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .thinking-tool-detail-copy {
   position: absolute;
@@ -14025,13 +14211,8 @@ button.bench-step-foot:disabled {
   min-height: 0;
 }
 
-/* Compact / narrow form factor (VS Code chat panel, ≤ 500 px sidebars,
-   future mobile shells). Drop the 22 rem side column entirely so the
-   chat surface gets the full pane width and no empty rail wraps below
-   the composer. ChatReferences only renders this branch with no
-   <aside> child, so flex-column is all we need — `.chat-rail-main`
-   stretches to fill its parent the same way the grid `1fr` row would
-   have. */
+/* Compact / narrow form factor. The split rail becomes a single-pane tab
+   surface so chat never competes with context for width or height. */
 .chat-rail-body-compact {
   display: flex;
   flex-direction: column;
@@ -14042,6 +14223,87 @@ button.bench-step-foot:disabled {
 .chat-rail-body-compact > .chat-rail-main {
   flex: 1;
   min-height: 0;
+}
+
+.chat-rail-compact-root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-rail-compact-tabs.gz-tabs-list {
+  flex: 0 0 auto;
+  gap: 0;
+  padding-inline: 0.35rem;
+  background: color-mix(in srgb, var(--panel) 82%, var(--surface));
+}
+
+.chat-rail-compact-tabs .chat-rail-compact-tab {
+  flex: 1 1 0;
+  min-width: max-content;
+  padding: 0.45rem 0.7rem;
+  text-align: center;
+}
+
+.chat-rail-compact-panel.gz-tabs-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="active"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+.chat-rail-compact-chat.gz-tabs-content {
+  background: transparent;
+}
+
+.chat-rail-compact-panel > .chat-rail-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail-compact-picker-row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-rail-compact-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: min(24rem, 100%);
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.chat-rail-compact-picker > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* When a reference is active, the component renders a draggable
@@ -15779,6 +16041,58 @@ button.timeline-session-divider-continuing::before {
   min-height: 20rem;
 }
 
+.chat-rail-audio-preview {
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-rail-audio-preview audio {
+  width: min(100%, 28rem);
+}
+
+.chat-rail-machine-file {
+  min-height: 20rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 1.5rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.chat-rail-machine-file-icon {
+  color: var(--accent);
+}
+
+.chat-rail-machine-file-label {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.chat-rail-machine-file-path {
+  max-width: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.chat-rail-machine-file-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.chat-rail-machine-file-actions button {
+  border-radius: var(--radius-md);
+}
+
 .chat-rail-viewer-markdown {
   color: var(--text);
   max-width: 100%;
@@ -15799,32 +16113,6 @@ button.timeline-session-divider-continuing::before {
 .chat-rail-viewer-markdown h4 {
   overflow-wrap: break-word;
   word-break: break-word;
-}
-
-/* Narrow layout: stack the side panel under the chat. */
-@media (max-width: 1100px) {
-  .chat-rail-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  .chat-rail-side {
-    max-height: 20rem;
-  }
-}
-
-/* A short, narrow window cannot spare enough vertical room for the
-   accessory pane below the conversation. Keep the timeline and composer
-   usable by suppressing the pane (and its split grip) at that size. */
-@media (max-width: 1100px) and (max-height: 720px) {
-  .chat-rail-body {
-    grid-template-rows: minmax(0, 1fr);
-    gap: 0;
-  }
-
-  .chat-rail-grip,
-  .chat-rail-side {
-    display: none;
-  }
 }
 
 /* ── Ollama settings ── */
@@ -17160,6 +17448,73 @@ a.license-button:hover {
   background: #d85555;
 }
 
+/* ── macOS uninstall ────────────────────────────────────────────────
+   One authenticated system action with explicit, independent retention
+   choices. Native checkboxes stay native; the surrounding rows carry the
+   consequence and filesystem scope so "purge" never hides what disappears. */
+.gz-uninstall-dialog {
+  max-width: 44rem;
+}
+
+.gz-uninstall-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-uninstall-choices legend {
+  margin-bottom: 0.15rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gz-uninstall-choices label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-uninstall-choices input {
+  margin-top: 0.18rem;
+}
+
+.gz-uninstall-choices label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-uninstall-choices small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.gz-uninstall-choices code {
+  font-size: 0.95em;
+}
+
+.gz-uninstall-preserve,
+.gz-uninstall-auth-note,
+.gz-uninstall-warning {
+  margin: 0.1rem 0 0;
+}
+
+.gz-uninstall-warning {
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
 /* ── Select ── */
 
 .gz-select-trigger {
@@ -17383,6 +17738,57 @@ a.license-button:hover {
 .entity-tabs-row.project-tabs-row {
   padding-top: 2px;
   padding-left: 4px;
+}
+
+/* The open project keeps archive/restore one click away. Archived is a
+   read-only status annotation (capsule); the adjacent action is a small key. */
+.project-archived-badge {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.08rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.project-archive-header-action {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.8rem;
+  margin: 0 0.25rem 1px 0;
+  padding: 0.24rem 0.5rem;
+  border: 1px solid var(--key-border, var(--border));
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--key-bg, var(--surface));
+  box-shadow: var(--key-shadow, none);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.project-archive-header-action:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--key-bg-hover, var(--bg-subtle));
+}
+.project-archive-header-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.project-archive-header-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.two-col.is-compact .project-archive-header-action span {
+  display: none;
 }
 
 /* ---------- Output pane (persistent workspace preview) ---------- */

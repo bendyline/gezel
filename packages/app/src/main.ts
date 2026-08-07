@@ -45,6 +45,7 @@ import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
+import { parseMacUninstallSelection, scheduleMacUninstall } from './uninstaller/macos.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
 import {
   type PublishedAppRelease,
@@ -99,6 +100,10 @@ let isQuitting = false;
 // app (removing the tray icon) instead of hiding to the tray. Off by default
 // (close-to-tray). Mirrors the `quitOnClose` preference; synced from config.
 let quitOnClose = false;
+/** Prevent duplicate administrator prompts while an uninstall is being scheduled. */
+let macUninstallInFlight = false;
+/** Native-menu request held while the branded startup splash is still active. */
+let macUninstallDialogRequested = false;
 // Held so the tray's "Check for updates" item can re-trigger a check.
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
 /** The exact app-tagged release selected for the current update check. */
@@ -142,12 +147,23 @@ const packagedSmokeExpectedVersion =
 // pick it up while the first window is being created — anything we
 // defer to ready will miss the initial taskbar/dock registration.
 //
-// `app.setName` overrides the default derived from package.json's
-// "name" field (`@bendyline/gezel-app`), which isn't a valid Linux
-// app_id / Wayland WM_CLASS and confuses GNOME's dock-icon lookup.
-// productName in electron-builder.yml only takes effect inside
-// packaged builds — dev runs need this explicit setName to match.
+// Keep the runtime name explicit as well as declaring `productName` in
+// package.json. Falling back to the scoped npm `name`
+// (`@bendyline/gezel-app`) produces the unpolished `bendyline-gezel-app`
+// label in Linux shells and can also change Electron's user-data identity.
 app.setName('Gezel');
+
+// A Linux desktop shell associates a live window with its .desktop entry by
+// app_id (Wayland) or WM_CLASS (X11), not by the human-readable product name.
+// Keep those identifiers aligned with package.json `desktopName` and
+// electron-builder's `linux.syncDesktopName`. Dev gets a separate id so its
+// launcher can coexist with an installed Gezel package without either dock
+// entry stealing the other's windows.
+const linuxDesktopId = app.isPackaged ? 'com.bendyline.gezel' : 'com.bendyline.gezel.dev';
+if (process.platform === 'linux') {
+  app.setDesktopName(`${linuxDesktopId}.desktop`);
+  app.commandLine.appendSwitch('class', linuxDesktopId);
+}
 
 // We were handed the daemon entrypoint but booted as an application, which
 // means whoever spawned us forgot `ELECTRON_RUN_AS_NODE=1` (see
@@ -178,19 +194,6 @@ if (packagedSmoke) {
 // running process. The id must equal the `appId` in electron-builder.yml.
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.bendyline.gezel');
-}
-
-// Linux: pin the X11 WM_CLASS / Wayland app_id to `Gezel`. GNOME
-// matches dock entries to a `.desktop` file via this string; without
-// the switch, Chromium defaults to the executable basename (`electron`
-// in dev, `gezel` once installed via deb/rpm) which doesn't line up
-// with the `StartupWMClass=Gezel` field electron-builder writes into
-// the packaged `.desktop` file. For dev runs you additionally need a
-// `gezel-dev.desktop` in ~/.local/share/applications/ pointing at the
-// in-tree assets/icon.png — install it via
-// `pnpm --filter @bendyline/gezel-app run install-dev-desktop`.
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('class', 'Gezel');
 }
 
 // E2E/release-smoke isolation: redirect Chromium's userData dir into the
@@ -697,6 +700,7 @@ async function navigateToApp(): Promise<void> {
   await loadAppUrl(mainWindow, `${connection.baseUrl}/`);
   splashShowing = false;
   flushOpenedModelBundles();
+  flushMacUninstallDialogRequest();
 }
 
 /**
@@ -916,6 +920,40 @@ ipcMain.handle('gezel:autostart:uninstall', async () => {
   } catch (err) {
     return { ok: false as const, error: (err as Error).message };
   }
+});
+
+// macOS PKG installs own a machine LaunchDaemon, service account, and shared
+// storage, so moving the .app to Trash is not a complete uninstall. The
+// renderer may choose only documented data scopes; this boundary resolves the
+// signed bundled script and performs the administrator-authenticated handoff.
+ipcMain.handle('gezel:uninstall:start', async (_event, payload: unknown) => {
+  if (macUninstallInFlight) {
+    return { ok: false as const, error: 'Gezel is already preparing to uninstall.' };
+  }
+  const selection = parseMacUninstallSelection(payload);
+  if (!selection) return { ok: false as const, error: 'Invalid uninstall choices.' };
+
+  macUninstallInFlight = true;
+  const result = await scheduleMacUninstall({
+    resourcesPath: process.resourcesPath,
+    appPid: process.pid,
+    userUid: process.getuid?.() ?? 0,
+    selection,
+    isPackaged: app.isPackaged,
+  });
+  if (!result.ok) {
+    macUninstallInFlight = false;
+    return result;
+  }
+
+  // The privileged script staged a detached, root-owned copy and is waiting
+  // for this PID to exit. A normal app.quit() lets QuitCoordinator stop the
+  // per-user daemon before that copy removes any selected user data.
+  setTimeout(() => {
+    isQuitting = true;
+    app.quit();
+  }, 200);
+  return result;
 });
 
 // Folders externalization: after a successful move the renderer offers
@@ -1341,6 +1379,23 @@ ipcMain.handle(
 function navigateTo(view: string): void {
   const win = mainWindow ?? BrowserWindow.getAllWindows()[0];
   if (win) win.webContents.send('gezel:navigate', view);
+}
+
+async function showMacUninstallDialog(): Promise<void> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  macUninstallDialogRequested = true;
+  if (!mainWindow || mainWindow.isDestroyed()) await createWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.show();
+  mainWindow.focus();
+  if (!connection || splashShowing) return;
+  flushMacUninstallDialogRequest();
+}
+
+function flushMacUninstallDialogRequest(): void {
+  if (!macUninstallDialogRequested || !mainWindow || mainWindow.isDestroyed()) return;
+  macUninstallDialogRequested = false;
+  mainWindow.webContents.send('gezel:show-uninstall');
 }
 
 /**
@@ -1893,6 +1948,19 @@ function installMenu(): void {
           : []),
       ],
     },
+    ...(isMac && app.isPackaged
+      ? ([
+          {
+            label: 'Help',
+            submenu: [
+              {
+                label: 'Uninstall Gezel…',
+                click: () => void showMacUninstallDialog(),
+              },
+            ],
+          },
+        ] as Electron.MenuItemConstructorOptions[])
+      : []),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

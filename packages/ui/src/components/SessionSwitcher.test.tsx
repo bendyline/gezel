@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import * as primitivesMock from '../test-utils/primitivesMock.js';
 
@@ -14,6 +14,10 @@ function mockSessions(sessions: unknown[]) {
 }
 
 describe('SessionSwitcher', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('scopes the empty state to the gezel when a name is provided', async () => {
     mockSessions([]);
     render(
@@ -114,5 +118,29 @@ describe('SessionSwitcher', () => {
 
     await waitFor(() => expect(onSessionIdChange).toHaveBeenCalledWith('ordinary'));
     expect(screen.queryByText(/Night-shift oversight/)).not.toBeInTheDocument();
+  });
+
+  it('requests composer focus after creating and selecting a fresh thread', async () => {
+    mockSessions([]);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 's-new' } as never);
+    const onSessionIdChange = vi.fn();
+    const onNewSessionCreated = vi.fn();
+
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={onSessionIdChange}
+        onNewSessionCreated={onNewSessionCreated}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+
+    await waitFor(() => {
+      expect(onSessionIdChange).toHaveBeenCalledWith('s-new');
+      expect(onNewSessionCreated).toHaveBeenCalledWith('s-new');
+    });
   });
 });

@@ -19,20 +19,143 @@ import {
   isExistingSourceEditTurn,
   isGateSurgicalEditTurn,
   isImmediateFileWriteTurn,
+  isLlamaCppGrammarParseError,
   isRecoverableImmediateFileWriteError,
   isScenarioFileRepairTurn,
   mergeSystemMessagesIntoFirst,
+  normalizeJsonSchemaForLlamaCpp,
   normalizeMalformedStructuredToolCalls,
   runNodeScriptWrongTargetError,
   scenarioRepairTextAbortThreshold,
   shouldPreferScriptedDataFileWork,
   shouldStartScriptedDataFileWork,
+  stripJsonSchemaPatternsForLlamaCpp,
   tryParseContextOverflow,
   tryParseStrictAlternationTemplateError,
   tryParseSystemMessageOrderingError,
   tryParseToolCallParseError,
   tryRepairMalformedWriteToolArguments,
 } from './provider.js';
+
+describe('llama.cpp JSON Schema compatibility', () => {
+  it('normalizes RegExp.source slash escapes in nested URI patterns without mutating the source', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        source: {
+          anyOf: [
+            {
+              type: 'object',
+              properties: {
+                uri: {
+                  type: 'string',
+                  pattern: '^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$',
+                },
+              },
+            },
+          ],
+        },
+        label: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    };
+
+    const normalized = normalizeJsonSchemaForLlamaCpp(schema) as typeof schema;
+
+    expect(normalized).not.toBe(schema);
+    expect(normalized.properties.source.anyOf[0]!.properties.uri.pattern).toBe(
+      '^docblocks://artifacts/[A-Za-z0-9][A-Za-z0-9._:-]*$',
+    );
+    expect(normalized.properties.label).toBe(schema.properties.label);
+    expect(schema.properties.source.anyOf[0]!.properties.uri.pattern).toBe(
+      '^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$',
+    );
+  });
+
+  it('normalizes external tool schemas in the chat-completions request body', async () => {
+    let capturedPattern: string | undefined;
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        tools?: Array<{
+          function: { parameters?: { properties?: { uri?: { pattern?: string } } } };
+        }>;
+      };
+      capturedPattern = body.tools?.[0]?.function.parameters?.properties?.uri?.pattern;
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'ok' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [
+        {
+          name: 'read_artifact',
+          parameters: {
+            type: 'object',
+            properties: {
+              uri: { type: 'string', pattern: '^scheme:\\/\\/artifacts\\/[A-Za-z0-9]+$' },
+            },
+          },
+        },
+      ],
+    });
+
+    await expect(session.sendAndWait('read it')).resolves.toBe('ok');
+    expect(capturedPattern).toBe('^scheme://artifacts/[A-Za-z0-9]+$');
+  });
+
+  it('retries a rejected tool grammar once without pattern constraints', async () => {
+    const bodies: Array<{
+      tools?: Array<{
+        function: { parameters?: { properties?: { uri?: { pattern?: string } } } };
+      }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'recovered' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [
+        {
+          name: 'read_artifact',
+          parameters: {
+            type: 'object',
+            properties: {
+              uri: { type: 'string', pattern: '^scheme:\\/\\/artifacts\\/[A-Za-z0-9]+$' },
+            },
+          },
+        },
+      ],
+    });
+
+    await expect(session.sendAndWait('read it')).resolves.toBe('recovered');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.tools?.[0]?.function.parameters?.properties?.uri?.pattern).toBe(
+      '^scheme://artifacts/[A-Za-z0-9]+$',
+    );
+    expect(bodies[1]?.tools?.[0]?.function.parameters?.properties?.uri?.pattern).toBeUndefined();
+    expect(isLlamaCppGrammarParseError('failed to parse grammar')).toBe(true);
+    expect(stripJsonSchemaPatternsForLlamaCpp({ pattern: '^x$', type: 'string' })).toEqual({
+      type: 'string',
+    });
+  });
+});
 
 describe('constrained tool guards', () => {
   it('gives models that ignore no-think mode a bounded private-reasoning allowance', () => {
@@ -473,6 +596,11 @@ describe('LlamaCppProvider constructor', () => {
         {
           choices: [{ index: 0, finish_reason: 'stop' }],
           usage: { prompt_tokens: 42, completion_tokens: 7 },
+          timings: {
+            predicted_per_second: 63.25,
+            prompt_per_second: 635.5,
+            cache_n: 12,
+          },
         },
         '[DONE]',
       ]);
@@ -488,6 +616,9 @@ describe('LlamaCppProvider constructor', () => {
           promptTokens: number;
           completionTokens: number;
           durationMs: number;
+          ttftMs?: number;
+          promptTokensPerSec?: number;
+          cachedPromptTokens?: number;
           tokensPerSec?: number;
         }) => void,
       ) => () => void;
@@ -497,6 +628,9 @@ describe('LlamaCppProvider constructor', () => {
       provider: string;
       promptTokens: number;
       completionTokens: number;
+      ttftMs?: number;
+      promptTokensPerSec?: number;
+      cachedPromptTokens?: number;
       tokensPerSec?: number;
     }> = [];
     session.onTurnStats((ev) =>
@@ -504,6 +638,13 @@ describe('LlamaCppProvider constructor', () => {
         provider: ev.provider,
         promptTokens: ev.promptTokens,
         completionTokens: ev.completionTokens,
+        ...(ev.ttftMs !== undefined ? { ttftMs: ev.ttftMs } : {}),
+        ...(ev.promptTokensPerSec !== undefined
+          ? { promptTokensPerSec: ev.promptTokensPerSec }
+          : {}),
+        ...(ev.cachedPromptTokens !== undefined
+          ? { cachedPromptTokens: ev.cachedPromptTokens }
+          : {}),
         ...(ev.tokensPerSec !== undefined ? { tokensPerSec: ev.tokensPerSec } : {}),
       }),
     );
@@ -512,9 +653,10 @@ describe('LlamaCppProvider constructor', () => {
     expect(stats[0]?.provider).toBe('llama-cpp');
     expect(stats[0]?.promptTokens).toBe(42);
     expect(stats[0]?.completionTokens).toBe(7);
-    // tokensPerSec only defined when there's non-zero generation
-    // time AND non-zero output; both hold here.
-    expect(stats[0]?.tokensPerSec).toBeGreaterThanOrEqual(0);
+    expect(stats[0]?.tokensPerSec).toBe(63.25);
+    expect(stats[0]?.promptTokensPerSec).toBe(635.5);
+    expect(stats[0]?.cachedPromptTokens).toBe(12);
+    expect(stats[0]?.ttftMs).toBeGreaterThanOrEqual(0);
   });
 
   it('emits engine_phase prefill then generating across a single turn', async () => {

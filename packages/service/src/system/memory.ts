@@ -109,25 +109,29 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   // driver overhead. Same budget rule for NVIDIA and non-NVIDIA cards.
   // `computeCapacityBudget` owns the same 5%, so read both from it rather
   // than keeping a second copy of the constant here.
-  const gpuBudget = (vram: number) => {
-    const budget = computeCapacityBudget({ systemRamBytes: totalRam, gpuVramBytes: vram });
+  const gpuBudget = (vram: number, unifiedMemory: boolean) => {
+    const budget = computeCapacityBudget({
+      systemRamBytes: totalRam,
+      gpuVramBytes: vram,
+      unifiedMemory,
+    });
     return { usableBytes: budget.fastBytes, budgetBytes: budget.budgetBytes };
   };
 
-  const nvidiaVram = await probeNvidiaVram();
-  if (nvidiaVram !== null) {
-    setDetectedGpuVramBytes(nvidiaVram);
-    const unified = nvidiaVram >= totalRam * 0.75;
+  const nvidia = await probeNvidiaMemory();
+  if (nvidia !== null) {
+    const unified = nvidia.memoryKind === 'unified';
+    setDetectedGpuVramBytes(nvidia.vramBytes, unified);
     return {
       platform: plat,
       totalRamBytes: totalRam,
-      gpuVramBytes: nvidiaVram,
+      gpuVramBytes: nvidia.vramBytes,
       // GB10 / DGX Spark reports nearly the whole unified pool through CUDA.
       // It is shared memory, but it remains a high-performance accelerator and
       // must not be routed to the consumer-iGPU small-model policy.
-      gpuMemoryKind: unified ? 'unified' : 'discrete',
+      gpuMemoryKind: nvidia.memoryKind,
       source: 'gpu-nvidia',
-      ...gpuBudget(nvidiaVram),
+      ...gpuBudget(nvidia.vramBytes, unified),
       gpuVendor: 'nvidia',
     };
   }
@@ -143,7 +147,10 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
     // The ambient capacity broker accepts only a VRAM byte count. Publishing
     // an integrated adapter's shared allocation there would add it to RAM a
     // second time, so publish null for that host class.
-    setDetectedGpuVramBytes(profile.gpuMemoryKind === 'integrated' ? null : gpu.vramBytes);
+    setDetectedGpuVramBytes(
+      profile.gpuMemoryKind === 'integrated' ? null : gpu.vramBytes,
+      profile.gpuMemoryKind === 'integrated' || profile.gpuMemoryKind === 'unified',
+    );
     // Vendor comes from the device name in the SAME probe (e.g. "AMD Radeon
     // …" / "Intel Arc …"), so the label always matches the card we sized —
     // never "AMD" for an Intel GPU. Undefined for unrecognized names → the
@@ -184,12 +191,18 @@ export function memoryProfileForLlamaGpu(
 ): MemoryProfile {
   const ratioLooksUnified = gpu.vramBytes >= totalRamBytes * 0.75;
   const gpuMemoryKind: GpuMemoryKind =
-    gpu.memoryKind === 'integrated' ? 'integrated' : ratioLooksUnified ? 'unified' : gpu.memoryKind;
+    gpu.memoryKind === 'integrated'
+      ? 'integrated'
+      : gpu.memoryKind === 'discrete'
+        ? 'discrete'
+        : ratioLooksUnified
+          ? 'unified'
+          : 'unknown';
   const shared = gpuMemoryKind === 'integrated' || gpuMemoryKind === 'unified';
   const budget = computeCapacityBudget({
     systemRamBytes: totalRamBytes,
     gpuVramBytes: gpu.vramBytes,
-    ...(shared ? { unifiedMemory: true } : {}),
+    unifiedMemory: shared,
   });
   return {
     platform,
@@ -280,7 +293,7 @@ export function sampleMachineMemoryUsage(
   const unified =
     profile.source === 'darwin-unified' ||
     profile.source === 'gpu-integrated' ||
-    (profile.gpuVramBytes !== null && profile.gpuVramBytes >= totalRamBytes * 0.75);
+    profile.gpuMemoryKind === 'unified';
   const mainMemory =
     opts.forceMainMemory === true || profile.source === 'system-ram-fallback' || unified;
   const engineBytes = finiteNonNegative(opts.engineCommittedBytes);
@@ -483,26 +496,51 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-async function probeNvidiaVram(): Promise<number | null> {
+export interface NvidiaMemoryProbe {
+  vramBytes: number;
+  memoryKind: 'discrete' | 'unified';
+  deviceNames: string[];
+}
+
+/** Parse the stable `name,memory.total` CSV emitted by nvidia-smi. */
+export function parseNvidiaMemoryProbe(stdout: string): NvidiaMemoryProbe | null {
+  const devices: Array<{ name: string; memoryMiB: number }> = [];
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    // GPU names can theoretically contain commas. Split on the final field,
+    // whose nounits form is always an integer MiB value.
+    const match = /^(.*),\s*(\d+)\s*$/.exec(rawLine.trim());
+    if (!match) continue;
+    const name = match[1]?.trim() ?? '';
+    const memoryMiB = Number.parseInt(match[2] ?? '', 10);
+    if (!name || !Number.isFinite(memoryMiB) || memoryMiB <= 0) continue;
+    devices.push({ name, memoryMiB });
+  }
+  if (devices.length === 0) return null;
+  const unified = devices.every((device) => isKnownUnifiedNvidiaDevice(device.name));
+  return {
+    vramBytes: devices.reduce((sum, device) => sum + device.memoryMiB, 0) * 1024 * 1024,
+    memoryKind: unified ? 'unified' : 'discrete',
+    deviceNames: devices.map((device) => device.name),
+  };
+}
+
+function isKnownUnifiedNvidiaDevice(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return /\bgb10\b/.test(normalized) || normalized.includes('dgx spark');
+}
+
+async function probeNvidiaMemory(): Promise<NvidiaMemoryProbe | null> {
   try {
     const { stdout } = await exec(
       'nvidia-smi',
-      ['--query-gpu=memory.total', '--format=csv,noheader,nounits'],
+      ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
       // DETACHED_PROCESS: nvidia-smi is console-subsystem, and the machine
       // service's restricted SID cannot allocate a console. Without this the
       // probe throws, VRAM reads as unknown, and an NVIDIA box silently plans
       // capacity as `system-ram-fallback`.
       { timeout: 2000, ...windowsDetachedSpawnOptions() },
     );
-    // `nvidia-smi` reports MiB per GPU, one per line. Sum across GPUs —
-    // Ollama can split a model across GPUs when wired up correctly.
-    let total = 0;
-    for (const line of stdout.split(/\r?\n/)) {
-      const mib = Number.parseInt(line.trim(), 10);
-      if (Number.isFinite(mib) && mib > 0) total += mib;
-    }
-    if (total === 0) return null;
-    return total * 1024 * 1024;
+    return parseNvidiaMemoryProbe(stdout);
   } catch {
     return null;
   }

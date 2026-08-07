@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isGitInstalled, runGit } from '../git/git.js';
 import {
   buildTokenIndex,
   discoverBinCommands,
@@ -195,6 +196,21 @@ describe('discoverFiles', () => {
     expect(paths.some((p) => p.startsWith('node_modules/'))).toBe(false);
     expect(paths.some((p) => p.startsWith('.git/'))).toBe(false);
     expect(paths.some((p) => p.startsWith('dist/'))).toBe(false);
+  });
+
+  it('uses Git ignore rules to prune generated trees before walking them', async () => {
+    if (!(await isGitInstalled())) return;
+    await runGit(['init', '-q'], { cwd: root });
+    await mkdir(join(root, 'src'), { recursive: true });
+    await mkdir(join(root, 'generated', 'nested'), { recursive: true });
+    await writeFile(join(root, '.gitignore'), 'generated/\n');
+    await writeFile(join(root, 'src', 'visible.ts'), 'export const visible = true;\n');
+    await writeFile(join(root, 'generated', 'nested', 'large.js'), 'ignored');
+
+    const paths = (await discoverFiles(root)).map((file) => file.path);
+    expect(paths).toContain('.gitignore');
+    expect(paths).toContain('src/visible.ts');
+    expect(paths.some((path) => path.startsWith('generated/'))).toBe(false);
   });
 });
 

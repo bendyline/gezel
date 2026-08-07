@@ -90,15 +90,44 @@ export interface GgufSummary {
   /** `<arch>.attention.head_count` — query heads. */
   headCount?: number;
   /**
-   * `<arch>.attention.head_count_kv` — KV heads (GQA). Some archs store a
-   * per-layer array here; the scalar reader returns undefined for those and
-   * the KV estimate degrades to unavailable rather than guessing.
+   * `<arch>.attention.head_count_kv` — KV heads (GQA). Archs that store a
+   * per-layer array here (Gemma 4) yield the array MEAN, possibly
+   * fractional — the KV estimate multiplies by `block_count`, so the mean
+   * keeps the aggregate exact. See readUintScalarOrArrayDetail for why
+   * "degrade to unavailable" was the wrong policy.
    */
   headCountKv?: number;
+  /**
+   * The raw per-layer `head_count_kv` array when the arch stores one
+   * (Gemma 4) — index-aligned with `slidingWindowPattern`, which is what
+   * makes the windowed-KV estimate exact: Gemma 4's global layers carry
+   * DIFFERENT head counts than its SWA layers (31b: 4 vs 16), so a mean
+   * cannot price the two cache shapes. Absent for scalar-headed archs.
+   */
+  headCountKvPerLayer?: number[];
   /** `<arch>.attention.key_length` — per-head K dim when it differs from embd/heads. */
   keyLength?: number;
   /** `<arch>.attention.value_length` — per-head V dim when it differs from embd/heads. */
   valueLength?: number;
+  /**
+   * `<arch>.attention.sliding_window` — SWA window size in tokens.
+   * `> 0` marks the model as sliding-window-attention; layers listed
+   * `true` in `slidingWindowPattern` cache only ~this many tokens under
+   * the default (windowed) KV cache.
+   */
+  slidingWindow?: number;
+  /**
+   * `<arch>.attention.sliding_window_pattern` — one flag per layer,
+   * `true` = SWA (window-capped cache), `false` = global attention
+   * (full-context cache). Gemma 4 ships 5:1. Input to
+   * `estimateWindowedKvLinearization`; absent on non-SWA archs and on
+   * GGUFs that predate the key.
+   */
+  slidingWindowPattern?: boolean[];
+  /** `<arch>.attention.key_length_swa` — per-head K dim on SWA layers when it differs (Gemma 4: 256 vs 512). */
+  keyLengthSwa?: number;
+  /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
+  valueLengthSwa?: number;
   /**
    * `<arch>.nextn_predict_layers` — number of multi-token-prediction
    * (MTP / "nextn") layers. `> 0` means the GGUF carries an MTP head,
@@ -138,13 +167,25 @@ export interface GgufSummary {
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
   bytesRead: number;
+  /** Physical read(2) calls made by the buffered reader. A large tokenizer
+   *  vocabulary should cost tens of reads, not one syscall per token. */
+  readOperations: number;
 }
 
-// Small streaming reader over a file descriptor. GGUF metadata size
-// depends on the model but is typically <1 MB; we pre-fetch in chunks.
+// Small buffered reader over a file descriptor. Tokenizer vocabularies can
+// contain hundreds of thousands of strings. Reading each 8-byte length with a
+// separate readSync pinned Electron's main thread for minutes when Settings
+// previewed context sizing. One bounded read-ahead window turns that syscall
+// storm into sequential I/O, while skip() avoids reading ignored payloads.
+const READ_AHEAD_BYTES = 256 * 1024;
+
 class Reader {
   private pos = 0;
   private bytesRead = 0;
+  private readOperations = 0;
+  private readonly readAhead = Buffer.allocUnsafe(READ_AHEAD_BYTES);
+  private readAheadStart = -1;
+  private readAheadEnd = -1;
   private fd: number;
   private fileSize: number;
 
@@ -154,18 +195,60 @@ class Reader {
   }
 
   bytes(n: number): Buffer {
-    const buf = Buffer.alloc(n);
+    this.assertRange(n);
+    if (n === 0) return Buffer.alloc(0);
+
+    if (
+      n <= this.readAhead.length &&
+      this.pos >= this.readAheadStart &&
+      this.pos + n <= this.readAheadEnd
+    ) {
+      const offset = this.pos - this.readAheadStart;
+      this.pos += n;
+      return this.readAhead.subarray(offset, offset + n);
+    }
+
+    if (n <= this.readAhead.length) {
+      const available = Math.min(this.readAhead.length, this.fileSize - this.pos);
+      const got = readSync(this.fd, this.readAhead, 0, available, this.pos);
+      this.readOperations++;
+      this.bytesRead += got;
+      if (got < n) throw new Error(`unexpected EOF at offset ${this.pos + got}`);
+      this.readAheadStart = this.pos;
+      this.readAheadEnd = this.pos + got;
+      this.pos += n;
+      return this.readAhead.subarray(0, n);
+    }
+
+    // Large values we intentionally retain (notably chat templates) bypass
+    // the read-ahead window so they don't require an equally large permanent
+    // buffer. Ignored strings take skipString() and never land here.
+    const buf = Buffer.allocUnsafe(n);
     let total = 0;
     while (total < n) {
       const got = readSync(this.fd, buf, total, n - total, this.pos + total);
+      this.readOperations++;
       if (got === 0) {
         throw new Error(`unexpected EOF at offset ${this.pos + total}`);
       }
       total += got;
     }
     this.pos += n;
-    this.bytesRead += n;
+    this.bytesRead += total;
+    this.readAheadStart = -1;
+    this.readAheadEnd = -1;
     return buf;
+  }
+
+  skip(n: number): void {
+    this.assertRange(n);
+    this.pos += n;
+  }
+
+  private assertRange(n: number): void {
+    if (!Number.isSafeInteger(n) || n < 0 || this.pos + n > this.fileSize) {
+      throw new Error(`invalid GGUF read length ${n} at offset ${this.pos}`);
+    }
   }
 
   u8(): number {
@@ -213,6 +296,14 @@ class Reader {
     return this.bytes(len).toString('utf8');
   }
 
+  skipString(): void {
+    const len = Number(this.u64());
+    if (len > 16 * 1024 * 1024) {
+      throw new Error(`absurdly large string length ${len} at offset ${this.pos - 8}`);
+    }
+    this.skip(len);
+  }
+
   // Read a value of the given type. For ARRAY, recurse one level —
   // most of the arrays in GGUF metadata are token vocabularies which
   // we don't care about, so we skip them without materialising.
@@ -221,28 +312,36 @@ class Reader {
       case GgufValueType.UINT8:
       case GgufValueType.INT8:
       case GgufValueType.BOOL:
-        this.bytes(1);
+        this.skip(1);
         return;
       case GgufValueType.UINT16:
       case GgufValueType.INT16:
-        this.bytes(2);
+        this.skip(2);
         return;
       case GgufValueType.UINT32:
       case GgufValueType.INT32:
       case GgufValueType.FLOAT32:
-        this.bytes(4);
+        this.skip(4);
         return;
       case GgufValueType.UINT64:
       case GgufValueType.INT64:
       case GgufValueType.FLOAT64:
-        this.bytes(8);
+        this.skip(8);
         return;
       case GgufValueType.STRING:
-        this.string();
+        this.skipString();
         return;
       case GgufValueType.ARRAY: {
         const elemType = this.u32() as GgufValueType;
         const count = Number(this.u64());
+        if (!Number.isSafeInteger(count) || count < 0) {
+          throw new Error(`invalid GGUF array length ${count} at offset ${this.pos - 8}`);
+        }
+        const width = fixedWidth(elemType);
+        if (width !== null) {
+          this.skip(count * width);
+          return;
+        }
         for (let i = 0; i < count; i++) this.skipValue(elemType);
         return;
       }
@@ -255,12 +354,38 @@ class Reader {
     return this.bytesRead;
   }
 
+  totalReadOperations(): number {
+    return this.readOperations;
+  }
+
   currentPos(): number {
     return this.pos;
   }
 
   size(): number {
     return this.fileSize;
+  }
+}
+
+function fixedWidth(type: GgufValueType): number | null {
+  switch (type) {
+    case GgufValueType.UINT8:
+    case GgufValueType.INT8:
+    case GgufValueType.BOOL:
+      return 1;
+    case GgufValueType.UINT16:
+    case GgufValueType.INT16:
+      return 2;
+    case GgufValueType.UINT32:
+    case GgufValueType.INT32:
+    case GgufValueType.FLOAT32:
+      return 4;
+    case GgufValueType.UINT64:
+    case GgufValueType.INT64:
+    case GgufValueType.FLOAT64:
+      return 8;
+    default:
+      return null;
   }
 }
 
@@ -286,6 +411,73 @@ function readUintScalar(r: Reader, type: GgufValueType): number | undefined {
       r.skipValue(type);
       return undefined;
   }
+}
+
+/**
+ * Like {@link readUintScalar}, but also accepts a per-layer ARRAY,
+ * returning both the MEAN (possibly fractional) and the raw values.
+ * Gemma 4 stores `attention.head_count_kv` as one entry per layer; the
+ * aggregate KV estimate multiplies the mean by `block_count` (keeping the
+ * total exactly equal to the per-layer sum), while the windowed-KV
+ * estimate needs the raw values because global and SWA layers carry
+ * different head counts. Skipping arrays here is what left `headCountKv`
+ * undefined and silently downgraded the RAM admission check to the
+ * weights-scaled heuristic — which judged a ~33 GB full-attention KV
+ * cache as fitting (2026-08-05 gemma4-31b Metal OOM under `--swa-full`).
+ */
+function readUintScalarOrArrayDetail(
+  r: Reader,
+  type: GgufValueType,
+): { mean?: number; perLayer?: number[] } {
+  if (type !== GgufValueType.ARRAY) {
+    const v = readUintScalar(r, type);
+    return v !== undefined ? { mean: v } : {};
+  }
+  const elemType = r.u32() as GgufValueType;
+  const count = Number(r.u64());
+  const values: number[] = [];
+  let sum = 0;
+  let readable = 0;
+  for (let i = 0; i < count; i++) {
+    const v = readUintScalar(r, elemType);
+    if (v !== undefined) {
+      values.push(v);
+      sum += v;
+      readable++;
+    }
+  }
+  if (readable !== count || count === 0) return {};
+  return { mean: sum / count, perLayer: values };
+}
+
+/**
+ * Read a BOOL (or 0/1 integer) ARRAY — the shape of Gemma 4's
+ * `attention.sliding_window_pattern`. Non-array values and arrays with
+ * unreadable elements are consumed and reported as undefined, so the
+ * windowed-KV estimate degrades to unavailable rather than guessing a
+ * layer layout.
+ */
+function readBoolArray(r: Reader, type: GgufValueType): boolean[] | undefined {
+  if (type !== GgufValueType.ARRAY) {
+    r.skipValue(type);
+    return undefined;
+  }
+  const elemType = r.u32() as GgufValueType;
+  const count = Number(r.u64());
+  const values: boolean[] = [];
+  let readable = true;
+  for (let i = 0; i < count; i++) {
+    if (elemType === GgufValueType.BOOL || elemType === GgufValueType.UINT8) {
+      values.push(r.u8() !== 0);
+      continue;
+    }
+    // readUintScalar consumes the element either way, keeping the stream
+    // in sync — never break out of this loop early.
+    const v = readUintScalar(r, elemType);
+    if (v === undefined) readable = false;
+    else values.push(v !== 0);
+  }
+  return readable && values.length === count ? values : undefined;
 }
 
 /**
@@ -329,6 +521,7 @@ export function readGgufSummary(
       chatTemplateMissing: true,
       fileSizeBytes: stat.size,
       bytesRead: 0,
+      readOperations: 0,
     };
 
     let alignment = DEFAULT_ALIGNMENT;
@@ -376,11 +569,22 @@ export function readGgufSummary(
       } else if (key.endsWith('.attention.head_count')) {
         summary.headCount = readUintScalar(r, type);
       } else if (key.endsWith('.attention.head_count_kv')) {
-        summary.headCountKv = readUintScalar(r, type);
+        const detail = readUintScalarOrArrayDetail(r, type);
+        if (detail.mean !== undefined) summary.headCountKv = detail.mean;
+        if (detail.perLayer) summary.headCountKvPerLayer = detail.perLayer;
       } else if (key.endsWith('.attention.key_length')) {
         summary.keyLength = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length')) {
         summary.valueLength = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.sliding_window')) {
+        summary.slidingWindow = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.sliding_window_pattern')) {
+        const pattern = readBoolArray(r, type);
+        if (pattern) summary.slidingWindowPattern = pattern;
+      } else if (key.endsWith('.attention.key_length_swa')) {
+        summary.keyLengthSwa = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.value_length_swa')) {
+        summary.valueLengthSwa = readUintScalar(r, type);
       } else {
         r.skipValue(type);
       }
@@ -439,6 +643,7 @@ export function readGgufSummary(
     }
 
     summary.bytesRead = r.totalBytesRead();
+    summary.readOperations = r.totalReadOperations();
     return summary;
   } finally {
     closeSync(fd);

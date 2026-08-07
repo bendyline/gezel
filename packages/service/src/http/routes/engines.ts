@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import type { NativeEngineName } from '@bendyline/gezel';
+import { LlamaCppContextSizingResponseSchema, type NativeEngineName } from '@bendyline/gezel';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
@@ -7,6 +7,7 @@ import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-man
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import type { ServiceContext } from '../context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
+import { invalidateModelsCache } from './models.js';
 
 const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
   'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
@@ -110,6 +111,40 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       });
     }
     return c.json(snap);
+  });
+
+  /**
+   * Machine-owned llama.cpp context policy. This deliberately lives under
+   * the engine-management boundary instead of `/api/config`: packaged user
+   * daemons proxy this route to the machine engine, while local/dev installs
+   * persist it in their own store. The selector therefore controls the
+   * process that actually performs admission in both hosting shapes.
+   */
+  app.get('/llama-cpp/context-sizing', async (c) => {
+    const config = await ctx.store.readConfig();
+    return c.json({ policy: config.llamaCppContextSizing ?? 'adaptive' });
+  });
+
+  app.put('/llama-cpp/context-sizing', async (c) => {
+    const body = LlamaCppContextSizingResponseSchema.parse(await c.req.json());
+    const previous = (await ctx.store.readConfig()).llamaCppContextSizing ?? 'adaptive';
+    const updated = await ctx.store.writeConfig({
+      // Keep the default sparse on disk; explicit model-max is the only
+      // durable override needed.
+      llamaCppContextSizing: body.policy === 'adaptive' ? null : body.policy,
+    });
+    const effective = updated.llamaCppContextSizing ?? 'adaptive';
+    if (effective !== previous) {
+      // The policy governs engine LAUNCH arguments, so a resident engine
+      // holds its old window until it restarts. Tear idle providers down
+      // now (busy ones finish their in-flight turn first — same soft-reset
+      // contract as model-preference changes in the config route) so the
+      // next session actually launches under the new policy instead of
+      // waiting for an idle-timeout nobody can see.
+      invalidateModelsCache();
+      await ctx.chat.resetClient({ deferBusy: true });
+    }
+    return c.json({ policy: effective });
   });
 
   /**

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  estimateKvReserveBytes,
+  estimateWindowedKvLinearization,
+} from '../llama-cpp/offload-planner.js';
+import {
   CapacityBroker,
   autoDetectBudgetBytes,
   clampCtxTokensForMemory,
@@ -8,11 +12,17 @@ import {
   estimatePerSlotKvBytes,
   fastMemoryBudgetBytes,
   formatCapacityDenial,
+  formatContextCapacityDenial,
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
   localEngineSlotCeiling,
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
+  planCtxTokensForMemory,
+  plannedLocalEngineSlots,
+  resolveLlamaCppContextRequirement,
+  resolveLocalContextRequirement,
+  setDetectedGpuVramBytes,
 } from './capacity-broker.js';
 
 const GB = 1024 ** 3;
@@ -369,6 +379,25 @@ describe('defaultLocalEngineSlots — RAM-tier demand default', () => {
   });
 });
 
+describe('plannedLocalEngineSlots — one resolver for preview and launch', () => {
+  it('caps the RAM-tier default by what memory can hold', () => {
+    // The bug this pins: the launch-preview short-circuit quoted the bare
+    // tier default (3 on a 32-48 GB host) while the launch path clamped by
+    // the ceiling, so a resident 17 GB model advertised a ~49 GB reservation
+    // the broker would never have admitted.
+    expect(plannedLocalEngineSlots({ ceiling: 1, tierDefault: 3 })).toBe(1);
+    expect(plannedLocalEngineSlots({ ceiling: 4, tierDefault: 3 })).toBe(3);
+  });
+
+  it('honors an explicit operator setting verbatim, ceiling included', () => {
+    expect(plannedLocalEngineSlots({ configuredSlots: 4, ceiling: 1, tierDefault: 2 })).toBe(4);
+  });
+
+  it('never resolves below one slot', () => {
+    expect(plannedLocalEngineSlots({ ceiling: 0, tierDefault: 3 })).toBe(1);
+  });
+});
+
 describe('estimatePerSlotKvBytes', () => {
   it('lands near the measured Gemma-26B anchor (~2 GB), biased conservative-high', () => {
     // Anchor (from the manager comment): 26B Q4_K_M (~15 GB on-disk) at 65K
@@ -578,6 +607,18 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     expect(autoDetectBudgetBytes(RAM, host)).toBe(budget.budgetBytes);
   });
 
+  it('keeps an explicitly detected 16 GiB card discrete beside 16 GiB RAM', () => {
+    setDetectedGpuVramBytes(16 * GB, false);
+    try {
+      const budget = computeCapacityBudget({ systemRamBytes: 16 * GB });
+      expect(budget.kind).toBe('discrete-gpu');
+      expect(budget.vramBytes).toBe(Math.floor(16 * GB * 0.95));
+      expect(budget.ramShareBytes).toBe(Math.floor(16 * GB * 0.6));
+    } finally {
+      setDetectedGpuVramBytes(null);
+    }
+  });
+
   it('keeps the RAM share bounded no matter what the card absorbs', () => {
     // Every admissible set of models can put at most `ramShareBytes` in RAM:
     // VRAM absorbs the first `vramBytes` of any total under the budget. That
@@ -780,6 +821,189 @@ describe('clampCtxTokensForMemory', () => {
     expect(clampCtxTokensForMemory({ ...INCIDENT, requestedPerTurnCtxTokens: 8_192 }).clamped).toBe(
       false,
     );
+  });
+});
+
+describe('model-aware context admission', () => {
+  it('reduces slots before sacrificing the 64K working window', () => {
+    const result = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: 98_304,
+      minimumPerTurnCtxTokens: 65_536,
+      slots: 2,
+      kvBytesPerToken: 100 * 1024,
+      weightsResidentBytes: 4 * GB,
+      budgetBytes: 18 * GB,
+      freeSystemRamBytes: 64 * GB,
+      vramBytes: 0,
+    });
+    expect(result.minimumSatisfied).toBe(true);
+    expect(result.slots).toBe(1);
+    expect(result.perTurnCtxTokens).toBe(98_304);
+  });
+
+  it('denies admission when even one slot cannot retain 64K', () => {
+    const result = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: 65_536,
+      minimumPerTurnCtxTokens: 65_536,
+      slots: 2,
+      kvBytesPerToken: 380 * 1024,
+      weightsResidentBytes: 8 * GB,
+      budgetBytes: 30.7 * GB,
+      freeSystemRamBytes: 15 * GB,
+      vramBytes: 11.6 * GB,
+    });
+    expect(result.minimumSatisfied).toBe(false);
+    expect(result.slots).toBe(1);
+    expect(result.perTurnCtxTokens).toBeLessThan(65_536);
+    expect(formatContextCapacityDenial({ modelLabel: 'Gemma', plan: result })).toMatch(
+      /required 65,536-token working window/,
+    );
+  });
+
+  it('uses a genuinely smaller native window as the model floor', () => {
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 32_768,
+        requestedContextWindow: 16_384,
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 32_768,
+    });
+  });
+
+  it('raises low preferences to 64K while honoring useful higher requests', () => {
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 128_000,
+        requestedContextWindow: 16_384,
+      }).requestedPerTurnCtxTokens,
+    ).toBe(65_536);
+    expect(
+      resolveLocalContextRequirement({
+        modelContextWindow: 128_000,
+        requestedContextWindow: 98_304,
+      }).requestedPerTurnCtxTokens,
+    ).toBe(98_304);
+  });
+
+  it('adaptive llama.cpp sizing keeps the practical target and 64K floor', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        adaptiveContextWindow: 98_304,
+        contextSizing: 'adaptive',
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 65_536,
+      requestedPerTurnCtxTokens: 98_304,
+      strict: false,
+    });
+  });
+
+  it('model-max sizing makes the advertised window a strict admission minimum', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        adaptiveContextWindow: 65_536,
+        contextSizing: 'model-max',
+      }),
+    ).toMatchObject({
+      nativeContextWindow: 262_144,
+      minimumPerTurnCtxTokens: 262_144,
+      requestedPerTurnCtxTokens: 262_144,
+      strict: true,
+    });
+  });
+
+  it('model-max on an SWA model: full-attention math denies, the windowed re-plan admits at native', () => {
+    // gemma4-12b's real header geometry: 48 layers in a 5:1 SWA:global
+    // pattern, SWA layers 8 KV heads × 256+256 dims, global layers 1 KV
+    // head × 512+512, sliding window 1024, native window 256000. The
+    // regression this pins: an early build gated the windowed re-plan on
+    // `!strict`, so model-max evaluated Gemma ONLY under full-attention
+    // math — which can never fit — and denied a model whose real windowed
+    // cache at the full native window is ~5 GB.
+    const NATIVE = 256_000;
+    const requirement = resolveLlamaCppContextRequirement({
+      modelContextWindow: NATIVE,
+      adaptiveContextWindow: 65_536,
+      contextSizing: 'model-max',
+    });
+    expect(requirement).toMatchObject({
+      minimumPerTurnCtxTokens: NATIVE,
+      requestedPerTurnCtxTokens: NATIVE,
+      strict: true,
+    });
+
+    const blockCount = 48;
+    const perLayerHeads = Array.from({ length: blockCount }, (_, i) => ((i + 1) % 6 === 0 ? 1 : 8));
+    const meanHeads = perLayerHeads.reduce((a, b) => a + b, 0) / blockCount;
+    const budget = {
+      weightsResidentBytes: 8.6 * GB,
+      budgetBytes: 44.8 * GB,
+      committedOtherBytes: 0,
+      freeSystemRamBytes: 40 * GB,
+      vramBytes: 0,
+    };
+
+    const fullKvAtReference = estimateKvReserveBytes({
+      blockCount,
+      headCountKv: meanHeads,
+      keyLength: 512,
+      valueLength: 512,
+      ctxTokens: 4096,
+      kvCacheType: 'f16',
+    });
+    const fullPlan = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: requirement.requestedPerTurnCtxTokens,
+      slots: 1,
+      minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+      kvBytesPerToken: (fullKvAtReference ?? 0) / 4096,
+      ...budget,
+    });
+    expect(fullPlan.minimumSatisfied).toBe(false);
+
+    const windowed = estimateWindowedKvLinearization({
+      blockCount,
+      headCountKvPerLayer: perLayerHeads,
+      slidingWindow: 1024,
+      slidingWindowPattern: Array.from({ length: blockCount }, (_, i) => (i + 1) % 6 !== 0),
+      keyLength: 512,
+      valueLength: 512,
+      keyLengthSwa: 256,
+      valueLengthSwa: 256,
+      kvCacheType: 'f16',
+    });
+    expect(windowed).toBeDefined();
+    const windowedPlan = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: requirement.requestedPerTurnCtxTokens,
+      slots: 1,
+      minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+      kvBytesPerToken: windowed?.bytesPerToken ?? 0,
+      ...budget,
+      weightsResidentBytes: budget.weightsResidentBytes + (windowed?.fixedBytes ?? 0),
+    });
+    expect(windowedPlan).toMatchObject({
+      minimumSatisfied: true,
+      clamped: false,
+      perTurnCtxTokens: NATIVE,
+      slots: 1,
+    });
+  });
+
+  it('an explicit numeric override wins over model-max and retains adaptive fallback', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        explicitContextWindow: 131_072,
+        adaptiveContextWindow: 65_536,
+        contextSizing: 'model-max',
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 65_536,
+      requestedPerTurnCtxTokens: 131_072,
+    });
   });
 });
 

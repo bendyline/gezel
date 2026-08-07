@@ -37,10 +37,10 @@ export const ProviderNameSchema = z.enum([
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 /**
- * Gezel gender — drives pronouns the model uses when referring to itself
- * and pronouns other gezels see when the prompt mentions this one. Three
- * buckets only; the picker assigns one at creation time from the gendered
- * first-name pools (with a ~4% non-binary conversion regardless of name).
+ * Gezel gender — drives pronouns used when another gezel or the UI refers to
+ * this one. It is deliberately not shown to the gezel itself. Three buckets
+ * only; the picker assigns one at creation time from the gendered first-name
+ * pools (with a ~4% non-binary conversion regardless of name).
  */
 export const GezelGenderSchema = z.enum(['male', 'female', 'non-binary']);
 export type GezelGender = z.infer<typeof GezelGenderSchema>;
@@ -120,10 +120,9 @@ export const GezelFrontmatterSchema = z.object({
   /**
    * One of `male` / `female` / `non-binary`. Assigned at creation time
    * from the matching gendered first-name pool (with a small chance of
-   * non-binary regardless of name). Drives the pronouns surfaced to the
-   * model — both in its own header and in references to other gezels
-   * elsewhere in the prompt. Absent on legacy gezels; the prompt builder
-   * treats absence as "pronouns unknown" and renders no pronoun line.
+   * non-binary regardless of name). Drives pronouns in UI copy and in prompt
+   * references made by other gezels. It is not rendered into this gezel's
+   * own prompt. Absent on legacy gezels, where references omit pronouns.
    */
   gender: GezelGenderSchema.optional(),
   model: z.string().optional(),
@@ -457,6 +456,10 @@ export const ChatMessageToolCallSchema = z.object({
    * the toolset-config path), so this is not separately redacted.
    */
   argsFull: z.string().optional(),
+  /** Short full response, or a bounded beginning/end summary for a long response. */
+  resultText: z.string().optional(),
+  /** True when `resultText` is a bounded summary rather than the complete response. */
+  resultTruncated: z.boolean().optional(),
   /** Image artifacts the tool returned (e.g. browser_snapshot screenshots). */
   images: z.array(ToolCallImageSchema).optional(),
   /** Audio artifacts the tool returned (e.g. synthesize_speech WAV). */
@@ -764,6 +767,10 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     argsSummary: z.string().optional(),
     /** Full, readable args for the expand + copy affordance. See the persisted `ChatMessageToolCall.argsFull`. */
     argsFull: z.string().optional(),
+    /** Short full response, or a bounded beginning/end summary. */
+    resultText: z.string().optional(),
+    /** True when `resultText` is a bounded summary rather than the complete response. */
+    resultTruncated: z.boolean().optional(),
     /**
      * Image artifacts the tool returned (most commonly browser screenshots).
      * Paths are relative to the project's artifacts/ root and resolved

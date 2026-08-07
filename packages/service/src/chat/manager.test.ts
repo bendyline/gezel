@@ -75,6 +75,30 @@ describe('effectiveSessionModel', () => {
       }),
     ).toBe('night-model');
   });
+
+  it('keeps an explicit capability route ahead of the ordinary install default', () => {
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('routed-model');
+    expect(
+      effectiveSessionModel({
+        record: {
+          ...record,
+          model: 'routed-model',
+          modelSource: 'capability-routing',
+        },
+        frontmatterModel: 'gezel-model',
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('gezel-model');
+  });
 });
 
 describe('consultationIdleTimeoutMsForModel', () => {
@@ -130,6 +154,18 @@ describe('resolveMlxEffectiveNumCtx', () => {
     expect(
       resolveMlxEffectiveNumCtx({ modelContextWindow: 262_144, configuredLimit: 98_304 }),
     ).toBe(98_304);
+  });
+
+  it('does not let an explicit limit push a long-context model below 64K', () => {
+    expect(
+      resolveMlxEffectiveNumCtx({ modelContextWindow: 262_144, configuredLimit: 16_384 }),
+    ).toBe(65_536);
+  });
+
+  it('uses the native limit when the model is genuinely below 64K', () => {
+    expect(resolveMlxEffectiveNumCtx({ modelContextWindow: 32_768, configuredLimit: 16_384 })).toBe(
+      32_768,
+    );
   });
 
   it('does not let an explicit limit exceed the model native window', () => {
@@ -3438,7 +3474,7 @@ describe('ChatManager — one-shot attribution', () => {
     expect(denial).toBeNull();
   });
 
-  it('previews a cold native context from install metadata without binding a provider', async () => {
+  it('previews the 64K floor from install metadata without binding a provider', async () => {
     await store.writeConfig({ mlxNumCtx: 32_768 });
     Object.defineProperty(manager, 'mlxModels', {
       configurable: true,
@@ -3449,7 +3485,7 @@ describe('ChatManager — one-shot attribution', () => {
     const inferenceBind = vi.spyOn(manager, 'getProviderForModel');
 
     await expect(manager.previewContextWindowForModel('mlx', 'installed-mlx')).resolves.toBe(
-      32_768,
+      65_536,
     );
     expect(inferenceBind).not.toHaveBeenCalled();
   });

@@ -54,8 +54,8 @@ import type { Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
 import { classifyFile } from './classify.js';
-import { type ContentIndexStats, indexWorkspaceContent } from './content-indexer.js';
-import { convertDocToMarkdown, docFilesPaths, writeConvertedMarkdown } from './docs.js';
+import type { ContentIndexStats } from './content-indexer.js';
+import { docFilesPaths, ensureConvertedMarkdownSidecar } from './docs.js';
 import { type EnrichDeps, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
@@ -69,6 +69,7 @@ import {
 } from './index-store.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
 
 /**
@@ -121,28 +122,39 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
+    const { workspaceDir, dbPath } = opened;
     try {
       if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
-        await ensureIndexGitignore(opened.workspaceDir);
+        await ensureIndexGitignore(workspaceDir);
       }
-      const stats = await indexWorkspaceContent(opened.index, opened.workspaceDir);
+    } finally {
+      // The worker owns the only open connection while it writes. Keeping a
+      // parent connection alive is unnecessary and makes SQLite lock behavior
+      // platform-dependent.
+      opened.index.close();
+    }
+
+    const stats = await runStaticIndex({ dbPath, workspaceDir, collectionId: projectId });
+    const post = await this.open(projectId);
+    if (!post) return stats;
+    try {
       // Scanner rows are rebuildable; lifecycle is durable Store state. A
       // completed refresh prunes lifecycle for findings that truly vanished,
       // then mirrors the surviving states back into SQLite for fast queries.
-      await this.syncFindingLifecycle(projectId, opened.index, true);
+      await this.syncFindingLifecycle(projectId, post.index, true);
       // Deterministic meta-boekwachter: rebuild entities from the metadata the
       // scan just refreshed (cheap; no model).
-      buildEntitiesFromMetadata(opened.index);
+      buildEntitiesFromMetadata(post.index);
       // Git churn/last-commit for the map's signals — before the map build so
       // the same tick that ingests churn also refreshes the persisted map.
       // Never throws; degrades to 'unavailable' without git.
-      await refreshGitStats(opened.index, opened.workspaceDir);
+      await refreshGitStats(post.index, workspaceDir);
       // Refresh the persisted city-map layout so it grows with the code. Failure
       // here must not break indexing — the map is a derived, regenerable view.
       try {
-        await buildFileMap(opened.index, opened.workspaceDir, {
+        await buildFileMap(post.index, workspaceDir, {
           persist: true,
-          villageFile: this.cityStoreFor(projectId, opened.workspaceDir),
+          villageFile: this.cityStoreFor(projectId, workspaceDir),
           userFacing: false,
         });
       } catch {
@@ -150,7 +162,7 @@ export class ContentIndex {
       }
       return stats;
     } finally {
-      opened.index.close();
+      post.index.close();
     }
   }
 
@@ -1261,13 +1273,9 @@ export class ContentIndex {
     if (!absSource) return { found: false, truncated: false };
 
     const paths = docFilesPaths(workspaceDir, relPath);
-    let md = await readFile(paths.mdPath, 'utf8').catch(() => null);
-    if (md == null) {
-      // Convert on demand if the _files markdown isn't there yet.
-      const conv = await convertDocToMarkdown(absSource);
-      md = conv.markdown;
-      if (md != null) await writeConvertedMarkdown(workspaceDir, relPath, md).catch(() => {});
-    }
+    // Reuse the same freshness + sandboxed-conversion path as indexing and
+    // the References viewer so every document consumer agrees on sidecars.
+    const md = (await ensureConvertedMarkdownSidecar(absSource, paths)).markdown;
     if (md == null) return { found: false, sourcePath: relPath, truncated: false };
     const truncated = md.length > MAX_READ_BYTES;
     return {
@@ -1482,7 +1490,7 @@ export class ContentIndex {
 
   private async open(
     projectId: string,
-  ): Promise<{ index: IndexStore; workspaceDir: string } | null> {
+  ): Promise<{ index: IndexStore; workspaceDir: string; dbPath: string } | null> {
     let workspaceDir: string;
     try {
       workspaceDir = await this.store.projectWorkspaceDir(projectId);
@@ -1501,13 +1509,15 @@ export class ContentIndex {
     // A machine-shared workspace is a collaborative content tree, not a safe
     // home for a mutable SQLite database opened by every account daemon.
     // Build the same derived index independently in each account's sidecar.
-    let index = await open(projectContentIndexDbFile(this.home, projectId, workspaceDir));
+    let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
+    let index = await open(dbPath);
     if (!index) {
       // Workspace `.gezel/` not writable — fall back to the home-local dir.
-      index = await open(join(fallbackProjectIndexDir(this.home, projectId), 'index.db'));
+      dbPath = join(fallbackProjectIndexDir(this.home, projectId), 'index.db');
+      index = await open(dbPath);
     }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir } : null;
+    return index ? { index, workspaceDir, dbPath } : null;
   }
 
   private async syncFindingLifecycle(

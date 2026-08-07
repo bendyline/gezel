@@ -26,7 +26,8 @@
     "coverage:models": "tsx src/bin/model-coverage.ts",
     "coverage:refresh": "tsx src/bin/model-coverage.ts --out runs/current-model-coverage-$(date +%F).md && tsx src/bin/compare-scores.ts --out runs/current-score-comparison-$(date +%F).md",
     "screenshot": "tsx src/bin/screenshot.ts",
-    "thinking-report": "tsx src/bin/thinking-report.ts"
+    "thinking-report": "tsx src/bin/thinking-report.ts",
+    "report:engine-context": "tsx src/bin/report-engine-context.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

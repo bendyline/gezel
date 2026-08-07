@@ -4,7 +4,7 @@
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <name>Gezel</name>
-  <summary>Your crew of AI companions</summary>
+  <summary>Your team of AI craftsmen</summary>
   <description>
     <p>
       Build a crew of named AI companions with distinct roles and tools, then
@@ -15,7 +15,7 @@
       ordinary files.
     </p>
   </description>
-  <launchable type="desktop-id">gezel.desktop</launchable>
+  <launchable type="desktop-id">com.bendyline.gezel.desktop</launchable>
   <provides>
     <binary>gezel</binary>
   </provides>

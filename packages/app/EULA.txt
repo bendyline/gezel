@@ -30,14 +30,8 @@ While Gezel can work with cloud AI providers like OpenAI or Anthropic, it may us
 Gezel ships with open-source and third-party software that is licensed under its own terms rather than the MIT License above. Most of it is permissively licensed (MIT, Apache-2.0, BSD, ISC), but some of it is not. In particular:
 
   - the resvg SVG renderer is MPL-2.0;
-  - the NVIDIA CUDA runtime libraries bundled with the CUDA engine builds are
-    proprietary, under the NVIDIA CUDA Toolkit EULA;
-  - on Windows only, the installer carries the Microsoft Visual C++ 2015-2022
-    Redistributable and runs it during installation. Gezel's local-model
-    engines cannot load without it. It is Microsoft-proprietary, redistributed
-    under Microsoft's redistributable terms, and installed system-wide so that
-    Windows Update services it. Uninstalling Gezel leaves it in place, because
-    other software on your machine may depend on it.
+  - the NVIDIA CUDA runtime libraries bundled with the CUDA engine builds are proprietary, under the NVIDIA CUDA Toolkit EULA;
+  - on Windows only, the installer carries the Microsoft Visual C++ 2015-2022 Redistributable and runs it during installation. Gezel's local-model engines cannot load without it. It is Microsoft-proprietary, redistributed under Microsoft's redistributable terms, and installed system-wide so that Windows Update services it. Uninstalling Gezel leaves it in place, because other software on your machine may depend on it.
 
 Where a bundled component's license conflicts with the MIT License above, that component's own license governs that component.
 

@@ -31,6 +31,7 @@ import ts from 'typescript';
 
 export type ValidateCheck =
   | { ok: true; name: string; detail?: string }
+  | { ok: null; name: string; detail: string }
   | {
       ok: false;
       name: string;
@@ -104,12 +105,14 @@ export function validateFile(path: string, content: FileContent): ValidateResult
  * Failures come first so the model reads them without scrolling.
  */
 export function formatValidateResult(result: ValidateResult): string {
-  const fails = result.checks.filter((c) => !c.ok) as Array<ValidateCheck & { ok: false }>;
-  const passes = result.checks.filter((c) => c.ok) as Array<ValidateCheck & { ok: true }>;
+  const fails = result.checks.filter((c) => c.ok === false) as Array<ValidateCheck & { ok: false }>;
+  const passes = result.checks.filter((c) => c.ok === true) as Array<ValidateCheck & { ok: true }>;
+  const skips = result.checks.filter((c) => c.ok === null) as Array<ValidateCheck & { ok: null }>;
+  const skipSuffix = skips.length > 0 ? `; ${skips.length} skipped` : '';
   const summary =
     fails.length === 0
-      ? `validate ${result.path} — PASS (${passes.length} check${passes.length === 1 ? '' : 's'})`
-      : `validate ${result.path} — FAIL (${fails.length} of ${result.checks.length} check${result.checks.length === 1 ? '' : 's'} failed)`;
+      ? `validate ${result.path} — PASS (${passes.length} check${passes.length === 1 ? '' : 's'}${skipSuffix})`
+      : `validate ${result.path} — FAIL (${fails.length} of ${fails.length + passes.length} completed check${fails.length + passes.length === 1 ? '' : 's'} failed${skipSuffix})`;
   const lines: string[] = [summary, ''];
   for (const f of fails) {
     const loc = f.location
@@ -128,7 +131,35 @@ export function formatValidateResult(result: ValidateResult): string {
   for (const p of passes) {
     lines.push(`✓ ${p.name}${p.detail ? `: ${p.detail}` : ''}`);
   }
+  for (const s of skips) {
+    lines.push(`- ${s.name}: skipped — ${s.detail}`);
+  }
   return lines.join('\n').trimEnd();
+}
+
+export function runtimePageCheckToValidateCheck(check: {
+  ran: boolean;
+  ok?: boolean;
+  errors?: string[];
+  reason?: string;
+}): ValidateCheck {
+  if (!check.ran || check.ok === undefined) {
+    return {
+      ok: null,
+      name: 'runtime-load',
+      detail: check.reason ?? 'headless browser produced no verdict',
+    };
+  }
+  if (check.ok) {
+    return { ok: true, name: 'runtime-load', detail: 'page loaded headlessly without errors' };
+  }
+  return {
+    ok: false,
+    name: 'runtime-load',
+    message: (check.errors ?? []).join('; ') || 'page failed its headless runtime check',
+    fixHint:
+      'fix the reported runtime error, then call `validate` again. Do not install a separate static server; the validator already loads workspace HTML through the scoped preview server.',
+  };
 }
 
 // ── Common helpers ───────────────────────────────────────────────
@@ -173,6 +204,12 @@ const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
 const SCRIPT_OPEN_RE = /<script\b[^>]*>/gi;
 const SCRIPT_CLOSE_RE = /<\/script\s*>/gi;
 
+interface InlineScriptForLint {
+  body: string;
+  attrs: string;
+  openLine: number;
+}
+
 function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
   if (!content.text) {
     return [
@@ -187,16 +224,17 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
   const html = content.text;
   const checks: ValidateCheck[] = [fileNonEmptyCheck(content)];
 
+  checks.push(validateHtmlDocumentStructure(html));
+  checks.push(validateUniqueHtmlIds(html));
+
   // script-tag-present
   const opens = (html.match(SCRIPT_OPEN_RE) ?? []).length;
   const closes = (html.match(SCRIPT_CLOSE_RE) ?? []).length;
   if (opens === 0) {
     checks.push({
-      ok: false,
+      ok: true,
       name: 'script-tag-present',
-      message: 'no inline <script> tag found in the HTML',
-      fixHint:
-        'interactive HTML usually needs at least one inline <script>; add one with the game/page logic.',
+      detail: 'no inline scripts (valid for a static page)',
     });
   } else if (opens > closes) {
     checks.push({
@@ -217,6 +255,7 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
 
   // script-body-parses (each inline <script> body parses as JS)
   let scriptIdx = 0;
+  const scripts: InlineScriptForLint[] = [];
   for (const m of html.matchAll(SCRIPT_RE)) {
     scriptIdx += 1;
     const attrs = m[1] ?? '';
@@ -229,11 +268,13 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
       if (t !== 'text/javascript' && t !== 'application/javascript' && t !== 'module') {
         continue;
       }
-      if (t === 'module') continue; // top-level import/export confuses the function-body parser
     }
     const openIdx = m.index ?? 0;
     const openLine = (html.slice(0, openIdx).match(/\n/g)?.length ?? 0) + 1;
-    const parseError = tryParseFunctionBody(body);
+    scripts.push({ body, attrs, openLine });
+    const parseError = isModuleScript(attrs)
+      ? tryParseSource(body, ts.ScriptKind.JS)
+      : tryParseFunctionBody(body);
     if (parseError) {
       // V8's error message often includes "line N, col M"; pull it out
       // for a clean location field. Fall back to the script's opening
@@ -260,8 +301,121 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
       name: 'script-body-parses',
       detail: `${scriptIdx} inline script(s) parse cleanly`,
     });
+    checks.push(validateUniqueTopLevelFunctions(scripts));
   }
   return checks;
+}
+
+function isModuleScript(attrs: string): boolean {
+  return /\btype\s*=\s*["']module["']/i.test(attrs);
+}
+
+function validateHtmlDocumentStructure(html: string): ValidateCheck {
+  const hasDocumentShell = /<!doctype\s+html\b/i.test(html) || /<html\b/i.test(html);
+  if (!hasDocumentShell) {
+    return { ok: true, name: 'document-structure', detail: 'HTML fragment' };
+  }
+  const missing: string[] = [];
+  if (/<html\b/i.test(html) && !/<\/html\s*>/i.test(html)) missing.push('</html>');
+  if (/<body\b/i.test(html) && !/<\/body\s*>/i.test(html)) missing.push('</body>');
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      name: 'document-structure',
+      message: `document is missing ${missing.join(' and ')}`,
+      fixHint: 'restore the missing closing tag(s); the HTML document appears truncated.',
+    };
+  }
+  return { ok: true, name: 'document-structure', detail: 'document shell closes cleanly' };
+}
+
+function validateUniqueHtmlIds(html: string): ValidateCheck {
+  const withoutExecutableBodies = html.replace(
+    /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    (match) => match.replace(/[^\n]/g, ' '),
+  );
+  const seen = new Map<string, number>();
+  const idRe = /\bid\s*=\s*(["'])([^"']+)\1/gi;
+  for (const match of withoutExecutableBodies.matchAll(idRe)) {
+    const id = match[2]!;
+    const line = (withoutExecutableBodies.slice(0, match.index).match(/\n/g)?.length ?? 0) + 1;
+    const firstLine = seen.get(id);
+    if (firstLine !== undefined) {
+      return {
+        ok: false,
+        name: 'dom-ids-unique',
+        message: `duplicate id="${id}" (first declared at line ${firstLine})`,
+        location: { line },
+        excerpt: buildExcerpt(html, line, 2),
+        fixHint:
+          'give each static DOM element a unique id and update matching JavaScript/CSS references.',
+      };
+    }
+    seen.set(id, line);
+  }
+  return {
+    ok: true,
+    name: 'dom-ids-unique',
+    detail: `${seen.size} static id${seen.size === 1 ? '' : 's'} checked`,
+  };
+}
+
+function validateUniqueTopLevelFunctions(scripts: InlineScriptForLint[]): ValidateCheck {
+  const seen = new Map<string, number>();
+  let count = 0;
+  for (const script of scripts) {
+    const sf = ts.createSourceFile(
+      'inline-script.js',
+      script.body,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.JS,
+    );
+    for (const statement of sf.statements) {
+      if (!ts.isFunctionDeclaration(statement) || !statement.name) continue;
+      count += 1;
+      const relative = sf.getLineAndCharacterOfPosition(statement.name.getStart(sf));
+      const line = script.openLine + relative.line;
+      const name = statement.name.text;
+      const firstLine = seen.get(name);
+      if (firstLine !== undefined) {
+        return {
+          ok: false,
+          name: 'top-level-functions-unique',
+          message: `top-level function "${name}" is declared more than once (first declared at line ${firstLine}); the later declaration silently replaces the earlier one`,
+          location: { line, col: relative.character + 1 },
+          fixHint:
+            'keep one implementation, merge the intended behavior into it, and remove the duplicate declaration.',
+        };
+      }
+      seen.set(name, line);
+    }
+  }
+  return {
+    ok: true,
+    name: 'top-level-functions-unique',
+    detail: `${count} function declaration${count === 1 ? '' : 's'} checked`,
+  };
+}
+
+function tryParseSource(source: string, scriptKind: ts.ScriptKind): string | null {
+  const fileName = scriptKind === ts.ScriptKind.TSX ? 'source.tsx' : 'source.js';
+  const output = ts.transpileModule(source, {
+    fileName,
+    reportDiagnostics: true,
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  });
+  const diagnostics = output.diagnostics?.filter(
+    (diagnostic): diagnostic is ts.DiagnosticWithLocation =>
+      diagnostic.category === ts.DiagnosticCategory.Error &&
+      diagnostic.file !== undefined &&
+      diagnostic.start !== undefined,
+  );
+  if (!diagnostics || diagnostics.length === 0) return null;
+  const first = diagnostics[0]!;
+  const message = ts.flattenDiagnosticMessageText(first.messageText, '\n');
+  const { line, character } = first.file.getLineAndCharacterOfPosition(first.start);
+  return `${message} at line ${line + 1}, col ${character + 1}`;
 }
 
 function tryParseFunctionBody(body: string): string | null {

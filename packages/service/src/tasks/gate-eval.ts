@@ -1,4 +1,5 @@
 import type { GateCheck } from '@bendyline/gezel';
+import { validateFile } from '@bendyline/gezel-mcp';
 import {
   type WorkspaceLike,
   buildJudgePrompt,
@@ -208,6 +209,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `unsupportedClaims ${c.file}`;
     case 'jsParses':
       return `jsParses ${c.file ?? 'index.html'}`;
+    case 'htmlLint':
+      return `htmlLint ${c.file}`;
     case 'esmImports':
       return `esmImports ${c.file}`;
     case 'sourceParses':
@@ -399,6 +402,27 @@ async function evalCheckInner(
             detail: `${file}: inline JavaScript does not parse (${v.firstError ?? 'syntax error'}). The page will not run until the inline <script> parses — fix the broken statement (commonly an unbalanced brace or parenthesis).`,
             ...(v.firstError ? { evidence: { firstError: v.firstError } } : {}),
           };
+    }
+    case 'htmlLint': {
+      const content = await ws.read(c.file);
+      if (content === null) {
+        return { ok: false, detail: `${c.file} not found (needed for the HTML lint check)` };
+      }
+      const bytes = new TextEncoder().encode(content);
+      const result = validateFile(c.file, { text: content, bytes, totalBytes: bytes.byteLength });
+      const failures = result.checks.filter((check) => check.ok === false);
+      if (failures.length === 0) {
+        return {
+          ok: true,
+          detail: `${c.file}: HTML structure and inline JavaScript lint checks pass`,
+        };
+      }
+      const first = failures[0]!;
+      return {
+        ok: false,
+        detail: `${c.file}: HTML lint failed (${first.name}: ${first.message})${first.location ? ` at line ${first.location.line}${first.location.col ? `:${first.location.col}` : ''}` : ''}`,
+        evidence: { checks: failures.map((failure) => failure.name).slice(0, EVIDENCE_LIST_CAP) },
+      };
     }
     case 'esmImports': {
       const content = await ws.read(c.file);

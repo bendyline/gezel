@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TurnStatsEvent } from '../providers/streaming-session.js';
 import type { ExternalToolCall, LLMProvider, LLMSession } from '../providers/types.js';
 import { type FitnessProbeDeps, runFitnessProbe } from './probe.js';
 
@@ -10,6 +11,12 @@ import { type FitnessProbeDeps, runFitnessProbe } from './probe.js';
 interface ScriptedTurn {
   text?: string;
   tokensPerSec?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  durationMs?: number;
+  ttftMs?: number;
+  promptTokensPerSec?: number;
+  cachedPromptTokens?: number;
   reasoning?: string;
   calls?: ExternalToolCall[];
   fail?: string;
@@ -18,25 +25,42 @@ interface ScriptedTurn {
 
 class FakeSession {
   disconnected = false;
+  prompts: string[] = [];
   private turnIdx = 0;
   private lastTurn: ScriptedTurn | undefined;
-  private statsHandlers: Array<(ev: { tokensPerSec?: number }) => void> = [];
+  private statsHandlers: Array<(ev: TurnStatsEvent) => void> = [];
 
   constructor(private readonly turns: ScriptedTurn[]) {}
 
-  onTurnStats(handler: (ev: { tokensPerSec?: number }) => void): () => void {
+  onTurnStats(handler: (ev: TurnStatsEvent) => void): () => void {
     this.statsHandlers.push(handler);
     return () => {};
   }
 
-  async sendAndWait(_prompt: string): Promise<string> {
+  async sendAndWait(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
     const turn = this.turns[this.turnIdx++];
     if (!turn) throw new Error('unscripted turn');
     this.lastTurn = turn;
     if (turn.hang) return new Promise<string>(() => {});
     if (turn.fail) throw new Error(turn.fail);
     if (turn.tokensPerSec != null) {
-      for (const h of this.statsHandlers) h({ tokensPerSec: turn.tokensPerSec });
+      for (const h of this.statsHandlers) {
+        h({
+          provider: 'llama-cpp',
+          promptTokens: turn.promptTokens ?? 100,
+          completionTokens: turn.completionTokens ?? 100,
+          durationMs: turn.durationMs ?? 1_000,
+          tokensPerSec: turn.tokensPerSec,
+          ...(turn.ttftMs !== undefined ? { ttftMs: turn.ttftMs } : {}),
+          ...(turn.promptTokensPerSec !== undefined
+            ? { promptTokensPerSec: turn.promptTokensPerSec }
+            : {}),
+          ...(turn.cachedPromptTokens !== undefined
+            ? { cachedPromptTokens: turn.cachedPromptTokens }
+            : {}),
+        });
+      }
     }
     return turn.text ?? '';
   }
@@ -85,7 +109,7 @@ function deps(overrides: Partial<FitnessProbeDeps> = {}): FitnessProbeDeps {
       source: 'test',
     }),
     configuredNumCtx: async () => undefined,
-    env: {},
+    env: { GEZEL_FITNESS_REPRESENTATIVE_TOKENS: '0' },
     ...overrides,
   };
 }
@@ -115,6 +139,53 @@ describe('runFitnessProbe', () => {
     expect(record.trigger).toBe('manual');
     for (const check of Object.values(record.checks)) expect(check.ok).toBe(true);
     expect(session.disconnected).toBe(true);
+  });
+
+  it('records warm short-prompt speed plus practical 20K-context TTFT, prefill, and decode', async () => {
+    const session = new FakeSession([
+      {
+        text: 'short story',
+        tokensPerSec: 130,
+        promptTokens: 349,
+        completionTokens: 180,
+        durationMs: 2_000,
+        ttftMs: 400,
+      },
+      {
+        text: 'representative story',
+        tokensPerSec: 25,
+        promptTokens: 19_804,
+        completionTokens: 160,
+        durationMs: 37_000,
+        ttftMs: 31_000,
+        promptTokensPerSec: 635,
+        cachedPromptTokens: 420,
+      },
+      { calls: [VALID_CALL] },
+    ]);
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        env: { GEZEL_FITNESS_REPRESENTATIVE_TOKENS: '64' },
+      }),
+      { provider: 'llama-cpp', modelId: 'qwen3.6-27b-q4', trigger: 'manual' },
+    );
+
+    expect(record.genTokensPerSec).toBe(25);
+    expect(record.shortPromptGenTokensPerSec).toBe(130);
+    expect(record.representativeContext).toEqual({
+      targetPromptTokens: 64,
+      promptTokens: 19_804,
+      cachedPromptTokens: 420,
+      completionTokens: 160,
+      durationMs: 37_000,
+      ttftMs: 31_000,
+      promptTokensPerSec: 635,
+      genTokensPerSec: 25,
+    });
+    expect(session.prompts).toHaveLength(3);
+    expect(session.prompts[1]).toContain('neutral workshop ledger');
+    expect(record.checks.throughput.detail).toContain('25.0 t/s');
   });
 
   // Regression: native engines start lazily on the FIRST TURN, not in
@@ -273,7 +344,10 @@ describe('runFitnessProbe', () => {
           return 40_960;
         },
         // The llama.cpp/ds4 supervisors read this; the MLX one never does.
-        env: { GEZEL_LLAMA_NUM_CTX: '8192' },
+        env: {
+          GEZEL_LLAMA_NUM_CTX: '8192',
+          GEZEL_FITNESS_REPRESENTATIVE_TOKENS: '0',
+        },
       }),
       { provider: 'mlx', modelId: 'gemma4-12b-q4', trigger: 'manual' },
     );

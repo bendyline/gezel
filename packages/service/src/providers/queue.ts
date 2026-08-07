@@ -363,6 +363,25 @@ export class ProviderQueue {
   }
 
   /**
+   * Whether a caller may reserve another slot in `lane` right now.
+   *
+   * This is intentionally a synchronous hint rather than a second acquire
+   * API. Producers such as TaskRunner use it to keep cancellable work in
+   * their own durable/pending queue until both the provider's total cap and
+   * its per-lane cap have room. `additionalReservations` covers several
+   * fire-and-forget dispatches made in one tick before their async
+   * `sendAndWait()` calls have reached {@link acquire}.
+   */
+  hasCapacity(lane: Lane, additionalReservations = 0): boolean {
+    const reserved = Math.max(0, additionalReservations);
+    if (this.running + reserved >= this.concurrency) return false;
+    const runningInLane = lane === 'interactive' ? this.runningInteractive : this.runningBackground;
+    const laneCap =
+      lane === 'interactive' ? this.interactiveConcurrency : this.backgroundConcurrency;
+    return runningInLane + reserved < laneCap;
+  }
+
+  /**
    * Richer snapshot for debugging + UI surfacing. Same summary fields
    * as `snapshot()` plus a list of each currently running item and
    * each pending item, with their session/gezel ids and wait/run

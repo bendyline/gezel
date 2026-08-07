@@ -132,6 +132,65 @@ describe('engines routes', () => {
     expect(body.entries).toEqual([]);
   });
 
+  it('reads and persists the machine-owned llama.cpp context policy, resetting engines on change', async () => {
+    let config: { llamaCppContextSizing?: 'adaptive' | 'model-max' } = {};
+    const resetCalls: Array<{ deferBusy?: boolean }> = [];
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+        // The policy governs launch args, so a change must tear idle
+        // engines down (deferring busy ones) — otherwise it silently waits
+        // for an idle-timeout nobody can see.
+        resetClient: async (opts: { deferBusy?: boolean }) => {
+          resetCalls.push(opts);
+        },
+      } as Parameters<typeof makeApp>[0],
+      {
+        store: {
+          readConfig: async () => config,
+          writeConfig: async (patch: { llamaCppContextSizing?: 'model-max' | null }) => {
+            config =
+              patch.llamaCppContextSizing === null
+                ? {}
+                : { llamaCppContextSizing: patch.llamaCppContextSizing };
+            return config;
+          },
+        },
+      },
+    );
+
+    const initial = await app.request('/api/engines/llama-cpp/context-sizing');
+    await expect(initial.json()).resolves.toEqual({ policy: 'adaptive' });
+    expect(resetCalls).toEqual([]);
+
+    const setMaximum = await app.request('/api/engines/llama-cpp/context-sizing', {
+      method: 'PUT',
+      body: JSON.stringify({ policy: 'model-max' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(setMaximum.json()).resolves.toEqual({ policy: 'model-max' });
+    expect(config).toEqual({ llamaCppContextSizing: 'model-max' });
+    expect(resetCalls).toEqual([{ deferBusy: true }]);
+
+    const repeatMaximum = await app.request('/api/engines/llama-cpp/context-sizing', {
+      method: 'PUT',
+      body: JSON.stringify({ policy: 'model-max' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(repeatMaximum.json()).resolves.toEqual({ policy: 'model-max' });
+    expect(resetCalls).toHaveLength(1);
+
+    const setAdaptive = await app.request('/api/engines/llama-cpp/context-sizing', {
+      method: 'PUT',
+      body: JSON.stringify({ policy: 'adaptive' }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(setAdaptive.json()).resolves.toEqual({ policy: 'adaptive' });
+    expect(config).toEqual({});
+    expect(resetCalls).toHaveLength(2);
+  });
+
   it('POST /reconcile rejects an invalid provider', async () => {
     const app = makeApp({
       engineStatus: async () => null,

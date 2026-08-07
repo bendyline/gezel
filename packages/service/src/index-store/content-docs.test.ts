@@ -52,12 +52,12 @@ describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + sear
     expect(search.engine).toBe('fts');
     expect(search.results.length).toBeGreaterThanOrEqual(1);
     expect(search.results[0]?.sourcePath).toBe('docs/spec.docx');
-    expect(search.results[0]?.markdownPath).toContain('spec.docx_files');
+    expect(search.results[0]?.markdownPath).toContain('spec_files');
 
     const read = await ci.readDocAsMarkdown('c', 'docs/spec.docx');
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('frobnication');
-    expect(read.markdownPath).toContain('.gezel/files/docs/spec.docx_files/spec.md');
+    expect(read.markdownPath).toContain('.gezel/files/docs/spec_files/spec.md');
   });
 
   it('read_doc_as_markdown converts on demand when not yet indexed', async () => {

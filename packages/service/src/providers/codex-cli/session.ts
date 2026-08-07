@@ -279,6 +279,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       emitHeartbeat: (label?: string) => this.emitHeartbeat(label),
       emitUsage: (usage: TurnUsage) => this.emitUsage(usage),
       emitWarning: (message: string) => this.emitWarning(message),
+      ...(this.deps.knownSecretValues ? { knownSecretValues: this.deps.knownSecretValues } : {}),
       onThreadStarted: (threadId: string) => {
         this.codexThreadIdCache = threadId;
       },

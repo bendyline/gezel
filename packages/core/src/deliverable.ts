@@ -159,13 +159,13 @@ function gateChecksFloor(kind: DeliverableKind, path: string, minBytes?: number)
   });
   switch (kind) {
     case 'html-game':
-      return [mb(1500)];
+      return [mb(1500), { kind: 'htmlLint', file: path }];
     case 'html-multiscreen-game':
-      return [mb(2500)];
+      return [mb(2500), { kind: 'htmlLint', file: path }];
     case 'html-page':
-      return [mb(800)];
+      return [mb(800), { kind: 'htmlLint', file: path }];
     case 'html-marketing-site':
-      return [mb(1200)];
+      return [mb(1200), { kind: 'htmlLint', file: path }];
     case 'markdown-doc':
       return [mb(500)];
     case 'markdown-report':

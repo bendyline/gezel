@@ -81,6 +81,19 @@ declare global {
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
       };
       /**
+       * macOS PKG uninstall surface. Boolean choices are intentionally the
+       * entire renderer contract; paths and privileged arguments are resolved
+       * by the Electron main process from the signed app bundle.
+       */
+      uninstall?: {
+        start(selection: {
+          removeMachineData: boolean;
+          removeSharedData: boolean;
+          removeCurrentUserData: boolean;
+        }): Promise<{ ok: true } | { ok: false; error: string; canceled?: boolean }>;
+        onShowRequested(callback: () => void): () => void;
+      };
+      /**
        * App update status from the Electron shell. On macOS `install` opens a
        * downloaded, signature- and notarization-verified PKG so Installer.app
        * can authenticate the user — Squirrel's in-place ZIP swap cannot

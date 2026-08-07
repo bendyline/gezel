@@ -43,15 +43,18 @@ function fakeLlamaModels(): LlamaCppModelManager {
  * seeded MockProvider so no real llama-server is ever spawned; the
  * pool snapshot is empty (nothing resident).
  */
-function fakeRouter(provider: LLMProvider) {
+function fakeRouter(provider: LLMProvider, boundModels: string[]) {
   const snapshot = () => ({ entries: [], committedBytes: 0, budgetBytes: 0, enforced: false });
   return {
     pool: { pickReplicaForBind: () => 0, snapshot },
     snapshot,
-    bindForSession: async (name: string, modelId: string) => ({
-      engineKey: `${name}:${modelId}:0`,
-      provider,
-    }),
+    bindForSession: async (name: string, modelId: string) => {
+      boundModels.push(modelId);
+      return {
+        engineKey: `${name}:${modelId}:0`,
+        provider,
+      };
+    },
   } as unknown as import('../providers/native/engine-router.js').EngineRouter;
 }
 
@@ -60,6 +63,8 @@ let store: Store;
 let history: HistoryManager;
 let mock: MockProvider;
 let manager: ChatManager;
+let events: ChatEventBus;
+let boundModels: string[];
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-routing-'));
@@ -73,9 +78,11 @@ beforeEach(async () => {
     defaultModel: { 'llama-cpp': 'brain-27b' },
   });
   mock = new MockProvider({ name: 'llama-cpp' });
+  events = new ChatEventBus();
+  boundModels = [];
   manager = new ChatManager({
     store,
-    events: new ChatEventBus(),
+    events,
     memory: noopMemory,
     getPort: () => 0,
     getToken: () => 'test-token',
@@ -85,7 +92,7 @@ beforeEach(async () => {
     secrets: new FileSecretStore(home),
     history,
     llamaCppModels: fakeLlamaModels(),
-    engineRouter: fakeRouter(mock),
+    engineRouter: fakeRouter(mock, boundModels),
   });
   delete process.env.GEZEL_DISABLE_MODEL_ROUTING;
 });
@@ -112,12 +119,14 @@ describe('createSession routedModel precedence', () => {
   it('routedModel replaces the config default', async () => {
     const session = await manager.createSession({ gezelId: 'worker', routedModel: routed });
     expect(session.model).toBe('worker-8b');
+    expect(session.modelSource).toBe('capability-routing');
   });
 
   it('a frontmatter model pin wins over routedModel', async () => {
     await store.updateGezelSettings('worker', { model: 'pinned-13b' });
     const session = await manager.createSession({ gezelId: 'worker', routedModel: routed });
     expect(session.model).toBe('pinned-13b');
+    expect(session.modelSource).toBeUndefined();
   });
 
   it('a cross-provider routedModel is inert', async () => {
@@ -126,6 +135,40 @@ describe('createSession routedModel precedence', () => {
       routedModel: { ...routed, provider: 'mlx' },
     });
     expect(session.model).toBe('brain-27b');
+    expect(session.modelSource).toBeUndefined();
+  });
+
+  it('binds and reports the capability-routed model for the live turn', async () => {
+    const session = await manager.createSession({ gezelId: 'worker', routedModel: routed });
+    mock.script('ok');
+    let inflightModel: string | undefined;
+    events.subscribe(session.id, (event) => {
+      if (event.type !== 'delta' || inflightModel) return;
+      inflightModel = manager.listInflight().find((turn) => turn.sessionId === session.id)?.model;
+    });
+
+    await manager.send(session.id, 'build it');
+
+    expect(boundModels).toContain('worker-8b');
+    expect(inflightModel).toBe('worker-8b');
+  });
+
+  it('reports the actual live default for a legacy record with a stale model stamp', async () => {
+    const session = await manager.createSession({ gezelId: 'worker' });
+    session.model = 'worker-8b';
+    delete session.modelSource;
+    await store.writeSession(session);
+    mock.script('ok');
+    let inflightModel: string | undefined;
+    events.subscribe(session.id, (event) => {
+      if (event.type !== 'delta' || inflightModel) return;
+      inflightModel = manager.listInflight().find((turn) => turn.sessionId === session.id)?.model;
+    });
+
+    await manager.send(session.id, 'continue');
+
+    expect(boundModels).toContain('brain-27b');
+    expect(inflightModel).toBe('brain-27b');
   });
 });
 
@@ -142,6 +185,7 @@ describe('startHandoffSession capability-floor routing', () => {
     });
     const session = await store.getSession('worker', sessionId);
     expect(session?.model).toBe('worker-8b');
+    expect(session?.modelSource).toBe('capability-routing');
 
     const events = await routedEvents();
     expect(events).toHaveLength(1);

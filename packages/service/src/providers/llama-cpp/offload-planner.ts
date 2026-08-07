@@ -243,8 +243,19 @@ export interface KvReserveInput {
   embeddingLength?: number | undefined;
   headCount?: number | undefined;
   headCountKv?: number | undefined;
+  /**
+   * Per-layer KV heads, index-aligned with `slidingWindowPattern`
+   * (Gemma 4). When present (with the pattern and SWA dims), the estimate
+   * becomes per-layer exact instead of mean-based.
+   */
+  headCountKvPerLayer?: number[] | undefined;
+  /** Per-layer flags: true = SWA layer, which caches at the `*Swa` dims. */
+  slidingWindowPattern?: boolean[] | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
+  /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
+  keyLengthSwa?: number | undefined;
+  valueLengthSwa?: number | undefined;
   /** Total launch context (`--ctx-size`, i.e. per-slot ctx × slots). */
   ctxTokens: number;
   /** The launcher's `--cache-type-k/v` value (assumed symmetric). */
@@ -252,22 +263,164 @@ export interface KvReserveInput {
 }
 
 /**
- * Estimate the KV cache's VRAM footprint at launch: under `-ngl all`
- * every layer's KV lives on the GPU. Full-attention assumption — models
- * with sliding-window layers (Gemma) allocate less than this, which only
- * biases the plan toward keeping more experts in RAM; never toward an
- * OOM. Returns undefined when the header lacks the needed dims (e.g.
- * per-layer KV-head arrays), so callers can budget weights-only rather
- * than on a guess.
+ * Estimate the KV cache footprint with EVERY layer caching the full
+ * context — what llama.cpp allocates for ordinary full-attention models,
+ * and for SWA models under `--swa-full`.
+ *
+ * Per-layer exact when the header supplies the layout: SWA layers cache
+ * at their own head dims (`key/value_length_swa`), so pricing them at the
+ * global dims overstated Gemma 4's true `--swa-full` allocation ~2×
+ * (31b at 64K: ~55 GB real vs ~105 GB mean-based) — enough to decline
+ * the full cache on machines that could genuinely hold it. Falls back to
+ * mean heads × global dims when per-layer data is absent, and to
+ * undefined when even that is missing, so callers budget weights-only
+ * rather than on a guess. For the DEFAULT (windowed) cache of an SWA
+ * model, use {@link estimateWindowedKvLinearization} instead.
  */
 export function estimateKvReserveBytes(input: KvReserveInput): number | undefined {
   const { blockCount, headCountKv, ctxTokens } = input;
-  if (!blockCount || !headCountKv || !ctxTokens) return undefined;
+  if (!blockCount || !ctxTokens) return undefined;
   const headDim =
     input.headCount && input.embeddingLength ? input.embeddingLength / input.headCount : undefined;
   const kDim = input.keyLength ?? headDim;
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const perLayerHeads = input.headCountKvPerLayer;
+  const pattern = input.slidingWindowPattern;
+  if (
+    perLayerHeads &&
+    perLayerHeads.length === blockCount &&
+    pattern &&
+    pattern.length === blockCount
+  ) {
+    const kDimSwa = input.keyLengthSwa ?? kDim;
+    const vDimSwa = input.valueLengthSwa ?? vDim;
+    let elemsPerToken = 0;
+    for (let layer = 0; layer < blockCount; layer++) {
+      const heads = perLayerHeads[layer] ?? 0;
+      elemsPerToken += heads * (pattern[layer] ? kDimSwa + vDimSwa : kDim + vDim);
+    }
+    if (elemsPerToken > 0) return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
+  }
+  if (!headCountKv) return undefined;
   return Math.round(blockCount * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
+}
+
+export interface WindowedKvInput {
+  blockCount?: number | undefined;
+  embeddingLength?: number | undefined;
+  headCount?: number | undefined;
+  /** Scalar/mean KV heads — used for every layer when no per-layer array exists. */
+  headCountKv?: number | undefined;
+  /** Per-layer KV heads, index-aligned with `slidingWindowPattern` (Gemma 4). */
+  headCountKvPerLayer?: number[] | undefined;
+  /** SWA window size in tokens (`<arch>.attention.sliding_window`). */
+  slidingWindow?: number | undefined;
+  /** Per-layer flags: true = SWA layer, false = global layer. */
+  slidingWindowPattern?: boolean[] | undefined;
+  keyLength?: number | undefined;
+  valueLength?: number | undefined;
+  /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
+  keyLengthSwa?: number | undefined;
+  valueLengthSwa?: number | undefined;
+  kvCacheType?: string | undefined;
+}
+
+export interface WindowedKvLinearization {
+  /**
+   * KV bytes per context token per slot — global (full-attention) layers
+   * only, the sole component that scales with the window.
+   */
+  bytesPerToken: number;
+  /**
+   * Context-independent KV bytes per slot: the SWA layers' window-capped
+   * caches. Add to the resident-weights term when feeding a linear
+   * admission model (`total(ctx) = fixed + bytesPerToken × ctx`).
+   */
+  fixedBytes: number;
+}
+
+/**
+ * Tokens each SWA layer caches beyond the window itself — llama.cpp
+ * allocates `n_swa + n_ubatch` per SWA layer. Sized for the largest
+ * ubatch we launch with; overestimating here only pads the fixed term.
+ */
+const SWA_UBATCH_MARGIN_TOKENS = 2048;
+
+/**
+ * Price the DEFAULT (windowed) KV cache of a sliding-window-attention
+ * model as a linear function of context: SWA layers cache only
+ * ~`slidingWindow` tokens regardless of context (a fixed cost), while the
+ * global layers scale with it. On Gemma 4 the two shapes differ by more
+ * than the layer ratio — global layers carry fewer KV heads at wider head
+ * dims (31b: 10 layers × 4 heads × 512+512 vs 50 layers × 16 heads ×
+ * 256+256) — so full-attention math overstates the windowed cache ~14×
+ * and using it for admission over-clamps or over-denies exactly the
+ * launches the `--swa-full` decline is trying to keep whole (the
+ * 2026-08-04 gemma4-26b sweep shipped 19–56K windows on a 65536 request
+ * this way).
+ *
+ * Returns undefined when the header lacks the SWA layout (no window, no
+ * pattern, length mismatches) so callers fall back to their conservative
+ * path instead of guessing. `shared_kv_layers` (Gemma 4n) is deliberately
+ * ignored — sharing only shrinks the real cache, so the estimate stays an
+ * overestimate, never an OOM-side error.
+ */
+/**
+ * Exact per-slot KV bytes at f16 for the slot-ceiling math: the windowed
+ * linearization when the header shows an SWA layout (the engine-default
+ * cache mode, and the one that yields the honest slot upper bound — a
+ * full-attention number would cut Gemma to one slot for a cache it only
+ * runs when it fits anyway), per-layer full-attention otherwise.
+ * Undefined when the header lacks the dims; callers fall back to the
+ * weights-scaled heuristic.
+ */
+export function estimateExactPerSlotKvBytesF16(
+  input: Omit<WindowedKvInput, 'kvCacheType'>,
+  perTurnCtxTokens: number,
+): number | undefined {
+  const windowed = estimateWindowedKvLinearization({ ...input, kvCacheType: 'f16' });
+  if (windowed) {
+    return Math.round(windowed.fixedBytes + windowed.bytesPerToken * perTurnCtxTokens);
+  }
+  return estimateKvReserveBytes({
+    ...input,
+    ctxTokens: perTurnCtxTokens,
+    kvCacheType: 'f16',
+  });
+}
+
+export function estimateWindowedKvLinearization(
+  input: WindowedKvInput,
+): WindowedKvLinearization | undefined {
+  const { blockCount, slidingWindow, slidingWindowPattern } = input;
+  if (!blockCount || !slidingWindow || slidingWindow <= 0 || !slidingWindowPattern)
+    return undefined;
+  if (slidingWindowPattern.length !== blockCount) return undefined;
+  const headDim =
+    input.headCount && input.embeddingLength ? input.embeddingLength / input.headCount : undefined;
+  const kDim = input.keyLength ?? headDim;
+  const vDim = input.valueLength ?? headDim;
+  if (!kDim || !vDim) return undefined;
+  const kDimSwa = input.keyLengthSwa ?? kDim;
+  const vDimSwa = input.valueLengthSwa ?? vDim;
+  const perLayerHeads = input.headCountKvPerLayer;
+  if (perLayerHeads && perLayerHeads.length !== blockCount) return undefined;
+  if (!perLayerHeads && !input.headCountKv) return undefined;
+  const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  let globalElemsPerToken = 0;
+  let swaElemsPerToken = 0;
+  for (let layer = 0; layer < blockCount; layer++) {
+    const heads = perLayerHeads?.[layer] ?? input.headCountKv;
+    if (!heads) return undefined;
+    if (slidingWindowPattern[layer]) swaElemsPerToken += heads * (kDimSwa + vDimSwa);
+    else globalElemsPerToken += heads * (kDim + vDim);
+  }
+  return {
+    bytesPerToken: globalElemsPerToken * bytesPerElement,
+    fixedBytes: Math.round(
+      swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS),
+    ),
+  };
 }

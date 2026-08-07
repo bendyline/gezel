@@ -9,6 +9,7 @@ import {
   GezelClient,
   createTrustingFetch,
   discoverOrSpawn,
+  electronNativeBinCandidates,
   isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
@@ -593,7 +594,56 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // supervisor entirely) can re-resolve if anything was missed here.
   // Idempotent — operator-set values win.
   if (!process.env.GEZEL_NATIVE_BIN_DIR) {
-    process.env.GEZEL_NATIVE_BIN_DIR = nativeBinDir(import.meta.url);
+    const bundledNativeRoot = nativeBinDir(import.meta.url);
+    // Packaged payloads pass the release build's hash/signature gates before
+    // shipping. A development checkout is mutable, so feed its payload and
+    // any installed Electron payload through the service package's exact
+    // source-pinned verifier before exposing either one to child processes.
+    if (opts.packaged) {
+      process.env.GEZEL_NATIVE_BIN_DIR = bundledNativeRoot;
+    } else {
+      const developmentCandidates = existsSync(bundledNativeRoot) ? [bundledNativeRoot] : [];
+      const installedCandidates = electronNativeBinCandidates().filter(
+        (candidate, index, all) =>
+          candidate !== bundledNativeRoot &&
+          existsSync(candidate) &&
+          all.indexOf(candidate) === index,
+      );
+      if (developmentCandidates.length > 0 || installedCandidates.length > 0) {
+        try {
+          const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+          let reuse =
+            developmentCandidates.length > 0
+              ? await reuseVerifiedElectronNativeBinaries({
+                  candidates: developmentCandidates,
+                  allowStandaloneMacPayload: true,
+                })
+              : undefined;
+          if (!reuse?.reused && installedCandidates.length > 0) {
+            const installedReuse = await reuseVerifiedElectronNativeBinaries({
+              candidates: installedCandidates,
+            });
+            reuse = reuse
+              ? {
+                  ...installedReuse,
+                  reason: `${reuse.reason}; ${installedReuse.reason}`,
+                }
+              : installedReuse;
+          }
+          if (!reuse) {
+            opts.logger?.warn?.('[supervisor] native payload reuse produced no result');
+          } else if (reuse.reused) {
+            opts.logger?.info?.(`[supervisor] ${reuse.reason}: ${reuse.nativeBinDir}`);
+          } else {
+            opts.logger?.warn?.(`[supervisor] native payload reuse rejected: ${reuse.reason}`);
+          }
+        } catch (error) {
+          opts.logger?.warn?.(
+            `[supervisor] native payload verification failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
   }
   // Mirror the CLI's defensive overlay (packages/cli/src/connection.ts): a
   // user daemon may validate/read immutable machine-published model bundles

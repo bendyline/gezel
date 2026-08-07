@@ -18,6 +18,9 @@ export interface TenantLimitsConfig {
 
 export type TenantKind = 'chat' | 'generation';
 
+/** Shared wire-side default; remote clients mirror this for local queuing. */
+export const DEFAULT_TENANT_MAX_CONCURRENT = 4;
+
 export interface TenantLimiter {
   /**
    * Try to admit one request for `deviceId`. Returns a release function on
@@ -29,7 +32,7 @@ export interface TenantLimiter {
 }
 
 export function createTenantLimiter(config?: TenantLimitsConfig): TenantLimiter {
-  const maxTotal = Math.max(1, config?.maxConcurrentPerDevice ?? 4);
+  const maxTotal = Math.max(1, config?.maxConcurrentPerDevice ?? DEFAULT_TENANT_MAX_CONCURRENT);
   const maxChat = Math.max(1, config?.maxChatPerDevice ?? maxTotal);
   const total = new Map<string, number>();
   const chat = new Map<string, number>();

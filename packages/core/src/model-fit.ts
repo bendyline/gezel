@@ -73,6 +73,28 @@ const RAM_OFFLOAD_FRACTION = 0.8;
  */
 export const MOE_NON_EXPERT_FRACTION_ESTIMATE = 0.15;
 
+/** The practical working window fit badges price KV at — Gezel's 64K floor. */
+export const FIT_KV_CONTEXT_TOKENS = 65_536;
+
+/**
+ * KV bytes a model would carry at the fit window, from the catalog's
+ * authored f16 geometry (`kvBytesPerTokenF16` / `kvFixedBytesF16`).
+ * Returns 0 when the manifest predates the fields — the fit check then
+ * degrades to the historical weights-only estimate rather than blocking.
+ * `cacheScale` converts the f16 baseline to the engine's cache dtype
+ * (llama.cpp defaults to q8_0 ≈ 0.55; MLX runs f16 = 1).
+ */
+export function estimateManifestKvBytes(
+  manifest: { kvBytesPerTokenF16?: number; kvFixedBytesF16?: number },
+  opts?: { ctxTokens?: number; cacheScale?: number },
+): number {
+  const perToken = manifest.kvBytesPerTokenF16;
+  if (perToken === undefined || perToken <= 0) return 0;
+  const ctx = opts?.ctxTokens ?? FIT_KV_CONTEXT_TOKENS;
+  const scale = opts?.cacheScale ?? 0.55;
+  return Math.round((perToken * ctx + (manifest.kvFixedBytesF16 ?? 0)) * scale);
+}
+
 /**
  * Classify a model's fit against a machine's memory. See the module
  * doc for the MoE-offload rationale.

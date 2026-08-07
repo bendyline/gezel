@@ -323,6 +323,33 @@ export const SystemDiagnosticsSchema = z.object({
       }),
     ),
   }),
+  /**
+   * Local engines currently resident, with what each ACTUALLY granted at
+   * launch. `contextPerSlot` is the one-glance answer to "is this model
+   * looping because its window is smaller than its prompt?" — the field
+   * support asks for first on any small-model misbehavior report. Catalog
+   * ids and engine names only, never paths. Collected fresh on every
+   * request (engines start and stop between dialog openings); absent when
+   * no local engine is up.
+   */
+  localEngines: z
+    .array(
+      z.object({
+        provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+        /** Catalog id the engine launched with. */
+        model: z.string().optional(),
+        pid: z.number().optional(),
+        startedAt: z.string().optional(),
+        /** Per-slot context window in tokens — the granted working window. */
+        contextPerSlot: z.number().optional(),
+        /** Total context across slots (`--ctx-size`). */
+        contextTotal: z.number().optional(),
+        slots: z.number().optional(),
+        kvCacheType: z.string().optional(),
+        backend: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 
@@ -486,6 +513,21 @@ export const DocumentExportOptionsSchema = z.object({
   htmlBundle: z.enum(['single', 'zip']),
 });
 export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
+
+/**
+ * How the managed llama.cpp engine chooses its per-turn context window.
+ *
+ * `adaptive` keeps Gezel's practical model/tuning target and may reduce a
+ * larger requested window after reducing concurrency. `model-max` requests
+ * the model's advertised native window and treats that full window as a hard
+ * admission requirement: concurrency may fall, but context may not.
+ */
+export const LlamaCppContextSizingSchema = z.enum(['adaptive', 'model-max']);
+export type LlamaCppContextSizing = z.infer<typeof LlamaCppContextSizingSchema>;
+export const LlamaCppContextSizingResponseSchema = z.object({
+  policy: LlamaCppContextSizingSchema,
+});
+export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
@@ -985,12 +1027,19 @@ export const GezelConfigSchema = z.object({
    * pre-turn context-pressure check in `ChatManager` — when the
    * estimated prompt approaches this limit, older messages get
    * collapsed into a synthetic compaction-summary bubble (same path
-   * as Ollama). Unset → default of 16384, which is a generous working
-   * window for 2–8B local models without burning VRAM on an unused
-   * 128k allocation. Raise for long coding sessions on capable
-   * hardware; lower on memory-constrained machines.
+   * as Ollama). Unset requests 65536. Long-context models are never
+   * launched below 65536: admission reduces engine slots first, then
+   * refuses the model if one slot still cannot fit. A model whose native
+   * context is genuinely smaller retains that native limit.
    */
   llamaCppNumCtx: z.number().int().positive().optional(),
+  /**
+   * Managed llama.cpp context policy. Unset is `adaptive`. `model-max`
+   * requests the model's advertised native window and refuses admission when
+   * one engine slot cannot safely retain it. Stored by the engine owner so a
+   * machine-engine broker and an in-process/dev engine use identical policy.
+   */
+  llamaCppContextSizing: LlamaCppContextSizingSchema.optional(),
   /**
    * ds4-only: base URL of an already-running `ds4-server` to talk to
    * instead of supervising the bundled binary. Mirrors `llamaCppBaseUrl`
@@ -3011,6 +3060,36 @@ export const ReferenceFileLocationResponseSchema = z.object({
 export type ReferenceFileLocationResponse = z.infer<typeof ReferenceFileLocationResponseSchema>;
 
 /**
+ * Classify and prepare a file for the References viewer without decoding
+ * arbitrary binary bytes as UTF-8 in the renderer. Convertible documents are
+ * represented by their generated markdown sidecar; media stays binary and is
+ * fetched through the authenticated raw-file endpoints.
+ */
+export const ReferencePreviewRequestSchema = ReferenceFileLocationRequestSchema;
+export type ReferencePreviewRequest = z.infer<typeof ReferencePreviewRequestSchema>;
+
+export const ReferencePreviewResponseSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('text'),
+    content: z.string(),
+  }),
+  z.object({
+    mode: z.literal('markdown'),
+    content: z.string(),
+    /** Path to the generated markdown companion, relative to its source root. */
+    sidecarPath: z.string().min(1),
+  }),
+  z.object({
+    mode: z.literal('media'),
+    mediaKind: z.enum(['image', 'video', 'audio']),
+  }),
+  z.object({
+    mode: z.literal('binary'),
+  }),
+]);
+export type ReferencePreviewResponse = z.infer<typeof ReferencePreviewResponseSchema>;
+
+/**
  * Resolve-and-read for project artifacts. Agents frequently guess paths
  * (pass the basename alone, or include a redundant `artifacts/` prefix);
  * this endpoint tries the exact path first, then falls back to a
@@ -3405,6 +3484,12 @@ export const UpdateProjectRequestSchema = z.object({
    * resumes. Chat remains functional in all states.
    */
   status: z.enum(['active', 'readonly', 'inactive', 'stable']).optional(),
+  /**
+   * Move the project into or out of the archived section. Archiving also
+   * forces the operational status to `inactive`; restoring only clears this
+   * flag so the user can choose when to reactivate background work.
+   */
+  archived: z.boolean().optional(),
   /** Per-project override of the `run_nodejs_script` wall-clock timeout. */
   workspaceScriptTimeoutMs: z
     .number()

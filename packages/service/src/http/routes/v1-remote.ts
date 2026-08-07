@@ -14,6 +14,7 @@ import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ResolvedTuning } from '../../model-profile/index.js';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import {
   PROTOCOL_VERSION,
   RemoteAdmissionRequestSchema,
@@ -356,6 +357,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     const originDeviceId = auth?.appId ?? 'unknown';
     const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
     if (!release) {
+      c.header('Retry-After', '1');
       return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
     }
     let probe: LLMSession | null = null;
@@ -391,6 +393,9 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       if (err instanceof ModelNotInstalledError) {
         return c.json({ error: 'model_not_loaded', model: body.model }, 404);
       }
+      if (err instanceof CapacityDeniedError) {
+        return c.json({ error: 'capacity_denied' }, 503);
+      }
       throw err;
     } finally {
       await probe?.disconnect().catch(() => {});
@@ -418,6 +423,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     // before we touch the GPU/engine. Released when the turn ends.
     const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
     if (!release) {
+      c.header('Retry-After', '1');
       return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
     }
 

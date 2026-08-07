@@ -162,6 +162,17 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     file: z.string().optional(),
   }),
   /**
+   * An in-process, zero-spawn static gate for an HTML deliverable: the document
+   * shell closes, static DOM ids are unique, every inline classic/module
+   * script parses, and top-level function declarations do not silently
+   * replace one another. Unlike a live browser check, this runs in-process
+   * in locked-down modes and is safe to attach to every HTML deliverable.
+   */
+  z.object({
+    kind: z.literal('htmlLint'),
+    file: z.string().min(1),
+  }),
+  /**
    * Named `node:` imports in `file` resolve to real builtin exports, and a
    * `.mjs` file doesn't call `require()`. The "ships broken module imports"
    * floor for the code class: a name imported from the wrong builtin (e.g.

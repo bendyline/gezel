@@ -210,6 +210,21 @@ initiated actions (a human pulling a repo, the app's own npm/CLI processes) are 
 | *derived* `allowModelGit` (= `allowFileEdits`) | ✗ | ✓ | ✓ |
 | *derived* `allowNonBuiltinToolsets` (= services ∧ scripts) | ✗ | ✗ | ✓ |
 
+There is one deliberately narrower exception to `allowNonBuiltinToolsets`:
+the exact system-managed `@playwright/mcp` package may run for an eligible
+browser-facing role/project while External services are off, but only through
+Gezel's bridge-backed **local preview browser** profile. That profile exposes a
+small interaction/inspection tool subset (no evaluate, unsafe code, uploads,
+or storage mutation), rewrites only in-workspace `file:` aliases to a
+short-lived preview capability, and forces Chromium through the dedicated
+preview-only HTTP listener as a non-forwarding proxy. The listener serves
+capability paths, rejects ordinary paths/foreign hosts, and destroys CONNECT
+and WebSocket upgrades; the preview document CSP independently blocks external
+resources, connections, forms, frames, WebRTC, and DNS prefetch. User-installed
+Playwright copies and native SDK/CLI MCP loops do not receive this exception.
+Changing the security policy hard-resets live chat/MCP sessions so a browser
+started under `free` cannot survive a switch into a locked posture.
+
 `allowFileEdits` is a legacy-named, file-adjacent capability. It does **not** decide whether
 a gezel may mutate a project workspace, and it does not hide the builtin shared-document
 tools. Workspace writes have a separate per-project consent gate:
@@ -233,6 +248,9 @@ off-preset combination (`classifySecurityLevel` re-labels the slider).
 2. **Call-time dispatch guard** — `isCallableByModel` (`providers/mcp-bridge-pool.ts`) rejects
    a builtin tool call that isn't on the allowlist, even if the model fabricates it. This is
    what makes the surface filter a real boundary against a prompt-injected model.
+   The local preview browser applies the same rule inside its Playwright bridge:
+   pruned tools are absent from the bridge's callable name set, and its wrapper
+   rejects non-preview navigation before dispatch.
 3. **Sink checks** — the action handlers re-check the policy independently:
    - `web_search` / `wikipedia_search` → `providers/search/factory.ts` (no provider when
      `!allowExternalServices`).

@@ -336,9 +336,9 @@ export const ProjectSchema = z.object({
    *   above pause. Chat still works — gezels can answer direct user
    *   questions — but no ambient work fires. No write-blocking in this
    *   pass; revisit once we see how it lands.
-   * - `inactive`: archived. Identical ambient-pause semantics as
-   *   `readonly` for now; the distinction is a visual one in the UI
-   *   so the user can express "done with this" vs "on hold."
+   * - `inactive`: deliberately paused. Identical ambient-pause semantics as
+   *   `readonly` for now; unlike `archived`, an inactive project remains in
+   *   the primary project navigation.
    * - `stable`: the project has come to rest — all its tasks are
    *   terminal (complete/canceled), so there is nothing to advance.
    *   Ambient nudges pause (same gate as readonly/inactive) but, unlike
@@ -351,6 +351,16 @@ export const ProjectSchema = z.object({
    *   non-destructive; chat and direct tool calls keep working.
    */
   status: z.enum(['active', 'readonly', 'inactive', 'stable']).optional(),
+  /**
+   * Bury this project in the navigation without deleting it. Archived
+   * projects remain available from the dedicated section in the full
+   * Projects view. The Store enforces `archived: true` => `status: inactive`
+   * so background work cannot continue on a buried project.
+   *
+   * Missing/false means visible in the ordinary project UX, preserving
+   * compatibility with projects written before archiving existed.
+   */
+  archived: z.boolean().optional(),
   /**
    * Per-project override of the `run_nodejs_script` wall-clock
    * timeout. Clamped between 30 seconds and 30 minutes. Missing →

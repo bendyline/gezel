@@ -41,11 +41,19 @@ export interface ElectronNativeReuseOptions {
   release?: string;
   manifest?: NativeFileManifest;
   verifySignature?: typeof verifyCodeSignature;
+  /**
+   * Accept an exactly pinned standalone macOS native release tree without an
+   * enclosing Electron app. Intended for the development checkout populated
+   * by `fetch-native-binaries.mjs`; installed Electron payloads must leave
+   * this false so their parent app is also signature/notarization checked.
+   */
+  allowStandaloneMacPayload?: boolean;
 }
 
 /**
- * Adopt Electron's extracted native payload only when every executable and
- * loadable library matches the CLI's source-bundled per-file pins.
+ * Adopt Electron's extracted native payload, or an explicitly allowed
+ * standalone development payload, only when every executable and loadable
+ * library matches the CLI's source-bundled per-file pins.
  *
  * A manifest found beside the Electron app is never trusted. The expected
  * file set and hashes come from this package, which pin-native-release.mjs
@@ -87,12 +95,15 @@ export async function reuseVerifiedElectronNativeBinaries(
         platform,
         entries: platformEntries,
         verifySignature: opts.verifySignature ?? verifyCodeSignature,
+        allowStandaloneMacPayload: opts.allowStandaloneMacPayload === true,
       });
       process.env.GEZEL_NATIVE_BIN_DIR = resolve(candidate);
       return {
         reused: true,
         nativeBinDir: resolve(candidate),
-        reason: `verified Electron native release ${release}`,
+        reason: `verified ${
+          opts.allowStandaloneMacPayload ? 'standalone' : 'Electron'
+        } native release ${release}`,
       };
     } catch (error) {
       failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
@@ -113,6 +124,7 @@ async function verifyCandidate(opts: {
   platform: NodeJS.Platform;
   entries: Array<[string, NativePlatformPin]>;
   verifySignature: typeof verifyCodeSignature;
+  allowStandaloneMacPayload: boolean;
 }): Promise<void> {
   const root = resolve(opts.root);
   const rootInfo = await lstat(root);
@@ -190,7 +202,7 @@ async function verifyCandidate(opts: {
     }
   }
 
-  if (opts.platform === 'darwin') {
+  if (opts.platform === 'darwin' && !opts.allowStandaloneMacPayload) {
     const appBundle = enclosingMacApp(root);
     if (!appBundle) throw new Error('native payload is not inside a macOS app bundle');
     const outcome = await opts.verifySignature(appBundle, {

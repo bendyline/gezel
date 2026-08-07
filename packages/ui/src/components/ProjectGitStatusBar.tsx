@@ -42,6 +42,9 @@ interface Props {
    * Omit `onStatusChange` to hide the control.
    */
   status?: ProjectStatus;
+  /** Archived projects remain visibly inactive but must be restored before
+   *  their lifecycle status can change. */
+  statusLocked?: boolean;
   onStatusChange?: (status: ProjectStatus) => void;
 }
 
@@ -91,11 +94,13 @@ function EditsLockIcon({ unlocked = false }: { unlocked?: boolean }) {
  */
 function ProjectControlsOverflow({
   projectStatus,
+  statusLocked,
   onStatusChange,
   gezelWritesOn,
   onAllowWritesChange,
 }: {
   projectStatus: ProjectStatus;
+  statusLocked?: boolean;
   onStatusChange?: (status: ProjectStatus) => void;
   gezelWritesOn: boolean;
   onAllowWritesChange?: (next: boolean) => void;
@@ -130,6 +135,7 @@ function ProjectControlsOverflow({
                       type="button"
                       className={`project-controls-overflow-item project-status-select-${option.value}`}
                       aria-pressed={projectStatus === option.value}
+                      disabled={statusLocked}
                       onClick={() => {
                         onStatusChange(option.value);
                         setOpen(false);
@@ -189,6 +195,7 @@ export function ProjectGitStatusBar({
   onAllowWritesChange,
   onOpenGitHub,
   status: projectStatus,
+  statusLocked = false,
   onStatusChange,
 }: Props) {
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
@@ -677,11 +684,16 @@ export function ProjectGitStatusBar({
           {onStatusChange && (
             <Select.Root
               value={projectStatus ?? 'active'}
+              disabled={statusLocked}
               onValueChange={(v) => onStatusChange(v as ProjectStatus)}
             >
               <Select.Trigger
                 className={`project-status-select project-status-select-${projectStatus ?? 'active'}`}
-                title={STATUS_TOOLTIP}
+                title={
+                  statusLocked
+                    ? 'Archived projects are inactive. Restore this project to change its status.'
+                    : STATUS_TOOLTIP
+                }
                 aria-label="Project status"
               >
                 <span className="project-status-select-dot" aria-hidden />
@@ -721,6 +733,7 @@ export function ProjectGitStatusBar({
         {compact && (
           <ProjectControlsOverflow
             projectStatus={projectStatus ?? 'active'}
+            statusLocked={statusLocked}
             onStatusChange={onStatusChange}
             gezelWritesOn={gezelWritesOn}
             onAllowWritesChange={onAllowWritesChange}

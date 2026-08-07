@@ -14,7 +14,7 @@ import { verifyLicenseBundle } from './verify-packaged-licenses.mjs';
 
 const execFileP = promisify(execFile);
 const LINUX_METAINFO_PATH = join('usr', 'share', 'metainfo', 'com.bendyline.gezel.metainfo.xml');
-const LINUX_DESKTOP_PATH = join('usr', 'share', 'applications', 'gezel.desktop');
+const LINUX_DESKTOP_PATH = join('usr', 'share', 'applications', 'com.bendyline.gezel.desktop');
 
 async function walk(root, predicate) {
   const matches = [];
@@ -143,7 +143,10 @@ async function verifyLinuxAppStreamMetadata(artifact, root) {
     ['component id', /<id>\s*com\.bendyline\.gezel\s*<\/id>/],
     ['metadata license', /<metadata_license>\s*MIT\s*<\/metadata_license>/],
     ['project license', /<project_license>\s*MIT\s*<\/project_license>/],
-    ['desktop launchable', /<launchable\s+type="desktop-id">\s*gezel\.desktop\s*<\/launchable>/],
+    [
+      'desktop launchable',
+      /<launchable\s+type="desktop-id">\s*com\.bendyline\.gezel\.desktop\s*<\/launchable>/,
+    ],
   ];
   for (const [label, pattern] of requiredMetadata) {
     if (!pattern.test(metadata)) {

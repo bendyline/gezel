@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -18,7 +19,42 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/llama-cpp', '/v1/remote/manage/llama-cpp'));
 
   app.get('/models', async (c) => {
-    const models = await ctx.llamaCppModels.listInstalled();
+    const installed = await ctx.llamaCppModels.listInstalled();
+    const models = await Promise.all(
+      installed.map(async (model) => {
+        try {
+          const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id);
+          return {
+            ...model,
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.plannedResidentBytes
+              ? { predictedResidentBytes: plan.plannedResidentBytes }
+              : {}),
+            ...(plan.reservedResidentBytes
+              ? { reservedResidentBytes: plan.reservedResidentBytes }
+              : {}),
+            ...(plan.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
+          };
+        } catch (error) {
+          // Two distinct denials, two distinct remedies: a model RESIDENT
+          // below the new policy's minimum needs an engine restart, while a
+          // genuine can't-fit needs memory (or the Adaptive policy). Folding
+          // both into one status made the UI tell restart-case users to go
+          // free memory.
+          return {
+            ...model,
+            ...(error instanceof CapacityDeniedError
+              ? {
+                  contextSizingStatus:
+                    error.reason === 'resident-below-minimum'
+                      ? ('restart-required' as const)
+                      : ('insufficient-memory' as const),
+                }
+              : {}),
+          };
+        }
+      }),
+    );
     return c.json({ models });
   });
 

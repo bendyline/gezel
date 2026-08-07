@@ -18,6 +18,8 @@ interface Props {
    */
   gezelName?: string;
   onSessionIdChange: (next: string | undefined) => void;
+  /** Runs after "+ New" has created and selected a fresh session. */
+  onNewSessionCreated?: (sessionId: string) => void;
   /** Bumped by the parent after a write it wants the switcher to re-read
    *  (e.g. ChatComposer's lazy-create on first send). */
   refreshKey?: number;
@@ -52,6 +54,7 @@ export function SessionSwitcher({
   sessionId,
   gezelName,
   onSessionIdChange,
+  onNewSessionCreated,
   refreshKey,
   taskRef,
   stepId,
@@ -143,10 +146,11 @@ export function SessionSwitcher({
       const created = await api.createChatSession(body);
       await refresh();
       onSessionIdChange(created.id);
+      onNewSessionCreated?.(created.id);
     } finally {
       setBusy(false);
     }
-  }, [gezelId, projectId, taskRef, stepId, refresh, onSessionIdChange]);
+  }, [gezelId, projectId, taskRef, stepId, refresh, onSessionIdChange, onNewSessionCreated]);
 
   const archiveCurrent = useCallback(async () => {
     if (!sessionId) return;

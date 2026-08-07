@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
-import { DropdownChevron, DropdownMenu } from '../primitives/index.js';
+import { DropdownChevron, DropdownMenu, Tabs } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -64,17 +64,21 @@ const MAX_SIDE_FRACTION = 0.65;
 const DEFAULT_SIDE_FRACTION = 0.34;
 
 /**
- * Minimum widths for the split chat/reference layout. The side rail drops
- * before the conversation can shrink below 480 px; while the split remains,
- * CSS caps the resizable side track against the same constraint. This is
- * measured on the rail itself because an output pane can squeeze chat even
- * while the surrounding project view is still wide.
+ * Minimum widths for the split chat/reference layout. The split is
+ * technically able to fit at 686 px, but at that width both panes read as
+ * cramped utility columns. Below 1100 px the rail becomes a single-pane tab
+ * surface instead: Chat keeps the whole canvas, while Task, Commands, and
+ * References remain one click away. This is measured on the rail itself
+ * because an output pane can squeeze chat even while the surrounding project
+ * view is still wide.
  */
 export const CHAT_RAIL_MIN_CHAT_PX = 480;
 const CHAT_RAIL_MIN_SIDE_PX = 192;
 const CHAT_RAIL_GRIP_TRACK_PX = 14;
-export const CHAT_RAIL_MIN_SPLIT_PX =
-  CHAT_RAIL_MIN_CHAT_PX + CHAT_RAIL_MIN_SIDE_PX + CHAT_RAIL_GRIP_TRACK_PX;
+export const CHAT_RAIL_MIN_SPLIT_PX = 1100;
+
+type RailSection = 'tasks' | 'references' | 'commands';
+type CompactPane = 'chat' | RailSection;
 
 function clampFraction(f: number): number {
   if (!Number.isFinite(f)) return DEFAULT_SIDE_FRACTION;
@@ -141,14 +145,6 @@ function isHtml(path: string): boolean {
   return /\.html?$/i.test(path);
 }
 
-function isImage(path: string): boolean {
-  return /\.(png|jpg|jpeg|gif|webp|bmp|ico|avif)$/i.test(path);
-}
-
-function isVideo(path: string): boolean {
-  return /\.(mp4|webm|ogv|mov|m4v)$/i.test(path);
-}
-
 export interface ChatReferencesApi {
   /** Fed by tool-call events from the timeline / composer. */
   onToolActivity: (tool: ToolActivity) => void;
@@ -204,14 +200,9 @@ export function ChatReferences({
    */
   commandsProjectId?: string;
   /**
-   * Narrow-form-factor mode (VS Code chat panel, mobile, anywhere the
-   * pane is under ~500 px wide). The side rail — commands listing,
-   * artifact previewer, resize grip — is suppressed entirely; only
-   * the chat surface renders. Tool-activity is still tracked (so
-   * follow-up surfaces could surface references differently) but no
-   * preview UI is offered. Callers should also avoid passing
-   * `commandsProjectId` in compact mode if they want a guarantee the
-   * commands list never spawns its fetch loop.
+   * Narrow-form-factor mode (VS Code chat panel, mobile, or an explicitly
+   * compact host). The side-by-side rail and resize grip are suppressed;
+   * Chat, Task, Commands, and References become full-width tabs instead.
    */
   compact?: boolean;
   /**
@@ -234,9 +225,10 @@ export function ChatReferences({
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'tasks' | 'references' | 'commands'>(
+  const [activeTab, setActiveTab] = useState<RailSection>(
     commandsProjectId ? 'commands' : 'references',
   );
+  const [compactPane, setCompactPane] = useState<CompactPane>('chat');
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey is the reset trigger — the effect body doesn't read it, but changing it must re-fire.
   useEffect(() => {
@@ -244,6 +236,7 @@ export function ChatReferences({
     setActiveRef(null);
     setTaskRefs([]);
     setActiveTaskRef(null);
+    setCompactPane('chat');
   }, [chatKey]);
 
   const handleTaskReference = useCallback((ref: string, opts?: { scoped?: boolean }) => {
@@ -339,7 +332,10 @@ export function ChatReferences({
     });
     // Promote the clicked artifact to the viewer. `ref` is assigned
     // synchronously inside the updater so it's defined by now.
-    if (ref) setActiveRef(ref);
+    if (ref) {
+      setActiveRef(ref);
+      setCompactPane('references');
+    }
   }, []);
 
   const handleWorkspaceReference = useCallback((path: string, messageProjectId?: string) => {
@@ -360,7 +356,10 @@ export function ChatReferences({
       };
       return [...prev, ref];
     });
-    if (ref) setActiveRef(ref);
+    if (ref) {
+      setActiveRef(ref);
+      setCompactPane('references');
+    }
   }, []);
 
   const api = useMemo<ChatReferencesApi>(
@@ -503,14 +502,106 @@ export function ChatReferences({
     [sideFraction, commitSideFraction],
   );
 
-  // Compact short-circuit: skip the grid layout (and the empty `<aside>`
-  // that the default chat-rail-body grid reserves a 22 rem column for)
-  // so the chat surface gets the full pane width. No side rail, no
-  // grip, no commands panel — what the VS Code chat webview wants.
+  // Compact short-circuit: replace the split rail with one full-width pane.
+  // Keep Chat mounted while another tab is selected so streaming state,
+  // session focus, and an in-progress draft survive the round trip.
   if (isCompact) {
     return (
       <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
-        <div className="chat-rail-main">{children(api)}</div>
+        <Tabs.Root
+          className="chat-rail-compact-root"
+          value={compactPane}
+          onValueChange={(value) => setCompactPane(value as CompactPane)}
+        >
+          <Tabs.List className="chat-rail-compact-tabs" aria-label="Conversation panels">
+            <Tabs.Trigger className="chat-rail-compact-tab" value="chat">
+              Chat
+            </Tabs.Trigger>
+            {hasTasks && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="tasks">
+                Task
+              </Tabs.Trigger>
+            )}
+            {hasCommands && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="commands">
+                Commands
+              </Tabs.Trigger>
+            )}
+            {hasReferences && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="references">
+                References
+              </Tabs.Trigger>
+            )}
+          </Tabs.List>
+
+          <Tabs.Content
+            forceMount
+            className="chat-rail-compact-panel chat-rail-compact-chat"
+            value="chat"
+          >
+            <div className="chat-rail-main">{children(api)}</div>
+          </Tabs.Content>
+
+          {hasTasks && effectiveTaskRef && (
+            <Tabs.Content className="chat-rail-compact-panel" value="tasks">
+              {orderedTasks.length > 1 && (
+                <div className="chat-rail-compact-picker-row">
+                  <span className="muted small">Showing</span>
+                  <TaskTabMenu
+                    variant="picker"
+                    tasks={orderedTasks}
+                    activeRef={effectiveTaskRef}
+                    selected
+                    onSelect={setActiveTaskRef}
+                  />
+                </div>
+              )}
+              <TaskRailCard
+                key={effectiveTaskRef}
+                taskRef={effectiveTaskRef}
+                onOpenTask={(ref) =>
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
+                  )
+                }
+              />
+            </Tabs.Content>
+          )}
+
+          {hasCommands && commandsProjectId && (
+            <Tabs.Content className="chat-rail-compact-panel" value="commands">
+              <CommandsPanel
+                projectId={commandsProjectId}
+                {...(onStageTerminalCommand ? { onStageCommand: onStageTerminalCommand } : {})}
+              />
+            </Tabs.Content>
+          )}
+
+          {hasReferences && effectiveActive && (
+            <Tabs.Content className="chat-rail-compact-panel" value="references">
+              {references.length > 1 && (
+                <div className="chat-rail-compact-picker-row">
+                  <span className="muted small">Showing</span>
+                  <ReferenceTabMenu
+                    variant="picker"
+                    refs={references}
+                    activeKey={effectiveActive.key}
+                    selected
+                    onSelect={setActiveRef}
+                  />
+                </div>
+              )}
+              <div className="chat-rail-viewer-wrap">
+                <ReferenceViewer
+                  key={effectiveActive.key}
+                  projectId={effectiveActive.projectId ?? resolvedProjectId}
+                  reference={effectiveActive}
+                  onResolved={handleResolved}
+                />
+              </div>
+            </Tabs.Content>
+          )}
+        </Tabs.Root>
       </div>
     );
   }
@@ -845,29 +936,33 @@ function TaskTabMenu({
   selected,
   onOpen,
   onSelect,
+  variant = 'tab',
 }: {
   tasks: TaskRef[];
   activeRef: string | null;
   selected: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
   onSelect: (ref: string) => void;
+  variant?: 'tab' | 'picker';
 }) {
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
-        if (open) onOpen();
+        if (open) onOpen?.();
       }}
     >
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          role="tab"
-          className={`chat-rail-section-tab chat-rail-section-tab-menu${
-            selected ? ' is-active' : ''
-          }`}
-          aria-selected={selected}
+          role={variant === 'tab' ? 'tab' : undefined}
+          className={
+            variant === 'tab'
+              ? `chat-rail-section-tab chat-rail-section-tab-menu${selected ? ' is-active' : ''}`
+              : 'chat-rail-compact-picker chat-rail-section-tab-menu'
+          }
+          aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>Tasks</span>
+          <span>{variant === 'tab' ? 'Tasks' : (activeRef ?? 'Choose task')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
@@ -918,29 +1013,37 @@ function ReferenceTabMenu({
   selected,
   onOpen,
   onSelect,
+  variant = 'tab',
 }: {
   refs: Reference[];
   activeKey: string | null;
   selected: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
   onSelect: (r: Reference) => void;
+  variant?: 'tab' | 'picker';
 }) {
+  const activeName = refs
+    .find((reference) => reference.key === activeKey)
+    ?.path.split('/')
+    .pop();
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
-        if (open) onOpen();
+        if (open) onOpen?.();
       }}
     >
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          role="tab"
-          className={`chat-rail-section-tab chat-rail-section-tab-menu${
-            selected ? ' is-active' : ''
-          }`}
-          aria-selected={selected}
+          role={variant === 'tab' ? 'tab' : undefined}
+          className={
+            variant === 'tab'
+              ? `chat-rail-section-tab chat-rail-section-tab-menu${selected ? ' is-active' : ''}`
+              : 'chat-rail-compact-picker chat-rail-section-tab-menu'
+          }
+          aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>References</span>
+          <span>{variant === 'tab' ? 'References' : (activeName ?? 'Choose reference')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
@@ -996,7 +1099,9 @@ function ReferenceTabMenu({
  */
 type ResolvedReference =
   | { kind: RefKind; mode: 'text'; content: string }
-  | { kind: RefKind; mode: 'blob'; blob: Blob };
+  | { kind: RefKind; mode: 'markdown'; content: string; sidecarPath: string }
+  | { kind: RefKind; mode: 'media'; mediaKind: 'image' | 'video' | 'audio'; blob: Blob }
+  | { kind: RefKind; mode: 'binary' };
 
 async function resolveReference(
   projectId: string,
@@ -1006,16 +1111,15 @@ async function resolveReference(
     reference.kind,
     ...(['artifact', 'workspace', 'document'] as const).filter((k) => k !== reference.kind),
   ];
-  const wantBlob = isImage(reference.path) || isVideo(reference.path);
   let lastErr: unknown = null;
   for (const kind of order) {
     try {
-      if (wantBlob) {
+      const preview = await api.previewReference(projectId, { kind, path: reference.path });
+      if (preview.mode === 'media') {
         const blob = await readBlobByKind(projectId, kind, reference.path);
-        return { kind, mode: 'blob', blob };
+        return { kind, mode: 'media', mediaKind: preview.mediaKind, blob };
       }
-      const content = await readByKind(projectId, kind, reference.path);
-      return { kind, mode: 'text', content };
+      return { kind, ...preview };
     } catch (err) {
       lastErr = err;
       if (err instanceof GezelApiError && err.status === 404) {
@@ -1027,19 +1131,6 @@ async function resolveReference(
   throw lastErr ?? new Error(`not found: ${reference.path}`);
 }
 
-async function readByKind(projectId: string, kind: RefKind, path: string): Promise<string> {
-  if (kind === 'artifact') {
-    const r = await api.readProjectArtifact(projectId, path);
-    return r.content;
-  }
-  if (kind === 'document') {
-    const r = await api.readDocument(path);
-    return r.content;
-  }
-  const r = await api.readProjectWorkspaceFile(projectId, path);
-  return r.content;
-}
-
 async function readBlobByKind(projectId: string, kind: RefKind, path: string): Promise<Blob> {
   if (kind === 'artifact') {
     return api.fetchProjectArtifactBlob(projectId, path);
@@ -1047,12 +1138,7 @@ async function readBlobByKind(projectId: string, kind: RefKind, path: string): P
   if (kind === 'workspace') {
     return api.fetchProjectWorkspaceBlob(projectId, path);
   }
-  // Documents are global and currently text-only — fall back to fetching
-  // the text body and wrapping it in a Blob so the caller's image branch
-  // can still render whatever was returned (rare path; mostly here so the
-  // kind-cascade doesn't dead-end).
-  const r = await api.readDocument(path);
-  return new Blob([r.content]);
+  return api.fetchDocumentBlob(path);
 }
 
 function ReferenceViewer({
@@ -1067,7 +1153,10 @@ function ReferenceViewer({
   onResolved?: (refKey: string, resolvedKind: RefKind) => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [contentMode, setContentMode] = useState<'text' | 'markdown' | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [mediaKind, setMediaKind] = useState<'image' | 'video' | 'audio' | null>(null);
+  const [machineFile, setMachineFile] = useState(false);
   const [resolvedKind, setResolvedKind] = useState<RefKind>(reference.kind);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1078,7 +1167,10 @@ function ReferenceViewer({
     let createdUrl: string | null = null;
     setLoading(true);
     setContent(null);
-    setImageUrl(null);
+    setContentMode(null);
+    setBlobUrl(null);
+    setMediaKind(null);
+    setMachineFile(false);
     setError(null);
     setActionError(null);
     setResolvedKind(reference.kind);
@@ -1086,11 +1178,15 @@ function ReferenceViewer({
       try {
         const res = await resolveReference(projectId, reference);
         if (cancelled) return;
-        if (res.mode === 'blob') {
+        if (res.mode === 'media') {
           createdUrl = URL.createObjectURL(res.blob);
-          setImageUrl(createdUrl);
+          setBlobUrl(createdUrl);
+          setMediaKind(res.mediaKind);
+        } else if (res.mode === 'binary') {
+          setMachineFile(true);
         } else {
           setContent(res.content);
+          setContentMode(res.mode);
         }
         setResolvedKind(res.kind);
         if (res.kind !== reference.kind) {
@@ -1186,7 +1282,7 @@ function ReferenceViewer({
                   className="app-nav-menu-item"
                   onSelect={() => void showContainingFolder()}
                 >
-                  Show containing folder
+                  Open containing folder
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1202,16 +1298,26 @@ function ReferenceViewer({
       <div className="chat-rail-viewer-body">
         {loading && <p className="muted small">Loading…</p>}
         {error && <p className="error">{error}</p>}
-        {imageUrl !== null && !loading && !error && isVideo(reference.path) && (
-          <ReferenceVideoPreview path={reference.path} src={imageUrl} />
+        {blobUrl !== null && !loading && !error && mediaKind === 'video' && (
+          <ReferenceVideoPreview path={reference.path} src={blobUrl} />
         )}
-        {imageUrl !== null && !loading && !error && !isVideo(reference.path) && (
-          <ReferenceImagePreview path={reference.path} src={imageUrl} />
+        {blobUrl !== null && !loading && !error && mediaKind === 'audio' && (
+          <ReferenceAudioPreview path={reference.path} src={blobUrl} />
+        )}
+        {blobUrl !== null && !loading && !error && mediaKind === 'image' && (
+          <ReferenceImagePreview path={reference.path} src={blobUrl} />
+        )}
+        {machineFile && !loading && !error && (
+          <ReferenceMachineFile
+            path={reference.path}
+            onSaveCopy={() => void saveCopy()}
+            onOpenContainingFolder={() => void showContainingFolder()}
+          />
         )}
         {content !== null &&
           !loading &&
           !error &&
-          (isMarkdown(reference.path) ? (
+          (contentMode === 'markdown' || isMarkdown(reference.path) ? (
             <RenderedMarkdownPreview
               markdown={content}
               projectId={projectId}
@@ -1306,6 +1412,51 @@ function ReferenceVideoPreview({ path, src }: { path: string; src: string }) {
           background: '#000',
         }}
       />
+    </div>
+  );
+}
+
+function ReferenceAudioPreview({ path, src }: { path: string; src: string }) {
+  return (
+    <div className="chat-rail-viewer-code chat-rail-audio-preview">
+      {/* biome-ignore lint/a11y/useMediaCaption: user-created audio has no caption track. */}
+      <audio key={path} src={src} controls preload="metadata" />
+    </div>
+  );
+}
+
+function ReferenceMachineFile({
+  path,
+  onSaveCopy,
+  onOpenContainingFolder,
+}: {
+  path: string;
+  onSaveCopy: () => void;
+  onOpenContainingFolder: () => void;
+}) {
+  return (
+    <div className="chat-rail-machine-file">
+      <svg
+        className="chat-rail-machine-file-icon"
+        width="40"
+        height="40"
+        viewBox="0 0 40 40"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M10 4h13l7 7v25H10z" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M23 4v8h7M15 21h10M15 26h10" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+      <p className="chat-rail-machine-file-label">{'<Machine File>'}</p>
+      <code className="chat-rail-machine-file-path">{path}</code>
+      <div className="chat-rail-machine-file-actions">
+        <button type="button" onClick={onSaveCopy}>
+          Save copy as…
+        </button>
+        <button type="button" onClick={onOpenContainingFolder}>
+          Open containing folder
+        </button>
+      </div>
     </div>
   );
 }

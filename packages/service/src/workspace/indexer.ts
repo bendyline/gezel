@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { open, readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CommandShape, DiscoveredCommand } from '@bendyline/gezel';
+import { discoverWorkspaceFiles } from './file-walk.js';
 import { extractOclifShapes } from './oclif.js';
 
 /**
@@ -14,21 +15,6 @@ import { extractOclifShapes } from './oclif.js';
  */
 
 const COMMAND_DESCRIPTION_CAP = 240;
-
-/** Files/dirs we never recurse into. */
-const SKIP_DIRS = new Set([
-  '.git',
-  '.gezel',
-  'node_modules',
-  '.next',
-  '.cache',
-  '.turbo',
-  'dist',
-  'build',
-  'out',
-  'coverage',
-  '.DS_Store',
-]);
 
 /** Workspace-script extensions we treat as runnable without a shebang. */
 const RUNNABLE_SCRIPT_EXTS = new Set(['.sh', '.bash', '.zsh', '.ts', '.mjs', '.js', '.py']);
@@ -264,38 +250,8 @@ export interface WorkspaceFile {
 }
 
 export async function discoverFiles(workspaceDir: string): Promise<WorkspaceFile[]> {
-  const out: WorkspaceFile[] = [];
-  await walk(workspaceDir, workspaceDir, out);
-  return out;
-}
-
-async function walk(root: string, dir: string, out: WorkspaceFile[]): Promise<void> {
-  if (out.length >= MAX_FILES) return;
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (out.length >= MAX_FILES) return;
-    if (SKIP_DIRS.has(e.name)) continue;
-    const abs = join(dir, e.name);
-    if (e.isDirectory()) {
-      await walk(root, abs, out);
-    } else if (e.isFile()) {
-      try {
-        const st = await stat(abs);
-        out.push({
-          path: relative(root, abs).replaceAll('\\', '/'),
-          size: st.size,
-          mtimeMs: st.mtimeMs,
-        });
-      } catch {
-        /* skip unreadable */
-      }
-    }
-  }
+  const files = await discoverWorkspaceFiles(workspaceDir, { maxFiles: MAX_FILES });
+  return files.map(({ path, size, mtimeMs }) => ({ path, size, mtimeMs }));
 }
 
 /** ── token index ──────────────────────────────────────────────────── */

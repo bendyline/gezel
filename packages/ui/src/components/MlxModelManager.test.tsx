@@ -23,12 +23,13 @@ const INSTALLED = {
       installedAt: '2026-08-01T00:00:00.000Z',
       modelDir: '/tmp/gemma4-12b-q4',
       contextWindow: 256_000,
+      effectiveContextWindow: 128_000,
       quantization: '4bit',
       chatTemplatePresent: true,
       catalogVersion: '1.0.0',
     },
   ],
-} as never;
+} satisfies Awaited<ReturnType<typeof api.listMlxModels>>;
 
 function fitnessRecord(overrides: Record<string, unknown> = {}) {
   const ok = { ok: true, detail: 'fine' };
@@ -69,7 +70,11 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
-    expect(await screen.findByText('runs well (62 t/s)')).toBeInTheDocument();
+    // Legacy record (no representativeContext): the badge names the probe
+    // shape so the user knows a re-run gets realistic timing.
+    expect(await screen.findByText('short prompt · 62 t/s')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
+    expect(screen.getByText('128K')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Re-run' })).toBeInTheDocument();
   });
 
@@ -86,6 +91,28 @@ describe('MlxModelManager fitness column', () => {
     await waitFor(() => {
       expect(api.runModelFitnessProbe).toHaveBeenCalledWith('mlx', 'gemma4-12b-q4');
     });
+  });
+
+  it('headlines the single-chat cost and keeps the slot reservation in the tooltip', async () => {
+    vi.mocked(api.listMlxModels).mockResolvedValue({
+      models: [
+        {
+          ...INSTALLED.models[0],
+          predictedResidentBytes: 18_000_000_000,
+          reservedResidentBytes: 30_000_000_000,
+          plannedSlots: 2,
+        },
+      ],
+    } as never);
+    vi.mocked(api.listModelFitness).mockResolvedValue({ records: [], probing: [] } as never);
+
+    render(<MlxModelManager />);
+
+    const memory = await screen.findByText(/~18\.0 GB in memory/);
+    expect(screen.queryByText(/30\.0 GB in memory/)).not.toBeInTheDocument();
+    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/about 18\.0 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 2 chats at once reserves about 30\.0 GB/);
   });
 
   it('shows a live pill while a probe is running', async () => {

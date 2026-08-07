@@ -8,7 +8,7 @@ import type { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import { ReportActionManager } from '../report-actions/report-action-manager.js';
 import { TaskManager } from './manager.js';
-import { buildNightShiftReview } from './night-review.js';
+import { buildNightShiftReview, nightShiftReportAttachmentPath } from './night-review.js';
 import type { TaskRunner } from './runner.js';
 
 let home: string;
@@ -44,6 +44,15 @@ afterEach(async () => {
 });
 
 describe('buildNightShiftReview', () => {
+  it('qualifies a Default-project report as a project artifact attachment', () => {
+    expect(
+      nightShiftReportAttachmentPath({
+        projectId: 'default',
+        path: 'night-shift-report.md',
+      }),
+    ).toBe('projects/default/artifacts/night-shift-report.md');
+  });
+
   it('collects night tasks by lastRunDay, their declared deliverables, and action tallies', async () => {
     const project = await store.createProject({ name: 'Shop' });
     const created = await tasks.create(project.id, {

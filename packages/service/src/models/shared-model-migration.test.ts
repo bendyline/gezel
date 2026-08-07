@@ -143,6 +143,7 @@ describe('SharedModelMigrationManager', () => {
         engine: 'llama-cpp',
         id: MODEL_ID,
         catalogVersion,
+        moving: false,
       }),
     ]);
 
@@ -194,6 +195,45 @@ describe('SharedModelMigrationManager', () => {
       localRemoved: true,
     });
     expect(phases).toEqual(['scan', 'publish', 'delete']);
+  });
+
+  it('reports an active move while the transfer is still in flight', async () => {
+    const { owner } = await localModel();
+    let signalScanStarted!: () => void;
+    const scanStarted = new Promise<void>((resolve) => {
+      signalScanStarted = resolve;
+    });
+    let releaseScan!: () => void;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const proxy = vi.fn(async (incoming: Request) => {
+      if (incoming.url.endsWith('/imports/scan')) {
+        const zip = new AdmZip(Buffer.from(await incoming.arrayBuffer()));
+        const manifest = JSON.parse(zip.readAsText('manifest.json')) as GezmodelBundleManifest;
+        signalScanStarted();
+        await scanGate;
+        return Response.json({
+          importId: 'e1788664-6d0b-4d2a-b069-e6ad3ffb87ea',
+          manifest,
+          alreadyInstalled: false,
+          warnings: [],
+        });
+      }
+      return Response.json({ ok: true, engine: 'llama-cpp', id: MODEL_ID });
+    });
+    const manager = migrationManager(owner, bridgeWith(proxy));
+
+    const move = manager.move(request());
+    await scanStarted;
+
+    await expect(manager.listCandidates('llama-cpp')).resolves.toEqual([
+      expect.objectContaining({ id: MODEL_ID, moving: true }),
+    ]);
+    await expect(manager.move(request())).rejects.toThrow('this model is already being moved');
+
+    releaseScan();
+    await expect(move).resolves.toMatchObject({ ok: true, id: MODEL_ID });
   });
 
   it('keeps the private model and cancels broker staging when publish fails', async () => {

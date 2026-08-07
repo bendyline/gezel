@@ -79,7 +79,6 @@ import {
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
-  pronounFormsForGender,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
@@ -1420,10 +1419,7 @@ export class Store {
     // misleading. The about pane / editor route refuses to write into
     // these gezels too — see the http routes and the UI gating.
     if (!input.frontmatter?.fixedFunction) {
-      await writeFileAtomic(
-        join(dir, 'about.md'),
-        input.about ?? defaultAboutMarkdown(input.name, gender),
-      );
+      await writeFileAtomic(join(dir, 'about.md'), input.about ?? defaultAboutMarkdown(input.role));
     }
     // Generate-and-persist the poppetje before reading the detail, so
     // the create response carries the figure for the UI to render
@@ -2194,10 +2190,7 @@ export class Store {
     });
     await writeFileAtomic(join(dir, 'gezel.md'), source);
     if (!input.canonical) {
-      await writeFileAtomic(
-        join(dir, 'about.md'),
-        input.about ?? defaultAboutMarkdown(input.name, gender),
-      );
+      await writeFileAtomic(join(dir, 'about.md'), input.about ?? defaultAboutMarkdown(input.role));
     }
     // Poppetje lands in app-data keyed by the encoded id (not the repo).
     await this.poppetjes.get(encodedId, input.name, gender);
@@ -2726,6 +2719,8 @@ export class Store {
       indexingEnabled?: boolean;
       workspaceScriptTimeoutMs?: number;
       status?: 'active' | 'readonly' | 'inactive' | 'stable';
+      /** Buried in project navigation. Archiving always forces inactive. */
+      archived?: boolean;
       grantedCredentials?: string[];
       credentialAllowedOrigins?: Record<string, string[]>;
       /** `null` clears the user override (back to auto-detection). */
@@ -2757,6 +2752,8 @@ export class Store {
       const detected = await autoDetectGitHubLink(patch.workingDir, nextGitHub);
       if (detected) nextGitHub = detected;
     }
+    const nextArchived = patch.archived ?? meta.archived ?? false;
+    const nextStatus = nextArchived ? 'inactive' : patch.status;
     const updated: Project = {
       ...meta,
       updatedAt: nowIso(),
@@ -2800,7 +2797,8 @@ export class Store {
       ...(patch.workspaceScriptTimeoutMs !== undefined
         ? { workspaceScriptTimeoutMs: patch.workspaceScriptTimeoutMs }
         : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(nextStatus !== undefined ? { status: nextStatus } : {}),
+      ...(patch.archived !== undefined ? { archived: patch.archived ? true : undefined } : {}),
       ...(patch.grantedCredentials !== undefined
         ? { grantedCredentials: patch.grantedCredentials }
         : {}),
@@ -2868,6 +2866,9 @@ export class Store {
     ) {
       metaChanged.push('indexingEnabled');
     }
+    if (patch.archived !== undefined && patch.archived !== (meta.archived ?? false)) {
+      metaChanged.push('archived');
+    }
     if (metaChanged.length > 0) {
       await this.history?.log({
         kind: 'project.updated',
@@ -2876,13 +2877,13 @@ export class Store {
         details: { changed: metaChanged, patch },
       });
     }
-    if (patch.status !== undefined && patch.status !== (meta.status ?? 'active')) {
+    if ((detail.status ?? 'active') !== (meta.status ?? 'active')) {
       const previous = meta.status ?? 'active';
       await this.history?.log({
         kind: 'project.status.changed',
         projectId: id,
-        summary: `Project "${detail.name}" status: ${previous} → ${patch.status}`,
-        details: { previousStatus: previous, status: patch.status },
+        summary: `Project "${detail.name}" status: ${previous} → ${detail.status ?? 'active'}`,
+        details: { previousStatus: previous, status: detail.status ?? 'active' },
       });
     }
     if (patch.voormanGezelId !== undefined) {
@@ -6244,11 +6245,11 @@ export function pickRoleBasedName(role: string | undefined, taken: ReadonlySet<s
   throw new Error('roleBasedName collision overflow for roleless gezel');
 }
 
-function defaultAboutMarkdown(name: string, gender?: GezelGender): string {
-  const pronouns = pronounFormsForGender(gender);
-  return `# ${name}
+function defaultAboutMarkdown(role?: string): string {
+  const roleDescription = role?.trim() ? ` for the "${role.trim()}" role` : '';
+  return `# About this role
 
-Write a few paragraphs about this agent: who ${pronouns.subject} ${pronouns.presentBe}, what ${pronouns.subject} ${pronouns.presentBe} good at, how ${pronouns.subject} should behave, and anything a task runner should know to work with ${pronouns.object} well. This content is injected into the system prompt whenever a task uses this agent.
+Write a few paragraphs describing the responsibilities${roleDescription}, the expertise the work requires, how to approach the work, and anything a task runner should know. Write in the second person and do not add a name, pronouns, gender, or backstory. This content is injected into the system prompt whenever a task uses this gezel.
 `;
 }
 

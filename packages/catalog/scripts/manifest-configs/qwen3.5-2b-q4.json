@@ -20,7 +20,6 @@
   },
   "behaviors": [
     "reasoning.strip-think-tags",
-    "prompt.private-reasoning-guidance",
     "prompt.tool-cookbook-full",
     "fabrication.detect-past-tense-no-tools",
     "mcp.relax-required-fields",

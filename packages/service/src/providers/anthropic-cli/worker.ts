@@ -912,6 +912,7 @@ export class ClaudeWorker {
         const errorMessage = event.isError
           ? this.redact(event.text, hooks.knownSecretValues)
           : undefined;
+        const resultText = this.redact(event.text, hooks.knownSecretValues);
         const ev: ToolCallEvent = {
           name: toolName,
           argKeys: Object.keys(args),
@@ -919,6 +920,7 @@ export class ClaudeWorker {
           durationMs,
           success: !event.isError,
           ...(errorMessage ? { errorMessage } : {}),
+          ...(resultText ? { resultText } : {}),
         };
         if (hooks.onToolCall) {
           Promise.resolve(hooks.onToolCall(ev)).catch((err) => {

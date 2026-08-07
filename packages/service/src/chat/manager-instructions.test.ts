@@ -68,9 +68,23 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(withScript).toContain('`run_playwright_script`');
 
     // Toolset installed, but the tool is not on this role's roster.
-    const withoutScript = prompt(['read_file'], installed);
+    const withoutScript = prompt(['read_file', 'validate'], installed);
     expect(withoutScript).not.toContain('run_playwright_script');
     expect(withoutScript).toContain('browser_*');
+    expect(withoutScript).toContain('validate({ path: "index.html" })');
+    expect(withoutScript).toContain('file:///workspace/index.html');
+    expect(withoutScript).toContain('automatically rewrites');
+  });
+
+  it('does not advertise bridge-only file URL rewriting to Copilot', () => {
+    const installed = { installedToolsetIds: new Set(['@playwright/mcp']) };
+    const copilot = prompt(['read_file', 'validate', 'browser_navigate'], {
+      ...installed,
+      providerName: 'copilot',
+    });
+    expect(copilot).not.toContain('file:///workspace/index.html');
+    expect(copilot).toContain('native MCP loop cannot rewrite `file:` navigation');
+    expect(copilot).toContain('validate({ path: "index.html" })');
   });
 
   it('names only the GitHub tools the role actually holds', () => {
@@ -165,5 +179,48 @@ describe('buildInstructions assigned pronouns', () => {
 
     expect(full).toContain(`Lyudmyla** (${label})`);
     expect(full).toContain(sentence);
+  });
+});
+
+describe('buildInstructions active gezel identity', () => {
+  it('renders the role without the active gezel name or pronouns', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      role: 'Developer',
+      about: 'Build reliable software.',
+    });
+
+    expect(full).toContain('Your role is "Developer".');
+    expect(full).not.toContain('Wren');
+    expect(full).not.toContain('Pronouns:');
+  });
+
+  it('uses a neutral gezel header when no role is configured', () => {
+    const { full } = buildInstructions({ name: 'Wren', about: 'Help with general work.' });
+
+    expect(full).toContain('You are a gezel.');
+    expect(full).not.toContain('Wren');
+  });
+
+  it('describes an active project lead in second person without repeating their identity', () => {
+    const project = {
+      id: 'wren-project',
+      name: 'Workshop',
+      mode: 'crew',
+      voormanGezelId: 'wren',
+    } as unknown as ProjectDetail;
+    const { full } = buildInstructions({
+      name: 'Wren',
+      gezelId: 'wren',
+      role: 'Developer',
+      about: 'Build reliable software.',
+      project,
+      voormanName: 'Wren',
+      voormanGender: 'male',
+    });
+
+    expect(full).toContain('You are the voorman of this project.');
+    expect(full).not.toContain('Wren');
+    expect(full).not.toContain('(he/him)');
   });
 });

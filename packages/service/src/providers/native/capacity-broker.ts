@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { freemem, totalmem } from 'node:os';
-import { createLogger } from '@bendyline/gezel';
+import { type LlamaCppContextSizing, createLogger } from '@bendyline/gezel';
 import {
   type CapacityBudget,
   autoAllowRamSpillover,
@@ -213,10 +213,19 @@ export function formatCapacityDenial(opts: {
  */
 export class CapacityDeniedError extends Error {
   readonly code = 'capacity-denied';
+  /**
+   * Machine-readable cause when the human message alone would mislead a
+   * downstream surface. `resident-below-minimum` = the model is ALREADY
+   * running with a window smaller than the current policy requires — the
+   * remedy is an engine restart, not freeing memory, and the models list
+   * must not render it as a generic "won't fit".
+   */
+  readonly reason?: 'resident-below-minimum';
 
-  constructor(message: string) {
+  constructor(message: string, opts?: { reason?: 'resident-below-minimum' }) {
     super(message);
     this.name = 'CapacityDeniedError';
+    if (opts?.reason) this.reason = opts.reason;
   }
 }
 
@@ -575,6 +584,26 @@ export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): nu
 }
 
 /**
+ * Slots a launch would be admitted at before the context-admission ladder
+ * gets its say: an explicit operator setting, else the RAM tier default
+ * capped by what memory can actually hold.
+ *
+ * Exists so every caller resolves slots the same way. The launch-preview
+ * short-circuit once used the bare tier default while the main path clamped
+ * by the ceiling, so a resident model on a 32-48 GB host advertised a
+ * 3-slot reservation (~49 GB for a 17 GB model) the broker would never have
+ * admitted.
+ */
+export function plannedLocalEngineSlots(opts: {
+  configuredSlots?: number | undefined;
+  ceiling: number;
+  tierDefault?: number;
+}): number {
+  if (opts.configuredSlots !== undefined) return opts.configuredSlots;
+  return Math.max(1, Math.min(opts.tierDefault ?? defaultLocalEngineSlots(), opts.ceiling));
+}
+
+/**
  * Conservative estimate of the KV-cache bytes ONE slot needs at a given
  * per-turn context window. We have no model attention-architecture metadata
  * (layers / KV-heads / head-dim) anywhere in the app, so we scale off the
@@ -584,6 +613,12 @@ export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): nu
  * per-token band so tiny models don't round to ~0 and giant MoE weights
  * don't push the estimate far past reality.
  */
+/** Approximate scale from an f16 KV baseline to the launcher's cache dtype. */
+export function kvQuantScale(kvCacheType: string | undefined): number {
+  const kvType = kvCacheType ?? 'q8_0';
+  return kvType.startsWith('q4') ? 0.3 : kvType.startsWith('q8') ? 0.55 : kvType === 'f32' ? 2 : 1;
+}
+
 export function estimatePerSlotKvBytes(opts: {
   perTurnCtxTokens: number;
   weightsBytes: number;
@@ -591,18 +626,15 @@ export function estimatePerSlotKvBytes(opts: {
 }): number {
   const KB = 1024;
   // f16 KV bytes/token per byte of (quantized) on-disk weights. ~1.3× the
-  // measured Gemma-26B anchor (~3.7e-6) → conservative.
+  // measured Gemma-26B anchor (~3.7e-6) → conservative. NOTE the anchor is
+  // a WINDOWED-cache measurement, and small dense models routinely exceed
+  // the 40 KB/token floor by 3× — this heuristic exists only for weights
+  // without a readable header (external paths, MLX safetensors). Callers
+  // with GGUF metadata pass `exactPerSlotKvBytesF16` to the slot ceilings
+  // instead (see estimateExactPerSlotKvBytesF16 in offload-planner).
   const KV_RATIO_F16 = 5e-6;
   const perTokenF16 = Math.min(400 * KB, Math.max(40 * KB, opts.weightsBytes * KV_RATIO_F16));
-  const kvType = opts.kvCacheType ?? 'q8_0';
-  const quant = kvType.startsWith('q4')
-    ? 0.3
-    : kvType.startsWith('q8')
-      ? 0.55
-      : kvType === 'f32'
-        ? 2
-        : 1; // f16 / unknown → full
-  return Math.round(opts.perTurnCtxTokens * perTokenF16 * quant);
+  return Math.round(opts.perTurnCtxTokens * perTokenF16 * kvQuantScale(opts.kvCacheType));
 }
 
 /**
@@ -655,12 +687,23 @@ export function localEngineSlotCeiling(opts: {
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;
+  /**
+   * Header-exact per-slot KV at f16 (see estimateExactPerSlotKvBytesF16).
+   * When present it replaces the weights-scaled heuristic, scaled to the
+   * launcher's cache dtype by the same approximate quant ladder — the
+   * heuristic under-prices small dense models ~3× (over-slotting exactly
+   * the models that get multi-slot defaults) and over-prices MoE.
+   */
+  exactPerSlotKvBytesF16?: number;
 }): number {
-  const perSlotKv = estimatePerSlotKvBytes({
-    perTurnCtxTokens: opts.perTurnCtxTokens,
-    weightsBytes: opts.weightsBytes,
-    ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
-  });
+  const perSlotKv =
+    opts.exactPerSlotKvBytesF16 !== undefined && opts.exactPerSlotKvBytesF16 > 0
+      ? Math.round(opts.exactPerSlotKvBytesF16 * kvQuantScale(opts.kvCacheType))
+      : estimatePerSlotKvBytes({
+          perTurnCtxTokens: opts.perTurnCtxTokens,
+          weightsBytes: opts.weightsBytes,
+          ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
+        });
   if (perSlotKv <= 0) return 1;
   const freeForKv = localEngineKvBudgetBytes(opts);
   const usableForKv = freeForKv * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
@@ -678,6 +721,7 @@ export function llamaCppSlotCeiling(opts: {
   perTurnCtxTokens: number;
   kvCacheType?: string;
   committedOtherBytes?: number;
+  exactPerSlotKvBytesF16?: number;
 }): number {
   return localEngineSlotCeiling({ engine: 'llama-cpp', ...opts });
 }
@@ -691,9 +735,88 @@ export function llamaCppSlotCeiling(opts: {
  */
 const CTX_CLAMP_OS_RESERVE_BYTES = 2 * GIB;
 
-/** Never clamp a turn's working window below this — sessions compact, tools
- * cap their output, and small-context failure modes are well handled; a
- * machine paging itself to death is not. */
+/** Minimum useful per-turn context for Gezel's standing prompt + tool surface. */
+export const MIN_VIABLE_LOCAL_CONTEXT_TOKENS = 65_536;
+
+export interface LocalContextRequirement {
+  nativeContextWindow: number;
+  minimumPerTurnCtxTokens: number;
+  requestedPerTurnCtxTokens: number;
+}
+
+/**
+ * Resolve the model-aware context contract. Long-context models must retain
+ * at least 64K; a model whose native window is genuinely smaller keeps that
+ * native limit instead of being asked to do something it cannot support.
+ */
+export function resolveLocalContextRequirement(opts: {
+  modelContextWindow?: number;
+  requestedContextWindow?: number;
+}): LocalContextRequirement {
+  const preferred =
+    opts.requestedContextWindow && opts.requestedContextWindow > 0
+      ? Math.floor(opts.requestedContextWindow)
+      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
+  const native =
+    opts.modelContextWindow && opts.modelContextWindow > 0
+      ? Math.floor(opts.modelContextWindow)
+      : MIN_VIABLE_LOCAL_CONTEXT_TOKENS;
+  const minimum = Math.min(native, MIN_VIABLE_LOCAL_CONTEXT_TOKENS);
+  return {
+    nativeContextWindow: native,
+    minimumPerTurnCtxTokens: minimum,
+    requestedPerTurnCtxTokens: Math.min(native, Math.max(preferred, minimum)),
+  };
+}
+
+export interface LlamaCppContextRequirement extends LocalContextRequirement {
+  /**
+   * True when strict model-max is in force (policy selected, no explicit
+   * numeric override): the requested native window is also the admission
+   * minimum. This flag is the SINGLE derivation of strictness — admission
+   * sites must consume `minimumPerTurnCtxTokens` (which already carries it)
+   * rather than re-deriving the predicate from config. Notably, strictness
+   * must NOT disable the SWA windowed re-plan: gemma's full-attention KV at
+   * its native window never fits any real host, while the windowed cache
+   * often holds the full native window cheaply (12b: 4.8 GB at 256K) — an
+   * early build gated the re-plan on `!strict` and thereby denied every
+   * Gemma model under model-max.
+   */
+  strict: boolean;
+}
+
+/**
+ * Apply llama.cpp's user-selectable sizing policy on top of the shared local
+ * context floor. Explicit numeric overrides keep their historical semantics
+ * and win over the selector. In strict model-max mode the requested native
+ * window is also the admission minimum, so the planner may reduce slots but
+ * cannot silently shorten the context window to make the model fit.
+ */
+export function resolveLlamaCppContextRequirement(opts: {
+  modelContextWindow?: number;
+  explicitContextWindow?: number;
+  adaptiveContextWindow?: number;
+  contextSizing?: LlamaCppContextSizing;
+}): LlamaCppContextRequirement {
+  const strictModelMax =
+    opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
+  const requestedContextWindow =
+    opts.explicitContextWindow ??
+    (strictModelMax ? opts.modelContextWindow : opts.adaptiveContextWindow);
+  const resolved = resolveLocalContextRequirement({
+    ...(opts.modelContextWindow !== undefined
+      ? { modelContextWindow: opts.modelContextWindow }
+      : {}),
+    ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
+  });
+  return strictModelMax
+    ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens, strict: true }
+    : { ...resolved, strict: false };
+}
+
+/** Numerical floor for the low-level clamp calculation. Production admission
+ * applies the model-aware policy above and refuses a launch when that
+ * requirement cannot fit. */
 const CTX_CLAMP_FLOOR_TOKENS = 8_192;
 
 export interface CtxMemoryClampInput {
@@ -736,6 +859,15 @@ export interface CtxMemoryClampResult {
   reason: string | null;
 }
 
+export interface CtxMemoryAdmissionPlanResult extends CtxMemoryClampResult {
+  /** Slot count that produced this admission result. */
+  slots: number;
+  /** The model/policy minimum this plan had to preserve. */
+  minimumPerTurnCtxTokens: number;
+  /** False means even one slot cannot fit the required working window. */
+  minimumSatisfied: boolean;
+}
+
 /**
  * Clamp the per-turn context window so the engine's projected footprint —
  * resident weights plus total KV plus the compute-headroom reserve — fits
@@ -750,9 +882,10 @@ export interface CtxMemoryClampResult {
  * (sessions compact sooner); paging does not degrade at all — it takes
  * the whole desktop with it.
  *
- * Never clamps below the floor: if even the floor doesn't fit, the engine
- * still launches at the floor and the existing OOM/recovery paths own the
- * outcome. Returns multiples of 1024 for tidy engine arguments.
+ * Never returns below the caller's floor. Production launch admission wraps
+ * this primitive with {@link planCtxTokensForMemory}, which tests the actual
+ * safe value and refuses a launch that cannot retain the model-aware floor.
+ * Returns multiples of 1024 for tidy engine arguments.
  */
 export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryClampResult {
   const requested = input.requestedPerTurnCtxTokens;
@@ -789,4 +922,55 @@ export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryCl
       `${committedOther > 0 ? `, ${gb(committedOther)} held by other models` : ''}); ` +
       `KV now ~${gb(kvAtClamped)}. Sessions compact sooner instead of the machine paging.`,
   };
+}
+
+/**
+ * Preserve useful context by reducing concurrency before context. If even a
+ * single slot cannot fit the required per-turn window, report a denial rather
+ * than silently launching a tool-using model with an unusably small window.
+ */
+export function planCtxTokensForMemory(
+  input: CtxMemoryClampInput & { minimumPerTurnCtxTokens: number },
+): CtxMemoryAdmissionPlanResult {
+  const requestedSlots = Math.max(1, Math.floor(input.slots));
+  const minimum = Math.max(1, Math.floor(input.minimumPerTurnCtxTokens));
+  let last: CtxMemoryClampResult | undefined;
+  for (let slots = requestedSlots; slots >= 1; slots -= 1) {
+    const safe = clampCtxTokensForMemory({
+      ...input,
+      slots,
+      // Reveal the actually safe context instead of pinning the low-level
+      // clamp to the policy floor; admission compares it below.
+      minPerTurnCtxTokens: 1,
+    });
+    last = safe;
+    if (safe.perTurnCtxTokens >= minimum) {
+      return {
+        ...safe,
+        slots,
+        minimumPerTurnCtxTokens: minimum,
+        minimumSatisfied: true,
+      };
+    }
+  }
+  const denied = last ?? clampCtxTokensForMemory({ ...input, slots: 1, minPerTurnCtxTokens: 1 });
+  return {
+    ...denied,
+    slots: 1,
+    minimumPerTurnCtxTokens: minimum,
+    minimumSatisfied: false,
+  };
+}
+
+/** Human-readable refusal for a model that cannot retain its viable context. */
+export function formatContextCapacityDenial(opts: {
+  modelLabel: string;
+  plan: CtxMemoryAdmissionPlanResult;
+}): string {
+  const minimum = opts.plan.minimumPerTurnCtxTokens.toLocaleString('en-US');
+  const safe = opts.plan.perTurnCtxTokens.toLocaleString('en-US');
+  return `Not enough memory to run ${opts.modelLabel} with its required ${minimum}-token working window. Even at one engine slot, this machine could safely admit only about ${safe} tokens per turn. ${opts.plan.reason ?? ''} Free memory or unload another local model, then restart the engine; otherwise choose a model that fits. Gezel will not silently launch the full tool surface below the required context.`.replace(
+    /\s+/g,
+    ' ',
+  );
 }

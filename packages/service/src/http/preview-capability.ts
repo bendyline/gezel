@@ -186,6 +186,21 @@ export function encodePreviewPath(path: string): string {
     .join('/');
 }
 
+/**
+ * Canonical path shape shared by first-party output-pane previews and
+ * agent-driven browser previews. Keeping this in one place prevents either
+ * caller from drifting away from the capability route's segment ordering.
+ */
+export function previewCapabilityPath(input: {
+  token: string;
+  source: PreviewSource;
+  projectId: string;
+  entryPath: string;
+}): string {
+  const suffix = encodePreviewPath(input.entryPath);
+  return `/preview/${encodeURIComponent(input.token)}/${input.source}/${encodeURIComponent(input.projectId)}/${suffix}`;
+}
+
 function previewParentPath(path: string): string {
   if (!path) return '';
   const parent = posix.dirname(path);

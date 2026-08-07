@@ -48,8 +48,30 @@ export const ModelFitnessRecordSchema = z.object({
   status: ModelFitnessStatusSchema,
   /** All gating checks passed (eval-report parity). */
   admitted: z.boolean(),
-  /** Measured decode tokens/sec (first-token → end), or null when unmeasured. */
+  /**
+   * Practical decode tokens/sec. New probes measure this under the
+   * representative-context turn; older records contain their short-prompt
+   * result. The nested evidence below disambiguates the two shapes.
+   */
   genTokensPerSec: z.number().nullable(),
+  /** Engine-reported decode rate from the short warm-up turn. */
+  shortPromptGenTokensPerSec: z.number().nullable().optional(),
+  /**
+   * Warm-engine turn with an approximately 20K-token neutral context. Optional
+   * so records written before this evidence existed remain readable.
+   */
+  representativeContext: z
+    .object({
+      targetPromptTokens: z.number().int().positive(),
+      promptTokens: z.number().int().nonnegative().nullable(),
+      cachedPromptTokens: z.number().int().nonnegative().nullable(),
+      completionTokens: z.number().int().nonnegative().nullable(),
+      durationMs: z.number().nonnegative().nullable(),
+      ttftMs: z.number().nonnegative().nullable(),
+      promptTokensPerSec: z.number().positive().nullable(),
+      genTokensPerSec: z.number().positive().nullable(),
+    })
+    .optional(),
   createdAt: z.string(),
   durationMs: z.number().int().nonnegative(),
   trigger: ModelFitnessTriggerSchema,

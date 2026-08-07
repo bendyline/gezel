@@ -1,4 +1,4 @@
-import type { HealthResponse } from '@bendyline/gezel';
+import type { HealthResponse, LlamaCppContextSizing } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import type { LlamaCppInstalledModel } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
@@ -138,6 +138,8 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
   const [modelPathDraft, setModelPathDraft] = useState(config?.llamaCppModelPath ?? '');
   const [installed, setInstalled] = useState<LlamaCppInstalledModel[]>([]);
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
+  const [contextSizingLoading, setContextSizingLoading] = useState(true);
 
   useEffect(() => {
     setBaseUrlDraft(config?.llamaCppBaseUrl ?? '');
@@ -158,6 +160,24 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
   useEffect(() => {
     void refreshInstalled();
   }, [refreshInstalled]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getLlamaCppContextSizing()
+      .then((response) => {
+        if (!cancelled) setContextSizing(response.policy);
+      })
+      .catch(() => {
+        /* Keep the safe/default Adaptive choice when the engine is unavailable. */
+      })
+      .finally(() => {
+        if (!cancelled) setContextSizingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const saveBaseUrl = useCallback(async () => {
     const trimmed = baseUrlDraft.trim();
@@ -193,6 +213,18 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
     },
     [onConfigChanged],
   );
+
+  const saveContextSizing = useCallback(async (policy: LlamaCppContextSizing) => {
+    setSaving('saving');
+    try {
+      const updated = await api.updateLlamaCppContextSizing(policy);
+      setContextSizing(updated.policy);
+      setSaving('saved');
+      setTimeout(() => setSaving('idle'), 1200);
+    } catch {
+      setSaving('idle');
+    }
+  }, []);
 
   const saveModelPath = useCallback(async () => {
     const trimmed = modelPathDraft.trim();
@@ -353,9 +385,6 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
               using external engine
             </span>
           )}
-          <span className="muted small">
-            Local models: <code>{installed.length}</code>
-          </span>
           {saving === 'saved' && <span className="muted small">saved ✓</span>}
         </div>
       </section>
@@ -364,8 +393,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         <section style={{ marginBottom: '2rem' }}>
           <h4>Default model</h4>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Which local model new chat sessions use when a gezel doesn't pin one. Leave blank to use
-            the first local model.
+            Which local model new chat sessions use when a gezel doesn't pin one.
           </p>
           <div className="new-row" style={{ marginTop: '0.5rem' }}>
             <select
@@ -383,12 +411,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         </section>
       )}
 
-      <EngineBudgetStrip provider="llama-cpp" />
-
       <section style={{ marginBottom: '2rem' }}>
         <h4>Models</h4>
-        <LlamaCppModelManager onModelsChanged={refreshInstalled} />
+        <LlamaCppModelManager key={contextSizing} onModelsChanged={refreshInstalled} />
       </section>
+
+      <EngineBudgetStrip provider="llama-cpp" />
 
       <section style={{ marginBottom: '2rem' }}>
         <h4 style={{ marginBottom: '0.5rem' }}>Concurrent replicas</h4>
@@ -411,20 +439,58 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         platform={window.__GEZEL__?.platform ?? health?.platform}
       />
 
-      <section style={{ marginBottom: '2rem' }}>
-        <h4>Advanced</h4>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          Override how Gezel connects to the on-device engine. Most users don't need any of these —
-          the supervised engine handles everything. Set them only if you're running your own engine
-          process, pointing at a weights file that isn't in the catalog, or downgrading the
-          accelerator (e.g. CUDA → Vulkan or CPU when CUDA misbehaves).
+      <details className="llama-advanced-settings">
+        <summary className="llama-advanced-summary">
+          <span className="llama-advanced-caret" aria-hidden="true">
+            &rsaquo;
+          </span>
+          <h4>Advanced</h4>
+        </summary>
+        <p className="muted small" style={{ marginTop: '0.75rem' }}>
+          Tune how the managed on-device engine starts, or override how Gezel connects to it. Most
+          users don't need any of these — the supervised engine handles everything. Set them only
+          when you need a different context policy, are running your own engine process, point at a
+          weights file that isn't in the catalog, or downgrade the accelerator.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label
+            htmlFor="llama-cpp-context-sizing"
+            className="muted"
+            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+          >
+            Context sizing
+          </label>
+          <select
+            id="llama-cpp-context-sizing"
+            value={contextSizing}
+            disabled={contextSizingLoading || saving === 'saving' || hasExternalBaseUrl}
+            onChange={(e) => void saveContextSizing(e.target.value as LlamaCppContextSizing)}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          >
+            <option value="adaptive">Adaptive (recommended)</option>
+            <option value="model-max">Model maximum (strict)</option>
+          </select>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          <em>Adaptive</em> uses model tuning (64K by default), reducing concurrency before it
+          shortens a larger tuned window. <em>Model maximum</em> requests the model's full
+          advertised window; if one engine slot cannot hold it safely, the model will not start.
+          This is a machine-wide managed-engine setting. Changing it restarts idle local engines
+          right away; a model that is mid-conversation finishes its current turn first.
+          {hasExternalBaseUrl ? ' External engine URLs manage their own context size.' : ''}
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label
+            htmlFor="llama-cpp-engine-backend"
+            className="muted"
+            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+          >
             Engine backend
           </label>
           <select
+            id="llama-cpp-engine-backend"
             value={config?.llamaCppBackendOverride ?? 'auto'}
             onChange={(e) => void saveBackendOverride(e.target.value as BackendOverride)}
             style={{ flex: 1, maxWidth: '20rem' }}
@@ -611,7 +677,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         </div>
 
         <EngineLogViewer />
-      </section>
+      </details>
     </div>
   );
 }

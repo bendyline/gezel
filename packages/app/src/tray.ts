@@ -234,7 +234,7 @@ export class TrayController {
     return frames;
   }
 
-  private trayImage(): Electron.NativeImage {
+  private trayImage(): Electron.NativeImage | string {
     if (process.platform === 'darwin') {
       // A `…Template` filename tells Electron to treat the image as a
       // monochrome template that adapts to light/dark menu bars; the
@@ -246,13 +246,22 @@ export class TrayController {
         return img;
       }
     }
-    // Windows/Linux (and macOS fallback): a small color icon derived from
-    // the app icon. Resized down so the full-resolution logo doesn't get
-    // squashed by the platform at draw time.
+    if (process.platform === 'win32') {
+      // Let Windows select the 16/20/24 px frame that matches the current
+      // display scale. Unlike the 512 px PNG, those ICO frames are
+      // pixel-aligned and fill their canvas; shrinking the padded PNG to
+      // 16 px made the tray mark appear about 12.5% smaller than its peers.
+      // Return the path: createFromPath collapses an ICO to one NativeImage
+      // representation, preventing the shell from choosing a smaller frame.
+      const ico = join(this.deps.assetsDir, 'icon.ico');
+      if (existsSync(ico)) return ico;
+    }
+    // Linux (and platform fallbacks): a small color icon derived from the
+    // app icon. Resize it so the full-resolution logo isn't squashed by the
+    // platform at draw time.
     const png = join(this.deps.assetsDir, 'icon.png');
     if (existsSync(png)) {
-      const size = process.platform === 'win32' ? 16 : 22;
-      return nativeImage.createFromPath(png).resize({ width: size, height: size });
+      return nativeImage.createFromPath(png).resize({ width: 22, height: 22 });
     }
     return nativeImage.createEmpty();
   }

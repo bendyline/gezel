@@ -463,6 +463,25 @@ jobs:
           }
           Write-Host "[packaged-smoke] Windows app imported and reached ready"
 
+      # The normal Windows artifact upload is skipped after a smoke failure.
+      # Preserve both sides of the archive boundary so the next failure can be
+      # classified without guessing: the shipped tarball plus the dependency
+      # directories produced by extraction on the runner.
+      - name: Preserve Windows packaged-smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-packaged-smoke-diagnostics-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/gezel-packaged-smoke.stdout.log
+            ${{ runner.temp }}/gezel-packaged-smoke.stderr.log
+            ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/entities
+            ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/parse5
+            packages/app/dist/service-bundle.tar.gz
+            packages/app/dist/service-bundle.meta.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Verify Windows signatures
         shell: pwsh
         run: |
@@ -788,9 +807,12 @@ jobs:
           test -n "$pkg"
 
           daemon_label=com.bendyline.gezeld
+          package_id=com.bendyline.gezel
           data_dir="/Library/Application Support/Gezel"
+          shared_dir="/Users/Shared/Gezel"
           runtime_dir="$data_dir/runtime"
           uninstaller="/Applications/Gezel.app/Contents/Resources/uninstall.sh"
+          user_agent="$HOME/Library/LaunchAgents/com.bendyline.gezel.plist"
 
           dump_pkg_diagnostics() {
             set +e
@@ -839,7 +861,7 @@ jobs:
           cleanup() {
             set +e
             if [[ -f "$uninstaller" ]]; then
-              sudo /bin/bash "$uninstaller" --purge-data
+              sudo /bin/bash "$uninstaller" --remove-machine-data --remove-shared-data
             else
               # The installer can fail after creating script-owned state but
               # before the app payload is available. Keep the ephemeral runner
@@ -850,7 +872,9 @@ jobs:
               sudo rm -rf "/Applications/Gezel.app" "$data_dir"
               sudo dscl . -delete /Users/_gezeld 2>/dev/null || true
               sudo dscl . -delete /Groups/_gezeld 2>/dev/null || true
+              sudo /usr/sbin/pkgutil --forget "$package_id" >/dev/null 2>&1 || true
             fi
+            rm -f "$user_agent"
             return 0
           }
           trap cleanup EXIT
@@ -905,6 +929,35 @@ jobs:
           fi
           install_pkg "reinstalling the PKG to recover a persistently disabled service"
           assert_installed_health
+
+          echo "verifying default uninstall preserves data and cleans integration state"
+          sudo touch "$data_dir/.gezel-uninstall-preserve-smoke"
+          sudo mkdir -p "$shared_dir"
+          sudo touch "$shared_dir/.gezel-uninstall-preserve-smoke"
+          mkdir -p "$(dirname "$user_agent")"
+          touch "$user_agent"
+          /usr/sbin/pkgutil --pkg-info "$package_id" >/dev/null
+          sudo /bin/bash "$uninstaller"
+
+          ! sudo launchctl print "system/$daemon_label" >/dev/null 2>&1
+          [[ ! -e "/Library/LaunchDaemons/$daemon_label.plist" ]]
+          [[ ! -e "/Applications/Gezel.app" ]]
+          ! sudo dscl . -read /Users/_gezeld >/dev/null 2>&1
+          ! sudo dscl . -read /Groups/_gezeld >/dev/null 2>&1
+          [[ ! -e "$user_agent" ]]
+          [[ -e "$data_dir/.gezel-uninstall-preserve-smoke" ]]
+          [[ -e "$shared_dir/.gezel-uninstall-preserve-smoke" ]]
+          ! /usr/sbin/pkgutil --pkg-info "$package_id" >/dev/null 2>&1
+
+          install_pkg "reinstalling after a clean default uninstall"
+          assert_installed_health
+
+          echo "verifying explicit machine and shared data removal"
+          sudo /bin/bash "$uninstaller" --remove-machine-data --remove-shared-data
+          [[ ! -e "$data_dir" ]]
+          [[ ! -e "$shared_dir" ]]
+          [[ ! -e "/Applications/Gezel.app" ]]
+          ! /usr/sbin/pkgutil --pkg-info "$package_id" >/dev/null 2>&1
 
       - name: Verify macOS update metadata was generated
         run: |

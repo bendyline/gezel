@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeModelFit, isMoEFromTags } from './model-fit.js';
+import { computeModelFit, estimateManifestKvBytes, isMoEFromTags } from './model-fit.js';
 
 const GiB = 1024 ** 3;
 
@@ -159,5 +159,28 @@ describe('isMoEFromTags', () => {
     expect(isMoEFromTags(['google', 'reasoning', 'large', 'qat'])).toBe(false); // gemma4-31b
     expect(isMoEFromTags(undefined)).toBe(false);
     expect(isMoEFromTags([])).toBe(false);
+  });
+});
+
+describe('estimateManifestKvBytes', () => {
+  it('prices KV at the 64K fit window from the authored f16 geometry', () => {
+    // qwen3.5-4b-shaped: ~137 KB/token f16 → ~4.4 GB at 64K q8 — a model
+    // whose KV exceeds its 2.6 GB weights, the case weights-only fit
+    // badges get wrong.
+    const bytes = estimateManifestKvBytes({ kvBytesPerTokenF16: 140_000 });
+    expect(bytes).toBe(Math.round(140_000 * 65_536 * 0.55));
+  });
+
+  it('adds the fixed SWA block and honors the cache scale', () => {
+    const bytes = estimateManifestKvBytes(
+      { kvBytesPerTokenF16: 16_384, kvFixedBytesF16: 1_000_000_000 },
+      { ctxTokens: 32_768, cacheScale: 1 },
+    );
+    expect(bytes).toBe(16_384 * 32_768 + 1_000_000_000);
+  });
+
+  it('degrades to 0 when the manifest predates the fields', () => {
+    expect(estimateManifestKvBytes({})).toBe(0);
+    expect(estimateManifestKvBytes({ kvBytesPerTokenF16: 0 })).toBe(0);
   });
 });

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readGgufSummaryAsync } from './gguf-metadata-async.js';
 import { readGgufSummary } from './gguf-metadata.js';
 
 /**
@@ -88,6 +89,28 @@ class GgufBuilder {
     this.parts.push(this.u32(VTYPE.BOOL));
     const b = Buffer.alloc(1);
     b.writeUInt8(value ? 1 : 0, 0);
+    this.parts.push(b);
+    this.metaCount++;
+    return this;
+  }
+
+  metaU32Array(key: string, values: number[]) {
+    this.parts.push(this.gguf_string(key));
+    this.parts.push(this.u32(VTYPE.ARRAY));
+    this.parts.push(this.u32(VTYPE.UINT32));
+    this.parts.push(this.u64(BigInt(values.length)));
+    for (const v of values) this.parts.push(this.u32(v));
+    this.metaCount++;
+    return this;
+  }
+
+  metaBoolArray(key: string, values: boolean[]) {
+    this.parts.push(this.gguf_string(key));
+    this.parts.push(this.u32(VTYPE.ARRAY));
+    this.parts.push(this.u32(VTYPE.BOOL));
+    this.parts.push(this.u64(BigInt(values.length)));
+    const b = Buffer.alloc(values.length);
+    values.forEach((v, i) => b.writeUInt8(v ? 1 : 0, i));
     this.parts.push(b);
     this.metaCount++;
     return this;
@@ -229,6 +252,39 @@ describe('readGgufSummary', () => {
     expect(s.contextLength).toBe(4096n);
   });
 
+  it('skips a production-sized tokenizer vocabulary with bounded file reads', () => {
+    const tokens = Array.from({ length: 50_000 }, (_, i) => `token-${i}`);
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'llama')
+      .metaStringArray('tokenizer.ggml.tokens', tokens)
+      .metaU32('llama.context_length', 131_072)
+      .finish();
+    const path = join(dir, 'large-vocab.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.contextLength).toBe(131_072n);
+    // The former reader issued one readSync per string length (50K+ calls).
+    // Read-ahead should keep this proportional to metadata bytes instead.
+    expect(s.readOperations).toBeLessThan(32);
+  });
+
+  it('caches async inspection results by file identity and options', async () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'llama')
+      .metaU32('llama.context_length', 8192)
+      .finish();
+    const path = join(dir, 'async-cache.gguf');
+    writeFileSync(path, blob);
+
+    const first = await readGgufSummaryAsync(path);
+    const second = await readGgufSummaryAsync(path);
+    expect(first.contextLength).toBe(8192n);
+    expect(second).toBe(first);
+  });
+
   it('rejects a non-GGUF file', () => {
     const path = join(dir, 'not-gguf.bin');
     writeFileSync(path, Buffer.from('NOPE\x00\x00\x00\x00', 'binary'));
@@ -277,6 +333,82 @@ describe('readGgufSummary', () => {
     expect(s.headCountKv).toBe(8);
     expect(s.keyLength).toBe(128);
     expect(s.valueLength).toBe(128);
+  });
+
+  it('reads a per-layer head_count_kv array as its mean (Gemma 4)', () => {
+    // Gemma 4 stores one KV-head count per layer. Skipping the array left
+    // headCountKv undefined, the KV estimate degraded to the weights
+    // heuristic, and a ~105 GB full-attention cache passed admission
+    // (2026-08-05 gemma4-31b Metal OOM). The mean × block_count keeps the
+    // aggregate KV total exact.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'gemma4')
+      .metaU32('gemma4.block_count', 4)
+      .metaU32Array('gemma4.attention.head_count_kv', [16, 16, 8, 16])
+      .metaU32('gemma4.attention.key_length', 512)
+      .metaU32('gemma4.attention.value_length', 512)
+      .finish();
+    const path = join(dir, 'kv-dims-array.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.headCountKv).toBe(14);
+    expect(s.keyLength).toBe(512);
+  });
+
+  it('reads the SWA layout: window, per-layer pattern, swa head dims, raw per-layer heads (Gemma 4)', () => {
+    // Mirrors gemma4-26b's real header shape: 5 SWA layers per global
+    // layer, SWA layers at half the head dims and different head counts.
+    // These fields feed estimateWindowedKvLinearization — the admission
+    // input when `--swa-full` is declined or pinned off.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'gemma4')
+      .metaU32('gemma4.block_count', 6)
+      .metaU32Array('gemma4.attention.head_count_kv', [8, 8, 8, 8, 8, 2])
+      .metaU32('gemma4.attention.key_length', 512)
+      .metaU32('gemma4.attention.value_length', 512)
+      .metaU32('gemma4.attention.sliding_window', 1024)
+      .metaBoolArray('gemma4.attention.sliding_window_pattern', [
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+      ])
+      .metaU32('gemma4.attention.key_length_swa', 256)
+      .metaU32('gemma4.attention.value_length_swa', 256)
+      .finish();
+    const path = join(dir, 'swa-layout.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.headCountKv).toBe(7);
+    expect(s.headCountKvPerLayer).toEqual([8, 8, 8, 8, 8, 2]);
+    expect(s.slidingWindow).toBe(1024);
+    expect(s.slidingWindowPattern).toEqual([true, true, true, true, true, false]);
+    expect(s.keyLengthSwa).toBe(256);
+    expect(s.valueLengthSwa).toBe(256);
+  });
+
+  it('leaves SWA fields absent on non-SWA headers and keeps the stream in sync past them', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'qwen3moe')
+      .metaU32('qwen3moe.block_count', 48)
+      .metaU32('qwen3moe.attention.head_count_kv', 8)
+      .metaU32('qwen3moe.attention.key_length', 128)
+      .finish();
+    const path = join(dir, 'no-swa.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.slidingWindow).toBeUndefined();
+    expect(s.slidingWindowPattern).toBeUndefined();
+    expect(s.headCountKvPerLayer).toBeUndefined();
+    expect(s.keyLength).toBe(128);
   });
 });
 

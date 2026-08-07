@@ -172,6 +172,50 @@ describe('NativeEngineSupervisor', () => {
     await sup.stop();
   });
 
+  it('exposes the live launch snapshot and hides it once the child exits', async () => {
+    const child = makeFakeChild(5150);
+    const fakeSpawn = (() =>
+      child as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+        diagnostics: {
+          model: 'gemma4-31b-q4',
+          contextPerSlot: 65_536,
+          contextTotal: 65_536,
+          slots: 1,
+          kvCacheType: 'q8_0',
+          backend: 'metal',
+        },
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      idleTimeoutMs: 0,
+      healthIntervalMs: 10_000_000,
+      onLog: () => {},
+      psRunner: async () => [],
+    });
+
+    expect(sup.launchSnapshot()).toBeUndefined();
+    await sup.ensureRunning();
+    const snap = sup.launchSnapshot();
+    expect(snap?.pid).toBe(5150);
+    expect(snap?.startedAt).toBeGreaterThan(0);
+    expect(snap?.diagnostics).toMatchObject({
+      model: 'gemma4-31b-q4',
+      contextPerSlot: 65_536,
+      kvCacheType: 'q8_0',
+    });
+    await sup.stop();
+    // A stale grant for a dead engine would misdirect the exact triage
+    // this snapshot feeds (Settings → About, /api/system/diagnostics).
+    expect(sup.launchSnapshot()).toBeUndefined();
+  });
+
   it('parses PPID from the production ps snapshot shape', () => {
     expect(
       parseNativeProcessSnapshot(`

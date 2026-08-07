@@ -9,6 +9,10 @@ const apiMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   listGezels: vi.fn(),
   listTaskNotes: vi.fn(),
+  previewReference: vi.fn(),
+  fetchProjectArtifactBlob: vi.fn(),
+  fetchProjectWorkspaceBlob: vi.fn(),
+  fetchDocumentBlob: vi.fn(),
   readProjectArtifact: vi.fn(),
   readDocument: vi.fn(),
   readProjectWorkspaceFile: vi.fn(),
@@ -26,9 +30,21 @@ beforeEach(() => {
   apiMocks.getConfig.mockResolvedValue({ showPoppetjes: true });
   apiMocks.listGezels.mockResolvedValue({ gezels: [] });
   apiMocks.listTaskNotes.mockResolvedValue({ notes: [] });
-  apiMocks.readProjectArtifact.mockImplementation(async (_projectId, path) => ({
-    content: `# ${path}`,
+  apiMocks.previewReference.mockImplementation(async (_projectId, request) => ({
+    mode: 'text',
+    content: `# ${request.path}`,
   }));
+  apiMocks.fetchProjectArtifactBlob.mockResolvedValue(new Blob(['media']));
+  apiMocks.fetchProjectWorkspaceBlob.mockResolvedValue(new Blob(['media']));
+  apiMocks.fetchDocumentBlob.mockResolvedValue(new Blob(['media']));
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn(() => 'blob:reference-preview'),
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: vi.fn(),
+  });
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -96,15 +112,26 @@ function task(ref: string, title: string): Task {
 }
 
 describe('ChatReferences responsive split', () => {
-  it('drops the right pane before the chat would fall below its minimum width', async () => {
+  it('replaces the right pane with full-width tabs below the split threshold', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    const user = userEvent.setup();
     const { container } = renderProjectRail();
 
     await waitFor(() => {
       expect(container.querySelector('.chat-rail-body-compact')).not.toBeNull();
     });
     expect(container.querySelector('aside')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Commands' })).toBeInTheDocument();
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Commands' }));
+
+    expect(screen.getByTestId('commands-panel')).toBeVisible();
+    expect(screen.getByTestId('chat-main').closest('.gz-tabs-content')).toHaveAttribute(
+      'data-state',
+      'inactive',
+    );
   });
 
   it('keeps the right pane at the minimum viable split width', async () => {
@@ -116,6 +143,37 @@ describe('ChatReferences responsive split', () => {
     });
     expect(container.querySelector('aside')).not.toBeNull();
     expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+  });
+
+  it('offers Chat, Task, and Commands as peer tabs when a narrow chat has a task', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1', { scoped: true })}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+        'Chat',
+        'Task',
+        'Commands',
+      ]);
+    });
+
+    await user.click(screen.getByRole('tab', { name: 'Task' }));
+
+    expect(await screen.findByRole('heading', { name: 'First task' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Task' })).toHaveAttribute('aria-selected', 'true');
   });
 });
 
@@ -256,7 +314,7 @@ describe('ChatReferences reference picker', () => {
       saveReferenceCopy,
       showReferenceInFolder,
     };
-    apiMocks.readProjectArtifact.mockRejectedValue(
+    apiMocks.previewReference.mockRejectedValue(
       new Error('Preview unavailable in native-action test'),
     );
 
@@ -292,7 +350,7 @@ describe('ChatReferences reference picker', () => {
     });
 
     await user.click(actions);
-    await user.click(await screen.findByRole('menuitem', { name: 'Show containing folder' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Open containing folder' }));
     expect(showReferenceInFolder).toHaveBeenCalledWith({
       projectId: 'project-1',
       kind: 'artifact',
@@ -303,7 +361,7 @@ describe('ChatReferences reference picker', () => {
   it('promotes a terminal workspace reference into the previewer', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
-    apiMocks.readProjectWorkspaceFile.mockRejectedValue(
+    apiMocks.previewReference.mockRejectedValue(
       new Error('Preview unavailable in workspace-reference test'),
     );
 
@@ -320,10 +378,10 @@ describe('ChatReferences reference picker', () => {
     await user.click(screen.getByRole('button', { name: 'Open workspace reference' }));
 
     await waitFor(() => {
-      expect(apiMocks.readProjectWorkspaceFile).toHaveBeenCalledWith(
-        'project-1',
-        'battle-research.md',
-      );
+      expect(apiMocks.previewReference).toHaveBeenCalledWith('project-1', {
+        kind: 'workspace',
+        path: 'battle-research.md',
+      });
     });
   });
 
@@ -333,7 +391,7 @@ describe('ChatReferences reference picker', () => {
     // Keep the viewer on its lightweight error path. This test exercises the
     // picker; rendering markdown would pull canvas/media behavior into jsdom
     // that belongs to the previewer's own coverage.
-    apiMocks.readProjectArtifact.mockRejectedValue(new Error('Preview unavailable in picker test'));
+    apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in picker test'));
 
     const { container } = render(
       <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
@@ -371,7 +429,98 @@ describe('ChatReferences reference picker', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'design.md' }));
 
     await waitFor(() => {
-      expect(apiMocks.readProjectArtifact).toHaveBeenLastCalledWith('project-1', 'design.md');
+      expect(apiMocks.previewReference).toHaveBeenLastCalledWith('project-1', {
+        kind: 'artifact',
+        path: 'design.md',
+      });
+    });
+  });
+
+  it.each([
+    ['image', 'preview.png', 'img'],
+    ['video', 'preview.mp4', 'video'],
+    ['audio', 'preview.mp3', 'audio'],
+  ] as const)('renders a %s reference with its native viewer', async (kind, path, selector) => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({ mode: 'media', mediaKind: kind });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button type="button" onClick={() => onArtifactReference(path)}>
+            Open media
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open media' }));
+    await waitFor(() => expect(container.querySelector(selector)).not.toBeNull());
+    expect(apiMocks.fetchProjectArtifactBlob).toHaveBeenCalledWith('project-1', path);
+  });
+
+  it('renders a converted PPTX companion through the Squisq markdown viewer', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({
+      mode: 'markdown',
+      content: '# Converted deck\n\nBattle overview',
+      sidecarPath: 'battle-deck_files/battle-deck.md',
+    });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button type="button" onClick={() => onArtifactReference('battle-deck.pptx')}>
+            Open deck
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open deck' }));
+    expect(await screen.findByText('Converted deck')).toBeInTheDocument();
+    expect(container.querySelector('.chat-rail-viewer-markdown')).not.toBeNull();
+    expect(container.querySelector('.chat-rail-viewer-code')).toBeNull();
+  });
+
+  it('shows a machine-file card with direct native actions for unknown binary files', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const saveReferenceCopy = vi.fn().mockResolvedValue({ ok: true });
+    const showReferenceInFolder = vi.fn().mockResolvedValue({ ok: true });
+    window.__GEZEL__ = {
+      token: '',
+      saveReferenceCopy,
+      showReferenceInFolder,
+    };
+    apiMocks.previewReference.mockResolvedValue({ mode: 'binary' });
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button type="button" onClick={() => onArtifactReference('build/archive.bin')}>
+            Open binary
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open binary' }));
+    expect(await screen.findByText('<Machine File>')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save copy as…' }));
+    await user.click(screen.getByRole('button', { name: 'Open containing folder' }));
+    expect(saveReferenceCopy).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      kind: 'artifact',
+      path: 'build/archive.bin',
+    });
+    expect(showReferenceInFolder).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      kind: 'artifact',
+      path: 'build/archive.bin',
     });
   });
 });

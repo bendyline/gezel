@@ -19,3 +19,10 @@ export {
   type ConditionallyRegisteredToolName,
   type LegacyToolName,
 } from './tool-inventory.js';
+export {
+  formatValidateResult,
+  validateFile,
+  type FileContent,
+  type ValidateCheck,
+  type ValidateResult,
+} from './validate.js';

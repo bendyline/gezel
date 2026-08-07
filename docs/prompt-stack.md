@@ -34,7 +34,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 
 | # | Layer | Included when | Size (approx) |
 |---|---|---|---|
-| 1 | Header (`You are acting as the agent "<name>".` + pronouns) | always | 1 line |
+| 1 | Role header (`Your role is "<role>".`; neutral gezel fallback when unset) | always | 1 line |
 | 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); crew-density installs emit it only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); flat-density installs emit it for any delegation role | ~2.3K ch |
 | 3 | About intro + **the gezel's `about.md`, verbatim** | always | meester template ~4.6K ch |
 | 4 | `### Traits` | frontmatter traits present | varies |
@@ -45,7 +45,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 8 | Shared documents library listing | documents exist, not executor-trimmed | varies |
 | 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
-| 11 | `### Recalled from prior sessions` (auto-recall memory hits; plus up to 3 `[workspace]` code hits from the content index when available — same query embedding, no extra embed) | recall enabled, hits ≥ min score | ~4–7 bullets |
+| 11 | `### Recalled from prior sessions` (auto-recall memory hits; plus up to 3 `[workspace]` code hits from the content index when available — same query embedding, no extra embed; `package.json` and `tsconfig.json` payloads are excluded) | recall enabled, hits ≥ min score | ~4–7 bullets |
 | 12 | Conduct core: **act-don't-narrate** (558 ch), **ask_user_question when stuck** incl. "a short message is not vague when task context is above" (1,414 ch), **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated) (~490 ch) | always, every provider | ~2.5K ch / ~620 tok total |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |

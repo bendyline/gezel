@@ -174,6 +174,7 @@ function GezelChatBody({
 }) {
   const [sessionId, setSessionId] = useState<string>(focusSessionId ?? '');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
 
   // Search-driven focus while already mounted (same gezel + project).
   useEffect(() => {
@@ -241,6 +242,7 @@ function GezelChatBody({
             gezelIconOverride={gezel.iconOverride}
             projectId={project.projectId}
             sessionId={sessionId || undefined}
+            focusRequestKey={composerFocusRequestKey}
             onSessionCreated={(sid) => {
               setSessionId(sid);
               setSessionRefreshKey((k) => k + 1);
@@ -253,6 +255,7 @@ function GezelChatBody({
                 projectId={project.projectId}
                 sessionId={sessionId || undefined}
                 onSessionIdChange={(next) => setSessionId(next ?? '')}
+                onNewSessionCreated={() => setComposerFocusRequestKey((key) => key + 1)}
                 refreshKey={sessionRefreshKey}
                 engineLabel={engineLabel}
               />

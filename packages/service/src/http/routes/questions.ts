@@ -10,6 +10,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
+import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 import { applyNpmInstallApprovals, intentPackages } from '../../workspace/npm.js';
 import type { ServiceContext } from '../context.js';
@@ -114,7 +115,7 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       // wants that today.
       questions = await ctx.store.listAllPendingQuestions();
     }
-    return c.json({ questions });
+    return c.json({ questions: questions.map(normalizeNightShiftReportAttachment) });
   });
 
   app.post('/:id/answer', async (c) => {

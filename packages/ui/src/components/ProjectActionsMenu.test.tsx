@@ -15,12 +15,34 @@ const PROJECT = { id: 'p1', name: 'Alpha' } as Project;
 describe('ProjectActionsMenu', () => {
   beforeEach(() => {
     vi.mocked(api.clearProjectErrors).mockResolvedValue({ cleared: 2 } as never);
+    vi.mocked(api.revealProject).mockResolvedValue({ ok: true, path: '/tmp/project' });
+    vi.mocked(api.updateProject).mockResolvedValue({
+      ...PROJECT,
+      archived: true,
+      status: 'inactive',
+      packages: [],
+    } as never);
   });
 
   it('offers no error-clearing action when the project has no failed turn', () => {
     render(<ProjectActionsMenu project={PROJECT} />);
     expect(screen.queryByRole('menuitem', { name: 'Clear error indicator' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Open workspace folder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open artifacts folder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Archive project' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Delete project…' })).toBeInTheDocument();
+  });
+
+  it('opens the project workspace and artifacts folders in the OS file manager', async () => {
+    render(<ProjectActionsMenu project={PROJECT} />);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open workspace folder' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open artifacts folder' }));
+
+    await waitFor(() => {
+      expect(api.revealProject).toHaveBeenCalledWith('p1', 'workspace');
+      expect(api.revealProject).toHaveBeenCalledWith('p1', 'artifacts');
+    });
   });
 
   it('clears the project error and announces it so the sidebar indicator drops', async () => {
@@ -46,6 +68,30 @@ describe('ProjectActionsMenu', () => {
 
     expect(screen.queryByRole('menuitem', { name: 'Delete project…' })).toBeNull();
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Alpha project row' }));
+    expect(screen.getByRole('menuitem', { name: 'Open workspace folder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open artifacts folder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Archive project' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Delete project…' })).toBeInTheDocument();
+  });
+
+  it('archives a project, announces the update, and returns the updated project', async () => {
+    const changed = vi.fn();
+    const announced = vi.fn();
+    window.addEventListener('gezel:project-updated', announced);
+    render(<ProjectActionsMenu project={PROJECT} onChanged={changed} />);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive project' }));
+
+    await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith('p1', { archived: true }));
+    await waitFor(() =>
+      expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' })),
+    );
+    expect(announced).toHaveBeenCalled();
+    window.removeEventListener('gezel:project-updated', announced);
+  });
+
+  it('offers Restore for an archived project', () => {
+    render(<ProjectActionsMenu project={{ ...PROJECT, archived: true }} />);
+    expect(screen.getByRole('menuitem', { name: 'Restore project' })).toBeInTheDocument();
   });
 });

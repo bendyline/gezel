@@ -192,6 +192,10 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {
+  // The reference rail intentionally becomes a compact tab surface when the
+  // output pane leaves it less than 1100 px. Give this split-geometry check a
+  // wide canvas so both resize grips are expected to render.
+  await page.setViewportSize({ width: 2400, height: 900 });
   await gotoProject(page, world!.projectId);
 
   const showOutput = page.getByRole('button', { name: 'Show output pane' });

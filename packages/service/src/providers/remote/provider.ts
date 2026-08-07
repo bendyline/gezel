@@ -7,9 +7,16 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import { DEFAULT_TENANT_MAX_CONCURRENT } from '../../remotes/tenant-limits.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
+import { CapacityDeniedError, MIN_VIABLE_LOCAL_CONTEXT_TOKENS } from '../native/capacity-broker.js';
 import { ProviderQueue } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
+import {
+  isTenantConcurrencyResponse,
+  remoteBackpressureDelayMs,
+  waitForRemoteCapacity,
+} from './backpressure.js';
 import { makeRemoteModelId, parseRemoteModelId } from './model-id.js';
 import { RemoteSession } from './session.js';
 import {
@@ -26,12 +33,18 @@ import {
 export const REMOTE_TURN_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
- * Mixed-version safety floor. Brokers predating `/v1/remote/admit` cannot
- * reveal their live capacity clamp, so A deliberately assumes a small window
- * and applies the coordinator/tool diet. This may under-use an old broker,
- * but it cannot recreate the first-turn OOM class during rolling upgrades.
+ * Match the remote server's default per-device admission ceiling. Keeping
+ * this client queue at or below B's gate means ordinary saturation waits in
+ * ProviderQueue (where it is visible and cancellable) instead of crossing
+ * the wire and becoming an HTTP 429.
  */
-export const LEGACY_REMOTE_CONTEXT_WINDOW = 8_192;
+export const DEFAULT_REMOTE_CONCURRENCY = DEFAULT_TENANT_MAX_CONCURRENT;
+
+/**
+ * Coalesce the duplicate admission checks ChatManager performs while opening
+ * one session, without carrying a stale context policy into a later start.
+ */
+export const REMOTE_ADMISSION_CACHE_TTL_MS = 1_000;
 
 export interface RemoteGezelProviderOpts {
   /** Stable id of the paired server this provider talks to. */
@@ -67,11 +80,21 @@ export class RemoteGezelProvider implements LLMProvider {
   readonly supportsExternalTools = false;
   readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
-  private readonly admittedContextWindows = new Map<string, number>();
+  private readonly admittedContextWindows = new Map<
+    string,
+    { contextWindow: number; admittedAt: number }
+  >();
   private lastAdmittedContextWindow: number | undefined;
 
   constructor(private readonly opts: RemoteGezelProviderOpts) {
-    this.queue = new ProviderQueue({ concurrency: opts.concurrency ?? 8 });
+    const concurrency = opts.concurrency ?? DEFAULT_REMOTE_CONCURRENCY;
+    this.queue = new ProviderQueue({
+      concurrency,
+      // Task handoffs and one-shots use the background lane. Leave one
+      // socket available for a typed chat so restored work cannot occupy the
+      // tenant's entire broker allowance before the user gets a turn.
+      backgroundConcurrency: Math.max(1, concurrency - 1),
+    });
   }
 
   async initialize(): Promise<void> {
@@ -110,43 +133,70 @@ export class RemoteGezelProvider implements LLMProvider {
     // clamp across that identity boundary.
     const admissionKey = `${connection.baseUrl}\0${connection.token}\0${bLocal}`;
     const cached = this.admittedContextWindows.get(admissionKey);
-    if (cached !== undefined) {
-      this.lastAdmittedContextWindow = cached;
-      return cached;
+    if (cached && Date.now() - cached.admittedAt < REMOTE_ADMISSION_CACHE_TTL_MS) {
+      this.lastAdmittedContextWindow = cached.contextWindow;
+      return cached.contextWindow;
     }
+    this.admittedContextWindows.delete(admissionKey);
 
-    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/admit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${connection.token}`,
-      },
-      body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
-    });
-    if (!res.ok) {
+    let backpressureAttempt = 0;
+    let waitLogged = false;
+    for (;;) {
+      const latestConnection = this.opts.resolveConnection?.() ?? connection;
+      const res = await latestConnection.fetch(`${latestConnection.baseUrl}/v1/remote/admit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${latestConnection.token}`,
+        },
+        body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
+      });
+      if (res.ok) {
+        const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
+        this.admittedContextWindows.set(admissionKey, {
+          contextWindow: admitted,
+          admittedAt: Date.now(),
+        });
+        this.lastAdmittedContextWindow = admitted;
+        return admitted;
+      }
       const detail = await res.text().catch(() => '');
       let code: string | undefined;
+      let message: string | undefined;
       try {
-        code = (JSON.parse(detail) as { error?: string }).error;
+        const parsed = JSON.parse(detail) as { error?: string; message?: string };
+        code = parsed.error;
+        message = parsed.message;
       } catch {
         /* old brokers commonly return a plain 404 body */
       }
-      if (res.status === 404 && code !== 'model_not_loaded') {
-        this.log.warn(
-          `[remote-provider] ${this.opts.label} predates context admission; using conservative ${LEGACY_REMOTE_CONTEXT_WINDOW}-token window for ${bLocal}`,
+      if (isTenantConcurrencyResponse(res.status, detail)) {
+        if (!waitLogged) {
+          waitLogged = true;
+          this.log.info(
+            `[remote-provider] ${this.opts.label} waiting for broker admission capacity`,
+          );
+        }
+        await waitForRemoteCapacity(
+          remoteBackpressureDelayMs(res.headers.get('retry-after'), backpressureAttempt++),
         );
-        this.admittedContextWindows.set(admissionKey, LEGACY_REMOTE_CONTEXT_WINDOW);
-        this.lastAdmittedContextWindow = LEGACY_REMOTE_CONTEXT_WINDOW;
-        return LEGACY_REMOTE_CONTEXT_WINDOW;
+        continue;
+      }
+      if (code === 'capacity_denied') {
+        throw new CapacityDeniedError(
+          message ??
+            `This machine cannot fit the required ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token local context.`,
+        );
+      }
+      if (res.status === 404 && code !== 'model_not_loaded') {
+        throw new CapacityDeniedError(
+          `[remote] ${this.opts.label} predates context admission and cannot prove that ${bLocal} meets Gezel's ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token minimum. Upgrade or restart the machine engine before using this model.`,
+        );
       }
       throw new Error(
         `[remote] /v1/remote/admit returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
       );
     }
-    const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
-    this.admittedContextWindows.set(admissionKey, admitted);
-    this.lastAdmittedContextWindow = admitted;
-    return admitted;
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -177,7 +227,12 @@ export class RemoteGezelProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
-    const numCtx = (await this.prepareContextWindow(opts.model)) ?? LEGACY_REMOTE_CONTEXT_WINDOW;
+    const numCtx = await this.prepareContextWindow(opts.model);
+    if (!numCtx) {
+      throw new CapacityDeniedError(
+        `The remote model has no admitted context window. Gezel requires ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')} tokens unless the model's native limit is smaller.`,
+      );
+    }
     const bridges = await McpBridgePool.fromSessionOpts(opts, `[remote:${this.opts.label}]`);
     const bLocal = this.brokerModel(opts.model);
     this.log.info(`[remote-provider] session on ${this.opts.label} model=${bLocal}`);

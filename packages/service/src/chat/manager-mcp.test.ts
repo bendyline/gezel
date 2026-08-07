@@ -121,6 +121,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(assistantMsg!.toolCalls!.length).toBe(1);
     expect(assistantMsg!.toolCalls![0]!.name).toBe('write_document');
     expect(assistantMsg!.toolCalls![0]!.success).toBe(true);
+    expect(assistantMsg!.toolCalls![0]!.resultText).toBeTruthy();
+    expect(assistantMsg!.toolCalls![0]!.resultTruncated).not.toBe(true);
   }, 30_000);
 
   it('can script create_gezel (meester-style) and the new gezel appears on disk', async () => {
@@ -364,7 +366,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     ]);
   }, 30_000);
 
-  it('continues an untasked PowerPoint request after suggest_craftbook instead of summarizing', async () => {
+  it('continues an untasked PowerPoint request from suggest_craftbook through invoke_craftbook', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 
     mock.scriptToolCalls([
@@ -373,10 +375,21 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         arguments: { query: 'create a PowerPoint about the Battle of Ypres' },
       },
     ]);
+    mock.scriptToolCalls([
+      {
+        name: 'invoke_craftbook',
+        arguments: {
+          craftbookId: 'powerpoint-deck',
+          title: 'Battle of Ypres Presentation',
+          description:
+            'Create a historically accurate PowerPoint presentation about the Battle of Ypres.',
+          outputPath: 'battle-of-ypres.pptx',
+        },
+      },
+    ]);
     mock.script(
-      'I will start a project called "Battle of Ypres Presentation".\n\n' +
-        "The voorman is on it, and I'll let you know when the draft is ready.",
-      'I cannot complete the requested action yet.',
+      'I found the matching PowerPoint recipe.\n\nI will invoke it now.',
+      'The PowerPoint recipe is running for the Battle of Ypres presentation.',
     );
 
     await manager.send(session.id, 'Can you create a PowerPoint about the Battle of Ypres?');
@@ -388,7 +401,22 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(progressNudge).toBeDefined();
     expect(progressNudge?.prompt).toContain('If the lookup result named a next tool call');
     expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
-    expect(mock.toolCallOutputs.map((output) => output.name)).toEqual(['suggest_craftbook']);
+    expect(mock.toolCallOutputs.map((output) => output.name)).toEqual([
+      'suggest_craftbook',
+      'invoke_craftbook',
+    ]);
+    expect(mock.toolCallOutputs[0]?.output).toContain('craftbookId: "powerpoint-deck"');
+    expect(mock.toolCallOutputs[1]?.output).toContain('Invoked craftbook "powerpoint-deck"');
+    expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('start_project');
+    expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('message_gezel');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistantText = disk?.messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => message.content)
+      .join('\n');
+    expect(assistantText).not.toMatch(/(?:created|initiated|started).*project/i);
+    expect(assistantText).not.toMatch(/voorman.*(?:recruited|is on it)/i);
   }, 30_000);
 
   it('persists gate infrastructure diagnostics on the assistant message', async () => {

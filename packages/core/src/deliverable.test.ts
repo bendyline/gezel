@@ -33,6 +33,7 @@ describe('deliverableStep', () => {
     });
     expect(advanceWhen?.sniff).toBe('html-complete');
     expect(gate.checks?.find((c) => c.kind === 'minBytes')).toMatchObject({ bytes: 5000 });
+    expect(gate.checks).toContainEqual({ kind: 'htmlLint', file: 'index.html' });
     expect(gate.scripts?.some((s) => s.name === 'checkHtmlComplete')).toBe(true);
   });
 

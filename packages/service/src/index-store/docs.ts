@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { projectLocalFilesDir } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
@@ -9,7 +9,7 @@ import { convertInSandbox } from './sandbox-convert.js';
  * Document → markdown conversion via squisq, written into the `_files`
  * companion-folder convention:
  *
- *   <source>jobs/resume.docx  →  .gezel/files/jobs/resume.docx_files/resume.md
+ *   <source>jobs/resume.docx  →  .gezel/files/jobs/resume_files/resume.md
  *
  * squisq is browser-oriented and its OOXML importers run native parsers (jszip,
  * pdfjs, xmldom). Because attachments are untrusted, the actual parse runs
@@ -59,22 +59,34 @@ export interface DocFilesPaths {
   dir: string;
   /** Absolute path of the converted markdown. */
   mdPath: string;
-  /** Markdown path relative to the workspace (forward-slashed), for display. */
+  /** Markdown path relative to the sidecar's source root (forward-slashed). */
   mdRel: string;
+}
+
+function filesPaths(filesRoot: string, relPath: string, relativeRoot: string): DocFilesPaths {
+  const base = basename(relPath);
+  const nameNoExt = base.replace(/\.[^.]+$/, '');
+  const parent = dirname(relPath);
+  const dir = join(filesRoot, parent === '.' ? '' : parent, `${nameNoExt}_files`);
+  const mdPath = join(dir, `${nameNoExt}.md`);
+  return { dir, mdPath, mdRel: relative(relativeRoot, mdPath).replaceAll('\\', '/') };
 }
 
 /** Compute the `_files` companion paths for a source doc (relative path). */
 export function docFilesPaths(workspaceDir: string, relPath: string): DocFilesPaths {
-  const base = basename(relPath);
-  const nameNoExt = base.replace(/\.[^.]+$/, '');
-  const parent = dirname(relPath);
-  const dir = join(
-    projectLocalFilesDir(workspaceDir),
-    parent === '.' ? '' : parent,
-    `${base}_files`,
-  );
-  const mdPath = join(dir, `${nameNoExt}.md`);
-  return { dir, mdPath, mdRel: relative(workspaceDir, mdPath).replaceAll('\\', '/') };
+  return filesPaths(projectLocalFilesDir(workspaceDir), relPath, workspaceDir);
+}
+
+/**
+ * Compute a user-visible companion beside a source tree:
+ * `decks/brief.pptx` → `decks/brief_files/brief.md`.
+ *
+ * Artifacts and the shared documents library use this placement. Workspace
+ * conversions keep using {@link docFilesPaths} so derived files remain under
+ * the project's gitignored `.gezel/files/` directory.
+ */
+export function adjacentDocFilesPaths(sourceRoot: string, relPath: string): DocFilesPaths {
+  return filesPaths(sourceRoot, relPath, sourceRoot);
 }
 
 /** Write converted markdown into the `_files` folder; returns its paths. */
@@ -84,9 +96,50 @@ export async function writeConvertedMarkdown(
   markdown: string,
 ): Promise<DocFilesPaths> {
   const paths = docFilesPaths(workspaceDir, relPath);
+  return writeConvertedMarkdownAt(paths, markdown);
+}
+
+/** Write markdown to an already-computed companion path. */
+export async function writeConvertedMarkdownAt(
+  paths: DocFilesPaths,
+  markdown: string,
+): Promise<DocFilesPaths> {
   await mkdir(paths.dir, { recursive: true });
   await writeFileAtomic(paths.mdPath, markdown);
   return paths;
+}
+
+export interface EnsuredDocSidecar extends DocConversion {
+  paths: DocFilesPaths;
+}
+
+/**
+ * Return a fresh markdown companion, converting and atomically refreshing it
+ * when the source is newer. The mtime gate keeps reopening a deck cheap while
+ * the conversion itself remains in the sandboxed worker.
+ */
+export async function ensureConvertedMarkdownSidecar(
+  sourcePath: string,
+  paths: DocFilesPaths,
+): Promise<EnsuredDocSidecar> {
+  let sourceMtimeMs: number;
+  try {
+    sourceMtimeMs = (await stat(sourcePath)).mtimeMs;
+  } catch {
+    return { markdown: null, paths };
+  }
+
+  const sidecarStat = await stat(paths.mdPath).catch(() => null);
+  if (sidecarStat?.isFile() && sidecarStat.mtimeMs >= sourceMtimeMs) {
+    const markdown = await readFile(paths.mdPath, 'utf8').catch(() => null);
+    if (markdown !== null) return { markdown, paths };
+  }
+
+  const converted = await convertDocToMarkdown(sourcePath);
+  if (converted.markdown !== null) {
+    await writeConvertedMarkdownAt(paths, converted.markdown);
+  }
+  return { ...converted, paths };
 }
 
 /**

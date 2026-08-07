@@ -125,7 +125,7 @@ export class SharedModelMigrationManager {
       throw new Error('that Gezel data folder is currently in use by another daemon');
     }
 
-    const key = `${resolve(source.home)}\0${request.engine}\0${request.id}`;
+    const key = migrationKey(source.home, request.engine, request.id);
     if (this.inFlight.has(key)) throw new Error('this model is already being moved');
     this.inFlight.add(key);
     let importId: string | undefined;
@@ -243,6 +243,7 @@ export class SharedModelMigrationManager {
       name: model.name,
       approxSizeBytes: model.approxSizeBytes,
       catalogVersion: model.catalogVersion,
+      moving: this.inFlight.has(migrationKey(source.home, engine, model.id)),
     });
   }
 
@@ -286,6 +287,10 @@ export class SharedModelMigrationManager {
     );
     await machineEngine.proxy(cancel, SOURCE_PREFIX, TARGET_PREFIX).catch(() => undefined);
   }
+}
+
+function migrationKey(home: string, engine: GezmodelEngine, id: string): string {
+  return `${resolve(home)}\0${engine}\0${id}`;
 }
 
 export function defaultSourceHomes(currentHome: string): SharedModelSourceHome[] {

@@ -4,13 +4,14 @@ import {
   type ProviderName,
   isOllamaReasoningModel,
 } from '@bendyline/gezel';
+import type { SystemDiagnostics } from '@bendyline/gezel';
 import type {
   ConfigResponse,
   ProviderUsage,
   QuotaBucket,
   UsageResponse,
 } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
@@ -18,6 +19,7 @@ import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
+import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
@@ -3356,6 +3358,7 @@ export function SettingsView() {
                   <dd>{formatStartedAt(health.startedAt)}</dd>
                 </dl>
               )}
+              <LocalEngineStatus />
               <AutostartToggle />
               <BackgroundServiceStatus />
               <p className="muted small" style={{ marginTop: '0.75rem' }}>
@@ -3398,6 +3401,19 @@ export function SettingsView() {
                 <span>Show advanced features</span>
               </label>
             </section>
+            {isDarwin && window.__GEZEL__?.uninstall && (
+              <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>
+                <h3>Uninstall</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Remove Gezel and its machine-wide background service. You can keep downloaded
+                  models and your work for a later reinstall, or choose exactly which data to
+                  delete.
+                </p>
+                <button type="button" className="danger" onClick={requestMacUninstall}>
+                  Uninstall Gezel…
+                </button>
+              </section>
+            )}
             <section>
               <h3>Debug mode</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -3699,6 +3715,57 @@ function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
  * fixable without the installer, so it lives here and only leaves a one-line
  * pointer in the rail.
  */
+/**
+ * The live local engines and — the load-bearing number — the context
+ * window each one ACTUALLY granted at launch. A model looping or "acting
+ * dumb" on a small machine is very often a window smaller than its
+ * standing prompt; surfacing the grant here turns that diagnosis into one
+ * glance instead of a log hunt through `~/.gezel/logs/`.
+ */
+function LocalEngineStatus() {
+  const [engines, setEngines] = useState<NonNullable<SystemDiagnostics['localEngines']>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void api.getSystemDiagnostics().then(
+      (diagnostics) => {
+        if (!cancelled) setEngines(diagnostics.localEngines ?? []);
+      },
+      () => {
+        if (!cancelled) setEngines([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (engines.length === 0) return null;
+  return (
+    <dl>
+      {engines.map((engine, idx) => {
+        const parts: string[] = [];
+        if (engine.contextPerSlot !== undefined) {
+          parts.push(`${engine.contextPerSlot.toLocaleString()}-token context window`);
+        }
+        if (engine.slots !== undefined && engine.slots > 1) parts.push(`${engine.slots} slots`);
+        if (engine.kvCacheType) parts.push(`${engine.kvCacheType} KV`);
+        if (engine.backend) parts.push(engine.backend);
+        return (
+          <Fragment key={`${engine.provider}-${engine.pid ?? idx}`}>
+            <dt>Local engine</dt>
+            <dd>
+              {engine.model ?? engine.provider}
+              {parts.length > 0 ? ` — ${parts.join(', ')}` : ''}
+              {engine.pid !== undefined ? (
+                <span className="muted small">{` · pid ${engine.pid}`}</span>
+              ) : null}
+            </dd>
+          </Fragment>
+        );
+      })}
+    </dl>
+  );
+}
+
 function BackgroundServiceStatus() {
   const [logsError, setLogsError] = useState<string | null>(null);
   const notice = serviceNotice({

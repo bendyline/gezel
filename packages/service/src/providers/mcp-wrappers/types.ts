@@ -86,6 +86,21 @@ export interface McpToolWrapperContext {
    * call.
    */
   writeArtifact?: (relPath: string, content: string) => Promise<void>;
+  /**
+   * Active project workspace hosting seam. Playwright's browser process
+   * intentionally refuses `file:` URLs; this lets its argument wrapper map
+   * an in-workspace file reference onto the same capability-scoped preview
+   * server used by the output pane. Arbitrary local paths never reach the
+   * preview server: the wrapper resolves them against `root`, and `createUrl`
+   * performs the final existence/scope check for this project.
+   */
+  workspacePreview?: {
+    projectId: string;
+    root: string;
+    origin?: string;
+    localOnly?: boolean;
+    createUrl: (relativePath: string) => Promise<string | null>;
+  };
 }
 
 export interface McpToolWrapper {

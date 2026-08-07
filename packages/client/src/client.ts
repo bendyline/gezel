@@ -16,6 +16,8 @@ import type {
   ListInstalledAudioModelsResponse,
   ListInstalledImageModelsResponse,
   ListInstalledVideoModelsResponse,
+  LlamaCppContextSizing,
+  LlamaCppContextSizingResponse,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -227,6 +229,8 @@ import type {
   ReadSymbolResponse,
   ReferenceFileLocationRequest,
   ReferenceFileLocationResponse,
+  ReferencePreviewRequest,
+  ReferencePreviewResponse,
   RenameGezelRequest,
   RenderImageRequest,
   RenderImageResponse,
@@ -773,8 +777,9 @@ export interface ConfigResponse {
   llamaCppBaseUrl?: string;
   /**
    * llama-cpp: context window (tokens) llama-server is booted with.
-   * When unset, the service picks a model-aware default (32 k or the
-   * model's advertised max, whichever is smaller).
+   * This explicit numeric override wins over the engine-owned context-sizing
+   * selector. When unset, Adaptive uses model tuning or a 64K practical
+   * target; Model maximum requests the advertised native window.
    */
   llamaCppNumCtx?: number;
   /** ds4 (DeepSeek-V4): base URL of an already-running ds4-server (external mode). */
@@ -1426,7 +1431,34 @@ export interface LlamaCppInstalledModel {
   approxSizeBytes: number;
   installedAt: string;
   weightsPath: string;
+  /** Context capacity advertised by the GGUF metadata. */
   contextWindow?: number;
+  /** Per-turn cap Gezel would actually grant after tuning, settings, and live memory admission. */
+  effectiveContextWindow?: number;
+  /**
+   * Expected memory to serve ONE chat: resident weights (with runtime
+   * overhead) plus a single slot's KV cache at the granted context
+   * window. This is the figure that tracks measured peak RSS. Absent when
+   * the daemon could not price the launch (unreadable weights, older
+   * daemon).
+   */
+  predictedResidentBytes?: number;
+  /**
+   * What the capacity broker actually holds: weights plus {@link plannedSlots}
+   * slots' KV. Equals `predictedResidentBytes` on a single-slot host.
+   */
+  reservedResidentBytes?: number;
+  /** Concurrent engine slots the launch would be admitted at. */
+  plannedSlots?: number;
+  /**
+   * Present when the selected context policy cannot be admitted right now.
+   * `insufficient-memory` — even one slot cannot hold the required window;
+   * free memory, unload a model, or pick Adaptive. `restart-required` — the
+   * model is already RUNNING with a smaller window than the current policy
+   * requires; restarting the local engine re-admits it (no memory change
+   * needed).
+   */
+  contextSizingStatus?: 'insufficient-memory' | 'restart-required';
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -1462,6 +1494,17 @@ export interface ModelFitnessEntry {
     status: 'probed' | 'failed' | 'deferred' | 'blocked';
     admitted: boolean;
     genTokensPerSec: number | null;
+    shortPromptGenTokensPerSec?: number | null;
+    representativeContext?: {
+      targetPromptTokens: number;
+      promptTokens: number | null;
+      cachedPromptTokens: number | null;
+      completionTokens: number | null;
+      durationMs: number | null;
+      ttftMs: number | null;
+      promptTokensPerSec: number | null;
+      genTokensPerSec: number | null;
+    };
     createdAt: string;
     durationMs: number;
     trigger: 'install' | 'manual';
@@ -1534,7 +1577,25 @@ export interface MlxInstalledModel {
   installedAt: string;
   /** Absolute path of the model directory; `mlx_lm.server --model` takes this. */
   modelDir: string;
+  /** Context capacity advertised by the model metadata. */
   contextWindow?: number;
+  /** Per-turn cap Gezel would actually grant after applying its configured limit. */
+  effectiveContextWindow?: number;
+  /**
+   * Expected memory to serve ONE chat: resident weights (with runtime
+   * overhead) plus a single slot's KV cache at the granted context
+   * window. This is the figure that tracks measured peak RSS. Absent when
+   * the daemon could not price the launch (unreadable weights, older
+   * daemon).
+   */
+  predictedResidentBytes?: number;
+  /**
+   * What the capacity broker actually holds: weights plus {@link plannedSlots}
+   * slots' KV. Equals `predictedResidentBytes` on a single-slot host.
+   */
+  reservedResidentBytes?: number;
+  /** Concurrent engine slots the launch would be admitted at. */
+  plannedSlots?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -3002,6 +3063,18 @@ export class GezelClient {
   /** Live pool snapshot for the engines budget bar. */
   getEngineStatus(): Promise<EngineStatusResponse> {
     return this.request('GET', '/api/engines/status');
+  }
+
+  /** Effective context-sizing policy owned by the managed llama.cpp engine. */
+  getLlamaCppContextSizing(): Promise<LlamaCppContextSizingResponse> {
+    return this.request('GET', '/api/engines/llama-cpp/context-sizing');
+  }
+
+  /** Persist the managed llama.cpp context-sizing policy on the engine owner. */
+  updateLlamaCppContextSizing(
+    policy: LlamaCppContextSizing,
+  ): Promise<LlamaCppContextSizingResponse> {
+    return this.request('PUT', '/api/engines/llama-cpp/context-sizing', { policy });
   }
 
   /** Source-pinned native release and executable availability in the daemon. */
@@ -4496,6 +4569,21 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/reference-file-location?${params.toString()}`,
+    );
+  }
+
+  /**
+   * Classify a References-pane file and prepare any document markdown
+   * companion. Binary bytes are never returned through this JSON endpoint.
+   */
+  previewReference(
+    projectId: string,
+    request: ReferencePreviewRequest,
+  ): Promise<ReferencePreviewResponse> {
+    const params = new URLSearchParams({ kind: request.kind, path: request.path });
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/reference-preview?${params.toString()}`,
     );
   }
 

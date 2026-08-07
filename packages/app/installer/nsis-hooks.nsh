@@ -717,6 +717,25 @@ FunctionEnd
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipUninstallRuntimeCleanup
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\runtime" "Gezel runtime directory" SkipUninstallRuntimeCleanup
   !insertmacro ClearGezelRuntime
+
+  ; Shared models survive uninstall so standalone app/CLI runs can keep using
+  ; them. Re-publish their inherited read-only ACL after the broker has
+  ; stopped: directories atomically moved out of the broker's private staging
+  ; area retain that private DACL on NTFS, even though their destination is
+  ; below the public assets container. Without this final elevated repair the
+  ; model ids are visible, but ordinary users cannot open manifest.json.
+  ${If} ${FileExists} "${GEZEL_DATA_DIR}\assets\*.*"
+    !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipUninstallRuntimeCleanup
+    !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipUninstallRuntimeCleanup
+    !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its preserved shared model store" SkipUninstallRuntimeCleanup
+    !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "preserved shared model"
+    nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
+    Pop $0
+    ${If} $0 != 0
+      DetailPrint "WARNING: shared models were preserved, but their standalone read permissions could not be repaired (icacls exit $0)."
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel preserved the shared models, but could not make them readable to standalone app or CLI runs (Windows error $0). An administrator may need to repair permissions under ${GEZEL_DATA_DIR}\assets." /SD IDOK
+    ${EndIf}
+  ${EndIf}
   SkipUninstallRuntimeCleanup:
   ; The service is gone by design now, so the install-state breadcrumb must go
   ; with it — leaving it behind would make the next fresh install look like it

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { PreviewCapabilityStore, normalizePreviewPath } from './preview-capability.js';
+import {
+  PreviewCapabilityStore,
+  normalizePreviewPath,
+  previewCapabilityPath,
+} from './preview-capability.js';
 
 describe('PreviewCapabilityStore', () => {
   it('mints high-entropy tokens bound to project, source, and entry subtree', () => {
@@ -137,5 +141,18 @@ describe('normalizePreviewPath', () => {
     expect(normalizePreviewPath('site/../secret')).toBeNull();
     expect(normalizePreviewPath('/etc/passwd')).toBeNull();
     expect(normalizePreviewPath('C:\\secret')).toBeNull();
+  });
+});
+
+describe('previewCapabilityPath', () => {
+  it('uses the shared output-pane/browser-preview route shape', () => {
+    expect(
+      previewCapabilityPath({
+        token: 'a/b',
+        source: 'workspace',
+        projectId: 'project one',
+        entryPath: 'site/index file.html',
+      }),
+    ).toBe('/preview/a%2Fb/workspace/project%20one/site/index%20file.html');
   });
 });

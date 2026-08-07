@@ -85,6 +85,7 @@ import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   BatchCapability,
+  EngineLaunchSnapshot,
   ExternalToolCall,
   ExternalToolSpec,
   ImageAttachment,
@@ -474,6 +475,79 @@ function withWireMessages(body: Record<string, unknown>): Record<string, unknown
 interface ChatCompletionTool {
   type: 'function';
   function: { name: string; description: string; parameters: unknown };
+}
+
+/**
+ * Normalize JSON Schema regexes before llama-server turns tool definitions
+ * into a GBNF grammar.
+ *
+ * JavaScript's `RegExp#source` escapes forward slashes so the source can be
+ * embedded in a `/.../` literal (`https:\/\/...`). That escape is
+ * semantically identical to a plain `/` in an ECMA-262 pattern, but
+ * llama.cpp's JSON-Schema-to-GBNF converter used to copy it into a quoted
+ * GBNF terminal where `\/` is not a recognized escape. One otherwise-unused
+ * tool could therefore reject the entire request with "failed to parse
+ * grammar" before inference began.
+ *
+ * Keep this compatibility transform local to llama.cpp: cloud providers can
+ * consume the original schema, and callers retain ownership of their object.
+ */
+export function normalizeJsonSchemaForLlamaCpp(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    let changed = false;
+    const normalized = schema.map((entry) => {
+      const next = normalizeJsonSchemaForLlamaCpp(entry);
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? normalized : schema;
+  }
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const record = schema as Record<string, unknown>;
+  let changed = false;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const next =
+      key === 'pattern' && typeof value === 'string'
+        ? value.replace(/\\\//g, '/')
+        : normalizeJsonSchemaForLlamaCpp(value);
+    normalized[key] = next;
+    if (next !== value) changed = true;
+  }
+  return changed ? normalized : schema;
+}
+
+/** Last-resort recovery for a server build that still rejects a tool grammar. */
+export function stripJsonSchemaPatternsForLlamaCpp(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    let changed = false;
+    const stripped = schema.map((entry) => {
+      const next = stripJsonSchemaPatternsForLlamaCpp(entry);
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? stripped : schema;
+  }
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const record = schema as Record<string, unknown>;
+  let changed = false;
+  const stripped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'pattern' && typeof value === 'string') {
+      changed = true;
+      continue;
+    }
+    const next = stripJsonSchemaPatternsForLlamaCpp(value);
+    stripped[key] = next;
+    if (next !== value) changed = true;
+  }
+  return changed ? stripped : schema;
+}
+
+export function isLlamaCppGrammarParseError(text: string): boolean {
+  return /failed to (?:initialize samplers:[^\r\n]*failed to )?parse grammar/i.test(text);
 }
 
 function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
@@ -1573,6 +1647,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private disposed = false;
   private readonly numCtx: number;
+  private readonly plannedReservation?: number;
   /**
    * When true, append `stream_options:{include_usage:true}` to chat requests so
    * the engine emits a final usage chunk. Off for llama-server (it surfaces its
@@ -1720,6 +1795,14 @@ export class LlamaCppProvider implements LLMProvider {
      * can pressure-check. Default 16384 when omitted.
      */
     numCtx?: number;
+    /**
+     * Broker-ledger reservation for this replica: resident weights plus
+     * the KV the engine will allocate at the granted window and cache
+     * mode, computed by the launch admission pass. The pool builder
+     * prefers this over the catalog/weights-multiplier fallback so
+     * co-residency admission can see KV (M1).
+     */
+    plannedReservationBytes?: number;
     /** See {@link LlamaCppProvider.includeUsageInStream}. Default false. */
     includeUsageInStream?: boolean;
     /** See {@link LlamaCppProvider.replayReasoningContent}. Default false. */
@@ -1826,6 +1909,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
     if (opts.modelManager) this.modelManager = opts.modelManager;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
+    this.plannedReservation = opts.plannedReservationBytes;
     this.includeUsageInStream = opts.includeUsageInStream ?? false;
     this.replayReasoningContent = opts.replayReasoningContent ?? false;
     this.visionEnabled = opts.visionEnabled ?? false;
@@ -2062,6 +2146,23 @@ export class LlamaCppProvider implements LLMProvider {
 
   getContextWindow(): number {
     return this.numCtx;
+  }
+
+  /**
+   * Live engine launch provenance (granted context, slots, KV dtype) from
+   * the supervisor — undefined in external base-URL mode or when no child
+   * process is up. See `LLMProvider.engineLaunchSnapshot`.
+   */
+  engineLaunchSnapshot(): EngineLaunchSnapshot | undefined {
+    return this.supervisor?.launchSnapshot();
+  }
+
+  /**
+   * Weights + KV at the granted window/cache mode, from the launch
+   * admission pass. See `LLMProvider.plannedReservationBytes`.
+   */
+  plannedReservationBytes(): number | undefined {
+    return this.plannedReservation;
   }
 
   /**
@@ -2577,7 +2678,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
       (t) => ({
         type: 'function' as const,
-        function: { name: t.name, description: t.description ?? '', parameters: t.parameters },
+        function: {
+          name: t.name,
+          description: t.description ?? '',
+          parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
+        },
       }),
     );
     const tools = [...bridgeTools, ...externalAsChatCompletions];
@@ -2858,7 +2963,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         function: {
           name: t.name,
           description: t.description ?? '',
-          parameters: t.parameters,
+          parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
         },
       }),
     );
@@ -2919,6 +3024,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       completion_tokens: number;
       /** From llama-server's `timings.predicted_per_second` — decode rate. */
       predicted_per_second?: number;
+      /** From llama-server's `timings.prompt_per_second` — prefill rate. */
+      prompt_per_second?: number;
       /** From llama-server's `timings.cache_n` — prompt tokens reused. */
       cache_n?: number;
     } | null = null;
@@ -2970,6 +3077,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // drives `foldPostActionRumination` on later reply-only iterations
     // (the wrap-up wall a verbose model emits after its tool ran).
     let actionFiredEarlierThisTurn = false;
+    // Some llama.cpp builds reject otherwise-valid JSON Schema regexes while
+    // compiling the aggregate tool grammar. A single retry strips only
+    // `pattern` constraints; MCP/Zod still validates the eventual arguments.
+    let grammarPatternFallback = false;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -3717,6 +3828,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
+        if (grammarPatternFallback && Array.isArray(body.tools)) {
+          body.tools = (body.tools as ChatCompletionTool[]).map((tool) => ({
+            ...tool,
+            function: {
+              ...tool.function,
+              parameters: stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters),
+            },
+          }));
+        }
         // llama-server accepts the string choices `auto`, `none`, and
         // `required`. Its OpenAI-compatible endpoint currently rejects the
         // named-object form, even when the constrained surface has one tool.
@@ -4191,6 +4311,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           this.deps.markUsed();
           const txt = await res.text().catch(() => '');
           if (
+            tools &&
+            tools.length > 0 &&
+            isLlamaCppGrammarParseError(txt) &&
+            !grammarPatternFallback
+          ) {
+            grammarPatternFallback = true;
+            log.warn(
+              '[llama-cpp] tool grammar rejected by server; retrying once without JSON Schema pattern constraints',
+            );
+            continue;
+          }
+          if (
             tryParseStrictAlternationTemplateError(txt) &&
             !this.flattenToolMessagesForStrictAlternation
           ) {
@@ -4597,13 +4729,28 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // `timings` rides alongside `usage` when `timings_per_token` is
               // set; it is the only HTTP source of decode/prefill rate.
               const t = (chunk as { timings?: Record<string, unknown> }).timings;
+              const extendedUsage = chunk.usage as typeof chunk.usage & {
+                prompt_tps?: number;
+                generation_tps?: number;
+                cached_tokens?: number;
+              };
               const perSec =
-                typeof t?.predicted_per_second === 'number' ? t.predicted_per_second : undefined;
-              const cacheN = typeof t?.cache_n === 'number' ? t.cache_n : undefined;
+                typeof t?.predicted_per_second === 'number'
+                  ? t.predicted_per_second
+                  : extendedUsage.generation_tps;
+              const promptPerSec =
+                typeof t?.prompt_per_second === 'number'
+                  ? t.prompt_per_second
+                  : extendedUsage.prompt_tps;
+              const cacheN =
+                typeof t?.cache_n === 'number' ? t.cache_n : extendedUsage.cached_tokens;
               iterationUsage = {
                 prompt_tokens: chunk.usage.prompt_tokens,
                 completion_tokens: chunk.usage.completion_tokens,
                 ...(perSec !== undefined && perSec > 0 ? { predicted_per_second: perSec } : {}),
+                ...(promptPerSec !== undefined && promptPerSec > 0
+                  ? { prompt_per_second: promptPerSec }
+                  : {}),
                 ...(cacheN !== undefined && cacheN > 0 ? { cache_n: cacheN } : {}),
               };
               lastUsage = iterationUsage;
@@ -5467,23 +5614,30 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 durationMs,
               }),
             );
-            // Per-turn telemetry for the UI engine pill. Base
-            // tokens/sec on the *generation* phase — first-token
-            // time through end — since prefill speed is dominated by
-            // batch sizing, not model throughput. Fall back to the
-            // full durationMs when TTFT wasn't recorded (shouldn't
-            // happen in normal flow, but a zero-chunk reply could).
+            // Per-turn telemetry for the UI engine pill and fitness probe.
+            // Prefer llama-server's own decode-loop timing. Re-deriving from
+            // `completion_tokens / (end - first streamed token)` overstates
+            // thinking models because completion_tokens includes private
+            // reasoning the server may finish before it emits any SSE delta.
+            // Keep the wall-clock estimate only for older servers that omit
+            // the timings block.
             const generationMs =
               firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const tokensPerSec =
+            const wallTokensPerSec =
               lastUsage.completion_tokens > 0 && generationMs > 0
                 ? lastUsage.completion_tokens / (generationMs / 1000)
                 : undefined;
+            const tokensPerSec = lastUsage.predicted_per_second ?? wallTokensPerSec;
             this.emitTurnStats({
               provider: 'llama-cpp',
               promptTokens: lastUsage.prompt_tokens,
               completionTokens: lastUsage.completion_tokens,
               durationMs,
+              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+              ...(lastUsage.prompt_per_second !== undefined
+                ? { promptTokensPerSec: lastUsage.prompt_per_second }
+                : {}),
+              ...(lastUsage.cache_n !== undefined ? { cachedPromptTokens: lastUsage.cache_n } : {}),
               ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
             });
           }
@@ -6427,7 +6581,7 @@ function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTool[] {
     function: {
       name: t.name,
       description: t.description,
-      parameters: t.parameters,
+      parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
     },
   }));
 }

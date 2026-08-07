@@ -88,7 +88,7 @@ async function createTask(projectId: string, title: string) {
 
 function findCreateOpts(mock: MockProvider) {
   return mock.calls.find(
-    (c) => c.kind === 'create' && !!c.opts?.systemMessage.startsWith('You are acting as the agent'),
+    (c) => c.kind === 'create' && !!c.opts?.systemMessage.startsWith('Your role is'),
   )!.opts!;
 }
 
@@ -121,7 +121,8 @@ describe('layered prefix cache — gating', () => {
       expect(layers!.project.startsWith(layers!.gezel)).toBe(true);
       expect(layers!.project.length).toBeGreaterThan(layers!.gezel.length);
       expect(layers!.project).toContain("Act, don't narrate");
-      expect(layers!.gezel).toContain('Ada');
+      expect(layers!.gezel).toContain('Your role is "Developer".');
+      expect(layers!.gezel).not.toContain('Ada');
       expect(layers!.gezel).not.toContain('Build the storefront');
       // The system message sent to the engine is the stable `project` layer
       // (volatile-free) — same identity prefix, no task content.

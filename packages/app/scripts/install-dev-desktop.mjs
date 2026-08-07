@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 /**
- * Install (or remove) a per-user `gezel-dev.desktop` so GNOME / KDE /
- * any XDG-compliant Linux desktop renders a proper icon and label for
- * the dev Electron shell (`pnpm app`). Without it the dock shows a
- * generic placeholder because the window's WM_CLASS=Gezel (set in
- * src/main.ts) has no matching `.desktop` file to look up.
+ * Install (or remove) a per-user `com.bendyline.gezel.dev.desktop` so
+ * GNOME / KDE / any XDG-compliant Linux desktop renders a proper icon
+ * and label for the dev Electron shell (`pnpm app`). Without it the
+ * dock shows a generic placeholder because the window's app_id /
+ * WM_CLASS (set in src/main.ts) has no matching `.desktop` file.
  *
  * Usage:
  *   node scripts/install-dev-desktop.mjs            # install
  *   node scripts/install-dev-desktop.mjs --remove   # uninstall
  *
  * What it does (install):
- *   1. Writes `~/.local/share/applications/gezel-dev.desktop`. The
- *      file points `Exec=` at `pnpm --filter @bendyline/gezel-app app`
- *      run from this repo's root, and `Icon=` at the absolute path
+ *   1. Writes `~/.local/share/applications/com.bendyline.gezel.dev.desktop`. The
+ *      file points `Exec=` at the repo's root `pnpm app` script and
+ *      `Icon=` at the absolute path
  *      of `packages/app/assets/icon.png` so GNOME doesn't have to
  *      copy the icon into a theme dir.
- *   2. Sets `StartupWMClass=Gezel` to match the WM_CLASS the running
- *      Electron window declares — this is the join key the dock uses
- *      to fuse the .desktop file with the actual window.
+ *   2. Sets `StartupWMClass=com.bendyline.gezel.dev` to match the app_id /
+ *      WM_CLASS the running Electron window declares — this is the join
+ *      key the dock uses to fuse the .desktop file with the actual window.
  *   3. Runs `update-desktop-database` if available, so the new entry
  *      is indexed immediately. Without that, GNOME may not pick up
  *      the file until a logout/login cycle.
@@ -28,9 +28,9 @@
  *   2. Refreshes the desktop database the same way.
  *
  * Packaged installs (.deb / .rpm) use the electron-builder-generated
- * `gezel.desktop` instead — this script is a dev-only convenience and
- * deliberately uses a different basename (`gezel-dev`) so it can
- * coexist with a packaged install on the same machine.
+ * `com.bendyline.gezel.desktop` instead — this script is a dev-only
+ * convenience and deliberately uses a different basename
+ * (`com.bendyline.gezel.dev`) so both can coexist on the same machine.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -55,7 +55,8 @@ const xdgDataHome =
     ? process.env.XDG_DATA_HOME
     : join(homedir(), '.local', 'share');
 const applicationsDir = join(xdgDataHome, 'applications');
-const desktopFile = join(applicationsDir, 'gezel-dev.desktop');
+const desktopId = 'com.bendyline.gezel.dev';
+const desktopFile = join(applicationsDir, `${desktopId}.desktop`);
 
 const remove = process.argv.slice(2).some((a) => a === '--remove' || a === '-r');
 
@@ -92,7 +93,7 @@ mkdirSync(applicationsDir, { recursive: true });
 // not used here, kept implicit. `Exec=` must double-quote any path
 // with spaces; we wrap pnpm + repoRoot defensively so a path like
 // `/home/User Name/gh/gezel` doesn't blow up.
-const exec = `${quote(pnpmBin)} --dir ${quote(repoRoot)} --filter @bendyline/gezel-app app`;
+const exec = `${quote(pnpmBin)} --dir ${quote(repoRoot)} app`;
 
 const contents = `[Desktop Entry]
 Type=Application
@@ -106,14 +107,14 @@ Terminal=false
 Categories=Office;
 Keywords=ai;agents;gezel;copilot;
 StartupNotify=true
-StartupWMClass=Gezel
+StartupWMClass=${desktopId}
 `;
 
 writeFileSync(desktopFile, contents, { mode: 0o644 });
 console.log(`installed ${desktopFile}`);
 console.log(`  Exec=${exec}`);
 console.log(`  Icon=${iconPath}`);
-console.log('  StartupWMClass=Gezel');
+console.log(`  StartupWMClass=${desktopId}`);
 refreshDatabase();
 console.log('');
 console.log('next: launch `pnpm app` from the repo root, or click "Gezel (dev)" in the app grid.');

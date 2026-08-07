@@ -117,6 +117,21 @@ export interface EngineFlagInput {
   architecture?: string | undefined;
   /** The resolved model id, a fallback for `architecture` (see isGemmaModel). */
   modelId?: string | undefined;
+  /**
+   * Whether the FULL-attention KV cache at the launch context fits the
+   * host's memory budget (the launcher computes this with the same
+   * full-attention estimate + admission math as the context clamp).
+   * `--swa-full` makes that estimate the model's REAL allocation — on
+   * Gemma it multiplies KV by roughly the layer ratio (~6× at 64K, not
+   * "+30%"), so the auto-default must not pick it when the result cannot
+   * physically fit. Wild-caught 2026-08-05: gemma4-31b-q4 at forced
+   * 65536-token ctx (evals bypass the clamp) projected ~33 GB KV on top
+   * of 21 GB weights and OOM'd Metal mid-prefill, presenting as empty
+   * model turns. `false` declines the auto-default; `undefined` (unknown
+   * host / clamped launch, which already budgets full-attention KV) and
+   * `true` keep it. An explicit config/manifest `swaFull` wins regardless.
+   */
+  swaFullAutoFits?: boolean | undefined;
 }
 
 /** Default `--cache-reuse` chunk when neither config nor manifest set it. */
@@ -160,6 +175,7 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     reasoningFormat,
     architecture,
     modelId,
+    swaFullAutoFits,
   } = input;
   const args: string[] = [];
 
@@ -213,10 +229,17 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   // Tri-state: explicit config/manifest `true`/`false` wins; `undefined`
   // at both layers falls through to the Gemma-family auto-default. Gemma's
   // sliding-window attention refuses cross-request prefix reuse under the
-  // memory-efficient windowed cache; the full cache trades ~30% KV memory
-  // (which the offload planner already budgets for) to enable it.
+  // memory-efficient windowed cache; the full cache enables reuse by
+  // allocating full-context KV on EVERY layer — on Gemma that multiplies
+  // KV by roughly the global:SWA layer ratio (~6× at 64K ctx), so the
+  // auto-default is gated on `swaFullAutoFits` (see its doc): when the
+  // launcher determines full-attention KV cannot fit the host, Gemma
+  // launches with the windowed cache (slower session switches, alive)
+  // instead of a configuration that OOMs mid-prefill.
   const swaFull =
-    config.llamaCppSwaFull ?? perModel?.swaFull ?? isGemmaModel({ architecture, modelId });
+    config.llamaCppSwaFull ??
+    perModel?.swaFull ??
+    (swaFullAutoFits !== false && isGemmaModel({ architecture, modelId }));
   if (swaFull) args.push('--swa-full');
 
   // ── Thread / batch overrides ──────────────────────────────────────

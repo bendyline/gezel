@@ -20,6 +20,10 @@ const OVERRIDES: Record<string, string> = {
   browser_navigate:
     'Navigate the browser to a URL. The "url" parameter MUST be a full URL beginning with ' +
     'https:// or http:// — for example https://news.ycombinator.com or https://www.bbc.com/news. ' +
+    'For active-project HTML, file:///workspace/index.html (or another workspace-relative path) ' +
+    "is automatically rewritten to gezel's capability-scoped preview server; do not install a " +
+    'separate static server. Use validate({ path: "index.html" }) when you need the HTML/JS gate ' +
+    'without an interactive browser. ' +
     'Search queries like "world news" are NOT valid URLs and will be rejected. If you do not know ' +
     'a real URL for what the user wants, ask them for one rather than guessing. After this ' +
     'returns, you receive an aria-tree snapshot of the page (interactive elements + links + tree) ' +

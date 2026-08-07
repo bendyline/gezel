@@ -436,6 +436,8 @@ export class McpBridge {
    * existing capToolOutput truncation path.
    */
   artifactPersister?: (relPath: string, content: string) => Promise<void>;
+  /** Active-project preview seam forwarded to Playwright wrappers. */
+  workspacePreview?: McpToolWrapperContext['workspacePreview'];
   /**
    * Secret values to strip from anything this bridge emits — tool args on
    * log/event emission paths, error messages. Populated per-session from
@@ -736,6 +738,7 @@ export class McpBridge {
         return { text: r.text, images: r.images };
       },
       ...(this.artifactPersister ? { writeArtifact: this.artifactPersister } : {}),
+      ...(this.workspacePreview ? { workspacePreview: this.workspacePreview } : {}),
     };
     // Let wrappers tighten descriptions / prune args / relax schemas
     // before the model ever sees the tool list. Stable order: each
@@ -1164,6 +1167,9 @@ export class McpBridge {
           const redactedError = errorMessage
             ? redactString(errorMessage, this.knownSecretValues)
             : undefined;
+          const redactedResult = combined
+            ? redactString(combined, this.knownSecretValues)
+            : undefined;
           await this.onToolCall({
             name: toolName,
             argKeys: Object.keys(args),
@@ -1171,6 +1177,7 @@ export class McpBridge {
             durationMs: Date.now() - start,
             success: !isError,
             ...(redactedError ? { errorMessage: redactedError } : {}),
+            ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
             ...(persistedAudios.length > 0 ? { audios: persistedAudios } : {}),
             ...(structuredContent ? { structuredContent } : {}),

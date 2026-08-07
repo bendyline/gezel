@@ -26,6 +26,20 @@ describe('resolveDs4LaunchCtx', () => {
     ).toBe(262_144);
   });
 
+  it('does not let an explicit limit push a long-context model below 64K', () => {
+    expect(resolveDs4LaunchCtx({ configured: 16_384, ramTieredCtx: 131_072 })).toBe(65_536);
+  });
+
+  it('retains a genuinely smaller catalog bound', () => {
+    expect(
+      resolveDs4LaunchCtx({
+        configured: 16_384,
+        ramTieredCtx: 131_072,
+        catalogMaxCtx: 32_768,
+      }),
+    ).toBe(32_768);
+  });
+
   it('treats an absent cap and an absent override as unset, not as zero', () => {
     expect(
       resolveDs4LaunchCtx({

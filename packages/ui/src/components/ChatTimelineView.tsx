@@ -1853,6 +1853,8 @@ export function ChatTimelineView({
           ...(event.path ? { path: event.path } : {}),
           ...(event.argsSummary ? { argsSummary: event.argsSummary } : {}),
           ...(event.argsFull ? { argsFull: event.argsFull } : {}),
+          ...(event.resultText ? { resultText: event.resultText } : {}),
+          ...(event.resultTruncated ? { resultTruncated: true } : {}),
           ...(event.images && event.images.length > 0 ? { images: event.images } : {}),
           ...(event.diff !== undefined ? { diff: event.diff } : {}),
           ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),

@@ -131,28 +131,15 @@ export function documentRoutes(ctx: ServiceContext): Hono {
 }
 
 async function serveRawFile(c: import('hono').Context, base: string, filePath: string) {
-  const { extname } = await import('node:path');
   const { readFile } = await import('node:fs/promises');
+  const { mimeTypeForPath } = await import('../mime.js');
   const full = safeJoin(base, filePath);
   if (!full || !(await realpathContained(base, full))) {
     return c.json({ error: 'path traversal' }, 400);
   }
   try {
     const buf = await readFile(full);
-    const ext = extname(filePath).toLowerCase();
-    const mime =
-      ext === '.png'
-        ? 'image/png'
-        : ext === '.jpg' || ext === '.jpeg'
-          ? 'image/jpeg'
-          : ext === '.gif'
-            ? 'image/gif'
-            : ext === '.svg'
-              ? 'image/svg+xml'
-              : ext === '.webp'
-                ? 'image/webp'
-                : 'application/octet-stream';
-    return c.body(buf, 200, { 'content-type': mime });
+    return c.body(buf, 200, { 'content-type': mimeTypeForPath(filePath) });
   } catch {
     return c.json({ error: 'not found' }, 404);
   }

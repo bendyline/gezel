@@ -162,22 +162,37 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('launchctl enable "system/${DAEMON_LABEL}"');
   });
 
-  it('documents and preserves the boundary between engine data and shared projects', () => {
+  it('makes every macOS data-removal scope explicit and opt-in', () => {
     expect(macUninstall).toContain('DATA_DIR="/Library/Application Support/Gezel"');
     expect(macUninstall).toContain('MACHINE_SHARED_DIR="/Users/Shared/Gezel"');
-    expect(macUninstall).toContain('--purge-data additionally removes ONLY');
-    expect(macUninstall).toContain('This includes downloaded shared models.');
-    expect(macUninstall).toContain(
-      'This script never removes the two locations listed under "Always preserved."',
-    );
+    expect(macUninstall).toContain('--purge-data is an alias for --remove-machine-data');
+    expect(macUninstall).toContain('--remove-machine-data');
+    expect(macUninstall).toContain('--remove-shared-data');
+    expect(macUninstall).toContain('--remove-current-user-data --user-uid=UID');
+    expect(macUninstall).toContain('if [ "$REMOVE_MACHINE_DATA" -eq 1 ]');
+    expect(macUninstall).toContain('if [ "$REMOVE_SHARED_DATA" -eq 1 ]');
+    expect(macUninstall).toContain('if [ "$REMOVE_CURRENT_USER_DATA" -eq 1 ]');
     expect(macUninstall).toContain(
       '[gezel uninstall] preserved machine-shared projects and gezels at ${MACHINE_SHARED_DIR}',
     );
     expect(macUninstall).toContain(
-      "[gezel uninstall] preserved every account's private Gezel data under ~/.gezel",
+      "[gezel uninstall] preserved every account's private Gezel data",
     );
-    expect(macUninstall).toContain('rm -rf "$DATA_DIR"');
-    expect(macUninstall).not.toContain('rm -rf "$MACHINE_SHARED_DIR"');
+    expect(macUninstall).toContain('/bin/rm -rf -- "$DATA_DIR"');
+    expect(macUninstall).toContain('/bin/rm -rf -- "$MACHINE_SHARED_DIR"');
+    expect(macUninstall).toContain('/usr/bin/sudo -H -u "$target_username" /bin/rm -rf --');
+  });
+
+  it('removes all user startup items, detaches safely, and forgets the PKG receipt', () => {
+    expect(macUninstall).toContain('USER_AGENT_LABEL="com.bendyline.gezel"');
+    expect(macUninstall).toContain('/usr/bin/dscl . -list /Users UniqueID');
+    expect(macUninstall).toContain('/bin/launchctl bootout "gui/${uid}/${USER_AGENT_LABEL}"');
+    expect(macUninstall).toContain('"${home}/Library/LaunchAgents/${USER_AGENT_LABEL}.plist"');
+    expect(macUninstall).toContain('/usr/bin/mktemp "${DETACHED_SCRIPT_PREFIX}XXXXXX"');
+    expect(macUninstall).toContain('/usr/bin/nohup /bin/bash "$staged_script"');
+    expect(macUninstall).toContain('waiting for Gezel process ${WAIT_FOR_PID} to exit');
+    expect(macUninstall).toContain('PACKAGE_ID="com.bendyline.gezel"');
+    expect(macUninstall).toContain('/usr/sbin/pkgutil --forget "$PACKAGE_ID"');
   });
 
   it('repairs a daemon account that kept its user but lost its group', () => {

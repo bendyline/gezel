@@ -69,6 +69,7 @@ import { projectRoutes } from './routes/projects.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
+import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -79,7 +80,7 @@ import { searchRoutes } from './routes/search.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
-import { systemRoutes } from './routes/system.js';
+import { systemMemoryRoutes, systemRoutes } from './routes/system.js';
 import { terminalRoutes } from './routes/terminals.js';
 import { timelineRoutes } from './routes/timeline.js';
 import { toolRoutes } from './routes/tools.js';
@@ -165,11 +166,11 @@ export function opaqueServerErrors(
     try {
       const parsed = JSON.parse(raw) as { error?: unknown; requestId?: unknown };
       if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') return;
-      // A broker outage is an expected, actionable degraded state rather than
-      // a route exception. Preserve only its fixed code; the bridge logs the
-      // underlying socket/TLS detail and never puts that detail in this body.
+      // Broker outages and capacity denials are expected, actionable degraded
+      // states rather than route exceptions. Preserve only their fixed codes;
+      // the bridge logs the underlying detail and never puts it in this body.
       if (
-        parsed.error === 'machine_engine_unavailable' &&
+        (parsed.error === 'machine_engine_unavailable' || parsed.error === 'capacity_denied') &&
         Object.keys(parsed as Record<string, unknown>).length === 1
       ) {
         return;
@@ -464,6 +465,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.route('/v1/remote/manage/engines', enginesRoutes(ctx));
     app.route('/v1/remote/manage/queues', queueRoutes(ctx));
     app.route('/v1/remote/manage/cache', cacheRoutes(ctx));
+    app.route('/v1/remote/manage/system/memory', systemMemoryRoutes(ctx));
     app.route('/v1/remote/manage/model-fitness', modelFitnessRoutes(ctx));
     app.route('/v1/remote/manage/model-bundles', modelBundleRoutes(ctx));
     // These routers mix project-persisting execution with model lifecycle.
@@ -499,6 +501,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Interactive type pages: the first-party bridge relaying page tool
   // invokes at /api/projects/:id/page-invoke (see routes/page-invoke.ts).
   app.route('/api/projects', pageInvokeRoutes(ctx));
+  app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*
   app.route('/api/projects', projectGezelRoutes(ctx));

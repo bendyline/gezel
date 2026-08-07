@@ -724,4 +724,114 @@ describe('RemoteSession', () => {
       ]),
     );
   });
+
+  it('holds and retries tenant saturation instead of surfacing HTTP 429', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          { error: 'tenant_concurrency_exceeded' },
+          { status: 429, headers: { 'Retry-After': '0' } },
+        );
+      }
+      return sseResponse([{ type: 'delta', text: 'after the queue' }, { type: 'done' }]);
+    }) as typeof fetch;
+    const waits: number[] = [];
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 's',
+      model: 'mlx:m',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await expect(
+      session.sendAndWait('hi', {
+        queue: {
+          lane: 'interactive',
+          affinity: true,
+          onQueueWait: ({ aheadOf }) => waits.push(aheadOf),
+        },
+      }),
+    ).resolves.toBe('after the queue');
+    expect(calls).toBe(2);
+    expect(waits).toEqual([1]);
+  });
+
+  it('does not charge broker queue time against a continued tool-loop timeout', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          { error: 'tenant_concurrency_exceeded' },
+          { status: 429, headers: { 'Retry-After': '0.05' } },
+        );
+      }
+      if (calls === 2) {
+        return sseResponse([
+          {
+            type: 'tool_call',
+            calls: [{ id: 't1', name: 'read_file', arguments: '{}' }],
+          },
+          { type: 'done' },
+        ]);
+      }
+      return sseResponse([{ type: 'delta', text: 'finished' }, { type: 'done' }]);
+    }) as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({ read_file: async () => 'contents' }),
+      systemMessage: 's',
+      model: 'mlx:m',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 20,
+    });
+
+    await expect(session.sendAndWait('hi')).resolves.toBe('finished');
+    expect(calls).toBe(3);
+  });
+
+  it('cancels promptly while waiting for remote tenant capacity', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return Response.json(
+        { error: 'tenant_concurrency_exceeded' },
+        { status: 429, headers: { 'Retry-After': '60' } },
+      );
+    }) as typeof fetch;
+    const controller = new AbortController();
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 's',
+      model: 'mlx:m',
+      priorMessages: [],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    const pending = session.sendAndWait('hi', {
+      queue: { lane: 'interactive', affinity: true, signal: controller.signal },
+    });
+    while (calls === 0) await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls).toBe(1);
+  });
 });

@@ -2,11 +2,29 @@ import { describe, expect, it } from 'vitest';
 import type { MemoryProfile } from './memory.js';
 import {
   memoryProfileForLlamaGpu,
+  parseNvidiaMemoryProbe,
   sampleMachineMemoryUsage,
   summarizeResidentModels,
 } from './memory.js';
 
 const GiB = 1024 ** 3;
+
+describe('parseNvidiaMemoryProbe', () => {
+  it('keeps a GeForce discrete when its VRAM is as large as system RAM', () => {
+    expect(parseNvidiaMemoryProbe('NVIDIA GeForce RTX 5060 Ti, 16384\n')).toEqual({
+      vramBytes: 16 * GiB,
+      memoryKind: 'discrete',
+      deviceNames: ['NVIDIA GeForce RTX 5060 Ti'],
+    });
+  });
+
+  it('recognizes the known NVIDIA unified-memory device family', () => {
+    expect(parseNvidiaMemoryProbe('NVIDIA GB10, 122880\n')).toMatchObject({
+      memoryKind: 'unified',
+      deviceNames: ['NVIDIA GB10'],
+    });
+  });
+});
 
 function profile(overrides: Partial<MemoryProfile> = {}): MemoryProfile {
   return {
@@ -52,6 +70,18 @@ describe('memoryProfileForLlamaGpu', () => {
     expect(result.source).toBe('gpu-vulkan');
     expect(result.gpuMemoryKind).toBe('discrete');
     expect(result.budgetBytes).toBeGreaterThan(19.2 * GiB);
+  });
+
+  it('trusts an explicitly discrete device even when VRAM equals system RAM', () => {
+    const result = memoryProfileForLlamaGpu('linux', 16 * GiB, {
+      vramBytes: 16 * GiB,
+      name: 'NVIDIA GeForce RTX 5060 Ti',
+      vendor: 'nvidia',
+      memoryKind: 'discrete',
+    });
+    expect(result.gpuMemoryKind).toBe('discrete');
+    expect(result.usableBytes).toBe(Math.floor(16 * GiB * 0.95));
+    expect(result.budgetBytes).toBeGreaterThan(16 * GiB);
   });
 
   it('keeps a large non-Mac unified accelerator distinct from a consumer iGPU', () => {
@@ -176,6 +206,7 @@ describe('sampleMachineMemoryUsage', () => {
     const usage = sampleMachineMemoryUsage({
       profile: profile({
         gpuVramBytes: 60 * GiB,
+        gpuMemoryKind: 'unified',
         source: 'gpu-vulkan',
       }),
       freeRamBytes: 24 * GiB,
@@ -185,6 +216,41 @@ describe('sampleMachineMemoryUsage', () => {
     expect(usage.kind).toBe('unified');
     expect(usage.totalBytes).toBe(64 * GiB);
     expect(usage.usedBytes).toBe(40 * GiB);
+  });
+
+  it('uses VRAM telemetry for an explicitly discrete equal-sized GPU pool', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile({
+        totalRamBytes: 16 * GiB,
+        gpuVramBytes: 16 * GiB,
+        gpuMemoryKind: 'discrete',
+      }),
+      deviceHealth: {
+        state: 'healthy',
+        mode: 'observe',
+        sampledAt: 'driver-now',
+        sources: ['nvidia-smi'],
+        readings: [
+          {
+            vendor: 'nvidia',
+            deviceId: '0',
+            name: 'NVIDIA GeForce RTX 5060 Ti',
+            memoryUsedMb: 4 * 1024,
+            memoryTotalMb: 16 * 1024,
+          },
+        ],
+        reasons: [],
+        summary: 'healthy',
+      },
+    });
+
+    expect(usage).toMatchObject({
+      kind: 'vram',
+      totalBytes: 16 * GiB,
+      usedBytes: 4 * GiB,
+      freeBytes: 12 * GiB,
+      deviceNames: ['NVIDIA GeForce RTX 5060 Ti'],
+    });
   });
 
   it('uses main RAM when CPU inference is selected despite a discrete GPU', () => {

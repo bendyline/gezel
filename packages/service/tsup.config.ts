@@ -15,6 +15,14 @@ export default defineConfig({
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
     'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // Deterministic workspace file/classification/symbol/SQLite indexing is
+    // CPU-heavy on large repositories. Keep it off the daemon event loop (and
+    // therefore off Electron's main thread in embedded dev mode).
+    'index-store/static-index-worker': 'src/index-store/static-index-worker.ts',
+    // Settings previews context admission for every installed GGUF. Tokenizer
+    // metadata can be enormous, so the first inspection must not run on the
+    // embedded Electron main thread; subsequent polls hit the parent cache.
+    'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
     // npm's macOS node-pty prebuild currently publishes spawn-helper without
     // its execute bit. This lifecycle entry repairs the installed dependency
     // after npm has laid out the consumer tree.

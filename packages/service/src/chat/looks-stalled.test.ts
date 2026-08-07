@@ -20,6 +20,13 @@ describe('looksStalled', () => {
     expect(looksStalled('Let me check the artifacts folder…')).toBe(true);
   });
 
+  it('does NOT turn a conversational "Let me know" closing into an action continuation', () => {
+    const greeting =
+      "Hi! I'm Fenton, the concierge for your project. " +
+      'Let me know if you have any other requests!';
+    expect(looksStalled(greeting)).toBe(false);
+  });
+
   it('catches a bare gerund opener like "Processing…"', () => {
     expect(looksStalled('Processing the spec...')).toBe(true);
   });

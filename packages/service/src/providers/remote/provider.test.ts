@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { LEGACY_REMOTE_CONTEXT_WINDOW, RemoteGezelProvider } from './provider.js';
+import { describe, expect, it, vi } from 'vitest';
+import { CapacityDeniedError } from '../native/capacity-broker.js';
+import {
+  DEFAULT_REMOTE_CONCURRENCY,
+  REMOTE_ADMISSION_CACHE_TTL_MS,
+  RemoteGezelProvider,
+} from './provider.js';
 
 function doneResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -16,6 +21,19 @@ function admissionResponse(model: string, contextWindow = 35_840): Response {
 }
 
 describe('RemoteGezelProvider', () => {
+  it('keeps client admission within the broker cap and reserves typed-chat headroom', () => {
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch,
+    });
+
+    expect(provider.queue.concurrency).toBe(DEFAULT_REMOTE_CONCURRENCY);
+    expect(provider.queue.backgroundConcurrency).toBe(DEFAULT_REMOTE_CONCURRENCY - 1);
+  });
+
   it('re-reads broker inventory so a completed pull appears without reconnecting', async () => {
     let requests = 0;
     const fetchImpl = (async () => {
@@ -72,6 +90,36 @@ describe('RemoteGezelProvider', () => {
     await session.disconnect();
   });
 
+  it('refreshes admission after the short session-start cache expires', async () => {
+    let requests = 0;
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fetchImpl = (async () => {
+      requests += 1;
+      return admissionResponse('llama-cpp:qwen.gguf', requests === 1 ? 65_536 : 131_072);
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+    });
+
+    try {
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(65_536);
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(65_536);
+      expect(requests).toBe(1);
+
+      now += REMOTE_ADMISSION_CACHE_TTL_MS;
+      await expect(provider.prepareContextWindow('qwen.gguf')).resolves.toBe(131_072);
+      expect(requests).toBe(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('does not duplicate an engine namespace already present on the wire', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -95,7 +143,7 @@ describe('RemoteGezelProvider', () => {
     await session.disconnect();
   });
 
-  it('fails safe to a diet-sized window when a rolling-upgrade broker lacks admission', async () => {
+  it('refuses an old broker that cannot prove the 64K minimum', async () => {
     const fetchImpl = (async (url: string | URL | Request) => {
       if (String(url).endsWith('/v1/remote/admit')) {
         return Response.json({ error: 'not_found' }, { status: 404 });
@@ -112,8 +160,24 @@ describe('RemoteGezelProvider', () => {
       defaultModel: 'llama-cpp:qwen.gguf',
     });
 
-    await expect(provider.prepareContextWindow()).resolves.toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
-    expect(provider.getContextWindow()).toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
+    await expect(provider.prepareContextWindow()).rejects.toThrow(/cannot prove.*65,536-token/i);
+    expect(provider.getContextWindow()).toBeUndefined();
+  });
+
+  it('preserves a broker context-capacity denial as a structured local error', async () => {
+    const fetchImpl = (async () =>
+      Response.json({ error: 'capacity_denied' }, { status: 503 })) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+      defaultModel: 'llama-cpp:qwen.gguf',
+    });
+
+    await expect(provider.prepareContextWindow()).rejects.toBeInstanceOf(CapacityDeniedError);
   });
 
   it('does not disguise a model-not-loaded response as legacy compatibility', async () => {
@@ -129,5 +193,30 @@ describe('RemoteGezelProvider', () => {
     });
 
     await expect(provider.prepareContextWindow()).rejects.toThrow(/model_not_loaded/);
+  });
+
+  it('waits through tenant saturation during context admission', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return Response.json(
+          { error: 'tenant_concurrency_exceeded' },
+          { status: 429, headers: { 'Retry-After': '0' } },
+        );
+      }
+      return admissionResponse('mlx:qwen', 24_576);
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      defaultModel: 'mlx:qwen',
+    });
+
+    await expect(provider.prepareContextWindow()).resolves.toBe(24_576);
+    expect(calls).toBe(2);
   });
 });

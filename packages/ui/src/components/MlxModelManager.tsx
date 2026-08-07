@@ -21,6 +21,8 @@ import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleC
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
+import { formatContextWindow } from './model-context.js';
+import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -28,12 +30,6 @@ interface MemoryProfile {
   gpuVramBytes: number | null;
   source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'gpu-integrated' | 'system-ram-fallback';
   usableBytes: number;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
-  return `${bytes} B`;
 }
 
 function formatApprox(bytes: number): string {
@@ -576,8 +572,12 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th>Context</th>
-                  <th>Fitness</th>
+                  <th title="Effective per-turn context size after Gezel's configured limit">
+                    Context size
+                  </th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -616,11 +616,24 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                           </span>
                         )}
                       </td>
-                      <td>{formatBytes(m.approxSizeBytes)}</td>
+                      <td title={modelSizeTitle(m)}>
+                        {formatBytes(m.approxSizeBytes)}
+                        {modelMemoryHeadline(m) ? (
+                          <span className="muted small">{modelMemoryHeadline(m)}</span>
+                        ) : null}
+                      </td>
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
                       </td>
-                      <td>{m.contextWindow ? m.contextWindow.toLocaleString() : '—'}</td>
+                      <td
+                        title={
+                          m.effectiveContextWindow
+                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
+                            : 'The effective context size is unavailable.'
+                        }
+                      >
+                        {formatContextWindow(m.effectiveContextWindow)}
+                      </td>
                       <td className="model-fitness-table-cell">
                         <div className="model-fitness-cell">
                           <span
@@ -641,7 +654,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                             type="button"
                             className="home-link"
                             disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
                             onClick={() => {
                               void api
                                 .runModelFitnessProbe('mlx', m.id)

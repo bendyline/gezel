@@ -450,6 +450,26 @@ export class NativeEngineSupervisor {
   }
 
   /**
+   * Launch provenance of the LIVE child: pid, start time, and the
+   * request-independent launch facts the spawner attached (granted context
+   * window, slots, KV dtype, backend — the payload behind the
+   * `launch {...}` log line). Undefined when no child is up, so callers
+   * (Settings → About, `/api/system/diagnostics`) never show a stale grant
+   * for an engine that already exited.
+   */
+  launchSnapshot():
+    | { pid?: number; startedAt: number; diagnostics?: Record<string, string | number | boolean> }
+    | undefined {
+    if (this.state.kind !== 'running' && this.state.kind !== 'starting') return undefined;
+    const pid = this.currentChildPid();
+    return {
+      ...(pid !== undefined ? { pid } : {}),
+      startedAt: this.currentStartedAt,
+      ...(this.currentDiagnostics ? { diagnostics: { ...this.currentDiagnostics } } : {}),
+    };
+  }
+
+  /**
    * Wait briefly for an unexpected exit attributable to a request that began
    * at `sinceMs`. Fetch/stream teardown can race Node's child `exit` event by
    * a few milliseconds; this bounded wait prevents CUDA SIGABRTs from being

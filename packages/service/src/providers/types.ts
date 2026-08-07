@@ -320,6 +320,23 @@ export interface SessionOpts {
    */
   artifactPersister?: (relPath: string, content: string) => Promise<void>;
   /**
+   * Active-project preview hosting available to MCP wrappers. Used by the
+   * Playwright argument adapter to rewrite workspace `file:` navigation onto
+   * the daemon's short-lived, capability-scoped preview URL.
+   */
+  workspacePreview?: {
+    projectId: string;
+    root: string;
+    /** Dedicated loopback origin that serves only capability-scoped previews. */
+    origin?: string;
+    /**
+     * Restrict Playwright to the local-preview tool surface and network
+     * boundary. Set whenever External services are disabled.
+     */
+    localOnly?: boolean;
+    createUrl: (relativePath: string) => Promise<string | null>;
+  };
+  /**
    * Craftbook hooks active for the session — the `hooks?: HookSpec[]`
    * list from the session's active craftbook(s). The MCP bridge
    * installs these via `installCraftbookHooks` at session start and
@@ -465,6 +482,12 @@ export interface ToolCallEvent {
   success: boolean;
   errorMessage?: string;
   /**
+   * Text returned by the tool when the provider exposes it. Producers must
+   * redact known secrets before firing the event. ChatManager bounds this
+   * into a short full response or a deterministic summary before persistence.
+   */
+  resultText?: string;
+  /**
    * Image artifacts the tool returned (Playwright `browser_*` screenshots,
    * etc.) — already written to disk by the bridge's image persister, paths
    * are relative to the project's artifacts/ root. Forwarded onto both
@@ -495,6 +518,20 @@ export interface ToolCallEvent {
 }
 
 /** Provider-specific state we persist after each turn so the session can resume. */
+/**
+ * Live launch provenance of a supervised native engine — see
+ * `LLMProvider.engineLaunchSnapshot`. `diagnostics` carries the launch
+ * payload the spawner attached (the `launch {...}` log line fields:
+ * `model`, `contextPerSlot`, `contextTotal`, `slots`, `kvCacheType`,
+ * `backend`, …), safe request-independent facts only.
+ */
+export interface EngineLaunchSnapshot {
+  pid?: number;
+  /** Epoch ms when the current child was spawned. */
+  startedAt: number;
+  diagnostics?: Record<string, string | number | boolean>;
+}
+
 export interface ProviderSessionState {
   copilotSessionId?: string;
   openaiPreviousResponseId?: string;
@@ -999,10 +1036,31 @@ export interface LLMProvider {
    * Native providers usually know this synchronously via
    * {@link getContextWindow}. A broker-backed provider must first ask the
    * broker to admit/load the selected model, because live RAM/VRAM pressure
-   * can clamp the configured window. Implementations should cache the result;
-   * ChatManager may call this again while refreshing a warm session prompt.
+   * can clamp the configured window. Implementations may briefly cache the
+   * result because ChatManager can call this twice while opening one session,
+   * but must not retain it across later starts where policy or pressure may
+   * have changed.
    */
   prepareContextWindow?(model?: string): Promise<number | undefined>;
+  /**
+   * Launch provenance of the provider's LIVE engine process — pid, start
+   * time, and the request-independent launch facts (granted context
+   * window, slots, KV dtype, backend). Supervised native providers
+   * delegate to their supervisor; undefined when no process is up or the
+   * provider has no supervised engine (cloud, external base URL). Powers
+   * `/api/system/diagnostics` `localEngines` and Settings → About.
+   */
+  engineLaunchSnapshot?(): EngineLaunchSnapshot | undefined;
+  /**
+   * Broker-ledger reservation this provider's engine actually needs:
+   * resident weights plus KV at the granted context window and cache
+   * mode, computed by the build-time admission pass. The pool builder
+   * prefers this over catalog/weights-multiplier estimates so
+   * co-residency admission sees KV — a dense small model's KV can exceed
+   * its weights (qwen3.5-4b at 64K). Undefined when the provider could
+   * not price its launch (external base URL, unreadable weights).
+   */
+  plannedReservationBytes?(): number | undefined;
   /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by

@@ -69,6 +69,11 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(windowsSmoke, /RedirectStandardError/);
   assert.match(windowsSmoke, /Get-Content -LiteralPath \$path -Tail 400/);
   assert.match(windowsSmoke, /timed out after 360 seconds/);
+  assert.match(windowsSmoke, /name: Preserve Windows packaged-smoke diagnostics/);
+  assert.match(windowsSmoke, /if: failure\(\)/);
+  assert.match(windowsSmoke, /service-bundle\.tar\.gz/);
+  assert.match(windowsSmoke, /service\/node_modules\/entities/);
+  assert.match(windowsSmoke, /service\/node_modules\/parse5/);
   assert.ok(
     (workflow.match(/180(?:s| seconds)/g)?.length ?? 0) >= 2,
     'macOS and Linux packaged smoke tests must have bounded timeouts',
@@ -130,7 +135,10 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(metainfo, /<id>\s*com\.bendyline\.gezel\s*<\/id>/);
   assert.match(metainfo, /<metadata_license>\s*MIT\s*<\/metadata_license>/);
   assert.match(metainfo, /<project_license>\s*MIT\s*<\/project_license>/);
-  assert.match(metainfo, /<launchable\s+type="desktop-id">\s*gezel\.desktop\s*<\/launchable>/);
+  assert.match(
+    metainfo,
+    /<launchable\s+type="desktop-id">\s*com\.bendyline\.gezel\.desktop\s*<\/launchable>/,
+  );
   assert.match(installerVerifier, /verifyLinuxAppStreamMetadata/);
   assert.match(installerVerifier, /declares the MIT project license in AppStream metadata/);
   assert.match(
@@ -138,7 +146,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /appstreamcli validate packages\/app\/assets\/com\.bendyline\.gezel\.metainfo\.xml/,
   );
 
-  const productTagline = 'Your crew of AI companions';
+  const productTagline = 'Your team of AI craftsmen';
   const productDescription =
     'Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.';
   assert.ok(builder.includes(`synopsis: ${productTagline}`));
@@ -224,8 +232,8 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   const macPkgSmoke = workflow.slice(macPkgSmokeStart, macPkgSmokeEnd);
   assert.equal(
     macPkgSmoke.match(/install_pkg "/g)?.length,
-    3,
-    'macOS PKG smoke must cover clean install, reinstall, and disabled-state recovery',
+    4,
+    'macOS PKG smoke must cover clean install, reinstall, disabled-state recovery, and reinstall after uninstall',
   );
   assert.equal(
     macPkgSmoke.match(/sudo \/usr\/sbin\/installer -pkg "\$pkg" -target \//g)?.length,
@@ -238,5 +246,9 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
+  assert.match(macPkgSmoke, /sudo \/bin\/bash "\$uninstaller"\n/);
+  assert.match(macPkgSmoke, /--remove-machine-data --remove-shared-data/);
+  assert.match(macPkgSmoke, /\[\[ -e "\$data_dir\/\.gezel-uninstall-preserve-smoke" \]\]/);
+  assert.match(macPkgSmoke, /! \/usr\/sbin\/pkgutil --pkg-info "\$package_id"/);
   assert.match(macPkgSmoke, /trap cleanup EXIT/);
 });

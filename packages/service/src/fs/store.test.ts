@@ -74,7 +74,8 @@ describe('agents', () => {
     const created = await store.createGezel({ name: 'Researcher' });
     expect(created.id).toBe('researcher');
     expect(created.name).toBe('Researcher');
-    expect(created.about).toContain('Researcher');
+    expect(created.about).toContain('# About this role');
+    expect(created.about).not.toContain('Researcher');
 
     const list = await store.listGezels();
     expect(list).toHaveLength(1);
@@ -308,6 +309,26 @@ describe('projects', () => {
     // so that existing projects on disk (no `mode` field) parse identically.
     expect(crew!.mode).toBeUndefined();
     expect(defaultProj!.mode).toBeUndefined();
+  });
+
+  it('archives a project as inactive and restores it without reactivating ambient work', async () => {
+    const created = await store.createProject({ name: 'Finished work' });
+
+    const archived = await store.updateProject(created.id, { archived: true });
+    expect(archived.archived).toBe(true);
+    expect(archived.status).toBe('inactive');
+
+    // Status cannot be reactivated while the project remains buried.
+    const stillArchived = await store.updateProject(created.id, { status: 'active' });
+    expect(stillArchived.archived).toBe(true);
+    expect(stillArchived.status).toBe('inactive');
+
+    const restored = await store.updateProject(created.id, { archived: false });
+    expect(restored.archived).toBeUndefined();
+    expect(restored.status).toBe('inactive');
+
+    const reactivated = await store.updateProject(created.id, { status: 'active' });
+    expect(reactivated.status).toBe('active');
   });
 });
 
@@ -970,15 +991,12 @@ describe('project tasks storage', () => {
     expect(list).toHaveLength(1);
   });
 
-  it.each([
-    ['male', 'who he is', 'work with him well'],
-    ['female', 'who she is', 'work with her well'],
-    ['non-binary', 'who they are', 'work with them well'],
-  ] as const)('writes %s pronouns into the default about prompt', async (gender, who, object) => {
-    const created = await store.createGezel({ name: `Default ${gender}`, gender });
+  it('writes a role-based default about prompt without self identity metadata', async () => {
+    const created = await store.createGezel({ name: 'Wren', role: 'Developer', gender: 'male' });
 
-    expect(created.about).toContain(who);
-    expect(created.about).toContain(object);
+    expect(created.about).toContain('for the "Developer" role');
+    expect(created.about).not.toContain('Wren');
+    expect(created.about).not.toMatch(/\b(?:he|him|his)\b/i);
   });
 
   it('readTask migrates a legacy phases/activePhaseId task to craftbook', async () => {

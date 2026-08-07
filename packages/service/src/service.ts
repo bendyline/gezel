@@ -16,6 +16,7 @@ import {
 } from '@bendyline/gezel';
 import type { ExternalFolders, TaskAssignee } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
   DeviceHealthGate,
   createSystemDeviceHealthProbe,
@@ -38,6 +39,7 @@ import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
+import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
 import { effectiveEngineRelease } from './engines/native-manifest.js';
 import { EngineBinaryRegistry } from './engines/registry.js';
 import { ModelFitnessManager } from './fitness/manager.js';
@@ -58,7 +60,11 @@ import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
-import { PreviewCapabilityStore } from './http/preview-capability.js';
+import {
+  PreviewCapabilityStore,
+  normalizePreviewPath,
+  previewCapabilityPath,
+} from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
 import { invalidateModelsCache } from './http/routes/models.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
@@ -122,7 +128,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
-import { buildNightShiftReview } from './tasks/night-review.js';
+import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
@@ -525,9 +531,29 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // engine binaries here so the on-device chat path finds them. Idempotent
   // when the supervisor already populated the env (embedded / dev /
   // packaged-spawn launches); the discovery short-circuits per binary.
-  // Bare npm/CLI installs have no Electron supervisor to point discovery at
-  // the runtime-downloaded cache. Make the source-pinned cache the default
-  // native-bin root while preserving a packaged/operator override. This makes
+  // A directly-started user daemon has no Electron supervisor to point it at
+  // an installed app payload. Reuse that payload only after the service's own
+  // source-pinned per-file manifest, architecture, and platform-signature
+  // policy accept it. This is the same gate the standalone CLI uses; metadata
+  // beside the installed app is never trusted. An explicit/operator path and
+  // mock mode both remain untouched.
+  if (!process.env.GEZEL_NATIVE_BIN_DIR && process.env.GEZEL_MOCK_PROVIDER !== '1') {
+    const installedCandidates = electronNativeBinCandidates().filter((candidate) =>
+      existsSync(candidate),
+    );
+    if (installedCandidates.length > 0) {
+      const reuse = await reuseVerifiedElectronNativeBinaries({ candidates: installedCandidates });
+      if (reuse.reused) {
+        log.info(`[native] ${reuse.reason}: ${reuse.nativeBinDir}`);
+      } else {
+        log.warn(`[native] installed Electron payload rejected: ${reuse.reason}`);
+      }
+    }
+  }
+
+  // Bare npm/CLI installs may have neither a supervisor nor an installed app.
+  // Make the source-pinned, user-owned download cache the final default while
+  // preserving every verified or operator-provided override above. This makes
   // a verified TUI bootstrap install available immediately and on later daemon
   // launches without another download.
   process.env.GEZEL_NATIVE_BIN_DIR ??= join(
@@ -713,6 +739,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Preview-shim runtime errors → next-turn chat prelude. Shared between
   // the HTTP intake route and ChatManager's drain-on-send.
   const previewLog = new PreviewLogBuffer();
+  // Shared output-pane/browser-preview capability authority. It is created
+  // before ChatManager so browser MCP wrappers can mint through a narrow
+  // workspace-only callback; the HTTP routers and sidecar bind later.
+  const previewCapabilities = new PreviewCapabilityStore();
+  const previewBrowser = { origin: null as string | null };
 
   // Image recognition. Built before ChatManager because the chat turn needs
   // it to describe images for models that can't see them.
@@ -726,6 +757,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     events: chatEvents,
     memory,
     previewLog,
+    createWorkspacePreviewUrl: async (projectId, relativePath) => {
+      const entryPath = normalizePreviewPath(relativePath);
+      if (entryPath === null) throw new Error('invalid workspace preview path');
+      if (boundPort <= 0) throw new Error('preview server is not ready');
+      const minted = previewCapabilities.mint({
+        source: 'workspace',
+        projectId,
+        entryPath,
+      });
+      const path = previewCapabilityPath({
+        token: minted.token,
+        source: 'workspace',
+        projectId,
+        entryPath,
+      });
+      const mainOrigin = `${cert ? 'https' : 'http'}://127.0.0.1:${boundPort}`;
+      return `${previewBrowser.origin ?? mainOrigin}${path}`;
+    },
+    getWorkspacePreviewOrigin: () => previewBrowser.origin,
     getPort: () => boundPort,
     getToken: () => token,
     getCert: () => cert?.certPem ?? null,
@@ -1571,7 +1621,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       choices: ['Dismiss'],
       allowWriteIn: false,
       multiSelect: false,
-      ...(review.reports[0] ? { documentPath: review.reports[0].path } : {}),
+      ...(review.reports[0]
+        ? { documentPath: nightShiftReportAttachmentPath(review.reports[0]) }
+        : {}),
       intent: {
         kind: 'night-shift-review',
         windowKey: review.windowKey,
@@ -1905,15 +1957,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     requestRestart: opts.onRestartRequested,
   };
 
-  // When the main transport is HTTPS (the default), a self-signed loopback
-  // cert makes external browsers reject preview URLs. We serve the same
-  // capability-authenticated `/preview` route on a separate plain-HTTP
-  // listener so "open in browser" gets a clean, warning-free URL. The mint
-  // endpoint reads the listener's origin lazily (it binds below, after the
-  // main app is built). No second listener when the whole transport is
-  // already plain HTTP — the existing same-origin URL works there.
-  const previewCapabilities = new PreviewCapabilityStore();
-  const previewBrowser = { origin: null as string | null };
+  // Serve capability-authenticated previews on a separate plain-HTTP origin.
+  // Besides avoiding the self-signed main-listener certificate in external
+  // browsers, the dedicated origin is the only network destination admitted
+  // by local-preview-only Playwright sessions. The mint endpoint reads its
+  // origin lazily because the sidecar binds after the main app is built.
   const app = buildApp(context, {
     onUnexpectedHttpError: opts.onUnexpectedHttpError,
     previewCapabilities,
@@ -2097,11 +2145,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     });
   }
 
-  // Plain-HTTP preview sidecar (only when the main transport is TLS). Serves
-  // the capability-gated `/preview` route on its own ephemeral loopback port
-  // so external browsers open previews without the self-signed-cert warning.
+  // Plain-HTTP preview sidecar. It always gets a dedicated loopback origin,
+  // even when the main transport is already HTTP: local-preview-only browser
+  // sessions use this listener as a deliberately non-forwarding Chromium
+  // proxy, keeping every request away from both the public web and the
+  // daemon's bearer-gated API surface.
   let previewServer: ServerType | null = null;
-  if (cert && serviceRole !== 'machine-engine') {
+  if (serviceRole !== 'machine-engine') {
     const previewApp = buildPreviewApp(context, previewCapabilities, {
       onUnexpectedHttpError: opts.onUnexpectedHttpError,
     });
@@ -2114,12 +2164,23 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       });
       previewServer = bound.server;
       previewBrowser.origin = `http://127.0.0.1:${bound.port}`;
+      // HTTPS and WebSocket proxy attempts never reach Hono's request path.
+      // Explicitly destroy both upgrade forms so this listener can never
+      // become a tunnel even if Node's default behavior changes.
+      const rawPreviewServer = previewServer as unknown as NodeJS.EventEmitter;
+      rawPreviewServer.on('connect', (_request: unknown, socket: { destroy: () => void }) =>
+        socket.destroy(),
+      );
+      rawPreviewServer.on('upgrade', (_request: unknown, socket: { destroy: () => void }) =>
+        socket.destroy(),
+      );
       log.info(`[service] serving preview (HTTP) on 127.0.0.1:${bound.port}`);
     } catch (err) {
-      // Non-fatal: previews still work in-app over the pinned-cert HTTPS
-      // iframe; only the external-browser convenience is lost.
+      // Non-fatal for the product shell: previews still work in-app over the
+      // main listener. The constrained MCP browser fails closed because no
+      // dedicated preview/proxy origin is published to ChatManager.
       log.warn(
-        `[service] preview HTTP listener failed to bind; open-in-browser will use the TLS URL: ${
+        `[service] preview HTTP listener failed to bind; open-in-browser will use the main URL and local-preview browser tools will stay unavailable: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );

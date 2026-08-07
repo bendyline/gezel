@@ -678,6 +678,8 @@ export function ChatComposer({
                 ...(event.path ? { path: event.path } : {}),
                 ...(event.argsSummary ? { argsSummary: event.argsSummary } : {}),
                 ...(event.argsFull ? { argsFull: event.argsFull } : {}),
+                ...(event.resultText ? { resultText: event.resultText } : {}),
+                ...(event.resultTruncated ? { resultTruncated: true } : {}),
                 ...(event.diff !== undefined ? { diff: event.diff } : {}),
                 ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
                 ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),

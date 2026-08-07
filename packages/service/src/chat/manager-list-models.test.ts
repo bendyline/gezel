@@ -164,4 +164,46 @@ describe('ChatManager.listModelsForProvider — installed local models', () => {
       },
     ]);
   });
+
+  it('reports the configured Ollama context cap instead of the size heuristic', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-model-list-'));
+    const store = new Store({ home });
+    await store.ensureLayout();
+    await store.writeConfig({ ollamaNumCtx: 49_152 });
+    const provider = new MockProvider({ name: 'ollama' });
+    vi.spyOn(provider, 'listModels').mockResolvedValue([
+      {
+        id: 'qwen:14b',
+        name: 'qwen:14b',
+        supportsTools: true,
+        contextWindow: 32_768,
+      },
+    ]);
+    const manager = new ChatManager({
+      store,
+      events: new ChatEventBus(),
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['ollama', provider]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    cleanups.push(async () => {
+      await manager.shutdown();
+      await rm(home, { recursive: true, force: true });
+    });
+
+    const models = await manager.listModelsForProvider('ollama');
+
+    expect(models).toEqual([
+      {
+        id: 'qwen:14b',
+        name: 'qwen:14b',
+        supportsTools: true,
+        contextWindow: 49_152,
+      },
+    ]);
+  });
 });

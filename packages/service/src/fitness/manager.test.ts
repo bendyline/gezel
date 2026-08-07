@@ -246,6 +246,41 @@ describe('ModelFitnessManager', () => {
     expect(resolved?.stale).toBe(false);
   });
 
+  it('manual re-run replaces a legacy short-prompt record with representative timing', async () => {
+    const representativeContext = {
+      targetPromptTokens: 20_000,
+      promptTokens: 19_804,
+      cachedPromptTokens: 420,
+      completionTokens: 160,
+      durationMs: 37_000,
+      ttftMs: 31_000,
+      promptTokensPerSec: 635,
+      genTokensPerSec: 25,
+    };
+    await store.writeConfig({
+      modelFitness: {
+        'llama-cpp:gemma4-e4b-q4': record({ genTokensPerSec: 142 }),
+      },
+    });
+    const mgr = makeManager({
+      runProbe: async (args) =>
+        record({
+          provider: args.provider,
+          modelId: args.modelId,
+          genTokensPerSec: 25,
+          shortPromptGenTokensPerSec: 130,
+          representativeContext,
+        }),
+    });
+
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
+    await drained(mgr);
+
+    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q4');
+    expect(resolved?.record.shortPromptGenTokensPerSec).toBe(130);
+    expect(resolved?.record.representativeContext).toEqual(representativeContext);
+  });
+
   it('a malformed persisted entry is skipped without nuking the others', async () => {
     await store.writeConfig({
       modelFitness: {
