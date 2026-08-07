@@ -352,7 +352,10 @@ physical-use meter and show capacity as text rather than drawing an
 unactionable unknown bar or printing a zero. A reservation may have its own
 separate meter against the broker budget, but it must say `reserved` (never
 `used`), expose the VRAM/RAM capacity split, and visually differ from the
-measured-use meter. Name what is holding the reservation underneath.
+measured-use meter. Name what is holding the reservation underneath. Memory
+borrowed for a reclaimable system cache uses alternating cache-color and
+empty-pool stripes: it is physically occupied, but remains available when the
+operating system needs the capacity.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
 

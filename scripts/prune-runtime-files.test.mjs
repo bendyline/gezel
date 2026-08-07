@@ -153,7 +153,7 @@ describe('release bundle wiring', () => {
       assert.match(source, /pruneRuntimeFilesWithReport\(target\)/, name);
     }
     assert.match(serviceBuilder, /verifyBundleArchiveRoundTrip/);
-    assert.match(serviceBuilder, /COPYFILE_DISABLE: '1'/);
+    assert.match(serviceBuilder, /await createBundleArchive\(\{ sourceDir: src, archivePath \}\)/);
     assert.doesNotMatch(electronBuilder, /^\s+- dist\/(?:main|extract-service-bundle)\.js\.map$/m);
     assert.match(electronBuilder, /^\s+- '!dist\/ui\/\*\*\/\*\.map'$/m);
   });

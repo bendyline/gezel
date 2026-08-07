@@ -44,6 +44,50 @@ export async function inventoryBundleTree(root) {
   return entries;
 }
 
+/**
+ * Create the archive with the same maintained Node implementation used to
+ * inspect and extract it. Windows' bundled bsdtar has returned success while
+ * silently omitting individual files from large service trees, so it is not a
+ * safe release-artifact creator.
+ */
+export async function createBundleArchive({ sourceDir, archivePath }) {
+  await tar.create(
+    {
+      cwd: sourceDir,
+      file: archivePath,
+      gzip: true,
+      strict: true,
+    },
+    ['.'],
+  );
+}
+
+/** List filesystem-entry paths encoded in an archive, excluding directories. */
+export async function inventoryBundleArchivePaths(archivePath) {
+  const paths = [];
+  await tar.list({
+    file: archivePath,
+    strict: true,
+    onReadEntry(entry) {
+      if (entry.type === 'Directory') return;
+      const path = slash(entry.path).replace(/^\.\//, '').replace(/\/$/, '');
+      if (path) paths.push(path);
+    },
+  });
+  paths.sort((a, b) => a.localeCompare(b));
+  return paths;
+}
+
+function describePathDifferences(source, archivedPaths) {
+  const sourcePaths = new Set(source.map((entry) => entry.path));
+  const archivePaths = new Set(archivedPaths);
+  const missing = source.filter((entry) => !archivePaths.has(entry.path));
+  const unexpected = archivedPaths
+    .filter((path) => !sourcePaths.has(path))
+    .map((path) => ({ path }));
+  return describeDifferenceGroups({ missing, unexpected, changed: [] });
+}
+
 function describeDifferences(source, extracted) {
   const sourceByPath = new Map(source.map((entry) => [entry.path, entry]));
   const extractedByPath = new Map(extracted.map((entry) => [entry.path, entry]));
@@ -53,6 +97,10 @@ function describeDifferences(source, extracted) {
     const other = extractedByPath.get(entry.path);
     return other && JSON.stringify(entry) !== JSON.stringify(other);
   });
+  return describeDifferenceGroups({ missing, unexpected, changed });
+}
+
+function describeDifferenceGroups({ missing, unexpected, changed }) {
   const sample = (entries) =>
     entries
       .slice(0, 8)
@@ -79,22 +127,29 @@ export async function verifyBundleArchiveRoundTrip({
 }) {
   const extractedDir = await mkdtemp(join(tmpdir(), 'gezel-bundle-verify-'));
   try {
+    const [source, archivedPaths] = await Promise.all([
+      inventoryBundleTree(sourceDir),
+      inventoryBundleArchivePaths(archivePath),
+    ]);
+    if (source.length !== expectedFileCount) {
+      throw new Error(
+        `[bundle-archive] source file count ${source.length} does not match metadata ${expectedFileCount}`,
+      );
+    }
+    const archiveDifferences = describePathDifferences(source, archivedPaths);
+    if (archiveDifferences) {
+      throw new Error(
+        `[bundle-archive] archive inventory differs from source (source=${source.length} archive=${archivedPaths.length}); ${archiveDifferences}`,
+      );
+    }
+
     await tar.extract({
       file: archivePath,
       cwd: extractedDir,
       strict: true,
       preservePaths: false,
     });
-    const [source, extracted] = await Promise.all([
-      inventoryBundleTree(sourceDir),
-      inventoryBundleTree(extractedDir),
-    ]);
-
-    if (source.length !== expectedFileCount) {
-      throw new Error(
-        `[bundle-archive] source file count ${source.length} does not match metadata ${expectedFileCount}`,
-      );
-    }
+    const extracted = await inventoryBundleTree(extractedDir);
     const differences = describeDifferences(source, extracted);
     if (differences) {
       throw new Error(

@@ -45,7 +45,7 @@ import {
 } from './prune-runtime-files.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
-import { verifyBundleArchiveRoundTrip } from './verify-bundle-archive.mjs';
+import { createBundleArchive, verifyBundleArchiveRoundTrip } from './verify-bundle-archive.mjs';
 import { verifyPeTree } from './verify-pe-tree.mjs';
 
 const exec = promisify(execFile);
@@ -312,31 +312,16 @@ async function finishBundle() {
 /**
  * Pack the tree at `src` into a gzipped tarball at `archivePath`.
  *
- * Why shell out to the system `tar` binary instead of using the `tar` npm
- * package: zero new dep at the script's resolution root, and `tar.exe`
- * ships with Windows 10 1803+ as libarchive bsdtar.
- *
- * Windows quirk: when the build runs from git-bash, PATH has git-bash's
- * GNU tar ahead of System32's bsdtar. GNU tar interprets `C:\...` paths as
- * remote rsync-style specs (`host:path`) and fails with "Cannot connect to
- * C: resolve failed". Hardcoding the System32 path on win32 sidesteps it.
+ * Use the pinned Node `tar` implementation on every platform. Windows'
+ * built-in bsdtar returned success for a release archive while silently
+ * omitting one Gilde manifest; the round-trip verifier caught the incomplete
+ * artifact, but the creator itself provided no warning to act on.
  */
 async function emitArchive(src, archivePath) {
   if (existsSync(archivePath)) rmSync(archivePath, { force: true });
   console.log(`[build-service-bundle] archiving → ${basename(archivePath)}`);
   const t0 = Date.now();
-  const tarBin =
-    process.platform === 'win32'
-      ? join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
-      : 'tar';
-  await exec(tarBin, ['-czf', archivePath, '-C', src, '.'], {
-    maxBuffer: 64 * 1024 * 1024,
-    // macOS bsdtar otherwise serializes extended attributes/resource forks as
-    // AppleDouble `._*` entries. The service does not consume them; one local
-    // round-trip produced 56k metadata files on top of 32k runtime files,
-    // invalidating fileCount and multiplying first-launch extraction work.
-    env: { ...process.env, COPYFILE_DISABLE: '1' },
-  });
+  await createBundleArchive({ sourceDir: src, archivePath });
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
   const sz = statSync(archivePath).size;
   console.log(`[build-service-bundle] archived ${(sz / 1024 / 1024).toFixed(1)} MB in ${dt}s`);

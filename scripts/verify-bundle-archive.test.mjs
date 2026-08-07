@@ -3,9 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import * as tar from 'tar';
 
-import { inventoryBundleTree, verifyBundleArchiveRoundTrip } from './verify-bundle-archive.mjs';
+import {
+  createBundleArchive,
+  inventoryBundleArchivePaths,
+  inventoryBundleTree,
+  verifyBundleArchiveRoundTrip,
+} from './verify-bundle-archive.mjs';
 
 describe('verifyBundleArchiveRoundTrip', () => {
   let root;
@@ -35,7 +39,10 @@ describe('verifyBundleArchiveRoundTrip', () => {
   });
 
   async function archive() {
-    await tar.create({ gzip: true, file: archivePath, cwd: archiveSourceDir }, ['.']);
+    await createBundleArchive({
+      sourceDir: archiveSourceDir,
+      archivePath,
+    });
   }
 
   it('validates the extracted tree and exposes it to the runtime check', async () => {
@@ -62,8 +69,51 @@ describe('verifyBundleArchiveRoundTrip', () => {
     const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
     await assert.rejects(
       verifyBundleArchiveRoundTrip({ sourceDir, archivePath, expectedFileCount }),
-      /missing 1: node_modules\/entities\/dist\/esm\/decode\.js/,
+      /archive inventory differs from source .* missing 1: node_modules\/entities\/dist\/esm\/decode\.js/,
     );
+  });
+
+  it('archives every entry in a deep directory with many siblings', async () => {
+    const relativeDir = join(
+      'node_modules',
+      '@bendyline',
+      'gilde',
+      'data',
+      'community',
+      'toolsets',
+      'br',
+      'brilliantdirectories-brilliant-directories-mcp',
+      'versions',
+    );
+    const versions = Array.from({ length: 320 }, (_, index) => `6.40.${index}`);
+
+    for (const dir of [sourceDir, archiveSourceDir]) {
+      const versionsDir = join(dir, relativeDir);
+      await mkdir(versionsDir, { recursive: true });
+      await Promise.all(
+        versions.map(async (version) => {
+          const versionDir = join(versionsDir, version);
+          await mkdir(versionDir);
+          await writeFile(join(versionDir, 'manifest.json'), `${version}\n`);
+        }),
+      );
+    }
+
+    await archive();
+
+    const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
+    const archivedPaths = await inventoryBundleArchivePaths(archivePath);
+    assert.equal(archivedPaths.length, expectedFileCount);
+    assert.ok(
+      archivedPaths.includes(
+        'node_modules/@bendyline/gilde/data/community/toolsets/br/brilliantdirectories-brilliant-directories-mcp/versions/6.40.26/manifest.json',
+      ),
+    );
+    await verifyBundleArchiveRoundTrip({
+      sourceDir,
+      archivePath,
+      expectedFileCount,
+    });
   });
 
   it('reports metadata files injected into the archive', async () => {
