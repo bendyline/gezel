@@ -97,7 +97,16 @@ describe('MlxModelManager fitness column', () => {
     vi.mocked(api.listMlxModels).mockResolvedValue({
       models: [
         {
-          ...INSTALLED.models[0],
+          id: 'gemma4-12b-q4',
+          name: 'Gemma 4 (12B)',
+          approxSizeBytes: 11 * GiB,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          modelDir: '/tmp/gemma4-12b-q4',
+          contextWindow: 256_000,
+          effectiveContextWindow: 128_000,
+          quantization: '4bit',
+          chatTemplatePresent: true,
+          catalogVersion: '1.0.0',
           predictedResidentBytes: 18_000_000_000,
           reservedResidentBytes: 30_000_000_000,
           plannedSlots: 2,

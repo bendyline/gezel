@@ -1395,6 +1395,16 @@ export const ChatModelIdentitySchema = IdentityCommonSchema.extend({
   parameterSize: z.string(),
   supportsTools: z.boolean(),
   contextWindow: z.number().int().positive().optional(),
+  /**
+   * KV-cache geometry, mirrored from the resolved manifest. Lives on
+   * IDENTITY rather than on a version because it is architecture-determined
+   * and therefore identical across every quant of a model — and because the
+   * catalog index is built from identity fields, so a value authored only on
+   * the resolved shape is silently stripped and never reaches a pre-install
+   * fit badge. See {@link ChatModelManifestSchema} for the semantics.
+   */
+  kvBytesPerTokenF16: z.number().positive().optional(),
+  kvFixedBytesF16: z.number().nonnegative().optional(),
   upstream: z.string().url().optional(),
   /** Coarse specialty used by the UI filter tabs. */
   category: ChatModelCategorySchema.optional(),
