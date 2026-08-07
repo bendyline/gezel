@@ -320,14 +320,20 @@ function FullApp() {
     return () => window.removeEventListener('gezel:project-deleted', onDeleted);
   }, [commitSelection]);
 
-  // Document deletion → if the deleted doc is the current selection, fall
-  // back to Meester home. The Sidebar refreshes its own document list.
+  // Document deletion → if the deleted doc (or a folder containing it) is
+  // the current selection, fall back to Meester home. The Sidebar refreshes
+  // its own document list.
   useEffect(() => {
     const onDeleted = (e: Event) => {
       const detail = (e as CustomEvent<{ path?: string }>).detail;
       if (!detail?.path) return;
       const sel = selectionRef.current;
-      if (sel?.kind === 'document' && sel.path === detail.path) commitSelection(null);
+      if (
+        sel?.kind === 'document' &&
+        (sel.path === detail.path || sel.path.startsWith(`${detail.path}/`))
+      ) {
+        commitSelection(null);
+      }
     };
     window.addEventListener('gezel:document-deleted', onDeleted);
     return () => window.removeEventListener('gezel:document-deleted', onDeleted);
