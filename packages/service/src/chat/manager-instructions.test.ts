@@ -224,3 +224,25 @@ describe('buildInstructions active gezel identity', () => {
     expect(full).not.toContain('(he/him)');
   });
 });
+
+describe('buildInstructions workspace inventory', () => {
+  it('renders explicit full-path file/dir rows instead of visually nesting root files', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const { full } = buildInstructions({
+      name: 'Reviewer',
+      about: 'Review the deck.',
+      project,
+      workspaceFiles: [
+        { name: 'assets', path: 'assets', isDirectory: true },
+        { name: 'deck.md', path: 'deck.md', isDirectory: false },
+        { name: 'generated', path: 'assets/generated', isDirectory: true },
+        { name: 'map.png', path: 'assets/generated/map.png', isDirectory: false },
+      ],
+    });
+    expect(full).toContain('dir  assets/');
+    expect(full).toContain('file deck.md');
+    expect(full).toContain('dir  assets/generated/');
+    expect(full).toContain('file assets/generated/map.png');
+    expect(full).not.toContain('📁 assets');
+  });
+});

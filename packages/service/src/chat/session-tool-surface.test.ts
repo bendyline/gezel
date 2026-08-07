@@ -689,6 +689,50 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist!.has('message_gezel')).toBe(false);
   });
 
+  it('keeps source-acquisition tools throughout a Researcher step and gate repair', async () => {
+    for (const repairing of [false, true]) {
+      const { allowlist } = await resolveSessionToolSurface({
+        ...baseOpts,
+        role: 'Researcher',
+        session: baseSession({ taskRef: 'p1/2', stepId: 'research' }),
+        tier: 'medium',
+        activeStep: {
+          suggestedRole: 'researcher',
+          advanceWhen: { file: 'notes/sources.md' },
+          gate: {
+            at: 'completion',
+            checks: [
+              { kind: 'minBytes', file: 'notes/sources.md', bytes: 500 },
+              {
+                kind: 'researchEvidence',
+                sourcePath: '',
+                tools: ['wikipedia_search', 'fetch_url', 'run_playwright_script'],
+                minSuccessful: 1,
+              },
+            ],
+            onReject: 'research',
+          },
+          ...(repairing
+            ? {
+                gateAttempts: 1,
+                lastGateReject: {
+                  at: '2026-07-07T00:00:00Z',
+                  message: 'No successful source retrieval was observed.',
+                } as never,
+              }
+            : {}),
+        },
+      });
+
+      expect(allowlist).not.toBeNull();
+      expect(allowlist!.has('wikipedia_search')).toBe(true);
+      expect(allowlist!.has('fetch_url')).toBe(true);
+      expect(allowlist!.has('run_playwright_script')).toBe(true);
+      expect(allowlist!.has('write_file')).toBe(true);
+      expect(allowlist!.has('advance_task_step')).toBe(true);
+    }
+  });
+
   it('keeps a fixed image-generator tool through a generic task-step kit', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

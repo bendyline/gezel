@@ -13,6 +13,7 @@ import {
   fileCountByExt,
   fileMinBytes,
   jsonPathEquals,
+  markdownHeadingsMatch,
   notContainsPattern,
   parseJudgeVerdict,
   planStructure,
@@ -106,6 +107,18 @@ export interface GateEvalDeps {
     prompt: string,
     timeoutMs: number,
   ) => Promise<{ text: string } | { unavailable: string }>;
+  /**
+   * Observable tool-call evidence for `researchEvidence`. The task manager
+   * scopes this to the current task, step, and activation timestamp.
+   */
+  researchEvidence?: (opts: {
+    sourcePath?: string;
+    tools: string[];
+    minSuccessful: number;
+  }) => Promise<{
+    observable: boolean;
+    matches: Array<{ tool: string; path?: string; target?: string; at?: string }>;
+  }>;
 }
 
 /**
@@ -223,6 +236,10 @@ export function gateCheckLabel(c: GateCheck): string {
       return `nodeRuns ${c.file}`;
     case 'citationsResolve':
       return `citationsResolve ${c.file}`;
+    case 'researchEvidence':
+      return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
+    case 'markdownHeadingsMatch':
+      return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
     case 'valueGrounding':
       return `valueGrounding ${c.file}`;
     case 'valuesSubsetOf':
@@ -551,6 +568,57 @@ async function evalCheckInner(
           resolved: capList(r.resolved),
           unresolved: capList(r.unresolved),
           urls: capList(r.urls),
+        },
+      };
+    }
+    case 'researchEvidence': {
+      if (!deps?.researchEvidence) {
+        return {
+          ok: false,
+          detail:
+            'Research evidence is unavailable in this runtime, so successful source acquisition cannot be verified (fail-closed).',
+        };
+      }
+      const minSuccessful = c.minSuccessful ?? 1;
+      const result = await deps.researchEvidence({
+        ...(c.sourcePath !== undefined ? { sourcePath: c.sourcePath } : {}),
+        tools: c.tools,
+        minSuccessful,
+      });
+      if (!result.observable) {
+        return {
+          ok: false,
+          detail:
+            'Research tool-call telemetry is unavailable for this step, so source acquisition cannot be verified (fail-closed).',
+        };
+      }
+      const evidence = { matches: result.matches.slice(0, EVIDENCE_LIST_CAP) };
+      if (result.matches.length < minSuccessful) {
+        const local = c.sourcePath?.trim();
+        const requirement = local
+          ? `successfully read the exact source file ${local} or use one of: ${c.tools.join(', ')}`
+          : `successfully use at least one source tool: ${c.tools.join(', ')}`;
+        return {
+          ok: false,
+          detail: `No verifiable source acquisition ran during this step. ${requirement}; then cite the retrieved source in the deliverable.`,
+          evidence,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Research evidence: ${result.matches.length} successful source-acquisition call(s) observed`,
+        evidence,
+      };
+    }
+    case 'markdownHeadingsMatch': {
+      const result = await markdownHeadingsMatch(reader, c.file, c.outlineFile);
+      return {
+        ok: result.ok,
+        detail: result.detail,
+        evidence: {
+          outlineHeadings: capList(result.outlineHeadings),
+          documentHeadings: capList(result.documentHeadings),
+          ...(result.mismatchIndex !== undefined ? { mismatchIndex: result.mismatchIndex } : {}),
         },
       };
     }

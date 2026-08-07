@@ -110,7 +110,7 @@ describe('roleToolsetGroups', () => {
     expect(roleToolsetGroups('UX Designer')).toEqual(roleToolsetGroups('designer'));
   });
 
-  it('researcher trim: drops git + task-mutation, keeps write/web/browser', () => {
+  it('researcher trim: drops git + task-mutation, keeps write/web/scripted browser', () => {
     const groups = roleToolsetGroups('researcher');
     // Dropped groups.
     expect(groups).not.toContain('git');
@@ -130,9 +130,12 @@ describe('roleToolsetGroups', () => {
     expect(allow.has('write_file')).toBe(true);
     expect(allow.has('write_artifact')).toBe(true);
     expect(allow.has('fetch_url')).toBe(true);
+    expect(allow.has('run_playwright_script')).toBe(true);
     expect(allow.has('read_file')).toBe(true);
 
-    // `web` + `workspace-fs-write` retained → still gets Playwright.
+    // The role explicitly owns scripted browser automation in addition
+    // to the dynamically spawned interactive Playwright surface.
+    expect(groups).toContain('browser-automation');
     expect(rolePermitsBrowserAutomation('researcher')).toBe(true);
   });
 

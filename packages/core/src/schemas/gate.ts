@@ -264,6 +264,29 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     artifact: z.boolean().optional(),
   }),
   /**
+   * Require observable source acquisition during this activation. When
+   * `sourcePath` is non-empty, an exact successful `read_file` of that path
+   * qualifies; otherwise one of `tools` must have completed against an
+   * external source. The runtime supplies the live tool-call evidence.
+   */
+  z.object({
+    kind: z.literal('researchEvidence'),
+    sourcePath: z.string().optional(),
+    tools: z.array(z.string().min(1)).min(1),
+    minSuccessful: z.number().int().positive().optional(),
+  }),
+  /**
+   * The H1 slide titles in `file` must match the numbered slide headings in
+   * `outlineFile`, one-for-one and in order. This makes a locked Markdown
+   * outline mechanically binding instead of relying on a reviewer to notice
+   * that slides were merged, dropped, or reordered.
+   */
+  z.object({
+    kind: z.literal('markdownHeadingsMatch'),
+    file: z.string().min(1),
+    outlineFile: z.string().min(1),
+  }),
+  /**
    * Named facts in `file` must come from authorized sources: each fact
    * requires one of its `required` patterns to appear, and its `forbidden`
    * (decoy) patterns must not appear at all. The distractor-grounding

@@ -2838,6 +2838,11 @@ export class ChatManager {
       ...(sessionOpts.volatileContext ? { volatileContext: sessionOpts.volatileContext } : {}),
       customToolsMd,
       registeredTools,
+      turnStatus: this.inflight.has(sessionId)
+        ? 'in-progress'
+        : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+          ? 'queued'
+          : 'idle',
       recentMessages,
       diagnostics: {
         sessionRecordPath: this.store.sessionRecordPath(record.gezelId, sessionId),
@@ -13089,6 +13094,7 @@ export class ChatManager {
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
       const rawPath = info.args?.path;
       const path = typeof rawPath === 'string' ? rawPath : undefined;
+      const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
       // the UI's expand + copy so a handoff's real content is verifiable.
@@ -13177,9 +13183,14 @@ export class ChatManager {
             : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
           details: {
             name: info.name,
+            sessionId: record.id,
+            ...(record.taskRef ? { taskRef: record.taskRef } : {}),
+            ...(record.stepId ? { stepId: record.stepId } : {}),
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
+            ...(path ? { path } : {}),
+            ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
             ...(addedLines !== undefined ? { addedLines } : {}),
@@ -14234,6 +14245,32 @@ function normalizeExpectedDeliverablePath(path: string): string {
     .replace(/^workspace\//i, '')
     .replace(/^\.\//, '')
     .toLowerCase();
+}
+
+/**
+ * Retain a compact, non-secret proof that a successful tool call was aimed at
+ * source acquisition. Full arguments already live on the session turn; the
+ * history event only needs enough to distinguish an external lookup from a
+ * local preview/navigation call when a research gate completes mid-turn.
+ */
+function researchTargetForToolCall(
+  name: string,
+  args: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!args) return undefined;
+  if (name === 'web_search' || name === 'wikipedia_search') {
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    return query ? `query:${query.slice(0, 240)}` : undefined;
+  }
+  if (name === 'fetch_url' || name === 'browser_navigate') {
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    return /^https?:\/\//i.test(url) ? url.slice(0, 500) : undefined;
+  }
+  if (name === 'run_playwright_script') {
+    const path = typeof args.path === 'string' ? args.path.trim() : '';
+    return path ? `script:${path.slice(0, 240)}` : 'scripted-browser-run';
+  }
+  return undefined;
 }
 
 function isExpectedBinaryDocumentDeliverablePath(path: string): boolean {
@@ -16499,7 +16536,7 @@ ${artifactsLine}
   if (project && workspaceFiles && workspaceFiles.length > 0) {
     const listing = workspaceFiles
       .slice(0, 200)
-      .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
+      .map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}${f.isDirectory ? '/' : ''}`)
       .join('\n');
     workspaceFilesBlock = `\n\n---\n\n### Workspace files\n\nFiles currently in the project:\n\`\`\`\n${listing}\n\`\`\``;
     if (workspaceFilesTruncated) {

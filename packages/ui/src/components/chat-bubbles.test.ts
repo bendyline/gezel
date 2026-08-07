@@ -2,6 +2,7 @@ import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { describe, expect, it } from 'vitest';
 import {
   countReasoningWords,
+  formatDebugBundle,
   isRawHtmlDump,
   isStalledSilence,
   toHtmlCodeFence,
@@ -80,5 +81,27 @@ describe('countReasoningWords', () => {
 
   it('returns zero for an empty reasoning trace', () => {
     expect(countReasoningWords(' \n\t ')).toBe(0);
+  });
+});
+
+describe('formatDebugBundle', () => {
+  it('labels a blank response captured while the turn is still running', () => {
+    const bundle = formatDebugBundle({
+      snapshot: {
+        sessionId: 's1',
+        providerName: 'llama-cpp',
+        modelTier: 'medium',
+        leaksUntaggedReasoning: false,
+        systemPrompt: 'system',
+        customToolsMd: false,
+        registeredTools: [],
+        turnStatus: 'in-progress',
+        recentMessages: [],
+        generatedAt: '2026-08-06T00:00:00.000Z',
+      },
+      response: '',
+    });
+    expect(bundle).toContain('Turn status at export: `in-progress`');
+    expect(bundle).toContain('not a completed empty model response');
   });
 });

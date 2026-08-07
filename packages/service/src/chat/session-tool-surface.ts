@@ -23,6 +23,7 @@ import {
   shouldConstrainToImmediateFileWrite,
 } from './role-tool-filter.js';
 import {
+  RESEARCH_STEP_TOOLS,
   capPriorityPrefixForKind,
   gateRepairToolsForKind,
   repairClampDisabled,
@@ -103,6 +104,7 @@ export interface ResolveSessionToolSurfaceOptions {
     | 'gateAttempts'
     | 'lastGateReject'
     | 'gateAttemptHistory'
+    | 'suggestedRole'
   >;
   /**
    * Deterministic tool invoked by a fixed-function session. Keep it through
@@ -235,6 +237,9 @@ export async function resolveSessionToolSurface(
     !stepToolKitDisabled()
       ? stepToolKit(opts.activeStep)
       : null;
+  const researchIntent =
+    resolveRoleId(opts.role) === 'researcher' ||
+    resolveRoleId(opts.activeStep?.suggestedRole) === 'researcher';
   // Planner is a pure-delegation role in ordinary chat, but many authored
   // craftbooks deliberately assign it a planning document (`notes/*.md`,
   // an outline, a brief). In a real step-scoped session that assignment is
@@ -273,6 +278,7 @@ export async function resolveSessionToolSurface(
       ...STEP_COMPLETION_TOOLS,
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
+      ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
       'ask_user_question',
     ]);
     rawAllowlist = new Set([...rawAllowlist].filter((name) => keep.has(name)));
@@ -284,6 +290,7 @@ export async function resolveSessionToolSurface(
     role: opts.role,
     mode: opts.mode,
     ...(kit ? { deliverableKind: kit.kind } : {}),
+    ...(researchIntent ? { researchIntent: true } : {}),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
@@ -406,6 +413,7 @@ export async function resolveSessionToolSurface(
       ...STEP_COMPLETION_TOOLS,
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
+      ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
       'ask_user_question',
       ...(opts.activeStep && normalizeScriptRefs(opts.activeStep.onExit).length > 0
         ? ['run_installed_script']
@@ -850,6 +858,8 @@ function capToolAllowlistForTier(opts: {
   rolesAsTools?: boolean;
   /** Active step's deliverable class — prepends a kit prefix to the priority list. */
   deliverableKind?: import('@bendyline/gezel').DeliverableKind;
+  /** Research/source-acquisition tools are load-bearing for this turn. */
+  researchIntent?: boolean;
   /** Explicit matrix/test override for the env-gated coordinator diet. */
   coordinatorToolDiet?: boolean;
   /** Post-admission local context window; see ResolveSessionToolSurfaceOptions. */
@@ -876,6 +886,7 @@ function capToolAllowlistForTier(opts: {
   const alwaysKeep = (name: string): boolean =>
     SELF_CHECK_TOOL_CAP_ALWAYS_KEEP.has(name) ||
     LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP.has(name) ||
+    (opts.researchIntent === true && RESEARCH_STEP_TOOLS.includes(name)) ||
     (opts.rolesAsTools === true && isRoleDelegationTool(name));
   const nonExempt = [...opts.allowlist].filter((n) => !alwaysKeep(n)).length;
   if (nonExempt <= cap) return opts.allowlist;

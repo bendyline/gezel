@@ -46,6 +46,33 @@ describe('TaskCraftbookStepSchema — plateau-trail back-compat', () => {
   });
 });
 
+describe('research and Markdown-outline gate checks', () => {
+  it('parses observable research evidence and locked-heading checks', () => {
+    const step = CraftbookStepSchema.parse({
+      id: 'research',
+      name: 'Research',
+      suggestedRole: 'researcher',
+      gate: {
+        at: 'completion',
+        checks: [
+          {
+            kind: 'researchEvidence',
+            sourcePath: '',
+            tools: ['wikipedia_search', 'fetch_url', 'browser_navigate'],
+            minSuccessful: 1,
+          },
+          {
+            kind: 'markdownHeadingsMatch',
+            file: 'deck.md',
+            outlineFile: 'notes/outline.md',
+          },
+        ],
+      },
+    });
+    expect(step.gate).toBeDefined();
+  });
+});
+
 describe('GateCheckSchema — grounding kinds', () => {
   it('accepts the in-process HTML lint gate', () => {
     expect(GateCheckSchema.parse({ kind: 'htmlLint', file: 'index.html' })).toEqual({

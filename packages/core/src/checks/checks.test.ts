@@ -23,6 +23,7 @@ import {
   isRealIsoDate,
   jsonPathEquals,
   jsonValid,
+  markdownHeadingsMatch,
   namedEntitiesConsistent,
   normalizeDigitGroups,
   notContainsPattern,
@@ -104,6 +105,71 @@ describe('html checks', () => {
     expect(htmlGameSniff('<html><body><script>requestAnimationFrame</script></body></html>')).toBe(
       false,
     );
+  });
+});
+
+describe('markdownHeadingsMatch', () => {
+  const outline = [
+    '# Deck outline',
+    '## Slide 1 — Battle of Trafalgar',
+    '## Slide 2 — Strategic stakes',
+    '## Slide 3 — What Trafalgar teaches us',
+  ].join('\n');
+
+  it('approves an exact H1 title/order projection of the numbered outline', async () => {
+    const deck = [
+      '# Battle of Trafalgar',
+      '- Context',
+      '# Strategic stakes',
+      '- Why it mattered',
+      '# What Trafalgar teaches us',
+      '- Closing lesson',
+    ].join('\n');
+    const result = await markdownHeadingsMatch(
+      ws({ 'notes/outline.md': outline, 'deck.md': deck }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.ok).toBe(true);
+    expect(result.documentHeadings).toHaveLength(3);
+  });
+
+  it('rejects merged/missing slides and title reordering', async () => {
+    const missing = await markdownHeadingsMatch(
+      ws({
+        'notes/outline.md': outline,
+        'deck.md': '# Battle of Trafalgar\n# What Trafalgar teaches us',
+      }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(missing.ok).toBe(false);
+    expect(missing.detail).toContain('2 H1 slide headings');
+
+    const reordered = await markdownHeadingsMatch(
+      ws({
+        'notes/outline.md': outline,
+        'deck.md': [
+          '# Battle of Trafalgar',
+          '# What Trafalgar teaches us',
+          '# Strategic stakes',
+        ].join('\n'),
+      }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(reordered.ok).toBe(false);
+    expect(reordered.mismatchIndex).toBe(1);
+  });
+
+  it('does not mistake a bare multi-digit slide number for a titled slide', async () => {
+    const result = await markdownHeadingsMatch(
+      ws({ 'notes/outline.md': '## Slide 10', 'deck.md': '# 0' }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('no numbered slide headings');
   });
 });
 

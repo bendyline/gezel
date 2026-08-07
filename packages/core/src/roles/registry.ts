@@ -210,6 +210,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'documents',
       'interaction',
       'web',
+      'browser-automation',
       'handboek',
     ],
     suggestedTuningProfile: 'thinking-general',
