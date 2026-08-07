@@ -2104,7 +2104,7 @@ export async function pollUntilDone(
               fromGezelId: args.meesterId,
               text: nudge,
               projectId: downstream.projectId,
-              ...(attachableDeliverable(filePath, downstream.role, args.log)),
+              ...attachableDeliverable(filePath, downstream.role, args.log),
             });
           } else {
             await args.client.sendChatMessage(targetId, {
@@ -2114,9 +2114,7 @@ export async function pollUntilDone(
           }
           reEngageNudgeDelivered = true;
         } catch (err) {
-          args.log(
-            `[poll] re-engage nudge send failed (non-fatal): ${describeSendFailure(err)}`,
-          );
+          args.log(`[poll] re-engage nudge send failed (non-fatal): ${describeSendFailure(err)}`);
         }
         // Don't reset clocks — if the nudge produces real activity,
         // the next fingerprint cycle will move them naturally. If it
@@ -2258,7 +2256,7 @@ export async function pollUntilDone(
                 fromGezelId: args.meesterId,
                 text: nudge,
                 projectId: downstream.projectId,
-                ...(attachableDeliverable(filePath, downstream.role, args.log)),
+                ...attachableDeliverable(filePath, downstream.role, args.log),
               });
             } else {
               await args.client.sendChatMessage(targetId, {

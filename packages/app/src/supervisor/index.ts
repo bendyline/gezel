@@ -49,6 +49,12 @@ export interface ConnectOptions {
   /** UI directory to pass to embedded `startService`. */
   uiDir?: string;
   logger?: { info?: (m: string) => void; warn?: (m: string) => void; error?: (m: string) => void };
+  /**
+   * How long an adopted-but-not-yet-serving daemon gets to finish booting.
+   * Defaults to {@link ADOPT_HEALTH_WAIT_MS}; tests shorten it so they can
+   * exercise the give-up path without waiting out the real budget.
+   */
+  adoptHealthWaitMs?: number;
 }
 
 export type ConnectionMode = Mode['kind'];
@@ -108,6 +114,21 @@ const PACKAGED_STARTUP_TIMEOUT_MS = 30_000;
 // native request to the broker instead of briefly starting a duplicate engine.
 const MACHINE_SERVICE_STARTUP_WAIT_MS = 45_000;
 const MACHINE_SERVICE_STARTUP_POLL_MS = 1_000;
+// How long an adopted daemon that is alive but not yet answering /api/health
+// gets to finish booting before we treat it as broken.
+//
+// The adopt probe was a single 5s attempt, which cannot tell a wedged daemon
+// from one that is merely still starting — and right after an upgrade it is
+// almost always the latter: the daemon re-extracts a ~32k-file service bundle
+// and re-runs first-boot work, which takes minutes on a cold cache, not
+// seconds. A v1.26219.45 Linux upgrade hit exactly that: launching the app
+// immediately after install failed with "alive but unhealthy", and launching
+// it again later simply worked, because by then the daemon had finished.
+//
+// Sized like MACHINE_SERVICE_STARTUP_WAIT_MS and for the same reason. Waiting
+// costs a splash screen; being impatient costs the user their daemon.
+const ADOPT_HEALTH_WAIT_MS = 45_000;
+const ADOPT_HEALTH_POLL_MS = 1_000;
 
 interface SupervisedServiceInit {
   systemServiceHome?: string;
@@ -865,7 +886,12 @@ async function connectResolved(
   if (mode.kind === 'local-adopt') {
     const client = buildHealthClient(mode.baseUrl, mode.token, mode.cert);
     try {
-      const health = await healthWithTimeout(client);
+      const health = await adoptedDaemonHealth(
+        client,
+        mode.pid,
+        opts,
+        opts.adoptHealthWaitMs ?? ADOPT_HEALTH_WAIT_MS,
+      );
       // Version negotiation: in packaged mode, only adopt a running daemon
       // whose version matches what we ship. A version mismatch almost
       // always means an autostart daemon is pinned at an older release —
@@ -927,13 +953,37 @@ async function connectResolved(
       });
     } catch (err) {
       if (isProcessAlive(mode.pid)) {
-        opts.logger?.error?.(
-          `[supervisor] adopted daemon health check failed while pid=${mode.pid} remains alive; refusing a second writer`,
+        // Getting here now means the daemon had ADOPT_HEALTH_WAIT_MS to answer
+        // and never did, so it is wedged rather than busy — the patient poll in
+        // adoptedDaemonHealth already absorbed the slow-boot case that made
+        // this branch fire spuriously after an upgrade.
+        //
+        // Never run two writers against one home, but a wedged daemon is not
+        // serving anyone, so refusing outright left the app with nothing at
+        // all. The two branches above (packaged version mismatch, dev
+        // staleness) already stop the process they cannot use; do the same
+        // here, and only refuse if it survives the bounded stop ladder.
+        opts.logger?.warn?.(
+          `[supervisor] adopted daemon pid=${mode.pid} is alive but failing health checks; stopping it before starting a replacement`,
         );
-        throw new Error(
-          `Adopted gezeld pid=${mode.pid} is still alive but unhealthy; refusing to start an embedded writer for the same home`,
-          { cause: err },
+        const stopped = await stopProcessByPid(mode.pid, opts.logger);
+        if (!stopped) {
+          opts.logger?.error?.(
+            `[supervisor] adopted daemon pid=${mode.pid} survived the stop ladder; refusing a second writer`,
+          );
+          throw new Error(
+            `Adopted gezeld pid=${mode.pid} is unhealthy and did not exit when asked; refusing to start a second writer for the same home`,
+            { cause: err },
+          );
+        }
+        opts.logger?.warn?.(
+          '[supervisor] stopped the unhealthy adopted daemon; falling back to embedded',
         );
+        return buildEmbedded(opts, {
+          code: 'adopted-daemon-unhealthy',
+          sourceMode: 'local-adopt',
+          message: `The adopted daemon was unhealthy and was stopped: ${(err as Error).message}`,
+        });
       }
       opts.logger?.warn?.(
         `[supervisor] adopted daemon health check failed after pid=${mode.pid} exited: ${(err as Error).message}; falling back to embedded`,
@@ -1431,6 +1481,46 @@ function buildHealthClient(baseUrl: string, token: string, cert: string | null):
  * intentionally patient for long-running model/tool requests. The explicit
  * rejection race also bounds injected fetches that fail to observe abort.
  */
+/**
+ * Health for a daemon we intend to adopt, with patience.
+ *
+ * A live process that is not yet answering is the normal state for the first
+ * launch after an upgrade — the daemon is re-extracting its service bundle.
+ * Poll until it answers or the budget runs out, so "unhealthy" means "had time
+ * and still could not serve" rather than "was busy for five seconds".
+ *
+ * Gives up immediately once the process is gone: there is nothing to wait for,
+ * and the caller's dead-pid path already recovers cleanly.
+ */
+export async function adoptedDaemonHealth(
+  client: Pick<GezelClient, 'health'>,
+  pid: number,
+  opts: Pick<ConnectOptions, 'logger'>,
+  budgetMs: number = ADOPT_HEALTH_WAIT_MS,
+  pollMs: number = ADOPT_HEALTH_POLL_MS,
+  alive: (pid: number) => boolean = isProcessAlive,
+): Promise<Awaited<ReturnType<GezelClient['health']>>> {
+  const deadline = Date.now() + budgetMs;
+  let announced = false;
+  for (;;) {
+    try {
+      return await healthWithTimeout(client);
+    } catch (err) {
+      if (!alive(pid)) throw err;
+      if (Date.now() >= deadline) throw err;
+      if (!announced) {
+        announced = true;
+        opts.logger?.info?.(
+          `[supervisor] adopted daemon pid=${pid} is alive but not serving yet; waiting up to ${Math.round(
+            budgetMs / 1000,
+          )}s for it to finish starting`,
+        );
+      }
+      await sleepMs(pollMs);
+    }
+  }
+}
+
 export async function healthWithTimeout(
   client: Pick<GezelClient, 'health'>,
   timeoutMs = HEALTH_REQUEST_TIMEOUT_MS,

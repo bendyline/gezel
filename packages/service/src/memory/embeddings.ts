@@ -18,11 +18,9 @@
  *      degrade to in-process inference, which is still bounded by (1).
  */
 
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { PipelineLoadError, queryInstruction, runEmbed } from './embed-core.js';
 
 const log = createLogger('memory');
@@ -79,22 +77,12 @@ let nextId = 1;
 const pending = new Map<number, Pending>();
 
 /**
- * Locate the built worker entry. In production it's a sibling under `dist`
- * (tsup entry `memory/embed-worker`); `import.meta.url` resolves to the bundled
- * `dist/index.js`, so `here` is `dist`. Under vitest there is no dist build —
- * return null and let the caller fall back to in-process.
+ * Locate the built worker from either service bundle shape. Under vitest there
+ * is no dist build, so let the caller fall back to in-process.
  */
 function workerEntry(): string | null {
   if (process.env.VITEST) return null;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, 'memory', 'embed-worker.js'), // prod: here = dist
-    join(here, 'embed-worker.js'), // emitted sibling (here = dist/memory)
-  ];
-  for (const path of candidates) {
-    if (existsSync(path)) return path;
-  }
-  return null;
+  return findServiceWorkerEntry(import.meta.url, 'embeddings');
 }
 
 function ensureWorker(): Worker | null {

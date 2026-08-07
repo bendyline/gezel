@@ -287,6 +287,25 @@ export interface StoreOptions {
    * (the move worker enforces this).
    */
   external?: ExternalFolders;
+  /**
+   * The daemon role this Store serves. `machine-engine` owns native engines,
+   * model downloads and resource queues — never gezels, projects or documents.
+   *
+   * Load-bearing, not decorative. `ensureLayout` used to create the product
+   * scopes for every role, so a machine broker booting against
+   * `C:\ProgramData\Gezel` (or `/var/lib/gezel`) recreated `gezels/` and
+   * `projects/` beside the `shared/` tree those very directories had just been
+   * drained into — and `adoptMachineSharedGezelPrivateState` then filled them
+   * with per-entity stubs. The installer's `migrate-legacy-shared` step found
+   * legacy and shared both populated and divergent on the next upgrade,
+   * refused (correctly — it verifies before deleting), and the whole
+   * machine-service registration was abandoned. v1.26219.45 could not be
+   * installed over any machine whose broker had ever run.
+   *
+   * Defaults to the full-product layout so every existing caller and test
+   * keeps its current behaviour.
+   */
+  serviceRole?: import('@bendyline/gezel').ServiceRole;
 }
 
 export interface SessionChangeEvent {
@@ -334,6 +353,8 @@ export class Store {
   private readonly home: string;
   private readonly history?: import('../history/manager.js').HistoryManager;
   private readonly external?: ExternalFolders;
+  /** True for a `machine-engine` broker: engines and models, no product state. */
+  private readonly engineOnly: boolean;
   private readonly poppetjes: PoppetjeManager;
   private readonly documents: DocumentsStore;
   private readonly artifacts: ProjectArtifactsStore;
@@ -361,6 +382,7 @@ export class Store {
     this.home = opts.home;
     this.history = opts.history;
     this.external = opts.external;
+    this.engineOnly = opts.serviceRole === 'machine-engine';
     this.poppetjes = new PoppetjeManager({
       home: this.home,
       external: this.external,
@@ -484,6 +506,19 @@ export class Store {
   async ensureLayout(): Promise<void> {
     const local = gezelPaths(this.home);
     const p = gezelPaths(this.home, this.external);
+
+    // A machine-engine broker gets the operational directories it genuinely
+    // owns and nothing else. Creating the product scopes here is what produced
+    // the divergent second copy that blocked every subsequent upgrade — see
+    // StoreOptions.serviceRole. The adopters and backfills below are all
+    // product-state operations and would have nothing legitimate to act on.
+    if (this.engineOnly) {
+      await Promise.all([
+        mkdir(local.runtime.dir, { recursive: true }),
+        mkdir(local.logs, { recursive: true }),
+      ]);
+      return;
+    }
     // One-time rename: the folder used to be called `agents/`. If the old
     // path exists and the new one doesn't, rename it. Safe to remove once
     // all installs have upgraded. Always operates against the local root —

@@ -21,6 +21,7 @@ import { createLogger } from '@bendyline/gezel';
 import { guardZipArchive } from '../safety/archive-guard.js';
 import { sniffContainer } from '../safety/sniff.js';
 import { runInSandbox } from '../sandbox/runner.js';
+import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 
 const log = createLogger('convert');
 
@@ -87,19 +88,8 @@ let workerCache: { path: string; stripTypes: boolean } | null | undefined;
 /** Locate the convert-worker entry — built `.js` (prod) or source `.ts` (dev). */
 function workerEntry(): { path: string; stripTypes: boolean } | null {
   if (workerCache !== undefined) return workerCache;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, 'index-store', 'convert-worker.js'), // prod: bundled into dist/index.js, here = dist
-    join(here, 'convert-worker.js'), // emitted sibling
-    join(here, 'convert-worker.ts'), // dev: sibling source under src/index-store
-  ];
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      workerCache = { path, stripTypes: path.endsWith('.ts') };
-      return workerCache;
-    }
-  }
-  workerCache = null;
+  const path = findServiceWorkerEntry(import.meta.url, 'document-convert');
+  workerCache = path ? { path, stripTypes: path.endsWith('.ts') } : null;
   return workerCache;
 }
 

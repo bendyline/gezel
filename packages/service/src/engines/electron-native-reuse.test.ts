@@ -160,7 +160,11 @@ describe('Electron native reuse', () => {
     const dir = join(root, 'darwin-arm64');
     await mkdir(dir, { recursive: true });
     const bytes = Buffer.from('signed standalone fixture');
-    await writeFile(join(dir, 'gezel-ds4-server'), bytes, { mode: 0o755 });
+    // Windows does not preserve POSIX executable bits. Use a dylib suffix
+    // there so the simulated macOS payload is still classified as loadable.
+    const fixtureName =
+      process.platform === 'win32' ? 'libgezel-fixture.dylib' : 'gezel-ds4-server';
+    await writeFile(join(dir, fixtureName), bytes, { mode: 0o755 });
     const verifySignature = vi.fn(async (_path: string, _opts: VerifyOptions) => ({
       accepted: true,
       result: { status: 'valid' as const, detail: 'Bendyline LLC' },
@@ -177,7 +181,7 @@ describe('Electron native reuse', () => {
         platforms: {
           'darwin-arm64': {
             files: {
-              'gezel-ds4-server': {
+              [fixtureName]: {
                 sha256: createHash('sha256').update(bytes).digest('hex'),
                 sizeBytes: bytes.length,
                 signature: 'bendyline',
@@ -203,7 +207,7 @@ describe('Electron native reuse', () => {
     expect(result.reused).toBe(true);
     expect(result.nativeBinDir).toBe(root);
     expect(verifySignature).toHaveBeenCalledOnce();
-    expect(verifySignature.mock.calls[0]?.[0]).toBe(join(dir, 'gezel-ds4-server'));
+    expect(verifySignature.mock.calls[0]?.[0]).toBe(join(dir, fixtureName));
     expect(verifySignature.mock.calls[0]?.[1]).not.toHaveProperty('requireNotarizedApp');
   });
 

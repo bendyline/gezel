@@ -1,8 +1,6 @@
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { type ContentIndexStats, indexWorkspaceContent } from './content-indexer.js';
 import { IndexStore } from './index-store.js';
 
@@ -93,12 +91,7 @@ function ensureWorker(): Worker | null {
 }
 
 function workerEntry(): string | null {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, 'index-store', 'static-index-worker.js'),
-    join(here, 'static-index-worker.js'),
-  ];
-  return candidates.find((path) => existsSync(path)) ?? null;
+  return findServiceWorkerEntry(import.meta.url, 'static-index');
 }
 
 function onMessage(reply: WorkerReply): void {

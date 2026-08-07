@@ -368,7 +368,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     (rawConfigForExternal.externalFolders as ExternalFolders | undefined) ?? undefined;
   const { HistoryManager } = await import('./history/manager.js');
   const history = new HistoryManager(home);
-  const store = new Store({ home, history, external });
+  const store = new Store({ home, history, external, serviceRole });
   if (serviceRole !== 'machine-engine') await recoverTypedProjectCreations(store);
   await store.ensureLayout();
   if (serviceRole !== 'machine-engine') {
