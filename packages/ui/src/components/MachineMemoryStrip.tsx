@@ -229,7 +229,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
         } from an earlier service session`
       : null,
     usage.otherBytes === null ? null : `other use ${formatBytes(usage.otherBytes)}`,
-    cachedBytes === null ? null : `cached files ${formatBytes(cachedBytes)}, available to apps`,
+    cachedBytes === null
+      ? null
+      : `borrowed for cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
     usage.freeBytes === null ? null : `free ${formatBytes(usage.freeBytes)}`,
   ]
     .filter(Boolean)
@@ -294,7 +296,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
           {cachedBytes !== null && (
             <span title="Reclaimable file cache available to apps">
               <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
-              Cached {formatBytes(cachedBytes)}
+              Borrowed for cache {formatBytes(cachedBytes)}
             </span>
           )}
           {usage.freeBytes !== null && (

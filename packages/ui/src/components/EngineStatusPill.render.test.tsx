@@ -363,8 +363,10 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
-    expect(screen.getByText('Cached 20.0 GiB')).toBeInTheDocument();
-    expect(strip).toHaveAccessibleName(/cached files 20\.0 GiB, available to apps/i);
+    expect(screen.getByText('Borrowed for cache 20.0 GiB')).toBeInTheDocument();
+    expect(strip).toHaveAccessibleName(
+      /borrowed for cache 20\.0 GiB, reclaimable by the operating system/i,
+    );
     expect(
       screen.getByText(
         'Models reserve ~36.0 GiB for capacity planning; this can include models that are not running',

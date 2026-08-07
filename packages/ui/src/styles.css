@@ -1587,7 +1587,12 @@ html.embedded-chat #root {
   background: color-mix(in srgb, var(--warning) 62%, var(--surface));
 }
 .machine-memory-segment-cached {
-  background: color-mix(in srgb, var(--success) 28%, var(--surface));
+  background-color: color-mix(in srgb, var(--surface) 75%, var(--panel));
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--success) 28%, var(--surface)) 0 4px,
+    transparent 4px 8px
+  );
 }
 .machine-memory-legend {
   display: flex;
@@ -1616,7 +1621,12 @@ html.embedded-chat #root {
   background: color-mix(in srgb, var(--warning) 62%, var(--surface));
 }
 .machine-memory-swatch-cached {
-  background: color-mix(in srgb, var(--success) 28%, var(--surface));
+  background-color: color-mix(in srgb, var(--surface) 75%, var(--panel));
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--success) 28%, var(--surface)) 0 3px,
+    transparent 3px 6px
+  );
 }
 .machine-memory-swatch-free {
   background: color-mix(in srgb, var(--surface) 75%, var(--panel));
