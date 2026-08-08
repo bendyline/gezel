@@ -49,6 +49,31 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient workspace binary writes', () => {
+  it('sends raw bytes through the authenticated workspace endpoint', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/projects/demo/workspace/raw?path=report.pdf');
+      expect(init?.method).toBe('PUT');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer t');
+      expect(new Headers(init?.headers).get('content-type')).toBe('application/pdf');
+      expect(new Uint8Array(await new Response(init?.body).arrayBuffer())).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      return Response.json({ ok: true, path: 'report.pdf' });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(
+      client.writeProjectWorkspaceBinary(
+        'demo',
+        'report.pdf',
+        new Uint8Array([1, 2, 3]),
+        'application/pdf',
+      ),
+    ).resolves.toEqual({ ok: true, path: 'report.pdf' });
+  });
+});
+
 describe('GezelClient project preview', () => {
   it('forwards cancellation to both repository and Klerk draft requests', async () => {
     const controller = new AbortController();

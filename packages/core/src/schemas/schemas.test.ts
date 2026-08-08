@@ -3,6 +3,7 @@ import {
   AskQuestionRequestSchema,
   ChatEventSchema,
   ChatMessageSchema,
+  CraftbookTemplateIdentitySchema,
   CreateProjectRequestSchema,
   CreateTaskRequestSchema,
   CreateTypedProjectRequestSchema,
@@ -20,6 +21,25 @@ import {
   projectAllowsAmbientWork,
   taskRef,
 } from './index.js';
+
+describe('CraftbookTemplateIdentitySchema', () => {
+  const identity = {
+    schemaVersion: 1,
+    kind: 'craftbook-template',
+    id: 'starter',
+    name: 'Starter',
+    description: 'Start a blank project.',
+    tags: [],
+    maintainer: { name: 'Gezel' },
+  } as const;
+
+  it('defaults older identities to general and accepts lifecycle roles', () => {
+    expect(CraftbookTemplateIdentitySchema.parse(identity).role).toBe('general');
+    expect(
+      CraftbookTemplateIdentitySchema.parse({ ...identity, role: 'project-starter' }).role,
+    ).toBe('project-starter');
+  });
+});
 
 describe('DocumentMediaExportRequestSchema', () => {
   it('accepts Store-backed native media exports and rejects traversal', () => {
@@ -211,6 +231,16 @@ describe('ChatEventSchema', () => {
     expect(
       ChatEventSchema.parse({ type: 'gezel_created', gezelId: 'sipho', name: 'Sipho' }).type,
     ).toBe('gezel_created');
+    expect(
+      ChatEventSchema.parse({
+        type: 'task_event',
+        eventId: 'event-1',
+        kind: 'task.status.changed',
+        summary: 'Task default/1 → paused',
+        at: '2026-08-08T12:00:00.000Z',
+        taskRef: 'default/1',
+      }).type,
+    ).toBe('task_event');
   });
 
   it('accepts an in-app Settings action on a warning', () => {

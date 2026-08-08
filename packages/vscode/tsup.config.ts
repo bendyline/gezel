@@ -11,20 +11,21 @@ const embeddedDst = path.resolve(__dirname, 'dist', 'webview', 'embedded');
  * into the extension's `dist/webview/embedded/`. The chat-view loads
  * `chat.global.js` + `chat.css` (plus the fonts under `assets/`) from
  * that path via `asWebviewUri`. Build order: `packages/ui` must finish
- * `vite build --config vite.embedded.config.ts` before this runs —
- * pnpm-workspace's per-package `build` script handles the dependency
- * via the `@bendyline/gezel-ui` dep in package.json.
+ * `vite build --config vite.embedded.config.ts` before this runs. The root
+ * `build:packages` script invokes the UI's `build:all` target before it builds
+ * this package; the workspace dependency alone does not select that target.
  */
 function copyEmbeddedChatAssets(): void {
   if (!fs.existsSync(embeddedSrc)) {
-    // Soft-fail: the watch-mode dev script may run before the UI's
-    // first embedded build completes. The webview will 404 the
-    // missing scripts until the rebuild lands, but the extension
-    // itself loads fine.
-    console.warn(
-      `[gezel-vscode] embedded chat bundle missing at ${embeddedSrc} - run \`pnpm --filter @bendyline/gezel-ui build:embedded\` first.`,
-    );
-    return;
+    const message = `[gezel-vscode] embedded chat bundle missing at ${embeddedSrc} - run \`pnpm --filter @bendyline/gezel-ui build:embedded\` first.`;
+    // Watch mode may start before the UI's first embedded build completes;
+    // keep that development loop available. A production build must fail
+    // instead of publishing an extension whose chat webview only 404s.
+    if (process.argv.includes('--watch') || process.argv.includes('-w')) {
+      console.warn(message);
+      return;
+    }
+    throw new Error(message);
   }
   fs.rmSync(embeddedDst, { recursive: true, force: true });
   fs.mkdirSync(embeddedDst, { recursive: true });

@@ -1,6 +1,7 @@
 [
   {
     "id": "inbox-triage",
+    "role": "general",
     "name": "Inbox Triage & Reply Drafts",
     "description": "Triage a batch of incoming emails or messages into priority buckets and draft replies for the ones that need them. Locks the triage rules and bucket taxonomy FIRST (urgent / needs-reply / FYI / archive, plus the criteria for each and a reply policy), then classifies every message deterministically against those rules, then a copywriter drafts on-voice replies only for the messages flagged needs-reply. The rules-before-triage ordering is what stops a small model from inventing ad-hoc categories and gives the reviewer something to grade. Use for inbox zero, support-queue triage, email sorting, message prioritization, and auto-drafting responses.",
     "tags": ["email", "triage", "inbox", "automation", "comms"],
@@ -45,6 +46,7 @@
   },
   {
     "id": "status-report",
+    "role": "general",
     "name": "Recurring Status Report",
     "description": "Produce a recurring (weekly/biweekly) status report by gathering signals from the team's tools and writing a tight, skimmable update for stakeholders. Scopes the report template and the exact data sources FIRST (sections, audience, reporting window, RAG/health convention), then a developer gathers the raw signals from issue trackers, PRs, metrics, and notes into a facts file, then a copywriter writes the polished report strictly from those gathered facts. Scoping the template before gathering is what keeps every recurring issue consistent and prevents the model from padding with prose. Use for weekly status updates, sprint reports, project health reports, stakeholder updates, and exec summaries.",
     "tags": ["status", "report", "reporting", "weekly", "comms"],
@@ -89,6 +91,7 @@
   },
   {
     "id": "standup-summary",
+    "role": "general",
     "name": "Standup / Team Update Summary",
     "description": "Condense a pile of raw team updates (standup messages, async check-ins, channel dumps) into one clean summary grouped by person or workstream, surfacing blockers and decisions. Scopes the grouping axis and summary shape FIRST (by-person vs by-project, what counts as a blocker, the yesterday/today/blockers frame), then a copywriter compresses every raw update into that frame without dropping anyone. The scope-first step prevents a 4B model from rambling and guarantees blockers get their own callout section instead of being buried. Use for daily standup summaries, async update rollups, team check-in digests, and turning Slack threads into a readable recap.",
     "tags": ["standup", "summary", "team", "async", "comms"],
@@ -125,6 +128,7 @@
   },
   {
     "id": "calendar-brief",
+    "role": "general",
     "name": "Daily Calendar & Prep Brief",
     "description": "Assemble a morning brief from the day's calendar: a chronological agenda with per-meeting prep notes, conflicts flagged, and a short focus-time/priorities summary. Scopes the brief layout and prep rules FIRST (which meetings need prep, what prep means, how to flag conflicts and back-to-backs), then a developer pulls the day's events and assembles the brief deterministically against those rules. The scope-first ordering ensures the brief always flags double-bookings and attaches the right context (attendees, agenda, links) instead of just dumping a raw event list. Use for daily agenda briefs, meeting prep, morning planning, schedule rundowns, and turning a calendar into an actionable day plan.",
     "tags": ["calendar", "brief", "agenda", "planning", "comms"],
@@ -161,6 +165,7 @@
   },
   {
     "id": "alert-rules",
+    "role": "general",
     "name": "Monitoring Alert Rules",
     "description": "Author a set of monitoring/alerting rules as a deployable config (Prometheus alerting rules, Grafana/Alertmanager YAML, or a CloudWatch-style spec): the right signals, thresholds, severities, for-durations, and routing labels. Scopes the SLOs and alert philosophy FIRST (what to alert on, symptom-vs-cause, thresholds and burn windows, severity ladder, noise budget), then a developer writes the rules config to that spec, then a reviewer validates for completeness, dedupe, and anti-flapping. Scoping thresholds and severities before writing YAML is what produces actionable, low-noise alerts instead of a wall of CPU-over-80% pages. Use for alerting rules, Prometheus alerts, SLO monitoring, on-call paging rules, and reducing alert fatigue.",
     "tags": ["monitoring", "alerting", "ops", "yaml", "sre"],
@@ -198,6 +203,7 @@
   },
   {
     "id": "notification-router",
+    "role": "general",
     "name": "Notification Router",
     "description": "Build an event-to-channel notification router: a small module that takes incoming events and routes each to the right destination (Slack channel, email, PagerDuty, webhook) based on type, severity, and quiet-hours rules — with dedupe, throttling, and a fallback channel. Scopes the routing matrix and policy FIRST (event taxonomy, channel map, severity→destination rules, dedupe key, rate limits, fallback), then a developer implements the router module to that matrix, then writes tests covering each routing branch. Scoping the matrix before coding is what guarantees every event type has a defined destination and that critical events can never be silently dropped. Use for notification routing, alert fan-out, event dispatch, webhook routing, and on-call/Slack notification systems.",
     "tags": ["notifications", "routing", "events", "code", "ops"],
@@ -242,6 +248,7 @@
   },
   {
     "id": "meeting-notes-to-actions",
+    "role": "general",
     "name": "Meeting Notes to Action Items",
     "description": "Convert raw meeting notes or a transcript into a clean, assigned action-item list with owners, due dates, and the decisions that drove them. Extracts the actions and decisions FIRST (every commitment, ask, and decision lifted verbatim-ish into a structured list with source quotes), then a planner assigns owners and due dates and prioritizes — separating extraction from assignment so nothing said in the meeting is lost before triage. The extract-then-assign ordering is what stops a small model from silently dropping commitments or inventing owners. Use for meeting follow-ups, action-item extraction, turning transcripts into to-dos, decision logs, and post-meeting recaps.",
     "tags": ["meeting", "actions", "tasks", "transcript", "comms"],
@@ -278,6 +285,7 @@
   },
   {
     "id": "weekly-review",
+    "role": "maintenance-review",
     "name": "Personal / Team Weekly Review",
     "description": "Assemble a reflective weekly review that pulls the week's done-list, metrics, and open loops into a structured retrospective with wins, misses, lessons, and next-week priorities. Scopes the review template and the inputs FIRST (the GTD-style sections, what data feeds each, the carry-over rule for unfinished items), then a copywriter writes the honest, concise review against that template. The scope-first ordering keeps the review consistent week over week and ensures open loops are carried forward rather than forgotten. Use for weekly reviews, personal retrospectives, GTD weekly review, end-of-week wrap-ups, and team retros.",
     "tags": ["review", "retrospective", "weekly", "productivity", "comms"],
@@ -314,6 +322,7 @@
   },
   {
     "id": "escalation-playbook",
+    "role": "general",
     "name": "On-Call Escalation Playbook",
     "description": "Author an on-call escalation playbook: the severity ladder, who-to-page-when escalation tiers with timeouts, communication cadence to stakeholders, and the step-by-step actions for each severity. Scopes the severity definitions and escalation policy FIRST (SEV levels with concrete examples, tier timeouts, roles, comms channels and cadence), then a copywriter writes the playbook in clear, do-this-now imperative steps, then a reviewer validates it for completeness and that no severity dead-ends without an escalation path. Scoping the SEV ladder and timeouts before writing prose is what makes the playbook unambiguous at 3am. Use for on-call runbooks, incident escalation policy, paging tiers, severity ladders, and SRE escalation procedures.",
     "tags": ["oncall", "escalation", "incident", "playbook", "sre"],
@@ -351,6 +360,7 @@
   },
   {
     "id": "digest-from-feeds",
+    "role": "general",
     "name": "RSS / Feed Digest",
     "description": "Build a recurring digest from RSS/Atom feeds or news sources: fetch the latest items in the window, dedupe and cluster by topic, then write a scannable digest with one-line takes and source links. Scopes the feed list and digest format FIRST (which feeds, the time window, topic sections, item cap, ranking signal), then a developer fetches and normalizes the feed items into a deduped item list, then a copywriter writes the curated digest from those items only. Scoping sources and the window before fetching is what keeps the digest fresh, deduped, and within length instead of an unranked firehose. Use for RSS digests, news roundups, feed summaries, content curation, and recurring reading digests.",
     "tags": ["rss", "feeds", "digest", "news", "comms"],
@@ -395,6 +405,7 @@
   },
   {
     "id": "crm-update-batch",
+    "role": "general",
     "sourceDiscipline": "Source discipline:\n- Extract only contacts, accounts, emails, statuses, tasks, activities, and source quotes present in the provided notes or locked schema.\n- Preserve the locked import header exactly. Do not split schema fields into extra columns such as first_name, last_name, title, old_value, or new_value; put the attribute name in `field_name` and its value in `field_value`.\n- Treat object names, field names, and picklist values as case-sensitive when the target CRM/import schema gives exact values.\n- For CSV imports, keep empty placeholders as adjacent commas so every row has the same number of cells as the header.\n- When the schema has many optional cells, draft row shapes against the header before extraction and verify the cell count on each output row.\n- When a contact lacks the match key, flag it as UNMATCHED instead of creating a placeholder email, guessed ID, or new account.\n- If the locked schema explicitly needs separate Contact, Account, Activity, or Task rows, split each seeded note into supported rows. Do not add optional object rows just to pad the batch.",
     "disciplinePlacement": "in-description",
     "name": "Bulk CRM Update from Notes",
@@ -434,6 +445,7 @@
   },
   {
     "id": "oncall-handoff",
+    "role": "general",
     "name": "On-Call Shift Handoff",
     "description": "Produce a clean end-of-shift on-call handoff: open incidents and their state, watch-items and known-flapping alerts, deferred actions, and anything the next on-call must do in the first hour. Scopes the handoff template and the carry-over rule FIRST (sections, what counts as an open item, the must-not-drop list), then a developer gathers the shift's signals (active incidents, recent pages, deferred follow-ups) and assembles the handoff so the incoming engineer can pick up cold. Scoping the template and carry-over rule before assembling is what guarantees no live incident or hot watch-item is dropped at the shift boundary. Use for on-call handoffs, shift handover notes, pager handoff, SRE shift change, and end-of-shift summaries.",
     "tags": ["oncall", "handoff", "incident", "ops", "sre"],
@@ -470,6 +482,7 @@
   },
   {
     "id": "incident-comms-templates",
+    "role": "general",
     "name": "Incident Communication Templates",
     "description": "Author a reusable set of incident communication templates: status-page posts and stakeholder update messages for each phase of an incident (Investigating, Identified, Monitoring, Resolved) across severities, with fill-in variables and a cadence guide. Scopes the audiences, phases, and tone rules FIRST (who reads each channel, the phase ladder, what may and may not be said, the variable set), then a copywriter writes the on-brand templates with bracketed placeholders, then a reviewer checks coverage, tone, and that no template over-promises or leaks blame. Scoping audiences and phases before drafting is what produces calm, honest, copy-paste-ready updates instead of ad-hoc panic posts. Use for incident comms, status page templates, customer incident updates, outage communication, and stakeholder messaging during an incident.",
     "tags": ["incident", "comms", "templates", "status-page", "ops"],
@@ -507,6 +520,7 @@
   },
   {
     "id": "broadcast-announcement",
+    "role": "general",
     "name": "Multi-Channel Broadcast Announcement",
     "description": "Adapt a single announcement (launch, policy change, maintenance window, org news) into channel-tailored variants — email, Slack/Teams post, status-page note, and a short SMS/push — that carry one consistent core message at the right length and tone for each surface. Scopes the core message and the per-channel constraints FIRST (the single source of truth, the CTA, character/format limits and tone per channel, the must-include facts), then a copywriter writes every variant from that locked core so nothing contradicts across channels. Scoping the core before adapting is what keeps the facts, dates, and CTA identical everywhere while the voice fits each surface. Use for announcements, multi-channel comms, launch messaging, maintenance notices, and broadcasting one message everywhere.",
     "tags": ["announcement", "broadcast", "comms", "multichannel", "messaging"],

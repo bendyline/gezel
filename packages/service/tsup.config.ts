@@ -1,6 +1,7 @@
 import { cpSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
+import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
@@ -121,6 +122,10 @@ export default defineConfig({
         `[tsup] no UI bundle at ${uiSrc} — run \`pnpm --filter @bendyline/gezel-ui build\` before building the service to ship the browser UI (\`gezel start --web\`). The daemon still runs headless without it.`,
       );
     }
+    // npm publishes this dist/ui copy independently of Electron's staged
+    // resources/licenses tree. Keep the notice and every font's canonical
+    // legal text beside it so that distribution channel is self-contained.
+    await stageServiceFontLegalBundle();
     await stripSourcemapCommentsFromBuild();
   },
 });

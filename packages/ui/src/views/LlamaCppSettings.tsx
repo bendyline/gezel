@@ -617,18 +617,18 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
             onChange={(e) => void saveSwaFull(e.target.value as TriState)}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <option value="auto">Auto — on for the Gemma family (default)</option>
+            <option value="auto">Auto — full only when it fits fast memory</option>
             <option value="on">On — always full cache (--swa-full)</option>
             <option value="off">Off — memory-efficient windowed cache</option>
           </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
-          For sliding-window models (the Gemma family): swap the memory-efficient windowed KV cache
-          for a full-size one. Costs roughly 30% more memory at long context, and in exchange the
-          engine will accept prompt reuse — with the windowed cache it refuses, logging{' '}
-          <code>cache_reuse is not supported by this context</code>. <em>Auto</em> enables it for
-          Gemma models, where it helps long multi-turn sessions; it does nothing for Qwen models,
-          which cannot reuse this way at all. Takes effect the next time the engine starts.
+          For sliding-window models (the Gemma family): retain old KV entries that the
+          memory-efficient windowed cache normally discards. This can enable prompt reuse and other
+          cache operations where the engine supports them, but its memory cost grows with context.{' '}
+          <em>Auto</em> uses the full cache only when the model weights and full KV cache fit in
+          fast memory — VRAM on a discrete GPU — and otherwise keeps the windowed cache. Takes
+          effect the next time the engine starts.
         </p>
         <p className="muted small" style={{ marginTop: '0.5rem', marginLeft: '10rem' }}>
           More engine flags (an explicit GPU-layer count, partial expert split, prompt-reuse size,

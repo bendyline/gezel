@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
+import { resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { MockProvider } from '../providers/mock.js';
 import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
@@ -30,7 +31,6 @@ import {
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
   messageExpressesModifyIntent,
-  resolveMlxEffectiveNumCtx,
   shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';
@@ -1353,6 +1353,34 @@ describe('ChatManager — resume', () => {
     expect(disk!.resumeFailed).toBeUndefined(); // cleared on the successful next turn
     // But the create call after the failed resume means we have BOTH a resume
     // attempt and a subsequent create in the call log:
+    const kinds = mock.calls.map((c) => c.kind);
+    expect(kinds).toContain('resume');
+    expect(kinds.filter((k) => k === 'create').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recovers when SessionResumeError surfaces lazily from sendAndWait', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('first');
+    await manager.send(session.id, 'hi');
+
+    // Codex CLI's resumeSession only constructs a lazy session. A missing
+    // rollout is discovered by `codex exec resume` on the first send instead
+    // of during resumeSession itself.
+    await manager.reset(session.id);
+    mock.scriptSendFailure(
+      '[codex-cli] thread resume failed: no rollout found for thread id deadbeef',
+      { name: 'SessionResumeError' },
+    );
+    mock.script('second, after lazy resume recovery');
+
+    const reply = await manager.send(session.id, 'are you back?');
+    expect(reply.content).toBe('second, after lazy resume recovery');
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.messages).toHaveLength(4);
+    expect(disk!.messages.at(-1)!.content).toBe('second, after lazy resume recovery');
+    expect(disk!.resumeFailed).toBeUndefined();
+
     const kinds = mock.calls.map((c) => c.kind);
     expect(kinds).toContain('resume');
     expect(kinds.filter((k) => k === 'create').length).toBeGreaterThanOrEqual(2);
@@ -4919,7 +4947,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('threads the final role allowlist into codex-cli gezel-mcp registration', async () => {
+  it('threads Codex policy into sessions and rebuilds when the project mode changes', async () => {
     await manager.shutdown();
     mock = new MockProvider({ name: 'copilot' });
     manager = new ChatManager({
@@ -4938,6 +4966,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       defaultModel: { 'codex-cli': 'gpt-5.5' },
     });
     await store.updateGezelSettings('ada', { reasoningEffort: 'ultra' });
+    await store.updateProject('default', { codexPermissionMode: 'reviewed' });
 
     const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
     mock.script('ok');
@@ -4948,8 +4977,60 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     const env = create!.opts!.mcpServer!.env;
     expect(create!.opts!.codexCliContext).toBeTruthy();
     expect(create!.opts!.codexCliContext?.reasoningEffortOverride).toBe('ultra');
+    expect(create!.opts!.codexCliContext?.permissionModeOverride).toBe('reviewed');
     expect(env.GEZEL_MCP_EXCLUDE).toBeTruthy();
     expect(env.GEZEL_MCP_ALLOW).toBe([...allow].sort().join(','));
+
+    await store.updateProject('default', { codexPermissionMode: 'plan' });
+    mock.script('planned');
+    await manager.send(session.id, 'Now only inspect it.');
+
+    const creates = mock.calls.filter((call) => call.kind === 'create');
+    expect(creates).toHaveLength(2);
+    expect(creates[1]!.opts!.codexCliContext?.permissionModeOverride).toBe('plan');
+    expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
+  });
+
+  it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {
+    await manager.shutdown();
+    mock = new MockProvider({ name: 'copilot' });
+    let contentRoot = join(home, 'gilde-bundled', 'data');
+    manager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', mock]],
+      catalog: new CatalogService(undefined, { contentRoot: () => contentRoot }),
+      secrets: new FileSecretStore(home),
+    });
+
+    // A live-session (re)build surfaces as either a 'create' carrying the
+    // MCP bridge or a 'resume' of persisted provider state. One-shot side
+    // completions (titles, extraction) also register bare 'create' calls
+    // and must not count.
+    const liveBuilds = () =>
+      mock.calls.filter(
+        (call) => (call.kind === 'create' && call.opts?.mcpServer) || call.kind === 'resume',
+      );
+
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    mock.script('ok');
+    await manager.send(session.id, 'First turn.');
+    mock.script('still ok');
+    await manager.send(session.id, 'Second turn, unchanged content.');
+    // Same root both turns: the live session is reused.
+    expect(liveBuilds()).toHaveLength(1);
+
+    // A live gilde activation flips the effective content root; the cached
+    // model profile/tuning were resolved from the old content, so the next
+    // turn must tear down and re-establish the live session.
+    contentRoot = join(home, 'gilde', 'versions', '0.1.99', 'package', 'data');
+    mock.script('rebuilt');
+    await manager.send(session.id, 'Third turn, after activation.');
+    expect(liveBuilds()).toHaveLength(2);
   });
 
   it('small local meester keeps every curated tool under the coordinator cap', async () => {

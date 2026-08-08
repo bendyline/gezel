@@ -61,11 +61,12 @@ export function miniHIso(height: number): number {
 export function townRoofRiseIso(r: Rect, scale: number, compact = false): number {
   const safeScale = Math.max(0.001, scale);
   const topSpanPx = (r.w + r.h) * safeScale;
-  // The compact ceiling is for symbol minis. It used to be 7px, which flattened
-  // every building in a symbol campus into a box with a token lid — and since
-  // most files carry symbols, that was most of the settlement. 13 gives a mini
-  // real pitch while still reading as subordinate to its parent block.
-  const risePx = Math.max(compact ? 1.5 : 2.5, Math.min(compact ? 13 : 16, topSpanPx * 0.13));
+  // The compact ceiling is for symbol minis. A 13px / 0.13 pitch still read as
+  // a modern bungalow roof once an entire symbol campus was fit on screen.
+  // Edwardian cottages and workshops need the roof to own the silhouette, so
+  // both forms now approach a visually steeper 8:12-ish pitch. The cap keeps a
+  // close-zoom roof from swallowing its facade.
+  const risePx = Math.max(compact ? 2 : 3, Math.min(compact ? 16 : 20, topSpanPx * 0.17));
   return risePx / safeScale;
 }
 

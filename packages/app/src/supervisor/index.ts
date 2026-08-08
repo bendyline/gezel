@@ -57,6 +57,13 @@ export interface ConnectOptions {
   adoptHealthWaitMs?: number;
 }
 
+interface LocalAdoptRuntime {
+  baseUrl: string;
+  token: string;
+  cert: string | null;
+  pid: number;
+}
+
 export type ConnectionMode = Mode['kind'];
 
 export type ServiceFallbackCode =
@@ -884,75 +891,45 @@ async function connectResolved(
   }
 
   if (mode.kind === 'local-adopt') {
-    const client = buildHealthClient(mode.baseUrl, mode.token, mode.cert);
-    try {
-      const health = await adoptedDaemonHealth(
-        client,
-        mode.pid,
-        opts,
-        opts.adoptHealthWaitMs ?? ADOPT_HEALTH_WAIT_MS,
-      );
-      // Version negotiation: in packaged mode, only adopt a running daemon
-      // whose version matches what we ship. A version mismatch almost
-      // always means an autostart daemon is pinned at an older release —
-      // adopting it would have the new Electron UI talking to old service
-      // code, which is worse than just restarting it.
-      if (opts.packaged) {
-        const shipped = await shippedServiceVersion();
-        if (shipped && health.version !== shipped) {
-          opts.logger?.warn?.(
-            `[supervisor] running daemon is v${health.version}, shipped is v${shipped}; stopping it and respawning`,
-          );
-          // Stop the outdated daemon before respawning so the user doesn't
-          // end up with two gezeld instances racing for the same `~/.gezel/`
-          // state. This is the ONE situation where we stop a pid we didn't
-          // spawn — justified because the version check just told us it's
-          // stale. On Windows the stop covers its full descendant tree.
-          // Phase 2 will coordinate with autostart cleanly;
-          // for now the autostart may restart the old one on the next
-          // login cycle, which is acceptable for a skeleton.
-          const stopped = await stopProcessByPid(mode.pid, opts.logger);
-          if (!stopped) {
-            throw new Error(
-              `Stale gezeld pid=${mode.pid} did not exit after the bounded stop ladder; refusing to spawn another writer`,
-            );
-          }
-          return await respawnPackagedAfterMismatch(opts);
+    let candidate: LocalAdoptRuntime = mode;
+    let adopted:
+      | {
+          health: Awaited<ReturnType<GezelClient['health']>>;
+          runtime: LocalAdoptRuntime;
         }
-      } else {
-        // Dev-mode staleness check: compare the workspace
-        // `service/dist/index.js` mtime to the daemon's pid-file mtime
-        // (a proxy for "when this daemon was started"). If the workspace
-        // build is newer, the user just rebuilt — the running daemon is
-        // executing stale TS, so adopting it would have the new UI talking
-        // to old service code. Stop it and fall through to embedded.
-        // Without this, `pnpm app` (which always runs `pnpm build` first)
-        // can silently use a daemon that doesn't reflect the just-built
-        // code, exactly the failure that surfaced when iterating on the
-        // salvage layer.
-        const stale = await isAdoptDaemonStaleForDev(opts.home, opts.logger);
-        if (stale) {
-          opts.logger?.warn?.(
-            `[supervisor] dev daemon at pid=${mode.pid} is older than the latest workspace build; stopping it and falling back to embedded`,
+      | undefined;
+    let healthError: unknown;
+
+    // adoptedDaemonHealth refreshes runtime metadata after every failed probe.
+    // Re-read once more at its failure boundary before authorizing a stop: the
+    // daemon may have rotated its token/certificate between the helper's final
+    // read and this branch.
+    for (;;) {
+      try {
+        adopted = await adoptedDaemonHealth(
+          candidate,
+          opts,
+          opts.adoptHealthWaitMs ?? ADOPT_HEALTH_WAIT_MS,
+        );
+        break;
+      } catch (err) {
+        const failedRuntime = err instanceof AdoptedDaemonHealthError ? err.runtime : candidate;
+        const latest = await readRuntime(opts.home);
+        if (latest && isProcessAlive(latest.pid) && !sameLocalRuntime(latest, failedRuntime)) {
+          opts.logger?.info?.(
+            `[supervisor] adopted daemon runtime changed at the health deadline; checking pid=${latest.pid} with the newly published credentials`,
           );
-          const stopped = await stopProcessByPid(mode.pid, opts.logger);
-          if (!stopped) {
-            throw new Error(
-              `Stale development gezeld pid=${mode.pid} did not exit after the bounded stop ladder; refusing embedded startup`,
-            );
-          }
-          return buildEmbedded(opts, {
-            code: 'adopted-daemon-stale',
-            sourceMode: 'local-adopt',
-            message: 'The adopted development daemon was stale and was stopped',
-          });
+          candidate = latest;
+          continue;
         }
+        candidate = failedRuntime;
+        healthError = err;
+        break;
       }
-      return new SupervisedService('local-adopt', mode.baseUrl, mode.token, mode.cert, opts, {
-        fallbackReason: flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-adopt')),
-      });
-    } catch (err) {
-      if (isProcessAlive(mode.pid)) {
+    }
+
+    if (!adopted) {
+      if (isProcessAlive(candidate.pid)) {
         // Getting here now means the daemon had ADOPT_HEALTH_WAIT_MS to answer
         // and never did, so it is wedged rather than busy — the patient poll in
         // adoptedDaemonHealth already absorbed the slow-boot case that made
@@ -964,16 +941,16 @@ async function connectResolved(
         // staleness) already stop the process they cannot use; do the same
         // here, and only refuse if it survives the bounded stop ladder.
         opts.logger?.warn?.(
-          `[supervisor] adopted daemon pid=${mode.pid} is alive but failing health checks; stopping it before starting a replacement`,
+          `[supervisor] adopted daemon pid=${candidate.pid} is alive but failing health checks; stopping it before starting a replacement`,
         );
-        const stopped = await stopProcessByPid(mode.pid, opts.logger);
+        const stopped = await stopProcessByPid(candidate.pid, opts.logger);
         if (!stopped) {
           opts.logger?.error?.(
-            `[supervisor] adopted daemon pid=${mode.pid} survived the stop ladder; refusing a second writer`,
+            `[supervisor] adopted daemon pid=${candidate.pid} survived the stop ladder; refusing a second writer`,
           );
           throw new Error(
-            `Adopted gezeld pid=${mode.pid} is unhealthy and did not exit when asked; refusing to start a second writer for the same home`,
-            { cause: err },
+            `Adopted gezeld pid=${candidate.pid} is unhealthy and did not exit when asked; refusing to start a second writer for the same home`,
+            { cause: healthError },
           );
         }
         opts.logger?.warn?.(
@@ -982,18 +959,86 @@ async function connectResolved(
         return buildEmbedded(opts, {
           code: 'adopted-daemon-unhealthy',
           sourceMode: 'local-adopt',
-          message: `The adopted daemon was unhealthy and was stopped: ${(err as Error).message}`,
+          message: `The adopted daemon was unhealthy and was stopped: ${errorMessage(healthError)}`,
         });
       }
       opts.logger?.warn?.(
-        `[supervisor] adopted daemon health check failed after pid=${mode.pid} exited: ${(err as Error).message}; falling back to embedded`,
+        `[supervisor] adopted daemon health check failed after pid=${candidate.pid} exited: ${errorMessage(healthError)}; falling back to embedded`,
       );
       return buildEmbedded(opts, {
         code: 'adopted-daemon-unhealthy',
         sourceMode: 'local-adopt',
-        message: `The adopted daemon was unavailable: ${(err as Error).message}`,
+        message: `The adopted daemon was unavailable: ${errorMessage(healthError)}`,
       });
     }
+
+    const { health, runtime } = adopted;
+    // Version negotiation: in packaged mode, only adopt a running daemon
+    // whose version matches what we ship. A version mismatch almost
+    // always means an autostart daemon is pinned at an older release —
+    // adopting it would have the new Electron UI talking to old service
+    // code, which is worse than just restarting it.
+    if (opts.packaged) {
+      const shipped = await shippedServiceVersion();
+      if (shipped && health.version !== shipped) {
+        opts.logger?.warn?.(
+          `[supervisor] running daemon is v${health.version}, shipped is v${shipped}; stopping it and respawning`,
+        );
+        // Stop the outdated daemon before respawning so the user doesn't
+        // end up with two gezeld instances racing for the same `~/.gezel/`
+        // state. This is the ONE situation where we stop a pid we didn't
+        // spawn — justified because the version check just told us it's
+        // stale. On Windows the stop covers its full descendant tree.
+        // Phase 2 will coordinate with autostart cleanly;
+        // for now the autostart may restart the old one on the next
+        // login cycle, which is acceptable for a skeleton.
+        const stopped = await stopProcessByPid(runtime.pid, opts.logger);
+        if (!stopped) {
+          throw new Error(
+            `Stale gezeld pid=${runtime.pid} did not exit after the bounded stop ladder; refusing to spawn another writer`,
+          );
+        }
+        return await respawnPackagedAfterMismatch(opts);
+      }
+    } else {
+      // Dev-mode staleness check: compare the workspace
+      // `service/dist/index.js` mtime to the daemon's pid-file mtime
+      // (a proxy for "when this daemon was started"). If the workspace
+      // build is newer, the user just rebuilt — the running daemon is
+      // executing stale TS, so adopting it would have the new UI talking
+      // to old service code. Stop it and fall through to embedded.
+      // Without this, `pnpm app` (which always runs `pnpm build` first)
+      // can silently use a daemon that doesn't reflect the just-built
+      // code, exactly the failure that surfaced when iterating on the
+      // salvage layer.
+      const stale = await isAdoptDaemonStaleForDev(opts.home, opts.logger);
+      if (stale) {
+        opts.logger?.warn?.(
+          `[supervisor] dev daemon at pid=${runtime.pid} is older than the latest workspace build; stopping it and falling back to embedded`,
+        );
+        const stopped = await stopProcessByPid(runtime.pid, opts.logger);
+        if (!stopped) {
+          throw new Error(
+            `Stale development gezeld pid=${runtime.pid} did not exit after the bounded stop ladder; refusing embedded startup`,
+          );
+        }
+        return buildEmbedded(opts, {
+          code: 'adopted-daemon-stale',
+          sourceMode: 'local-adopt',
+          message: 'The adopted development daemon was stale and was stopped',
+        });
+      }
+    }
+    return new SupervisedService(
+      'local-adopt',
+      runtime.baseUrl,
+      runtime.token,
+      runtime.cert,
+      opts,
+      {
+        fallbackReason: flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-adopt')),
+      },
+    );
   }
 
   if (mode.kind === 'local-spawn-packaged') {
@@ -1492,26 +1537,69 @@ function buildHealthClient(baseUrl: string, token: string, cert: string | null):
  * Gives up immediately once the process is gone: there is nothing to wait for,
  * and the caller's dead-pid path already recovers cleanly.
  */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+class AdoptedDaemonHealthError extends Error {
+  constructor(
+    cause: unknown,
+    readonly runtime: LocalAdoptRuntime,
+  ) {
+    super(errorMessage(cause), { cause });
+    this.name = 'AdoptedDaemonHealthError';
+  }
+}
+
+function sameLocalRuntime(a: LocalAdoptRuntime, b: LocalAdoptRuntime): boolean {
+  return a.pid === b.pid && a.baseUrl === b.baseUrl && a.token === b.token && a.cert === b.cert;
+}
+
 export async function adoptedDaemonHealth(
-  client: Pick<GezelClient, 'health'>,
-  pid: number,
-  opts: Pick<ConnectOptions, 'logger'>,
+  initialRuntime: LocalAdoptRuntime,
+  opts: Pick<ConnectOptions, 'home' | 'logger'>,
   budgetMs: number = ADOPT_HEALTH_WAIT_MS,
   pollMs: number = ADOPT_HEALTH_POLL_MS,
   alive: (pid: number) => boolean = isProcessAlive,
-): Promise<Awaited<ReturnType<GezelClient['health']>>> {
+  readCurrent: typeof readRuntime = readRuntime,
+): Promise<{
+  health: Awaited<ReturnType<GezelClient['health']>>;
+  runtime: LocalAdoptRuntime;
+}> {
   const deadline = Date.now() + budgetMs;
   let announced = false;
+  let runtime = initialRuntime;
   for (;;) {
+    const client = buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert);
     try {
-      return await healthWithTimeout(client);
+      return { health: await healthWithTimeout(client), runtime };
     } catch (err) {
-      if (!alive(pid)) throw err;
-      if (Date.now() >= deadline) throw err;
+      // Runtime discovery is a set of independently replaced files. During a
+      // restart the pid may already name the new daemon while token/cert still
+      // describe the old one. Refresh after every failed probe so this wait can
+      // converge on the generation that is actually serving.
+      const refreshed = await readCurrent(opts.home);
+      if (refreshed && alive(refreshed.pid) && !sameLocalRuntime(runtime, refreshed)) {
+        opts.logger?.info?.(
+          `[supervisor] adopted daemon runtime rotated while waiting; retrying pid=${refreshed.pid} with refreshed credentials`,
+        );
+        runtime = refreshed;
+        if (Date.now() >= deadline) {
+          try {
+            const refreshedClient = buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert);
+            return { health: await healthWithTimeout(refreshedClient), runtime };
+          } catch (refreshedErr) {
+            throw new AdoptedDaemonHealthError(refreshedErr, runtime);
+          }
+        }
+        continue;
+      }
+      if (!alive(runtime.pid)) throw new AdoptedDaemonHealthError(err, runtime);
+      if (Date.now() >= deadline) throw new AdoptedDaemonHealthError(err, runtime);
       if (!announced) {
         announced = true;
         opts.logger?.info?.(
-          `[supervisor] adopted daemon pid=${pid} is alive but not serving yet; waiting up to ${Math.round(
+          `[supervisor] adopted daemon pid=${runtime.pid} is alive but not serving yet; waiting up to ${Math.round(
             budgetMs / 1000,
           )}s for it to finish starting`,
         );

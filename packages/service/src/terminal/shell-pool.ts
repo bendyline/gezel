@@ -24,6 +24,8 @@ export interface ShellPoolRunOptions {
   initialCwd: string;
   /** Raw shell command to write to the shell's stdin. */
   command: string;
+  /** Client output width. Programs use this to choose their column layout. */
+  columns?: number;
   /**
    * Streaming sink — fires for each block of real command output
    * as it arrives from the PTY, before the final result resolves.
@@ -80,7 +82,7 @@ export class PersistentShellPool {
 
     if (!entry) {
       log.info(`spawning shell for thread=${threadId} (cwd=${opts.initialCwd})`);
-      const shell = await PersistentShell.start({ cwd: opts.initialCwd });
+      const shell = await PersistentShell.start({ cwd: opts.initialCwd, columns: opts.columns });
       entry = { shell, idleTimer: null };
       this.entries.set(threadId, entry);
     }
@@ -89,6 +91,7 @@ export class PersistentShellPool {
 
     try {
       const result = await entry.shell.run(opts.command, {
+        ...(opts.columns !== undefined ? { columns: opts.columns } : {}),
         ...(opts.onChunk ? { onChunk: opts.onChunk } : {}),
         ...(opts.onPromptDetected ? { onPromptDetected: opts.onPromptDetected } : {}),
       });

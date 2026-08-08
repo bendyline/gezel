@@ -317,14 +317,21 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/using external engine/)).toBeInTheDocument();
     });
   });
-  // The SWA cache control is a tri-state select (Auto / On / Off). `--swa-full`
-  // is the precondition for llama-server accepting `--cache-reuse` on SWA
-  // models; without it the engine logs "cache_reuse is not supported by this
-  // context" and drops the flag.
+  // The SWA cache control is a tri-state select (Auto / On / Off). Auto keeps
+  // the memory-efficient cache unless weights + full KV fit in fast memory.
   const findSwaSelect = () =>
     (screen.getAllByRole('combobox') as HTMLSelectElement[]).find((s) =>
-      within(s).queryByText(/Gemma family/),
+      within(s).queryByText(/full only when it fits fast memory/),
     )!;
+
+  it('explains that Auto is gated by fast-memory fit', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+    await openAdvanced();
+    expect(findSwaSelect()).toHaveValue('auto');
+    expect(screen.getByText(/VRAM on a discrete GPU/)).toBeInTheDocument();
+  });
 
   it('setting the full SWA cache to On saves llamaCppSwaFull: true', async () => {
     render(

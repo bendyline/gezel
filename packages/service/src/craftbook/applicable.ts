@@ -1,3 +1,5 @@
+import { readdir } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import type {
   CatalogItemSummary,
   Craftbook,
@@ -14,6 +16,110 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
+
+const CODEBASE_FILES = new Set([
+  '.git',
+  'package.json',
+  'pnpm-workspace.yaml',
+  'tsconfig.json',
+  'cargo.toml',
+  'go.mod',
+  'pyproject.toml',
+  'requirements.txt',
+  'gemfile',
+  'pom.xml',
+  'build.gradle',
+  'settings.gradle',
+  'composer.json',
+  'mix.exs',
+  'makefile',
+  'cmakelists.txt',
+]);
+const CODEBASE_DIRS = new Set([
+  'src',
+  'app',
+  'apps',
+  'lib',
+  'libs',
+  'packages',
+  'crates',
+  'cmd',
+  'internal',
+  'test',
+  'tests',
+]);
+const CODE_EXTENSIONS = new Set([
+  '.c',
+  '.cc',
+  '.cpp',
+  '.cs',
+  '.css',
+  '.ex',
+  '.exs',
+  '.go',
+  '.h',
+  '.hpp',
+  '.html',
+  '.java',
+  '.js',
+  '.jsx',
+  '.kt',
+  '.kts',
+  '.php',
+  '.py',
+  '.rb',
+  '.rs',
+  '.scala',
+  '.swift',
+  '.ts',
+  '.tsx',
+  '.vue',
+]);
+
+interface WorkspaceEntryShape {
+  name: string;
+  isDirectory(): boolean;
+}
+
+/** Pure root-level signal used by the project-aware craftbook filter. */
+export function workspaceEntriesLookLikeCodebase(
+  entries: ReadonlyArray<WorkspaceEntryShape>,
+): boolean {
+  return entries.some((entry) => {
+    const name = entry.name.toLowerCase();
+    if (CODEBASE_FILES.has(name)) return true;
+    if (entry.isDirectory() && CODEBASE_DIRS.has(name)) return true;
+    if (!entry.isDirectory() && CODE_EXTENSIONS.has(extname(name))) return true;
+    return !entry.isDirectory() && (name.endsWith('.sln') || name.endsWith('.csproj'));
+  });
+}
+
+/**
+ * Best-effort, bounded detection for a workspace that already contains a
+ * codebase. Root markers catch normal repositories immediately; one shallow
+ * pass also handles a folder whose actual project lives one directory down.
+ */
+export async function projectHasEstablishedCodebase(
+  store: Store,
+  projectId: string,
+): Promise<boolean> {
+  if (!projectId) return false;
+  const base = await store.projectWorkspaceDir(projectId).catch(() => null);
+  if (!base) return false;
+  const root = await readdir(base, { withFileTypes: true }).catch(() => []);
+  if (workspaceEntriesLookLikeCodebase(root)) return true;
+
+  const folders = root
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .slice(0, 24);
+  for (const folder of folders) {
+    const children = await readdir(join(base, folder.name), { withFileTypes: true }).catch(
+      () => [],
+    );
+    if (workspaceEntriesLookLikeCodebase(children)) return true;
+  }
+  return false;
+}
 
 /**
  * Build the requirement-evaluation context for a project from its stored
@@ -43,13 +149,17 @@ export async function listApplicableCraftbooks(
   catalog: CatalogService,
   store: Store,
   projectId: string,
+  opts: { establishedCodebase?: boolean } = {},
 ): Promise<CatalogItemSummary[]> {
   const items = await catalog.list('craftbook-template').catch(() => []);
   const ctx = await craftbookContextForProject(store, projectId);
+  const establishedCodebase =
+    opts.establishedCodebase ?? (await projectHasEstablishedCodebase(store, projectId));
   return items.filter(
     (it) =>
       it.manifest.kind === 'craftbook-template' &&
-      craftbookRequirementsMet(it.manifest.requirements, ctx),
+      craftbookRequirementsMet(it.manifest.requirements, ctx) &&
+      !(establishedCodebase && it.manifest.role === 'project-starter'),
   );
 }
 

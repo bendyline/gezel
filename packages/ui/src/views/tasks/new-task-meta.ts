@@ -1,16 +1,14 @@
 import type { CatalogItemSummary, CraftbookTemplateManifest, ProjectType } from '@bendyline/gezel';
-import { listProjectTypes } from '@bendyline/gezel';
+import { CRAFTBOOK_ROLE_META, listProjectTypes } from '@bendyline/gezel';
 import type { ProjectGlyphId } from '../projects/new-project-meta.js';
 
 /**
  * Lens + card metadata for the New Task dialog's craftbook gallery.
  *
- * The rail "lenses" reuse the project-type taxonomy (`PROJECT_TYPES` in
- * core) as browse filters over the ~200-book catalog: a book belongs to a
- * lens when its manifest tags intersect the type's curated
- * `craftbookTags` — the exact same rule the service uses to compute a
- * project's suggested subset, so "Recommended" and the lenses can never
- * disagree about what relevance means.
+ * "Recommended" remains project-type-aware, while the browse rail groups
+ * the remaining catalog by each craftbook's project-lifecycle role. That
+ * keeps "what fits this project type?" separate from "what kind of work is
+ * this recipe for?".
  */
 
 /** A craftbook catalog item narrowed to its manifest kind. */
@@ -30,8 +28,8 @@ export function toBookItems(items: CatalogItemSummary[]): BookItem[] {
   return out.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
 }
 
-/** Glyph per taxonomy lens, following the New Project gallery idiom. */
-const LENS_GLYPHS: Record<string, ProjectGlyphId> = {
+/** Glyph per project type, used as a card fallback. */
+const PROJECT_TYPE_GLYPHS: Record<string, ProjectGlyphId> = {
   'browser-game': 'die',
   'web-app': 'frame',
   'static-site': 'frame',
@@ -62,23 +60,29 @@ function bookMatchesTags(manifest: CraftbookTemplateManifest, wanted: Set<string
 }
 
 /**
- * The browse lenses that have at least one matching book in the given
- * (project-applicable) catalog subset. Order follows the taxonomy.
+ * The lifecycle shelves that have at least one matching book in the given
+ * project-applicable subset. Project starters disappear automatically when
+ * the service identifies an established codebase.
  */
 export function taskLensesFor(books: BookItem[]): TaskLens[] {
+  const roleGlyph: Record<(typeof CRAFTBOOK_ROLE_META)[number]['id'], ProjectGlyphId> = {
+    'project-starter': 'sprout',
+    'maintenance-review': 'code',
+    general: 'sheet',
+  };
   const out: TaskLens[] = [];
-  for (const type of listProjectTypes()) {
-    const wanted = lensTagSet(type);
-    const bookIds = new Set<string>();
-    for (const b of books) {
-      if (bookMatchesTags(b.manifest, wanted)) bookIds.add(b.manifest.id);
-    }
+  for (const role of CRAFTBOOK_ROLE_META) {
+    const bookIds = new Set(
+      books
+        .filter((book) => (book.manifest.role ?? 'general') === role.id)
+        .map((book) => book.manifest.id),
+    );
     if (bookIds.size > 0) {
       out.push({
-        id: type.id,
-        label: type.label,
-        tagline: type.description,
-        glyph: LENS_GLYPHS[type.id] ?? 'sheet',
+        id: `role:${role.id}`,
+        label: role.label,
+        tagline: role.description,
+        glyph: roleGlyph[role.id],
         bookIds,
       });
     }
@@ -90,7 +94,7 @@ export function taskLensesFor(books: BookItem[]): TaskLens[] {
 export function craftbookGlyph(manifest: CraftbookTemplateManifest): ProjectGlyphId {
   for (const type of listProjectTypes()) {
     if (bookMatchesTags(manifest, lensTagSet(type))) {
-      return LENS_GLYPHS[type.id] ?? 'sheet';
+      return PROJECT_TYPE_GLYPHS[type.id] ?? 'sheet';
     }
   }
   return 'sheet';

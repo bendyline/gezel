@@ -1,4 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, normalizeCodexPermissionMode } from '@bendyline/gezel';
 import { ProviderQueue } from '../queue.js';
 import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
 import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
@@ -75,7 +75,7 @@ export interface CodexCliProviderOptions {
   defaultReasoningEffort?: CodexReasoningEffort;
   /** User-supplied additions to the hardcoded model list. */
   extraModels?: ModelInfo[];
-  /** Per-install permission mode default. Falls back to `acceptEdits`. */
+  /** Per-install permission mode default. Falls back to Edit. */
   defaultPermissionMode?: CodexPermissionMode;
   /** Concurrency cap for parallel `codex` invocations. Default 4. */
   concurrency?: number;
@@ -150,7 +150,7 @@ export class CodexCliProvider implements LLMProvider {
     this.defaultModel = opts.defaultModel ?? DEFAULT_MODEL;
     if (opts.defaultReasoningEffort) this.defaultReasoningEffort = opts.defaultReasoningEffort;
     this.extraModels = opts.extraModels ?? [];
-    this.defaultPermissionMode = opts.defaultPermissionMode ?? 'acceptEdits';
+    this.defaultPermissionMode = opts.defaultPermissionMode ?? 'edit';
     this.runtimeDir = opts.runtimeDir;
     this.manageRuntimeFiles = opts.manageRuntimeFiles ?? true;
     if (opts.extraConfigOverrides) this.extraConfigOverrides = opts.extraConfigOverrides;
@@ -200,10 +200,22 @@ export class CodexCliProvider implements LLMProvider {
       ctx.reasoningEffortOverride,
       this.defaultReasoningEffort,
     );
+    const permissionMode = ctx.permissionModeOverride ?? this.defaultPermissionMode;
+    if (
+      normalizeCodexPermissionMode(permissionMode) === 'reviewed' &&
+      !this.resolved.capabilities.autoReview
+    ) {
+      const err = new Error(
+        '[codex-cli] Reviewed mode needs a newer Codex CLI with --approve-for-me. Update Codex, then test the connection again.',
+      ) as Error & { isActionable?: boolean };
+      err.isActionable = true;
+      throw err;
+    }
     const deps: CodexSessionDeps = {
       binaryPath: this.resolved.path,
+      binaryCapabilities: this.resolved.capabilities,
       model: opts.model ?? this.defaultModel,
-      permissionMode: ctx.permissionModeOverride ?? this.defaultPermissionMode,
+      permissionMode,
       systemMessage: opts.systemMessage,
       context: ctx,
       runtimeDir: this.runtimeDir,

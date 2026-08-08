@@ -4,6 +4,7 @@ import {
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
+  fitsSwaFullInFastMemory,
   planMoeOffload,
 } from './offload-planner.js';
 
@@ -165,6 +166,24 @@ describe('estimateKvReserveBytes', () => {
     );
   });
 
+  it('prices Gemma 4 E4B from its scalar heads, SWA dims, and 18 shared KV layers', () => {
+    const e4b = {
+      blockCount: 42,
+      headCountKv: 2,
+      sharedKvLayers: 18,
+      slidingWindowPattern: Array.from({ length: 42 }, (_, i) => (i + 1) % 6 !== 0),
+      keyLength: 512,
+      valueLength: 512,
+      keyLengthSwa: 256,
+      valueLengthSwa: 256,
+      ctxTokens: 2 * 65_536,
+      kvCacheType: 'f16',
+    };
+    // Only the first 24 layers own cache tensors: 20 SWA × 256+256 dims
+    // plus 4 global × 512+512 dims, across two 64K slots = exactly 7 GiB.
+    expect(estimateKvReserveBytes(e4b)).toBe(7 * GiB);
+  });
+
   it('returns undefined when the header lacks the needed dims', () => {
     expect(estimateKvReserveBytes({ ctxTokens: 16384 })).toBeUndefined();
     expect(estimateKvReserveBytes({ ...dims, headCountKv: undefined })).toBeUndefined();
@@ -226,6 +245,43 @@ describe('estimateWindowedKvLinearization', () => {
     });
     expect(w?.bytesPerToken).toBe(1 * 2 * 1024 * 2);
     expect(w?.fixedBytes).toBe(5 * 2 * 1024 * 2 * (512 + 2048));
+  });
+
+  it('excludes E4B shared layers from both global and windowed SWA cache terms', () => {
+    const w = estimateWindowedKvLinearization({
+      blockCount: 42,
+      headCountKv: 2,
+      sharedKvLayers: 18,
+      slidingWindow: 512,
+      slidingWindowPattern: Array.from({ length: 42 }, (_, i) => (i + 1) % 6 !== 0),
+      keyLength: 512,
+      valueLength: 512,
+      keyLengthSwa: 256,
+      valueLengthSwa: 256,
+      kvCacheType: 'f16',
+    });
+    // The first 24 layers contain 4 global and 20 SWA layers.
+    expect(w?.bytesPerToken).toBe(4 * 2 * (512 + 512) * 2);
+    expect(w?.fixedBytes).toBe(20 * 2 * (256 + 256) * 2 * (512 + 2048));
+  });
+
+  it('selects full E4B on 16 GiB fast memory and windowed E4B on 8 GiB', () => {
+    const fullKvBytes = 7 * GiB;
+    const residentWeightsBytes = Math.round(4_275_373_792 * 1.2);
+    expect(
+      fitsSwaFullInFastMemory({
+        residentWeightsBytes,
+        fullKvBytes,
+        fastBudgetBytes: Math.floor(16 * GiB * 0.95),
+      }),
+    ).toBe(true);
+    expect(
+      fitsSwaFullInFastMemory({
+        residentWeightsBytes,
+        fullKvBytes,
+        fastBudgetBytes: Math.floor(8 * GiB * 0.95),
+      }),
+    ).toBe(false);
   });
 
   it('scales by the KV cache dtype', () => {

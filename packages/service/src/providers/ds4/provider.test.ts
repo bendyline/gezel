@@ -1,7 +1,7 @@
 import type { GezelConfig } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
-import { buildDs4Provider } from '../../chat/manager.js';
 import { LlamaCppProvider } from '../llama-cpp/index.js';
+import { buildDs4Provider } from './build-provider.js';
 import { Ds4Provider } from './provider.js';
 import { classifyDs4Line } from './stdout-parser.js';
 

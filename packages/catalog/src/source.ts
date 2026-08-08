@@ -144,8 +144,15 @@ function defaultBundledDataDir(): string {
 }
 
 export interface BundledSourceOptions {
-  /** Override the on-disk root. Defaults to `data/` next to this package. */
-  dataDir?: string;
+  /**
+   * Override the on-disk root. Defaults to `data/` next to this package.
+   * A function is re-read on every disk access — the live gilde update
+   * mechanism uses this to flip the content root without reconstructing
+   * the source (CatalogService is built once at boot and held by many
+   * subsystems). A string keeps the historical freeze-at-construct
+   * behavior.
+   */
+  dataDir?: string | (() => string);
   /** Source id surfaced via `CatalogService.listSources()`. */
   id?: string;
   /** Human-readable label. */
@@ -162,16 +169,26 @@ export interface BundledSourceOptions {
 export class BundledSource implements CatalogSource {
   readonly id: string;
   readonly label: string;
-  private readonly root: string;
+  private readonly rootProvider: () => string;
   private readonly useIndex: boolean;
 
   constructor(options: BundledSourceOptions | string = {}) {
     // Back-compat: old positional `root: string` signature.
     const opts: BundledSourceOptions = typeof options === 'string' ? { dataDir: options } : options;
-    this.root = opts.dataDir ?? defaultBundledDataDir();
+    const dataDir = opts.dataDir;
+    if (typeof dataDir === 'function') {
+      this.rootProvider = dataDir;
+    } else {
+      const fixed = dataDir ?? defaultBundledDataDir();
+      this.rootProvider = () => fixed;
+    }
     this.id = opts.id ?? 'bundled';
     this.label = opts.label ?? 'Bundled';
     this.useIndex = !opts.noIndex;
+  }
+
+  private get root(): string {
+    return this.rootProvider();
   }
 
   async listKinds(): Promise<CatalogKind[]> {
@@ -709,6 +726,7 @@ function craftbookManifestFromDoc(
     ...(identity.license !== undefined ? { license: identity.license } : {}),
     version,
     releasedAt: doc.releasedAt,
+    role: identity.role,
     ...(identity.workflow ? { workflow: identity.workflow } : {}),
     // The prose lives inline on the doc (`description`) — there is no
     // separate about.md file to point at. `get()` surfaces it directly.
@@ -841,6 +859,7 @@ function mergeIdentityAndVersion(
       ...(identity.license !== undefined ? { license: identity.license } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
+      role: identity.role,
       ...(identity.workflow ? { workflow: identity.workflow } : {}),
       about: version.about,
       steps: version.steps,

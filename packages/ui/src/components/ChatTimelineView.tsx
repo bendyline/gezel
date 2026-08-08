@@ -3086,6 +3086,7 @@ export function ChatTimelineView({
             queueId={entry.id}
             preview={entry.preview}
             enqueuedAt={entry.enqueuedAt}
+            mediaProvider={getReadonlyGezelMediaProvider(slot.projectId, sessionId)}
             {...(entry.nudge ? { nudge: true } : {})}
             onDiscard={async () => {
               try {
@@ -3102,8 +3103,9 @@ export function ChatTimelineView({
               }
             }}
             onLoadText={async () => {
-              // Lazy full-text fetch — the SSE event only carries a
-              // truncated preview. `null` when the entry is gone.
+              // Full-text fetch for attachment rendering and editing — the
+              // SSE event only carries a truncated preview. `null` when the
+              // entry is gone.
               try {
                 const res = await api.listSessionQueue(sessionId);
                 return res.entries.find((e) => e.queueId === entry.id)?.text ?? null;

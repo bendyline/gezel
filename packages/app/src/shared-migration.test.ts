@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,6 +58,52 @@ describe('migrateLegacyMachineDataToShared', () => {
       version: 1,
       privateStatePolicy: 'copy-legacy-gezel-runtime-per-user-on-first-mount',
     });
+  });
+
+  it('rolls back earlier moves when a later legacy entity is rejected', async () => {
+    const source = join(root, 'machine');
+    const shared = join(root, 'shared');
+    const projectFile = join(source, 'projects', 'old-project', 'project.json');
+    await mkdir(join(source, 'projects', 'old-project'), { recursive: true });
+    await writeFile(projectFile, '{"id":"old-project"}\n');
+    await mkdir(join(source, 'gezels'), { recursive: true });
+    await mkdir(join(root, 'outside-gezel'));
+    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'));
+
+    await expect(
+      migrateLegacyMachineDataToShared({ sourceHome: source, sharedHome: shared }),
+    ).rejects.toThrow(/refusing symlinked legacy gezels entry: unsafe/);
+
+    // The project was processed before the invalid gezel. A failed transaction
+    // must put it back so PackageKit cannot leave a half-migrated legacy tree.
+    expect(await readFile(projectFile, 'utf8')).toBe('{"id":"old-project"}\n');
+    await expect(stat(join(shared, 'projects', 'old-project'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(stat(join(shared, MACHINE_SHARED_MARKER))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('restores a quarantined conflict when the transaction later fails', async () => {
+    const source = join(root, 'machine');
+    const shared = join(root, 'shared');
+    const legacyFile = join(source, 'projects', 'same', 'project.json');
+    const sharedFile = join(shared, 'projects', 'same', 'project.json');
+    await mkdir(join(source, 'projects', 'same'), { recursive: true });
+    await mkdir(join(shared, 'projects', 'same'), { recursive: true });
+    await writeFile(legacyFile, 'legacy-only bytes');
+    await writeFile(sharedFile, 'shared bytes');
+    await mkdir(join(source, 'gezels'), { recursive: true });
+    await mkdir(join(root, 'outside-gezel'));
+    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'));
+
+    await expect(
+      migrateLegacyMachineDataToShared({ sourceHome: source, sharedHome: shared }),
+    ).rejects.toThrow(/refusing symlinked legacy gezels entry: unsafe/);
+
+    expect(await readFile(legacyFile, 'utf8')).toBe('legacy-only bytes');
+    expect(await readFile(sharedFile, 'utf8')).toBe('shared bytes');
   });
 
   it('is idempotent after a completed migration', async () => {

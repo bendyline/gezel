@@ -1,6 +1,7 @@
 [
   {
     "id": "scrape-to-structured",
+    "role": "general",
     "name": "Scrape a Site to Structured Data",
     "description": "Turn one or more web pages into a clean, structured dataset (JSON or CSV) with a fixed schema — product listings, directory entries, articles, tables, or job posts. Scopes the exact fields and a sample-row target FIRST so extraction is verifiable, then crawls and parses each page into rows, then validates that every row matches the schema, types are coerced, required fields are non-empty, and there are no duplicates. The scope-before-scrape ordering is the point: a small model that locks the field list and one hand-written sample row extracts consistently instead of inventing keys per page.",
     "tags": ["scraping", "web", "data", "etl", "automation"],
@@ -45,6 +46,7 @@
   },
   {
     "id": "form-fill-batch",
+    "role": "general",
     "name": "Batch-Fill Forms from a Dataset",
     "description": "Automate filling a web or PDF form once per row of an input dataset — registrations, applications, data-entry portals, mail-merge into a form. Scopes the field-to-column mapping and a per-row success signal FIRST, then builds a loop that loads each record, maps it onto the form fields, submits, and records the outcome, then verifies every row was attempted, each submission was confirmed, and failures are logged with the reason. Mapping-before-build is the wisdom: lock the column→field map and the 'submitted OK' signal so the run is idempotent, resumable, and auditable rather than a blind click-through.",
     "tags": ["automation", "forms", "batch", "data-entry", "workflow"],
@@ -89,6 +91,7 @@
   },
   {
     "id": "monitor-and-alert",
+    "role": "general",
     "name": "Watch a Page or API and Alert",
     "description": "Build a watcher that polls a web page or API endpoint on a schedule, detects a meaningful change or threshold breach, and fires an alert (and only alerts on real changes, not noise). Scopes the watched target, the exact change/threshold condition, and the dedup/cooldown policy FIRST, then builds the poll-diff-notify loop with persisted state, then tests it against simulated change and no-change inputs so it neither misses a real change nor spams on every poll. Condition-and-cooldown-before-build is the wisdom that separates a useful monitor from an alert-fatigue generator.",
     "tags": ["monitoring", "alerts", "automation", "polling", "api"],
@@ -133,6 +136,7 @@
   },
   {
     "id": "price-tracker",
+    "role": "general",
     "name": "Track Prices Over Time",
     "description": "Build a price tracker that records the price of one or more products/SKUs each time it runs, appending a timestamped history so you can see trends, drops, and the lowest price seen. Scopes the SKUs, the price-extraction rule, and the history-file schema FIRST, then builds the fetch-and-append routine that is idempotent per day and computes drop-from-previous and all-time-low. Schema-before-build keeps the history a clean append-only time series instead of a pile of inconsistent snapshots — the foundation any later chart or alert reads from.",
     "tags": ["price", "tracking", "automation", "data", "time-series"],
@@ -169,6 +173,7 @@
   },
   {
     "id": "lead-enrichment",
+    "role": "general",
     "name": "Enrich a Leads List",
     "description": "Take a raw leads or contacts list and enrich each row with derived and looked-up attributes — company domain, industry, size band, role seniority, normalized location, and a quality/score flag — into a clean CRM-ready file. Scopes the enrichment fields, their sources, and the dedup/normalization rules FIRST, then enriches each lead row-by-row, then verifies coverage, that nothing was fabricated when a source had no data, and that duplicates are merged. Defining 'what each field means and where it comes from' before enriching is what stops a small model from inventing plausible-but-false company data.",
     "tags": ["leads", "enrichment", "crm", "data", "sales"],
@@ -213,6 +218,7 @@
   },
   {
     "id": "expense-categorize",
+    "role": "general",
     "name": "Categorize Transactions",
     "description": "Classify a list of bank/card transactions into a fixed chart-of-accounts category set, with confidence and a review queue for the uncertain ones, producing a clean categorized ledger ready for bookkeeping or tax. Locks the category taxonomy and the matching rules (merchant patterns, amount/sign heuristics) FIRST, then categorizes every transaction deterministically-first then by inference, then reviews that the taxonomy is closed, low-confidence rows are queued not force-fit, and totals reconcile to the input. Rules-before-categorize is the wisdom: a defined taxonomy plus rule precedence makes results auditable and repeatable, not a one-off guess.",
     "tags": ["finance", "expenses", "categorization", "bookkeeping", "automation"],
@@ -257,6 +263,7 @@
   },
   {
     "id": "doc-intake-pipeline",
+    "role": "general",
     "name": "Classify and Route Incoming Documents",
     "description": "Build a document-intake pipeline that classifies each incoming file (invoice, contract, resume, receipt, ID, support ticket, other) into a fixed type set, extracts a few key fields per type, and routes it to the right destination folder with a normalized filename. Locks the document-type taxonomy, per-type extraction fields, and the routing/naming rules FIRST, then builds the classify-extract-route loop, then verifies every input file was handled, classifications are in-set with an 'other' fallback, and routing is deterministic. Taxonomy-and-routing-before-build prevents files from silently vanishing or piling into a misc bucket.",
     "tags": ["documents", "classification", "intake", "automation", "routing"],
@@ -301,6 +308,7 @@
   },
   {
     "id": "booking-automation",
+    "role": "general",
     "name": "Automate a Booking or Checkout Flow",
     "description": "Automate a multi-step booking, reservation, or checkout flow end-to-end — select, fill details, choose options, confirm — with a hard dry-run/confirmation guard so it never accidentally commits a real transaction during development. Maps the step-by-step flow, the success/failure signals, and the safety guard FIRST, then builds the resilient step driver with waits and retries, then tests both the happy path and the failure/abort paths against a stub or dry-run. Mapping-the-flow-and-guard-before-build is what makes booking automation safe and reliable instead of a brittle, money-spending click bot.",
     "tags": ["automation", "booking", "checkout", "workflow", "browser"],
@@ -345,6 +353,7 @@
   },
   {
     "id": "backup-routine",
+    "role": "general",
     "name": "Scheduled Backup or Export",
     "description": "Build a scheduled, idempotent backup/export routine that snapshots data (files, a database, or an app export) to a timestamped, optionally compressed destination, prunes old backups by a retention policy, and verifies each backup is restorable. Locks what to back up, the destination layout, the retention policy, and the integrity check FIRST, then builds the snapshot-write-verify-prune routine, then verifies a fresh backup is created, integrity-checked, and that retention deletes only what it should. Defining retention and an integrity check up front is the wisdom that turns backups from a false sense of safety into a tested recovery path.",
     "tags": ["backup", "export", "automation", "scheduled", "ops"],
@@ -389,6 +398,7 @@
   },
   {
     "id": "data-export-migrate",
+    "role": "general",
     "name": "Migrate Data Between Tools",
     "description": "Migrate records from a source tool/format to a destination tool/format — CRM to CRM, spreadsheet to app, JSON export to a new API — with a field mapping, value transforms, and a reconciliation that proves nothing was lost or corrupted. Locks the source→destination field map, the transform/normalization rules, and the reconciliation criteria FIRST, then builds the extract-transform-load with a dry-run preview, then verifies record counts match, key fields round-trip, and a diff report flags any mismatch. Mapping-and-reconciliation-before-load is the discipline that makes a migration trustworthy rather than a one-shot leap of faith.",
     "tags": ["migration", "data", "etl", "export", "integration"],
@@ -433,6 +443,7 @@
   },
   {
     "id": "recurring-invoice-run",
+    "role": "general",
     "name": "Generate and Send Recurring Invoices",
     "description": "Run a recurring billing batch: for each active client/subscription due this period, generate a correctly-numbered, line-itemed invoice with taxes and totals, render it, and send it — once, idempotently, with a sent-log. Locks the invoice template, the numbering scheme, the tax/total math, and the due/idempotency rules FIRST, then builds the generate-render-send batch keyed to a billing-run log, then verifies every due client was invoiced exactly once, totals are arithmetically correct, and numbers are sequential with no gaps or dupes. Locking numbering and math up front is what keeps recurring billing audit-clean instead of producing duplicate or mis-totaled invoices.",
     "tags": ["invoicing", "billing", "finance", "automation", "recurring"],
@@ -477,6 +488,7 @@
   },
   {
     "id": "onboarding-checklist",
+    "role": "general",
     "name": "Generate an Onboarding Checklist",
     "description": "Produce a clear, role-specific onboarding checklist for a new hire, customer, or user — grouped by phase (before day one, week one, first 30 days), with each item owned, actionable, and verifiable. Scopes the audience, the phases, and a 'good item' rule FIRST so the checklist is complete and non-overlapping, then writes the actual checklist as a clean markdown document with grouped, owner-tagged, checkbox items. Scoping the phases and item-quality bar before writing is what turns a vague to-do dump into a sequenced, accountable onboarding plan.",
     "tags": ["onboarding", "checklist", "hr", "process", "document"],
@@ -513,6 +525,7 @@
   },
   {
     "id": "receipt-ocr-ledger",
+    "role": "general",
     "name": "Receipts to Expense Ledger",
     "description": "Turn a folder of receipt photos/PDFs into a clean expense ledger: OCR each receipt, extract vendor, date, line items, tax, and total, assign an expense category, and reconcile that each extracted total matches its line items. Locks the per-receipt field schema, the category set, and the math/reconciliation rules FIRST, then OCRs and extracts each receipt into rows, then verifies every receipt was processed, totals reconcile, currencies/dates are normalized, and low-confidence reads are flagged for review. Defining the schema and the total-equals-line-items check before extraction is what keeps an expense ledger trustworthy for reimbursement or tax.",
     "tags": ["receipts", "ocr", "expenses", "finance", "data"],
@@ -557,6 +570,7 @@
   },
   {
     "id": "subscription-audit",
+    "role": "maintenance-review",
     "name": "Audit Recurring Subscriptions",
     "description": "Audit a set of transactions or a vendor list to find every recurring subscription, normalize each to a monthly cost, surface duplicates, price hikes, and zombie/unused services, and produce a prioritized cancel/keep recommendation report. Locks the recurrence-detection rule, the normalization (to monthly), and the recommendation criteria FIRST, then detects and analyzes the recurring charges, then writes a clear report whose every recommendation is backed by the evidence in the data. Defining what counts as 'recurring' and how to rank cancel candidates before analyzing is what makes the audit actionable rather than a list of guesses.",
     "tags": ["subscriptions", "finance", "audit", "spend", "report"],

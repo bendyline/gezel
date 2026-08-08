@@ -91,6 +91,7 @@ describe('CodexCliSession', () => {
     expect(body).toContain('model = "gpt-5.5"');
     expect(body).toContain('[mcp_servers.gezel]');
     expect(body).toContain('GEZEL_TOKEN = "tk"');
+    expect(body).toContain('default_tools_approval_mode = "approve"');
   });
 
   it('forwards an initial resume id as providerState until a fresh one arrives', async () => {
@@ -259,11 +260,18 @@ describe('CodexCliSession', () => {
     expect(body).toContain('"read_file"');
   });
 
-  it('writes http MCP extras into Codex config without storing header values', async () => {
+  it('writes admitted MCP extras with approval and without storing HTTP header values', async () => {
     const codex = await makeFakeCodex(happyPathStream);
     const deps = buildDeps({ binaryPath: codex });
     deps.mcpServer = { command: 'node', args: ['/tmp/gezel-mcp.js'], env: {} };
     deps.extraMcpServers = [
+      {
+        id: 'docblocks',
+        kind: 'stdio',
+        command: 'node',
+        args: ['/tmp/docblocks-mcp.js'],
+        env: {},
+      },
       {
         id: 'remote-api',
         kind: 'http',
@@ -275,13 +283,72 @@ describe('CodexCliSession', () => {
     const session = new CodexCliSession(deps);
     await session.sendAndWait('hello');
     const body = await readFile(join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml'), 'utf8');
+    expect(body).toContain('[mcp_servers.docblocks]');
+    expect(body).toContain('args = ["/tmp/docblocks-mcp.js"]');
     expect(body).toContain('[mcp_servers.remote-api]');
     expect(body).toContain('url = "https://example.com/mcp"');
     expect(body).toContain('env_http_headers = {');
     expect(body).toContain('Authorization = "GEZEL_CODEX_MCP_HEADER_REMOTE_API_0"');
     expect(body).toContain('X-Api-Key = "GEZEL_CODEX_MCP_HEADER_REMOTE_API_1"');
+    expect(body.match(/default_tools_approval_mode = "approve"/g)).toHaveLength(3);
     expect(body).not.toContain('secret-token');
     expect(body).not.toContain('secret-key');
+  });
+
+  it('routes extra MCP calls through review and installs the command guard in Reviewed mode', async () => {
+    const codex = await makeFakeCodex(happyPathStream);
+    const deps = buildDeps({ binaryPath: codex });
+    deps.permissionMode = 'reviewed';
+    deps.binaryCapabilities = {
+      autoReview: true,
+      strictConfig: true,
+      managedHooks: true,
+      stdinPrompt: true,
+    };
+    deps.mcpServer = { command: 'node', args: ['/tmp/gezel-mcp.js'], env: {} };
+    deps.extraMcpServers = [
+      {
+        id: 'docblocks',
+        kind: 'stdio',
+        command: 'node',
+        args: ['/tmp/docblocks-mcp.js'],
+        env: {},
+      },
+    ];
+
+    await new CodexCliSession(deps).sendAndWait('review this turn');
+
+    const home = join(deps.runtimeDir, 'proj-1', 'sess-1');
+    const body = await readFile(join(home, 'config.toml'), 'utf8');
+    expect(body).toContain('[mcp_servers.gezel]');
+    expect(body).toContain('[mcp_servers.docblocks]');
+    expect(body.match(/default_tools_approval_mode = "approve"/g)).toHaveLength(1);
+    expect(body.match(/default_tools_approval_mode = "prompt"/g)).toHaveLength(1);
+    expect(await readFile(join(home, 'hooks.json'), 'utf8')).toContain('PreToolUse');
+    expect(await readFile(join(home, 'gezel-safety-hook.cjs'), 'utf8')).toContain(
+      "permissionDecision: 'deny'",
+    );
+  });
+
+  it('leaves extra MCP calls on the denied approval path in Plan mode', async () => {
+    const codex = await makeFakeCodex(happyPathStream);
+    const deps = buildDeps({ binaryPath: codex });
+    deps.permissionMode = 'plan';
+    deps.extraMcpServers = [
+      {
+        id: 'docblocks',
+        kind: 'stdio',
+        command: 'node',
+        args: ['/tmp/docblocks-mcp.js'],
+        env: {},
+      },
+    ];
+
+    await new CodexCliSession(deps).sendAndWait('inspect only');
+
+    const body = await readFile(join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml'), 'utf8');
+    expect(body).toContain('[mcp_servers.docblocks]');
+    expect(body).toContain('default_tools_approval_mode = "prompt"');
   });
 
   it('materializes image attachments under the per-session Codex runtime home', async () => {

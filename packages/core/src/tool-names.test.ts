@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { prettifyToolName, stripMcpPrefix } from './tool-names.js';
+import { prettifyToolName, stripMcpPrefix, toolActivityLabel } from './tool-names.js';
 
 describe('stripMcpPrefix', () => {
   it('strips the gezel-mcp wire prefix', () => {
@@ -44,5 +44,18 @@ describe('prettifyToolName', () => {
   it('leaves Claude built-ins as-is (no underscores to humanize)', () => {
     expect(prettifyToolName('Bash')).toBe('Bash');
     expect(prettifyToolName('TodoWrite')).toBe('TodoWrite');
+  });
+});
+
+describe('toolActivityLabel', () => {
+  it('keeps the concrete Gezel tool name visible', () => {
+    expect(toolActivityLabel('mcp__gezel__advance_task_step')).toBe('advance task step');
+  });
+
+  it('turns provider implementation buckets into human activity', () => {
+    expect(toolActivityLabel('shell')).toBe('running a command');
+    expect(toolActivityLabel('file_change')).toBe('updating files');
+    expect(toolActivityLabel('web_search')).toBe('searching the web');
+    expect(toolActivityLabel('mcp_tool_call')).toBe('working');
   });
 });

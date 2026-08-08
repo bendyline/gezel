@@ -51,7 +51,16 @@ vi.mock('../components/DocumentExport/index.js', () => ({
 vi.mock('../components/SquisqIntegration/index.js', () => ({
   createDocumentsContentContainer: () => ({}),
   createArtifactsContentContainer: () => ({}),
+  createProjectContentContainer: () => ({}),
   createDocumentLinkProvider: () => async () => [],
+  chooseOutsideInSource: () => null,
+  importOutsideInDocument: vi.fn(),
+  isOutsideInInternalPath: () => false,
+  relativePath: (from: string, to: string) => `${from}:${to}`,
+  renderOutsideInDocument: vi.fn(),
+  resolveOutsideInLayout: () => null,
+  runtimePathForTarget: () => '_squisq/squisq-player.js',
+  withOutsideInMetadata: (source: string) => source,
   deriveContainerScope: (p: string) => ({
     root: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
     primaryDocumentFilename: p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p,

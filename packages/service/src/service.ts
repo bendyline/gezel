@@ -37,6 +37,7 @@ import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js'
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
+import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
@@ -47,6 +48,7 @@ import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
+import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
@@ -447,6 +449,29 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const httpsEnabled = process.env.GEZEL_INSECURE_TRANSPORT !== '1';
   const cert = httpsEnabled ? await generateLoopbackCert() : null;
   const chatEvents = new ChatEventBus();
+  // TaskManager already writes a durable, human-readable History event for
+  // every meaningful task transition. Mirror those events onto the existing
+  // project SSE stream only after the append succeeds, giving terminal and
+  // other lightweight clients live task updates without a parallel task bus.
+  // Scheduler ticks are operational heartbeats, not transcript-worthy news.
+  history.subscribe((event) => {
+    if (
+      !event.projectId ||
+      event.kind === 'task.tick' ||
+      (!event.kind.startsWith('task.') && !event.kind.startsWith('tasknote.'))
+    ) {
+      return;
+    }
+    const ref = event.details?.ref;
+    chatEvents.publishProjectEvent(event.projectId, {
+      type: 'task_event',
+      eventId: event.id,
+      kind: event.kind,
+      summary: event.summary,
+      at: event.at,
+      ...(typeof ref === 'string' ? { taskRef: ref } : {}),
+    });
+  });
   // Shared gezels can be recruited from inside a chat (`ensure_gezel`), by
   // workspace imports, or by a direct UI/API create. Bridge the Store's
   // creation choke point onto the global SSE stream so every connected UI
@@ -460,7 +485,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   const memory = new MemoryManager(store);
   const tasks = new TaskManager(store, history);
-  const catalog = new CatalogService(undefined, { localRoot: home });
+  // The gilde update manager must exist before the CatalogService: it owns
+  // the effective content root, and the catalog's default sources capture it
+  // as a provider closure (re-read on every disk access, so a live content
+  // activation flips the whole catalog without a reconstruct).
+  const gildeUpdates = await GildeUpdateManager.create({ home, store, history });
+  gildeUpdates.onContentChanged(() => {
+    invalidateModelsCache();
+    clearCraftbookSuggestVectorCache();
+  });
+  const catalog = new CatalogService(undefined, {
+    localRoot: home,
+    contentRoot: () => gildeUpdates.contentDataDir(),
+  });
   // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
   // construction (unlike the Store-owned Meester/Klerk ensures above) so the
   // canonical gilde about.md and template provenance are preserved.
@@ -1898,11 +1935,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     growth,
     tasks,
     taskRunner,
+    taskScheduler: scheduler,
     nightShift,
     indexEnrichment,
     meesterStatus,
     scriptRunner,
     catalog,
+    gildeUpdates,
     handboek,
     secrets,
     git,
@@ -2350,6 +2389,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   if (serviceRole !== 'machine-engine') digestGenerator.start();
+  if (serviceRole !== 'machine-engine') gildeUpdates.startScheduler();
 
   // Meester status report: idle-gated, budgeted, change-gated sweep.
   // The activity tracker starts with it — its stamps feed the change
@@ -2432,6 +2472,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
+      gildeUpdates.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
       await activityTracker.stop();

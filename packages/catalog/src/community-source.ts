@@ -26,7 +26,7 @@ function defaultCommunityDataDir(): string {
  * entry with the same id as a bundled one is shadowed.
  */
 export class CommunitySource extends BundledSource {
-  constructor(dataDir: string = defaultCommunityDataDir()) {
+  constructor(dataDir: string | (() => string) = defaultCommunityDataDir()) {
     super({ dataDir, id: 'community', label: 'MCP Registry (community)' });
   }
 }

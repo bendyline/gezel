@@ -1,4 +1,5 @@
 import type {
+  CodexPermissionMode,
   GitBranchesResponse,
   GitStatusResponse,
   WorkspaceIndexStatus,
@@ -34,6 +35,15 @@ interface Props {
    * on a user-supplied folder must confirm first).
    */
   onAllowWritesChange?: (next: boolean) => void;
+  /**
+   * A configured AI provider can edit the workspace through its own harness,
+   * outside the scoped Gezel write gate. The edits control becomes a disabled
+   * indicator because its on/off value cannot guarantee read-only behavior.
+   */
+  editableViaAiProvider?: boolean;
+  /** Codex-specific project posture. When present, replaces Edits on/off. */
+  codexMode?: CodexPermissionMode;
+  onCodexModeChange?: (mode: CodexPermissionMode) => void;
   /** Opens the GitHub tab — the workbench for saves, diffs, and conflicts. */
   onOpenGitHub?: () => void;
   /**
@@ -56,6 +66,34 @@ const WRITES_TOOLTIP =
   "Whether gezellen may create, edit, and delete files in this project's workspace. " +
   'Internal workspaces default to on; a project opened from an existing folder defaults to off ' +
   '(turning it on asks for confirmation first). Gezels can always write reports into artifacts.';
+
+const PROVIDER_WRITES_TOOLTIP =
+  'Codex CLI, Claude CLI, or Copilot built-in tools can edit this workspace directly. ' +
+  'The Gezel edits switch cannot guarantee a read-only project while that provider is in use.';
+
+const CODEX_MODE_OPTIONS: ReadonlyArray<{
+  value: CodexPermissionMode;
+  label: string;
+  hint: string;
+}> = [
+  { value: 'plan', label: 'Plan', hint: 'Read and reason without changing workspace files.' },
+  { value: 'edit', label: 'Edit', hint: 'Edit inside the workspace; deny boundary crossings.' },
+  {
+    value: 'reviewed',
+    label: 'Reviewed',
+    hint: 'Edit in the workspace; send boundary crossings to an independent Codex reviewer.',
+  },
+  {
+    value: 'full',
+    label: 'Full',
+    hint: 'Run without Codex sandboxing or approvals. Gezel still blocks a narrow set of unmistakably destructive commands.',
+  },
+];
+
+function codexModeTitle(mode: CodexPermissionMode): string {
+  const option = CODEX_MODE_OPTIONS.find((item) => item.value === mode);
+  return `Codex ${option?.label ?? mode}: ${option?.hint ?? ''}`;
+}
 
 const PROJECT_STATUS_OPTIONS: ReadonlyArray<{ value: ProjectStatus; label: string }> = [
   { value: 'active', label: 'Active' },
@@ -98,16 +136,28 @@ function ProjectControlsOverflow({
   onStatusChange,
   gezelWritesOn,
   onAllowWritesChange,
+  editableViaAiProvider,
+  codexMode,
+  onCodexModeChange,
 }: {
   projectStatus: ProjectStatus;
   statusLocked?: boolean;
   onStatusChange?: (status: ProjectStatus) => void;
   gezelWritesOn: boolean;
   onAllowWritesChange?: (next: boolean) => void;
+  editableViaAiProvider: boolean;
+  codexMode?: CodexPermissionMode;
+  onCodexModeChange?: (mode: CodexPermissionMode) => void;
 }) {
   const [open, setOpen] = useState(false);
 
-  if (!onStatusChange && (!onAllowWritesChange || gezelWritesOn)) return null;
+  if (
+    !onStatusChange &&
+    !onCodexModeChange &&
+    (!onAllowWritesChange || (gezelWritesOn && !editableViaAiProvider))
+  ) {
+    return null;
+  }
 
   return (
     <div className="project-controls-overflow">
@@ -148,13 +198,18 @@ function ProjectControlsOverflow({
                 </div>
               </section>
             )}
-            {onAllowWritesChange && !gezelWritesOn && (
+            {!codexMode && onAllowWritesChange && (editableViaAiProvider || !gezelWritesOn) && (
               <section className="project-controls-overflow-section">
-                <span className="project-controls-overflow-label">File edits are off</span>
+                <span className="project-controls-overflow-label">
+                  {editableViaAiProvider ? 'File edits' : 'File edits are off'}
+                </span>
                 <button
                   type="button"
                   className="project-controls-overflow-item"
+                  disabled={editableViaAiProvider}
+                  title={editableViaAiProvider ? PROVIDER_WRITES_TOOLTIP : undefined}
                   onClick={() => {
+                    if (editableViaAiProvider) return;
                     onAllowWritesChange(true);
                     setOpen(false);
                   }}
@@ -162,8 +217,32 @@ function ProjectControlsOverflow({
                   <span className="project-writes-select-icon" aria-hidden>
                     <EditsLockIcon unlocked />
                   </span>
-                  <span>Turn edits on</span>
+                  <span>
+                    {editableViaAiProvider ? 'Editable via AI provider' : 'Turn edits on'}
+                  </span>
                 </button>
+              </section>
+            )}
+            {codexMode && onCodexModeChange && (
+              <section className="project-controls-overflow-section">
+                <span className="project-controls-overflow-label">Codex access</span>
+                <div className="project-controls-overflow-options">
+                  {CODEX_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="project-controls-overflow-item"
+                      aria-pressed={codexMode === option.value}
+                      title={option.hint}
+                      onClick={() => {
+                        onCodexModeChange(option.value);
+                        setOpen(false);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </section>
             )}
           </fieldset>
@@ -193,6 +272,9 @@ export function ProjectGitStatusBar({
   allowGezelWrites,
   workingDir,
   onAllowWritesChange,
+  editableViaAiProvider = false,
+  codexMode,
+  onCodexModeChange,
   onOpenGitHub,
   status: projectStatus,
   statusLocked = false,
@@ -708,27 +790,59 @@ export function ProjectGitStatusBar({
               </Select.Content>
             </Select.Root>
           )}
-          {onAllowWritesChange && (!compact || !gezelWritesOn) && (
+          {codexMode && onCodexModeChange && (
             <Select.Root
-              value={gezelWritesOn ? 'on' : 'off'}
-              onValueChange={(v) => onAllowWritesChange(v === 'on')}
+              value={codexMode}
+              onValueChange={(value) => onCodexModeChange(value as CodexPermissionMode)}
             >
               <Select.Trigger
-                className={`project-writes-select project-writes-select-${gezelWritesOn ? 'on' : 'off'}`}
-                title={WRITES_TOOLTIP}
-                aria-label="Gezel file edits for this project"
+                className={`project-writes-select project-codex-mode project-codex-mode-${codexMode}`}
+                title={codexModeTitle(codexMode)}
+                aria-label="Codex execution mode for this project"
               >
                 <span className="project-writes-select-icon" aria-hidden>
-                  <EditsLockIcon unlocked={gezelWritesOn} />
+                  <EditsLockIcon unlocked={codexMode !== 'plan'} />
                 </span>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                <Select.Item value="on">Edits on</Select.Item>
-                <Select.Item value="off">Edits off</Select.Item>
+                {CODEX_MODE_OPTIONS.map((option) => (
+                  <Select.Item key={option.value} value={option.value} textValue={option.label}>
+                    {option.label}
+                  </Select.Item>
+                ))}
               </Select.Content>
             </Select.Root>
           )}
+          {!codexMode &&
+            onAllowWritesChange &&
+            (!compact || !gezelWritesOn || editableViaAiProvider) && (
+              <Select.Root
+                value={editableViaAiProvider ? 'provider' : gezelWritesOn ? 'on' : 'off'}
+                disabled={editableViaAiProvider}
+                onValueChange={(v) => {
+                  if (!editableViaAiProvider) onAllowWritesChange(v === 'on');
+                }}
+              >
+                <Select.Trigger
+                  className={`project-writes-select project-writes-select-${
+                    editableViaAiProvider ? 'provider' : gezelWritesOn ? 'on' : 'off'
+                  }`}
+                  title={editableViaAiProvider ? PROVIDER_WRITES_TOOLTIP : WRITES_TOOLTIP}
+                  aria-label="Gezel file edits for this project"
+                >
+                  <span className="project-writes-select-icon" aria-hidden>
+                    <EditsLockIcon unlocked={editableViaAiProvider || gezelWritesOn} />
+                  </span>
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="on">Edits on</Select.Item>
+                  <Select.Item value="off">Edits off</Select.Item>
+                  <Select.Item value="provider">Editable via AI provider</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            )}
         </div>
         {compact && (
           <ProjectControlsOverflow
@@ -737,6 +851,9 @@ export function ProjectGitStatusBar({
             onStatusChange={onStatusChange}
             gezelWritesOn={gezelWritesOn}
             onAllowWritesChange={onAllowWritesChange}
+            editableViaAiProvider={editableViaAiProvider}
+            codexMode={codexMode}
+            onCodexModeChange={onCodexModeChange}
           />
         )}
         {!onAllowWritesChange && !gezelWritesOn && (

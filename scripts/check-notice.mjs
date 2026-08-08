@@ -7,8 +7,8 @@
  *   - a native VERSION pin that is stale in NOTICE.md;
  *   - a native license manifest that is not bound to the same tag/commit;
  *   - missing or orphaned native license texts;
- *   - a bundled WOFF2 missing from the font manifest (or vice versa);
- *   - a font/license listed in the manifest but absent from NOTICE.md/disk.
+ *   - a built UI font missing from the font manifest/NOTICE (or vice versa);
+ *   - a font license absent from the service npm payload or stale on disk.
  */
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
@@ -20,6 +20,7 @@ import {
   pnpmReleaseTargets,
   shippedPnpmRuntimePackages,
 } from './pnpm-runtime-inventory.mjs';
+import { verifyServiceFontLegalBundle } from './service-font-legal.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(scriptDir, '..');
@@ -96,9 +97,16 @@ async function parsePinnedConstant(path, name) {
   return match[1];
 }
 
-function wildcardRegex(pattern) {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
-  return new RegExp(`^${escaped}$`);
+function builtFontRegex(pattern) {
+  const match = pattern.match(/^(.+)\.(woff2?|ttf|otf)$/i);
+  if (!match) throw new Error(`invalid bundled-font pattern: ${pattern}`);
+  const stem = match[1];
+  const escaped = stem.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
+  // Vite preserves the original stem and inserts a content hash before the
+  // extension. A wildcard source pattern already consumes that hash; exact
+  // names (OpenMoji) need the optional suffix explicitly.
+  const hash = stem.includes('*') ? '' : '(?:-[a-zA-Z0-9_-]+)?';
+  return new RegExp(`^${escaped}${hash}\\.${match[2]}$`, 'i');
 }
 
 function sorted(values) {
@@ -223,11 +231,23 @@ async function checkNativeInventory(notice) {
 
 async function checkFontInventory(notice) {
   const fontsRoot = join(repoRoot, 'packages', 'ui', 'src', 'assets', 'fonts');
+  const builtAssetsRoot = join(repoRoot, 'packages', 'service', 'dist', 'ui', 'assets');
+  if (!existsSync(builtAssetsRoot)) {
+    throw new Error(
+      'missing packages/service/dist/ui/assets; build the UI and service before checking notices',
+    );
+  }
+  const stagedLegal = await verifyServiceFontLegalBundle();
   const fontManifest = await readFile(join(fontsRoot, 'README.md'), 'utf8');
   const rows = parseMarkdownTable(fontManifest).filter(
     (cells) => cells[0] !== 'File(s)' && cells.length >= 4,
   );
-  const actualFonts = (await readdir(fontsRoot)).filter((name) => name.endsWith('.woff2'));
+  const actualFonts = (await readdir(builtAssetsRoot)).filter((name) =>
+    /\.(?:woff2?|ttf|otf)$/i.test(name),
+  );
+  if (actualFonts.length === 0) {
+    throw new Error('packages/service/dist/ui/assets contains no built font files');
+  }
   const declaredNames = new Set();
   const matchedFiles = new Map(actualFonts.map((name) => [name, []]));
 
@@ -246,19 +266,37 @@ async function checkFontInventory(notice) {
         `font ${fontName} references missing license ${relative(repoRoot, licensePath)}`,
       );
     }
+    const matcher = builtFontRegex(pattern);
+    const matches = actualFonts.filter((file) => matcher.test(file));
+    // The source manifest also records weights/themes that Vite may tree-shake.
+    // Only families represented in the distribution belong in its inventory.
+    if (matches.length === 0) continue;
     if (declaredNames.has(fontName)) throw new Error(`duplicate bundled font name: ${fontName}`);
     declaredNames.add(fontName);
-
-    const matcher = wildcardRegex(pattern);
-    const matches = actualFonts.filter((file) => matcher.test(file));
-    if (matches.length === 0) throw new Error(`font manifest pattern matches no files: ${pattern}`);
     for (const file of matches) matchedFiles.get(file).push(fontName);
+  }
+
+  const dependencyFonts = [
+    {
+      name: `Font Awesome Free ${stagedLegal.fontAwesomeVersion}`,
+      pattern: 'fa-*.woff2',
+    },
+    { name: 'Visual Studio Code icons', pattern: 'codicon-*.ttf' },
+  ];
+  for (const font of dependencyFonts) {
+    const matcher = builtFontRegex(font.pattern);
+    const matches = actualFonts.filter((file) => matcher.test(file));
+    if (matches.length === 0) {
+      throw new Error(`dependency font pattern matches no built files: ${font.pattern}`);
+    }
+    declaredNames.add(font.name);
+    for (const file of matches) matchedFiles.get(file).push(font.name);
   }
 
   for (const [file, names] of matchedFiles) {
     if (names.length !== 1) {
       throw new Error(
-        `${relative(repoRoot, join(fontsRoot, file))} must match exactly one font manifest row; ` +
+        `${relative(repoRoot, join(builtAssetsRoot, file))} must match exactly one font manifest row; ` +
           `matched ${names.length}: ${names.join(', ') || '(none)'}`,
       );
     }
@@ -277,16 +315,34 @@ async function checkFontInventory(notice) {
       throw new Error(`NOTICE font ${match[1].trim()} does not link to a local license text`);
     }
   }
+  const dependencySection = markdownSubsection(notice, 'Icon fonts carried inside dependencies');
+  const dependencyRows = parseMarkdownTable(dependencySection).filter(
+    (cells) => cells[0] !== 'Asset' && cells.length >= 4,
+  );
+  for (const cells of dependencyRows) {
+    const match = (cells[0] ?? '').match(/\*\*([^*]+)\*\*/);
+    if (!match) throw new Error(`invalid NOTICE dependency-font row: | ${cells.join(' | ')} |`);
+    noticeNames.add(match[1].trim());
+  }
+  for (const required of ['Fonticons, Inc.', 'Microsoft Corporation', 'used unmodified']) {
+    if (!dependencySection.includes(required)) {
+      throw new Error(`NOTICE dependency-font attribution is missing: ${required}`);
+    }
+  }
   if (!sameMembers(declaredNames, noticeNames)) {
     throw new Error(
       [
-        'NOTICE bundled fonts differ from font manifest',
-        `  manifest: ${formatSet(declaredNames)}`,
+        'NOTICE bundled fonts differ from built service UI assets',
+        `  built: ${formatSet(declaredNames)}`,
         `  NOTICE: ${formatSet(noticeNames)}`,
       ].join('\n'),
     );
   }
-  return { families: declaredNames.size, files: actualFonts.length };
+  return {
+    families: declaredNames.size,
+    files: actualFonts.length,
+    licenseFiles: stagedLegal.files,
+  };
 }
 
 async function checkBundledRuntimes(notice) {
@@ -413,7 +469,8 @@ async function main() {
   console.log(
     `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ` +
       `${result.native.licenseFiles} native license texts, ` +
-      `${result.fonts.families} font families, ${result.fonts.files} WOFF2 files, and ` +
+      `${result.fonts.families} font families, ${result.fonts.files} built font files, ` +
+      `${result.fonts.licenseFiles} service font-license files, and ` +
       `${result.runtimes.count} bundled application runtimes with ` +
       `${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
   );

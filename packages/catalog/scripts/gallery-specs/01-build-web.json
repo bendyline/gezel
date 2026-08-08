@@ -1,6 +1,7 @@
 [
   {
     "id": "html-arcade-game",
+    "role": "project-starter",
     "name": "HTML Arcade Game",
     "description": "Build a playable single-file HTML5 canvas arcade game such as a space shooter, runner, dodger, or asteroids clone. Locks the core mechanic, controls, and win/lose loop first, then a visual look, then implements a real requestAnimationFrame game loop with input handling and collision. The deliberate design-before-code ordering is what stops a small model from shipping a static canvas that does not actually play; every phase tightens an acceptance bar the reviewer enforces until the game is genuinely fun and bug-free.",
     "tags": ["game", "html", "canvas", "interactive", "arcade"],
@@ -46,6 +47,7 @@
   },
   {
     "id": "html-puzzle-game",
+    "role": "project-starter",
     "name": "HTML Puzzle Game",
     "description": "Build a single-file HTML logic or puzzle game such as a match-3, sliding tile, Sokoban, 2048, minesweeper, or sudoku. Locks the rule system, the solve/fail condition, and the win detection first, then a clean grid visual language, then implements deterministic board state with valid-move enforcement. Puzzle games live or die on correct rules and reliable win detection, so the design phase pins the exact legal-move and victory logic before any rendering — the ordering that prevents a small model from shipping a grid that looks right but never registers a win.",
     "tags": ["game", "html", "puzzle", "logic", "grid"],
@@ -91,6 +93,7 @@
   },
   {
     "id": "board-game-web",
+    "role": "project-starter",
     "name": "Digital Board Game",
     "description": "Build a single-file web version of a turn-based board game such as tic-tac-toe, checkers, connect-four, reversi, or a simple chess variant, with two-player hotseat or a basic AI opponent. Locks the rules, turn order, legal-move set, and win/draw detection first, then the board visual language, then implements an authoritative turn state machine. Board games demand correct turn alternation and exhaustive win/draw detection, so the rules phase enumerates every terminal condition before rendering — the ordering that stops a small model from shipping a board where turns desync or a win goes unnoticed.",
     "tags": ["game", "html", "board-game", "turn-based", "strategy"],
@@ -136,6 +139,7 @@
   },
   {
     "id": "idle-clicker-game",
+    "role": "project-starter",
     "name": "Idle / Incremental Game",
     "description": "Build a single-file idle or incremental clicker game such as a cookie/factory clicker with upgrades, generators, and exponential growth. Designs the resource economy — base click yield, generator costs, cost-scaling factor, and per-second production — first, then the layout, then implements a tick loop with persistent-feeling progression. Idle games are an economy problem before a UI problem: if costs and yields are not tuned the game is boring in 10 seconds or unwinnable, so the economy phase locks the exact numbers and growth curve before any rendering.",
     "tags": ["game", "html", "idle", "incremental", "clicker"],
@@ -181,6 +185,7 @@
   },
   {
     "id": "physics-toy",
+    "role": "project-starter",
     "name": "Interactive Physics Toy",
     "description": "Build a single-file interactive canvas physics or particle toy such as a bouncing-ball sandbox, gravity wells, springs, cloth, fluid, or a boids flock that the user can poke with the mouse. Defines the simulation model — forces, integration, collisions, and the interaction verbs — first, then implements a stable per-frame integrator. Physics toys feel magical only when the numerics are stable and the mouse interaction is responsive, so the concept phase pins the forces and integration scheme before any drawing, the ordering that keeps a small model from shipping a jittery or exploding sim.",
     "tags": ["canvas", "physics", "simulation", "interactive", "particles"],
@@ -218,6 +223,7 @@
   },
   {
     "id": "branding-website",
+    "role": "project-starter",
     "name": "Branding Website",
     "description": "Build a small brand or marketing website where the visual identity leads. Locks a visual language and section mockups FIRST — palette, type pairing, spacing scale, hero treatment — then writes the marketing copy in that voice, then builds responsive HTML to the locked design with real CSS. This visual-first ordering is the whole point: it makes brand sites feel intentionally designed rather than templated, and it stops a small model from redesigning in code mid-build.",
     "tags": ["website", "branding", "marketing", "design", "html"],
@@ -262,6 +268,7 @@
   },
   {
     "id": "landing-page",
+    "role": "project-starter",
     "name": "Landing Page",
     "description": "Build a single high-conversion landing page for one offer — a product, signup, waitlist, or download — with a focused hero, benefits, social proof, and one primary call to action above and below the fold. Locks the offer, audience, and single CTA first, then a conversion-oriented visual design, then the persuasive copy, then builds responsive HTML with real CSS. The scope-then-design-then-copy ordering keeps the page ruthlessly focused on one conversion goal instead of becoming a sprawling site.",
     "tags": ["website", "marketing", "landing-page", "conversion", "html"],
@@ -315,6 +322,7 @@
   },
   {
     "id": "portfolio-site",
+    "role": "project-starter",
     "name": "Portfolio Site",
     "description": "Build a personal or professional portfolio site that showcases projects, an about/bio, and contact links in a single polished page. Locks the content inventory — which projects, what bio, which links — first, then a clean gallery-style visual design, then builds responsive HTML with a project grid and real CSS. Scoping the content before designing prevents a small model from inventing fake projects or building a layout the real content does not fit; the portfolio's job is to present a finite set of real work cleanly.",
     "tags": ["website", "portfolio", "personal-site", "showcase", "html"],
@@ -360,6 +368,7 @@
   },
   {
     "id": "docs-site",
+    "role": "project-starter",
     "name": "Documentation Site",
     "description": "Build a single-page documentation site with a sidebar table of contents, anchored sections, code blocks, and in-page navigation — the kind of reference page a library or API ships. Locks the information architecture (the section tree and ordering) first, then a readable docs visual design with good typography and code styling, then builds the HTML with working anchor links and a sticky sidebar. Getting the IA right before layout is what makes docs findable; a small model that jumps straight to HTML produces an unnavigable wall of text.",
     "tags": ["website", "documentation", "docs", "reference", "html"],
@@ -405,6 +414,7 @@
   },
   {
     "id": "spa-dashboard",
+    "role": "project-starter",
     "name": "Metrics / Admin Dashboard",
     "description": "Build a single-page metrics or admin dashboard with KPI summary cards, at least one chart, and a data table, rendered from sample or provided data. Locks the data model and which metrics matter first, then a scannable dashboard layout (grid of cards, chart placement, table), then builds the interactive HTML with a lightweight charting approach and a sortable/filterable table. Deciding the metrics and layout before coding prevents a small model from dumping raw data with no hierarchy; a dashboard's value is the at-a-glance summary up top.",
     "tags": ["website", "dashboard", "admin", "metrics", "charts", "html"],
@@ -450,6 +460,7 @@
   },
   {
     "id": "web-app-crud",
+    "role": "project-starter",
     "name": "CRUD Web App",
     "description": "Build a small single-file CRUD web app — a todo list, notes, contacts, or inventory manager — with create, read, update, and delete plus localStorage persistence so data survives a reload. Locks the data model and the four operations first, then a clean list-plus-form UI design, then builds vanilla JS with real state and persistence. CRUD apps fail when delete or edit silently does nothing or data vanishes on reload, so the model phase pins every operation's behavior before coding, the ordering that gets a small model to a genuinely working app.",
     "tags": ["website", "crud", "app", "localstorage", "interactive", "html"],
@@ -495,6 +506,7 @@
   },
   {
     "id": "form-wizard",
+    "role": "project-starter",
     "name": "Multi-Step Form Wizard",
     "description": "Build a single-file multi-step form wizard — a signup, checkout, survey, or onboarding form split across steps with a progress indicator, per-step validation, back/next navigation, and a final review-and-submit. Designs the step flow, fields per step, and validation rules first, then implements stateful navigation that preserves entered data across steps. Wizards break when going back loses data or a step advances with invalid input, so the flow-design phase locks the field-per-step map and validation before any markup.",
     "tags": ["form", "wizard", "multi-step", "validation", "html"],
@@ -532,6 +544,7 @@
   },
   {
     "id": "data-viz-page",
+    "role": "project-starter",
     "name": "Data Visualization Explorer",
     "description": "Build a single interactive chart or data explorer page — bar, line, scatter, or pie — driven by sample or provided data, with controls to filter, switch series, or change the dimension and a tooltip on hover. Scopes the dataset and the question the chart answers first, then the chart type and encodings, then implements a canvas or SVG chart with real interactivity. A chart that does not map data to pixels correctly is worse than a table, so the data and chart-design phases lock the encoding and the axes before any rendering code.",
     "tags": ["website", "data-viz", "chart", "interactive", "svg", "html"],
@@ -577,6 +590,7 @@
   },
   {
     "id": "email-template",
+    "role": "project-starter",
     "name": "Responsive HTML Email",
     "description": "Build a responsive HTML email template that renders across email clients — Outlook, Gmail, Apple Mail — using table-based layout, inline styles, and bulletproof buttons, for a newsletter, transactional, or promo send. Designs the visual structure and the client-safe constraints first, writes the copy, then builds the table-based HTML with all CSS inlined. Email is not the web: external CSS, flexbox, and modern selectors break, so the design phase locks the table layout and inline-only rule before any markup, the ordering that keeps a small model from producing a div-and-class email that renders broken in Outlook.",
     "tags": ["email", "html-email", "responsive", "newsletter", "marketing"],
@@ -622,6 +636,7 @@
   },
   {
     "id": "chrome-extension",
+    "role": "project-starter",
     "name": "Browser Extension",
     "description": "Build a Manifest V3 browser extension scaffold — a popup, a content script, and the manifest — that does one concrete thing on the current page (highlight, count, extract, or toggle). Scopes the single capability and the required permissions first, designs the popup UI, then builds a valid manifest.json plus popup and content-script files wired by messaging. Extensions fail at the manifest and the popup↔content messaging boundary, so the scope phase pins the exact MV3 permissions and message contract before any code, keeping a small model from producing a manifest the browser rejects.",
     "tags": ["browser-extension", "chrome", "manifest-v3", "popup", "javascript"],
@@ -677,6 +692,7 @@
   },
   {
     "id": "pwa-offline",
+    "role": "project-starter",
     "name": "Installable Offline PWA",
     "description": "Build an installable Progressive Web App that works offline — an HTML app shell, a web app manifest, and a service worker that caches the shell so it loads with no network. Scopes the app's one job and the offline strategy first, designs the app shell, then implements the manifest, registration, and a cache-first service worker. PWAs fail at installability and the service-worker caching contract, so the scope phase locks the cached asset list and the offline behavior before coding, keeping a small model from shipping a manifest that fails the install criteria or a service worker that never caches.",
     "tags": ["pwa", "service-worker", "offline", "installable", "web-app"],
@@ -758,6 +774,7 @@
   },
   {
     "id": "interactive-quiz",
+    "role": "project-starter",
     "name": "Interactive Quiz Widget",
     "description": "Build a single-file interactive quiz or assessment — multiple-choice, true/false, or a scored personality quiz — that asks questions one at a time, tracks the score, gives feedback, and shows a results screen. Authors the question bank, answer keys, and scoring logic first, designs the question and results UI, then implements stateful question flow with correct scoring. Quizzes break when the score is miscounted or the results screen never appears, so the content phase locks the answer key and the score-to-result mapping before any markup.",
     "tags": ["quiz", "assessment", "interactive", "education", "html"],
@@ -803,6 +820,7 @@
   },
   {
     "id": "onboarding-flow",
+    "role": "project-starter",
     "name": "Product Onboarding Tour",
     "description": "Build a single-file product onboarding tour or coachmark walkthrough that guides a new user through key features with sequential tooltips, a highlighted target, next/back/skip controls, and a finish state. Designs the step sequence, what each step points at, and the copy strategy first, writes the step copy, then implements the spotlight overlay and step navigation. Tours break when a step points at the wrong element or skip/finish does not dismiss, so the flow-design phase locks the step-to-target map before any code.",
     "tags": ["onboarding", "tour", "walkthrough", "coachmarks", "html"],
@@ -848,6 +866,7 @@
   },
   {
     "id": "pricing-page",
+    "role": "project-starter",
     "name": "Pricing Page",
     "description": "Build a single pricing or plan-comparison page with tiered plan cards, a feature comparison, a highlighted recommended plan, and optionally a monthly/annual toggle that updates prices. Scopes the plans, features, and pricing model first, designs a comparison layout that makes the recommended tier obvious, writes the plan copy, then builds responsive HTML with a working billing toggle. Pricing pages fail when the toggle does not update prices or the tiers are not genuinely comparable, so the offer-scope phase locks the exact plans and feature matrix before any markup.",
     "tags": ["website", "pricing", "plans", "comparison", "marketing", "html"],
@@ -901,6 +920,7 @@
   },
   {
     "id": "micro-game-jam",
+    "role": "project-starter",
     "name": "Micro Game Jam",
     "description": "Build a tiny, complete, themed micro-game from a one-word or one-line prompt — a 60-second arcade or one-mechanic toy that fully fits in a single HTML file with a clear goal and a win/lose. Interprets the theme into one tight mechanic and a scope you can actually finish first, then builds the whole game in one pass. The jam discipline is ruthless scope: pick ONE mechanic that expresses the theme, lock a tiny acceptance bar, and ship it playable rather than sprawling — the ordering that gets a small model to a finished game instead of an unfinished engine.",
     "tags": ["game", "html", "game-jam", "micro-game", "canvas"],
@@ -938,6 +958,7 @@
   },
   {
     "id": "svg-animation",
+    "role": "project-starter",
     "name": "Animated SVG / CSS Hero",
     "description": "Build a single-file animated SVG or CSS hero section — a looping illustrated scene, an animated logo, or a motion banner driven by CSS keyframes or SMIL with no JavaScript animation library. Storyboards the motion (what moves, the timing, easing, and loop) first, then implements clean, performant, GPU-friendly animation. Motion looks amateur when timing and easing are unconsidered, so the motion-design phase locks the keyframe storyboard and respects prefers-reduced-motion before any markup, the ordering that yields a polished, smooth hero instead of janky tweens.",
     "tags": ["svg", "animation", "css", "motion", "hero", "html"],
@@ -975,6 +996,7 @@
   },
   {
     "id": "web-component",
+    "role": "project-starter",
     "name": "Reusable Web Component",
     "description": "Build a reusable custom element as a standards-based Web Component — a rating widget, toggle, accordion, modal, or color-picker — using the Custom Elements API and Shadow DOM with encapsulated styles, attributes, properties, and custom events. Designs the component's public API (tag name, observed attributes, properties, events, slots) first, then implements the class with a demo page proving it works. Components fail when the API is inconsistent or styles leak, so the api-design phase locks the contract before any code, the ordering that yields a genuinely reusable element rather than a one-off.",
     "tags": ["web-component", "custom-element", "shadow-dom", "javascript", "reusable"],
@@ -1012,6 +1034,7 @@
   },
   {
     "id": "canvas-generative-art",
+    "role": "project-starter",
     "name": "Canvas Generative Art",
     "description": "Build a single-file generative art piece on canvas — flow fields, particle systems, recursive trees, Voronoi, noise terrain, or geometric tilings — that produces a fresh composition each run from a seed, with parameters the viewer can tweak. Defines the aesthetic and the generative algorithm first, then implements a seeded, reproducible renderer with a regenerate control. Generative art is an algorithm-and-aesthetic problem, so the aesthetic-scope phase locks the visual rules and the seedable randomness before any drawing, the ordering that yields a deliberate piece rather than random noise.",
     "tags": ["canvas", "generative", "art", "creative-coding", "html"],
@@ -1049,6 +1072,7 @@
   },
   {
     "id": "accessibility-retrofit",
+    "role": "maintenance-review",
     "name": "Accessibility Retrofit (WCAG AA)",
     "description": "Take an existing HTML page and retrofit it to WCAG 2.1 AA — fixing semantic structure, alt text, color contrast, keyboard operability, focus visibility, form labels, ARIA, and landmarks — without changing the visual design. Audits the page against the AA success criteria first to produce a prioritized findings list, then applies the fixes in place. Accessibility work fails when fixes are guessed rather than measured, so the audit phase enumerates the concrete violations and the target criteria before any edit, and the loop runs back to the FIX phase until every finding is resolved.",
     "tags": ["accessibility", "a11y", "wcag", "retrofit", "html"],
@@ -1086,6 +1110,7 @@
   },
   {
     "id": "game-with-screens",
+    "role": "project-starter",
     "name": "Full Game with Title & Game-Over Screens",
     "description": "Build a complete single-file HTML game with the full screen flow — a title/start screen, the gameplay screen, a game-over screen showing the score, and a restart back to a fresh game — wrapping any core arcade or survival mechanic. Designs the mechanic and the screen-state machine first, a cohesive visual look across all screens, then implements a screen manager so transitions are clean and restart truly resets. Many small models nail gameplay but ship with no start or game-over screen; this archetype makes the screen flow a first-class, gated requirement.",
     "tags": ["game", "html", "multiscreen", "canvas", "arcade"],
@@ -1131,6 +1156,7 @@
   },
   {
     "id": "feedback-widget",
+    "role": "project-starter",
     "name": "Embeddable Feedback Widget",
     "description": "Build a single-file embeddable feedback, contact, or rating widget — a floating button that opens a small panel with a rating, a message field, and validation, then shows a thank-you state and persists submissions to localStorage. Scopes the fields, validation, and submission behavior first, designs the floating launcher and panel, then implements an accessible, self-contained widget that drops into any page. Feedback widgets fail when submit does nothing, validation is missing, or the panel cannot be closed, so the scope phase locks the field set and the submit-and-thank-you flow before any markup.",
     "tags": ["widget", "feedback", "form", "embeddable", "html"],

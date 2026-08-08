@@ -47,3 +47,27 @@ export function stripMcpPrefix(name: string): string {
 export function prettifyToolName(name: string): string {
   return stripMcpPrefix(name).replace(/_/g, ' ');
 }
+
+/**
+ * Short, transient status text for a tool that is currently running.
+ * Concrete tools keep their humanized name so the user sees useful
+ * progress ("advance task step"), while provider-level implementation
+ * buckets get a natural-language activity instead of protocol jargon.
+ */
+export function toolActivityLabel(name: string): string {
+  const friendly = prettifyToolName(name);
+  switch (friendly.toLowerCase()) {
+    case 'shell':
+    case 'bash':
+    case 'command execution':
+      return 'running a command';
+    case 'file change':
+      return 'updating files';
+    case 'web search':
+      return 'searching the web';
+    case 'mcp tool call':
+      return 'working';
+    default:
+      return friendly;
+  }
+}

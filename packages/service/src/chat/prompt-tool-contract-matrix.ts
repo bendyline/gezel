@@ -34,8 +34,8 @@ import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contr
 import { resolveProfile } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
 import type { ResolvedModelProfile, TurnCtx } from '../model-profile/types.js';
+import { type PromptTaskContext, buildInstructions } from './instructions.js';
 import { classifyModelTier } from './local-model-tier.js';
-import { type PromptTaskContext, buildInstructions } from './manager.js';
 import {
   type PromptToolContractFinding,
   type PromptToolContractReport,

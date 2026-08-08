@@ -48,6 +48,7 @@ describe('EngineMemoryBudgetPanel — RAM spillover', () => {
     );
     // The host's own answer is stated, so "Automatic" isn't a black box.
     expect(screen.getByText(/On this machine that means unloading one/)).toBeInTheDocument();
+    expect(screen.getByText(/concurrent models stay within graphics memory/)).toBeInTheDocument();
   });
 
   it('saves an explicit choice and reflects the override', async () => {

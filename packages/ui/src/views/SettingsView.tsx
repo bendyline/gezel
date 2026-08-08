@@ -1,8 +1,10 @@
 import {
+  type CodexPermissionMode,
   type GezelSummary,
   type HealthResponse,
   type ProviderName,
   isOllamaReasoningModel,
+  normalizeCodexPermissionMode,
 } from '@bendyline/gezel';
 import type { SystemDiagnostics } from '@bendyline/gezel';
 import type {
@@ -17,6 +19,7 @@ import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
+import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
@@ -927,6 +930,7 @@ export function SettingsView() {
           codexCli: { ...(config?.codexCli ?? {}), ...patch },
         });
         setConfig(res);
+        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
         setStatus('Codex CLI settings saved');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
@@ -2751,32 +2755,38 @@ export function SettingsView() {
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Default permission
               </label>
-              <select
-                value={config?.codexCli?.defaultPermissionMode ?? 'acceptEdits'}
-                onChange={(e) =>
-                  void saveCodexCli({
-                    defaultPermissionMode: e.target.value as
-                      | 'default'
-                      | 'acceptEdits'
-                      | 'plan'
-                      | 'bypassPermissions',
-                  })
-                }
-              >
-                <option value="acceptEdits">
-                  acceptEdits — workspace-write + on-request approvals
-                </option>
-                <option value="default">default — workspace-write + on-request approvals</option>
-                <option value="plan">plan — read-only, never ask</option>
-                <option value="bypassPermissions">
-                  bypassPermissions — yolo (full sandbox bypass)
-                </option>
-              </select>
+              <div className="gz-tray" role="radiogroup" aria-label="Default Codex access">
+                {(
+                  [
+                    ['plan', 'Plan'],
+                    ['edit', 'Edit'],
+                    ['reviewed', 'Reviewed'],
+                    ['full', 'Full'],
+                  ] as const satisfies ReadonlyArray<readonly [CodexPermissionMode, string]>
+                ).map(([value, label]) => {
+                  const selected =
+                    normalizeCodexPermissionMode(config?.codexCli?.defaultPermissionMode) === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+                      role="radio"
+                      aria-checked={selected}
+                      className={`gz-key${selected ? ' gz-key-active' : ''}`}
+                      onClick={() => void saveCodexCli({ defaultPermissionMode: value })}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Mapped onto Codex's two-axis sandbox / approval model. Per-gezel override lives in the
-              gezel's frontmatter as <code>claudePermissionMode</code> (shared name across both CLI
-              providers).
+              Plan is read-only. Edit can change the workspace but cannot cross its sandbox.
+              Reviewed sends boundary crossings to an independent Codex reviewer. Full disables
+              Codex sandboxing and approvals. Gezel’s narrow destructive-command guard remains on in
+              every mode. Projects and individual gezels can override this default.
             </p>
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -3385,6 +3395,7 @@ export function SettingsView() {
               </label>
               <UpdateStatus />
             </section>
+            <GildeUpdatesCard />
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>
               <p className="muted" style={{ marginTop: 0 }}>

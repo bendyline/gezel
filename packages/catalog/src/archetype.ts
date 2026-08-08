@@ -1,6 +1,7 @@
 import {
   type CraftbookDoc,
   CraftbookDocSchema,
+  type CraftbookRole,
   CraftbookSchema,
   type CraftbookStep,
   type CraftbookToolsetNeed,
@@ -91,6 +92,8 @@ export interface ArchetypeSpec {
   name: string;
   /** One-paragraph description — also what `suggest_craftbook` ranks on. */
   description: string;
+  /** Project-lifecycle shelf. Older specs safely default to general. */
+  role?: CraftbookRole;
   tags?: string[];
   triggers?: string[];
   /**
@@ -433,6 +436,7 @@ export function archetypeToFiles(
     maintainer: { name: 'Gezel' },
     license: 'MIT',
     yankedVersions: [],
+    role: spec.role ?? 'general',
     workflow: 'build-loop',
   };
 

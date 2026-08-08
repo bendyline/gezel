@@ -11,6 +11,15 @@ import { winShellSafe } from '../../packages/win-shell.js';
 export interface CodexBinary {
   path: string;
   version: string;
+  capabilities: CodexBinaryCapabilities;
+}
+
+/** Features discovered from this exact CLI's help output. */
+export interface CodexBinaryCapabilities {
+  autoReview: boolean;
+  strictConfig: boolean;
+  managedHooks: boolean;
+  stdinPrompt: boolean;
 }
 
 /**
@@ -84,7 +93,8 @@ export async function resolveCodexBinary(opts: {
     const path = candidates[i]!;
     try {
       const version = await runVersionProbe(path);
-      return { path, version };
+      const capabilities = await detectCodexCapabilities(path);
+      return { path, version, capabilities };
     } catch (err) {
       if (i === last) {
         const message = err instanceof Error ? err.message : String(err);
@@ -104,6 +114,34 @@ export async function resolveCodexBinary(opts: {
  * Exposed for testing.
  */
 export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<string> {
+  return runTextProbe(path, ['--version'], timeoutMs);
+}
+
+/**
+ * Probe optional execution features rather than guessing from a version
+ * number. Gezel can therefore keep older CLIs working while enabling stdin,
+ * strict config, hooks, and automatic review as soon as the installed binary
+ * advertises them.
+ */
+export async function detectCodexCapabilities(path: string): Promise<CodexBinaryCapabilities> {
+  const [rootHelp, execHelp, resumeHelp] = await Promise.all([
+    runTextProbe(path, ['--help']).catch(() => ''),
+    runTextProbe(path, ['exec', '--help']).catch(() => ''),
+    runTextProbe(path, ['exec', 'resume', '--help']).catch(() => ''),
+  ]);
+  return {
+    autoReview: rootHelp.includes('--approve-for-me') || execHelp.includes('--approve-for-me'),
+    strictConfig: rootHelp.includes('--strict-config') || execHelp.includes('--strict-config'),
+    managedHooks:
+      rootHelp.includes('--dangerously-bypass-hook-trust') &&
+      execHelp.includes('--dangerously-bypass-hook-trust'),
+    stdinPrompt:
+      /instructions are read from stdin/i.test(execHelp) &&
+      /if `-` is used, read from stdin/i.test(resumeHelp),
+  };
+}
+
+async function runTextProbe(path: string, args: string[], timeoutMs = 5000): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     // Windows: `.cmd` / `.bat` shims (which is how OpenAI's CLI lands
     // when installed via `npm i -g @openai/codex`) can't be exec'd
@@ -117,7 +155,7 @@ export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<s
     // beside Node, so on a default Windows install the path contains a
     // space and an unquoted spawn makes the probe report the CLI as
     // missing rather than reading its version.
-    const target = winShellSafe(path, ['--version'], useShell);
+    const target = winShellSafe(path, args, useShell);
     const child = spawn(target.command, target.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: useShell,
@@ -126,7 +164,7 @@ export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<s
     let stderr = '';
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error(`--version timed out after ${timeoutMs}ms`));
+      reject(new Error(`${args.join(' ')} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');

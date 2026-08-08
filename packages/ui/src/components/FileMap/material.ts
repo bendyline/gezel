@@ -17,9 +17,11 @@ import type { UrbanityBand } from './urbanity.js';
  * - **Wall** mixes the language hue toward the material's hue, and how far is
  *   driven by *continuous* urbanity.
  *
- * Which reads, on the map, as: a village cottage is close to one warm limewashed
- * color, walls and roof agreeing. A city terrace is a slate-and-brick mass under
- * a language-hued roof. Period-correct and information-preserving at once.
+ * Which reads, on the map, as: the walls of a village cottage are visibly made
+ * from warm limewash, weatherboard, or brick while its roof still carries the
+ * language field. A city terrace is a slate-and-brick mass under that same
+ * quieter signal. Material has to win on the walls; letting the language hue
+ * dominate both faces is what made a street look like colored plastic sheds.
  *
  * ## Why the roof/facade lightness delta survives
  *
@@ -70,13 +72,13 @@ interface MaterialTone {
 }
 
 const MATERIAL: Record<MaterialKey, MaterialTone> = {
-  brick: { satMul: 1.05, litDelta: -4, hue: 14, hueMix: 0.55 },
+  brick: { satMul: 0.9, litDelta: -4, hue: 14, hueMix: 0.82 },
   stucco: { satMul: 0.62, litDelta: 6, hue: 42, hueMix: 0.45 },
-  timber: { satMul: 0.85, litDelta: -2, hue: 28, hueMix: 0.6 },
-  stone: { satMul: 0.4, litDelta: 2, hue: 40, hueMix: 0.5 },
-  slate: { satMul: 0.45, litDelta: -8, hue: 220, hueMix: 0.4 },
-  tile: { satMul: 1.1, litDelta: -1, hue: 18, hueMix: 0.5 },
-  thatch: { satMul: 0.8, litDelta: 4, hue: 44, hueMix: 0.7 },
+  timber: { satMul: 0.7, litDelta: -2, hue: 28, hueMix: 0.82 },
+  stone: { satMul: 0.34, litDelta: 2, hue: 40, hueMix: 0.78 },
+  slate: { satMul: 0.34, litDelta: -8, hue: 220, hueMix: 0.4 },
+  tile: { satMul: 0.72, litDelta: -1, hue: 18, hueMix: 0.5 },
+  thatch: { satMul: 0.5, litDelta: 4, hue: 44, hueMix: 0.7 },
   glass: { satMul: 0.55, litDelta: 10, hue: 196, hueMix: 0.5 },
   iron: { satMul: 0.35, litDelta: -10, hue: 210, hueMix: 0.55 },
 };
@@ -84,12 +86,12 @@ const MATERIAL: Record<MaterialKey, MaterialTone> = {
 /** Wall / roof material candidates per register. Village walls are limewash and
  *  timber under thatch and tile; city walls are brick and stone under slate. */
 const WALL_BY_BAND: Record<UrbanityBand, readonly MaterialKey[]> = {
-  village: ['timber', 'stucco', 'stone'],
-  town: ['brick', 'stucco'],
+  village: ['timber', 'stucco', 'brick', 'stone'],
+  town: ['brick', 'stucco', 'stone'],
   city: ['brick', 'stone'],
 };
 const ROOF_BY_BAND: Record<UrbanityBand, readonly MaterialKey[]> = {
-  village: ['thatch', 'tile'],
+  village: ['tile', 'slate', 'thatch'],
   town: ['tile', 'slate'],
   city: ['slate', 'tile'],
 };
@@ -108,13 +110,30 @@ export function materialsFor(seed: number, band: UrbanityBand, industrial: boole
   const random = seeded(seed);
   const walls = WALL_BY_BAND[band];
   const roofs = ROOF_BY_BAND[band];
-  const wall = walls[Math.min(walls.length - 1, Math.floor(random() * walls.length))]!;
+  const wallRoll = random();
+  // An Edwardian village is mostly painted timber, limewash, and local brick;
+  // stone is an accent. Equal weighting made every fourth cottage a grey block
+  // and pushed the scene backward toward a generic medieval village.
+  const wall =
+    band === 'village'
+      ? wallRoll < 0.34
+        ? 'timber'
+        : wallRoll < 0.62
+          ? 'stucco'
+          : wallRoll < 0.88
+            ? 'brick'
+            : 'stone'
+      : walls[Math.min(walls.length - 1, Math.floor(wallRoll * walls.length))]!;
   const roof = industrial
     ? // Works and foundries are iron-and-glass sheds, in every register.
       random() < 0.5
       ? 'iron'
       : 'glass'
-    : roofs[Math.min(roofs.length - 1, Math.floor(random() * roofs.length))]!;
+    : band === 'village'
+      ? // Thatch survives on the oldest cottages, but tile and slate define
+        // the 1910 roofscape. It is a signature, not the default.
+        ((roll: number) => (roll < 0.5 ? 'tile' : roll < 0.9 ? 'slate' : 'thatch'))(random())
+      : roofs[Math.min(roofs.length - 1, Math.floor(random() * roofs.length))]!;
   return { wall, roof };
 }
 
@@ -182,5 +201,9 @@ export function hsl({ h, s, l }: Hsl): string {
  */
 export function wallHueKeep(urbanity: number): number {
   const t = Math.max(0, Math.min(1, urbanity));
-  return 0.85 + (0.3 - 0.85) * t;
+  // The roof is already the language key. Walls should read first as material,
+  // including in the rural band; keeping 85% of the language hue here turned a
+  // TypeScript village into cyan and purple plastic. Urban masonry is slightly
+  // more neutral still, but the material owns both ends of this range.
+  return 0.38 + (0.18 - 0.38) * t;
 }

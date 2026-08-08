@@ -616,19 +616,43 @@ describe('facade richness at street zoom', () => {
     const bare = opsFor(6);
     const rich = opsFor(20);
     expect(count(rich.calls, 'fill')).toBeGreaterThan(count(bare.calls, 'fill') * 2);
-    // Glazing bars and half-timbering are strokes and appear only when fine.
-    expect(count(rich.calls, 'stroke')).toBeGreaterThan(count(bare.calls, 'stroke') * 5);
+    // Glazing bars and material courses share paths to keep draw calls low, so
+    // segment count — not stroke-call count — measures their real richness.
+    expect(count(rich.calls, 'lineTo')).toBeGreaterThan(count(bare.calls, 'lineTo') * 2);
   });
 
   it('drops the fine layer when a building is too small to resolve it', () => {
     // Sills and glazing bars on a 30px building are noise, not detail.
     const tiny = opsFor(6);
+    const rich = opsFor(20);
     expect(tiny.widthPx).toBeLessThan(34);
-    expect(count(tiny.calls, 'stroke')).toBeLessThanOrEqual(2);
+    expect(count(tiny.calls, 'lineTo')).toBeLessThan(count(rich.calls, 'lineTo') / 2);
   });
 
   it('gives village houses a chimney', () => {
     const m = roofModel('village', 'residential');
     expect(m.blocks.every((b) => townStyleForBlock(b).chimneys > 0)).toBe(true);
+  });
+
+  it('raises chimney pots above the ridge instead of painting posts down the roof', () => {
+    const m = roofModel('village', 'residential');
+    const s = state(3, m);
+    const g = geometryForModel(m).geoms[0]!;
+    const prism = prismScreen(s.cam, g.block.rect, g.hIso);
+    const style = townStyleForBlock(g.block);
+    const { ctx, calls } = recordingCtx();
+    drawTownBuilding(ctx, s, prism, style, prismColors(g.block.lang, s.palette));
+    const rise = townRoofRiseIso(g.block.rect, s.cam.scale) * s.cam.scale;
+    const [ridgeA, ridgeB] =
+      style.ridge === 'x'
+        ? [(prism.tn.y + prism.tw.y) / 2 - rise, (prism.te.y + prism.ts.y) / 2 - rise]
+        : [(prism.tn.y + prism.te.y) / 2 - rise, (prism.tw.y + prism.ts.y) / 2 - rise];
+    // The single stack is mounted at the midpoint of the sloping screen-space
+    // ridge. Compare against that local mount, not the roof's global ceiling.
+    const localRidgeY = (ridgeA + ridgeB) / 2;
+    const furnitureY = calls
+      .filter((call) => call.method === 'fillRect' && typeof call.args[1] === 'number')
+      .map((call) => call.args[1] as number);
+    expect(Math.min(...furnitureY)).toBeLessThan(localRidgeY);
   });
 });

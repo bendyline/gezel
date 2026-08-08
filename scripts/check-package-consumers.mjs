@@ -227,9 +227,8 @@ try {
 
   step('auditing the npm consumer graph');
   // critical matches every other vulnerability gate (quality.yml, the release
-  // workflows) — advisories land on npm's clock, not ours, and must not fail
-  // an unrelated validate run. The scheduled supply-chain-audit workflow is
-  // what surfaces sub-critical advisories.
+  // workflows, and the daily report). Lower-severity advisories remain visible
+  // without failing an unrelated validate run.
   const audit = runPackageManager(
     'npm',
     ['audit', '--omit=dev', '--audit-level=critical', '--json'],

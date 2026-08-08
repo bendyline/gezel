@@ -171,6 +171,7 @@ describe('isTeamRoute', () => {
     // The project-item file/tool routes (guarded by the project guard, not here).
     expect(isTeamRoute('POST', '/api/projects/proj-a/tools/fetch-url')).toBe(false);
     expect(isTeamRoute('PUT', '/api/projects/proj-a/workspace/file')).toBe(false);
+    expect(isTeamRoute('PUT', '/api/projects/proj-a/workspace/raw')).toBe(false);
   });
 });
 

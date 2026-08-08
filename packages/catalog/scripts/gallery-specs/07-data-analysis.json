@@ -1,6 +1,7 @@
 [
   {
     "id": "dataset-clean",
+    "role": "general",
     "name": "Clean a Dataset",
     "description": "Profile, clean, and validate a messy CSV/TSV/JSON dataset into an analysis-ready table. Profiles the raw data FIRST (row/column counts, types, null rates, duplicates, outliers, encoding) so cleaning decisions are evidence-based, then applies deterministic transforms (dedup, type coercion, null handling, whitespace/case normalization, value standardization), then validates the cleaned output against the same profile so nothing was silently dropped or corrupted. Use this for data wrangling, tidying, deduplication, normalizing dirty spreadsheets, and prepping raw exports for charts or modeling.",
     "tags": ["data", "cleaning", "csv", "etl", "wrangling"],
@@ -37,6 +38,7 @@
   },
   {
     "id": "data-to-report",
+    "role": "general",
     "name": "Dataset to Narrative Report",
     "description": "Turn a dataset into a written, evidence-backed analytical report that a non-technical reader can act on. Analyzes the data FIRST to surface the real findings (key metrics, segments, trends, surprises) with supporting numbers, then writes a narrative that leads with the takeaway and traces every claim to a figure, then builds the polished report document with sections, a summary table, and an explicit limitations note. Use this for turning raw numbers into an insights report, executive summary, data storytelling, or a findings write-up stakeholders will read.",
     "tags": ["data", "report", "analysis", "insights", "narrative"],
@@ -81,6 +83,7 @@
   },
   {
     "id": "chart-pack",
+    "role": "general",
     "name": "Chart Pack from Data",
     "description": "Build a single interactive HTML page of charts that answers a defined set of questions about a dataset. Scopes the questions and the right chart type per question FIRST (so you don't make a pretty chart that answers nothing), then analyzes the data into chart-ready series, then builds one self-contained HTML page rendering every chart with titles, axis labels, and a one-line takeaway caption each. Use this for a dashboard of charts, a visualization pack, a metrics page, or turning a CSV into graphs and plots.",
     "tags": ["data", "charts", "visualization", "html", "dashboard"],
@@ -125,6 +128,7 @@
   },
   {
     "id": "spreadsheet-model",
+    "role": "general",
     "name": "Spreadsheet / Financial Model",
     "description": "Build a working spreadsheet-style model (budget, forecast, unit economics, pricing, or scenario calculator) with clearly separated inputs, calculations, and outputs. Scopes the model's purpose, drivers, and assumptions FIRST so the formulas have a contract, then builds the model with live formulas and labeled assumption cells, then verifies the math by hand-checking key outputs and a sanity scenario. Use this for a financial model, budget calculator, ROI/forecast spreadsheet, unit-economics model, or any input-driven calculator.",
     "tags": ["data", "spreadsheet", "model", "finance", "calculator"],
@@ -161,6 +165,7 @@
   },
   {
     "id": "sql-analysis",
+    "role": "general",
     "name": "Answer a Question with SQL",
     "description": "Answer a specific business question against a database or table set with a correct, readable SQL query and a short written answer. Scopes the question, the tables/columns, and the grain FIRST (so the query measures the right thing at the right level), then writes and runs the query as a data-analyst, then verifies the result with a sanity check and an explanation. Use this for SQL analysis, querying a database, writing a report query, computing a metric in SQL, or answering 'how many / what's the trend' from tables.",
     "tags": ["data", "sql", "database", "query", "analysis"],
@@ -197,6 +202,7 @@
   },
   {
     "id": "ab-test-readout",
+    "role": "general",
     "name": "A/B Test Readout",
     "description": "Analyze a controlled experiment and produce a decision-ready readout: does the variant beat control, by how much, and is it real? States the hypothesis, the primary metric, and the decision rule FIRST (to avoid p-hacking and metric-shopping), then computes lift, statistical significance, and confidence intervals as a data-analyst, then writes a plain-language ship/no-ship recommendation. Use this for an experiment analysis, A/B test results, significance testing, conversion-lift readout, or an experiment decision memo.",
     "tags": ["data", "experiment", "ab-test", "statistics", "analysis"],
@@ -241,6 +247,7 @@
   },
   {
     "id": "csv-transformer",
+    "role": "general",
     "name": "CSV / Tabular Transformer",
     "description": "Reshape and convert tabular data from one schema to another: rename and reorder columns, split or merge fields, derive new columns, pivot/unpivot, change format (CSV<->JSON<->TSV), and filter rows. Locks the input and target schema and the field-by-field mapping FIRST (so the transform is a contract, not guesswork), then builds the transform and emits the output, then verifies row counts and a sample mapping. Use this for reshaping a CSV, converting data formats, remapping columns, flattening JSON to a table, or reformatting an export for another tool.",
     "tags": ["data", "csv", "transform", "etl", "convert"],
@@ -277,6 +284,7 @@
   },
   {
     "id": "data-dictionary",
+    "role": "general",
     "name": "Data Dictionary",
     "description": "Document a dataset's schema as a clear, complete data dictionary so others can use it without guessing. Inspects the data FIRST to derive each column's real type, value domain, null rate, units, and relationships from the actual values (not assumptions), then writes a readable dictionary with one entry per column plus dataset-level context. Use this for documenting a schema, building a data dictionary, a column glossary, a table reference, or onboarding docs for a dataset.",
     "tags": ["data", "documentation", "schema", "dictionary", "metadata"],
@@ -313,6 +321,7 @@
   },
   {
     "id": "anomaly-scan",
+    "role": "general",
     "name": "Anomaly / Outlier Scan",
     "description": "Scan a dataset for anomalies and outliers and report what is genuinely unusual versus expected noise. Defines the detection criteria and thresholds FIRST (statistical and rule-based, with an explicit definition of 'anomalous') so findings are reproducible, then runs the scan to flag and rank suspect records, then writes a prioritized report a human can triage. Use this for outlier detection, anomaly scanning, finding bad records, fraud/error spotting, or surfacing data points that don't fit.",
     "tags": ["data", "anomaly", "outliers", "detection", "quality"],
@@ -357,6 +366,7 @@
   },
   {
     "id": "forecast-model",
+    "role": "general",
     "name": "Simple Forecast / Trend Model",
     "description": "Build a simple, defensible forecast of a time series (revenue, demand, signups, usage) with the assumptions and method stated up front and the projection plus a confidence band as the output. Scopes the series, horizon, method, and assumptions FIRST (so the forecast isn't an unexplained black box), then builds the projection with a baseline and an interval, then reviews it for sanity against history and overfitting. Use this for forecasting a metric, projecting a trend, estimating future demand, a simple time-series projection, or a 'what will this be next quarter' estimate.",
     "tags": ["data", "forecast", "trend", "time-series", "projection"],
@@ -393,6 +403,7 @@
   },
   {
     "id": "survey-analysis",
+    "role": "general",
     "name": "Survey Analysis",
     "description": "Analyze survey responses into a clear summary of what respondents actually said, across both quantitative (rating/multiple-choice) and open-text questions. Scopes the questions, response types, and segments FIRST, then analyzes — tallying closed questions and theming open-text comments as a data-analyst, then writes a findings summary with the headline results, segment differences, and representative quotes. Use this for analyzing survey results, summarizing a questionnaire, NPS/feedback analysis, theming open-ended responses, or a survey readout.",
     "tags": ["data", "survey", "analysis", "feedback", "research"],
@@ -437,6 +448,7 @@
   },
   {
     "id": "dashboard-spec",
+    "role": "general",
     "name": "Dashboard Specification",
     "description": "Specify a dashboard from the questions it must answer, before anyone builds it — the artifact that prevents a chart-salad dashboard nobody uses. Scopes the audience, the decisions, and the questions FIRST, then designs the dashboard layout: which widgets/charts answer which question, their metric definitions, filters, refresh, and visual hierarchy. The output is a build-ready spec, not the dashboard itself. Use this for planning a dashboard, a BI/reporting spec, a metrics dashboard design, deciding what charts a dashboard needs, or a dashboard requirements doc.",
     "tags": ["data", "dashboard", "spec", "design", "bi"],
@@ -473,6 +485,7 @@
   },
   {
     "id": "cohort-analysis",
+    "role": "general",
     "sourceDiscipline": "Data output discipline:\n\n- `data/cohorts.json` must be valid JSON only: no Markdown fences, comments, formulas, or ratio strings.\n- Use stable keys such as `signup_week`, `total_users`, and `retention`.\n- Store retention rates as numeric decimals rounded consistently, for example `0.67`, not `\"2/3\"` or `\"66.7%\"`.\n- Distinguish observed zero retention from incomplete future periods: use `0` when the period is observed and no cohort users were active, and `null` when the period is outside the observed window.",
     "name": "Cohort / Retention Analysis",
     "description": "Analyze retention or behavior by cohort to reveal whether the product is getting stickier over time. Defines the cohort key, the activity event, and the retention window FIRST (so 'retained' has one unambiguous meaning), then builds the cohort/retention table and computes retention curves and trends as a data-analyst, then writes a readout on what the cohorts reveal. Use this for retention analysis, cohort tables, churn/stickiness analysis, a retention curve, or 'are newer users retaining better than older ones'.",
@@ -518,6 +531,7 @@
   },
   {
     "id": "data-quality-audit",
+    "role": "maintenance-review",
     "name": "Data Quality Audit",
     "description": "Audit a dataset against explicit data-quality rules and produce a scorecard of where it passes and fails across completeness, validity, consistency, uniqueness, and timeliness. Defines the quality rules and dimensions FIRST (so 'quality' is measurable, not a vibe), then runs the audit to measure each rule with pass rates and failing examples, then writes a prioritized report with an overall score and remediation steps. Use this for a data quality audit, data health check, validation report, data-quality scorecard, or assessing whether a dataset is trustworthy.",
     "tags": ["data", "quality", "audit", "validation", "governance"],
@@ -562,6 +576,7 @@
   },
   {
     "id": "kpi-scorecard",
+    "role": "general",
     "name": "KPI Scorecard Page",
     "description": "Build a single-page KPI scorecard that rolls a dataset up into the handful of numbers a team tracks, each shown with its current value, target, and period-over-period change. Defines the KPIs and their exact formulas and targets FIRST (so a number is never ambiguous), then computes the rollups, then builds a clean self-contained HTML scorecard with KPI tiles, deltas, and a tiny trend sparkline each. Use this for a KPI dashboard, a metrics scorecard, an executive summary page, a North Star metrics view, or rolling raw data into headline numbers.",
     "tags": ["data", "kpi", "metrics", "scorecard", "html"],
@@ -606,6 +621,7 @@
   },
   {
     "id": "data-join-merge",
+    "role": "general",
     "name": "Join / Merge Two Datasets",
     "description": "Combine two datasets into one reconciled table on a shared key, correctly handling the join type, key mismatches, and duplicate fan-out. Profiles both sources and locks the join key, join type, and conflict rules FIRST (so the merge doesn't silently drop or duplicate rows), then builds the joined output, then verifies the match rate and that no row count exploded. Use this for joining two tables, merging datasets, a VLOOKUP-style match, enriching one file from another, or reconciling records across two sources.",
     "tags": ["data", "join", "merge", "reconcile", "etl"],

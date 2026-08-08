@@ -227,6 +227,44 @@ interface ArchetypeSpec {
 const NO_TRIM: TownTrim = { cornice: false, parapet: false, stringCourse: false, quoins: false };
 
 /**
+ * Headroom for the roof form plus anything that breaks its skyline.
+ *
+ * Chimneys used to be painted *down* the roof, so the ordinary roof budget was
+ * accidentally enough. Once stacks stand upright, culling and hit-testing have
+ * to know about them just as they do a clock tower. Keep the allowance here,
+ * beside style resolution, rather than hiding it in the painter.
+ */
+function resolvedRoofFactor(roof: TownRoof, cap: RoofCap, chimneys: number, declared = 1): number {
+  const roofShape = roof === 'conical' ? 2.1 : roof === 'pyramid' ? 1.35 : 1;
+  let factor = Math.max(declared, roofShape);
+  if (chimneys > 0) factor = Math.max(factor, roofShape + 0.68);
+  const capExtra: Partial<Record<RoofCap, number>> = {
+    cupola: 0.78,
+    bellcote: 0.62,
+    'clock-tower': 0.78,
+    finial: 0.4,
+    lantern: 0.56,
+  };
+  factor = Math.max(factor, roofShape + (capExtra[cap] ?? 0));
+  return factor;
+}
+
+/** Roof geometry sometimes names the material outright. A bottle kiln cannot
+ * be glazed iron because the independent material stream happened to say so. */
+function resolvedMaterials(
+  seed: number,
+  band: UrbanityBand,
+  industrial: boolean,
+  roof: TownRoof,
+): MaterialPair {
+  const material = materialsFor(seed ^ SEED_SALT.MATERIAL, band, industrial);
+  if (roof === 'thatch') material.roof = 'thatch';
+  else if (roof === 'conical') material.roof = 'brick';
+  else if (roof === 'barrel') material.roof = 'glass';
+  return material;
+}
+
+/**
  * One data table instead of a switch per property. Village forms are gable-end
  * and untrimmed; city forms are eave-end, corniced, and often parapeted — which
  * is most of what makes the two registers read differently at district zoom.
@@ -453,7 +491,11 @@ export function allArchetypeForms(): Array<{
       archetype,
       roofs: spec.roofs,
       cap: spec.cap,
-      roofFactor: spec.roofFactor ?? 1,
+      // The renderer contract test adds two stacks to every sampled form; give
+      // it the same resolved headroom a real style receives.
+      roofFactor: Math.max(
+        ...spec.roofs.map((roof) => resolvedRoofFactor(roof, spec.cap, 2, spec.roofFactor)),
+      ),
     };
   });
 }
@@ -639,18 +681,22 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
   const cupola = isCivic && (block.landmark === true || random() < 0.5);
   // ── main stream ends here; nothing below may draw from `random` ──────────
 
+  const cap = spec.cap === 'cupola' && !cupola ? 'none' : spec.cap;
+  const resolvedChimneys =
+    chimneys === 0 && band === 'city' && !isIndustrial && storeys >= 3
+      ? // City terraces carry stacks on the party-wall line rather than the
+        // seeded one-or-two of a cottage. Derived from bays, so no new draw.
+        Math.max(1, Math.min(3, Math.floor(bays / 2)))
+      : chimneys;
+  const roofFactor = resolvedRoofFactor(roof, cap, resolvedChimneys, spec.roofFactor);
+
   return {
     archetype,
     roof,
     ridge,
     storeys,
     bays,
-    chimneys:
-      chimneys === 0 && band === 'city' && !isIndustrial && storeys >= 3
-        ? // City terraces carry stacks on the party-wall line rather than the
-          // seeded one-or-two of a cottage. Derived from bays, so no new draw.
-          Math.max(1, Math.min(3, Math.floor(bays / 2)))
-        : chimneys,
+    chimneys: resolvedChimneys,
     dormers:
       roof === 'mansard' || (roof === 'gable' && storeys >= 3)
         ? Math.min(3, Math.max(1, Math.floor(bays / 2)))
@@ -663,11 +709,11 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
     band,
     eaves: spec.eaves,
     ground: spec.ground,
-    cap: spec.cap === 'cupola' && !cupola ? 'none' : spec.cap,
+    cap,
     trim: { ...NO_TRIM, ...spec.trim },
-    material: materialsFor(seed ^ SEED_SALT.MATERIAL, band, isIndustrial),
+    material: resolvedMaterials(seed, band, isIndustrial, roof),
     massing: massingFor(archetype, seed, storeys),
-    ...(spec.roofFactor !== undefined ? { roofFactor: spec.roofFactor } : {}),
+    ...(roofFactor !== 1 ? { roofFactor } : {}),
   };
 }
 
@@ -716,24 +762,30 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
   // reads fine at campus scale, and the draw path already sizes caps to the
   // headroom they are given.
   const cap: RoofCap = spec.cap === 'clock-tower' ? 'cupola' : spec.cap;
+  // Preserve the original main-stream order: ridge → chimneys → sawteeth.
+  // Furniture headroom is derived only after those draws are complete.
+  const ridge = ridgeFor(symbol, random);
+  const chimneys =
+    industrial || archetype === 'cottage' || archetype === 'farmhouse' || archetype === 'inn'
+      ? 1 + (random() < 0.3 ? 1 : 0)
+      : 0;
+  const sawteeth = roof === 'sawtooth' ? 2 + (random() < 0.4 ? 1 : 0) : 0;
+  const roofFactor = resolvedRoofFactor(roof, cap, chimneys, spec.roofFactor);
   return {
     archetype,
     roof,
     // Per-symbol, not the parent's. Sharing one ridge axis across a campus
     // pointed every roof the same way, which is most of why a file read as one
     // extruded mass rather than a row of separate buildings.
-    ridge: ridgeFor(symbol, random),
+    ridge,
     storeys,
     bays,
-    chimneys:
-      industrial || archetype === 'cottage' || archetype === 'farmhouse' || archetype === 'inn'
-        ? 1 + (random() < 0.3 ? 1 : 0)
-        : 0,
+    chimneys,
     dormers: roof === 'mansard' && symbol.height > 0.55 ? 1 : 0,
     awning: parent.health?.zone === 'commercial' && !classLike,
     cupola: cap === 'cupola',
     clock: false,
-    sawteeth: roof === 'sawtooth' ? 2 + (random() < 0.4 ? 1 : 0) : 0,
+    sawteeth,
     seed,
     band,
     eaves: spec.eaves,
@@ -742,10 +794,10 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
     // Trim is gated on projected width at draw time, so a mini that is big
     // enough on screen earns its cornice and a tiny one silently skips it.
     trim: { ...NO_TRIM, ...spec.trim },
-    material: materialsFor(seed ^ SEED_SALT.MATERIAL, band, industrial),
+    material: resolvedMaterials(seed, band, industrial, roof),
     // A wing inside a symbol footprint would be indistinguishable noise.
     massing: NO_MASSING,
-    ...(spec.roofFactor !== undefined ? { roofFactor: spec.roofFactor } : {}),
+    ...(roofFactor !== 1 ? { roofFactor } : {}),
   };
 }
 

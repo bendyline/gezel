@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
+import { makeCraftbookResolver } from '../craftbook/resolve.js';
 import { Store } from '../fs/store.js';
 import { TaskManager } from '../tasks/manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
@@ -12,6 +13,7 @@ import { ReportActionManager, ReportNotFoundError } from './report-action-manage
 let home: string;
 let dataDir: string;
 let store: Store;
+let catalog: CatalogService;
 let tasks: TaskManager;
 let manager: ReportActionManager;
 let projectId: string;
@@ -33,18 +35,50 @@ const CREATE_TASK_BLOCK = [
   '```',
 ].join('\n');
 
+async function writeCraftbookTemplate(id: string, name: string): Promise<void> {
+  const itemDir = join(dataDir, 'craftbook-templates', id.slice(0, 2), id);
+  const versionDir = join(itemDir, 'versions', '1.0.0');
+  await mkdir(versionDir, { recursive: true });
+  await writeFile(
+    join(itemDir, 'manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: 'craftbook-template',
+      id,
+      name,
+      description: `${name} test book.`,
+      tags: [],
+      maintainer: { name: 'Test' },
+      yankedVersions: [],
+    }),
+  );
+  await writeFile(
+    join(versionDir, 'craftbook.json'),
+    JSON.stringify({
+      name,
+      description: `${name} test book.`,
+      entryStepId: 'run',
+      steps: [{ id: 'run', name: 'Run', prompt: 'Do the run.', terminal: true }],
+      version: '1.0.0',
+      releasedAt: '2026-07-06T00:00:00Z',
+    }),
+  );
+}
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'report-actions-'));
   dataDir = await mkdtemp(join(tmpdir(), 'report-actions-data-'));
   store = new Store({ home });
   await store.ensureLayout();
+  catalog = new CatalogService([new BundledSource({ dataDir, noIndex: true })]);
   tasks = new TaskManager(store);
+  tasks.setCraftbookResolver(makeCraftbookResolver(store, catalog));
   manager = new ReportActionManager({
     home,
     store,
     tasks,
     taskRunner: { enqueueHandoff: () => {} } as unknown as TaskRunner,
-    catalog: new CatalogService([new BundledSource({ dataDir, noIndex: true })]),
+    catalog,
     chat: null as unknown as ChatManager,
   });
   projectId = (await store.createProject({ name: 'Shop' })).id;
@@ -152,6 +186,30 @@ describe('fire', () => {
     expect(step?.prompt).toContain('untrusted evidence');
   });
 
+  it('fires an unchanged task-backed action only once across concurrent calls and retries', async () => {
+    await writeCraftbookTemplate('a11y-audit', 'Accessibility Audit');
+    const block = [
+      '```gezel-action',
+      'kind: fire-craftbook',
+      'id: audit',
+      'title: Run accessibility audit',
+      'craftbookId: a11y-audit',
+      '```',
+    ].join('\n');
+    await store.writeProjectArtifact(projectId, REPORT, reportWith(block));
+
+    const [first, concurrent] = await Promise.all([
+      manager.fire(projectId, REPORT, 'audit'),
+      manager.fire(projectId, REPORT, 'audit'),
+    ]);
+    const retry = await manager.fire(projectId, REPORT, 'audit');
+
+    expect(concurrent.taskRef).toBe(first.taskRef);
+    expect(retry.taskRef).toBe(first.taskRef);
+    expect((await tasks.getByRef(first.taskRef!))?.craftbook.id).toBe('a11y-audit');
+    expect(await store.listProjectTasks(projectId)).toHaveLength(1);
+  });
+
   it('refuses a cross-project target that is not a real project', async () => {
     const block = CREATE_TASK_BLOCK.replace('role: software developer', 'projectId: not-a-project');
     await store.writeProjectArtifact(projectId, REPORT, reportWith(block));
@@ -163,13 +221,28 @@ describe('fire', () => {
     expect(overlay.actions[0]?.state).toBe('suggested');
   });
 
-  it('fails an apply-edits pack whose sidecar diff is missing, writing nothing', async () => {
+  it('fails an invalid edit pack atomically and reports every skipped file', async () => {
+    await store.writeProjectWorkspaceFile(projectId, 'src/existing.ts', 'const safe = true;\n');
+    await store.writeProjectArtifact(
+      projectId,
+      'edits/existing.diff',
+      [
+        '--- a/src/existing.ts',
+        '+++ b/src/existing.ts',
+        '@@ -1 +1 @@',
+        '-const safe = true;',
+        '+const safe = false;',
+        '',
+      ].join('\n'),
+    );
     const block = [
       '```gezel-action',
       'kind: apply-edits',
       'id: harden',
       'title: Add headers',
       'edits:',
+      '  - path: src/existing.ts',
+      '    diffArtifact: edits/existing.diff',
       '  - path: src/server.ts',
       '    diffArtifact: edits/harden.diff',
       '```',
@@ -179,8 +252,16 @@ describe('fire', () => {
     const result = await manager.fire(projectId, REPORT, 'harden');
     expect(result.record.state).toBe('failed');
     expect(result.record.results).toEqual([
+      {
+        path: 'src/existing.ts',
+        ok: false,
+        error: 'skipped — pack validation failed',
+      },
       { path: 'src/server.ts', ok: false, error: expect.stringContaining('edits/harden.diff') },
     ]);
+    expect(await store.readProjectWorkspaceFile(projectId, 'src/existing.ts')).toBe(
+      'const safe = true;\n',
+    );
     expect(await store.readProjectWorkspaceFile(projectId, 'src/server.ts')).toBeNull();
   });
 

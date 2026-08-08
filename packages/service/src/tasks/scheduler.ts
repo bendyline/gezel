@@ -6,6 +6,7 @@ import {
   type TaskCraftbookStep,
   type WorkshopTempo,
   createLogger,
+  getEngagementMode,
   getWorkshopTempo,
   isProactiveAllowed,
   isSchedulingAllowed,
@@ -64,6 +65,17 @@ export interface SchedulerOptions {
    * every session.
    */
   activity?: ActivityTracker;
+}
+
+export interface CronTickResult {
+  /** Due schedule hosts whose tick metadata was advanced. */
+  processedTaskRefs: string[];
+  /** Due schedule hosts held by the current engagement mode. */
+  heldTaskRefs: string[];
+  /** Fresh task instances created from those hosts. */
+  spawnedTaskRefs: string[];
+  /** Why no due schedules may run under the current engagement mode. */
+  holdReason?: 'engagement-off' | 'engagement-paused';
 }
 
 /** Hard-coded global defaults applied when nothing's set in config. */
@@ -131,6 +143,8 @@ export class TaskScheduler {
   private readonly activity?: ActivityTracker;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** Serialize background and user-requested cron passes to prevent double ticks. */
+  private cronTickQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: SchedulerOptions) {
     this.manager = opts.manager;
@@ -486,10 +500,28 @@ export class TaskScheduler {
     return { taskSessionLastMs, landingPoisoned };
   }
 
-  async tickCrons(): Promise<void> {
+  async tickCrons(opts: { projectId?: string } = {}): Promise<CronTickResult> {
+    const pass = this.cronTickQueue.then(() => this.runCronTickPass(opts));
+    this.cronTickQueue = pass.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pass;
+  }
+
+  private async runCronTickPass(opts: { projectId?: string } = {}): Promise<CronTickResult> {
+    const result: CronTickResult = {
+      processedTaskRefs: [],
+      heldTaskRefs: [],
+      spawnedTaskRefs: [],
+    };
+    let schedulingHoldReason: CronTickResult['holdReason'];
     if (this.store) {
       const config = await this.store.readConfig();
-      if (!isSchedulingAllowed(config)) return;
+      if (!isSchedulingAllowed(config)) {
+        schedulingHoldReason =
+          getEngagementMode(config) === 'off' ? 'engagement-off' : 'engagement-paused';
+      }
     }
     const active = await this.manager.list({ status: 'active' });
     const nowMs = this.now().getTime();
@@ -505,15 +537,22 @@ export class TaskScheduler {
       return allowed;
     };
     for (const task of active) {
+      if (opts.projectId && task.projectId !== opts.projectId) continue;
       if (!task.cron?.nextTickAt) continue;
       const fireMs = Date.parse(task.cron.nextTickAt);
       if (!Number.isFinite(fireMs) || fireMs > nowMs) continue;
       if (!(await allowsAmbient(task.projectId))) continue;
+      if (schedulingHoldReason) {
+        result.holdReason = schedulingHoldReason;
+        result.heldTaskRefs.push(task.ref);
+        continue;
+      }
       try {
         // Always advance cron metadata so we don't fire repeatedly for a
         // past deadline. Spawning a child (if applicable) is a separate
         // step that can be skipped based on overlap policy.
         await this.manager.recordCronTick(task);
+        result.processedTaskRefs.push(task.ref);
         // A night-shift cron host advances its schedule normally but only
         // spawns a child while the night-shift window is open — this confines
         // its work to the night. The metadata advance above still runs so we
@@ -538,7 +577,8 @@ export class TaskScheduler {
             });
             if (activeChildren.length > 0) continue;
           }
-          await this.manager.spawnChild(task.ref);
+          const child = await this.manager.spawnChild(task.ref);
+          result.spawnedTaskRefs.push(child.ref);
           if (nightOnceKey !== null) {
             await this.manager.recordNightShiftSpawn(task.ref, nightOnceKey);
           }
@@ -550,6 +590,7 @@ export class TaskScheduler {
         );
       }
     }
+    return result;
   }
 
   /**

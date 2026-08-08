@@ -113,9 +113,8 @@ Two icon sets ship inside the packaged UI without being direct dependencies of
 this workspace: the bundler emits them from packages listed above. They are
 called out separately because their **icon artwork is CC BY 4.0**, which
 requires attribution, even though the surrounding package is MIT. They are not
-in `packages/ui/src/assets/fonts/` and so are deliberately absent from the
-**Bundled fonts and emoji** manifest, which inventories only the WOFF2 files
-vendored into this repository.
+in `packages/ui/src/assets/fonts/`; `pnpm check:notice` inventories them from
+the built `packages/service/dist/ui/assets/` tree where they actually ship.
 
 | Asset | License | Arrives via | Source |
 |---|---|---|---|
@@ -457,11 +456,13 @@ for p in $(jq -r '.dependencies // {}, .devDependencies // {} | keys[]' \
 done
 ```
 
-The bundled-font manifest in
+The vendored-font manifest in
 [`packages/ui/src/assets/fonts/README.md`](packages/ui/src/assets/fonts/README.md)
-is authoritative. `pnpm check:notice` compares that manifest, every referenced
-font license file, and the visible table above; adding or removing a `.woff2`
-without updating the inventory fails the check.
+maps Gezel's source assets to their canonical license texts. The redistributed
+inventory is the built `packages/service/dist/ui/assets/` tree. `pnpm
+check:notice` reconciles every built WOFF/WOFF2/TTF/OTF file — including Font
+Awesome and codicon from dependencies — with the notice rows and verifies the
+19 legal files staged into the service's npm payload byte-for-byte.
 
 The **Bundled application runtimes** table is checked against Electron's exact
 installed package version and the Node.js/pnpm pins compiled into the desktop

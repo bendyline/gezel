@@ -2,6 +2,7 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
   AccessoryOption,
+  CodexPermissionMode,
   DressOption,
   GezelDetail as GezelDetailData,
   GezelIconHistoryResponse,
@@ -16,6 +17,7 @@ import {
   GEZEL_CHAT_FONTS,
   GROWTH_COSMETICS,
   HAT_OPTIONS,
+  normalizeCodexPermissionMode,
 } from '@bendyline/gezel';
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -1051,9 +1053,27 @@ function ProviderOverride({
     [gezel.id, onUpdated],
   );
 
+  const saveCodexPermission = useCallback(
+    async (value: CodexPermissionMode | 'inherit') => {
+      setSaving(true);
+      try {
+        const updated = await api.updateGezelSettings(gezel.id, {
+          codexPermissionMode: value === 'inherit' ? null : value,
+        });
+        onUpdated(updated);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [gezel.id, onUpdated],
+  );
+
   const effectiveProvider = gezel.provider ?? globalProvider;
   const sandboxCurrent: 'default' | 'on' | 'off' =
     gezel.sandboxCopilot === undefined ? 'default' : gezel.sandboxCopilot ? 'on' : 'off';
+  const codexCurrent: CodexPermissionMode | 'inherit' = gezel.codexPermissionMode
+    ? normalizeCodexPermissionMode(gezel.codexPermissionMode)
+    : 'inherit';
 
   return (
     <div className="provider-override">
@@ -1089,6 +1109,36 @@ function ProviderOverride({
               disabled={saving}
             >
               {value === 'default' ? 'Inherit' : value === 'on' ? 'On' : 'Off'}
+            </button>
+          ))}
+        </>
+      )}
+      {effectiveProvider === 'codex-cli' && (
+        <>
+          <span
+            className="muted small"
+            style={{ marginLeft: '0.75rem' }}
+            title="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
+          >
+            Access:
+          </span>
+          {(['inherit', 'plan', 'edit', 'reviewed', 'full'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={`provider-chip${codexCurrent === value ? ' provider-chip-active' : ''}`}
+              onClick={() => void saveCodexPermission(value)}
+              disabled={saving}
+            >
+              {value === 'inherit'
+                ? 'Inherit'
+                : value === 'plan'
+                  ? 'Plan'
+                  : value === 'edit'
+                    ? 'Edit'
+                    : value === 'reviewed'
+                      ? 'Reviewed'
+                      : 'Full'}
             </button>
           ))}
         </>

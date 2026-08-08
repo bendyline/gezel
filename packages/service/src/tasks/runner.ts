@@ -101,6 +101,13 @@ export interface TaskHandoffBucket {
   byGezel: Record<string, number>;
 }
 
+export interface TaskRehydrationResult {
+  /** Active gezel-owned tasks eligible for reconciliation. */
+  taskRefs: string[];
+  /** Eligible work subject to Night Shift admission. */
+  nightShiftTaskRefs: string[];
+}
+
 export interface TaskRunnerDispatcher {
   /**
    * Actually kick off the handoff. Called by the runner when a slot
@@ -375,9 +382,16 @@ export class TaskRunner {
    * (taskRef, stepId, gezelId) triple before dispatch inside
    * `tick`, so a double-enqueue won't produce two handoff sessions.
    */
-  async rehydrateFromStore(opts: { nightShiftOnly?: boolean } = {}): Promise<void> {
+  async rehydrateFromStore(
+    opts: { nightShiftOnly?: boolean; projectId?: string } = {},
+  ): Promise<TaskRehydrationResult> {
+    const result: TaskRehydrationResult = {
+      taskRefs: [],
+      nightShiftTaskRefs: [],
+    };
     const projects = await this.store.listProjects();
     for (const proj of projects) {
+      if (opts.projectId && proj.id !== opts.projectId) continue;
       // Skip projects whose status gates ambient work. Prevents stale
       // pending handoffs from an inactive project auto-resuming after
       // the service restarts.
@@ -385,12 +399,18 @@ export class TaskRunner {
       const tasks = await this.store.listProjectTasks(proj.id).catch(() => []);
       for (const task of tasks) {
         if (task.status !== 'active') continue;
+        // Cron/fanout records are schedule hosts, not worker tasks. Their
+        // children dispatch through the scheduler's spawn path; rehydrating
+        // the host itself would make its inert "wait" step run as real work.
+        if (task.cron || task.fanout) continue;
         if (opts.nightShiftOnly && task.nightShift?.enabled !== true) continue;
         if (!task.activeStepId) continue;
         const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
         if (!step) continue;
         const assigneeId = stepOwnerGezelId(task, step);
         if (!assigneeId) continue;
+        result.taskRefs.push(task.ref);
+        if (task.nightShift?.enabled === true) result.nightShiftTaskRefs.push(task.ref);
         // Persisted sessions are history, not evidence of live process work.
         // A failed handoff remains non-archived, and treating it as "live"
         // strands the active task forever after restart. enqueueHandoff plus
@@ -405,6 +425,7 @@ export class TaskRunner {
         });
       }
     }
+    return result;
   }
 
   /**

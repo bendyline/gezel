@@ -1001,6 +1001,31 @@ export function systemToolsetsInstallDir(root: string): string {
 }
 
 /**
+ * Opt-in live gilde content cache — newer `@bendyline/gilde` patch releases
+ * fetched at runtime by the GildeUpdateManager. Holds `versions/<v>/` (the
+ * extracted npm package) plus `state.json`. Rebuildable: the bundled pin is
+ * the permanent fallback, so deleting this tree only reverts content.
+ */
+export function gildeLiveRoot(root: string): string {
+  return join(root, 'gilde');
+}
+
+/** Version-named extracted `@bendyline/gilde` packages, `<version>/package/`. */
+export function gildeLiveVersionsDir(root: string): string {
+  return join(gildeLiveRoot(root), 'versions');
+}
+
+/** One extracted live gilde version (contains the npm `package/` dir). */
+export function gildeLiveVersionDir(root: string, version: string): string {
+  return join(gildeLiveVersionsDir(root), version);
+}
+
+/** Active-version + last-check tracking state for live gilde updates. */
+export function gildeLiveStateFile(root: string): string {
+  return join(gildeLiveRoot(root), 'state.json');
+}
+
+/**
  * Directory where Playwright's own CLI drops browser binaries. Exported
  * to both the service (sets `PLAYWRIGHT_BROWSERS_PATH` when spawning
  * Playwright) and the bootstrap (verifies Chromium installed).

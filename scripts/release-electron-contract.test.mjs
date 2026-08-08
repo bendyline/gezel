@@ -218,6 +218,61 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   );
 });
 
+test('dependency security floors fix B3 while CI blocks only on critical advisories', async () => {
+  const [workspace, lockfile, quality, release, publish, scheduled, consumerCheck] =
+    await Promise.all([
+      readFile(join(root, 'pnpm-workspace.yaml'), 'utf8'),
+      readFile(join(root, 'pnpm-lock.yaml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'supply-chain-audit.yml'), 'utf8'),
+      readFile(join(root, 'scripts', 'check-package-consumers.mjs'), 'utf8'),
+    ]);
+
+  for (const [name, source] of [
+    ['quality', quality],
+    ['Electron release', release],
+    ['npm publish', publish],
+    ['scheduled supply-chain', scheduled],
+  ]) {
+    assert.match(
+      source,
+      /pnpm audit:vulnerabilities --audit-level=critical/,
+      `${name} workflow must reject critical production advisories`,
+    );
+    assert.doesNotMatch(
+      source,
+      /pnpm audit:vulnerabilities --audit-level=(?:low|moderate|high)/,
+      `${name} workflow must report but not fail on sub-critical advisories`,
+    );
+  }
+  assert.match(consumerCheck, /'--audit-level=critical'/);
+
+  for (const dependencyFloor of [
+    /"dompurify@>=3 <4": "3\.4\.13"/,
+    /"js-yaml@<4": "3\.15\.1"/,
+    /"js-yaml@>=4 <5": "4\.3\.1"/,
+    /"mermaid@>=11 <12": "11\.16\.1"/,
+  ]) {
+    assert.match(workspace, dependencyFloor);
+  }
+
+  for (const patchedResolution of [
+    /dompurify@3\.4\.13:/,
+    /js-yaml@3\.15\.1:/,
+    /js-yaml@4\.3\.1:/,
+    /mermaid@11\.16\.1:/,
+  ]) {
+    assert.match(lockfile, patchedResolution);
+  }
+  assert.doesNotMatch(
+    lockfile,
+    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.0|4\.3\.0)|mermaid@11\.16\.0):/,
+    'the lockfile must not reintroduce a B3-vulnerable resolution',
+  );
+});
+
 test('macOS release installs the finished PKG and exercises recovery', async () => {
   const workflow = await readFile(
     join(root, '.github', 'workflows', 'release-electron.yml'),

@@ -188,6 +188,31 @@ error; surfaced only by `node ../gilde/tools/build-index.mjs --verbose` as
 `skip … invalid-identity`). The daemon then falls back to defaults as if
 your edit never happened. See the `gilde:export-schemas` gotcha below.
 
+**Live gilde updates (opt-in, default off).** Between app releases, the
+daemon can pick up newer gilde content on its own:
+[GildeUpdateManager](packages/service/src/gilde-updates/manager.ts) checks
+registry.npmjs.org roughly daily for newer `@bendyline/gilde` **patch
+releases on the bundled pin's minor line**, verifies the tarball against
+the registry's `dist.integrity`, stages it under `~/.gezel/gilde/`, and
+activates it only after an empirical no-regression gate
+(`validateGildeContentUpgrade` in
+[packages/catalog/src/live/](packages/catalog/src/live/)): every item
+resolvable from the current content must still resolve from the candidate.
+Activation is restart-free — the manager owns the effective content root,
+`CatalogService` reads it through a provider closure
+(`BundledSourceOptions.dataDir` accepts a function), and catalog reads are
+lazy, so the flip is visible on the next read; live chat sessions re-resolve
+tuning via the `catalogContentSnapshot` drift check in `ensureState`.
+Controlled from Settings → About → Catalog content
+(`config.gildeUpdates.enabled`, additionally gated by the security policy's
+`allowAppNetwork`); surfaced at `/api/gilde-updates`. `GEZEL_GILDE_DATA_DIR`
+keeps absolute priority — with it set the manager reports `overridden` and
+never fetches, so dev/`link:gilde`/evals are unaffected. Line bumps (new
+minor) deliberately ride app releases, and the identity pick-lists in
+`mergeIdentityAndVersion` (source.ts) still drop manifest *fields* this
+build doesn't know — live updates deliver value changes and new items, not
+new schema surface.
+
 ## Core concepts
 
 ### Gezel
@@ -217,6 +242,13 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 ### Project
 
 A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase.
+
+The project file viewer supports outside-in rendered documents: HTML, DOCX,
+PDF, PPTX, and XLSX remain the visible project files while editable Markdown,
+media, and versions live in a hidden sibling `<stem>_files/` folder. Both
+artifact and workspace variants use the service/client filesystem boundary;
+workspace output bytes must go through the raw write endpoint and the ordinary
+workspace authority gate. See [docs/outside-in-editing.md](docs/outside-in-editing.md).
 
 **Every session belongs to a (gezel, project) pair.** There is no "gezel-only" session — the `default` project is the implicit bucket.
 
@@ -284,7 +316,7 @@ bypass those layers. An explicit install-level or per-gezel
 
 A first-class, append-only log of meaningful events across the install. Stored as JSONL at `~/.gezel/history.jsonl` (global) and `~/.gezel/projects/{id}/history.jsonl` (per-project). `HistoryManager` (in `packages/service/src/history/manager.ts`) owns both writes and reads.
 
-Event kinds include `gezel.created`, `gezel.renamed`, `gezel.settings.updated`, `project.created`, `project.updated`, `project.about.updated`, `project.mission.updated`, `project.voorman.changed`, `icon.generated`, `icon.reverted`, `document.created`, `document.deleted`, `tool.called`, `meester.changed`. Emission is wired inside `Store` mutation methods (via an optional `history` option) and inside `ChatManager` via a session `onToolCall` callback that the MCP bridge invokes. **Tool calls only surface for OpenAI and Mock providers** — the Copilot SDK runs tools inside its subprocess, so those invocations are currently invisible to the bridge.
+Event kinds include `gezel.created`, `gezel.renamed`, `gezel.settings.updated`, `project.created`, `project.updated`, `project.about.updated`, `project.mission.updated`, `project.voorman.changed`, `icon.generated`, `icon.reverted`, `document.created`, `document.deleted`, `tool.called`, `meester.changed`. Emission is wired inside `Store` mutation methods (via an optional `history` option) and inside `ChatManager` via a session `onToolCall` callback. Bridge-backed providers fire it from `McpBridge`; Claude CLI and Codex CLI synthesize it from their structured event streams; Copilot forwards observed SDK `tool.execution_start` / `tool.execution_complete` pairs. Provider-native coverage is necessarily best-effort: only events the provider exposes can be recorded, Copilot's phase-only `report_intent` is intentionally omitted, and `sandboxCopilot: false` restores built-ins that bypass Gezel's MCP scope and sink checks even when their completions are visible in History.
 
 Chat sessions are **not** stored as events. Instead, `listEntries` derives a session entry per existing `ChatSession` record at query time (duration = `lastActivityAt - createdAt`, message count from `messages.length`). This dodges the "when does a session end?" problem and avoids duplicate storage.
 
@@ -323,6 +355,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/logs/` — owned by the logger / log-rotator
   - `~/.gezel/history.jsonl` and `~/.gezel/projects/{id}/history.jsonl` — append-only, owned by [HistoryManager](packages/service/src/history/manager.ts)
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
+  - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` — sqlite-vec index (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
   - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts, the history log, and the documents library, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)

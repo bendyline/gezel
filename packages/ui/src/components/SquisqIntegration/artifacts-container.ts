@@ -35,6 +35,10 @@ const EXTENSION_MIME: Record<string, string> = {
   css: 'text/css',
   html: 'text/html',
   js: 'application/javascript',
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
 function guessMime(path: string): string {
@@ -77,12 +81,14 @@ export interface ArtifactsContentContainerOptions {
   client: GezelClient;
   /** Primary-doc filename override — basename of the file the user opened. */
   primaryDocumentFilename?: string;
+  /** Storage tree to wrap. Defaults to the project artifact drawer. */
+  source?: 'artifacts' | 'workspace';
 }
 
-export function createArtifactsContentContainer(
+export function createProjectContentContainer(
   options: ArtifactsContentContainerOptions,
 ): ContentContainer {
-  const { projectId, root, client, primaryDocumentFilename } = options;
+  const { projectId, root, client, primaryDocumentFilename, source = 'artifacts' } = options;
 
   return {
     async readFile(path: string): Promise<ArrayBuffer | null> {
@@ -90,10 +96,16 @@ export function createArtifactsContentContainer(
       const mime = guessMime(path);
       try {
         if (isTextMime(mime)) {
-          const res = await client.readProjectArtifact(projectId, full);
+          const res =
+            source === 'workspace'
+              ? await client.readProjectWorkspaceFile(projectId, full)
+              : await client.readProjectArtifact(projectId, full);
           return new TextEncoder().encode(res.content).buffer as ArrayBuffer;
         }
-        const blob = await client.fetchProjectArtifactBlob(projectId, full);
+        const blob =
+          source === 'workspace'
+            ? await client.fetchProjectWorkspaceBlob(projectId, full)
+            : await client.fetchProjectArtifactBlob(projectId, full);
         return await blob.arrayBuffer();
       } catch {
         return null;
@@ -109,16 +121,28 @@ export function createArtifactsContentContainer(
       const mime = mimeType ?? guessMime(path);
       if (isTextMime(mime)) {
         const text = new TextDecoder().decode(data);
-        await client.writeProjectArtifact(projectId, full, text);
+        if (source === 'workspace') {
+          await client.writeProjectWorkspaceFile(projectId, { path: full, content: text });
+        } else {
+          await client.writeProjectArtifact(projectId, full, text);
+        }
         return;
       }
-      await client.writeProjectArtifactBinary(projectId, full, data, mime);
+      if (source === 'workspace') {
+        await client.writeProjectWorkspaceBinary(projectId, full, data, mime);
+      } else {
+        await client.writeProjectArtifactBinary(projectId, full, data, mime);
+      }
     },
 
     async removeFile(path: string): Promise<void> {
       const full = joinRoot(root, path);
       try {
-        await client.deleteProjectArtifact(projectId, full);
+        if (source === 'workspace') {
+          await client.rmProjectWorkspacePath(projectId, full, { recursive: true });
+        } else {
+          await client.deleteProjectArtifact(projectId, full);
+        }
       } catch {
         // no-op
       }
@@ -126,11 +150,15 @@ export function createArtifactsContentContainer(
 
     async listFiles(prefix?: string): Promise<ContentEntry[]> {
       const subpath = prefix ? joinRoot(root, prefix) : root || undefined;
-      const res = await client.listProjectArtifacts(projectId, subpath, true);
+      const res =
+        source === 'workspace'
+          ? await client.listProjectWorkspace(projectId, subpath, true)
+          : await client.listProjectArtifacts(projectId, subpath, true);
       const out: ContentEntry[] = [];
       const rootPrefix = root ? `${root.replace(/\/+$/, '')}/` : '';
       for (const f of res.files) {
         if (f.isDirectory) continue;
+        if (rootPrefix && !f.path.startsWith(rootPrefix)) continue;
         const relative =
           rootPrefix && f.path.startsWith(rootPrefix) ? f.path.slice(rootPrefix.length) : f.path;
         out.push({
@@ -173,4 +201,10 @@ export function createArtifactsContentContainer(
       await this.writeFile(name, data, 'text/markdown');
     },
   };
+}
+
+export function createArtifactsContentContainer(
+  options: ArtifactsContentContainerOptions,
+): ContentContainer {
+  return createProjectContentContainer({ ...options, source: 'artifacts' });
 }

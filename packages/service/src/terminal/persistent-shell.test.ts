@@ -46,6 +46,19 @@ describe('PersistentShell (POSIX)', () => {
     }
   });
 
+  itPosix('resizes a persistent PTY to the client width before each command', async () => {
+    const shell = await PersistentShell.start({ cwd: tmpdir(), columns: 120 });
+    try {
+      const narrow = await shell.run('stty size', { columns: 72 });
+      expect(narrow.output).toBe('50 72');
+
+      const wider = await shell.run('stty size', { columns: 96 });
+      expect(wider.output).toBe('50 96');
+    } finally {
+      shell.kill();
+    }
+  });
+
   itPosix('non-zero exit code is captured', async () => {
     const shell = await PersistentShell.start({ cwd: tmpdir() });
     try {

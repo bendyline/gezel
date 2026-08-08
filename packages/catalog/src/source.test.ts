@@ -336,12 +336,16 @@ describe('BundledSource — craftbook template layouts', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const craftbookIdentity = (id: string) => ({
+  const craftbookIdentity = (
+    id: string,
+    role: 'project-starter' | 'maintenance-review' | 'general' = 'general',
+  ) => ({
     schemaVersion: 1,
     kind: 'craftbook-template',
     id,
     name: `${id} book`,
     description: `${id} fixture`,
+    role,
     tags: [],
     maintainer: { name: 'Test' },
     yankedVersions: [],
@@ -354,7 +358,7 @@ describe('BundledSource — craftbook template layouts', () => {
       root,
       'craftbook-template',
       'kk-book',
-      craftbookIdentity('kk-book'),
+      craftbookIdentity('kk-book', 'project-starter'),
     );
     const vdir = join(dir, 'versions', '1.0.0');
     await mkdir(vdir, { recursive: true });
@@ -380,6 +384,7 @@ describe('BundledSource — craftbook template layouts', () => {
     expect(detail).not.toBeNull();
     if (!detail || detail.manifest.kind !== 'craftbook-template') throw new Error('wrong kind');
     expect(detail.manifest.entryStepId).toBe('go');
+    expect(detail.manifest.role).toBe('project-starter');
     expect(detail.manifest.basedOn).toEqual({
       name: 'Fixture upstream',
       url: 'https://example.com/fixture',
@@ -427,6 +432,7 @@ describe('BundledSource — craftbook template layouts', () => {
     expect(detail).not.toBeNull();
     if (!detail || detail.manifest.kind !== 'craftbook-template') throw new Error('wrong kind');
     expect(detail.manifest.entryStepId).toBe('go');
+    expect(detail.manifest.role).toBe('general');
     expect(detail.manifest.runModes).toEqual({ scheduled: 'supported' });
     expect(detail.manifest.bundledScripts).toEqual(['hello.ts']);
     expect(detail.manifest.scripts).toBeUndefined();
@@ -587,5 +593,37 @@ describe('BundledSource — absent vs. failed directory reads', () => {
     await writeFile(join(root, 'chat-models'), 'not a directory');
     const src = new BundledSource({ dataDir: root, noIndex: true });
     await expect(src.list('chat-model')).resolves.toEqual([]);
+  });
+});
+
+describe('BundledSource — dynamic root provider', () => {
+  let rootA: string;
+  let rootB: string;
+
+  beforeEach(async () => {
+    rootA = await mkdtemp(join(tmpdir(), 'catalog-provider-a-'));
+    rootB = await mkdtemp(join(tmpdir(), 'catalog-provider-b-'));
+  });
+
+  afterEach(async () => {
+    await rm(rootA, { recursive: true, force: true });
+    await rm(rootB, { recursive: true, force: true });
+  });
+
+  it('follows a provider flip without reconstruction', async () => {
+    const dirA = await writeIdentity(rootA, 'toolset', 'aa-tool', baseToolsetIdentity('aa-tool'));
+    await writeVersion(dirA, '1.0.0', baseToolsetVersion('1.0.0'));
+    const dirB = await writeIdentity(rootB, 'toolset', 'bb-tool', baseToolsetIdentity('bb-tool'));
+    await writeVersion(dirB, '2.0.0', baseToolsetVersion('2.0.0'));
+
+    let active = rootA;
+    const src = new BundledSource({ dataDir: () => active, noIndex: true });
+    expect((await src.list('toolset')).map((i) => i.manifest.id)).toEqual(['aa-tool']);
+    expect(await src.get('toolset', 'bb-tool')).toBeNull();
+
+    active = rootB;
+    expect((await src.list('toolset')).map((i) => i.manifest.id)).toEqual(['bb-tool']);
+    expect((await src.get('toolset', 'bb-tool'))?.manifest.version).toBe('2.0.0');
+    expect(await src.get('toolset', 'aa-tool')).toBeNull();
   });
 });

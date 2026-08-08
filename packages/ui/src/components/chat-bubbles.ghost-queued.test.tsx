@@ -1,3 +1,4 @@
+import type { MediaProvider } from '@bendyline/squisq';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { GhostQueuedBubble, MessageBubble } from './chat-bubbles.js';
@@ -102,6 +103,39 @@ describe('GhostQueuedBubble', () => {
       expect(screen.queryByRole('textbox')).toBeNull();
     });
     expect(document.querySelector('.msg-ghost-queued-edit-error')).toBeNull();
+  });
+
+  it('resolves a pasted image inline while the message is queued', async () => {
+    const resolveUrl = vi.fn().mockResolvedValue('blob:queued-image');
+    const mediaProvider: MediaProvider = {
+      resolveUrl,
+      addMedia: vi.fn(),
+      listMedia: vi.fn(),
+      removeMedia: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const fullText = [
+      'Can you also add graphics inspired by armor alley?',
+      '',
+      '![pasted screenshot](attachments/81f79714-da68-4c0f-877b-0b1339e61fe5.png)',
+    ].join('\n');
+
+    render(
+      <GhostQueuedBubble
+        {...ghostProps({
+          // Simulate the SSE preview cutting the attachment markdown in half.
+          preview: `${'x'.repeat(157)}…`,
+          mediaProvider,
+          onLoadText: async () => fullText,
+          onSaveEdit: async () => true,
+        })}
+      />,
+    );
+
+    const image = await screen.findByRole('img', { name: 'pasted screenshot' });
+    await waitFor(() => expect(image).toHaveAttribute('src', 'blob:queued-image'));
+    expect(resolveUrl).toHaveBeenCalledWith('attachments/81f79714-da68-4c0f-877b-0b1339e61fe5.png');
+    expect(screen.queryByText(/!\[pasted screenshot\]/)).toBeNull();
   });
 });
 

@@ -21,6 +21,7 @@ APP_DIR="/Applications/Gezel.app"
 DAEMON_USER="_gezeld"
 DETACHED_SCRIPT_PREFIX="/private/tmp/gezel-uninstall."
 DETACHED_LOG="/var/tmp/gezel-uninstall.log"
+SERVICE_EXIT_TIMEOUT_SECONDS=30
 
 usage() {
   cat <<EOF
@@ -29,9 +30,12 @@ Usage:
 
 Default uninstall:
   Removes the Gezel application, machine-wide background service, service
-  account, every user's Gezel startup item, and the PackageKit receipt.
-  Preserves downloaded models and all project, chat, credential, and settings
-  data so a later reinstall can use them.
+  account, every user's Gezel startup item, and the PackageKit receipt. Service
+  exit and account removal are verified. If macOS protects a pre-existing
+  account, the matching group is retained and the script exits with the exact
+  directory-service error and manual-remediation steps instead of claiming
+  success. Downloaded models and all project, chat, credential, and settings
+  data are preserved so a later reinstall can use them.
 
 Data-removal options (independent and opt-in):
   --remove-machine-data
@@ -162,6 +166,167 @@ read_user_attribute() {
     /usr/bin/awk -v key="$2" '$1 ~ "(^|:)" key ":$" { print $2 }' || true
 }
 
+# Keep the privileged command behind a fixed wrapper so the identity-removal
+# state machine can be exercised with a fake directory service in unit tests.
+# The production path is not configurable from the environment.
+directory_service() {
+  /usr/bin/dscl "$@"
+}
+
+# Prints exactly one of: present, absent, unknown. A non-zero dscl result is
+# not enough to prove absence: permission and directory-service failures use
+# the same exit channel as eDSRecordNotFound.
+directory_record_state() {
+  record="$1"
+  if output=$(directory_service . -read "$record" 2>&1); then
+    echo "present"
+    return 0
+  fi
+  if printf '%s\n' "$output" | /usr/bin/grep -Eq 'eDSRecordNotFound|DS Error: -14136'; then
+    echo "absent"
+    return 0
+  fi
+  echo "[gezel uninstall] error: could not verify directory-service record ${record}" >&2
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output" | /usr/bin/sed 's/^/[gezel uninstall]   /' >&2
+  fi
+  echo "unknown"
+}
+
+delete_directory_record() {
+  kind="$1"
+  record="$2"
+  state=$(directory_record_state "$record")
+  case "$state" in
+    absent)
+      echo "[gezel uninstall] ${kind} record ${record} is already absent"
+      return 0
+      ;;
+    present) ;;
+    *)
+      echo "[gezel uninstall] error: refusing to claim ${kind} removal without a reliable preflight" >&2
+      return 1
+      ;;
+  esac
+
+  delete_failed=0
+  delete_output=""
+  if ! delete_output=$(directory_service . -delete "$record" 2>&1); then
+    delete_failed=1
+    echo "[gezel uninstall] error: dscl could not delete ${kind} record ${record}" >&2
+    if [ -n "$delete_output" ]; then
+      printf '%s\n' "$delete_output" | /usr/bin/sed 's/^/[gezel uninstall]   /' >&2
+    fi
+  fi
+
+  state=$(directory_record_state "$record")
+  if [ "$state" = "absent" ]; then
+    if [ "$delete_failed" -eq 1 ]; then
+      echo "[gezel uninstall] ${kind} record ${record} is nevertheless verified absent"
+    else
+      echo "[gezel uninstall] removed ${kind} record ${record} (verified absent)"
+    fi
+    return 0
+  fi
+
+  if [ "$state" = "present" ]; then
+    echo "[gezel uninstall] error: ${kind} record ${record} still exists after deletion" >&2
+  else
+    echo "[gezel uninstall] error: absence of ${kind} record ${record} could not be verified" >&2
+  fi
+  return 1
+}
+
+remove_service_identity() {
+  user_record="/Users/${DAEMON_USER}"
+  group_record="/Groups/${DAEMON_USER}"
+
+  # Never repeat the release defect: if macOS retains the user, keep its
+  # matching group too instead of manufacturing an orphaned account.
+  if ! delete_directory_record "user" "$user_record"; then
+    echo "[gezel uninstall] error: keeping ${group_record} because ${user_record} remains" >&2
+    return 1
+  fi
+  delete_directory_record "group" "$group_record"
+}
+
+launchd_service_pid() {
+  /bin/launchctl print "system/${DAEMON_LABEL}" 2>/dev/null |
+    /usr/bin/awk '$1 == "pid" && $2 == "=" { gsub(/;/, "", $3); print $3; exit }' || true
+}
+
+stop_machine_service() {
+  echo "[gezel uninstall] stopping GezelService"
+  service_was_loaded=0
+  if /bin/launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
+    service_was_loaded=1
+  fi
+  service_pid=$(launchd_service_pid)
+
+  bootout_output=""
+  if ! bootout_output=$(/bin/launchctl bootout "system/${DAEMON_LABEL}" 2>&1); then
+    if [ "$service_was_loaded" -eq 1 ]; then
+      echo "[gezel uninstall] warning: launchctl bootout reported an error; waiting to verify shutdown" >&2
+      if [ -n "$bootout_output" ]; then
+        printf '%s\n' "$bootout_output" | /usr/bin/sed 's/^/[gezel uninstall]   /' >&2
+      fi
+    fi
+  fi
+
+  deadline=$((SECONDS + SERVICE_EXIT_TIMEOUT_SECONDS))
+  while :; do
+    service_loaded=0
+    service_process_running=0
+    if /bin/launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
+      service_loaded=1
+    fi
+    if [[ "$service_pid" =~ ^[0-9]+$ ]] && [ "$service_pid" -gt 1 ] &&
+       /bin/kill -0 "$service_pid" 2>/dev/null; then
+      service_process_running=1
+    fi
+    if [ "$service_loaded" -eq 0 ] && [ "$service_process_running" -eq 0 ]; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "[gezel uninstall] error: GezelService did not exit within ${SERVICE_EXIT_TIMEOUT_SECONDS} seconds; cleanup stopped before removing its files or account" >&2
+      return 1
+    fi
+    /bin/sleep 0.2
+  done
+  echo "[gezel uninstall] GezelService stopped (verified)"
+}
+
+print_identity_remediation() {
+  cat >&2 <<EOF
+[gezel uninstall] ERROR: Gezel was removed, but macOS retained part of the ${DAEMON_USER} service account.
+[gezel uninstall] No unconditional success is being reported. Review the protected or pre-existing records with:
+[gezel uninstall]   sudo /usr/bin/dscl . -read /Users/${DAEMON_USER}
+[gezel uninstall]   sudo /usr/bin/dscl . -read /Groups/${DAEMON_USER}
+[gezel uninstall] If the user is Gezel's dedicated account, remove it first. Remove the matching group only after the user is verified absent:
+[gezel uninstall]   sudo /usr/bin/dscl . -delete /Users/${DAEMON_USER}
+[gezel uninstall]   sudo /usr/bin/dscl . -delete /Groups/${DAEMON_USER}
+[gezel uninstall] A detached uninstall's complete log is at ${DETACHED_LOG}.
+EOF
+}
+
+notify_detached_identity_failure() {
+  case "$0" in
+    "${DETACHED_SCRIPT_PREFIX}"*) ;;
+    *) return 0 ;;
+  esac
+  [[ "$TARGET_USER_UID" =~ ^[0-9]+$ ]] || return 0
+  [ "$TARGET_USER_UID" -gt 0 ] || return 0
+  notification_username=$(user_for_uid "$TARGET_USER_UID") || return 0
+
+  # The initiating app has already quit, so a detached failure cannot travel
+  # back over IPC. Surface it in the initiating user's GUI as well as the
+  # root-owned log. The alert times out so cleanup never waits indefinitely.
+  /bin/launchctl asuser "$TARGET_USER_UID" /usr/bin/sudo -H -u "$notification_username" \
+    /usr/bin/osascript -e \
+    'display alert "Gezel uninstall needs attention" message "Gezel was removed, but macOS retained part of the _gezeld service account. Its matching group was not removed while the user remained. See /var/tmp/gezel-uninstall.log for the exact error and safe manual steps." as critical buttons {"OK"} default button "OK" giving up after 30' \
+    >/dev/null 2>&1 || true
+}
+
 is_safe_user_home() {
   case "$1" in
     /Users/*|/Volumes/*|/Network/*) ;;
@@ -281,8 +446,7 @@ remove_current_user_data() {
     "${target_home}/Library/Saved Application State/com.bendyline.gezel.savedState"
 }
 
-echo "[gezel uninstall] stopping GezelService"
-/bin/launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
+stop_machine_service
 
 # `launchctl disable` persists independently of the plist and app payload.
 # Clear any installer safety quarantine so a later reinstall starts from the
@@ -299,8 +463,10 @@ echo "[gezel uninstall] removing application bundle"
 /bin/rm -rf -- "$APP_DIR"
 
 echo "[gezel uninstall] removing ${DAEMON_USER} system user and group"
-/usr/bin/dscl . -delete "/Users/${DAEMON_USER}" 2>/dev/null || true
-/usr/bin/dscl . -delete "/Groups/${DAEMON_USER}" 2>/dev/null || true
+IDENTITY_REMOVAL_FAILED=0
+if ! remove_service_identity; then
+  IDENTITY_REMOVAL_FAILED=1
+fi
 
 if [ "$REMOVE_MACHINE_DATA" -eq 1 ]; then
   echo "[gezel uninstall] removing machine broker/engine data at ${DATA_DIR}"
@@ -328,4 +494,10 @@ if /usr/sbin/pkgutil --pkg-info "$PACKAGE_ID" >/dev/null 2>&1; then
     echo "[gezel uninstall] warning: PackageKit could not forget ${PACKAGE_ID}" >&2
 fi
 
-echo "[gezel uninstall] done"
+if [ "$IDENTITY_REMOVAL_FAILED" -eq 1 ]; then
+  print_identity_remediation
+  notify_detached_identity_failure
+  exit 1
+fi
+
+echo "[gezel uninstall] done (service exit and account removal verified)"
