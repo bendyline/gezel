@@ -63,6 +63,32 @@ describe('createOllamaEmulationController', () => {
       await blocker.close();
     }
   });
+
+  it('names another gezel daemon when the occupant is a gezel emulation (multi-user machines)', async () => {
+    // Real Ollama and gezel's emulation both answer /api/version 200; the
+    // marker header is what tells them apart in the conflict message.
+    const blocker: Server = createServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'x-gezel-ollama-emulation': '1',
+      });
+      res.end('{"version":"emulated"}');
+    });
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const address = blocker.address();
+    if (address === null || typeof address === 'string') throw new Error('no port');
+    try {
+      const controller = createOllamaEmulationController({
+        fetch: okFetch(),
+        port: address.port,
+      });
+      await expect(controller.reconfigure({ emulateOllama: true })).rejects.toThrow(
+        /another gezel daemon/,
+      );
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+  });
 });
 
 describe('ollama emulation — end to end through the service', () => {
@@ -106,6 +132,46 @@ describe('ollama emulation — end to end through the service', () => {
 
   it('is off by default', () => {
     expect(svc.context.ollamaEmulation.status().listening).toBe(false);
+  });
+
+  it('rejects non-loopback Host authorities on the live listener (hostGuard e2e)', async () => {
+    await putEndpoints({ emulateOllama: true });
+    const status = svc.context.ollamaEmulation.status();
+    expect(status.listening).toBe(true);
+    const port = status.port!;
+
+    // Raw node:http because fetch/undici strips a spoofed Host header. This
+    // is the same DNS-rebinding defense as the main app, proven over the
+    // real unauthenticated socket.
+    const { request } = await import('node:http');
+    const raw = (hostHeader: string, path: string) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request(
+          { host: '127.0.0.1', port, path, headers: { host: hostHeader } },
+          (res) => {
+            let body = '';
+            res.on('data', (d) => {
+              body += d;
+            });
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+
+    const lanHost = await raw('192.168.1.50:11434', '/api/tags');
+    expect(lanHost.status).toBe(403);
+    expect(lanHost.body).toContain('forbidden_host');
+    const dnsHost = await raw('evil.example:11434', '/api/tags');
+    expect(dnsHost.status).toBe(403);
+    const loopback = await raw(`127.0.0.1:${port}`, '/api/version');
+    expect(loopback.status).toBe(200);
+
+    // The marker header rides on every response so a second daemon's
+    // port-conflict probe can identify this occupant as gezel.
+    const version = await fetch(`http://127.0.0.1:${port}/api/version`);
+    expect(version.headers.get('x-gezel-ollama-emulation')).toBe('1');
   });
 
   it('starts on config enable and serves the Ollama surface without auth', async () => {

@@ -79,6 +79,25 @@ const runtime = (serviceRole?: 'user' | 'machine-engine' | 'legacy-full') => ({
 });
 
 describe('resolveMode — machine-service decision table', () => {
+  it('resolves remote mode from a real config.json service entry, with no cert pin', async () => {
+    // Branch 1 outranks the machine service. `cert: null` is deliberate —
+    // remote daemons bring their own TLS chain; we never pin a cert for a
+    // URL we didn't generate.
+    await writeFile(
+      join(home, 'config.json'),
+      JSON.stringify({ service: { url: 'https://remote.example:6228/', token: 'remote-tok' } }),
+    );
+    ctx.scm = { status: 'running' };
+    ctx.runtime = runtime('machine-engine');
+    const mode = await resolveMode(opts());
+    expect(mode).toEqual({
+      kind: 'remote',
+      baseUrl: 'https://remote.example:6228',
+      token: 'remote-tok',
+      cert: null,
+    });
+  });
+
   it('waits for a START_PENDING service even when runtime files are absent', async () => {
     // The install race: service enabled seconds ago, files not yet written.
     ctx.scm = { status: 'start-pending' };

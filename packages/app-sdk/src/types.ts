@@ -13,7 +13,8 @@
 export interface DetectResult {
   /**
    * The daemon has been launched at least once on this machine and
-   * wrote runtime files to `~/.gezel/runtime/`. The runtime files
+   * wrote runtime files under its gezel home's `runtime/` directory
+   * (default `~/.gezel`, `GEZEL_HOME` overrides). The runtime files
    * are NOT proof that the daemon is currently up — that's `running`.
    */
   installed: boolean;
@@ -60,7 +61,7 @@ export interface ConnectInput {
   /**
    * Explicit base URL override. When omitted, the SDK runs
    * {@link DetectResult.baseUrl}. Useful for browser apps that can't
-   * read `~/.gezel/runtime/`.
+   * read the gezel home's `runtime/` directory.
    */
   baseUrl?: string;
   /**
@@ -128,6 +129,15 @@ export interface LocalDaemonOptions {
   daemonEntry?: string;
   /** Start the bundled entry when no live per-user runtime exists. Default false. */
   spawnIfMissing?: boolean;
+  /**
+   * When a spawn happens, let the daemon try to claim the canonical port
+   * 6228 (with ephemeral fallback) instead of pinning an ephemeral port.
+   * For first-party callers that have confirmed no machine service is
+   * registered on this host — on machine installs the canonical port
+   * belongs to the machine engine. Default false: SDK-started daemons
+   * never race the broker.
+   */
+  preferCanonicalPort?: boolean;
   /** Alternate `GEZEL_HOME`, primarily for managed installs and tests. */
   home?: string;
   /** Startup/adoption deadline. Default 20 seconds. */

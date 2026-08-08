@@ -111,8 +111,16 @@ The **enforcement layers** a model-driven action passes through, outermost first
 
 - **Loopback by default.** The primary listener and native-engine child ports bind
   `127.0.0.1`. An explicit `remoteServing.enabled` setting adds a second LAN listener for
-  paired inference; it serves the same Hono app, so every auth/scope/capability boundary must
-  remain valid on a routable interface rather than assuming loopback is the boundary.
+  paired inference. That listener serves a **separate deny-by-default allowlist app**
+  (`buildRemoteApp` in `http/remote-server.ts`: exactly `/v1/identity`, the pairing/grant
+  routes, and `/v1/remote/*`; everything else 404s), so adding a loopback route never
+  exposes it on the LAN as a side effect — but every boundary on the allowlisted routes
+  must still remain valid on a routable interface. The listener is hosted by whichever
+  daemon owns the engines: the machine-engine broker on machine installs (headless,
+  configured through the loopback `/v1/remote/manage/serving` surface), else the user
+  daemon. `bindAddress` is validated to an IP literal at bind time, and per-tenant limits
+  (concurrency + `requestsPerMinute`) are enforced for paired devices while the first-party
+  bridge credential is exempt.
 - **TLS 1.3, self-signed, per-launch.** Default transport is HTTPS/2 with a self-signed
   loopback cert; the private key lives in memory only and never hits disk (only the public
   cert PEM + fingerprint are written, world-readable by design). Downgrade to plain HTTP
@@ -535,6 +543,8 @@ privileged service identity or putting the daemon root token on disk.
 | Per-credential host binding for `http.authed` | DEFERRED | Today: https + `redirect:'manual'`; a granted script can still POST a credential to any public host it names. Needs a grant-schema decision (e.g. GitHub Enterprise custom hosts). |
 | `secrets.key` co-located with `secrets.enc` | DEFERRED | Same-dir, same `0600`; encryption ≈ file perms. Fix = bind the key to an OS keychain / machine-id KDF / passphrase. Treat `secrets.enc` as plaintext-equivalent for backup/sync purposes. |
 | Machine-shared client membership | PRODUCT CHOICE | Every local account that can read the shared runtime credential is a trusted first-party Gezel client and can access shared daemon data. A future installer choice should make shared-machine versus per-user/private hosting explicit. |
+| Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
+| Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution on Windows/Linux | FAIL CLOSED | Model/gate scripts return exit 126 because no supported OS network boundary exists yet. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |

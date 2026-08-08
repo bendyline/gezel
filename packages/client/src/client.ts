@@ -1322,6 +1322,51 @@ export interface PairedRemoteInfo {
   hasToken: boolean;
 }
 
+/** remoteServing config as managed on the machine broker. */
+export interface MachineServingConfig {
+  enabled?: boolean;
+  bindAddress?: string;
+  port?: number;
+  priority?: 'equal' | 'below-local' | 'above-local';
+  reserveLocalGb?: number;
+  allowModels?: string[];
+  limits?: {
+    maxConcurrentPerDevice?: number;
+    maxChatPerDevice?: number;
+    requestsPerMinute?: number;
+  };
+}
+
+/**
+ * GET/PUT /api/machine-serving response. `config.enabled` reflects the
+ * actual listener state; `identity` is the BROKER's device identity (the
+ * fingerprint peers verify out-of-band), not the user daemon's.
+ */
+export interface MachineServingState {
+  config: MachineServingConfig;
+  status: { listening: boolean; host?: string; port?: number };
+  identity: { deviceId: string; fingerprint: string };
+}
+
+export interface MachineServingGrant {
+  id: string;
+  appId: string;
+  appName: string;
+  scopes: string[];
+  status: 'pending' | 'approved' | 'denied' | string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
+export interface MachineServingDevice {
+  appId: string;
+  appName: string;
+  scopes: string[];
+  createdAt: number;
+  lastUsedAt?: number;
+  deviceId?: string;
+}
+
 export type SendChannelResult =
   | { ok: true; id?: string; channel?: 'webhook' }
   | { ok: false; error: string; channel?: 'webhook' };
@@ -4256,6 +4301,40 @@ export class GezelClient {
 
   unpairRemote(remoteId: string): Promise<{ ok: boolean }> {
     return this.request('DELETE', `/api/remotes/${encodeURIComponent(remoteId)}`);
+  }
+
+  // ---- Machine-broker LAN serving (this device as SERVER, broker-owned) ----
+  // Proxied by the user daemon to the machine engine's
+  // /v1/remote/manage/serving surface; 503 `machine_engine_unavailable`
+  // when no broker has been adopted (the UI then falls back to the user
+  // daemon's own remoteServing config).
+
+  getMachineServing(): Promise<MachineServingState> {
+    return this.request('GET', '/api/machine-serving');
+  }
+
+  updateMachineServing(config: MachineServingConfig): Promise<MachineServingState> {
+    return this.request('PUT', '/api/machine-serving', config);
+  }
+
+  listMachineServingGrants(): Promise<{ grants: MachineServingGrant[] }> {
+    return this.request('GET', '/api/machine-serving/grants');
+  }
+
+  approveMachineServingGrant(id: string): Promise<{ ok: true; status: string }> {
+    return this.request('POST', `/api/machine-serving/grants/${encodeURIComponent(id)}/approve`);
+  }
+
+  denyMachineServingGrant(id: string): Promise<{ ok: true; status: string }> {
+    return this.request('POST', `/api/machine-serving/grants/${encodeURIComponent(id)}/deny`);
+  }
+
+  listMachineServingDevices(): Promise<{ devices: MachineServingDevice[] }> {
+    return this.request('GET', '/api/machine-serving/devices');
+  }
+
+  revokeMachineServingDevice(appId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/machine-serving/devices/${encodeURIComponent(appId)}`);
   }
 
   listRemoteModels(remoteId: string): Promise<{

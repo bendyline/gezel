@@ -35,7 +35,11 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
     servers: [
       {
         url: 'https://127.0.0.1:{port}',
-        description: 'Local gezel daemon. Port is per-launch (see `~/.gezel/runtime/port`).',
+        description:
+          'Local gezel daemon. Port is per-launch — read `~/.gezel/runtime/port`. It is the ' +
+          'canonical 6228 only when no Gezel machine service is installed (on machine installs ' +
+          'the machine engine holds 6228 and this API moves to a per-launch port). The opt-in ' +
+          'Ollama emulation (`http://127.0.0.1:11434`) is the fixed-port alternative.',
       },
     ],
     paths: {

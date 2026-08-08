@@ -14,6 +14,7 @@ import {
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { hostGuard } from './host-guard.js';
+import { mountMachineEngineHints } from './machine-engine-hints.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
@@ -46,6 +47,7 @@ import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { machineEngineProxy } from './routes/machine-engine-proxy.js';
+import { machineServingRoutes } from './routes/machine-serving.js';
 import { mailRoutes } from './routes/mail.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
@@ -72,6 +74,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
+import { remoteServingManageRoutes } from './routes/remote-serving-manage.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -480,8 +483,17 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.route('/v1/remote/manage/image-gen', imageGenRoutes(ctx));
     app.route('/v1/remote/manage/video-gen', videoGenRoutes(ctx));
     app.route('/v1/remote/manage/audio', audioRoutes(ctx));
+    // LAN-serving administration (config, pairing grants, device roster).
+    // Loopback-only by construction: nothing under /v1/remote/manage is in
+    // isRemoteServingRoute, so the LAN app 404s it.
+    app.route('/v1/remote/manage/serving', remoteServingManageRoutes(ctx));
     app.route('/v1/remote', v1RemoteRoutes(ctx));
-    app.get('*', (c) => c.json({ error: 'not_found' }, 404));
+    // Actionable dead-ends for third-party clients that reach the broker on
+    // the canonical port expecting the product /v1 API.
+    mountMachineEngineHints(app);
+    // `all`, not `get`: the classic wrong call here is a POST, which would
+    // otherwise fall through to Hono's plain-text default 404.
+    app.all('*', (c) => c.json({ error: 'not_found', service: 'gezel-machine-engine' }, 404));
     return app;
   }
 
@@ -551,6 +563,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
   app.route('/api/remotes', remotesRoutes(ctx));
+  // Machine-broker LAN-serving administration, proxied to
+  // /v1/remote/manage/serving with the bridge credential; 503 without a broker.
+  app.route('/api/machine-serving', machineServingRoutes(ctx));
   app.route('/api/ollama', ollamaRoutes(ctx));
   app.route('/api/llama-cpp', llamaCppRoutes(ctx));
   app.route('/api/model-fitness', modelFitnessRoutes(ctx));

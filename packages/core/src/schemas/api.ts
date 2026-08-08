@@ -628,6 +628,46 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 });
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
+/**
+ * Remote model execution — serving a device's models to paired client devices
+ * over the LAN. Named schema (not inline in {@link GezelConfigSchema}) because
+ * the machine-engine broker's manage surface parses it standalone: the broker
+ * has no `/api/config`, so `/v1/remote/manage/serving` is the only
+ * reader/writer of the broker's own `remoteServing` key.
+ */
+export const RemoteServingConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /**
+   * Interface to bind the LAN listener to. Default `0.0.0.0`. Must be an IP
+   * literal or empty; enforced at bind time in the serving controller rather
+   * than as a zod refine — a schema failure fails the WHOLE config read at
+   * boot, which must never brick an install over one hand-edited field.
+   */
+  bindAddress: z.string().optional(),
+  /** Port for the LAN listener. Default 6229 (loopback stays on 6228). */
+  port: z.number().int().positive().optional(),
+  /**
+   * How remote turns compete with this device's own local work in the
+   * provider queue. `equal` (default) → interactive lane like local;
+   * `below-local` → background lane so local always drains first;
+   * `above-local` → remote favored.
+   */
+  priority: z.enum(['equal', 'below-local', 'above-local']).optional(),
+  /** GB of model budget reserved for local work; remote loads can't evict into it. */
+  reserveLocalGb: z.number().nonnegative().optional(),
+  /** Catalog/model ids remote clients may use. Omit → all installed. */
+  allowModels: z.array(z.string()).optional(),
+  /** Per-tenant resource caps. */
+  limits: z
+    .object({
+      maxConcurrentPerDevice: z.number().int().positive().optional(),
+      maxChatPerDevice: z.number().int().positive().optional(),
+      requestsPerMinute: z.number().int().positive().optional(),
+    })
+    .optional(),
+});
+export type RemoteServingConfig = z.infer<typeof RemoteServingConfigSchema>;
+
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
@@ -643,6 +683,20 @@ export const GezelConfigSchema = z.object({
    * separate authorization/storage setting and must not reuse this field.
    */
   hosting: z.enum(['auto', 'machine-service', 'per-user']).optional(),
+  /**
+   * Supervisor Branch-1 remote mode: point this desktop shell at a
+   * user-managed remote gezel daemon instead of running one locally. Read
+   * RAW by the Electron supervisor before any daemon exists
+   * (`supervisor/mode.ts` `readRemoteConfig` — bare JSON, not this schema);
+   * declared here so Store writes round-trip it — an undeclared key is
+   * stripped by `readConfig` and silently deleted on the next settings
+   * save. The token is the remote daemon's first-party runtime credential
+   * and rotates on every remote daemon start; a loopback-preserving tunnel
+   * (SSH `-L` / Tailscale toward loopback) is the recommended transport —
+   * see docs/remote-access.md. Deliberately absent from the
+   * `GET /api/config` projection so the token never reflects to clients.
+   */
+  service: z.object({ url: z.string(), token: z.string() }).optional(),
   /**
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
    * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`
@@ -915,34 +969,7 @@ export const GezelConfigSchema = z.object({
    * tokens are independent of this toggle — this only controls whether the
    * inference-only `/v1/remote/*` surface is reachable off-box.
    */
-  remoteServing: z
-    .object({
-      enabled: z.boolean().default(false),
-      /** Interface to bind the LAN listener to. Default `0.0.0.0`. */
-      bindAddress: z.string().optional(),
-      /** Port for the LAN listener. Default 6229 (loopback stays on 6228). */
-      port: z.number().int().positive().optional(),
-      /**
-       * How remote turns compete with this device's own local work in the
-       * provider queue. `equal` (default) → interactive lane like local;
-       * `below-local` → background lane so local always drains first;
-       * `above-local` → remote favored.
-       */
-      priority: z.enum(['equal', 'below-local', 'above-local']).optional(),
-      /** GB of model budget reserved for local work; remote loads can't evict into it. */
-      reserveLocalGb: z.number().nonnegative().optional(),
-      /** Catalog/model ids remote clients may use. Omit → all installed. */
-      allowModels: z.array(z.string()).optional(),
-      /** Per-tenant resource caps. */
-      limits: z
-        .object({
-          maxConcurrentPerDevice: z.number().int().positive().optional(),
-          maxChatPerDevice: z.number().int().positive().optional(),
-          requestsPerMinute: z.number().int().positive().optional(),
-        })
-        .optional(),
-    })
-    .optional(),
+  remoteServing: RemoteServingConfigSchema.optional(),
   /**
    * Boekwachter review pass (per-file cliffs notes, issues, 1-10 health).
    * ON by default when a local enrich model is configured — same best-effort,
@@ -2457,6 +2484,9 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
+  // Request side accepts `null` so "disconnect from the remote daemon"
+  // can clear the stored Branch-1 target; writeConfig strips the null.
+  service: z.object({ url: z.string(), token: z.string() }).nullable().optional(),
   // llama-cpp Advanced overrides the Settings UI can reset to their
   // default. The read/on-disk shape stays non-null (`.optional()`); the
   // request side accepts `null` so picking the default sentinel (Auto /

@@ -15,7 +15,7 @@ Everything described here lives in **Settings → Connected Apps**.
 
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
-1. **An address.** Gezel listens at `https://127.0.0.1:6228/v1` on your machine. Apps that let you set a custom AI server go here.
+1. **An address.** The address panel in **Settings → Connected Apps** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel.
 
 ## Who answers: gezel choices and the fallback

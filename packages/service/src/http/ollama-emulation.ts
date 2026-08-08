@@ -49,6 +49,10 @@ export function buildOllamaEmulationApp(ctx: ServiceContext): Hono {
     c.res.headers.delete('transfer-encoding');
     c.res.headers.set('x-content-type-options', 'nosniff');
     c.res.headers.set('referrer-policy', 'no-referrer');
+    // Marker so a port-conflict probe can tell gezel's emulation apart from
+    // real Ollama — both answer /api/version 200. Multi-user machines hit
+    // this: the first logged-in user's daemon wins 11434.
+    c.res.headers.set('x-gezel-ollama-emulation', '1');
   });
   app.use('*', opaqueServerErrors(log));
   app.use('*', hostGuard());
@@ -175,12 +179,15 @@ async function describePortConflict(port: number): Promise<string> {
       signal: AbortSignal.timeout(1_000),
     });
     if (res.ok) {
+      if (res.headers.get('x-gezel-ollama-emulation')) {
+        return `Port ${port} is already in use by another gezel daemon's Ollama emulation (likely another logged-in user on this machine). Only one process can own ${port}; the first daemon to enable emulation wins.`;
+      }
       return `Port ${port} is already in use — Ollama itself appears to be running there. Stop Ollama first, or keep using it directly and leave emulation off.`;
     }
   } catch {
     /* not Ollama, or not answering — fall through to the generic message */
   }
-  return `Port ${port} is already in use by another process, so the Ollama emulation cannot start.`;
+  return `Port ${port} is already in use by another process (possibly another user's gezel daemon), so the Ollama emulation cannot start.`;
 }
 
 async function startServer(opts: {

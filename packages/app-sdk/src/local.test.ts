@@ -84,6 +84,33 @@ describe('local native app connection', () => {
     expect(authorized).not.toHaveProperty('rootToken');
   });
 
+  it('omits GEZEL_PORT for an opted-in canonical-port spawn while still stripping inherited values', async () => {
+    process.env.GEZEL_PORT = '6228';
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'spawned',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+
+    await authorizeLocalOwner({
+      daemon: {
+        daemonEntry: '/bundled/gezeld.js',
+        spawnIfMissing: true,
+        preferCanonicalPort: true,
+      },
+    });
+
+    const spawnEnv = discoverOrSpawn.mock.calls[0]?.[0]?.env as NodeJS.ProcessEnv;
+    // Unset (not inherited, not '0') → gezeld's 6228-with-ephemeral-fallback
+    // path. The inherited developer-shell value must still be stripped.
+    expect(spawnEnv.GEZEL_PORT).toBeUndefined();
+    expect(spawnEnv.GEZEL_SERVICE_ROLE).toBe('user');
+    expect(spawnEnv.GEZEL_SYSTEM_SCOPE).toBeUndefined();
+  });
+
   it('preserves an operator-selected user home while overriding system role and port', async () => {
     const originalHome = process.env.GEZEL_HOME;
     process.env.GEZEL_HOME = '/custom/user/gezel';

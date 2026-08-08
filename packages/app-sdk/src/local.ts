@@ -83,7 +83,7 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
     resolved = await discoverOrSpawn({
       daemonEntry: daemon.daemonEntry,
       detached: true,
-      env: userDaemonEnv(daemon.home),
+      env: userDaemonEnv(daemon.home, daemon.preferCanonicalPort),
       home: daemon.home,
       spawnIfMissing: daemon.spawnIfMissing ?? false,
       timeoutMs: daemon.timeoutMs ?? 20_000,
@@ -160,7 +160,7 @@ export async function authorizeLocalOwner(
     resolved = await discoverOrSpawn({
       daemonEntry: input.daemon.daemonEntry,
       detached: true,
-      env: userDaemonEnv(input.daemon.home),
+      env: userDaemonEnv(input.daemon.home, input.daemon.preferCanonicalPort),
       home: input.daemon.home,
       spawnIfMissing: input.daemon.spawnIfMissing ?? false,
       timeoutMs: input.daemon.timeoutMs ?? 20_000,
@@ -218,7 +218,7 @@ export async function connectLocal(
   };
 }
 
-function userDaemonEnv(home: string | undefined): NodeJS.ProcessEnv {
+function userDaemonEnv(home: string | undefined, preferCanonicalPort?: boolean): NodeJS.ProcessEnv {
   // System-scope and named-port values can leak in from a service host or a
   // developer shell. They are never valid for an SDK-started product daemon.
   const {
@@ -230,7 +230,12 @@ function userDaemonEnv(home: string | undefined): NodeJS.ProcessEnv {
   return {
     ...inherited,
     ...(home ? { GEZEL_HOME: home } : {}),
-    GEZEL_PORT: '0',
+    // '0' pins an ephemeral port so an SDK-started daemon never races the
+    // machine broker's canonical 6228. A first-party caller that verified
+    // no machine service exists may opt into the canonical-port preference
+    // (unset env → gezeld's 6228-with-ephemeral-fallback path), which is
+    // what gives standalone installs the stable third-party /v1 base URL.
+    ...(preferCanonicalPort ? {} : { GEZEL_PORT: '0' }),
     GEZEL_SERVICE_ROLE: 'user',
   };
 }

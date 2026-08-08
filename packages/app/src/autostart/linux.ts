@@ -6,12 +6,34 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AutostartInstallOptions } from './index.js';
 
-const exec = promisify(execFile);
+const defaultExec = promisify(execFile);
 
-const UNIT_NAME = 'gezeld.service';
+/**
+ * User-scope unit name. Deliberately NOT `gezeld.service`: the machine
+ * installer owns system-scope `/etc/systemd/system/gezeld.service`, and a
+ * user unit with the identical name made every unscoped `systemctl` mention
+ * of "gezeld.service" ambiguous. The legacy name is still migrated/removed
+ * below for installs that enabled autostart before the rename.
+ */
+const UNIT_NAME = 'gezeld-user.service';
+const LEGACY_UNIT_NAME = 'gezeld.service';
 
-function unitPath(): string {
-  return join(homedir(), '.config', 'systemd', 'user', UNIT_NAME);
+/** Test seam: inject exec + config dir; production uses the real ones. */
+export interface LinuxAutostartDeps {
+  exec?: (command: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
+  configDir?: string;
+}
+
+function userUnitDir(deps?: LinuxAutostartDeps): string {
+  return deps?.configDir ?? join(homedir(), '.config', 'systemd', 'user');
+}
+
+function unitPath(deps?: LinuxAutostartDeps): string {
+  return join(userUnitDir(deps), UNIT_NAME);
+}
+
+function legacyUnitPath(deps?: LinuxAutostartDeps): string {
+  return join(userUnitDir(deps), LEGACY_UNIT_NAME);
 }
 
 function buildUnit(opts: AutostartInstallOptions): string {
@@ -33,20 +55,48 @@ WantedBy=default.target
 `;
 }
 
-export async function install(opts: AutostartInstallOptions): Promise<void> {
-  await mkdir(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
-  await writeFile(unitPath(), buildUnit(opts));
+export async function install(
+  opts: AutostartInstallOptions,
+  deps?: LinuxAutostartDeps,
+): Promise<void> {
+  const exec = deps?.exec ?? defaultExec;
+  await mkdir(userUnitDir(deps), { recursive: true });
+  await writeFile(unitPath(deps), buildUnit(opts));
   await exec('systemctl', ['--user', 'daemon-reload']);
   await exec('systemctl', ['--user', 'enable', '--now', UNIT_NAME]);
+  // Migrate the pre-rename USER unit (never the system-scope unit of the
+  // same legacy name) only after the replacement is enabled, so a failure
+  // above can't leave the user with no autostart at all.
+  if (existsSync(legacyUnitPath(deps))) {
+    try {
+      await exec('systemctl', ['--user', 'disable', '--now', LEGACY_UNIT_NAME]);
+    } catch {
+      /* not enabled */
+    }
+    await rm(legacyUnitPath(deps)).catch(() => undefined);
+    try {
+      await exec('systemctl', ['--user', 'daemon-reload']);
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
-export async function uninstall(): Promise<void> {
-  try {
-    await exec('systemctl', ['--user', 'disable', '--now', UNIT_NAME]);
-  } catch {
-    /* not enabled */
+export async function uninstall(deps?: LinuxAutostartDeps): Promise<void> {
+  const exec = deps?.exec ?? defaultExec;
+  // Remove BOTH names: users who enabled autostart before the rename and
+  // toggle it off afterwards still carry the legacy user unit.
+  for (const [name, path] of [
+    [UNIT_NAME, unitPath(deps)],
+    [LEGACY_UNIT_NAME, legacyUnitPath(deps)],
+  ] as const) {
+    try {
+      await exec('systemctl', ['--user', 'disable', '--now', name]);
+    } catch {
+      /* not enabled */
+    }
+    if (existsSync(path)) await rm(path).catch(() => undefined);
   }
-  if (existsSync(unitPath())) await rm(unitPath());
   try {
     await exec('systemctl', ['--user', 'daemon-reload']);
   } catch {
@@ -54,12 +104,21 @@ export async function uninstall(): Promise<void> {
   }
 }
 
-export async function isInstalled(): Promise<boolean> {
-  if (!existsSync(unitPath())) return false;
-  try {
-    await exec('systemctl', ['--user', 'is-enabled', UNIT_NAME]);
-    return true;
-  } catch {
-    return false;
+export async function isInstalled(deps?: LinuxAutostartDeps): Promise<boolean> {
+  const exec = deps?.exec ?? defaultExec;
+  // Either name counts so the Settings toggle stays truthful before the
+  // migration in install() has run.
+  for (const [name, path] of [
+    [UNIT_NAME, unitPath(deps)],
+    [LEGACY_UNIT_NAME, legacyUnitPath(deps)],
+  ] as const) {
+    if (!existsSync(path)) continue;
+    try {
+      await exec('systemctl', ['--user', 'is-enabled', name]);
+      return true;
+    } catch {
+      /* fall through to the other name */
+    }
   }
+  return false;
 }

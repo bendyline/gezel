@@ -113,6 +113,7 @@ import { loadOrCreateDeviceIdentity } from './remotes/identity.js';
 import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
+import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
@@ -144,21 +145,28 @@ import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 const log = createLogger('service');
 
 /**
- * Canonical fixed port for the Gezel daemon's public surface (the
- * OpenAI-compatible `/v1/*` API and everything else served alongside it).
- * `6228` spells "MAAT" on a phone keypad (M-A-A-T → 6-2-2-8). "Maat" is
- * Dutch for a mate, companion, or fellow worker — a close sibling to
- * "gezel". It sits in the IANA User Port range and below the default
- * ephemeral-allocation windows on Windows, macOS, and Linux.
+ * Canonical fixed port for the Gezel daemon. `6228` spells "MAAT" on a
+ * phone keypad (M-A-A-T → 6-2-2-8). "Maat" is Dutch for a mate, companion,
+ * or fellow worker — a close sibling to "gezel". It sits in the IANA User
+ * Port range and below the default ephemeral-allocation windows on Windows,
+ * macOS, and Linux.
  *
- * The user-facing daemons (standalone `gezeld` and the embedded desktop
- * service) try to claim this so third-party OpenAI-compatible clients —
- * the ones we don't ship and can't teach to read the runtime files — get
- * a stable `https://127.0.0.1:6228/v1` base URL. It's a strong default,
- * not a guarantee: if the port is taken the daemon falls back to an
- * ephemeral port, and the *actual* bound port is always written to
- * `~/.gezel/runtime/port` for first-party discovery. Force an exact port
- * (no fallback) with `--port` / `GEZEL_PORT`.
+ * Who holds it depends on the install. On machine installs the INSTALLERS
+ * pin the machine-engine broker here (`GEZEL_PORT=6228`), so 6228 answers
+ * with the compute broker — not the product `/v1` API — and third-party
+ * clients that land on it get an actionable redirect envelope (see
+ * http/machine-engine-hints.ts). User-facing daemons (standalone `gezeld`,
+ * the embedded desktop service, `gezel start` when no machine service is
+ * registered) prefer this port so that on installs WITHOUT a machine
+ * service, third-party OpenAI-compatible clients — the ones we don't ship
+ * and can't teach to read the runtime files — get a stable
+ * `https://127.0.0.1:6228/v1` base URL. It's a strong default, not a
+ * guarantee: if the port is taken the daemon falls back to an ephemeral
+ * port. The *actual* bound port is always written to
+ * `<home>/runtime/port`, which is the only universally-correct discovery;
+ * the Ollama-emulation listener (fixed 11434, opt-in) is the stable-port
+ * alternative for third-party apps on machine installs. Force an exact
+ * port (no fallback) with `--port` / `GEZEL_PORT`.
  */
 export const DEFAULT_PORT = 6228;
 
@@ -1879,6 +1887,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return remoteFetchRef.value;
     },
   });
+  const remoteTenantLimits = createTenantLimiter(config.remoteServing?.limits);
 
   // Opt-in unauthenticated Ollama-compat listener (port 11434). Same
   // deferred-fetch shape as remote serving: the controller is created
@@ -1978,6 +1987,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remotes,
     ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
+    remoteTenantLimits,
     ollamaEmulation,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
@@ -2239,12 +2249,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   // One live controller owns the LAN socket for startup, Settings changes,
   // rebinds, and shutdown. Persisted state can no longer drift from reality.
-  if (serviceRole !== 'machine-engine') {
+  //
+  // On machine installs the BROKER owns LAN serving: it holds the engines,
+  // outlives logins (headless serving), and reads its own system-home config
+  // via the /v1/remote/manage/serving surface. A user daemon that has adopted
+  // a broker defers so 6229 isn't double-bound and peers don't pay a second
+  // streaming hop. A broker that is installed-but-down at this boot leaves
+  // the user daemon serving until its next restart — logged, accepted.
+  const lanServingDelegatedToBroker =
+    serviceRole === 'user' && machineEngine?.isRequired() === true;
+  if (!lanServingDelegatedToBroker) {
     await remoteServing.reconfigure(config.remoteServing).catch((err) => {
       log.error(
         `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
       );
     });
+  } else if (config.remoteServing?.enabled) {
+    log.info(
+      '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
+    );
   }
   // Same contract for the Ollama emulation: non-fatal at boot (usually
   // means real Ollama grabbed 11434 since the toggle was set) — the

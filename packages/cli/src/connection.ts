@@ -129,6 +129,7 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
       daemonEntry: resolveDaemonEntry(import.meta.url),
       spawnIfMissing: true,
       timeoutMs: 20_000,
+      preferCanonicalPort: await shouldPreferCanonicalPort(),
       ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     },
   });
@@ -137,6 +138,39 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
     'The local Gezel owner authorization',
   );
   return connected.client;
+}
+
+/**
+ * Whether a CLI-spawned user daemon should try to claim the canonical port
+ * 6228 (with ephemeral fallback). True only when this host has no registered
+ * machine service — the installers pin the broker to exactly 6228, so a
+ * per-user daemon must never race it (note: even a stopped-but-installed
+ * service keeps its runtime files, which reads as "present" here — the
+ * conservative answer). Dev-scoped launches (`GEZEL_HOME`, `GEZEL_DEV`)
+ * always stay ephemeral so a scratch home can't squat the real port.
+ */
+export async function shouldPreferCanonicalPort(): Promise<boolean> {
+  if (process.env.GEZEL_HOME || process.env.GEZEL_DEV === '1') return false;
+  try {
+    return (await readSystemServiceEndpoint()) === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GEZEL_PORT value for a CLI-spawned daemon, or undefined to omit the
+ * variable entirely. Explicit `--port` hard-binds (fail on collision);
+ * `'0'` pins an ephemeral port; omitted → gezeld's canonical-port
+ * preference (6228 with ephemeral fallback) — the stable third-party
+ * `/v1` base URL on installs without a machine service.
+ */
+export function resolveStartPortEnv(
+  portFlag: number | undefined,
+  preferCanonical: boolean,
+): string | undefined {
+  if (portFlag !== undefined) return String(portFlag);
+  return preferCanonical ? undefined : '0';
 }
 
 export type RunConnection = {
@@ -313,6 +347,61 @@ export async function findHealthySystemService(
     };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export interface MachineEngineBrokerStatus {
+  present: boolean;
+  healthy?: boolean;
+  baseUrl?: string;
+  port?: number;
+  serviceRole?: ServiceRole;
+  version?: string;
+  startedAt?: string;
+}
+
+/**
+ * Reporting-only view of the machine service for `gezel doctor`/`status`.
+ * Deliberately separate from {@link findHealthySystemService}, whose
+ * legacy-full filter is correct for CONNECTION selection but reads a
+ * healthy post-split broker as "unavailable" — the exact blind spot this
+ * fixes. Never used to pick a connection target.
+ */
+export async function describeMachineEngineBroker(
+  deps: SystemServiceDiscoveryDeps = {},
+): Promise<MachineEngineBrokerStatus> {
+  let endpoint: Awaited<ReturnType<typeof readSystemServiceEndpoint>> = null;
+  try {
+    endpoint = await (deps.readEndpoint ?? readSystemServiceEndpoint)();
+  } catch {
+    endpoint = null;
+  }
+  if (!endpoint) return { present: false };
+  const fetchImpl = endpoint.cert ? createTrustingFetch({ cert: endpoint.cert }) : globalThis.fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_500);
+  timeout.unref?.();
+  try {
+    const health = deps.probeHealth
+      ? await deps.probeHealth({ endpoint, fetch: fetchImpl, signal: controller.signal })
+      : await new GezelClient({
+          baseUrl: endpoint.baseUrl,
+          token: '',
+          fetch: fetchImpl,
+        }).health(controller.signal);
+    return {
+      present: true,
+      healthy: true,
+      baseUrl: endpoint.baseUrl,
+      port: endpoint.port,
+      ...(health.serviceRole !== undefined ? { serviceRole: health.serviceRole } : {}),
+      version: health.version,
+      ...(health.startedAt !== undefined ? { startedAt: health.startedAt } : {}),
+    };
+  } catch {
+    return { present: true, healthy: false, baseUrl: endpoint.baseUrl, port: endpoint.port };
   } finally {
     clearTimeout(timeout);
   }

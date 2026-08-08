@@ -130,7 +130,7 @@ Run `gezel --help` for the full list. The most-used ones:
 |---|---|
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt, optionally `--gezel <id>` |
-| `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI) |
+| `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI). On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel agent list\|create\|show` | Manage your gezels |
 | `gezel env list\|create\|install` | Manage projects and their packages |

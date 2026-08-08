@@ -1105,6 +1105,34 @@ describe('mode-aware restart', () => {
     await svc.shutdown();
   });
 
+  it('restart in remote mode THROWS when the re-probe fails and does NOT fall back', async () => {
+    // The loud-fail contract holds at restart time too: a remote daemon that
+    // stopped answering must surface as an error on the existing remote
+    // connection, never silently drift into embedded/spawned mode.
+    let healthy = true;
+    ctx.health = () =>
+      healthy
+        ? Promise.resolve({ ok: true, version: '1.0.0' })
+        : Promise.reject(new Error('connection refused'));
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    vi.mocked(discoverOrSpawn).mockClear();
+    healthy = false;
+
+    await expect(svc.restart('reconnect after outage')).rejects.toThrow(/did not respond/i);
+
+    expect(svc.mode).toBe('remote');
+    expect(svc.baseUrl).toBe('https://remote.example.test');
+    expect(svc.fallbackReason).toBeNull();
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
   it('re-reads rotated system-service runtime without spawning locally', async () => {
     ctx.systemRuntime = {
       port: 5555,

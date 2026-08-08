@@ -24439,6 +24439,29 @@ button.boekwachter-pill:focus-visible {
   }
 }
 
+/* Remote Servers — server-settings field grid. Inputs inherit the global
+   input recipe; this only lays out label-above-input pairs compactly. */
+.remote-serving-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin: 0.6rem 0 0.2rem;
+  max-width: 46rem;
+}
+.remote-serving-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.remote-serving-field-wide {
+  grid-column: 1 / -1;
+}
+.remote-serving-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 /* ==========================================================================
    Keys in trays — the standard for radio-like choice controls.
    docs/ux.md → "Controls: keys in trays" is the contract; this block is the

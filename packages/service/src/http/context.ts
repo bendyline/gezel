@@ -43,6 +43,7 @@ import type { UvRuntime } from '../python/uv-runtime.js';
 import type { DeviceIdentity } from '../remotes/identity.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import type { RemoteServingController } from '../remotes/serving.js';
+import type { TenantLimiter } from '../remotes/tenant-limits.js';
 import type { ImageRenderer } from '../rendering/image-renderer.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -237,6 +238,12 @@ export interface ServiceContext {
   };
   /** Live owner of the optional LAN listener. */
   remoteServing: RemoteServingController;
+  /**
+   * Per-tenant admission control for `/v1/remote/*`. Context-owned rather
+   * than router-local so a `remoteServing.limits` change applies live via
+   * `setLimits` while in-flight counters survive the swap.
+   */
+  remoteTenantLimits: TenantLimiter;
   /**
    * Live owner of the opt-in, unauthenticated Ollama-compatible
    * loopback listener (port 11434). See http/ollama-emulation.ts.

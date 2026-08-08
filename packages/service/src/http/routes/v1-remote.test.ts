@@ -275,4 +275,12 @@ describe('remote model execution — B-side surface (e2e)', () => {
       preview.mockRestore();
     }
   });
+
+  it('answers 503 on /api/machine-serving when no broker has been adopted', async () => {
+    const res = await httpFetch(`${baseUrl}/api/machine-serving`, {
+      headers: { Authorization: `Bearer ${rootToken}` },
+    });
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: 'machine_engine_unavailable' });
+  });
 });

@@ -202,7 +202,7 @@ async function resolveBaseUrlAndFetch(
   const discovered = await readRuntimeForConnect();
   if (!discovered) {
     throw new GezelSdkError(
-      'gezel daemon not found — no runtime files at ~/.gezel/runtime. Start the gezel app or run `gezeld` first.',
+      "gezel daemon not found — no runtime files under the gezel home's runtime/ directory (default ~/.gezel, GEZEL_HOME overrides). Start the gezel app or run `gezeld` first.",
       { code: 'daemon_not_running' },
     );
   }

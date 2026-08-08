@@ -8,7 +8,7 @@
  * Configuration is passed via environment variables:
  *   GEZEL_BASE_URL   — daemon base URL (http(s)://127.0.0.1:<port>)
  *   GEZEL_TOKEN      — bearer token for the daemon API
- *   GEZEL_CERT_PATH  — path to ~/.gezel/runtime/cert.pem when daemon serves HTTPS
+ *   GEZEL_CERT_PATH  — path to the daemon's runtime/cert.pem (under its GEZEL_HOME; default ~/.gezel/runtime) when it serves HTTPS
  *   GEZEL_AGENT_ID   — the agent this session belongs to
  *   GEZEL_PROJECT_ID — the project context
  *   GEZEL_SESSION_ID — the chat session this subprocess serves

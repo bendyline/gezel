@@ -12,6 +12,7 @@ import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
+import { usesMachineEngine } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 const log = createLogger('http');
@@ -288,6 +289,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
         409,
       );
     }
+    // On machine installs the broker owns the LAN listener (it holds the
+    // engines and serves headless); flipping this daemon's copy on would
+    // double-bind 6229. Managed through /api/machine-serving instead.
+    // Disabling stays allowed so a stale pre-broker flag can be cleared.
+    if (body.remoteServing?.enabled === true && usesMachineEngine(ctx)) {
+      return c.json(
+        {
+          error: 'remote-serving-managed-by-machine',
+          hint: "This machine's LAN serving is controlled by the machine service — manage it in Settings → Remote Servers.",
+        },
+        409,
+      );
+    }
     const previous = await ctx.store.readConfig();
     // Credentials → SecretStore; everything else → config.json. Strip the
     // credential fields so they never hit plaintext disk even if the
@@ -330,6 +344,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+      ctx.remoteTenantLimits.setLimits(updated.remoteServing?.limits);
     }
     // Ollama emulation follows the remote-serving contract: the live
     // listener must track config, and a bind failure (usually real

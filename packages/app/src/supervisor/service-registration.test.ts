@@ -112,12 +112,18 @@ describe('queryMachineServiceState', () => {
     expect(state.status).toBe('not-installed');
   });
 
-  it('reads systemctl show on linux', async () => {
-    const state = await queryMachineServiceState({
-      platform: 'linux',
-      exec: execReturning('LoadState=loaded\nActiveState=active\n'),
-    });
+  it('reads systemctl show on linux, pinned to system scope', async () => {
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const exec: ServiceQueryExec = async (command, args) => {
+      calls.push({ command, args });
+      return { stdout: 'LoadState=loaded\nActiveState=active\n', stderr: '' };
+    };
+    const state = await queryMachineServiceState({ platform: 'linux', exec });
     expect(state.status).toBe('running');
+    // Explicit --system: the user-level autostart unit historically shared
+    // this unit name, and an unqualified query in a user session could
+    // answer for the wrong scope.
+    expect(calls[0]?.args?.[0]).toBe('--system');
   });
 
   it('reports not-installed on unsupported platforms', async () => {

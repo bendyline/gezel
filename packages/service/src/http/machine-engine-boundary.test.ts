@@ -107,4 +107,42 @@ describe('machine-engine service boundary', () => {
       await expect(access(join(home, scope))).rejects.toBeDefined();
     }
   });
+
+  it('hints third-party OpenAI clients toward product-daemon discovery', async () => {
+    // The broker holds canonical port 6228 on machine installs, so a client
+    // configured with the once-stable base URL lands here. Still 404 — the
+    // endpoint genuinely is not here — but with the one envelope OpenAI SDKs
+    // surface verbatim, explaining where the product /v1 actually lives.
+    const post = await httpFetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', messages: [] }),
+    });
+    expect(post.status).toBe(404);
+    const body = (await post.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('gezel_machine_engine_not_product_api');
+    expect(body.error.message).toContain('runtime/port');
+
+    // The hint does not vary with auth.
+    const authed = await machineFetch('/v1/models');
+    expect(authed.status).toBe(404);
+    await expect(authed.json()).resolves.toMatchObject({
+      error: { code: 'gezel_machine_engine_not_product_api' },
+    });
+
+    const ollama = await httpFetch(`${baseUrl}/ollama/v1/models`);
+    expect(ollama.status).toBe(404);
+    await expect(ollama.json()).resolves.toMatchObject({
+      error: { code: 'gezel_machine_engine_not_product_api' },
+    });
+
+    // Non-GET wrong paths get JSON from the catch-all too (Hono's default
+    // would be plain text), naming whom the caller reached.
+    const wrongPost = await httpFetch(`${baseUrl}/nonexistent`, { method: 'POST' });
+    expect(wrongPost.status).toBe(404);
+    await expect(wrongPost.json()).resolves.toMatchObject({
+      error: 'not_found',
+      service: 'gezel-machine-engine',
+    });
+  });
 });
