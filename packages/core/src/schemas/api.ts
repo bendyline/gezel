@@ -1228,6 +1228,8 @@ export const GezelConfigSchema = z.object({
    * matter what `cacheReuse` is set to. Measured 2026-07-31 on
    * gemma4-e4b-q4 at 64K context: windowed = 8,772 MB RSS + cache_reuse
    * refused; `--swa-full` = 11,415 MB RSS (+30%) + cache_reuse accepted.
+   * That is one measured configuration, not a general memory multiplier:
+   * the cache delta depends on context, SWA geometry, and shared-KV layers.
    * Qwen 3.5/3.6 cannot KV-shift at all (hybrid attention) and this flag
    * does not help them.
    */
@@ -1374,9 +1376,10 @@ export const GezelConfigSchema = z.object({
    * the resident set past the card's own memory causes an eviction instead
    * — the pool serializes rather than running everything degraded.
    *
-   * Unset = auto: on for cards at or below 12 GB (where nothing co-resides
-   * on-card anyway, so eviction would just mean a cold reload per switch),
-   * off above. Non-discrete hosts have one pool and ignore this entirely.
+   * Unset = auto: off for discrete GPUs, keeping concurrent resident models
+   * within VRAM and unloading idle models instead. One larger model may still
+   * offload into system RAM; explicit true permits RAM-backed co-residency.
+   * Non-discrete hosts have one pool and ignore this entirely.
    */
   allowRamSpillover: z.boolean().nullable().optional(),
   /**
@@ -1547,9 +1550,10 @@ export const GezelConfigSchema = z.object({
    * an arriving live turn never waits behind a background cohort.
    *
    * Scope & defaults: a LOCAL-ENGINE optimization, default ON for both
-   * supervised engines, sized by a shared RAM-tier slot heuristic (1 under
-   * 16 GB ⇒ effectively serial, up to 4 on workstation-class RAM). llama.cpp
-   * serves its `--parallel N` slots with continuous batching; MLX runs its
+   * supervised engines, sized from usable fast memory (VRAM on a discrete
+   * GPU; never the adjacent system-RAM offload pool), from 1 on constrained
+   * devices up to 4 on workstation-class hardware. llama.cpp serves its
+   * `--parallel N` slots with continuous batching; MLX runs its
    * wrapped server with `--max-concurrency N` (one mlx_lm BatchGenerator,
    * static-wave batching). Set `enabled: false` to force the serial path on
    * both, or use the `GEZEL_BATCHED_INFERENCE` env var (`1`/`true`/`0`/`false`)

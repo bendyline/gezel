@@ -209,13 +209,13 @@ describe('CapacityBroker', () => {
       });
     const vramUsable = Math.floor(32 * GB * 0.95);
 
-    it('auto-allows spilling up to a 12 GB card and refuses it above', () => {
+    it('keeps automatic co-residency within VRAM on every discrete GPU', () => {
       const small = new CapacityBroker({
         systemRamBytes: () => 32 * GB,
         gpuVramBytes: 12 * GB,
         unifiedMemory: false,
       });
-      expect(small.ramSpilloverAllowed()).toBe(true);
+      expect(small.ramSpilloverAllowed()).toBe(false);
       expect(discrete(null).ramSpilloverAllowed()).toBe(false);
     });
 
@@ -368,21 +368,21 @@ describe('CapacityBroker', () => {
   });
 });
 
-describe('defaultLocalEngineSlots — RAM-tier demand default', () => {
-  it('scales with total system RAM, capped at 4', () => {
+describe('defaultLocalEngineSlots — fast-memory demand default', () => {
+  it('scales only with usable fast memory, capped at 4', () => {
     expect(defaultLocalEngineSlots(8 * GB)).toBe(1);
-    expect(defaultLocalEngineSlots(15 * GB)).toBe(1);
-    expect(defaultLocalEngineSlots(16 * GB)).toBe(2);
-    expect(defaultLocalEngineSlots(31 * GB)).toBe(2);
-    expect(defaultLocalEngineSlots(32 * GB)).toBe(3);
-    expect(defaultLocalEngineSlots(63 * GB)).toBe(3);
-    expect(defaultLocalEngineSlots(64 * GB)).toBe(4);
+    expect(defaultLocalEngineSlots(11 * GB)).toBe(1);
+    expect(defaultLocalEngineSlots(12 * GB)).toBe(2);
+    expect(defaultLocalEngineSlots(23 * GB)).toBe(2);
+    expect(defaultLocalEngineSlots(24 * GB)).toBe(3);
+    expect(defaultLocalEngineSlots(47 * GB)).toBe(3);
+    expect(defaultLocalEngineSlots(48 * GB)).toBe(4);
     expect(defaultLocalEngineSlots(128 * GB)).toBe(4);
   });
 });
 
 describe('plannedLocalEngineSlots — one resolver for preview and launch', () => {
-  it('caps the RAM-tier default by what memory can hold', () => {
+  it('caps the fast-memory tier default by what the model can hold', () => {
     // The bug this pins: the launch-preview short-circuit quoted the bare
     // tier default (3 on a 32-48 GB host) while the launch path clamped by
     // the ceiling, so a resident 17 GB model advertised a ~49 GB reservation
@@ -638,6 +638,30 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     expect(budget.fastBytes).toBe(budget.vramBytes);
     expect(budget.fastBytes).toBeLessThan(budget.budgetBytes);
     expect(fastMemoryBudgetBytes(RAM, host)).toBe(budget.vramBytes);
+  });
+
+  it('does not let 32 GiB of system RAM inflate concurrency on a 16 GiB card', () => {
+    const budget = computeCapacityBudget({
+      systemRamBytes: 32 * GB,
+      unifiedMemory: false,
+      gpuVramBytes: 16 * GB,
+    });
+    const slotInput = {
+      weightsBytes: 4 * GB,
+      perTurnCtxTokens: 65_536,
+      kvCacheType: 'f16',
+      exactPerSlotKvBytesF16: 4 * GB,
+    };
+
+    const vramSlots = llamaCppSlotCeiling({ budgetBytes: budget.fastBytes, ...slotInput });
+    const wronglyCombinedSlots = llamaCppSlotCeiling({
+      budgetBytes: budget.budgetBytes,
+      ...slotInput,
+    });
+
+    expect(defaultLocalEngineSlots(budget.fastBytes)).toBe(2);
+    expect(vramSlots).toBe(2);
+    expect(wronglyCombinedSlots).toBe(5);
   });
 
   it('treats a shared pool reported as VRAM as unified, not as a second pool', () => {

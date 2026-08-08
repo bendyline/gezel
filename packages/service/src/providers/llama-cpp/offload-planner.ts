@@ -251,6 +251,8 @@ export interface KvReserveInput {
   headCountKvPerLayer?: number[] | undefined;
   /** Per-layer flags: true = SWA layer, which caches at the `*Swa` dims. */
   slidingWindowPattern?: boolean[] | undefined;
+  /** Trailing logical layers that share earlier K/V and own no cache tensors. */
+  sharedKvLayers?: number | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -274,9 +276,10 @@ export interface KvReserveInput {
 }
 
 /**
- * Estimate the KV cache footprint with EVERY layer caching the full
- * context — what llama.cpp allocates for ordinary full-attention models,
- * and for SWA models under `--swa-full`.
+ * Estimate the KV cache footprint with every cache-owning layer caching the
+ * full context — what llama.cpp allocates for ordinary full-attention
+ * models, and for SWA models under `--swa-full`. Trailing shared-KV layers
+ * reuse an earlier cache and therefore contribute no allocation of their own.
  *
  * Per-layer exact when the header supplies the layout: SWA layers cache
  * at their own head dims (`key/value_length_swa`), so pricing them at the
@@ -291,6 +294,7 @@ export interface KvReserveInput {
 export function estimateKvReserveBytes(input: KvReserveInput): number | undefined {
   const { blockCount, headCountKv, ctxTokens } = input;
   if (!blockCount || !ctxTokens) return undefined;
+  const cacheLayerCount = cacheOwningLayerCount(blockCount, input.sharedKvLayers);
   const headDim =
     input.headCount && input.embeddingLength ? input.embeddingLength / input.headCount : undefined;
   const kDim = input.keyLength ?? headDim;
@@ -300,19 +304,19 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   const perLayerHeads = input.headCountKvPerLayer;
   const pattern = input.slidingWindowPattern;
   if (
-    perLayerHeads &&
-    perLayerHeads.length === blockCount &&
     pattern &&
-    pattern.length === blockCount
+    pattern.length === blockCount &&
+    (!perLayerHeads || perLayerHeads.length === blockCount) &&
+    (perLayerHeads || headCountKv)
   ) {
     const kDimSwa = input.keyLengthSwa ?? kDim;
     const vDimSwa = input.valueLengthSwa ?? vDim;
     let elemsPerToken = 0;
-    for (let layer = 0; layer < blockCount; layer++) {
-      const heads = perLayerHeads[layer] ?? 0;
+    for (let layer = 0; layer < cacheLayerCount; layer++) {
+      const heads = perLayerHeads?.[layer] ?? headCountKv ?? 0;
       elemsPerToken += heads * (pattern[layer] ? kDimSwa + vDimSwa : kDim + vDim);
     }
-    if (elemsPerToken > 0) return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
+    return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
   }
   if (!headCountKv) return undefined;
   // Linear-attention hybrids: only the full-attention layers hold a cache
@@ -320,8 +324,21 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   // term) because callers derive bytes-per-token by dividing this by a
   // reference context — folding a fixed cost in there would inflate the
   // slope. The fixed part belongs to the linearization below.
-  const scalingLayers = fullAttentionLayerCount(blockCount, input.fullAttentionInterval);
+  const scalingLayers = fullAttentionLayerCount(cacheLayerCount, input.fullAttentionInterval);
   return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
+}
+
+/**
+ * llama.cpp's Gemma 4 loader sets `n_layer_kv_from_start` to logical layers
+ * minus `shared_kv_layers`: the trailing shared layers reuse the last K/V of
+ * their attention type and do not allocate their own cache tensors.
+ */
+function cacheOwningLayerCount(blockCount: number, sharedKvLayers: number | undefined): number {
+  const shared =
+    typeof sharedKvLayers === 'number' && Number.isFinite(sharedKvLayers)
+      ? Math.max(0, Math.min(blockCount, Math.floor(sharedKvLayers)))
+      : 0;
+  return blockCount - shared;
 }
 
 /**
@@ -370,6 +387,8 @@ export interface WindowedKvInput {
   slidingWindow?: number | undefined;
   /** Per-layer flags: true = SWA layer, false = global layer. */
   slidingWindowPattern?: boolean[] | undefined;
+  /** Trailing logical layers that share earlier K/V and own no cache tensors. */
+  sharedKvLayers?: number | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -425,9 +444,8 @@ const SWA_UBATCH_MARGIN_TOKENS = 2048;
  *
  * Returns undefined when the header lacks the SWA layout (no window, no
  * pattern, length mismatches) so callers fall back to their conservative
- * path instead of guessing. `shared_kv_layers` (Gemma 4n) is deliberately
- * ignored — sharing only shrinks the real cache, so the estimate stays an
- * overestimate, never an OOM-side error.
+ * path instead of guessing. Shared trailing KV layers are excluded exactly:
+ * llama.cpp does not allocate cache tensors for them.
  */
 /**
  * Exact per-slot KV bytes at f16 for the slot-ceiling math: the windowed
@@ -510,9 +528,10 @@ export function estimateWindowedKvLinearization(
   if (perLayerHeads && perLayerHeads.length !== blockCount) return undefined;
   if (!perLayerHeads && !input.headCountKv) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
+  const cacheLayerCount = cacheOwningLayerCount(blockCount, input.sharedKvLayers);
   let globalElemsPerToken = 0;
   let swaElemsPerToken = 0;
-  for (let layer = 0; layer < blockCount; layer++) {
+  for (let layer = 0; layer < cacheLayerCount; layer++) {
     const heads = perLayerHeads?.[layer] ?? input.headCountKv;
     if (!heads) return undefined;
     if (slidingWindowPattern[layer]) swaElemsPerToken += heads * (kDimSwa + vDimSwa);
@@ -524,4 +543,27 @@ export function estimateWindowedKvLinearization(
       swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS),
     ),
   };
+}
+
+export interface SwaFullFastMemoryFitInput {
+  residentWeightsBytes: number;
+  fullKvBytes: number;
+  /** Already safety-discounted fast-memory budget (VRAM on a discrete GPU). */
+  fastBudgetBytes: number;
+  /** Fast-memory reservations held by models that are already resident. */
+  committedOtherBytes?: number | undefined;
+}
+
+/**
+ * Whether Auto may keep `--swa-full` without spilling the model or KV cache
+ * out of the fast pool. The capacity budget already reserves driver/OS
+ * headroom, so this comparison must not discount it a second time.
+ */
+export function fitsSwaFullInFastMemory(input: SwaFullFastMemoryFitInput): boolean {
+  const required = Math.max(0, input.residentWeightsBytes) + Math.max(0, input.fullKvBytes);
+  const available = Math.max(
+    0,
+    input.fastBudgetBytes - Math.max(0, input.committedOtherBytes ?? 0),
+  );
+  return Number.isFinite(required) && Number.isFinite(available) && required <= available;
 }

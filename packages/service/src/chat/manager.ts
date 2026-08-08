@@ -150,6 +150,7 @@ import {
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
+  fitsSwaFullInFastMemory,
   planMoeOffload,
 } from '../providers/llama-cpp/offload-planner.js';
 import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
@@ -10600,6 +10601,7 @@ export class ChatManager {
         const {
           CapacityBroker,
           computeCapacityBudget,
+          defaultLocalEngineSlots,
           kvQuantScale,
           localEngineSlotCeiling,
           planCtxTokensForMemory,
@@ -10610,7 +10612,7 @@ export class ChatManager {
         const liveBudget = computeCapacityBudget();
         const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
         const fastBudget = brokerSnap?.enforced
-          ? (router?.broker.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+          ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
           : liveBudget.fastBytes;
         const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
         const kvBits = config.mlxKvBits ?? 0;
@@ -10631,7 +10633,11 @@ export class ChatManager {
           committedOtherBytes,
           exactPerSlotKvBytesF16: exactPerSlotKvF16,
         });
-        let slots = plannedLocalEngineSlots({ configuredSlots: configured, ceiling });
+        let slots = plannedLocalEngineSlots({
+          configuredSlots: configured,
+          ceiling,
+          tierDefault: defaultLocalEngineSlots(fastBudget),
+        });
         const admission = planCtxTokensForMemory({
           requestedPerTurnCtxTokens: effective,
           slots,
@@ -10727,7 +10733,7 @@ export class ChatManager {
     const brokerSnap = router?.broker.committed();
     const liveBudget = computeCapacityBudget();
     const fastBudgetBytes = brokerSnap?.enforced
-      ? (router?.broker.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+      ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
       : liveBudget.fastBytes;
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
@@ -10758,6 +10764,7 @@ export class ChatManager {
             headCountKvPerLayer: summary.headCountKvPerLayer,
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
+            sharedKvLayers: summary.sharedKvLayers,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -10789,6 +10796,7 @@ export class ChatManager {
           headCountKvPerLayer: summary.headCountKvPerLayer,
           slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
+          sharedKvLayers: summary.sharedKvLayers,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -10832,6 +10840,7 @@ export class ChatManager {
         plannedLocalEngineSlots({
           configuredSlots,
           ceiling: ceilingAt(contextWindow, kvCacheType),
+          tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
         }),
         kvCacheType,
       );
@@ -10853,10 +10862,14 @@ export class ChatManager {
       override: config.llamaCppKvCacheType,
       slotsConfigured: configuredSlots !== undefined,
       ceilingFor,
-      maxSlots: defaultLocalEngineSlots(),
+      maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
     });
     kvCacheType = kvPlan.kvCacheType;
-    let slots = plannedLocalEngineSlots({ configuredSlots, ceiling: ceilingFor(kvCacheType) });
+    let slots = plannedLocalEngineSlots({
+      configuredSlots,
+      ceiling: ceilingFor(kvCacheType),
+      tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
+    });
     if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
     try {
@@ -10869,6 +10882,7 @@ export class ChatManager {
         headCountKv: summary.headCountKv,
         headCountKvPerLayer: summary.headCountKvPerLayer,
         slidingWindowPattern: summary.slidingWindowPattern,
+        sharedKvLayers: summary.sharedKvLayers,
         keyLength: summary.keyLength,
         valueLength: summary.valueLength,
         keyLengthSwa: summary.keyLengthSwa,
@@ -10925,6 +10939,7 @@ export class ChatManager {
           headCountKvPerLayer: summary.headCountKvPerLayer,
           slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
+          sharedKvLayers: summary.sharedKvLayers,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -17704,7 +17719,7 @@ export async function buildLlamaCppProvider(opts: {
   // Slot count (`--parallel N`) is the single source of truth — drives the
   // queue `concurrency`, `--ctx-size × slots`, and the cache adapter's
   // `slotCount` (read back from `provider.queue.concurrency`). For a
-  // SUPERVISED engine the final `slots` is auto-sized below — RAM-tier
+  // SUPERVISED engine the final `slots` is auto-sized below — fast-memory
   // demand default, clamped by a per-model KV memory ceiling — once the
   // model + context window are known; an explicit
   // `providerConcurrency['llama-cpp']` overrides verbatim. The EXTERNAL-
@@ -17929,7 +17944,7 @@ export async function buildLlamaCppProvider(opts: {
   let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
 
   // Auto-size supervised slots now that the model + context window are
-  // known: a RAM-tier demand default, clamped by a per-model KV memory
+  // known: a fast-memory demand default, clamped by a per-model KV memory
   // ceiling so a big model on a small machine can't OOM by over-slotting.
   // Explicit `providerConcurrency['llama-cpp']` overrides verbatim.
   // (Co-resident pool models aren't subtracted here — the broker still
@@ -17956,7 +17971,7 @@ export async function buildLlamaCppProvider(opts: {
   // Unified and CPU-only hosts have one pool, so the two are the same there.
   const brokerSnap = opts.broker?.committed();
   const budgetBytes = brokerSnap?.enforced
-    ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+    ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
     : fastMemoryBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
   // Gemma f16-KV vs a second slot: when memory alone forces single-slot,
@@ -17987,6 +18002,7 @@ export async function buildLlamaCppProvider(opts: {
           headCountKvPerLayer: headerSummary.headCountKvPerLayer,
           slidingWindow: headerSummary.slidingWindow,
           slidingWindowPattern: headerSummary.slidingWindowPattern,
+          sharedKvLayers: headerSummary.sharedKvLayers,
           keyLength: headerSummary.keyLength,
           valueLength: headerSummary.valueLength,
           keyLengthSwa: headerSummary.keyLengthSwa,
@@ -18010,7 +18026,7 @@ export async function buildLlamaCppProvider(opts: {
     override: config.llamaCppKvCacheType,
     slotsConfigured: configuredSlots !== undefined,
     ceilingFor,
-    maxSlots: defaultLocalEngineSlots(),
+    maxSlots: defaultLocalEngineSlots(budgetBytes),
   });
   if (kvPlan.upgraded) {
     kvCacheType = kvPlan.kvCacheType;
@@ -18018,7 +18034,11 @@ export async function buildLlamaCppProvider(opts: {
       `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
     );
   }
-  let slots = plannedLocalEngineSlots({ configuredSlots, ceiling: ceilingFor(kvCacheType) });
+  let slots = plannedLocalEngineSlots({
+    configuredSlots,
+    ceiling: ceilingFor(kvCacheType),
+    tierDefault: defaultLocalEngineSlots(budgetBytes),
+  });
   // The bundled llama.cpp line still has known multi-slot MTP allocation
   // failures. Keep an explicitly selected MTP mode on one slot so its first
   // decode is reliable; `spec.mtp` alone is capability metadata, not an
@@ -18125,12 +18145,12 @@ export async function buildLlamaCppProvider(opts: {
   // WHY a model was — or wasn't — split. Best-effort: any failure falls
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
-  // Whether full-attention KV at the requested context fits the memory
-  // budget — gates the Gemma `--swa-full` auto-default (see
-  // `EngineFlagInput.swaFullAutoFits`). Set to false (decline, keep the
-  // full context on the windowed cache) when the admission math says the
-  // full cache cannot fit; stays undefined when it fits or the fit could
-  // not be computed.
+  // Whether weights + full-attention KV at the requested context fit the
+  // fast-memory pool — VRAM on a discrete GPU. Gates the Gemma
+  // `--swa-full` auto-default (see `EngineFlagInput.swaFullAutoFits`). Set
+  // false to keep the full context on the windowed cache when Full would
+  // spill or require a slot/context reduction; undefined means it fits or
+  // the exact decision could not be computed.
   let swaFullAutoFits: boolean | undefined;
   // Broker-ledger reservation for this launch: resident weights + the KV
   // the engine will actually allocate at the granted window and cache
@@ -18198,15 +18218,14 @@ export async function buildLlamaCppProvider(opts: {
       // and accept the memory consequences.
       //
       // The fit verdict additionally gates the Gemma `--swa-full`
-      // auto-default, in BOTH branches: the full cache is a session-switch
-      // performance trade (cross-request prefix reuse), while the context
-      // window is capability — so when full-attention KV at the requested
-      // context doesn't fit, prefer the full window on the windowed cache
-      // over clamping context to fit a full cache. gemma4-31b's KV is
-      // ~1.7 MB/token (60 layers × ~14 KV heads × 512+512 dims), i.e.
-      // ~105 GB at 65536 — `--swa-full` was never fittable there, and
-      // under evals (clamp skipped) it wired Metal past its limit
-      // mid-prefill and presented as empty model turns (2026-08-05).
+      // auto-default, in BOTH branches: the full cache is a cache-operation
+      // performance trade, while the context window is capability. Auto
+      // therefore requires resident weights + exact full KV to fit the fast
+      // pool (VRAM on a discrete GPU); otherwise it keeps the full window on
+      // the windowed cache. Shared-KV layers and SWA-specific head dimensions
+      // are load-bearing here — E4B owns only 24 KV caches for 42 logical
+      // layers, and pricing all 42 at global dimensions overstated its two-slot
+      // 64K KV allocation as 21 GiB instead of llama.cpp's actual 7 GiB.
       // When the windowed cache is what will run, the launch is NOT left
       // ungated: admission re-plans with the windowed-KV linearization
       // (SWA layers = fixed window-capped bytes, global layers = the only
@@ -18222,6 +18241,7 @@ export async function buildLlamaCppProvider(opts: {
           headCountKv: summary.headCountKv,
           headCountKvPerLayer: summary.headCountKvPerLayer,
           slidingWindowPattern: summary.slidingWindowPattern,
+          sharedKvLayers: summary.sharedKvLayers,
           keyLength: summary.keyLength,
           valueLength: summary.valueLength,
           keyLengthSwa: summary.keyLengthSwa,
@@ -18260,6 +18280,22 @@ export async function buildLlamaCppProvider(opts: {
               }
             : {}),
         });
+        const fastBudgetBytes = brokerSnap?.enforced
+          ? (opts.broker?.fastBudgetBytes() ?? liveBudget.fastBytes)
+          : liveBudget.fastBytes;
+        const fullKvBytesAtRequested =
+          exactKvAtReference !== undefined
+            ? (exactKvAtReference / REFERENCE_CTX) * effectiveNumCtx * slots
+            : undefined;
+        const fullCacheFitsFastMemory =
+          fullKvBytesAtRequested !== undefined
+            ? fitsSwaFullInFastMemory({
+                residentWeightsBytes: residentBytes,
+                fullKvBytes: fullKvBytesAtRequested,
+                fastBudgetBytes,
+                committedOtherBytes,
+              })
+            : undefined;
         const admission = planCtxTokensForMemory({
           requestedPerTurnCtxTokens: effectiveNumCtx,
           slots,
@@ -18279,7 +18315,10 @@ export async function buildLlamaCppProvider(opts: {
             modelId: defaultModelId ?? undefined,
           });
         const fullKvOverBudget =
-          !admission.minimumSatisfied || admission.slots < slots || admission.clamped;
+          fullCacheFitsFastMemory === false ||
+          !admission.minimumSatisfied ||
+          admission.slots < slots ||
+          admission.clamped;
         // The plan whose ladder (deny → shed slots → clamp) is enforced
         // below. Defaults to the full-attention plan; the windowed-cache
         // branches replace it with windowed math or — only when the GGUF
@@ -18312,6 +18351,7 @@ export async function buildLlamaCppProvider(opts: {
             headCountKvPerLayer: summary.headCountKvPerLayer,
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
+            sharedKvLayers: summary.sharedKvLayers,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -18328,13 +18368,21 @@ export async function buildLlamaCppProvider(opts: {
             // session-switch performance trade. Weights-level admission
             // stays with the capacity broker.
             swaFullAutoFits = false;
+            const fastFitDetail =
+              fullCacheFitsFastMemory === false && fullKvBytesAtRequested !== undefined
+                ? `projected weights + full KV ${(
+                    (residentBytes + fullKvBytesAtRequested) / 1024 ** 3
+                  ).toFixed(1)} GiB exceeds available fast memory ${(
+                    Math.max(0, fastBudgetBytes - committedOtherBytes) / 1024 ** 3
+                  ).toFixed(1)} GiB`
+                : undefined;
             log.warn(
               [
-                `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: full-attention KV at the requested `,
-                `${effectiveNumCtx * slots}-token total context does not fit — keeping the full `,
+                `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA working set at the requested `,
+                `${effectiveNumCtx * slots}-token total context does not fit fast memory — keeping the full `,
                 'context and declining the --swa-full auto-default instead; the windowed KV cache ',
                 'is what actually fits (cross-request prefix reuse unavailable). ',
-                `Fit detail: ${admission.reason ?? 'over budget at the requested slot count'}`,
+                `Fit detail: ${fastFitDetail ?? admission.reason ?? 'over budget at the requested slot count'}`,
               ].join(''),
             );
           }
@@ -18411,6 +18459,7 @@ export async function buildLlamaCppProvider(opts: {
             headCountKvPerLayer: summary.headCountKvPerLayer,
             slidingWindow: summary.slidingWindow,
             slidingWindowPattern: summary.slidingWindowPattern,
+            sharedKvLayers: summary.sharedKvLayers,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -18433,6 +18482,7 @@ export async function buildLlamaCppProvider(opts: {
             headCountKv: summary.headCountKv,
             headCountKvPerLayer: summary.headCountKvPerLayer,
             slidingWindowPattern: summary.slidingWindowPattern,
+            sharedKvLayers: summary.sharedKvLayers,
             keyLength: summary.keyLength,
             valueLength: summary.valueLength,
             keyLengthSwa: summary.keyLengthSwa,
@@ -18894,7 +18944,7 @@ export async function buildMlxProvider(opts: {
   // Batched-inference sizing (mlxSlots / mlxBatchMaxConcurrency) and the
   // in-engine cache budget are computed below, AFTER the model size, effective
   // context window, and KV dtype resolve — a memory-aware slot ceiling needs
-  // all three. Sizing concurrency here (pre-resolve) from a RAM-tier default
+  // all three. Sizing concurrency here (pre-resolve) from a model-blind default
   // alone is what let a 27B model open a width-4 engine gate and abort Metal.
   const numCtx = config.mlxNumCtx;
   const baseProviderOpts = {
@@ -19098,7 +19148,7 @@ export async function buildMlxProvider(opts: {
     kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
 
   // ── Memory-aware batch sizing ──
-  // Size concurrent slots to what actually fits GPU memory, not just a RAM-tier
+  // Size concurrent slots to what actually fits GPU memory, not just a tiered
   // default. This is the fix for the width-4-on-a-27B Metal abort: a Metal
   // command-buffer OOM aborts the WHOLE python process (SIGABRT — the "Python
   // quit unexpectedly" dialog), not just the offending request, so over-slotting
@@ -19117,7 +19167,7 @@ export async function buildMlxProvider(opts: {
   // Fast memory, not the admission budget — same reason as the llama path.
   // MLX only runs on unified-memory Macs today, where the two are equal.
   const mlxBudgetBytes = mlxBrokerSnap?.enforced
-    ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.budgetBytes)
+    ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.pools.fastBytes)
     : fastMemoryBudgetBytes();
   const mlxCommittedOther = mlxBrokerSnap?.enforced ? mlxBrokerSnap.committedBytes : 0;
   const mlxKvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
@@ -19143,7 +19193,7 @@ export async function buildMlxProvider(opts: {
     committedOtherBytes: mlxCommittedOther,
     ...(mlxExactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: mlxExactPerSlotKvF16 } : {}),
   });
-  const mlxRequestedSlots = concurrency ?? defaultLocalEngineSlots();
+  const mlxRequestedSlots = concurrency ?? defaultLocalEngineSlots(mlxBudgetBytes);
   let mlxSlots = concurrency ?? Math.min(mlxRequestedSlots, mlxSlotCeiling);
   if (mlxSlots < mlxRequestedSlots) {
     log.info(

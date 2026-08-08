@@ -124,6 +124,14 @@ export interface GgufSummary {
    * GGUFs that predate the key.
    */
   slidingWindowPattern?: boolean[];
+  /**
+   * `<arch>.attention.shared_kv_layers` — trailing layers that reuse K/V
+   * from the last cache-owning layer of the same attention type. llama.cpp
+   * allocates cache tensors only for the leading `blockCount - N` layers.
+   * Gemma 4 E4B declares 18, which reduces its 42 logical layers to 24
+   * cache-owning layers; ignoring this field overprices its full KV cache.
+   */
+  sharedKvLayers?: number;
   /** `<arch>.attention.key_length_swa` — per-head K dim on SWA layers when it differs (Gemma 4: 256 vs 512). */
   keyLengthSwa?: number;
   /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
@@ -602,6 +610,8 @@ export function readGgufSummary(
       } else if (key.endsWith('.attention.sliding_window_pattern')) {
         const pattern = readBoolArray(r, type);
         if (pattern) summary.slidingWindowPattern = pattern;
+      } else if (key.endsWith('.attention.shared_kv_layers')) {
+        summary.sharedKvLayers = readUintScalar(r, type);
       } else if (key.endsWith('.attention.key_length_swa')) {
         summary.keyLengthSwa = readUintScalar(r, type);
       } else if (key.endsWith('.attention.value_length_swa')) {
