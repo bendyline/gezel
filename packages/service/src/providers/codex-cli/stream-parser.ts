@@ -174,7 +174,8 @@ function parseItemEvent(
  * Pull the human-readable text out of a Codex item. Different item types
  * carry the prose under different keys: `agent_message` and `reasoning`
  * use `text`; `command_execution` exposes `command` and (when complete)
- * `output`; `mcp_tool_call` has `name`; `web_search` has `query`. We
+ * `output`; `mcp_tool_call` has `tool` (or `name` in older versions);
+ * `web_search` has `query`. We
  * coalesce all of them down to a single `text` field for the caller —
  * the original item is kept on `raw` for callers that want richer
  * extraction.
@@ -183,6 +184,7 @@ function extractItemText(item: Record<string, unknown>): string {
   if (typeof item.text === 'string') return item.text;
   if (typeof item.output === 'string') return item.output;
   if (typeof item.command === 'string') return item.command;
+  if (typeof item.tool === 'string') return item.tool;
   if (typeof item.name === 'string') return item.name;
   if (typeof item.query === 'string') return item.query;
   return '';

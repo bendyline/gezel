@@ -1,5 +1,12 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
-import { createLogger, prettifyToolName } from '@bendyline/gezel';
+import {
+  type CodexPermissionModeCompat,
+  createLogger,
+  normalizeCodexPermissionMode,
+  prettifyToolName,
+  toolActivityLabel,
+} from '@bendyline/gezel';
+import { winShellSafe } from '../../packages/win-shell.js';
 import { SessionResumeError } from '../types.js';
 import type { ToolCallEvent, TurnUsage } from '../types.js';
 import type { CodexReasoningEffort } from './reasoning.js';
@@ -23,7 +30,7 @@ const log = createLogger('codex-cli');
  *       --cd <cwd> -m <model> \
  *       --image <path> \
  *       -c model_reasoning_effort=<effort> \
- *       <prompt>
+ *       -                 # prompt arrives over stdin on current CLIs
  *
  *   Follow-up turn (when we have a thread_id):
  *     codex --sandbox workspace-write --ask-for-approval never \
@@ -31,7 +38,7 @@ const log = createLogger('codex-cli');
  *       -m <model> \
  *       --image <path> \
  *       -c model_reasoning_effort=<effort> \
- *       <thread_id> <prompt>
+ *       <thread_id> -     # prompt arrives over stdin on current CLIs
  *
  *   NB1: `codex exec resume` does not accept `--cd`; the child
  *   process cwd still anchors file tools in the right workspace. It
@@ -67,7 +74,8 @@ const STDERR_RING_CAP = 64 * 1024;
 const HEARTBEAT_INTERVAL_MS = 3_000;
 const SILENCE_THRESHOLD_MS = 15_000;
 
-export type CodexPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+/** Compatibility input accepted from persisted pre-four-mode settings. */
+export type CodexPermissionMode = CodexPermissionModeCompat;
 
 export interface CodexInvokerHooks {
   emitDelta(text: string): void;
@@ -105,8 +113,14 @@ export interface CodexInvokerOpts {
   imagePaths?: string[];
   /** When set, the invoker uses `codex exec resume <id>` instead of starting a fresh thread. */
   resumeThreadId?: string;
-  /** The user's turn prompt — passed positionally to `codex exec`. */
+  /** The user's turn prompt. Current CLIs receive it over stdin. */
   prompt: string;
+  /** CLI supports `-` as the prompt sentinel. Keeps prompt text out of argv/process listings. */
+  promptViaStdin?: boolean;
+  /** CLI supports strict config validation. */
+  strictConfig?: boolean;
+  /** Run Gezel's exact generated hook without interactive trust setup. */
+  trustManagedHooks?: boolean;
   /** Per-turn hooks for streaming feedback. */
   hooks: CodexInvokerHooks;
   /** Per-turn hard timeout. Default 600s. */
@@ -120,22 +134,23 @@ export interface CodexInvokerOpts {
 }
 
 /**
- * Map gezel's per-gezel `claudePermissionMode` enum onto Codex's
- * two-axis sandbox + approval flags. Codex separates these — we
- * collapse them to keep the gezel-frontmatter UX consistent across
- * `anthropic-cli` and `codex-cli`.
+ * Map Gezel's four user-facing postures onto Codex's sandbox and reviewer
+ * flags. Legacy persisted values normalize to their prior behavior.
  */
 export function permissionModeToCodexArgs(mode: CodexPermissionMode): string[] {
-  switch (mode) {
-    case 'default':
-    case 'acceptEdits':
+  switch (normalizeCodexPermissionMode(mode)) {
+    case 'edit':
       // Non-interactive gezels need deterministic behavior: allow
       // workspace writes, but never block waiting for an approval UI
       // the service cannot provide.
       return ['--sandbox', 'workspace-write', '--ask-for-approval', 'never'];
     case 'plan':
       return ['--sandbox', 'read-only', '--ask-for-approval', 'never'];
-    case 'bypassPermissions':
+    case 'reviewed':
+      // Codex keeps the workspace-write sandbox and routes only boundary
+      // crossings to an independent reviewer agent.
+      return ['--approve-for-me'];
+    case 'full':
       // The CLI exposes both this long alias and `--yolo`. Use the
       // long form so the intent is clear in process listings.
       return ['--dangerously-bypass-approvals-and-sandbox'];
@@ -156,8 +171,13 @@ export function buildCodexArgs(opts: {
   extraConfigOverrides?: Record<string, string>;
   imagePaths?: string[];
   resumeThreadId?: string;
+  promptViaStdin?: boolean;
+  strictConfig?: boolean;
+  trustManagedHooks?: boolean;
 }): string[] {
   const globalArgs = permissionModeToCodexArgs(opts.permissionMode);
+  if (opts.strictConfig) globalArgs.push('--strict-config');
+  if (opts.trustManagedHooks) globalArgs.push('--dangerously-bypass-hook-trust');
   if (opts.resumeThreadId) {
     // `codex exec resume` still does not accept `--cd`; the spawn cwd
     // anchors the process instead. Other execution-shaping flags are
@@ -181,7 +201,7 @@ export function buildCodexArgs(opts: {
     for (const imagePath of opts.imagePaths ?? []) {
       args.push('--image', imagePath);
     }
-    args.push(opts.resumeThreadId, opts.prompt);
+    args.push(opts.resumeThreadId, opts.promptViaStdin ? '-' : opts.prompt);
     return args;
   }
   const args: string[] = [
@@ -205,7 +225,7 @@ export function buildCodexArgs(opts: {
   for (const imagePath of opts.imagePaths ?? []) {
     args.push('--image', imagePath);
   }
-  args.push(opts.prompt);
+  args.push(opts.promptViaStdin ? '-' : opts.prompt);
   return args;
 }
 
@@ -246,6 +266,9 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
   if (opts.extraConfigOverrides) argsBuild.extraConfigOverrides = opts.extraConfigOverrides;
   if (opts.imagePaths && opts.imagePaths.length > 0) argsBuild.imagePaths = opts.imagePaths;
   if (opts.resumeThreadId) argsBuild.resumeThreadId = opts.resumeThreadId;
+  if (opts.promptViaStdin) argsBuild.promptViaStdin = true;
+  if (opts.strictConfig) argsBuild.strictConfig = true;
+  if (opts.trustManagedHooks) argsBuild.trustManagedHooks = true;
   const args = buildCodexArgs(argsBuild);
 
   const env: NodeJS.ProcessEnv = { ...opts.baseEnv, CODEX_HOME: opts.codexHome };
@@ -258,19 +281,13 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
   const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(opts.binaryPath);
   let child: ChildProcess;
   try {
-    // With `shell: true`, Node concatenates argv into a single command
-    // string and hands it to cmd.exe without escaping. Any arg
-    // containing spaces (cwd paths, multi-word prompts) gets word-split
-    // by cmd.exe — codex sees the second word as an unexpected extra
-    // positional. Quote ourselves before handoff. On the no-shell path
-    // Node passes argv directly to CreateProcess, so no quoting is
-    // needed (and would double-quote the args).
-    const spawnArgs = useShell ? args.map(quoteForWindowsShell) : args;
-    const spawnBinary = useShell ? quoteForWindowsShell(opts.binaryPath) : opts.binaryPath;
-    child = spawn(spawnBinary, spawnArgs, {
+    // Centralized cmd.exe quoting rejects `%` expansion and control
+    // characters instead of attempting an unsafe best-effort escape.
+    const target = winShellSafe(opts.binaryPath, args, useShell);
+    child = spawn(target.command, target.args, {
       cwd: opts.cwd,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.promptViaStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       shell: useShell,
     });
   } catch (err) {
@@ -464,6 +481,19 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       settleReject(err);
     });
 
+    if (opts.promptViaStdin) {
+      if (!child.stdin) {
+        settleReject(new Error('[codex-cli] failed to open stdin for prompt delivery'));
+        return;
+      }
+      child.stdin.on('error', (err) => {
+        // A fast CLI parse/startup failure can close stdin before Node flushes
+        // it. Preserve the CLI's more useful close/stderr error in that case.
+        if ((err as NodeJS.ErrnoException).code !== 'EPIPE') settleReject(err);
+      });
+      child.stdin.end(opts.prompt, 'utf8');
+    }
+
     function handleLine(line: string): void {
       const event = parseCodexLine(line);
       if (!event) return;
@@ -491,7 +521,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
         case 'item-started': {
           if (event.itemType === 'reasoning') {
             state.currentPhase = 'reasoning';
-            opts.hooks.emitIntent('reasoning');
+            opts.hooks.emitHeartbeat('reasoning');
           } else if (event.itemType === 'agent_message') {
             state.currentPhase = 'streaming';
           } else if (
@@ -501,9 +531,11 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
             event.itemType === 'web_search'
           ) {
             const name = describeItemTool(event.itemType, event.raw);
-            const friendlyName = prettifyToolName(name);
-            state.currentPhase = `using ${friendlyName}`;
-            opts.hooks.emitIntent(`using ${friendlyName}`);
+            state.currentPhase = describeToolActivity(event.itemType, event.raw, name);
+            // Tool execution is live status, not a durable phase boundary.
+            // Persisting one intent per call produced a large uppercase
+            // "USING …" divider immediately above the real tool row.
+            opts.hooks.emitHeartbeat(state.currentPhase);
             const args = extractToolArgs(event.itemType, event.raw);
             state.pendingTools.set(event.itemId, {
               name,
@@ -565,7 +597,12 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
             event.itemType === 'web_search'
           ) {
             const pending = state.pendingTools.get(event.itemId);
-            const name = pending?.name ?? describeItemTool(event.itemType, event.raw);
+            const completedName = describeItemTool(event.itemType, event.raw);
+            // Some Codex versions omit the concrete MCP tool at start but
+            // include it on completion. Never let the generic pending
+            // placeholder mask the authoritative completed name.
+            const name =
+              completedName !== 'mcp_tool_call' ? completedName : (pending?.name ?? completedName);
             const completedArgs = extractToolArgs(event.itemType, event.raw);
             const args = pending ? { ...pending.args, ...completedArgs } : completedArgs;
             const startedAt = pending?.startedAt ?? Date.now();
@@ -594,6 +631,8 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
               toolEvent.errorMessage = errorMessage;
             }
             opts.hooks.onToolCall?.(toolEvent);
+            state.currentPhase = 'thinking';
+            opts.hooks.emitHeartbeat(undefined);
           }
           return;
         }
@@ -669,32 +708,42 @@ function isResumeFailureSignal(lowerHaystack: string): boolean {
   );
 }
 
-/**
- * Quote a single argv element for cmd.exe consumption. Only called when
- * `spawn` is launched with `shell: true` (Windows `.cmd` / `.bat` shim
- * path). Wraps in double quotes when the arg contains any character
- * cmd.exe treats specially, and doubles inner double quotes per
- * Microsoft's parsing convention. Leaves bare arguments untouched so
- * process listings stay readable.
- *
- * Exported for testing.
- */
-export function quoteForWindowsShell(arg: string): string {
-  if (arg === '') return '""';
-  if (!/[\s"&|<>^()%!,;]/.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
 function describeItemTool(
   itemType: 'command_execution' | 'mcp_tool_call' | 'file_change' | 'web_search',
   raw: Record<string, unknown>,
 ): string {
   if (itemType === 'mcp_tool_call') {
-    return typeof raw.name === 'string' ? raw.name : 'mcp_tool_call';
+    return extractMcpToolName(raw) ?? 'mcp_tool_call';
   }
   if (itemType === 'command_execution') return 'shell';
   if (itemType === 'file_change') return 'file_change';
   return 'web_search';
+}
+
+/**
+ * Codex's JSONL field has appeared as `tool` in current releases and
+ * `name` in earlier fixtures. Accept both plus conventional camel/snake
+ * variants so a CLI update degrades to a generic row only as a last
+ * resort.
+ */
+function extractMcpToolName(raw: Record<string, unknown>): string | null {
+  for (const key of ['tool', 'name', 'tool_name', 'toolName'] as const) {
+    const value = raw[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+function describeToolActivity(
+  itemType: 'command_execution' | 'mcp_tool_call' | 'file_change' | 'web_search',
+  raw: Record<string, unknown>,
+  name: string,
+): string {
+  if (itemType === 'mcp_tool_call' && name === 'mcp_tool_call') {
+    const server = typeof raw.server === 'string' ? prettifyToolName(raw.server) : '';
+    return server ? `working with ${server}` : 'working';
+  }
+  return toolActivityLabel(name);
 }
 
 function extractToolArgs(
@@ -704,7 +753,8 @@ function extractToolArgs(
   if (itemType === 'mcp_tool_call') {
     const out: Record<string, unknown> = {};
     if (typeof raw.server === 'string') out.server = raw.server;
-    if (typeof raw.name === 'string') out.tool = raw.name;
+    const toolName = extractMcpToolName(raw);
+    if (toolName) out.tool = toolName;
     if (typeof raw.status === 'string') out.status = raw.status;
     const args =
       raw.arguments && typeof raw.arguments === 'object'

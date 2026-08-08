@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
+import { createLogger, resolveSandboxCopilot, toolActivityLabel } from '@bendyline/gezel';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { QuotaBucket } from '../chat/usage.js';
 import { resolveCopilotCliPath } from './copilot-cli.js';
@@ -47,6 +47,16 @@ class CopilotTurnAbortedError extends Error {
 }
 /** How often the idle-silence watchdog re-checks. Cheap poll. */
 const WATCHDOG_INTERVAL_MS = 2_000;
+
+function isOperationalToolIntent(label: string): boolean {
+  return /^(?:using|calling|executing)\b/i.test(label.trim());
+}
+
+function normalizeCopilotToolName(name: string, registeredToolNames: readonly string[]): string {
+  if (!name.startsWith('gezel-')) return name;
+  const bare = name.slice('gezel-'.length);
+  return registeredToolNames.includes(bare) ? bare : name;
+}
 
 /** Subset of the `@github/copilot-sdk` message-payload shape we hand in. */
 interface CopilotSendOpts {
@@ -415,10 +425,10 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
     // Tool-call surfacing. The SDK runs its tools in-process, but these
     // events expose them to us — enough to drive the References pane.
     // Exception: the model's built-in `report_intent` tool is treated as
-    // a phase-announcement event instead of a normal tool call. We emit
-    // an `intent` signal at start time and do NOT register it as a
-    // pending tool, so the `_complete` path has nothing to dispatch and
-    // the tool-call list stays free of the phase-announcement noise.
+    // a possible phase announcement instead of a normal tool call. We
+    // retain descriptive phases, discard per-tool implementation chatter,
+    // and do NOT register either as a pending tool, so the `_complete`
+    // path has nothing to dispatch and the tool-call list stays clean.
     // The SDK's separate `assistant.intent` event is unreliable in
     // practice (doesn't fire for every `report_intent` invocation) —
     // intercepting at the tool layer is the one source of truth.
@@ -435,7 +445,8 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
         // Prefer the underlying MCP tool name when present — it's the
         // `read_artifact` / `write_artifact` / etc. name the UI routes
         // on, rather than the SDK's internal wrapper label.
-        const name = (d.mcpToolName ?? d.toolName ?? 'unknown') as string;
+        const wireName = (d.mcpToolName ?? d.toolName ?? 'unknown') as string;
+        const name = normalizeCopilotToolName(wireName, this.toolNames);
         const args =
           d.arguments && typeof d.arguments === 'object'
             ? (d.arguments as Record<string, unknown>)
@@ -443,10 +454,15 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
         this.lastActivityAt = Date.now();
         if (name === 'report_intent') {
           const intent = typeof args.intent === 'string' ? args.intent.trim() : '';
-          if (intent) this.emitIntent(intent);
+          // Copilot often reports low-information implementation phases
+          // such as "Using MCP tool call" immediately before the actual
+          // tool event. The concrete event below drives live status and a
+          // named result row; only retain genuinely descriptive phases.
+          if (intent && !isOperationalToolIntent(intent)) this.emitIntent(intent);
           return;
         }
         this.pendingToolCalls.set(id, { name, args, startedAt: Date.now() });
+        this.emitHeartbeat(toolActivityLabel(name));
       }),
     );
     this.unsubs.push(
@@ -462,6 +478,7 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
         if (!pending) return;
         this.lastActivityAt = Date.now();
         this.pendingToolCalls.delete(id);
+        this.emitHeartbeat(undefined);
         const errorMessage =
           typeof d.error === 'string'
             ? d.error

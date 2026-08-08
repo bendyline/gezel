@@ -243,6 +243,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       mlxPackageSpec: config.mlxPackageSpec,
       mlxKvBits: config.mlxKvBits,
       anthropicCli: config.anthropicCli,
+      codexCli: config.codexCli,
       anthropicCliStatus: cliDetections.anthropicCli,
       codexCliStatus: cliDetections.codexCli,
       imageProvider: config.imageProvider,
@@ -425,6 +426,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
       'ollamaBaseUrl',
       'ollamaNumPredict',
       'ollamaThink',
+      // CodexCliProvider snapshots this nested object (including its
+      // reasoning default) when the provider is constructed. Rebuild it so
+      // a Settings change applies to the next turn instead of only after a
+      // daemon restart. The object also carries permission/runtime settings,
+      // so treating the whole field as a hard boundary is intentional.
+      'codexCli',
       'securityPolicy',
     ];
     // `defaultModel` / `defaultReasoningEffort` also need a reset because
@@ -613,6 +620,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       mlxModelPath: updated.mlxModelPath,
       mlxPackageSpec: updated.mlxPackageSpec,
       mlxKvBits: updated.mlxKvBits,
+      // Keep PUT response parity with GET. Settings swaps this response into
+      // local state, so omitting the nested Codex settings made the effort
+      // picker jump straight back to the model default after every change.
+      codexCli: updated.codexCli,
       imageProvider: updated.imageProvider,
       defaultImageModel: updated.defaultImageModel,
       imageGenerationConfirmation: updated.imageGenerationConfirmation,

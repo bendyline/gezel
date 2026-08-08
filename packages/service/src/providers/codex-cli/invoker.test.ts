@@ -7,7 +7,6 @@ import {
   buildCodexArgs,
   classifyError,
   permissionModeToCodexArgs,
-  quoteForWindowsShell,
   runCodexTurn,
 } from './invoker.js';
 
@@ -80,6 +79,15 @@ describe('permissionModeToCodexArgs', () => {
     ]);
   });
 
+  it('maps Edit → workspace-write sandbox with non-interactive approvals', () => {
+    expect(permissionModeToCodexArgs('edit')).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'never',
+    ]);
+  });
+
   it('maps plan → read-only sandbox + never approval', () => {
     expect(permissionModeToCodexArgs('plan')).toEqual([
       '--sandbox',
@@ -91,6 +99,16 @@ describe('permissionModeToCodexArgs', () => {
 
   it('maps bypassPermissions → --dangerously-bypass-approvals-and-sandbox', () => {
     expect(permissionModeToCodexArgs('bypassPermissions')).toEqual([
+      '--dangerously-bypass-approvals-and-sandbox',
+    ]);
+  });
+
+  it('maps Reviewed to Codex automatic review', () => {
+    expect(permissionModeToCodexArgs('reviewed')).toEqual(['--approve-for-me']);
+  });
+
+  it('maps Full to the explicit sandbox bypass', () => {
+    expect(permissionModeToCodexArgs('full')).toEqual([
       '--dangerously-bypass-approvals-and-sandbox',
     ]);
   });
@@ -229,37 +247,22 @@ describe('buildCodexArgs', () => {
     expect(args).toContain('web_search.live=true');
     expect(args).toContain('personality="friendly"');
   });
-});
 
-describe('quoteForWindowsShell', () => {
-  it('leaves bare arguments untouched', () => {
-    expect(quoteForWindowsShell('--json')).toBe('--json');
-    expect(quoteForWindowsShell('gpt-5.5')).toBe('gpt-5.5');
-    expect(quoteForWindowsShell('thread-abc')).toBe('thread-abc');
-  });
-
-  it('wraps multi-word prompts in double quotes', () => {
-    // Without this, cmd.exe word-splits the prompt and codex sees the
-    // second word as `unexpected argument 'there'`.
-    expect(quoteForWindowsShell('hi there')).toBe('"hi there"');
-  });
-
-  it('quotes paths containing spaces', () => {
-    expect(quoteForWindowsShell('C:\\Users\\Dev\\My Project')).toBe('"C:\\Users\\Dev\\My Project"');
-  });
-
-  it('doubles inner double quotes per cmd.exe parsing rules', () => {
-    expect(quoteForWindowsShell('say "hi"')).toBe('"say ""hi"""');
-  });
-
-  it('quotes the empty string as ""', () => {
-    expect(quoteForWindowsShell('')).toBe('""');
-  });
-
-  it('quotes shell metacharacters', () => {
-    expect(quoteForWindowsShell('a&b')).toBe('"a&b"');
-    expect(quoteForWindowsShell('a|b')).toBe('"a|b"');
-    expect(quoteForWindowsShell('a>b')).toBe('"a>b"');
+  it('uses stdin for prompt text and enables supported validation and hook flags', () => {
+    const args = buildCodexArgs({
+      prompt: 'secret prompt text',
+      model: 'gpt-5.5',
+      permissionMode: 'reviewed',
+      cwd: '/x',
+      promptViaStdin: true,
+      strictConfig: true,
+      trustManagedHooks: true,
+    });
+    expect(args).toContain('--approve-for-me');
+    expect(args).toContain('--strict-config');
+    expect(args).toContain('--dangerously-bypass-hook-trust');
+    expect(args.at(-1)).toBe('-');
+    expect(args).not.toContain('secret prompt text');
   });
 });
 
@@ -420,6 +423,58 @@ describe('runCodexTurn — happy path', () => {
         structuredContent: { status: 'completed', exitCode: 0, outputPreview: 'ok' },
         resultText: 'ok',
         success: true,
+      },
+    ]);
+  });
+
+  it('surfaces concrete MCP names as live status and one named tool row', async () => {
+    const ndjson = [
+      '{"type":"thread.started","thread_id":"thr-42"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.started","item":{"id":"t1","type":"mcp_tool_call","server":"gezel","tool":"advance_task_step","arguments":{"ref":"demo/1"}}}',
+      '{"type":"item.completed","item":{"id":"t1","type":"mcp_tool_call","server":"gezel","tool":"advance_task_step","status":"completed","arguments":{"ref":"demo/1"}}}',
+      '{"type":"item.started","item":{"id":"t2","type":"mcp_tool_call","server":"gezel","arguments":{"query":"mission"}}}',
+      '{"type":"item.completed","item":{"id":"t2","type":"mcp_tool_call","server":"gezel","tool":"search_memory","status":"completed","arguments":{"query":"mission"}}}',
+      '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"done"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}',
+      '',
+    ].join('\n');
+    const codex = await makeFakeCodex(ndjson);
+    const intents: string[] = [];
+    const heartbeats: Array<string | undefined> = [];
+    const toolCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+
+    await runCodexTurn({
+      binaryPath: codex,
+      cwd: dir,
+      codexHome: join(dir, 'codex-home'),
+      baseEnv: { ...process.env, CODEX_API_KEY: 'fake' },
+      model: 'gpt-5.5',
+      permissionMode: 'acceptEdits',
+      prompt: 'hi',
+      hooks: {
+        emitDelta: () => {},
+        emitIntent: (label) => intents.push(label),
+        emitHeartbeat: (label) => heartbeats.push(label),
+        emitUsage: () => {},
+        emitWarning: () => {},
+        onToolCall: (event) => {
+          toolCalls.push({ name: event.name, args: event.args });
+        },
+      },
+    });
+
+    expect(intents).toEqual([]);
+    expect(heartbeats).toContain('advance task step');
+    expect(heartbeats).toContain('working with gezel');
+    expect(toolCalls).toEqual([
+      {
+        name: 'advance_task_step',
+        args: { server: 'gezel', tool: 'advance_task_step', status: 'completed', ref: 'demo/1' },
+      },
+      {
+        name: 'search_memory',
+        args: { server: 'gezel', tool: 'search_memory', status: 'completed', query: 'mission' },
       },
     ]);
   });

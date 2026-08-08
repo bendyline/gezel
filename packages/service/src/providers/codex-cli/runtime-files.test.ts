@@ -24,6 +24,9 @@ describe('buildCodexConfigToml', () => {
     expect(body).toContain('instructions = "You are Maya."');
     expect(body).toContain('model = "gpt-5.5"');
     expect(body).toContain('project_doc_max_bytes = 0');
+    expect(body).toContain('[shell_environment_policy]');
+    expect(body).toContain('inherit = "all"');
+    expect(body).toContain('ignore_default_excludes = false');
   });
 
   it('includes reasoning effort when set', () => {
@@ -164,7 +167,7 @@ describe('buildCodexConfigToml', () => {
           enabledTools: ['list_tasks', 'read_task_notes'],
           disabledTools: ['write_file'],
           defaultToolsApprovalMode: 'auto',
-          toolApprovalModes: { list_tasks: 'approve' },
+          toolApprovalModes: { list_tasks: 'approve', write_artifact: 'writes' },
         },
       },
     });
@@ -177,6 +180,8 @@ describe('buildCodexConfigToml', () => {
     expect(body).toContain('default_tools_approval_mode = "auto"');
     expect(body).toContain('[mcp_servers.gezel.tools.list_tasks]');
     expect(body).toContain('approval_mode = "approve"');
+    expect(body).toContain('[mcp_servers.gezel.tools.write_artifact]');
+    expect(body).toContain('approval_mode = "writes"');
   });
 
   it('preserves an intentionally empty enabled_tools allowlist', () => {
@@ -202,6 +207,23 @@ describe('writeRuntimeCodexHome', () => {
     expect(path).toBe(home);
     const body = await readFile(join(home, 'config.toml'), 'utf8');
     expect(body).toContain('instructions = "hi"');
+  });
+
+  it('writes the managed command guard and exact hook registration when enabled', async () => {
+    const home = join(dir, 'p1', 'guarded');
+    await writeRuntimeCodexHome({
+      path: home,
+      config: { instructions: 'hi', model: 'gpt-5.5', mcpServers: {} },
+      userAuthJsonPath: join(dir, 'missing-auth.json'),
+      installSafetyHook: true,
+    });
+
+    const hook = await readFile(join(home, 'gezel-safety-hook.cjs'), 'utf8');
+    const registration = JSON.parse(await readFile(join(home, 'hooks.json'), 'utf8')) as {
+      hooks: { PreToolUse: Array<{ matcher: string }> };
+    };
+    expect(hook).toContain("permissionDecision: 'deny'");
+    expect(registration.hooks.PreToolUse[0]?.matcher).toBe('^Bash$');
   });
 
   it('symlinks the user auth.json when present', async () => {

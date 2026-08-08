@@ -1,13 +1,19 @@
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
+  CodexPermissionMode,
   GezelSummary,
   Project,
   ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
 } from '@bendyline/gezel';
-import { getProjectType, listProjectTypes, resolveProjectTypeId } from '@bendyline/gezel';
+import {
+  getProjectType,
+  listProjectTypes,
+  normalizeCodexPermissionMode,
+  resolveProjectTypeId,
+} from '@bendyline/gezel';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -37,6 +43,11 @@ import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
+import {
+  type AiProviderEditabilityConfig,
+  projectEditableViaAiProvider,
+  projectUsesCodex,
+} from '../components/project-ai-editability.js';
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
@@ -493,6 +504,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     pageTools?: string[];
   } | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [projectLocalGezelRoster, setProjectLocalGezelRoster] = useState<{
+    projectId: string;
+    gezels: GezelSummary[];
+  } | null>(null);
+  const [aiProviderConfig, setAiProviderConfig] = useState<AiProviderEditabilityConfig | null>(
+    null,
+  );
   const [boekwachterGezelId, setBoekwachterGezelId] = useState<string | undefined>();
   const [workingDirDraft, setWorkingDirDraft] = useState('');
   const [showAllowWritesConfirm, setShowAllowWritesConfirm] = useState(false);
@@ -577,27 +595,89 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:project-deleted', onDeleted);
   }, [refresh]);
 
-  useEffect(() => {
-    api
-      .listGezels()
-      .then((res) => setGezels(res.gezels))
-      .catch((err) => {
-        console.error('[ProjectsView] listGezels failed', err);
-      });
-    api
-      .getConfig()
-      .then((config) => setBoekwachterGezelId(config.boekwachterGezelId))
-      .catch(() => {});
+  const refreshGezels = useCallback(async () => {
+    try {
+      setGezels((await api.listGezels()).gezels);
+    } catch (err) {
+      console.error('[ProjectsView] listGezels failed', err);
+    }
+  }, []);
+
+  const refreshProjectConfig = useCallback(async () => {
+    try {
+      const config = await api.getConfig();
+      setBoekwachterGezelId(config.boekwachterGezelId);
+      setAiProviderConfig(config);
+    } catch {
+      /* non-fatal — the status bar keeps the scoped edits control */
+    }
   }, []);
 
   useEffect(() => {
-    const onConfigUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ boekwachterGezelId?: string }>).detail;
-      setBoekwachterGezelId(detail?.boekwachterGezelId);
-    };
+    void refreshGezels();
+    void refreshProjectConfig();
+  }, [refreshGezels, refreshProjectConfig]);
+
+  useEffect(() => {
+    const onConfigUpdated = () => void refreshProjectConfig();
     window.addEventListener('gezel:config-updated', onConfigUpdated);
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
-  }, []);
+  }, [refreshProjectConfig]);
+
+  useEffect(() => {
+    const onGezelUpdated = () => void refreshGezels();
+    window.addEventListener('gezel:gezel-updated', onGezelUpdated);
+    return () => window.removeEventListener('gezel:gezel-updated', onGezelUpdated);
+  }, [refreshGezels]);
+
+  const selectedProjectId = selected?.id;
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectLocalGezelRoster(null);
+      return;
+    }
+    let cancelled = false;
+    const refreshProjectLocalGezels = () => {
+      api
+        .listProjectLocalGezels(selectedProjectId)
+        .then((response) => {
+          if (!cancelled) {
+            setProjectLocalGezelRoster({ projectId: selectedProjectId, gezels: response.gezels });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setProjectLocalGezelRoster({ projectId: selectedProjectId, gezels: [] });
+          }
+        });
+    };
+    const onGezelUpdated = () => refreshProjectLocalGezels();
+    refreshProjectLocalGezels();
+    window.addEventListener('gezel:gezel-updated', onGezelUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('gezel:gezel-updated', onGezelUpdated);
+    };
+  }, [selectedProjectId]);
+
+  const aiAccess = useMemo(() => {
+    if (!selected) return { editableViaAiProvider: false, codexInUse: false };
+    const projectLocalGezels =
+      projectLocalGezelRoster?.projectId === selected.id ? projectLocalGezelRoster.gezels : [];
+    return {
+      editableViaAiProvider: projectEditableViaAiProvider(
+        selected,
+        gezels,
+        projectLocalGezels,
+        aiProviderConfig,
+      ),
+      codexInUse: projectUsesCodex(selected, gezels, projectLocalGezels, aiProviderConfig),
+    };
+  }, [selected, gezels, projectLocalGezelRoster, aiProviderConfig]);
+
+  const effectiveCodexMode = normalizeCodexPermissionMode(
+    selected?.codexPermissionMode ?? aiProviderConfig?.codexCli?.defaultPermissionMode,
+  );
 
   const addProjectGezel = useCallback(
     async (gezelId: string) => {
@@ -997,6 +1077,19 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setSelected(updated);
       } catch (err) {
         console.error('updateProject(allowGezelWrites) failed:', err);
+      }
+    },
+    [selected],
+  );
+
+  const saveCodexPermissionMode = useCallback(
+    async (next: CodexPermissionMode) => {
+      if (!selected) return;
+      try {
+        const updated = await api.updateProject(selected.id, { codexPermissionMode: next });
+        setSelected(updated);
+      } catch (err) {
+        console.error('updateProject(codexPermissionMode) failed:', err);
       }
     },
     [selected],
@@ -2436,6 +2529,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   void saveAllowGezelWrites(next);
                 }
               }}
+              editableViaAiProvider={aiAccess.editableViaAiProvider}
+              codexMode={aiAccess.codexInUse ? effectiveCodexMode : undefined}
+              onCodexModeChange={aiAccess.codexInUse ? saveCodexPermissionMode : undefined}
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
               status={selected.status ?? 'active'}
               statusLocked={selected.archived === true}

@@ -4919,7 +4919,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('threads the final role allowlist into codex-cli gezel-mcp registration', async () => {
+  it('threads Codex policy into sessions and rebuilds when the project mode changes', async () => {
     await manager.shutdown();
     mock = new MockProvider({ name: 'copilot' });
     manager = new ChatManager({
@@ -4938,6 +4938,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       defaultModel: { 'codex-cli': 'gpt-5.5' },
     });
     await store.updateGezelSettings('ada', { reasoningEffort: 'ultra' });
+    await store.updateProject('default', { codexPermissionMode: 'reviewed' });
 
     const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
     mock.script('ok');
@@ -4948,8 +4949,18 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     const env = create!.opts!.mcpServer!.env;
     expect(create!.opts!.codexCliContext).toBeTruthy();
     expect(create!.opts!.codexCliContext?.reasoningEffortOverride).toBe('ultra');
+    expect(create!.opts!.codexCliContext?.permissionModeOverride).toBe('reviewed');
     expect(env.GEZEL_MCP_EXCLUDE).toBeTruthy();
     expect(env.GEZEL_MCP_ALLOW).toBe([...allow].sort().join(','));
+
+    await store.updateProject('default', { codexPermissionMode: 'plan' });
+    mock.script('planned');
+    await manager.send(session.id, 'Now only inspect it.');
+
+    const creates = mock.calls.filter((call) => call.kind === 'create');
+    expect(creates).toHaveLength(2);
+    expect(creates[1]!.opts!.codexCliContext?.permissionModeOverride).toBe('plan');
+    expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
   });
 
   it('small local meester keeps every curated tool under the coordinator cap', async () => {

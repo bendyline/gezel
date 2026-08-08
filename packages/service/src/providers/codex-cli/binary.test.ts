@@ -42,6 +42,26 @@ describe('resolveCodexBinary', () => {
     expect(out.version).toBe('codex 0.125.0');
   });
 
+  it('detects optional safety and reliability features from CLI help', async () => {
+    const path = await makeFakeCodex(
+      [
+        'codex 0.147.0',
+        '--approve-for-me',
+        '--strict-config',
+        '--dangerously-bypass-hook-trust',
+        'Instructions are read from stdin',
+        'If `-` is used, read from stdin',
+      ].join('\n'),
+    );
+    const out = await resolveCodexBinary({ override: path });
+    expect(out.capabilities).toEqual({
+      autoReview: true,
+      strictConfig: true,
+      managedHooks: true,
+      stdinPrompt: true,
+    });
+  });
+
   it('throws an actionable error when nothing on PATH and no override', async () => {
     await expect(resolveCodexBinary({ env: { PATH: dir } })).rejects.toBeInstanceOf(
       CodexBinaryNotFoundError,

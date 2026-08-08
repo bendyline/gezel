@@ -1328,6 +1328,7 @@ export class Store {
       templateVersion: d.parsed.frontmatter.templateVersion,
       sandboxCopilot: d.parsed.frontmatter.sandboxCopilot,
       claudePermissionMode: d.parsed.frontmatter.claudePermissionMode,
+      codexPermissionMode: d.parsed.frontmatter.codexPermissionMode,
       fixedFunction: d.parsed.frontmatter.fixedFunction,
       icon: d.icon,
       poppetje: d.poppetje,
@@ -1724,6 +1725,15 @@ export class Store {
       font?: string | null;
       sandboxCopilot?: boolean | null;
       claudePermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | null;
+      codexPermissionMode?:
+        | 'plan'
+        | 'edit'
+        | 'reviewed'
+        | 'full'
+        | 'default'
+        | 'acceptEdits'
+        | 'bypassPermissions'
+        | null;
       /**
        * Sparse `Partial<ChatModelTuning>` override on top of the
        * catalog manifest's recommended defaults. Pass `null` to clear
@@ -1774,6 +1784,9 @@ export class Store {
     if (patch.claudePermissionMode === null) delete frontmatter.claudePermissionMode;
     else if (patch.claudePermissionMode !== undefined)
       frontmatter.claudePermissionMode = patch.claudePermissionMode;
+    if (patch.codexPermissionMode === null) delete frontmatter.codexPermissionMode;
+    else if (patch.codexPermissionMode !== undefined)
+      frontmatter.codexPermissionMode = patch.codexPermissionMode;
     if (patch.tuning === null) delete frontmatter.tuning;
     else if (patch.tuning !== undefined) frontmatter.tuning = patch.tuning;
     if (patch.tuningProfile === null) delete frontmatter.tuningProfile;
@@ -1796,6 +1809,7 @@ export class Store {
     if (patch.font !== undefined) changed.push('font');
     if (patch.sandboxCopilot !== undefined) changed.push('sandboxCopilot');
     if (patch.claudePermissionMode !== undefined) changed.push('claudePermissionMode');
+    if (patch.codexPermissionMode !== undefined) changed.push('codexPermissionMode');
     if (patch.tuning !== undefined) changed.push('tuning');
     if (patch.tuningProfile !== undefined) changed.push('tuningProfile');
     if (patch.iconOverride !== undefined) changed.push('iconOverride');
@@ -2018,6 +2032,7 @@ export class Store {
         templateVersion: parsed.frontmatter.templateVersion,
         sandboxCopilot: parsed.frontmatter.sandboxCopilot,
         claudePermissionMode: parsed.frontmatter.claudePermissionMode,
+        codexPermissionMode: parsed.frontmatter.codexPermissionMode,
         fixedFunction: parsed.frontmatter.fixedFunction,
         icon,
         poppetje,
@@ -2740,6 +2755,7 @@ export class Store {
       /** External-data connector bindings — `null` clears them. */
       connectors?: import('@bendyline/gezel').ProjectConnectorBinding[] | null;
       allowGezelWrites?: boolean;
+      codexPermissionMode?: import('@bendyline/gezel').CodexPermissionMode;
       /** Replaces the stored per-project ambient nudge override. */
       nudgeConfig?: ProjectNudgeConfig;
       /** Replaces the optional project-tab visibility overrides. */
@@ -2819,6 +2835,9 @@ export class Store {
           ? { connectors: patch.connectors }
           : {}),
       ...(patch.allowGezelWrites !== undefined ? { allowGezelWrites: patch.allowGezelWrites } : {}),
+      ...(patch.codexPermissionMode !== undefined
+        ? { codexPermissionMode: patch.codexPermissionMode }
+        : {}),
       ...(patch.nudgeConfig !== undefined ? { nudgeConfig: patch.nudgeConfig } : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
@@ -3002,6 +3021,21 @@ export class Store {
           previousValue: meta.allowGezelWrites ?? false,
           value: patch.allowGezelWrites,
           workingDir: detail.workingDir,
+        },
+      });
+    }
+    if (
+      patch.codexPermissionMode !== undefined &&
+      patch.codexPermissionMode !== meta.codexPermissionMode
+    ) {
+      await this.history?.log({
+        kind: 'project.updated',
+        projectId: id,
+        summary: `Set Codex to ${patch.codexPermissionMode} on "${detail.name}"`,
+        details: {
+          field: 'codexPermissionMode',
+          previousValue: meta.codexPermissionMode,
+          value: patch.codexPermissionMode,
         },
       });
     }

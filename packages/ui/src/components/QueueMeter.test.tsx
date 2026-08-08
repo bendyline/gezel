@@ -76,6 +76,51 @@ function liveTurn(overrides: Partial<LiveTurnState> = {}): LiveTurnState {
   };
 }
 
+type QueueProviderName = keyof QueueStatusResponse['providers'];
+
+const CLOUD_AND_CLI_QUEUE_CASES = [
+  { provider: 'copilot', label: 'Copilot' },
+  { provider: 'openai', label: 'OpenAI' },
+  { provider: 'anthropic', label: 'Claude' },
+  { provider: 'anthropic-cli', label: 'Claude CLI' },
+  { provider: 'codex-cli', label: 'Codex CLI' },
+] as const satisfies ReadonlyArray<{ provider: QueueProviderName; label: string }>;
+
+function busyProviderStatus(provider: QueueProviderName): QueueStatusResponse {
+  return {
+    providers: {
+      [provider]: {
+        running: 1,
+        queuedInteractive: 1,
+        queuedBackground: 0,
+        concurrency: 4,
+        active: [
+          {
+            sessionId: `${provider}-active`,
+            gezelId: 'gez-1',
+            projectId: 'project-7',
+            runningForMs: 12_000,
+          },
+        ],
+        pending: [
+          {
+            id: 71,
+            lane: 'interactive',
+            sessionId: `${provider}-queued`,
+            gezelId: 'gez-1',
+            projectId: 'project-7',
+            waitedMs: 4_000,
+          },
+        ],
+      },
+    },
+    taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+    sessions: [],
+    cache: [],
+    at: '',
+  };
+}
+
 describe('QueueMeter — preparing window', () => {
   beforeEach(() => {
     mockLiveTurns = new Map();
@@ -408,6 +453,49 @@ describe('QueueMeter — preparing window', () => {
     expect(screen.queryByText(/2 queued/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/deferred until idle/)).toHaveLength(3);
   });
+});
+
+describe('QueueMeter — cloud and CLI providers', () => {
+  beforeEach(() => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+    vi.mocked(api.cancelProviderQueueItem).mockResolvedValue({ cancelled: true });
+  });
+
+  it.each(CLOUD_AND_CLI_QUEUE_CASES)(
+    'shows running and queued work for $label',
+    async ({ provider, label }) => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider,
+        roleBasedNameOnlyMode: true,
+      } as ConfigResponse);
+      vi.mocked(api.getQueueStatus).mockResolvedValue(busyProviderStatus(provider));
+
+      const { container } = render(<QueueMeter />);
+      const button = await screen.findByRole('button', {
+        name: 'AI chat queue — click for details',
+      });
+
+      await waitFor(() => {
+        expect(container.querySelector('.queue-meter-chip')).not.toBeNull();
+      });
+      const chip = container.querySelector('.queue-meter-chip');
+      expect(chip).toHaveAttribute('title', label);
+      expect(chip?.querySelector('.queue-meter-chip-label-full')).toHaveTextContent(label);
+      expect(chip?.querySelector('.queue-meter-chip-counts')).toHaveTextContent('1+1');
+
+      await userEvent.click(button);
+      const panel = await screen.findByLabelText('AI chat queue');
+      expect(within(panel).getByText(label)).toBeInTheDocument();
+      expect(within(panel).getByText('1 / 4 in flight · 1 queued')).toBeInTheDocument();
+
+      await userEvent.click(within(panel).getByRole('button', { name: 'Cancel queued turn' }));
+      expect(api.cancelProviderQueueItem).toHaveBeenLastCalledWith(provider, 71);
+    },
+  );
 });
 
 describe('QueueMeter — night-shift handoffs', () => {

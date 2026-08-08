@@ -44,6 +44,7 @@ import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { artifactPathFromHref, linkifyArtifactRefs } from './artifact-linkify.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { formatElapsedClock } from './elapsed-time.js';
+import { shouldDisplayIntent } from './intent-display.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -451,6 +452,7 @@ export function MessageBubble({
     const sorted = [...intents].sort((a, b) => a.afterChars - b.afterChars);
     let cursor = 0;
     for (const it of sorted) {
+      if (!shouldDisplayIntent(it.label)) continue;
       const at = Math.max(cursor, Math.min(it.afterChars, displayContent.length));
       if (at > cursor) {
         segs.push({ kind: 'text', content: displayContent.slice(cursor, at) });
@@ -988,6 +990,7 @@ export type StreamingSegment =
  * checkout flow" ──── rest of the turn).
  */
 export function IntentDivider({ label }: { label: string }) {
+  if (!shouldDisplayIntent(label)) return null;
   return (
     <div className="msg-intent-divider" aria-label={label}>
       <span className="msg-intent-divider-label">{label}</span>
@@ -1598,7 +1601,9 @@ export function StreamingBubble({
       if (tail?.kind === 'tools') tail.tools.push(s.tool);
       else renderedSegments.push({ kind: 'tools', tools: [s.tool] });
     } else if (s.kind === 'intent') {
-      renderedSegments.push({ kind: 'intent', label: s.label });
+      if (shouldDisplayIntent(s.label)) {
+        renderedSegments.push({ kind: 'intent', label: s.label });
+      }
     } else if (s.content.length > 0) {
       // Skip text segments that render to nothing once tool-call
       // markup and `<think>`/channel reasoning are stripped — e.g.
@@ -2066,6 +2071,8 @@ export interface GhostQueuedBubbleProps {
   queueId: string;
   preview: string;
   enqueuedAt: string;
+  /** Resolves pasted attachment refs while the message is still waiting. */
+  mediaProvider?: MediaProvider | null;
   /** Queued as a mid-turn nudge — the label reads "nudge" instead of "queued". */
   nudge?: boolean;
   /** Drop this queued message from the session's queue without running it. */
@@ -2073,10 +2080,10 @@ export interface GhostQueuedBubbleProps {
   /** Cancel the session's currently-running turn so this one runs sooner. */
   onCancelCurrent: () => void | Promise<void>;
   /**
-   * Fetch the entry's FULL text for editing (the event preview is
-   * truncated at 160 chars). Resolve `null` when the entry is gone —
-   * already started or discarded — in which case edit mode never opens
-   * (the `queue_removed` event clears this bubble moments later).
+   * Fetch the entry's FULL text for inline rendering and editing (the event
+   * preview is truncated at 160 chars). Resolve `null` when the entry is
+   * gone — already started or discarded — in which case edit mode never
+   * opens (the `queue_removed` event clears this bubble moments later).
    */
   onLoadText?: () => Promise<string | null>;
   /**
@@ -2099,6 +2106,7 @@ export function GhostQueuedBubble({
   preview,
   enqueuedAt,
   nudge,
+  mediaProvider,
   onDiscard,
   onCancelCurrent,
   onLoadText,
@@ -2110,7 +2118,37 @@ export function GhostQueuedBubble({
   const [editDraft, setEditDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [displayText, setDisplayText] = useState(preview);
+  const loadTextRef = useRef(onLoadText);
   const editable = onLoadText !== undefined && onSaveEdit !== undefined;
+
+  useEffect(() => {
+    loadTextRef.current = onLoadText;
+  }, [onLoadText]);
+
+  // Queue SSE events intentionally carry only a 160-character preview.
+  // Load the complete body once so an attachment whose markdown ref falls
+  // after that boundary (or is cut by it) still renders as an image. Keep
+  // the preview as the immediate fallback while that small request runs.
+  useEffect(() => {
+    let cancelled = false;
+    setDisplayText(preview);
+    const loadText = loadTextRef.current;
+    if (!loadText) return;
+    void loadText().then(
+      (text) => {
+        if (!cancelled && text !== null) setDisplayText(text);
+      },
+      () => {
+        // The queue entry may have started between the SSE event and this
+        // read. Its ghost bubble will disappear on queue_removed; until then
+        // the event preview remains the safest display value.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [preview]);
 
   const beginEdit = async () => {
     if (!onLoadText) return;
@@ -2164,7 +2202,9 @@ export function GhostQueuedBubble({
           {editError && <div className="msg-ghost-queued-edit-error">{editError}</div>}
         </div>
       ) : (
-        <div className="msg-body msg-body-rendered">{preview}</div>
+        <div className="msg-body msg-body-rendered">
+          <RenderedMarkdown markdown={displayText} mediaProvider={mediaProvider} />
+        </div>
       )}
       <div className="msg-ghost-queued-actions">
         {editing ? (

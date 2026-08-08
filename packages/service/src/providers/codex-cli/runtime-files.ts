@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { writeFileAtomic } from '../../fs/atomic.js';
 import type { CodexReasoningEffort } from './reasoning.js';
+import { buildCodexSafetyHookScript } from './safety-hook.js';
 
 const log = createLogger('codex-cli');
 
-export type CodexMcpApprovalMode = 'auto' | 'prompt' | 'approve';
+export type CodexMcpApprovalMode = 'auto' | 'prompt' | 'writes' | 'approve';
 
 export type CodexMcpEnvVarForward =
   | string
@@ -126,6 +127,13 @@ export function buildCodexConfigToml(config: CodexRuntimeConfig): string {
     lines.push(`mcp_oauth_callback_url = ${tomlString(config.mcpOauthCallbackUrl)}`);
   }
 
+  // Preserve the normal PATH/toolchain while retaining Codex's built-in
+  // secret-name exclusions for model-generated shell commands.
+  lines.push('');
+  lines.push('[shell_environment_policy]');
+  lines.push('inherit = "all"');
+  lines.push('ignore_default_excludes = false');
+
   for (const [id, server] of Object.entries(config.mcpServers)) {
     lines.push('');
     lines.push(`[mcp_servers.${tomlBareKey(id)}]`);
@@ -212,6 +220,8 @@ export async function writeRuntimeCodexHome(opts: {
   config: CodexRuntimeConfig;
   /** Override for `~/.codex/auth.json` source — defaults to user's homedir. */
   userAuthJsonPath?: string;
+  /** Install Gezel's exact PreToolUse safety hook in this managed home. */
+  installSafetyHook?: boolean;
 }): Promise<string> {
   const body = buildCodexConfigToml(opts.config);
   await mkdir(opts.path, { recursive: true });
@@ -219,9 +229,70 @@ export async function writeRuntimeCodexHome(opts: {
   if (!(await sameBody(configPath, body))) {
     await writeFileAtomic(configPath, body);
   }
+  await writeSafetyHook(opts.path, opts.installSafetyHook === true);
   const userAuthPath = opts.userAuthJsonPath ?? join(homedir(), '.codex', 'auth.json');
   await ensureAuthSymlink(opts.path, userAuthPath);
   return opts.path;
+}
+
+const SAFETY_HOOK_FILE = 'gezel-safety-hook.cjs';
+
+async function writeSafetyHook(codexHome: string, enabled: boolean): Promise<void> {
+  const hookPath = join(codexHome, SAFETY_HOOK_FILE);
+  const hooksPath = join(codexHome, 'hooks.json');
+  if (!enabled) {
+    await Promise.all(
+      [hookPath, hooksPath].map(async (path) => {
+        try {
+          await unlink(path);
+        } catch {
+          /* absent is already disabled */
+        }
+      }),
+    );
+    return;
+  }
+
+  const hookBody = buildCodexSafetyHookScript();
+  if (!(await sameBody(hookPath, hookBody))) await writeFileAtomic(hookPath, hookBody);
+
+  const command = `${quotePosixCommandToken(process.execPath)} ${quotePosixCommandToken(hookPath)}`;
+  const commandWindows = `${quoteWindowsCommandToken(process.execPath)} ${quoteWindowsCommandToken(hookPath)}`;
+  const hooksBody = `${JSON.stringify(
+    {
+      description: 'Gezel-managed high-confidence destructive-command guard',
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: '^Bash$',
+            hooks: [
+              {
+                type: 'command',
+                command,
+                commandWindows,
+                timeout: 5,
+                statusMessage: 'Checking command safety',
+              },
+            ],
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  )}\n`;
+  if (!(await sameBody(hooksPath, hooksBody))) await writeFileAtomic(hooksPath, hooksBody);
+}
+
+function quotePosixCommandToken(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function quoteWindowsCommandToken(value: string): string {
+  // `%` expands even inside cmd.exe quotes; an invalid hook path is safer than
+  // silently executing a different command. The sandbox/reviewer remains on.
+  if (value.includes('%') || value.includes('"')) return '"__GEZEL_UNSAFE_HOOK_PATH__"';
+  return `"${value}"`;
 }
 
 async function sameBody(path: string, body: string): Promise<boolean> {

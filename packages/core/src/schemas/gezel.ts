@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
+import { CodexPermissionModeCompatSchema } from './codex.js';
 import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
@@ -227,6 +228,12 @@ export const GezelFrontmatterSchema = z.object({
    */
   claudePermissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']).optional(),
   /**
+   * `codex-cli`-only execution posture. New writes use Plan / Edit /
+   * Reviewed / Full; legacy Codex values remain readable for compatibility.
+   * When unset, the project override and then install default apply.
+   */
+  codexPermissionMode: CodexPermissionModeCompatSchema.optional(),
+  /**
    * When true and the gezel has a custom `icon.svg`, the UI renders that
    * abstract sigil instead of the parametric poppetje. Default (absent /
    * false) renders the poppetje everywhere. Toggled from Gezel Detail.
@@ -303,6 +310,8 @@ export const GezelSummarySchema = z.object({
   sandboxCopilot: z.boolean().optional(),
   /** Mirrors `GezelFrontmatter.claudePermissionMode`. */
   claudePermissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']).optional(),
+  /** Mirrors `GezelFrontmatter.codexPermissionMode`. */
+  codexPermissionMode: CodexPermissionModeCompatSchema.optional(),
   /**
    * Mirrors `GezelFrontmatter.fixedFunction`. Present means this gezel
    * skips the LLM and forwards messages to an MCP tool. The UI uses

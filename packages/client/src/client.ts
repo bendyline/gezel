@@ -416,7 +416,14 @@ export interface UsageResponse {
   providers: {
     copilot?: ProviderUsage;
     openai?: ProviderUsage;
+    anthropic?: ProviderUsage;
+    'anthropic-cli'?: ProviderUsage;
+    'codex-cli'?: ProviderUsage;
     ollama?: ProviderUsage;
+    'llama-cpp'?: ProviderUsage;
+    mlx?: ProviderUsage;
+    ds4?: ProviderUsage;
+    remote?: ProviderUsage;
   };
   lastUpdated: string | null;
 }
@@ -1176,7 +1183,14 @@ export interface ConfigResponse {
   codexCli?: {
     binaryPath?: string;
     manageRuntimeFiles?: boolean;
-    defaultPermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+    defaultPermissionMode?:
+      | 'plan'
+      | 'edit'
+      | 'reviewed'
+      | 'full'
+      | 'default'
+      | 'acceptEdits'
+      | 'bypassPermissions';
     defaultReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     extraModels?: Array<{ id: string; name: string }>;
     extraConfigOverrides?: Record<string, string>;

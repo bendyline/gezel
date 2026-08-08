@@ -1,10 +1,11 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { join } from 'node:path';
-import { createLogger, prettifyToolName } from '@bendyline/gezel';
+import { createLogger, toolActivityLabel } from '@bendyline/gezel';
 import { SessionResumeError } from '../types.js';
 import type { SessionOpts, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import type { ClaudePermissionMode } from './provider.js';
+import { writeClaudeQuotaCaptureFiles } from './quota.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import {
   type ClaudeMcpServerEntry,
@@ -187,6 +188,7 @@ export class ClaudeWorker {
   private child: ChildProcess | null = null;
   private capturedSessionId: string | null;
   private mcpConfigPath: string | null = null;
+  private quotaSettingsPath: string | null = null;
   private systemPromptPath: string | null = null;
   private pending: PendingTurn | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
@@ -275,6 +277,7 @@ export class ClaudeWorker {
     this.state = { kind: 'starting' };
 
     this.mcpConfigPath = await this.writeMcpConfigOnce();
+    this.quotaSettingsPath = await this.writeQuotaSettingsOnce();
     this.systemPromptPath = await this.writeSystemPromptOnce();
     const initialResumeId = this.opts.initialResumeId ?? null;
     this.startupAttemptedResumeId = initialResumeId;
@@ -370,7 +373,7 @@ export class ClaudeWorker {
       // watchdog doesn't climb during that window, then keep a
       // periodic heartbeat going for the rest of the turn. The
       // heartbeat label tracks the most recent phase (preparing /
-      // thinking / streaming / using <tool>) and is transient — it
+      // thinking / streaming / a concrete tool name) and is transient — it
       // clears on the first delta. We deliberately do NOT emit a
       // `preparing` intent: intents persist as HR dividers on the
       // saved message, so a startup-state intent would carve
@@ -593,6 +596,9 @@ export class ClaudeWorker {
       args.push('--mcp-config', this.mcpConfigPath);
       args.push('--permission-prompt-tool', 'mcp__gezel__request_tool_permission');
     }
+    if (this.quotaSettingsPath) {
+      args.push('--settings', this.quotaSettingsPath);
+    }
     if (resumeId) {
       args.push('--resume', resumeId);
     }
@@ -644,6 +650,15 @@ export class ClaudeWorker {
       `${this.opts.context.sessionId}.system.md`,
     );
     return writeRuntimeTextFile({ path, contents: this.opts.systemMessage });
+  }
+
+  private async writeQuotaSettingsOnce(): Promise<string | null> {
+    if (!this.opts.manageRuntimeFiles) return null;
+    return writeClaudeQuotaCaptureFiles({
+      runtimeDir: this.opts.runtimeDir,
+      projectId: this.opts.context.projectId,
+      sessionId: this.opts.context.sessionId,
+    });
   }
 
   private async writeMcpConfigOnce(): Promise<string | null> {
@@ -887,8 +902,8 @@ export class ClaudeWorker {
           startedAt: this.nowFn(),
         });
         // Strip Claude CLI's `mcp__<server>__` wire prefix and humanize
-        // underscores so the heartbeat label reads "using read task notes"
-        // instead of leaking "MCP__GEZEL__READ_TASK_NOTES" into the UI.
+        // underscores so the heartbeat names the actual operation (for
+        // example "read task notes") instead of leaking MCP jargon.
         //
         // We update `currentPhase` (transient — drives the live heartbeat
         // status line) but deliberately do NOT `emitIntent` here. Intents
@@ -899,9 +914,8 @@ export class ClaudeWorker {
         // `tool-result` case below). The CLI fires tool calls constantly, so
         // unlike Copilot's occasional `report_intent` phase announcements,
         // these never read as meaningful phase boundaries. The transient
-        // "using X" status is fully covered by the heartbeat.
-        const friendlyName = prettifyToolName(event.name);
-        turn.currentPhase = `using ${friendlyName}`;
+        // Concrete live status is fully covered by the heartbeat.
+        turn.currentPhase = toolActivityLabel(event.name);
         return;
       }
       case 'tool-result': {

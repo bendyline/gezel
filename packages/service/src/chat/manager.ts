@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ChatMessageToolCall,
   type ChatSession,
+  type CodexPermissionMode,
   type ExecutionDensity,
   type ExpectedDeliverable,
   type GezelConfig,
@@ -33,6 +34,7 @@ import {
   isProactiveAllowed,
   leaksUntaggedReasoning,
   normalizeChatModelCatalogId,
+  normalizeCodexPermissionMode,
   normalizeScriptRefs,
   normalizeStepGate,
   nowIso,
@@ -619,6 +621,8 @@ interface LiveSessionState {
    * live sessions.)
    */
   growthSnapshot: string;
+  /** Effective Codex execution mode baked into the live CLI session. */
+  codexPermissionModeSnapshot?: CodexPermissionMode;
   /**
    * The emergency "missing index.html" tool clamp is derived from the
    * latest user message, so it can change between queued turns without
@@ -11415,6 +11419,9 @@ export class ChatManager {
         ? this.projectOrchestrationConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await this.gateRepairConstraintActive(existing.record);
+      const codexPermissionMode = gezel
+        ? await this.resolveCodexPermissionMode(existing.record, gezel)
+        : undefined;
       if (
         gezel &&
         (gezel.about !== existing.aboutSnapshot ||
@@ -11424,7 +11431,8 @@ export class ChatManager {
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
           projectOrchestrationConstrained !== existing.projectOrchestrationConstrained ||
-          gateRepairConstrained !== existing.gateRepairConstrained)
+          gateRepairConstrained !== existing.gateRepairConstrained ||
+          codexPermissionMode !== existing.codexPermissionModeSnapshot)
       ) {
         if (immediateFileWriteConstrained !== existing.immediateFileWriteConstrained) {
           log.debug(
@@ -11454,6 +11462,12 @@ export class ChatManager {
           log.info(
             `tool-clamp: gate-repair session surface changed for ${existing.record.gezelId} ` +
               `(${existing.gateRepairConstrained ? 'on' : 'off'} → ${gateRepairConstrained ? 'on' : 'off'})`,
+          );
+        }
+        if (codexPermissionMode !== existing.codexPermissionModeSnapshot) {
+          log.info(
+            `codex: execution mode changed for ${existing.record.gezelId} ` +
+              `(${existing.codexPermissionModeSnapshot ?? 'n/a'} → ${codexPermissionMode ?? 'n/a'})`,
           );
         }
         try {
@@ -11666,6 +11680,13 @@ export class ChatManager {
       aboutSnapshot: gezel.about,
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
+      ...(sessionOpts.codexCliContext?.permissionModeOverride
+        ? {
+            codexPermissionModeSnapshot: normalizeCodexPermissionMode(
+              sessionOpts.codexCliContext.permissionModeOverride,
+            ),
+          }
+        : {}),
       immediateFileWriteConstrained,
       directFileWorkConstrained,
       scenarioFileRepairConstrained,
@@ -11702,6 +11723,25 @@ export class ChatManager {
       latestUserMessage,
       hasToolsetOverride,
     });
+  }
+
+  /** Resolve the mode that a Codex CLI session will actually receive. */
+  private async resolveCodexPermissionMode(
+    record: ChatSession,
+    gezel: GezelDetail,
+  ): Promise<CodexPermissionMode | undefined> {
+    if (record.providerName !== 'codex-cli') return undefined;
+    const [project, config] = await Promise.all([
+      this.store.getProject(record.projectId),
+      this.store.readConfig(),
+    ]);
+    const frontmatter = gezel.parsed.frontmatter;
+    return normalizeCodexPermissionMode(
+      project?.codexPermissionMode ??
+        frontmatter.codexPermissionMode ??
+        frontmatter.claudePermissionMode ??
+        config.codexCli?.defaultPermissionMode,
+    );
   }
 
   /**
@@ -13734,11 +13774,15 @@ export class ChatManager {
 
     if (record.providerName === 'codex-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
-      // Reuse the same per-gezel `claudePermissionMode` enum — the
-      // wire shape is shared across both CLI providers and the
-      // CodexCliProvider maps it onto Codex's two-axis sandbox /
-      // approval flags internally.
-      const permissionModeOverride = gezelFm?.claudePermissionMode;
+      // The project status-bar control is authoritative, followed by the
+      // Codex-specific gezel override. Fall back to the historical shared
+      // Claude field so existing gezel files retain their prior behavior.
+      const permissionModeOverride = normalizeCodexPermissionMode(
+        project?.codexPermissionMode ??
+          gezelFm?.codexPermissionMode ??
+          gezelFm?.claudePermissionMode ??
+          config.codexCli?.defaultPermissionMode,
+      );
       // If the gezel's effort belongs to another provider's vocabulary,
       // drop it and let Codex fall back to the install/model default.
       const reasoningEffortOverride = isCodexReasoningEffort(gezelFm?.reasoningEffort)
@@ -13749,7 +13793,7 @@ export class ChatManager {
         gezelId: record.gezelId,
         projectId: record.projectId,
         cwd,
-        ...(permissionModeOverride ? { permissionModeOverride } : {}),
+        permissionModeOverride,
         ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
       };
     }
@@ -16233,7 +16277,18 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // below.
   const fileEditsDisabled = workspaceWritable === false;
   const hasPlaywright = installedToolsetIds?.has('@playwright/mcp') ?? false;
-  const availableToolNameSet = new Set((availableTools ?? []).map((tool) => tool.name));
+  // Codex CLI reports native MCP functions as `mcp__<server>__<tool>`,
+  // while every provider-independent prompt rule below is written against
+  // the canonical MCP tool name. Keep both spellings in the capability set:
+  // the tools block can still show the exact registered function name, but
+  // routing/file/task guidance no longer falsely says "none wired" in Codex
+  // debug snapshots (or any future provider that exposes qualified names).
+  const availableToolNameSet = new Set<string>();
+  for (const tool of availableTools ?? []) {
+    availableToolNameSet.add(tool.name);
+    const qualified = tool.name.match(/^mcp__.+?__(.+)$/);
+    if (qualified?.[1] && qualified[1] !== '*') availableToolNameSet.add(qualified[1]);
+  }
   const isProjectStrategicOwner =
     project?.voormanGezelId !== undefined &&
     project.voormanGezelId !== '' &&

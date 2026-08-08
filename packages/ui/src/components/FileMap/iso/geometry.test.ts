@@ -75,11 +75,12 @@ describe('geometry cache', () => {
 });
 
 describe('roofHeadroom', () => {
-  it('defaults to the ordinary roof budget', () => {
+  it('includes the resolved period furniture in the roof budget', () => {
     const geom = geometryForModel(blockModel([liveBlock('src/a.ts', 0, 0)]));
     const g = geom.geoms[0]!;
-    expect(g.roofFactor).toBe(1);
-    expect(roofHeadroom(g, 1)).toBeCloseTo(townRoofRiseIso(g.block.rect, 1), 6);
+    expect(g.style?.chimneys).toBeGreaterThan(0);
+    expect(g.roofFactor).toBeGreaterThan(1);
+    expect(roofHeadroom(g, 1)).toBeCloseTo(townRoofRiseIso(g.block.rect, 1) * g.roofFactor, 6);
   });
 
   it('scales with roofFactor so tall caps stay cullable and clickable', () => {

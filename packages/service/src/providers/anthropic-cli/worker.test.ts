@@ -548,6 +548,14 @@ describe('ClaudeWorker — system prompt delivery', () => {
     const promptPath = capturedArgs[idx + 1]!;
     expect(await readFile(promptPath, 'utf8')).toBe(systemMessage);
 
+    const settingsIdx = capturedArgs.indexOf('--settings');
+    expect(settingsIdx).toBeGreaterThanOrEqual(0);
+    const quotaSettings = JSON.parse(await readFile(capturedArgs[settingsIdx + 1]!, 'utf8')) as {
+      statusLine?: { type?: string; command?: string };
+    };
+    expect(quotaSettings.statusLine?.type).toBe('command');
+    expect(quotaSettings.statusLine?.command).toContain('quota-statusline.mjs');
+
     await worker.shutdown();
   });
 
@@ -566,6 +574,7 @@ describe('ClaudeWorker — system prompt delivery', () => {
     await worker.start();
 
     expect(capturedArgs).not.toContain('--append-system-prompt-file');
+    expect(capturedArgs).not.toContain('--settings');
     const idx = capturedArgs.indexOf('--append-system-prompt');
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(capturedArgs[idx + 1]).toBe('You are a test gezel.');

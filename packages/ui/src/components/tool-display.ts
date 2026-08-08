@@ -47,8 +47,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_task: 'Update task',
   set_task_status: 'Set task status',
   assign_task: 'Assign task',
-  add_task_step: 'Add step',
-  advance_task_step: 'Advance step',
+  add_task_step: 'Add task step',
+  advance_task_step: 'Advance task step',
   read_task_notes: 'Read task notes',
   write_task_note: 'Write task note',
   // Audit / misc
@@ -64,8 +64,15 @@ export function toolDisplayName(name: string): string {
   // both operate on the bare tool slug ("save_memory" rather than
   // "mcp__gezel__save_memory"). Without this the previous fallback
   // produced UI strings like "mcp gezel save memory".
-  const bare = stripMcpPrefix(name);
-  if (TOOL_DISPLAY_NAMES[bare]) return TOOL_DISPLAY_NAMES[bare];
+  let bare = stripMcpPrefix(name);
+  // Copilot may surface our MCP tools in its user-visible
+  // `gezel-<tool>` wire form. This prefix belongs to the Gezel MCP server;
+  // unwrap it before both the rich lookup and unknown-tool fallback.
+  if (bare.startsWith('gezel-')) {
+    bare = bare.slice('gezel-'.length);
+  }
+  const displayName = TOOL_DISPLAY_NAMES[bare];
+  if (displayName) return displayName;
   // Unknown tools: prefer the `@scope/tool` suffix over the scope itself.
   // `@playwright/mcp`'s tools use `browser_navigate`, `browser_click`, etc.;
   // humanize those inline for a better fallback.

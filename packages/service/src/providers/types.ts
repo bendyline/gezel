@@ -1,4 +1,4 @@
-import type { ProviderName } from '@bendyline/gezel';
+import type { CodexPermissionModeCompat, ProviderName } from '@bendyline/gezel';
 import type { QuotaBucket } from '../chat/usage.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import type { CodexReasoningEffort } from './codex-cli/reasoning.js';
@@ -127,7 +127,7 @@ export interface SessionOpts {
     gezelId: string;
     projectId: string;
     cwd: string;
-    permissionModeOverride?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+    permissionModeOverride?: CodexPermissionModeCompat;
     reasoningEffortOverride?: CodexReasoningEffort;
   };
   /**
@@ -788,11 +788,10 @@ export interface LLMSession {
   onIntent?(handler: (label: string) => void): () => void;
   /**
    * Optional: subscribe to "still working" heartbeats. Providers that
-   * know they're mid-work without producing visible deltas (Copilot's
-   * `session.thinking_start` / `session.thinking_stop`) fire these so
-   * the chat UI doesn't let its "silent for Xs" banner climb during
-   * legitimate server-side reasoning phases. Providers without a
-   * comparable signal can leave this undefined.
+   * know they're mid-work without producing visible deltas fire these so
+   * the chat UI can name the current operation and does not let its
+   * "silent for Xs" banner climb during legitimate reasoning/tool phases.
+   * Providers without a comparable signal can leave this undefined.
    */
   onHeartbeat?(handler: (label: string | undefined) => void): () => void;
   /**

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ChannelsConfigSchema } from './channels.js';
+import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
   ChatMessageSchema,
@@ -2058,10 +2059,9 @@ export const GezelConfigSchema = z.object({
    * auth, or an `OPENAI_API_KEY` / `CODEX_API_KEY` in the user's
    * environment); no API key field here. Each turn spawns a fresh
    * `codex exec` (or `codex exec resume <thread_id>` for follow-ups)
-   * subprocess — Codex CLI has no streaming-stdin equivalent to
-   * Claude's `--input-format stream-json`, so there's no warm worker
-   * pool. The Rust binary's spawn cost is small enough that this is
-   * fine.
+   * subprocess — Codex CLI has no long-lived streaming-input equivalent
+   * to Claude's `--input-format stream-json`, so there's no warm worker
+   * pool. Current CLIs still receive each individual prompt over stdin.
    *
    *   - `binaryPath`: explicit override of the `codex` executable.
    *     When unset, the provider resolves it from `$PATH`.
@@ -2071,13 +2071,14 @@ export const GezelConfigSchema = z.object({
    *     user's `~/.codex/auth.json` if it exists. Setting this to
    *     false runs `codex exec` against the user's default
    *     `~/.codex/` and skips the gezel-mcp wiring.
-   *   - `defaultPermissionMode` (default `acceptEdits`): per-install
-   *     fallback when a gezel hasn't set `claudePermissionMode` on
-   *     its frontmatter. Mapped onto Codex's two-axis sandbox /
-   *     approval model: `default` and `acceptEdits` →
+   *   - `defaultPermissionMode` (default `edit`): per-install fallback
+   *     when neither a project nor gezel has selected a Codex posture.
+   *     Mapped onto Codex's sandbox / approval model: legacy `default`
+   *     and `acceptEdits`, plus current `edit`, →
    *     `--sandbox workspace-write --ask-for-approval never`; `plan` →
-   *     `--sandbox read-only --ask-for-approval never`;
-   *     `bypassPermissions` → `--dangerously-bypass-approvals-and-sandbox`.
+   *     `--sandbox read-only --ask-for-approval never`; `reviewed` →
+   *     `--approve-for-me`; current `full` and legacy `bypassPermissions`
+   *     → `--dangerously-bypass-approvals-and-sandbox`.
    *   - `defaultReasoningEffort`: per-install fallback for Codex's
    *     `model_reasoning_effort` config knob. Forwarded as `-c
    *     model_reasoning_effort="<effort>"`; supported values remain
@@ -2093,9 +2094,7 @@ export const GezelConfigSchema = z.object({
     .object({
       binaryPath: z.string().optional(),
       manageRuntimeFiles: z.boolean().optional(),
-      defaultPermissionMode: z
-        .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
-        .optional(),
+      defaultPermissionMode: CodexPermissionModeCompatSchema.optional(),
       defaultReasoningEffort: z
         .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
         .optional(),
@@ -2499,6 +2498,8 @@ export const UpdateGezelSettingsRequestSchema = z.object({
     .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
     .nullable()
     .optional(),
+  /** `null` inherits the project/install Codex execution posture. */
+  codexPermissionMode: CodexPermissionModeCompatSchema.nullable().optional(),
   /**
    * `null` clears the per-gezel sampling/reasoning/structured-output
    * override; the gezel falls back to the catalog manifest's recommended
@@ -3465,6 +3466,8 @@ export const UpdateProjectRequestSchema = z.object({
    *  Only consulted when `workingDir` is set (external repo); internal
    *  workspaces are always writable. */
   allowGezelWrites: z.boolean().optional(),
+  /** Override the Codex execution posture for every Codex session in this project. */
+  codexPermissionMode: CodexPermissionModeSchema.optional(),
   /**
    * Per-project override of the ambient Meester-to-voorman progress-check
    * cadence. The supplied object replaces the stored override, so callers

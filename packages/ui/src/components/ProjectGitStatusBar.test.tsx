@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
@@ -15,6 +15,22 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
+
+beforeAll(() => {
+  Object.defineProperties(HTMLElement.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+});
+
+afterAll(() => {
+  delete (HTMLElement.prototype as { hasPointerCapture?: unknown }).hasPointerCapture;
+  delete (HTMLElement.prototype as { setPointerCapture?: unknown }).setPointerCapture;
+  delete (HTMLElement.prototype as { releasePointerCapture?: unknown }).releasePointerCapture;
+  delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+});
 
 const { ProjectGitStatusBar } = await import('./ProjectGitStatusBar.js');
 const { api } = await import('../api.js');
@@ -169,6 +185,52 @@ describe('ProjectGitStatusBar', () => {
     expect(
       screen.getByRole('combobox', { name: 'Gezel file edits for this project' }),
     ).toHaveTextContent('Edits off');
+  });
+
+  it('grays out the edits control when an AI provider can edit implicitly', async () => {
+    const onAllowWritesChange = vi.fn();
+    render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        allowGezelWrites={false}
+        onAllowWritesChange={onAllowWritesChange}
+        editableViaAiProvider
+      />,
+    );
+
+    const control = screen.getByRole('combobox', {
+      name: 'Gezel file edits for this project',
+    });
+    expect(control).toBeDisabled();
+    expect(control).toHaveTextContent('Editable via AI provider');
+    expect(control).toHaveAttribute('title', expect.stringContaining('can edit this workspace'));
+    expect(onAllowWritesChange).not.toHaveBeenCalled();
+  });
+
+  it('replaces Edits on/off with the four Codex execution postures', async () => {
+    const onCodexModeChange = vi.fn();
+    render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        allowGezelWrites={false}
+        onAllowWritesChange={vi.fn()}
+        editableViaAiProvider
+        codexMode="edit"
+        onCodexModeChange={onCodexModeChange}
+      />,
+    );
+
+    const control = screen.getByRole('combobox', {
+      name: 'Codex execution mode for this project',
+    });
+    expect(control).toHaveTextContent('Edit');
+    expect(
+      screen.queryByRole('combobox', { name: 'Gezel file edits for this project' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(control);
+    await userEvent.click(await screen.findByRole('option', { name: 'Reviewed' }));
+    expect(onCodexModeChange).toHaveBeenCalledWith('reviewed');
   });
 
   it('moves secondary controls into the compact overflow menu', async () => {

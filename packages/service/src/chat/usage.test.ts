@@ -59,3 +59,77 @@ describe('UsageTracker decode-rate aggregation', () => {
     expect(p?.totalTokensOut).toBe(158);
   });
 });
+
+describe('UsageTracker standalone quota snapshots', () => {
+  it('surfaces quota windows without inventing a chat turn', () => {
+    const t = new UsageTracker();
+    const at = '2026-08-07T12:00:00.000Z';
+    t.recordQuotaBuckets(
+      'codex-cli',
+      [
+        {
+          name: 'five_hour',
+          isUnlimited: false,
+          limit: 100,
+          used: 42,
+          remaining: 58,
+          remainingPercent: 58,
+          overage: 0,
+          resetDate: '2026-08-07T15:00:00.000Z',
+        },
+      ],
+      at,
+    );
+
+    expect(t.summary()).toMatchObject({
+      lastUpdated: at,
+      providers: {
+        'codex-cli': {
+          quotaBuckets: [{ name: 'five_hour', used: 42 }],
+          todayTurns: 0,
+          totalTurns: 0,
+          lastUpdated: at,
+        },
+      },
+    });
+  });
+
+  it('keeps the later of the quota and turn timestamps', () => {
+    const t = new UsageTracker();
+    t.recordQuotaBuckets(
+      'anthropic-cli',
+      [
+        {
+          name: 'seven_day',
+          isUnlimited: false,
+          limit: 100,
+          used: 10,
+          remaining: 90,
+          remainingPercent: 90,
+          overage: 0,
+        },
+      ],
+      '2026-08-07T13:00:00.000Z',
+    );
+    t.recordTurn('anthropic-cli', turn({ at: '2026-08-07T12:00:00.000Z' }));
+
+    expect(t.summary().providers['anthropic-cli']?.lastUpdated).toBe('2026-08-07T13:00:00.000Z');
+  });
+
+  it('clears a stale quota when a later authoritative snapshot is empty', () => {
+    const t = new UsageTracker();
+    t.recordQuotaBuckets('codex-cli', [
+      {
+        name: 'five_hour',
+        isUnlimited: false,
+        limit: 100,
+        used: 10,
+        remaining: 90,
+        remainingPercent: 90,
+        overage: 0,
+      },
+    ]);
+    t.recordQuotaBuckets('codex-cli', []);
+    expect(t.summary().providers['codex-cli']?.quotaBuckets).toEqual([]);
+  });
+});

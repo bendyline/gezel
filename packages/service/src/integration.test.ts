@@ -122,6 +122,32 @@ describe('operational API surface', () => {
     });
   });
 
+  it('round-trips Codex CLI reasoning effort through PUT and GET', async () => {
+    // Regression: both config responses are hand-picked whitelists. The
+    // setting was persisted, but its omission from those responses made the
+    // controlled picker immediately jump back to the model default.
+    const codexCli = {
+      defaultReasoningEffort: 'ultra' as const,
+      defaultPermissionMode: 'acceptEdits' as const,
+    };
+    const resetClient = vi.spyOn(svc.context.chat, 'resetClient');
+
+    try {
+      const update = await api('PUT', '/api/config', { codexCli });
+      expect(update.status).toBe(200);
+      expect((await update.json()) as Record<string, unknown>).toMatchObject({ codexCli });
+      // CodexCliProvider snapshots this setting at construction, so the
+      // update must evict cached clients rather than waiting for a restart.
+      expect(resetClient).toHaveBeenCalled();
+
+      const read = await api('GET', '/api/config');
+      expect(read.status).toBe(200);
+      expect((await read.json()) as Record<string, unknown>).toMatchObject({ codexCli });
+    } finally {
+      resetClient.mockRestore();
+    }
+  });
+
   it('round-trips llama-cpp Advanced overrides through PUT and GET, and clears on null', async () => {
     // Regression: the GET/PUT config responses hand-pick a whitelist of
     // fields. These llama-cpp Advanced knobs were written to disk but
