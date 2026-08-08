@@ -590,8 +590,42 @@ export type GezelTemplateManifest = z.infer<typeof GezelTemplateManifestSchema>;
 // content into a task's embedded craftbook at create time — running
 // tasks are insulated from edits to the source template.
 
+/**
+ * The lifecycle role a craftbook plays in a project. This is deliberately
+ * separate from project-type tags: recipes for unrelated project types may
+ * still share the same assumption about whether the workspace is blank or
+ * already established.
+ */
+export const CraftbookRoleSchema = z.enum(['project-starter', 'maintenance-review', 'general']);
+export type CraftbookRole = z.infer<typeof CraftbookRoleSchema>;
+
+/** Shared shelf copy so every craftbook browser presents roles consistently. */
+export const CRAFTBOOK_ROLE_META: ReadonlyArray<{
+  id: CraftbookRole;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'project-starter',
+    label: 'New project starters',
+    description: 'greenfield recipes that establish a new project in a blank workspace',
+  },
+  {
+    id: 'maintenance-review',
+    label: 'Maintenance & review',
+    description: 'inspect, repair, improve, and keep existing work healthy',
+  },
+  {
+    id: 'general',
+    label: 'General work',
+    description: 'research, content, operations, and other reusable recipes',
+  },
+];
+
 export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('craftbook-template'),
+  /** Coarse project-lifecycle shelf used by craftbook browsers. */
+  role: CraftbookRoleSchema.default('general'),
   /**
    * Optional workflow tag for filtering / Gilde browser facets
    * (e.g. "review-loop", "publish-pipeline"). Free-form.
@@ -678,6 +712,7 @@ export const CraftbookTemplateManifestSchema = z.object({
   license: z.string().optional(),
   version: z.string(),
   releasedAt: z.string(),
+  role: CraftbookRoleSchema.default('general'),
   workflow: z.string().optional(),
   about: z.string(),
   steps: z.array(CraftbookStepSchema).min(1),

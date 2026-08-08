@@ -1,6 +1,7 @@
 [
   {
     "id": "pitch-deck",
+    "role": "general",
     "name": "Investor Pitch Deck",
     "description": "Build a fundraising or sales pitch deck that tells a tight investor-grade story: problem, solution, market size, product, business model, traction, go-to-market, competition, team, and the ask. Locks the NARRATIVE arc and per-slide message FIRST (a deck lives or dies on story order, not visuals), then designs a single consistent slide system, then builds a navigable HTML deck — one idea per slide, big claim plus one supporting proof, ending on a crisp ask and use-of-funds. Use for seed/Series-A raises, sales decks, demo days, and investor updates.",
     "tags": ["deck", "pitch", "investor", "fundraising", "slides", "html"],
@@ -46,6 +47,7 @@
   },
   {
     "id": "report-pdf",
+    "role": "general",
     "name": "Formatted Report",
     "description": "Produce a polished, print-ready formatted report — quarterly business review, research findings, status report, or analysis writeup — rendered as a clean paginated HTML document that prints cleanly to PDF. Locks the section outline and acceptance criteria FIRST, then a print-aware visual template (cover, headers/footers, page breaks, figure/table styling), then builds the full report so structure, numbered headings, figures, and an executive summary all land in the right order. Use when someone needs a shareable report or PDF rather than loose notes.",
     "tags": ["report", "pdf", "document", "print", "html"],
@@ -91,6 +93,7 @@
   },
   {
     "id": "one-pager",
+    "role": "general",
     "name": "One-Pager Brief",
     "description": "Create a single-page brief or summary that fits one printed page and lands one message fast — a product one-pager, executive summary, project brief, or leave-behind. Scopes the single audience + the one thing they must remember FIRST, then designs a tight one-page layout (headline, scannable sections, a sidebar of facts), then writes punchy copy that fits the page — ruthless about cutting anything that pushes past one page. Use when the answer must be skimmable in 60 seconds on a single sheet.",
     "tags": ["one-pager", "brief", "summary", "marketing", "document"],
@@ -136,6 +139,7 @@
   },
   {
     "id": "whitepaper",
+    "role": "general",
     "name": "Whitepaper",
     "description": "Author a long-form, authoritative whitepaper that makes a researched argument — a technical position paper, industry analysis, or thought-leadership piece with citations. Does the RESEARCH first to ground every claim, then locks a logical section outline and thesis, then writes the full long-form document with an abstract, numbered sections, evidence, figures, and a references list. Use when the deliverable must be credible, sourced, and substantial rather than a quick blog post.",
     "tags": ["whitepaper", "research", "long-form", "document", "report"],
@@ -181,6 +185,7 @@
   },
   {
     "id": "resume-cv",
+    "role": "general",
     "name": "Résumé / CV",
     "description": "Build a clean, ATS-friendly résumé or CV from a person's background, tailored to a target role. Scopes the target role and the highlight reel of achievements FIRST (so the résumé is targeted, not a life history), then designs a single-column, parser-safe layout, then writes impact-led bullets with metrics that fit one to two pages. Use for job applications, LinkedIn-to-résumé conversions, and role-targeted CV rewrites.",
     "tags": ["resume", "cv", "career", "document", "job"],
@@ -226,6 +231,7 @@
   },
   {
     "id": "proposal-sow",
+    "role": "general",
     "name": "Proposal / Statement of Work",
     "description": "Draft a client proposal or statement of work that wins the deal and prevents scope creep — covering objectives, scope, deliverables, timeline/milestones, pricing, assumptions, and acceptance criteria. Scopes the engagement and the in-scope/out-of-scope boundary FIRST (the boundary is what protects both sides), writes persuasive yet precise proposal copy, then formats it into a clean client-ready document with a structured deliverables-and-pricing table. Use for freelance/agency bids, consulting SOWs, and project proposals.",
     "tags": ["proposal", "sow", "statement-of-work", "client", "document"],
@@ -271,6 +277,7 @@
   },
   {
     "id": "runbook",
+    "role": "general",
     "name": "Ops Runbook",
     "description": "Write an operational runbook or playbook a tired on-call engineer can follow at 3am without thinking — covering when to use it, prerequisites, numbered step-by-step procedures, verification, rollback, and escalation. Scopes the exact scenarios and prerequisites FIRST, writes unambiguous copy-pasteable steps with expected output and verification at each stage, then has a reviewer pressure-test it for gaps and dangerous ambiguity. Use for incident response, deploy/rollback procedures, and recurring ops tasks.",
     "tags": ["runbook", "ops", "playbook", "oncall", "document"],
@@ -316,6 +323,7 @@
   },
   {
     "id": "spec-doc",
+    "role": "general",
     "name": "Technical Design Doc",
     "description": "Write a technical design document (RFC / engineering design doc) that gets a system change reviewed and approved — covering context and problem, goals and non-goals, the proposed design, alternatives considered, trade-offs, risks, and a rollout plan. Scopes the problem, goals, and explicit non-goals FIRST (non-goals prevent reviewer scope-creep), writes the detailed design with diagrams and alternatives, then has a reviewer check it for completeness and unjustified decisions. Use for RFCs, architecture proposals, and pre-implementation design reviews.",
     "tags": ["spec", "design-doc", "rfc", "engineering", "document"],
@@ -361,6 +369,7 @@
   },
   {
     "id": "contract-template",
+    "role": "general",
     "name": "Contract Template (Non-Legal-Advice)",
     "description": "Draft a reusable, plain-language agreement template — service agreement, NDA, freelance contract, or terms — with clearly marked fill-in fields, structured numbered clauses, and a prominent non-legal-advice disclaimer. Scopes the parties, obligations, and risk allocation FIRST, drafts clear enforceable-style clauses with placeholders for the variable terms, then has a reviewer check completeness and flag anything that genuinely needs a lawyer. NOT legal advice — every output must say so. Use for templated agreements you will adapt and have counsel review.",
     "tags": ["contract", "agreement", "template", "legal", "document"],
@@ -406,6 +415,7 @@
   },
   {
     "id": "newsletter-issue",
+    "role": "general",
     "name": "Newsletter Issue",
     "description": "Produce a single polished, email-client-safe newsletter issue — intro, a few curated stories with links, a featured section, and a CTA — that renders correctly across email clients. Outlines the issue's theme and section lineup FIRST, writes scannable, personable copy with working links, then builds the email-safe HTML using inline styles and table layout so it survives Gmail/Outlook. Use for recurring email newsletters, product updates, and curated digests sent to subscribers.",
     "tags": ["newsletter", "email", "issue", "content", "html"],
@@ -451,6 +461,7 @@
   },
   {
     "id": "ebook-compile",
+    "role": "general",
     "name": "Ebook Compile",
     "description": "Compile a collection of notes, articles, or chapter drafts into a coherent, readable ebook — with a title page, table of contents, consistently formatted chapters, and front/back matter — output as a single navigable HTML book. Outlines the chapter structure and through-line FIRST (so disparate notes become a real book, not a pile), writes/edits each chapter to a consistent voice and adds connective tissue, then builds the compiled HTML with a linked TOC and chapter navigation. Use for turning a blog backlog, course notes, or drafts into a downloadable ebook.",
     "tags": ["ebook", "book", "compile", "long-form", "html"],
@@ -496,6 +507,7 @@
   },
   {
     "id": "handbook-section",
+    "role": "general",
     "name": "Team Handbook Section",
     "description": "Write a clear, reference-grade section of a team/company handbook — a policy, process, or how-we-work doc that a new hire can read once and act on correctly. Scopes the policy's intent, audience, and edge cases FIRST, writes unambiguous prose with concrete examples, a quick-reference summary, and FAQ, then has a reviewer check it for ambiguity and contradictions with how things actually work. Use for onboarding docs, policy pages, process documentation, and internal wikis.",
     "tags": ["handbook", "policy", "process", "documentation", "wiki"],
@@ -541,6 +553,7 @@
   },
   {
     "id": "invoice-generator",
+    "role": "general",
     "name": "Invoice Generator",
     "description": "Generate a clean, professional, print-ready invoice from billing details — sender/recipient, line items with quantity and rate, subtotal, tax, total, invoice number, dates, and payment instructions. Scopes the required fields and the tax/total math FIRST (a wrong total is the one unforgivable invoice bug), then builds a polished single-file HTML invoice with an itemized table and correctly computed totals. Use for freelancer/contractor billing, one-off invoices, and invoice templates.",
     "tags": ["invoice", "billing", "finance", "document", "html"],
@@ -578,6 +591,7 @@
   },
   {
     "id": "case-study-writeup",
+    "role": "general",
     "name": "Customer Case Study",
     "description": "Write a persuasive customer/case-study writeup that turns a customer's results into a credible marketing asset — challenge, solution, and quantified results in the classic before/after arc, with a pull-quote and a clear CTA. Scopes the customer story and the hard metrics FIRST (results without numbers are not a case study), writes the narrative copy in the proven challenge-solution-results structure, then builds a clean, branded single-page HTML asset with a results-highlight band and quote callout. Use for marketing case studies, customer success stories, and sales proof assets.",
     "tags": ["case-study", "marketing", "customer-story", "document", "html"],
@@ -623,6 +637,7 @@
   },
   {
     "id": "board-deck",
+    "role": "general",
     "name": "Board Meeting Deck",
     "description": "Build a board-meeting deck that briefs directors efficiently — an executive summary up top, KPI dashboard, financials, progress against goals, key risks/asks, and an appendix — structured so a director gets the state of the business in minutes. Locks the standard board narrative and the metrics that matter FIRST (boards want a consistent dashboard, not a redesign every quarter), designs a dense data-forward slide system, then builds a navigable HTML deck where every slide leads with its number and the asks are unmistakable. Use for quarterly board meetings, board updates, and investor board reports.",
     "tags": ["deck", "board", "executive", "kpi", "slides"],
@@ -668,6 +683,7 @@
   },
   {
     "id": "meeting-minutes",
+    "role": "general",
     "name": "Meeting Minutes & Actions",
     "description": "Turn a meeting transcript, recording notes, or rough scratch into clean, distributable meeting minutes — attendees, agenda topics discussed, decisions made, and (most importantly) action items with owners and due dates. Scopes the minutes structure and what counts as a decision vs an action FIRST, then writes accurate, neutral minutes where every decision is recorded and every action has an owner and a date — the action table is the part people actually use. Use for board/team meeting minutes, project status meetings, and decision logs.",
     "tags": ["minutes", "meeting", "actions", "notes", "document"],

@@ -36,6 +36,7 @@ import { enginesRoutes } from './routes/engines.js';
 import { evalRoutes } from './routes/eval.js';
 import { folderRoutes } from './routes/folders.js';
 import { gezelRoutes } from './routes/gezels.js';
+import { gildeUpdateRoutes } from './routes/gilde-updates.js';
 import { gitRoutes } from './routes/git.js';
 import { githubRoutes } from './routes/github.js';
 import { growthRoutes } from './routes/growth.js';
@@ -63,6 +64,7 @@ import { permissionRoutes } from './routes/permissions.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
 import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
+import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
@@ -523,6 +525,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', connectorRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*
   app.route('/api/projects', projectTaskRoutes(ctx));
+  app.route('/api/projects', projectContinuationRoutes(ctx));
   app.route('/api/projects', scriptRoutes(ctx));
   app.route('/api/scripts', globalScriptRoutes(ctx));
   app.route('/api/sdk', sdkTypesRoutes());
@@ -574,6 +577,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/night-shift', nightShiftRoutes(ctx));
   app.route('/api/meester-status', meesterStatusRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
+  app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));

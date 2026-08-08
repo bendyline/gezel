@@ -1,6 +1,7 @@
 [
   {
     "id": "automation-recipe",
+    "role": "general",
     "name": "Write an Automation Recipe",
     "description": "Turn 'I wish the house would...' into an inspectable, versioned automation: triggers and actions that name real devices from the house's own inventory, a dry run through the device tools before anything is armed, and a manual override always written in. Locks the owner's intent and the safety rules FIRST (nothing that heats or locks runs unattended without a failsafe, an override path is mandatory, dry-run before arm), then drafts the recipe, then proves it against the devices — so the house only ever does what was actually asked, and never anything it cannot be talked out of. Use for home automations, 'make the lights do X', schedules and scenes, sensor-triggered routines, and wiring up a new smart-home behavior.",
     "tags": ["home", "automation", "smart-home", "devices", "recipe", "ritual"],
@@ -51,6 +52,7 @@
   },
   {
     "id": "morning-report",
+    "role": "general",
     "name": "Morning House Report",
     "description": "The house says good morning properly: every zone's state read through the device tools, anything unusual surfaced first with one suggested action apiece, and the boring rest compressed to a line or two — glanceable before the first coffee. Locks the report criteria FIRST (every zone covered, anomalies before normals, a suggested action per oddity, short enough to read standing up), then polls the house, then writes the report — so the one morning the garage door stayed open all night is the morning it gets noticed. Use for morning house checks, daily home status, 'anything wrong with the house', overnight anomaly sweeps, and a glanceable device roundup.",
     "tags": ["home", "smart-home", "devices", "status", "report", "ritual"],

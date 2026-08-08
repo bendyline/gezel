@@ -20,21 +20,20 @@ export function useProjectEvents(
 
   useEffect(() => {
     const controller = new AbortController();
-    (async () => {
-      try {
+    void consumeWithReconnect(
+      async function* () {
         for await (const env of streamProjectChatEvents({
           url: client.projectEventsUrl(projectId),
           headers: client.authHeader(),
           fetch: client.getFetch(),
           signal: controller.signal,
         })) {
-          handlerRef.current(env);
+          yield env;
         }
-      } catch {
-        // Aborted on unmount, or the daemon went away — the feed simply
-        // stops updating. Re-mounting (e.g. switching projects) reconnects.
-      }
-    })();
+      },
+      (env) => handlerRef.current(env),
+      controller.signal,
+    );
     return () => controller.abort();
   }, [client, projectId]);
 }
@@ -54,20 +53,58 @@ export function useTerminalEvents(
 
   useEffect(() => {
     const controller = new AbortController();
-    (async () => {
-      try {
+    void consumeWithReconnect(
+      async function* () {
         for await (const env of streamTerminalEvents({
           url: client.terminalEventsUrl(projectId),
           headers: client.authHeader(),
           fetch: client.getFetch(),
           signal: controller.signal,
         })) {
-          handlerRef.current(env);
+          yield env;
         }
-      } catch {
-        // Aborted on unmount, or daemon gone.
-      }
-    })();
+      },
+      (env) => handlerRef.current(env),
+      controller.signal,
+    );
     return () => controller.abort();
   }, [client, projectId]);
+}
+
+/**
+ * Keep a long-lived SSE subscription alive across daemon restarts and stale
+ * sockets. A successful event resets the backoff; aborting the owning React
+ * effect tears down both the active fetch and any pending retry delay.
+ */
+async function consumeWithReconnect<T>(
+  open: () => AsyncGenerator<T>,
+  handler: (event: T) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  let retryMs = 250;
+  while (!signal.aborted) {
+    try {
+      for await (const event of open()) {
+        handler(event);
+        retryMs = 250;
+      }
+    } catch {
+      /* stale socket / daemon restart; retry below */
+    }
+    if (signal.aborted) return;
+    await abortableDelay(retryMs, signal);
+    retryMs = Math.min(retryMs * 2, 5_000);
+  }
+}
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
+    function done(): void {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+  });
 }

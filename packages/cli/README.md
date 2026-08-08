@@ -141,6 +141,11 @@ Run `gezel --help` for the full list. The most-used ones:
 | `gezel skills import\|convert` | Import and convert skills |
 | `gezel handboek export --out <dir>` | Export the handbook |
 
+Inside the interactive TUI, `/continue` processes due schedules and reconciles
+gezel-owned active tasks for the current project. Night Shift is managed with
+`/nightshift start`, `/nightshift stop`, and `/nightshift list`; the command
+wordwheel exposes all three subcommands.
+
 ## Stability
 
 The supported public surface of this package is its **command line** — the

@@ -5,6 +5,7 @@ import { type ArchetypeSpec, archetypeToCraftbook, archetypeToFiles } from './ar
 const arcade: ArchetypeSpec = {
   id: 'html-arcade-game',
   name: 'HTML Arcade Game',
+  role: 'project-starter',
   description:
     'Build a playable single-file HTML arcade game, with a game-design phase and a visual-design phase before the build.',
   tags: ['game', 'html'],
@@ -355,8 +356,13 @@ describe('archetypeToCraftbook', () => {
       'manifest.json',
       'versions/1.0.0/craftbook.json',
     ]);
-    const top = JSON.parse(g.files[0]!.content) as { id: string; tags: string[] };
+    const top = JSON.parse(g.files[0]!.content) as {
+      id: string;
+      role: string;
+      tags: string[];
+    };
     expect(top.id).toBe('html-arcade-game');
+    expect(top.role).toBe('project-starter');
     expect(top.tags).toContain('gallery');
     const doc = JSON.parse(g.files[1]!.content) as {
       entryStepId: string;

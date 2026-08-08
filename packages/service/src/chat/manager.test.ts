@@ -4991,6 +4991,48 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
   });
 
+  it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {
+    await manager.shutdown();
+    mock = new MockProvider({ name: 'copilot' });
+    let contentRoot = join(home, 'gilde-bundled', 'data');
+    manager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', mock]],
+      catalog: new CatalogService(undefined, { contentRoot: () => contentRoot }),
+      secrets: new FileSecretStore(home),
+    });
+
+    // A live-session (re)build surfaces as either a 'create' carrying the
+    // MCP bridge or a 'resume' of persisted provider state. One-shot side
+    // completions (titles, extraction) also register bare 'create' calls
+    // and must not count.
+    const liveBuilds = () =>
+      mock.calls.filter(
+        (call) => (call.kind === 'create' && call.opts?.mcpServer) || call.kind === 'resume',
+      );
+
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    mock.script('ok');
+    await manager.send(session.id, 'First turn.');
+    mock.script('still ok');
+    await manager.send(session.id, 'Second turn, unchanged content.');
+    // Same root both turns: the live session is reused.
+    expect(liveBuilds()).toHaveLength(1);
+
+    // A live gilde activation flips the effective content root; the cached
+    // model profile/tuning were resolved from the old content, so the next
+    // turn must tear down and re-establish the live session.
+    contentRoot = join(home, 'gilde', 'versions', '0.1.99', 'package', 'data');
+    mock.script('rebuilt');
+    await manager.send(session.id, 'Third turn, after activation.');
+    expect(liveBuilds()).toHaveLength(2);
+  });
+
   it('small local meester keeps every curated tool under the coordinator cap', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-meester-cap-'));
     const localStore = new Store({ home });

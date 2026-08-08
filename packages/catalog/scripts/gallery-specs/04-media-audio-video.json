@@ -1,6 +1,7 @@
 [
   {
     "id": "folder-to-audio",
+    "role": "general",
     "name": "Text-to-Speech a Folder",
     "description": "Turn a folder of text files (articles, chapters, notes, markdown) into a set of spoken audio files using text-to-speech, so a reading list becomes a listening list. Scopes the voice, file mapping, and chunking rules FIRST so long inputs do not get truncated or mispronounced, then synthesizes one audio artifact per source file with a consistent voice, then verifies every file was rendered and is audible. The scope-before-synthesize ordering is the point: deciding chunk size, file naming, and a manifest up front is what keeps a batch TTS run complete and re-runnable instead of half-finished.",
     "tags": ["audio", "tts", "text-to-speech", "batch", "narration"],
@@ -37,6 +38,7 @@
   },
   {
     "id": "transcribe-audio",
+    "role": "general",
     "name": "Transcribe Audio or Video",
     "description": "Convert an audio or video recording into an accurate, readable transcript using speech-to-text, with speaker labels and timestamps. Scopes the output format, speaker-labeling, and timestamp granularity FIRST so the transcript is usable downstream (search, subtitles, minutes), then transcribes the full recording end-to-end, then verifies coverage against the recording's duration and checks for dropped segments. The scope-first ordering matters because deciding timestamp cadence and speaker handling up front is what separates a clean, searchable transcript from a wall of unattributed text.",
     "tags": ["audio", "video", "transcription", "speech-to-text", "stt"],
@@ -73,6 +75,7 @@
   },
   {
     "id": "subtitle-generator",
+    "role": "general",
     "name": "Subtitle & Caption Generator",
     "description": "Generate time-synced subtitles/captions for a video in a standard caption format (SRT or WebVTT), so the video is accessible and watchable without sound. Scopes the caption format and timing/reading-speed rules FIRST, transcribes the audio with precise word timings, then formats those into properly cued, line-length-limited caption cues. The transcribe-then-format split is deliberate: getting accurate text and timings is a different skill from chunking them into readable, on-screen-friendly cues that respect reading speed and never overlap.",
     "tags": ["subtitles", "captions", "srt", "vtt", "accessibility", "video"],
@@ -117,6 +120,7 @@
   },
   {
     "id": "narrated-slideshow",
+    "role": "general",
     "name": "Narrated Slideshow Video",
     "description": "Build a self-playing narrated slideshow — slides that auto-advance in sync with spoken narration, delivered as a single playable HTML page (slides + per-slide audio + timed auto-advance). Outlines the narrative and per-slide script FIRST, designs a consistent slide look, then builds the synced player so visuals, voiceover, and timing land together. The outline-then-design-then-build ordering keeps narration and slides telling ONE story instead of two unsynced tracks, which is the hard part of a narrated deck.",
     "tags": ["video", "slideshow", "narration", "presentation", "html", "tts"],
@@ -161,6 +165,7 @@
   },
   {
     "id": "podcast-chaptering",
+    "role": "general",
     "name": "Podcast Chapters & Show Notes",
     "description": "Turn a podcast episode into navigable chapter markers plus publish-ready show notes — timestamped chapter titles, an episode summary, key takeaways, and linked mentions. Scopes the chapter format and show-notes structure FIRST, analyzes the transcript to find real topic boundaries with timestamps, then writes the listener-facing notes in the show's voice. Separating boundary-detection (analysis) from the write-up (copy) is what yields chapters that land on actual topic shifts and notes that read like a human wrote them.",
     "tags": ["podcast", "audio", "chapters", "show-notes", "timestamps"],
@@ -205,6 +210,7 @@
   },
   {
     "id": "audio-highlight-reel",
+    "role": "general",
     "name": "Audio Highlight Reel",
     "description": "Cut a long recording (podcast, interview, talk, stream) down to a short highlight reel of its best moments, delivered as a single stitched audio clip plus a cue sheet of the segments used. Locks selection criteria and target length FIRST, selects the strongest timestamped segments against those criteria, then assembles them into one clean reel with smooth joins. Defining 'what makes a highlight' and the runtime budget before cutting is what keeps the reel tight and on-theme instead of a random montage.",
     "tags": ["audio", "highlights", "editing", "clip", "reel"],
@@ -249,6 +255,7 @@
   },
   {
     "id": "voiceover-script",
+    "role": "general",
     "name": "Voiceover / TTS Script",
     "description": "Write a voiceover script tuned for spoken delivery — by a human VO artist or a text-to-speech engine — for a video, ad, explainer, or narration, with pacing, pronunciation, and timing baked in. Briefs the audience, runtime, and voice FIRST, then drafts a performance-ready script with scene/segment breaks, [pause] and emphasis cues, phonetic spellings for tricky words, and a per-segment word count that fits the target seconds. The brief-then-draft ordering ensures the script is written for the EAR and the clock, not the page — short sentences, read-aloud rhythm, and a runtime that actually fits.",
     "tags": ["script", "voiceover", "tts", "narration", "copywriting"],
@@ -285,6 +292,7 @@
   },
   {
     "id": "meeting-summary-audio",
+    "role": "general",
     "name": "Meeting Recording to Minutes & Actions",
     "description": "Turn a meeting recording into structured minutes plus a clear action-item list — who agreed to do what by when — derived from the audio. Transcribes the recording FIRST (with speaker labels so attribution is possible), then summarizes into decisions, discussion, and assigned action items with owners and due dates. The transcribe-then-summarize ordering is essential: you cannot reliably attribute decisions and owners without first knowing who said what, and minutes without owners are useless.",
     "tags": ["meeting", "minutes", "audio", "transcription", "action-items"],
@@ -321,6 +329,7 @@
   },
   {
     "id": "music-metadata-tag",
+    "role": "general",
     "name": "Music Library Metadata Tagging",
     "description": "Tag and organize a folder of audio files with consistent, correct metadata — title, artist, album, track number, year, genre — so the library is clean, sortable, and player-friendly. Locks the tag schema and naming/foldering convention FIRST, applies tags and a consistent file/folder layout across the whole library, then verifies every file is fully and consistently tagged. Defining the schema and the source of truth before touching files is what prevents a half-tagged, inconsistently-named mess.",
     "tags": ["audio", "music", "metadata", "tags", "id3", "library"],
@@ -357,6 +366,7 @@
   },
   {
     "id": "video-storyboard",
+    "role": "general",
     "name": "Video Storyboard from a Script",
     "description": "Turn a video script into a shot-by-shot storyboard — each scene broken into shots with a framing sketch/description, camera direction, on-screen action, the matching script line, and timing — so a shoot or animation has a clear visual plan. Scopes the script into scenes and shot list FIRST, then designs each storyboard panel visually. The script-scope-then-storyboard ordering ensures every shot maps to a real script beat and the timing adds up to the script's runtime, instead of pretty panels that drift from the words.",
     "tags": ["video", "storyboard", "shots", "preproduction", "visual-design"],
@@ -393,6 +403,7 @@
   },
   {
     "id": "audio-ad-spot",
+    "role": "general",
     "name": "Audio Ad Spot",
     "description": "Produce a short broadcast/podcast audio ad spot (15s/30s/60s) — a tightly-timed script with a hook, value, and a single call-to-action, synthesized into a finished, runtime-accurate voiced spot with optional music bed cue. Scopes the offer, exact runtime, and mandatory disclaimers FIRST, then synthesizes a voiced spot that hits the time target. Locking the runtime and CTA before recording is what makes a spot land in its slot and drive one action instead of overrunning or rambling.",
     "tags": ["audio", "advertising", "ad-spot", "tts", "radio", "podcast"],
@@ -437,6 +448,7 @@
   },
   {
     "id": "youtube-chapters-seo",
+    "role": "general",
     "name": "YouTube Chapters & SEO Metadata",
     "description": "Turn a video (or its transcript) into a complete, paste-ready YouTube publishing kit — SEO title options, an optimized description with timestamped chapters, tags/keywords, and thumbnail text ideas — so an upload ranks and is navigable. Scopes the target keyword and metadata limits FIRST, analyzes the transcript for chapter boundaries, then writes the SEO-optimized metadata kit. Doing keyword research and pulling real chapter timestamps before writing is what makes the description both discoverable and accurate, instead of clickbait that doesn't match the video.",
     "tags": ["youtube", "video", "seo", "chapters", "metadata", "description"],

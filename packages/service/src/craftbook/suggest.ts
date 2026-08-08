@@ -81,6 +81,15 @@ const DEFAULT_MIN_SCORE_LEXICAL = 0.04;
  */
 const vectorCache = new Map<string, number[]>();
 
+/**
+ * A live gilde activation can change a book's text under an `id@version`
+ * key this process has already embedded — the version-bump assumption above
+ * only holds within one content snapshot. Called on content-root flips.
+ */
+export function clearCraftbookSuggestVectorCache(): void {
+  vectorCache.clear();
+}
+
 export interface RankOptions {
   topK?: number;
   minScore?: number;

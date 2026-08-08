@@ -112,6 +112,12 @@ export const RunTerminalCommandRequestSchema = z.object({
   workingDir: z.string(),
   /** Raw user input. The resolver decides whether to map through the index. */
   input: z.string().min(1),
+  /**
+   * Width of the client's output area. When present, the persistent PTY is
+   * resized before the command runs so column-aware programs such as `ls`
+   * format for the surface that will actually render their output.
+   */
+  columns: z.number().int().min(20).max(500).optional(),
 });
 export type RunTerminalCommandRequest = z.infer<typeof RunTerminalCommandRequestSchema>;
 

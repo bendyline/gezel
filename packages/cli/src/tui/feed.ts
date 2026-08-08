@@ -1,4 +1,9 @@
-import type { ChatEventEnvelope, GezelSummary, TerminalMessage } from '@bendyline/gezel';
+import type {
+  ChatEventEnvelope,
+  ChatSession,
+  GezelSummary,
+  TerminalMessage,
+} from '@bendyline/gezel';
 
 /**
  * A single rendered line in the live chat feed. `assistant` rows stay
@@ -9,7 +14,7 @@ export interface FeedRow {
   key: string;
   sessionId: string;
   gezelId: string;
-  kind: 'user' | 'assistant' | 'tool' | 'note' | 'error';
+  kind: 'user' | 'assistant' | 'tool' | 'note' | 'error' | 'shell';
   text: string;
   open: boolean;
 }
@@ -108,6 +113,19 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
         },
       ]);
 
+    case 'task_event':
+      return cap([
+        ...rows,
+        {
+          key: nextKey(),
+          sessionId: 'local',
+          gezelId: '',
+          kind: 'note',
+          text: `task · ${event.summary}`,
+          open: false,
+        },
+      ]);
+
     case 'error':
       return cap([
         ...rows,
@@ -120,6 +138,57 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
     default:
       return rows;
   }
+}
+
+/**
+ * Turn a persisted session into the same compact rows used by the live feed.
+ * This is what makes `/thread` a real context switch rather than merely
+ * redirecting the next send to an invisible transcript.
+ */
+export function sessionToFeedRows(
+  session: Pick<ChatSession, 'id' | 'gezelId' | 'messages' | 'lastTurnError'>,
+): FeedRow[] {
+  const rows: FeedRow[] = [];
+  for (const message of session.messages) {
+    if (message.hidden) continue;
+    if (message.role === 'assistant') {
+      for (const tool of message.toolCalls ?? []) {
+        rows.push({
+          key: nextKey(),
+          sessionId: session.id,
+          gezelId: session.gezelId,
+          kind: 'tool',
+          text: toolRowText(tool),
+          open: false,
+        });
+      }
+    }
+    if (!message.content.trim()) continue;
+    rows.push({
+      key: nextKey(),
+      sessionId: session.id,
+      gezelId: message.from?.gezelId ?? session.gezelId,
+      kind:
+        message.role === 'user' && !message.from
+          ? 'user'
+          : message.from
+            ? 'assistant'
+            : message.role,
+      text: message.content,
+      open: false,
+    });
+  }
+  if (session.lastTurnError) {
+    rows.push({
+      key: nextKey(),
+      sessionId: session.id,
+      gezelId: session.gezelId,
+      kind: 'error',
+      text: session.lastTurnError,
+      open: false,
+    });
+  }
+  return rows.length > MAX_ROWS ? rows.slice(rows.length - MAX_ROWS) : rows;
 }
 
 /**
@@ -212,7 +281,7 @@ export function finalizeShellRun(
         key,
         sessionId: `term-${runId}`,
         gezelId: '',
-        kind: 'note' as const,
+        kind: 'shell' as const,
         text: text ? `${text}${footer}` : footer.trimStart(),
         open: false,
       },
@@ -244,7 +313,7 @@ export function appendShellChunk(rows: FeedRow[], runId: string, chunk: string):
         key,
         sessionId: `term-${runId}`,
         gezelId: '',
-        kind: 'note' as const,
+        kind: 'shell' as const,
         text: chunk,
         open: true,
       },
@@ -267,8 +336,35 @@ function findOpenAssistant(rows: FeedRow[], sessionId: string): number {
 }
 
 function toolLabel(event: Extract<ChatEventEnvelope['event'], { type: 'tool' }>): string {
-  const name = 'name' in event && typeof event.name === 'string' ? event.name : 'tool';
-  return `🔧 ${name}`;
+  return toolRowText(event);
+}
+
+const MAX_TOOL_DETAIL_CHARS = 160;
+
+/**
+ * One feed line per tool call: `🔧 name · detail`. Detail prefers the
+ * server-built `argsSummary` (a compact human one-liner — "Read
+ * docs/plan.md", `url: "https://…"`) and falls back to the touched
+ * `path`; failures append the error so a red-flag run is visible without
+ * expanding anything.
+ */
+function toolRowText(call: {
+  name?: string;
+  argsSummary?: string;
+  path?: string;
+  success?: boolean;
+  errorMessage?: string;
+}): string {
+  const name = typeof call.name === 'string' && call.name.length > 0 ? call.name : 'tool';
+  const detail = call.argsSummary ?? call.path;
+  const flat = detail?.replace(/\s+/g, ' ').trim();
+  const clipped =
+    flat && flat.length > MAX_TOOL_DETAIL_CHARS
+      ? `${flat.slice(0, MAX_TOOL_DETAIL_CHARS - 1)}…`
+      : flat;
+  const failed =
+    call.success === false ? ` · failed${call.errorMessage ? `: ${call.errorMessage}` : ''}` : '';
+  return `🔧 ${name}${clipped ? ` · ${clipped}` : ''}${failed}`;
 }
 
 /**

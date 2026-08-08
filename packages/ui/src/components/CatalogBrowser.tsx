@@ -177,8 +177,10 @@ export function CatalogBrowser({
     return out;
   }, [items, query, filterTags, filter, activeCategory, kind]);
 
+  const isModelCatalog = kind === 'chat-model' || kind === 'image-model' || kind === 'video-model';
+
   return (
-    <div className="catalog-browser">
+    <div className={`catalog-browser${isModelCatalog ? ' catalog-browser--models' : ''}`}>
       <div className="catalog-filter">
         <input placeholder="Filter…" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button type="button" onClick={() => void refresh()}>

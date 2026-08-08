@@ -16577,6 +16577,15 @@ button.timeline-session-divider-continuing::before {
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* Model cards sit one warm paper step away from their panel so the grid
+   reads as a collection of objects instead of ruled-off page sections.
+   Keep the lift quiet: these cards are informational, not clickable. */
+.catalog-browser--models .catalog-item {
+  border-color: color-mix(in srgb, var(--border) 88%, var(--accent));
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
 .catalog-item-header {
   display: flex;
   gap: 0.6rem;
@@ -16702,9 +16711,10 @@ button.timeline-session-divider-continuing::before {
 
 .catalog-ollama-list > .catalog-ollama-action {
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
   /* Cards in a row share the tallest one's height: start their text at
      the top edge and keep the key on the bottom one, rather than letting
      the whole row float to the bottom of a short card. */

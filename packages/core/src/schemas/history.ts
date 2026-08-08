@@ -113,6 +113,13 @@ export const HistoryEventKindSchema = z.enum([
   'boekwachter.changed',
   'keurmeester.changed',
   /**
+   * A newer gilde content release was activated by the live-update
+   * mechanism (opt-in). `details` carries
+   * `{ previousVersion, version, trigger }` — `previousVersion` is the
+   * bundled pin when this is the first live activation.
+   */
+  'gilde.updated',
+  /**
    * A third-party app completed a chat turn through the public
    * OpenAI-compatible surface (`/v1/chat/completions`) or the Ollama
    * facade/emulation. `details` carries `{ appId, surface, model,

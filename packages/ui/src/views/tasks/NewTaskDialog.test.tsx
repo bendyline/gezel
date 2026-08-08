@@ -113,6 +113,30 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('radio', { name: 'Blog Post' })).toBeInTheDocument();
   });
 
+  it('groups craftbooks into project-lifecycle shelves', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('branding-website', 'Branding Website', { role: 'project-starter' }),
+        bookItem('code-review', 'Code Review', { role: 'maintenance-review' }),
+        bookItem('research-report', 'Research Report', { role: 'general' }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+      establishedCodebase: false,
+    });
+
+    renderDialog();
+    const user = userEvent.setup();
+    const starters = await screen.findByRole('button', { name: /New project starters/ });
+    expect(screen.getByRole('button', { name: /Maintenance & review/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /General work/ })).toBeInTheDocument();
+
+    await user.click(starters);
+    expect(screen.getByRole('radio', { name: 'Branding Website' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
+  });
+
   it('creates a general task as a ready-to-fire draft', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/1',

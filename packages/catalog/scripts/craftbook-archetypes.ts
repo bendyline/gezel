@@ -17,6 +17,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
   {
     id: 'html-arcade-game',
     name: 'HTML Arcade Game',
+    role: 'project-starter',
     description:
       'Build a playable single-file HTML/canvas arcade game (shooter, runner, dodger, etc.). Splits design into game-mechanics and visual look, builds, then evaluates against a playability bar and loops until it is actually fun and bug-free.',
     tags: ['game', 'html', 'canvas', 'interactive'],
@@ -55,6 +56,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
   {
     id: 'branding-website',
     name: 'Branding Website',
+    role: 'project-starter',
     description:
       'Build a small brand/marketing website where the visual identity leads. Locks a visual language and mockups FIRST, then writes the copy, then builds the HTML to the locked design — the ordering that makes brand sites feel designed rather than templated.',
     tags: ['website', 'branding', 'marketing', 'design', 'html'],

@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type {
   CatalogItemDetail,
   CatalogItemSummary,
@@ -26,25 +27,45 @@ import { BundledSource, type CatalogSource } from './source.js';
  */
 export class CatalogService {
   private readonly sources: CatalogSource[];
+  private readonly contentRootProvider: (() => string) | null;
 
   /**
    * @param sources explicit source list (replaces the defaults entirely).
    * @param opts.localRoot a GEZEL_HOME to read user-installed / `.gzl`-imported
    *   catalog items from (project types + gezel roles). Appended just ahead of
    *   the bundled tier so a user's imported item shadows a same-id bundled one.
+   * @param opts.contentRoot dynamic gilde content root for the default
+   *   bundled + community tiers, re-read on every disk access. The live
+   *   gilde update mechanism flips it without reconstructing this service
+   *   (which is built once at boot and held by many subsystems).
    */
-  constructor(sources?: CatalogSource[], opts?: { localRoot?: string }) {
+  constructor(
+    sources?: CatalogSource[],
+    opts?: { localRoot?: string; contentRoot?: () => string },
+  ) {
+    this.contentRootProvider = opts?.contentRoot ?? null;
     if (sources && sources.length > 0) {
       this.sources = sources;
       return;
     }
+    const contentRoot = opts?.contentRoot;
     const local = opts?.localRoot ? [new LocalCatalogSource(opts.localRoot)] : [];
     this.sources = [
       new BuiltinToolsetsSource(),
       ...local,
-      new BundledSource(),
-      new CommunitySource(),
+      new BundledSource(contentRoot ? { dataDir: contentRoot } : {}),
+      new CommunitySource(contentRoot ? () => join(contentRoot(), 'community') : undefined),
     ];
+  }
+
+  /**
+   * The effective gilde content root, or null when constructed without a
+   * provider (tests, CLI one-shots). Cheap and synchronous — ChatManager
+   * snapshots it per session to detect a live content flip and rebuild
+   * cached model profiles/tuning on the next turn.
+   */
+  contentRoot(): string | null {
+    return this.contentRootProvider ? this.contentRootProvider() : null;
   }
 
   /** All active sources in priority order (higher trust first). */

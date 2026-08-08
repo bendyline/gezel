@@ -1,6 +1,7 @@
 [
   {
     "id": "month-close",
+    "role": "general",
     "name": "Close the Month",
     "description": "Close out a month of household spending against the project's ledger: sweep the month's entries for category strays and surprises, compute the in/out/net totals and category breakdown, compare against the prior month, and write a short honest month summary with one concrete action for next month. Locks the target month and the reconciliation checks FIRST, then reconciles the entries, then writes the summary — so the close is a repeatable ritual with the same shape every month, not an ad-hoc glance at the numbers. Use for monthly budget close, month-end money review, 'how did we do this month', and household spending retrospectives.",
     "tags": ["budget", "finance", "monthly", "close", "household", "report"],
@@ -45,6 +46,7 @@
   },
   {
     "id": "annual-document-review",
+    "role": "maintenance-review",
     "name": "Annual Document Review",
     "description": "Walk a life binder's document roster once a year: inventory what is present and missing, confirm each present document is still current (right beneficiaries, right address, not expired), record the review so staleness tracking resets, and produce a prioritized to-do for the gaps. Locks the currency criteria per document kind FIRST, then verifies each record, then reports — so the binder's completeness claim is re-earned annually instead of rotting silently. Use for annual life-binder reviews, estate document checkups, 'is our paperwork still right', and insurance/beneficiary reviews.",
     "tags": ["documents", "binder", "review", "annual", "estate", "household"],
@@ -89,6 +91,7 @@
   },
   {
     "id": "seasonal-maintenance-sweep",
+    "role": "maintenance-review",
     "name": "Seasonal Maintenance Sweep",
     "description": "Run a season's home-care sweep against the project's systems roster: work out what care is due or overdue from each system's interval, plan the walkthrough in a sensible order with supplies, then log the completed care and flag what needs a professional — leaving the roster's due-tracking reset and a short sweep report. Locks the season's scope and the due list FIRST, then plans, then logs — so seasonal care becomes a checklist ritual instead of a vague worry. Use for spring/fall home maintenance, seasonal checkups, 'what does the house need', and pre-winter prep.",
     "tags": ["home", "maintenance", "seasonal", "sweep", "checklist", "household"],
@@ -133,6 +136,7 @@
   },
   {
     "id": "weekly-menu-plan",
+    "role": "general",
     "name": "Plan the Week's Dinners",
     "description": "Turn the pantry's real state into a planned week of dinners and one grocery list: check what is stocked, low, and out, plan seven dinners that use what is on hand and fit the household's tastes and schedule, write the menu onto the week, and produce a grocery list that covers the gaps. Locks the household constraints and the pantry picture FIRST, then plans the menu, then writes the list — so the weekly food question is answered once, on purpose, instead of nightly at 5pm. Use for weekly meal planning, menu planning, grocery list making, and 'what are we eating this week'.",
     "tags": ["meals", "menu", "pantry", "grocery", "weekly", "household"],
@@ -177,6 +181,7 @@
   },
   {
     "id": "visit-prep",
+    "role": "general",
     "name": "Care Visit Prep",
     "description": "Prepare a one-page brief for a medical or care appointment from the project's care record: compile everything logged since the last visit, the current medication list with doses, the changes and symptoms worth raising, and a prioritized question list — so the ten minutes in the room get spent on what matters. Locks the target appointment and the brief's sections FIRST, then compiles from the record, then writes the brief. Use for doctor visit prep, specialist appointments, care-team check-ins, and 'what do we need to tell the doctor'.",
     "tags": ["caregiving", "visit", "appointment", "brief", "medical", "prep"],
@@ -221,6 +226,7 @@
   },
   {
     "id": "pre-departure-countdown",
+    "role": "general",
     "name": "Pre-Departure Countdown",
     "description": "Audit a trip's readiness in the final stretch before departure: verify documents and bookings, close the packing gaps against the packing roster, sweep home-prep tasks, and produce a day-by-day countdown checklist to the departure date — so the last week runs on a list, not on 3am worry. Locks the audit areas and the days remaining FIRST, then audits each area against the trip record, then writes the countdown. Use for pre-trip checks, departure prep, 'are we ready for the trip', and travel countdown checklists.",
     "tags": ["travel", "trip", "departure", "checklist", "packing", "countdown"],
@@ -265,6 +271,7 @@
   },
   {
     "id": "drive-wrap-up",
+    "role": "general",
     "name": "Fundraiser Wrap-Up",
     "description": "Close a fundraising drive properly: verify the final numbers against the donation ledger, confirm every donor was thanked (or finish the thank-yous now), and write the wrap-up story — the total, what the money does, and the people who made it happen — ready to share with the community and hand to the next organizer. Locks the wrap-up's claims and the thank-you completeness check FIRST, then verifies against the ledger, then writes the story. Use for ending a fundraiser, drive wrap-up reports, final fundraising totals, and community thank-you posts.",
     "tags": ["fundraiser", "wrapup", "donations", "community", "report", "thanks"],

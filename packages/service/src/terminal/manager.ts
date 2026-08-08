@@ -196,7 +196,12 @@ export class TerminalManager {
    * Intercepts (`pwd`, `clear`, `open`) bypass spawning. `open` resolves a
    * workspace file and emits a one-shot preview intent to the UI.
    */
-  async enqueueRun(projectId: string, workingDir: string, input: string): Promise<RunOutcome> {
+  async enqueueRun(
+    projectId: string,
+    workingDir: string,
+    input: string,
+    columns?: number,
+  ): Promise<RunOutcome> {
     const runId = randomUUID();
     const threadId = this.threadIdFor(workingDir);
     const index = await this.workspaceIndex.readCommandIndex(projectId);
@@ -355,6 +360,7 @@ export class TerminalManager {
           wsRoot,
           preRunCwdDisplay: cwdDisplay,
           commandMessageId: commandMessage.id,
+          columns,
         });
       });
     this.threadQueues.set(threadId, next);
@@ -631,6 +637,8 @@ export class TerminalManager {
      *  `runStarted` SSE event so the UI can pair the live slot with
      *  the command bubble it sits below. */
     commandMessageId: string;
+    /** Client output width, used to size the PTY before execution. */
+    columns?: number;
   }): Promise<void> {
     const {
       projectId,
@@ -640,6 +648,7 @@ export class TerminalManager {
       resolution,
       preRunCwdDisplay,
       commandMessageId,
+      columns,
     } = args;
 
     // Resolve absolute initialCwd from the upstream wsRoot. If
@@ -693,6 +702,7 @@ export class TerminalManager {
         result = await this.shellPool.run(threadId, {
           initialCwd,
           command: resolution.run,
+          columns,
           onChunk: (chunk) => {
             // Cap individual envelope payloads at ~8KB to keep the
             // SSE pipe from holding a single multi-megabyte event in

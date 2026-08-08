@@ -24,7 +24,7 @@
     "dev": "pnpm bootstrap && pnpm -r --filter \"@bendyline/gezel*\" --filter \"!@bendyline/squisq*\" --parallel run dev",
     "app": "node scripts/dev-fresh-runtime.mjs && pnpm build && pnpm --filter @bendyline/gezel-app exec electron . --no-sandbox",
     "app:clean": "node scripts/dev-fresh-runtime.mjs && pnpm rebuild && pnpm --filter @bendyline/gezel-app exec electron . --no-sandbox",
-    "cli": "test -f packages/cli/dist/bin/gezel.js || pnpm --filter @bendyline/gezel-cli run build; GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
+    "cli": "pnpm bootstrap && pnpm --filter @bendyline/gezel-cli... run build && GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
     "cli:fresh": "pnpm --filter @bendyline/gezel-cli run build && GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
     "cli:tui": "pnpm bootstrap && pnpm --filter @bendyline/gezel-cli... run build && node scripts/run-cli-tui.mjs",
     "test": "pnpm -r --filter \"@bendyline/gezel*\" run test",

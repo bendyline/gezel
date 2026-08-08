@@ -32,6 +32,7 @@ import {
   listApplicableCraftbooks,
   missingToolsetsForCraftbooks,
   projectCraftbookSummaries,
+  projectHasEstablishedCodebase,
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
@@ -354,9 +355,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   // Catalog craftbooks applicable to THIS project — those whose
-  // `requirements` (GitHub-connected, non-main branch, …) are met. The
-  // command launcher rail renders these; non-applicable craftbooks are
-  // hidden so the user isn't offered work that can't run here.
+  // `requirements` (GitHub-connected, non-main branch, …) are met. Greenfield
+  // project starters are also omitted once the workspace looks like an
+  // established codebase. The command launcher rail renders this exact set.
   //
   // `missingToolsets` is a sibling map (craftbook id → unmet required
   // toolsets) the launcher uses to render a "needs setup" affordance.
@@ -364,7 +365,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   // — it stays listed so the user can install it inline.
   app.get('/:id/craftbooks', async (c) => {
     const id = c.req.param('id');
-    const catalogItems = await listApplicableCraftbooks(ctx.catalog, ctx.store, id);
+    const establishedCodebase = await projectHasEstablishedCodebase(ctx.store, id);
+    const catalogItems = await listApplicableCraftbooks(ctx.catalog, ctx.store, id, {
+      establishedCodebase,
+    });
     // Project-local books (including project-type installs) shadow same-id
     // catalog entries — mirroring the task resolver's precedence.
     const projectItems = await projectCraftbookSummaries(ctx.store, id);
@@ -391,6 +395,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       missingToolsets,
       projectType: type ? { id: type.id, label: type.label } : null,
       suggestedIds: [...suggested],
+      establishedCodebase,
     });
   });
 

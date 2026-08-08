@@ -475,6 +475,15 @@ interface LiveSessionState {
    * live sessions.)
    */
   growthSnapshot: string;
+  /**
+   * `CatalogService.contentRoot()` at live-session build time (null when
+   * the catalog has no dynamic root — tests, CLI one-shots). The model
+   * profile and tuning are resolved from catalog content once per session,
+   * so a live gilde activation or opt-out revert — both of which change
+   * the root path — must rebuild on the next turn, or the session keeps
+   * serving tuning from content that is no longer active.
+   */
+  catalogContentSnapshot: string | null;
   /** Effective Codex execution mode baked into the live CLI session. */
   codexPermissionModeSnapshot?: CodexPermissionMode;
   /**
@@ -11289,6 +11298,7 @@ export class ChatManager {
         (gezel.about !== existing.aboutSnapshot ||
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel) !== existing.growthSnapshot ||
+          this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
@@ -11296,6 +11306,11 @@ export class ChatManager {
           gateRepairConstrained !== existing.gateRepairConstrained ||
           codexPermissionMode !== existing.codexPermissionModeSnapshot)
       ) {
+        if (this.catalog.contentRoot() !== existing.catalogContentSnapshot) {
+          log.debug(
+            `catalog content root changed for ${existing.record.gezelId}; rebuilding session for fresh model profile/tuning`,
+          );
+        }
         if (immediateFileWriteConstrained !== existing.immediateFileWriteConstrained) {
           log.debug(
             `tool-clamp: immediate file write session surface changed for ${existing.record.gezelId} ` +
@@ -11542,6 +11557,7 @@ export class ChatManager {
       aboutSnapshot: gezel.about,
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
+      catalogContentSnapshot: this.catalog.contentRoot(),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
         ? {
             codexPermissionModeSnapshot: normalizeCodexPermissionMode(

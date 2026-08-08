@@ -1,6 +1,7 @@
 [
   {
     "id": "blog-post",
+    "role": "general",
     "name": "SEO Blog Post",
     "description": "Write a complete, SEO-aware blog post that ranks and reads well: it locks the primary keyword, search intent, target reader, and a heading-by-heading outline FIRST, then drafts the full article in a single human voice with the keyword woven naturally into the title, intro, and H2s, and finally runs an editorial pass for clarity, flow, factual accuracy, and on-page SEO. Covers blog article, SEO content, how-to guide, listicle, thought-leadership post, content marketing, and organic-traffic writing. The scope-first ordering is the point: a small model that picks the keyword and outline before drafting avoids the classic failure of a rambling post that buries its topic and never satisfies the searcher's intent.",
     "tags": ["blog", "seo", "writing", "content", "article"],
@@ -45,6 +46,7 @@
   },
   {
     "id": "landing-copy",
+    "role": "general",
     "name": "Landing Page Copy",
     "description": "Write conversion-focused copy for a single landing page: it first locks the offer, the one primary audience, the single desired action, and the core promise, then drafts a full message hierarchy — hero headline and subhead, value props, social proof, objection handling, and one repeated CTA — then edits ruthlessly for clarity, specificity, and persuasive flow. Covers landing page copy, sales copy, conversion copywriting, hero copy, CTA copy, and value proposition writing. Offer-first ordering matters: a small model that nails the single offer and one CTA before writing avoids the diluted page that lists ten features, hedges the promise, and offers three competing actions.",
     "tags": ["copywriting", "landing-page", "conversion", "marketing", "sales"],
@@ -89,6 +91,7 @@
   },
   {
     "id": "product-descriptions",
+    "role": "general",
     "name": "Bulk Product Descriptions",
     "description": "Generate consistent, on-brand product descriptions in bulk from a list of products and their attributes: it first locks the brand voice, the field schema (title, short blurb, long description, bullet features, SEO meta), and a worked exemplar, then drafts every product to that exact template so the whole catalog reads as one voice. Covers ecommerce product copy, catalog descriptions, Shopify/Amazon listings, bulk SKU copywriting, and product detail pages. Locking the voice and one exemplar before the batch is the key move: it stops a small model from drifting in tone and structure across items, which is the classic failure of bulk copy.",
     "tags": ["copywriting", "ecommerce", "product", "bulk", "catalog"],
@@ -125,6 +128,7 @@
   },
   {
     "id": "social-thread",
+    "role": "general",
     "name": "Social Media Thread",
     "description": "Write a multi-post social thread (X/Twitter, LinkedIn, Threads) that hooks, delivers, and converts: it first locks the single angle/big idea, the platform and its character limits, the target reader, and the CTA, then drafts the thread as numbered posts with a scroll-stopping hook, one idea per post, and a clear close. Covers Twitter thread, LinkedIn carousel copy, viral thread, social content, thought-leadership posts, and engagement hooks. Locking one angle and the hook before writing is the point: a small model that commits to a single big idea avoids the meandering thread that tries to say five things and stops no scroll.",
     "tags": ["social", "copywriting", "twitter", "linkedin", "thread"],
@@ -161,6 +165,7 @@
   },
   {
     "id": "press-release",
+    "role": "general",
     "name": "Press Release",
     "description": "Write a professional, AP-style press release ready to send to journalists: it first locks the news angle, the five W's, the approved quote(s), and the boilerplate, then drafts the release in the standard format — dateline, inverted-pyramid lede, supporting body, quotes, boilerplate, and media contact — then a review pass enforces newsworthiness, factual accuracy, and house style. Covers press release, news announcement, PR writing, media release, product launch announcement, and corporate communications. The scope-first ordering is essential: a small model that pins the angle and quotes before drafting avoids the soft, promotional release that buries the news and no editor will run.",
     "tags": ["pr", "press-release", "writing", "communications", "news"],
@@ -205,6 +210,7 @@
   },
   {
     "id": "faq-from-docs",
+    "role": "general",
     "name": "FAQ from Source Docs",
     "description": "Build a grounded FAQ page by mining real source documents for the questions users actually ask, then writing tight, accurate answers traced back to the source: it first researches the corpus to extract candidate questions, dedupes and groups them, and ranks by likely frequency, then writes clear question-and-answer pairs where every answer is supported by the docs. Covers FAQ generation, help center questions, support docs, knowledge mining, common questions, and self-service content. Mining the source before writing is the point: a small model that derives questions from the actual docs avoids inventing FAQs nobody asks and answers the docs cannot support.",
     "tags": ["faq", "support", "documentation", "content", "knowledge-base"],
@@ -241,6 +247,7 @@
   },
   {
     "id": "doc-rewrite",
+    "role": "general",
     "name": "Documentation Rewrite",
     "description": "Rewrite confusing existing documentation into clear, scannable, task-oriented prose without losing any technical fact: it first audits the current doc to catalog every problem — buried steps, undefined jargon, missing prerequisites, broken structure — and locks a clarity checklist, then rewrites the doc to fix exactly those issues while preserving every accurate instruction. Covers documentation rewrite, doc cleanup, clarify docs, improve README, restructure guide, and technical editing. Auditing before rewriting is the point: a small model that first inventories what is wrong rewrites with intent and preserves the facts, instead of producing a prettier doc that quietly drops a critical step.",
     "tags": ["documentation", "rewrite", "editing", "clarity", "technical-writing"],
@@ -277,6 +284,7 @@
   },
   {
     "id": "tone-rewrite",
+    "role": "general",
     "name": "Brand Tone Rewrite",
     "description": "Re-voice existing content to a specific brand tone while preserving every fact and the original structure: it first codifies the target voice into a concrete style guide — adjectives, do's and don'ts, banned and preferred words, sentence-length feel, point of view — then rewrites the content line by line to that voice without changing what it says. Covers tone of voice rewrite, rebranding copy, voice and tone, brand voice, re-voice content, and style adaptation. Codifying the voice into checkable rules before rewriting is the point: a small model that has explicit do/don't rules applies the tone consistently, instead of a vague 'make it friendlier' that drifts paragraph to paragraph.",
     "tags": ["copywriting", "tone", "brand-voice", "rewrite", "style"],
@@ -313,6 +321,7 @@
   },
   {
     "id": "localize-content",
+    "role": "general",
     "name": "Localize Content",
     "description": "Localize and translate content into a target language and locale with cultural adaptation, not just word-for-word translation: it first scopes the target locale, glossary of do-not-translate and must-translate-consistently terms, formatting conventions (dates, currency, units), and tone register, then translates preserving meaning and structure, then a native-level review pass checks fluency, terminology consistency, and cultural fit. Covers translation, localization, i18n content, multilingual copy, translate to Spanish/French/German, and locale adaptation. Scoping the glossary and conventions before translating is the point: a small model that locks terminology and date/currency rules avoids inconsistent term translations and locale-wrong formatting that mark content as machine-translated.",
     "tags": ["localization", "translation", "i18n", "content", "multilingual"],
@@ -357,6 +366,7 @@
   },
   {
     "id": "summarize-long",
+    "role": "general",
     "name": "Summarize a Long Document",
     "description": "Distill a long document into a faithful, well-structured summary at a chosen depth: it first scopes the audience, the target length and format (TL;DR line, executive summary, or bulleted key points), and what the reader must take away, then writes the summary capturing every major point and decision in proportion, with nothing invented and nothing critical dropped. Covers summarize, TL;DR, executive summary, condense a document, key takeaways, and abstract writing. Scoping audience and depth before summarizing is the point: a small model that knows who it is for and how long it should be avoids both the bloated near-copy and the lossy summary that omits the document's actual conclusion.",
     "tags": ["summary", "writing", "content", "tldr", "executive-summary"],
@@ -393,6 +403,7 @@
   },
   {
     "id": "changelog-writeup",
+    "role": "general",
     "name": "Human-Readable Changelog",
     "description": "Turn raw commit/PR history into a human-readable changelog that users actually understand: a developer first gathers and triages the merged changes since the last release into user-facing buckets (Added, Changed, Fixed, Deprecated, Removed, Security), filtering out noise like internal refactors, then a copywriter rewrites each entry in plain, benefit-oriented language with breaking changes called out. Covers changelog, release notes, what's new, version notes, and Keep a Changelog format. Gathering and triaging before writing is the point: a small model that first separates user-facing changes from internal churn avoids the changelog that lists 'bump deps' next to a breaking API change with equal weight.",
     "tags": ["changelog", "release-notes", "writing", "developer", "versioning"],
@@ -429,6 +440,7 @@
   },
   {
     "id": "cover-letter",
+    "role": "general",
     "name": "Tailored Cover Letter",
     "description": "Write a tailored, one-page cover letter that maps a candidate's real background to a specific job's requirements: it first scopes the role's key requirements, the company hook, and the 3-4 strongest matching proof points from the applicant's experience, then drafts a focused letter with a specific opening, evidence-backed body paragraphs, and a confident close. Covers cover letter, job application letter, motivation letter, application writing, and personalized cover letter. Scoping the role-to-experience mapping before writing is the point: a small model that picks the strongest evidence for THIS job avoids the generic, one-size-fits-all letter that could be sent anywhere and lists duties instead of proving fit.",
     "tags": ["cover-letter", "job-application", "writing", "career", "personalized"],
@@ -465,6 +477,7 @@
   },
   {
     "id": "ad-variations",
+    "role": "general",
     "name": "A/B Ad Copy Variations",
     "description": "Generate a set of distinct, testable ad-copy variations for one offer across the angles worth A/B testing: it first locks the platform and its constraints (headline/description character limits), the offer, audience, and the distinct messaging angles to test (benefit, pain, social proof, urgency, curiosity), then drafts multiple complete variants per angle so each is a genuine test of a hypothesis rather than a trivial reword. Covers ad copy, A/B testing, Google/Facebook/LinkedIn ads, PPC copy, ad variations, and marketing experiments. Locking the angles and limits before writing is the point: a small model that commits to distinct hypotheses produces variants that actually test something, not ten near-duplicates that teach the advertiser nothing.",
     "tags": ["advertising", "copywriting", "ab-testing", "marketing", "ppc"],
@@ -501,6 +514,7 @@
   },
   {
     "id": "email-sequence",
+    "role": "general",
     "name": "Lifecycle Email Sequence",
     "description": "Design and build a multi-email lifecycle sequence (welcome, onboarding, nurture, re-engagement) that moves a subscriber from one stage to the next: it first maps the customer journey — entry trigger, the goal of each email, send timing/cadence, and the one CTA per email — then drafts every email's subject line, preview text, and body to its single goal, then builds the sequence into a client-safe, inline-styled HTML email set ready to load into an ESP. Covers email sequence, drip campaign, welcome series, onboarding emails, nurture sequence, and lifecycle marketing. Journey-mapping before writing is the point: a small model that assigns each email one job and one CTA avoids the redundant sequence where every email says the same thing and asks for everything at once.",
     "tags": ["email", "copywriting", "lifecycle", "drip-campaign", "marketing"],
@@ -545,6 +559,7 @@
   },
   {
     "id": "knowledge-base-article",
+    "role": "general",
     "name": "Knowledge Base Article",
     "description": "Write a support knowledge-base article that lets a user solve their problem without contacting support: it first scopes the exact user problem, the search terms they would use, prerequisites, and the success outcome, then writes a task-oriented article with a clear title, a short overview, numbered steps with expected results, screenshots/placeholders where needed, and a troubleshooting section, then a review pass verifies accuracy and self-service completeness. Covers help center article, support documentation, how-to article, KB article, self-service docs, and product help. Scoping the precise problem and search terms before writing is the point: a small model that pins the one job-to-be-done writes a findable, followable article instead of a vague overview that leaves the user still stuck.",
     "tags": ["knowledge-base", "support", "documentation", "help-center", "how-to"],
@@ -589,6 +604,7 @@
   },
   {
     "id": "case-study",
+    "role": "general",
     "name": "Customer Case Study",
     "description": "Write a persuasive, evidence-backed customer success story in the classic challenge-solution-results arc: it first scopes the customer, the quantified before/after metrics, the approved customer quotes, and the single takeaway for prospects, then writes the case study with a results-forward summary, a relatable challenge, the solution narrative, and a measurable results section, then a review pass verifies every number and quote and the persuasive flow. Covers case study, customer success story, customer testimonial, success story, proof point, and B2B marketing content. Scoping the metrics and quotes before writing is the point: a small model that locks the quantified results first writes a credible story buyers trust, instead of a vague testimonial with adjectives but no proof.",
     "tags": ["case-study", "copywriting", "marketing", "b2b", "success-story"],
@@ -633,6 +649,7 @@
   },
   {
     "id": "seo-meta-pack",
+    "role": "general",
     "name": "SEO Metadata Pack",
     "description": "Generate a complete on-page SEO metadata pack for a set of pages: it first scopes each page's primary keyword and search intent and the length/format rules (title tag, meta description, Open Graph, Twitter card, slug), then writes optimized, unique metadata for every page that respects pixel/character limits and front-loads the keyword, producing a structured JSON file ready to drop into a CMS or templating layer. Covers SEO metadata, meta tags, title tags, meta descriptions, Open Graph tags, social cards, and on-page SEO. Scoping the keyword and limits per page before writing is the point: a small model that fixes the rules first produces unique, limit-respecting tags across the whole set, instead of duplicate titles and descriptions that get truncated in the SERP.",
     "tags": ["seo", "metadata", "meta-tags", "open-graph", "content"],

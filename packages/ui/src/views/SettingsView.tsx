@@ -19,6 +19,7 @@ import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
+import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
@@ -3394,6 +3395,7 @@ export function SettingsView() {
               </label>
               <UpdateStatus />
             </section>
+            <GildeUpdatesCard />
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>
               <p className="muted" style={{ marginTop: 0 }}>

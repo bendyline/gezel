@@ -261,6 +261,9 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // Hand-pick into the whitelist like everything above, or the panel's
       // toggle/dropdown would render defaults on the next GET.
       openaiEndpoints: config.openaiEndpoints,
+      // Live gilde content updates toggle (Settings → About). Same
+      // whitelist rule as above.
+      gildeUpdates: config.gildeUpdates,
       remoteServing: {
         ...(config.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,
@@ -346,6 +349,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+    }
+    // Live gilde updates: enabling kicks a background check; disabling
+    // reverts to bundled content immediately and prunes the cache. Never
+    // fails the config write — check failures land in the status surface.
+    if (body.gildeUpdates !== undefined) {
+      await ctx.gildeUpdates.setEnabled(updated.gildeUpdates?.enabled === true);
     }
     // Summaries carry the gezel's NAME — the id is a slug ("ada-lovelace")
     // that reads as plumbing in the History view; ids stay in `details`.

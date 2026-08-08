@@ -1831,6 +1831,24 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Opt-in live gilde content updates. Default OFF. When enabled, the
+   * daemon checks registry.npmjs.org roughly daily for newer
+   * `@bendyline/gilde` patch releases on the bundled pin's minor line,
+   * verifies the tarball against the registry's integrity hash, validates
+   * that no currently-resolvable catalog item regresses, and activates the
+   * new content under `~/.gezel/gilde/` without a restart. Nothing about
+   * the install is sent — the only outbound traffic is the public registry
+   * fetch, and it is additionally gated by the security policy's
+   * `allowAppNetwork` (the auto-update capability, off only under
+   * super-lockdown). Disabling reverts to the bundled content immediately
+   * and prunes the cache.
+   */
+  gildeUpdates: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
    * The meester's occasional status report — headline + dashboard for
    * the Home greeting band, plus follow-up draft tasks. Runs as the
    * meester gezel when the install is idle, capped per day, and only

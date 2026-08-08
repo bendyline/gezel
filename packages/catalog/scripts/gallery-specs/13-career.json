@@ -1,6 +1,7 @@
 [
   {
     "id": "tailor-resume",
+    "role": "general",
     "name": "Tailor Résumé to a Posting",
     "description": "Adapt an EXISTING résumé to a specific job posting — a fit map of must-hit requirements first, then a tailored variant that re-orders and re-words real experience without inventing any. Distinct from building a résumé from scratch (see Résumé / CV): this book starts from a base résumé plus a posting and produces the targeted variant along with honest gap notes for the cover letter and interview. Use per serious application in a job search.",
     "tags": ["career", "job", "resume", "cv", "tailoring"],
@@ -48,6 +49,7 @@
   },
   {
     "id": "company-research-brief",
+    "role": "general",
     "name": "Company Research Brief",
     "description": "A sharp, dated, sourced brief on a company before an interview or application — what they do and how they make money, recent signals, team and role context, culture as evidenced, likely interview themes, and five specific questions to ask THEM. Skimmable in ten minutes; every claim dated or marked UNKNOWN rather than guessed. Use before any serious interview or when deciding whether to apply.",
     "tags": ["career", "job", "interview", "company", "research", "brief"],
@@ -102,6 +104,7 @@
   },
   {
     "id": "mock-interview",
+    "role": "general",
     "name": "Mock Interview",
     "description": "A realistic practice interview run live with the candidate — planned questions calibrated to the target role and round, a real-time interview with pressure follow-ups, and a kind, specific debrief: strengths in the candidate's own words, fixes with sketched stronger answers, one drill, and an honest readiness read. The debrief is the deliverable. Use before any real interview round.",
     "tags": ["career", "interview", "practice", "debrief"],
@@ -163,6 +166,7 @@
   },
   {
     "id": "offer-compare",
+    "role": "general",
     "name": "Offer Comparison",
     "description": "Turn competing job offers into one honest decision sheet — every offer normalized into the same fact grid (comp, equity with vesting caveats, benefits, level, location, growth, deadlines), unknowns marked UNKNOWN instead of guessed, computed year-1 and 4-year views under stated assumptions, a weighted read against the candidate's OWN priorities, and a recommendation that separates arithmetic from judgment. Use when any second offer (or a strong counter) lands.",
     "tags": ["career", "job", "offer", "compensation", "decision"],
@@ -209,6 +213,7 @@
   },
   {
     "id": "weekly-pipeline-review",
+    "role": "maintenance-review",
     "name": "Weekly Pipeline Review",
     "description": "The weekly walk of a job-search pipeline — a grounded snapshot of every application (what moved in the last seven days, what went stale, which follow-ups are due), then a review that chases or consciously parks every stalled item and commits to exactly three concrete priorities for next week. Built for the Job Hunt project's weekly cadence; also runs on demand whenever the pipeline feels foggy.",
     "tags": ["career", "job", "review", "follow-up", "cadence"],

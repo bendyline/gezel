@@ -1003,6 +1003,21 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    */
   z.object({ type: z.literal('question_answered'), question: QuestionSchema }),
   /**
+   * A durable task audit event, fanned onto the project's live stream after
+   * it has been appended to History. This keeps lightweight clients (most
+   * notably the CLI) current without polling task files or inventing a
+   * second task lifecycle bus. `task.tick` heartbeats are intentionally not
+   * published; this channel is for user-meaningful changes.
+   */
+  z.object({
+    type: z.literal('task_event'),
+    eventId: z.string(),
+    kind: z.string(),
+    summary: z.string(),
+    at: z.string(),
+    taskRef: z.string().optional(),
+  }),
+  /**
    * Emitted when a gezel crosses a growth level threshold and a pending
    * level-up is created. The UI refreshes growth badges/dots and raises
    * a single calm OS notification when the window is hidden.

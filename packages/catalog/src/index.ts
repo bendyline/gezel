@@ -21,6 +21,20 @@ export {
   verifyTarballSha256,
 } from './install/npm-package.js';
 export {
+  GILDE_PACKAGE_NAME,
+  compareRelease,
+  fetchGildeReleases,
+  isGildeReleaseVersion,
+  pickGildePatchUpdate,
+  stageGildeVersion,
+  type GildeReleaseInfo,
+} from './live/gilde-npm.js';
+export {
+  validateGildeContentUpgrade,
+  type GildeContentRegression,
+  type GildeContentValidation,
+} from './live/validate.js';
+export {
   fetchHuggingfaceCommit,
   fetchHuggingfaceTree,
   selectMlxInstallFiles,

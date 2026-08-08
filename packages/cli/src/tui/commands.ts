@@ -1,3 +1,5 @@
+import type { CraftbookSummary } from '@bendyline/gezel';
+
 /**
  * Parse a line of TUI input into an intent. Chat mode treats bare text as a
  * prompt; CLI mode treats bare text as a shell command. Both modes honor the
@@ -23,7 +25,12 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'help', description: 'show the command reference' },
   { name: 'project', description: 'switch active project' },
   { name: 'gezel', description: 'switch active gezel' },
-  { name: 'task', description: 'set the active task' },
+  { name: 'model', description: 'switch engine and model' },
+  { name: 'thread', description: 'switch the active chat thread' },
+  { name: 'task', description: 'list and manage project tasks' },
+  { name: 'start', description: 'start a task from a craftbook' },
+  { name: 'continue', description: 'process due and active project tasks' },
+  { name: 'nightshift', description: 'start, stop, or list night-shift work' },
   { name: 'focus', description: 'send into another active chat' },
   { name: 'cli', description: 'make bare input run shell commands' },
   { name: 'chat', description: 'make bare input message your gezel' },
@@ -39,6 +46,86 @@ export function suggestSlashCommands(input: string): ReadonlyArray<SlashCommand>
   if (!input.startsWith('/') || /\s/.test(input)) return [];
   const query = input.slice(1).toLowerCase();
   return SLASH_COMMANDS.filter((command) => command.name.startsWith(query));
+}
+
+export interface SlashWordwheelSuggestion {
+  key: string;
+  label: string;
+  description: string;
+  /** Value submitted when Enter chooses this suggestion. */
+  submit: string;
+  /** Value staged in the prompt when Tab completes this suggestion. */
+  completion: string;
+}
+
+const NIGHT_SHIFT_SUBCOMMANDS = [
+  { name: 'start', description: 'start a manual night shift now' },
+  { name: 'stop', description: 'stop the current night shift' },
+  { name: 'list', description: 'show current and upcoming night-shift work' },
+] as const;
+
+/**
+ * Suggestions for the prompt's slash-command wordwheel. `/start ` changes
+ * the wheel to the active project's craftbook inventory; `/nightshift `
+ * changes it to the three Night Shift actions.
+ */
+export function suggestSlashWordwheel(
+  input: string,
+  craftbooks: ReadonlyArray<CraftbookSummary>,
+): ReadonlyArray<SlashWordwheelSuggestion> {
+  const nightShiftMatch = input.match(/^\/nightshift\s+(.*)$/i);
+  if (nightShiftMatch) {
+    const query = (nightShiftMatch[1] ?? '').trim().toLowerCase();
+    return NIGHT_SHIFT_SUBCOMMANDS.filter((command) => command.name.startsWith(query)).map(
+      (command) => ({
+        key: `nightshift:${command.name}`,
+        label: `/nightshift ${command.name}`,
+        description: command.description,
+        submit: `/nightshift ${command.name}`,
+        completion: `/nightshift ${command.name}`,
+      }),
+    );
+  }
+
+  const startMatch = input.match(/^\/start\s+(.*)$/i);
+  if (startMatch) {
+    const query = (startMatch[1] ?? '').trim().toLowerCase();
+    const terms = query.split(/\s+/).filter(Boolean);
+    return craftbooks
+      .filter((book) => {
+        const haystack = `${book.id} ${book.name} ${book.description ?? ''}`.toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+      })
+      .sort((left, right) => {
+        const leftRank = craftbookMatchRank(left, query);
+        const rightRank = craftbookMatchRank(right, query);
+        return leftRank - rightRank || left.name.localeCompare(right.name);
+      })
+      .map((book) => ({
+        key: `craftbook:${book.id}`,
+        label: `/start ${book.id}`,
+        description: `${book.name} · ${book.stepCount} ${book.stepCount === 1 ? 'step' : 'steps'} · ${book.source}`,
+        submit: `/start ${book.id}`,
+        completion: `/start ${book.id}`,
+      }));
+  }
+
+  return suggestSlashCommands(input).map((command) => ({
+    key: `command:${command.name}`,
+    label: `/${command.name}`,
+    description: command.description,
+    submit: `/${command.name}`,
+    completion: `/${command.name} `,
+  }));
+}
+
+function craftbookMatchRank(book: CraftbookSummary, query: string): number {
+  if (!query) return 2;
+  const id = book.id.toLowerCase();
+  const name = book.name.toLowerCase();
+  if (id === query || name === query) return 0;
+  if (id.startsWith(query) || name.startsWith(query)) return 1;
+  return 2;
 }
 
 export function parseInput(raw: string, cliMode: boolean): ParsedInput {

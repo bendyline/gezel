@@ -1,28 +1,31 @@
+import type { CraftbookSummary } from '@bendyline/gezel';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { type JSX, useEffect, useState } from 'react';
-import { SLASH_COMMAND_WORDWHEEL_SIZE, suggestSlashCommands } from '../commands.js';
+import { SLASH_COMMAND_WORDWHEEL_SIZE, suggestSlashWordwheel } from '../commands.js';
 import { EnginePill } from './EnginePill.js';
 
 /**
  * The bottom input row. The status segment shows the current project
  * (folder name), the active gezel (name + role, or role only in boring
- * mode), the optional active task, and the engine pill. The prefix flips
+ * mode), the selected thread, and the engine pill. The prefix flips
  * with the mode so it's obvious whether Enter sends a prompt or runs a
  * command.
  */
 export function PromptLine(props: {
   projectName: string;
   gezelLabel: string;
-  taskRef: string | undefined;
+  threadTitle?: string | undefined;
   mode: 'chat' | 'cli';
   provider: string | undefined;
   model: string | undefined;
+  accessMode: string | undefined;
   busy: boolean;
   statusLabel?: string | undefined;
   value: string;
   active: boolean;
   history: ReadonlyArray<string>;
+  craftbooks: ReadonlyArray<CraftbookSummary>;
   pendingPrompt?: string | undefined;
   pendingMode?: 'text' | 'password' | 'yes-no' | undefined;
   onChange: (v: string) => void;
@@ -31,15 +34,17 @@ export function PromptLine(props: {
   const {
     projectName,
     gezelLabel,
-    taskRef,
+    threadTitle,
     mode,
     provider,
     model,
+    accessMode,
     busy,
     statusLabel,
     value,
     active,
     history,
+    craftbooks,
     pendingPrompt,
     pendingMode,
     onChange,
@@ -51,7 +56,7 @@ export function PromptLine(props: {
   // Resets to the end whenever a new line lands in history.
   const [cursor, setCursor] = useState(history.length);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
-  const suggestions = active && !pendingPrompt ? suggestSlashCommands(value) : [];
+  const suggestions = active && !pendingPrompt ? suggestSlashWordwheel(value, craftbooks) : [];
   const activeSuggestionIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
   const suggestionWindowStart = Math.min(
     Math.max(0, activeSuggestionIndex - SLASH_COMMAND_WORDWHEEL_SIZE + 1),
@@ -67,7 +72,7 @@ export function PromptLine(props: {
   };
   const submitValue = (submittedValue: string) => {
     const selected = suggestions[activeSuggestionIndex];
-    onSubmit(selected ? `/${selected.name}` : submittedValue);
+    onSubmit(selected ? selected.submit : submittedValue);
   };
 
   useEffect(() => {
@@ -86,7 +91,7 @@ export function PromptLine(props: {
         }
         if (key.tab) {
           const selected = suggestions[activeSuggestionIndex];
-          if (selected) changeValue(`/${selected.name} `);
+          if (selected) changeValue(selected.completion);
           return;
         }
       }
@@ -117,24 +122,31 @@ export function PromptLine(props: {
         <Text color="blue">{projectName}</Text>
         <Text dimColor> · </Text>
         <Text color="magenta">{gezelLabel}</Text>
-        {taskRef ? (
+        {threadTitle ? (
           <>
             <Text dimColor> · </Text>
-            <Text color="yellow">{taskRef}</Text>
+            <Text color="cyan">↳ {compactThreadTitle(threadTitle)}</Text>
           </>
         ) : null}
         <Text> </Text>
-        <EnginePill provider={provider} model={model} busy={busy} label={statusLabel} />
+        <EnginePill
+          provider={provider}
+          model={model}
+          accessMode={accessMode}
+          busy={busy}
+          label={statusLabel}
+        />
       </Box>
       {visibleSuggestions.length > 0 ? (
         <Box flexDirection="column" marginLeft={2}>
-          {visibleSuggestions.map((command, windowIndex) => {
+          {visibleSuggestions.map((suggestion, windowIndex) => {
             const index = suggestionWindowStart + windowIndex;
             const selected = index === activeSuggestionIndex;
             return (
-              <Text key={command.name} color={selected ? 'cyan' : undefined}>
-                {selected ? '› ' : '  '}/{command.name}
-                <Text dimColor> — {command.description}</Text>
+              <Text key={suggestion.key} color={selected ? 'cyan' : undefined}>
+                {selected ? '› ' : '  '}
+                {suggestion.label}
+                <Text dimColor> — {suggestion.description}</Text>
               </Text>
             );
           })}
@@ -159,4 +171,9 @@ export function PromptLine(props: {
       </Box>
     </Box>
   );
+}
+
+function compactThreadTitle(title: string): string {
+  const display = title === 'New session' ? 'New thread' : title;
+  return display.length > 32 ? `${display.slice(0, 31)}…` : display;
 }
