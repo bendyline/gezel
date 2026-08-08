@@ -153,7 +153,8 @@ jobs:
     name: Supply-chain audit
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # No build needed — the inventory reads node_modules, not dist output.
+    # The font redistribution inventory is the service's built UI payload, not
+    # the hand-curated source directory, so legal/SBOM checks need dist output.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -161,6 +162,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Build redistributed assets
+        run: pnpm build
       - name: Verify lockfile supply-chain policies
         run: pnpm audit:lockfile
       - name: Generate production SBOM

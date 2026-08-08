@@ -45,6 +45,8 @@
   },
   "files": [
     "dist",
+    "dist/NOTICE.md",
+    "dist/licenses/fonts",
     "postinstall.mjs",
     "!dist/**/*.map",
     "!dist/**/__pycache__",

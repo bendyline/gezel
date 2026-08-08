@@ -1,8 +1,10 @@
 /**
  * Compile Gezel's custom NSIS include against electron-builder's pinned NSIS
- * templates on every host. electron-builder ships native makensis binaries
+ * templates on every supported host. electron-builder ships makensis binaries
  * for macOS and Linux as well as Windows, so parser errors, callback clashes,
- * and warnings promoted by `-WX` do not need a Windows release runner.
+ * and warnings promoted by `-WX` do not need a Windows release runner. Its
+ * pinned macOS binary is currently x86_64-only, however, so an arm64 Mac
+ * without Rosetta cannot execute it and skips this contract explicitly.
  *
  * electron-builder compiles NSIS twice: first with BUILD_UNINSTALLER to
  * produce the embedded uninstaller, then again for the final installer. Keep
@@ -72,7 +74,18 @@ async function compileNsis({ makensis, script, defines, output }) {
   );
 }
 
-test('custom NSIS hooks compile in electron-builder uninstaller and installer passes', async () => {
+function isMissingRosettaSpawnError(error) {
+  return (
+    process.platform === 'darwin' &&
+    process.arch === 'arm64' &&
+    typeof error === 'object' &&
+    error !== null &&
+    error.errno === -86 &&
+    error.syscall === 'spawn'
+  );
+}
+
+test('custom NSIS hooks compile in electron-builder uninstaller and installer passes', async (t) => {
   const workDir = await mkdtemp(join(tmpdir(), 'gezel-nsis-contract-'));
   try {
     const [makensis, pluginsDir] = await Promise.all([
@@ -167,16 +180,24 @@ test('custom NSIS hooks compile in electron-builder uninstaller and installer pa
       COMPRESS: 'auto',
     };
 
-    await compileNsis({
-      makensis,
-      script,
-      defines: {
-        ...defines,
-        BUILD_UNINSTALLER: null,
-        UNINSTALLER_OUT_FILE: uninstaller,
-      },
-      output: intermediate,
-    });
+    try {
+      await compileNsis({
+        makensis,
+        script,
+        defines: {
+          ...defines,
+          BUILD_UNINSTALLER: null,
+          UNINSTALLER_OUT_FILE: uninstaller,
+        },
+        output: intermediate,
+      });
+    } catch (error) {
+      if (isMissingRosettaSpawnError(error)) {
+        t.skip("electron-builder's macOS makensis is x86_64 and Rosetta is unavailable");
+        return;
+      }
+      throw error;
+    }
     await UninstallerReader.exec(intermediate, uninstaller);
     await compileNsis({
       makensis,

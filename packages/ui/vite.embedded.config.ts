@@ -43,17 +43,22 @@ export default defineConfig({
     sourcemap: true,
     cssCodeSplit: false,
     target: 'esnext',
+    // This target is deliberately one self-contained IIFE. Vite has already
+    // expanded its compile-time import.meta features before Rolldown reaches
+    // this replacement; runtime module metadata does not exist in a webview
+    // IIFE, so make the default `{}` behavior explicit and quiet.
+    chunkSizeWarningLimit: 17_000,
     // Force EVERY asset external — large WOFF2s would inline by default
     // and bloat chat.css. Setting 0 makes the threshold un-meetable
     // for any non-empty asset.
     assetsInlineLimit: 0,
     rollupOptions: {
       input: 'src/embedded/webview-main.tsx',
+      transform: { define: { 'import.meta': '{}' } },
       output: {
         format: 'iife',
         name: 'GezelChatEmbed',
         entryFileNames: 'chat.global.js',
-        inlineDynamicImports: true,
         assetFileNames: (info) => {
           if (info.name?.endsWith('.css')) return 'chat.css';
           // Fonts and any other static assets land at
