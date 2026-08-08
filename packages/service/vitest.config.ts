@@ -1,4 +1,4 @@
-import { availableParallelism, homedir } from 'node:os';
+import { availableParallelism, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
@@ -100,6 +100,17 @@ const WORKER_EXEC_ARGV = [
 ];
 
 /**
+ * Tests construct temporary user homes, but production discovery intentionally
+ * reaches outside those homes for installer-managed machine state. Without a
+ * harness-level override, running the suite on a workstation with Gezel
+ * installed mounts the real shared projects/gezels and connects to the live
+ * machine broker. Use unique, deliberately unpopulated roots for this Vitest
+ * invocation. Tests for the mounted/shared and split-service paths replace
+ * these overrides with their own fixtures.
+ */
+const HOST_ISOLATION_ROOT = join(tmpdir(), `gezel-vitest-host-isolation-${process.pid}`);
+
+/**
  * Embedding defaults for tests:
  *
  * - `GEZEL_EMBED_MODEL`: production defaults to bge-small-en-v1.5 (~130 MB),
@@ -124,6 +135,8 @@ export default defineConfig({
     env: {
       GEZEL_EMBED_MODEL: 'Xenova/all-MiniLM-L6-v2',
       GEZEL_HF_CACHE_DIR: join(homedir(), '.cache', 'gezel-test-hf'),
+      GEZEL_MACHINE_SHARED_HOME: join(HOST_ISOLATION_ROOT, 'shared'),
+      GEZEL_SYSTEM_SERVICE_HOME: join(HOST_ISOLATION_ROOT, 'machine-engine'),
       // The local context floor is host-derived (64K, or 32K on a
       // memory-constrained machine — see minViableLocalContextTokens), and a
       // 16 GB CI runner IS such a machine. Pin it so context assertions mean

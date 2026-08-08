@@ -1,3 +1,5 @@
+import { systemServiceHome } from '@bendyline/gezel-client/node';
+import { activeMachineSharedHome } from '@bendyline/gezel/paths';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -15,5 +17,12 @@ describe('vitest fork flags', () => {
 
   it('bounds the JS heap so forks leave room for native allocations', () => {
     expect(process.execArgv).toContain('--max-old-space-size=1024');
+  });
+
+  it('isolates installer-managed host state from fresh-home tests', () => {
+    expect(process.env.GEZEL_MACHINE_SHARED_HOME).toContain('gezel-vitest-host-isolation-');
+    expect(process.env.GEZEL_SYSTEM_SERVICE_HOME).toContain('gezel-vitest-host-isolation-');
+    expect(activeMachineSharedHome()).toBeNull();
+    expect(systemServiceHome()).toBe(process.env.GEZEL_SYSTEM_SERVICE_HOME);
   });
 });
