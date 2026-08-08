@@ -28,7 +28,9 @@ let manager: ChatManager | undefined;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'gezel-shared-mcp-'));
   previousSharedOverride = process.env.GEZEL_MACHINE_SHARED_HOME;
-  delete process.env.GEZEL_MACHINE_SHARED_HOME;
+  // Do not expose this fixture setup to the workstation's installed shared
+  // root when the suite-level isolation override is temporarily replaced.
+  process.env.GEZEL_MACHINE_SHARED_HOME = join(root, 'inactive-shared');
 });
 
 afterEach(async () => {

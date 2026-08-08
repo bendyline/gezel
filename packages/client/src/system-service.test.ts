@@ -29,6 +29,14 @@ async function runtimeHome(): Promise<string> {
 }
 
 describe('systemServiceHome', () => {
+  it('honors the explicit operator/test override on every platform', () => {
+    const env = { GEZEL_SYSTEM_SERVICE_HOME: '/isolated/gezel-engine' };
+    expect(systemServiceHome('win32', env)).toBe('/isolated/gezel-engine');
+    expect(systemServiceHome('darwin', env)).toBe('/isolated/gezel-engine');
+    expect(systemServiceHome('linux', env)).toBe('/isolated/gezel-engine');
+    expect(systemSharedAssetsDir('linux', env)).toBe('/isolated/gezel-engine/assets');
+  });
+
   it('resolves every packaged platform without using host path semantics', () => {
     expect(systemServiceHome('win32', { ProgramData: 'D:\\MachineData' })).toBe(
       'D:\\MachineData\\Gezel',

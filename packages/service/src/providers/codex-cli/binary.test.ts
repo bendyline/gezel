@@ -20,8 +20,18 @@ async function makeFakeCodex(stdout: string, exitCode = 0): Promise<string> {
     // (which iterates PATHEXT extensions) can find it. Mirrors the
     // makeFakeClaude shape in anthropic-cli/binary.test.ts.
     const path = join(dir, 'codex.cmd');
-    const escaped = stdout.replace(/[\r\n]+$/, '').replaceAll('%', '%%');
-    const script = `@echo off\r\n<NUL set /p =${escaped}\r\necho.\r\nexit /b ${exitCode}\r\n`;
+    // Emit every logical line separately. Interpolating multiline stdout
+    // into one `set /p` command makes cmd.exe execute line two onward as
+    // commands (`--strict-config is not recognized`, etc.). The quoted SET
+    // form keeps shell metacharacters literal; percent still needs doubling
+    // because cmd expands it even inside quotes.
+    const output = stdout
+      .replace(/\r\n?/g, '\n')
+      .replace(/\n+$/, '')
+      .split('\n')
+      .map((line) => `<NUL set /p "=${line.replaceAll('%', '%%').replaceAll('"', '""')}"\r\necho(`)
+      .join('\r\n');
+    const script = `@echo off\r\n${output}\r\nexit /b ${exitCode}\r\n`;
     await writeFile(path, script, 'utf8');
     return path;
   }
