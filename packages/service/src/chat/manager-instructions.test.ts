@@ -1,6 +1,6 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { type BuildInstructionsOptions, buildInstructions } from './manager.js';
+import { type BuildInstructionsOptions, buildInstructions } from './instructions.js';
 
 function promptWithTools(names: string[]): string {
   return buildInstructions({

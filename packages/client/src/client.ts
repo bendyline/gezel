@@ -4866,6 +4866,35 @@ export class GezelClient {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/workspace/file`, body);
   }
 
+  /** Raw-byte sibling used by direct user editing of rendered documents and media. */
+  async writeProjectWorkspaceBinary(
+    projectId: string,
+    filePath: string,
+    data: Blob | ArrayBuffer | Uint8Array,
+    mimeType = 'application/octet-stream',
+  ): Promise<{ ok: true; path: string }> {
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}`;
+    const body =
+      data instanceof Blob
+        ? data
+        : data instanceof Uint8Array
+          ? data
+          : new Uint8Array(data as ArrayBuffer);
+    const res = await this.fetchImpl(url, {
+      method: 'PUT',
+      headers: {
+        'content-type': mimeType,
+        Authorization: `Bearer ${this.token}`,
+      },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`workspace binary write failed (${res.status}): ${text}`);
+    }
+    return res.json() as Promise<{ ok: true; path: string }>;
+  }
+
   copyArtifactToWorkspace(
     id: string,
     body: CopyArtifactToWorkspaceRequest,

@@ -218,6 +218,13 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 
 A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase.
 
+The project file viewer supports outside-in rendered documents: HTML, DOCX,
+PDF, PPTX, and XLSX remain the visible project files while editable Markdown,
+media, and versions live in a hidden sibling `<stem>_files/` folder. Both
+artifact and workspace variants use the service/client filesystem boundary;
+workspace output bytes must go through the raw write endpoint and the ordinary
+workspace authority gate. See [docs/outside-in-editing.md](docs/outside-in-editing.md).
+
 **Every session belongs to a (gezel, project) pair.** There is no "gezel-only" session — the `default` project is the implicit bucket.
 
 Each project also carries:

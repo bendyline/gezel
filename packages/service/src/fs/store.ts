@@ -92,7 +92,6 @@ import {
   gezelDir,
   gezelGrowthPath,
   gezelLocalDir,
-  gezelMemoriesDir,
   gezelPaths,
   gezelSessionFile,
   gezelSessionsDir,
@@ -117,18 +116,12 @@ import {
   projectLocalImportsFile,
   projectLocalPendingImportsFile,
   projectLocalRoot,
-  projectMemoriesDir,
-  projectMemoryIndexDir,
   projectMetaFile,
   projectPrivateDir,
   projectQuestionsFile,
   projectStorageDir,
   projectStorageScope,
-  projectTaskAboutFile,
-  projectTaskFile,
-  projectTaskNextIdFile,
   projectTaskNotesFile,
-  projectTasksDir,
   projectTerminalFile,
   projectTerminalsDir,
   projectToolsetsFile,
@@ -148,11 +141,7 @@ import { matchReferencedTasksInContent } from '../chat/task-references.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
-import {
-  DEFAULT_MEMORY_KIND,
-  type MemoryKind,
-  formatMemoryBlock,
-} from '../memory/daily-markdown.js';
+import type { MemoryKind } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
   type WorkspaceEditResult,
@@ -167,6 +156,7 @@ import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
 import { DocumentsStore } from './documents-store.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
+import { MemoryStore } from './memory-store.js';
 import {
   type ProjectArtifactGrepResult,
   type ProjectArtifactResolveResult,
@@ -174,6 +164,7 @@ import {
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
 import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
+import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
   findHtmlPages,
@@ -197,73 +188,6 @@ export type ProjectFindingLifecycle = Record<string, ProjectFindingLifecycleEntr
 interface ProjectFindingLifecycleFile {
   version: 1;
   findings: ProjectFindingLifecycle;
-}
-
-/**
- * Tasks written before the `phases` → `craftbook` rename carry a
- * top-level `phases` array and `activePhaseId` instead of an embedded
- * `craftbook` / `activeStepId`. Map the legacy shape onto the current
- * one at the read boundary so every consumer (UI and service) sees a
- * valid craftbook — without this the UI crashes on `task.craftbook.steps`.
- *
- * Idempotent: a task that already has `craftbook` passes straight
- * through. The legacy `phases`/`activePhaseId` keys are dropped from the
- * returned object so they don't linger if the task is later written back.
- */
-function normalizeLegacyTaskShape(raw: unknown): Task {
-  const t = raw as Record<string, unknown>;
-  if (t.craftbook || !Array.isArray(t.phases)) return t as unknown as Task;
-
-  const { phases, activePhaseId, ...rest } = t;
-  const legacyPhases = phases as Array<Record<string, unknown>>;
-  const createdAt = typeof t.createdAt === 'string' ? t.createdAt : '1970-01-01T00:00:00.000Z';
-  const updatedAt = typeof t.updatedAt === 'string' ? t.updatedAt : createdAt;
-
-  const ids = legacyPhases.map((p, i) => (typeof p.id === 'string' ? p.id : `step-${i + 1}`));
-  const steps = legacyPhases.map((p, i) => {
-    const step: Record<string, unknown> = {
-      id: ids[i],
-      name: typeof p.name === 'string' ? p.name : `Step ${i + 1}`,
-      createdAt: typeof p.createdAt === 'string' ? p.createdAt : createdAt,
-    };
-    if (typeof p.description === 'string') step.description = p.description;
-    if (typeof p.suggestedGezelId === 'string') step.suggestedGezelId = p.suggestedGezelId;
-    if (typeof p.suggestedRole === 'string') step.suggestedRole = p.suggestedRole;
-    if (typeof p.completedAt === 'string') step.completedAt = p.completedAt;
-    // Legacy phases were a flat ordered list — reconstruct the linear
-    // walk so advancement keeps working: each step points to the next,
-    // the last is terminal.
-    if (i < legacyPhases.length - 1) step.next = ids[i + 1];
-    else step.terminal = true;
-    return step;
-  });
-  // `craftbook.steps` is `.min(1)` — synthesize a single placeholder for
-  // the (rare) legacy task that recorded zero phases.
-  if (steps.length === 0) {
-    const id = 'main';
-    ids.push(id);
-    steps.push({
-      id,
-      name: typeof t.title === 'string' ? t.title : 'Task',
-      createdAt,
-      terminal: true,
-    });
-  }
-
-  const craftbook = {
-    id: 'legacy',
-    name: typeof t.title === 'string' ? t.title : 'Task',
-    steps,
-    entryStepId: ids[0],
-    createdAt,
-    updatedAt,
-  };
-
-  return {
-    ...rest,
-    craftbook,
-    ...(typeof activePhaseId === 'string' ? { activeStepId: activePhaseId } : {}),
-  } as unknown as Task;
 }
 
 export interface StoreOptions {
@@ -358,6 +282,8 @@ export class Store {
   private readonly poppetjes: PoppetjeManager;
   private readonly documents: DocumentsStore;
   private readonly artifacts: ProjectArtifactsStore;
+  private readonly memories: MemoryStore;
+  private readonly taskFiles: TaskFilesStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new Map<string, Promise<unknown>>();
 
@@ -407,6 +333,8 @@ export class Store {
       external: this.external,
       touchProject: (id) => this.touchProject(id),
     });
+    this.memories = new MemoryStore({ home: this.home, external: this.external });
+    this.taskFiles = new TaskFilesStore({ home: this.home, external: this.external });
   }
 
   /** Snapshot of the external-folder config this Store was constructed
@@ -5001,67 +4929,25 @@ export class Store {
 
   // ---------- memories (agent + project) ----------
 
-  private memoryBaseDir(scope: 'gezel' | 'project', id: string): string {
-    return scope === 'gezel'
-      ? gezelMemoriesDir(this.home, id, this.external)
-      : projectMemoriesDir(this.home, id, this.external);
-  }
-
-  private memoryDir(scope: 'gezel' | 'project', id: string): string {
-    return join(this.memoryBaseDir(scope, id), 'daily');
-  }
-
-  private todayFile(scope: 'gezel' | 'project', id: string): string {
-    const date = new Date().toISOString().slice(0, 10);
-    return join(this.memoryDir(scope, id), `${date}.md`);
-  }
-
   async appendMemory(
     scope: 'gezel' | 'project',
     id: string,
     text: string,
-    kind: MemoryKind = DEFAULT_MEMORY_KIND,
+    kind?: MemoryKind,
   ): Promise<void> {
-    const dir = this.memoryDir(scope, id);
-    await mkdir(dir, { recursive: true });
-    const file = this.todayFile(scope, id);
-    const time = new Date().toISOString().slice(11, 16);
-    const { appendFile } = await import('node:fs/promises');
-    await appendFile(file, formatMemoryBlock(time, text, kind), 'utf8');
+    await this.memories.appendMemory(scope, id, text, kind);
   }
 
   async listMemoryDays(scope: 'gezel' | 'project', id: string): Promise<string[]> {
-    const dir = this.memoryDir(scope, id);
-    try {
-      const entries = await readdir(dir);
-      return entries
-        .filter((e) => e.endsWith('.md'))
-        .map((e) => e.replace('.md', ''))
-        .sort()
-        .reverse();
-    } catch {
-      return [];
-    }
+    return this.memories.listMemoryDays(scope, id);
   }
 
   async readMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<string> {
-    const file = join(this.memoryDir(scope, id), `${day}.md`);
-    try {
-      return await readFile(file, 'utf8');
-    } catch {
-      return '';
-    }
+    return this.memories.readMemoryDay(scope, id, day);
   }
 
   async readRecentMemories(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
-    const allDays = await this.listMemoryDays(scope, id);
-    const recent = allDays.slice(0, days);
-    const parts: string[] = [];
-    for (const day of recent) {
-      const content = await this.readMemoryDay(scope, id, day);
-      if (content.trim()) parts.push(`# ${day}\n${content}`);
-    }
-    return parts.join('\n\n');
+    return this.memories.readRecentMemories(scope, id, days);
   }
 
   /** Replace one daily memory file wholesale (compaction output). */
@@ -5071,13 +4957,11 @@ export class Store {
     day: string,
     content: string,
   ): Promise<void> {
-    const dir = this.memoryDir(scope, id);
-    await mkdir(dir, { recursive: true });
-    await writeFileAtomic(join(dir, `${day}.md`), content);
+    await this.memories.writeMemoryDay(scope, id, day, content);
   }
 
   async deleteMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<void> {
-    await rm(join(this.memoryDir(scope, id), `${day}.md`), { force: true });
+    await this.memories.deleteMemoryDay(scope, id, day);
   }
 
   /**
@@ -5092,16 +4976,11 @@ export class Store {
     days: string[],
     runId: string,
   ): Promise<string> {
-    const archiveDir = join(this.memoryBaseDir(scope, id), 'archive', runId);
-    await mkdir(archiveDir, { recursive: true });
-    for (const day of days) {
-      await copyFile(join(this.memoryDir(scope, id), `${day}.md`), join(archiveDir, `${day}.md`));
-    }
-    return archiveDir;
+    return this.memories.archiveMemoryDays(scope, id, days, runId);
   }
 
   memorySummaryPath(scope: 'gezel' | 'project', id: string): string {
-    return join(this.memoryBaseDir(scope, id), 'summary.md');
+    return this.memories.memorySummaryPath(scope, id);
   }
 
   /**
@@ -5111,20 +4990,15 @@ export class Store {
    * system-prompt prefix. Project scope keeps similarity recall only.
    */
   memoryLessonsPath(gezelId: string): string {
-    return join(this.memoryBaseDir('gezel', gezelId), 'lessons.md');
+    return this.memories.memoryLessonsPath(gezelId);
   }
 
   async readMemoryLessons(gezelId: string): Promise<string> {
-    try {
-      return await readFile(this.memoryLessonsPath(gezelId), 'utf8');
-    } catch {
-      return '';
-    }
+    return this.memories.readMemoryLessons(gezelId);
   }
 
   async writeMemoryLessons(gezelId: string, content: string): Promise<void> {
-    await mkdir(this.memoryBaseDir('gezel', gezelId), { recursive: true });
-    await writeFileAtomic(this.memoryLessonsPath(gezelId), content);
+    await this.memories.writeMemoryLessons(gezelId, content);
   }
 
   /* ─── Growth (per-gezel leveling state) ─────────────────────────────── */
@@ -5205,25 +5079,14 @@ export class Store {
    * Kept so existing files on disk remain viewable.
    */
   async readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<string> {
-    try {
-      return await readFile(this.memorySummaryPath(scope, id), 'utf8');
-    } catch {
-      return '';
-    }
+    return this.memories.readMemorySummary(scope, id);
   }
 
   memoryIndexDir(scope: 'gezel' | 'project', id: string): string {
-    // Project memory prose follows project ownership (and is therefore shared
-    // for a machine-wide project), but SQLite is derived daemon runtime. Each
-    // account builds its own index to avoid cross-UID writers opening mem.db.
-    return scope === 'project'
-      ? projectMemoryIndexDir(this.home, id)
-      : join(this.memoryBaseDir(scope, id), 'index');
+    return this.memories.memoryIndexDir(scope, id);
   }
 
   // ---------- tasks (per-project, stable numeric IDs) ----------
-
-  private readonly taskNumLocks = new Map<string, Promise<number>>();
 
   /**
    * Allocate the next monotonic task number for a project. Uses a plain-text
@@ -5231,62 +5094,15 @@ export class Store {
    * concurrent creates don't collide.
    */
   async nextProjectTaskNum(projectId: string): Promise<number> {
-    const prior = this.taskNumLocks.get(projectId) ?? Promise.resolve(0);
-    const next = prior.then(async () => {
-      const file = projectTaskNextIdFile(this.home, projectId, this.external);
-      let current = 0;
-      try {
-        const raw = await readFile(file, 'utf8');
-        current = Number.parseInt(raw.trim(), 10);
-        if (!Number.isFinite(current) || current < 0) current = 0;
-      } catch {
-        /* first allocation */
-      }
-      const num = current + 1;
-      await mkdir(dirname(file), { recursive: true });
-      await writeFileAtomic(file, `${num}\n`);
-      return num;
-    });
-    this.taskNumLocks.set(projectId, next);
-    return next;
+    return this.taskFiles.nextProjectTaskNum(projectId);
   }
 
   async writeTask(task: Task): Promise<void> {
-    const file = projectTaskFile(this.home, task.projectId, task.num, this.external);
-    await mkdir(dirname(file), { recursive: true });
-    // `description` is persisted as `about.md` next to `task.json` —
-    // the long-form prose stays editable as a real markdown file and
-    // the JSON stays compact. We strip it from the JSON shape before
-    // serializing so the two never drift. Empty/whitespace-only
-    // descriptions are treated as "delete the about file" so a clear
-    // round-trips correctly.
-    const { description, ...rest } = task;
-    await writeFileAtomic(file, `${JSON.stringify(rest, null, 2)}\n`);
-    // `task` is a complete aggregate snapshot, not a patch. Reconcile the
-    // sidecar on every write so deleting the optional property in
-    // TaskManager still clears the previously-persisted prose. Gating this on
-    // `description !== undefined` loses the clear intent after the manager
-    // normalizes an empty string by deleting `next.description`.
-    if (description !== undefined && description.trim().length > 0) {
-      await this.writeTaskAbout(task.projectId, task.num, description);
-    } else {
-      await this.deleteTaskAbout(task.projectId, task.num);
-    }
+    await this.taskFiles.writeTask(task);
   }
 
   async readTask(projectId: string, num: number): Promise<Task | null> {
-    try {
-      const raw = await readFile(projectTaskFile(this.home, projectId, num, this.external), 'utf8');
-      const parsed = normalizeLegacyTaskShape(JSON.parse(raw));
-      // Hydrate description from the sidecar `about.md`. Missing file
-      // is normal — older tasks without a description body simply
-      // come back without the field. ENOENT is the fast path.
-      const about = await this.readTaskAbout(projectId, num);
-      if (about.length > 0) parsed.description = about;
-      return parsed;
-    } catch {
-      return null;
-    }
+    return this.taskFiles.readTask(projectId, num);
   }
 
   /**
@@ -5295,11 +5111,7 @@ export class Store {
    * "empty body" should treat any empty result as "no body".
    */
   async readTaskAbout(projectId: string, num: number): Promise<string> {
-    try {
-      return await readFile(projectTaskAboutFile(this.home, projectId, num, this.external), 'utf8');
-    } catch {
-      return '';
-    }
+    return this.taskFiles.readTaskAbout(projectId, num);
   }
 
   /**
@@ -5308,48 +5120,19 @@ export class Store {
    * — keeps callers from having to interleave `writeTask` first).
    */
   async writeTaskAbout(projectId: string, num: number, body: string): Promise<void> {
-    const file = projectTaskAboutFile(this.home, projectId, num, this.external);
-    await mkdir(dirname(file), { recursive: true });
-    await writeFileAtomic(file, body);
+    await this.taskFiles.writeTaskAbout(projectId, num, body);
   }
 
   async deleteTaskAbout(projectId: string, num: number): Promise<void> {
-    const file = projectTaskAboutFile(this.home, projectId, num, this.external);
-    try {
-      await rm(file);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
+    await this.taskFiles.deleteTaskAbout(projectId, num);
   }
 
   async listProjectTasks(projectId: string): Promise<Task[]> {
-    const dir = projectTasksDir(this.home, projectId, this.external);
-    const names = await safeReaddir(dir);
-    const tasks: Task[] = [];
-    for (const name of names) {
-      if (!/^\d+$/.test(name)) continue;
-      const num = Number.parseInt(name, 10);
-      const t = await this.readTask(projectId, num);
-      if (t) tasks.push(t);
-    }
-    tasks.sort((a, b) => b.num - a.num);
-    return tasks;
+    return this.taskFiles.listProjectTasks(projectId);
   }
 
   async listAllTasks(): Promise<Task[]> {
-    const p = gezelPaths(this.home);
-    let projectIds: string[] = [];
-    try {
-      projectIds = await readdir(p.projects);
-    } catch {
-      /* none */
-    }
-    const all: Task[] = [];
-    for (const id of projectIds) {
-      all.push(...(await this.listProjectTasks(id)));
-    }
-    all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return all;
+    return this.taskFiles.listAllTasks();
   }
 
   // ---------- structured questions (per-project, single-file) ----------

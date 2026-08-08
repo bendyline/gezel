@@ -1,7 +1,7 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { MINIMAL_CONTEXT_MAX_WINDOW } from '../model-profile/behaviors/prompt-minimal-context.js';
-import { type BuildInstructionsOptions, buildInstructions } from './manager.js';
+import { type BuildInstructionsOptions, buildInstructions } from './instructions.js';
 
 /**
  * `prompt.minimal-context` fixes the "can't even say hi" failure on a 2K

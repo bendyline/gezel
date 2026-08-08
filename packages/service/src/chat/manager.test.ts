@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
+import { resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { MockProvider } from '../providers/mock.js';
 import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
@@ -30,7 +31,6 @@ import {
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
   messageExpressesModifyIntent,
-  resolveMlxEffectiveNumCtx,
   shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';

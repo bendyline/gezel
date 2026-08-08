@@ -92,9 +92,14 @@ export class PreviewCapabilityStore {
       if (path === null) throw new Error('invalid additional preview scope');
       return { source: scope.source, path, subtree: scope.subtree === true };
     });
+    const outsideInRuntimeScopes = outsideInPlayerScopes(input.source, normalized);
     this.records.set(tokenDigest(token), {
       projectId: input.projectId,
-      scopes: [{ source: input.source, path: scopePath, subtree: true }, ...additionalScopes],
+      scopes: [
+        { source: input.source, path: scopePath, subtree: true },
+        ...outsideInRuntimeScopes,
+        ...additionalScopes,
+      ],
       idleExpiresAtMs,
       absoluteExpiresAtMs,
       createdAtMs,
@@ -164,6 +169,29 @@ export class PreviewCapabilityStore {
       this.records.delete(oldestKey);
     }
   }
+}
+
+/**
+ * An outside-in HTML page may share the exact Squisq player file from an
+ * ancestor `_squisq` directory. Grant those fixed filenames, never the
+ * surrounding directories, so a nested page can load its runtime without
+ * turning the preview capability into general workspace read authority.
+ */
+function outsideInPlayerScopes(source: PreviewSource, entryPath: string): PreviewCapabilityScope[] {
+  if (source === 'type' || !/\.html?$/i.test(entryPath)) return [];
+  const directories: string[] = [];
+  let current = previewParentPath(entryPath);
+  for (let depth = 0; depth < 32; depth++) {
+    directories.push(current);
+    if (!current) break;
+    current = previewParentPath(current);
+  }
+  if (!directories.includes('')) directories.push('');
+  return directories.map((directory) => ({
+    source,
+    path: directory ? `${directory}/_squisq/squisq-player.js` : '_squisq/squisq-player.js',
+    subtree: false,
+  }));
 }
 
 /** Normalize an API/URL-relative preview path without accepting traversal. */

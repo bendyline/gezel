@@ -1715,6 +1715,25 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  // Byte-exact user editing path for outside-in rendered documents and their
+  // companion media. It uses the same workspace authority gate as text writes.
+  app.put('/:id/workspace/raw', async (c) => {
+    const id = c.req.param('id');
+    const filePath = c.req.query('path');
+    if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
+    try {
+      await ctx.store.writeProjectWorkspaceBinary(
+        id,
+        filePath,
+        Buffer.from(await c.req.arrayBuffer()),
+      );
+      return c.json({ ok: true, path: filePath });
+    } catch (err) {
+      const mapped = mapWorkspaceError(err);
+      return c.json(mapped.body, mapped.status as 400 | 403 | 500);
+    }
+  });
+
   // ── Surgical edit endpoints (Layer 4) ──
   //
   // Each returns a WorkspaceEditResponse envelope: { ok: true, path,
