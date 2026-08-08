@@ -169,9 +169,8 @@ jobs:
         # Blocks at critical only, matching the release workflows exactly —
         # publish must never fail on something CI passed. Advisories are
         # published against our pinned versions on npm's clock, not ours, so
-        # anything below critical prints as a warning here and surfaces
-        # within a day via the scheduled supply-chain-audit workflow instead
-        # of failing whatever unrelated PR happens to be open.
+        # anything below critical prints as a warning without failing whatever
+        # unrelated PR happens to be open.
         run: pnpm audit:vulnerabilities --audit-level=critical
       - name: Dependency license policy gate
         run: pnpm audit:licenses

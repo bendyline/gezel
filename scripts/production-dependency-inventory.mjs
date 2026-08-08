@@ -59,8 +59,9 @@ function cmdQuote(arg) {
  *
  * Without this, the eval tooling's own dependencies were audited as if they
  * shipped: a July 2026 release was blocked by advisories against js-yaml 5.x
- * (only `evals` pulls it; the shipped 3.15.0/4.3.0 are outside the advisory
- * range) and react-router (only `eval-viewer` pulls it at all).
+ * (only `evals` pulls that major line; it is pinned to the patched 5.2.1) and
+ * react-router (only `eval-viewer` pulls it at all). Shipping js-yaml 3.x/4.x
+ * is independently pinned to patched legacy releases by workspace overrides.
  *
  * Deliberately an exclusion list, not an allowlist of shipping packages: if
  * this list goes stale, a new dev tool gets audited unnecessarily. The

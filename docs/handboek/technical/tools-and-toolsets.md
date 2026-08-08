@@ -14,8 +14,10 @@ code execution, a coordinator gets team management. You can add or remove groups
 per gezel, and third-party toolsets from the gilde catalog extend the set
 further.
 
-Every tool call is mediated: consent rules and the audit log apply no matter
-which group a tool came from.
+Calls through Gezel's built-in tool groups are mediated by its policy, consent,
+and audit layers. Provider-native tools, approved package commands, and
+third-party MCP servers have different boundaries; the
+[security model](security-model.md) explains those exceptions.
 
 ## Custom MCP toolsets
 

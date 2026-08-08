@@ -271,7 +271,12 @@ off-preset combination (`classifySecurityLevel` re-labels the slider).
 and leaves the scoped MCP equivalents available. Explicit install-level or per-gezel
 `sandboxCopilot: false` is a compatibility escape hatch: it restores the SDK built-ins and
 their `approveAll` permission handler, so those actions do not receive Gezel's MCP scope,
-sink checks, or complete audit trail.
+sink checks, or complete audit trail. The current SDK does emit
+`tool.execution_start` / `tool.execution_complete` events, and Gezel forwards observed
+completions into `tool.called` History entries. That is useful visibility, not an
+enforcement boundary or a completeness guarantee: it depends on provider-emitted events,
+omits the phase-only `report_intent` tool, and carries less result detail than an MCP-bridged
+call.
 
 ---
 
