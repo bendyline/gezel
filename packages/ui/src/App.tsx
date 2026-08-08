@@ -1395,6 +1395,7 @@ function ProviderQuotaMeter({
         className="quota-meter"
         onClick={toggle}
         aria-expanded={open}
+        aria-label={`${label} quota: ${q.used}/${q.limit} used, ${Math.round(q.remainingPercent)}% left`}
         title={tooltip}
       >
         <div className="quota-ring-wrap">
@@ -1437,13 +1438,16 @@ function ProviderQuotaMeter({
                 <div className="quota-popover-bucket" key={bucket.name}>
                   <dt>{humanizeBucketName(bucket.name)}</dt>
                   <dd>
-                    {bucketUsedPercent}% used · {Math.round(bucket.remainingPercent)}% left
+                    {formatQuotaCount(bucket.used)} / {formatQuotaCount(bucket.limit)} (
+                    {bucketUsedPercent}%)
                     {bucket.resetDate && (
                       <span className="quota-popover-reset">
                         Resets {formatResetDate(bucket.resetDate)}
                       </span>
                     )}
                   </dd>
+                  <dt>Remaining</dt>
+                  <dd>{formatQuotaCount(bucket.remaining)}</dd>
                 </div>
               );
             })}
@@ -1466,6 +1470,10 @@ function ProviderQuotaMeter({
       )}
     </div>
   );
+}
+
+function formatQuotaCount(value: number): string {
+  return value.toLocaleString('en-US');
 }
 
 /**
