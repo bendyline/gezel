@@ -671,6 +671,7 @@ function FullApp() {
           <BoekwachterPill />
           <EngineStatusPill />
           <ClaudeCliPoolPill />
+          <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
           <NightShiftMenu state={nightShift} onChange={setNightShift} />
           <EngagementMenu mode={engagementMode} />
           {outputPaneMaximized && (
@@ -684,7 +685,6 @@ function FullApp() {
               <OutputPaneRestoreIcon />
             </button>
           )}
-          <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
         </div>
       </header>
       {questionsOpen && (
@@ -1226,6 +1226,9 @@ const QUOTA_PROVIDERS = [
   },
 ] as const;
 
+const QUOTA_ACTIVITY_POLL_MS = 3_000;
+
+type QuotaProviderKey = (typeof QUOTA_PROVIDERS)[number]['key'];
 type QuotaSettingsSection = (typeof QUOTA_PROVIDERS)[number]['settingsSection'];
 
 function QuotaMeters({
@@ -1235,10 +1238,44 @@ function QuotaMeters({
   usage: UsageResponse | null;
   onOpenSettings: (section: QuotaSettingsSection) => void;
 }) {
+  const [activeProviders, setActiveProviders] = useState<ReadonlySet<QuotaProviderKey>>(
+    () => new Set(),
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = () => {
+      void api
+        .getQueueStatus()
+        .then((status) => {
+          if (!mounted) return;
+          const next = new Set<QuotaProviderKey>();
+          for (const provider of QUOTA_PROVIDERS) {
+            if ((status.providers[provider.key]?.running ?? 0) > 0) next.add(provider.key);
+          }
+          setActiveProviders((current) => {
+            if (current.size === next.size && [...current].every((key) => next.has(key))) {
+              return current;
+            }
+            return next;
+          });
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, QUOTA_ACTIVITY_POLL_MS);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   if (!usage) return null;
   return (
     <>
       {QUOTA_PROVIDERS.map((provider) => {
+        if (!activeProviders.has(provider.key)) return null;
         const providerUsage = usage.providers[provider.key];
         if (!providerUsage) return null;
         const limitedBuckets = providerUsage.quotaBuckets.filter((bucket) => !bucket.isUnlimited);

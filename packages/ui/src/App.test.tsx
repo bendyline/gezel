@@ -228,6 +228,22 @@ describe('App project deletion navigation', () => {
 describe('quota meter', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        copilot: {
+          running: 1,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 1,
+          active: [],
+          pending: [],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '2026-07-31T20:00:00.000Z',
+    });
     vi.mocked(api.getUsage).mockResolvedValue({
       lastUpdated: '2026-07-31T20:00:00.000Z',
       providers: {
@@ -297,5 +313,49 @@ describe('quota meter', () => {
     });
 
     await waitFor(() => expect(screen.queryByText('Remaining')).not.toBeInTheDocument());
+  });
+
+  it('sits before the Night Shift and engagement controls', async () => {
+    render(<App />);
+    await screen.findByRole('button', { name: /1239\/1500/ });
+
+    const cluster = screen.getByTestId('app-header').querySelector('.app-header-right');
+    const children = [...(cluster?.children ?? [])];
+    const quotaIndex = children.findIndex((child) => child.classList.contains('quota-meter-root'));
+    const nightShiftIndex = children.findIndex((child) =>
+      child.classList.contains('app-nightshift-trigger'),
+    );
+    const engagementIndex = children.findIndex((child) =>
+      child.classList.contains('app-engagement-trigger'),
+    );
+
+    expect(quotaIndex).toBeGreaterThanOrEqual(0);
+    expect(nightShiftIndex).toBeGreaterThan(quotaIndex);
+    expect(engagementIndex).toBeGreaterThan(quotaIndex);
+  });
+
+  it('stays hidden while its provider is idle', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        copilot: {
+          running: 0,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 1,
+          active: [],
+          pending: [],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '2026-07-31T20:00:00.000Z',
+    });
+
+    render(<App />);
+    await waitFor(() => expect(api.getUsage).toHaveBeenCalled());
+    await waitFor(() => expect(api.getQueueStatus).toHaveBeenCalled());
+
+    expect(screen.queryByRole('button', { name: /1239\/1500/ })).not.toBeInTheDocument();
   });
 });
