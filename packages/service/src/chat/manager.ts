@@ -6431,12 +6431,12 @@ export class ChatManager {
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           } else if (!isSessionGoneError(err)) throw err;
           else {
-            // The provider GC'd our server-side session while we were idle. Rebuild
-            // from scratch (dropping the dead providerState so resume isn't tried)
-            // and transparently retry this one turn. Surfaces as `resumeFailed`
-            // on the session so the UI can show its existing stale-context banner.
+            // The provider session is no longer resumable. Rebuild from scratch
+            // (dropping the dead providerState so resume isn't tried) and
+            // transparently retry this one turn. Surfaces as `resumeFailed` on the
+            // session so the UI can show its existing stale-context banner.
             log.warn(
-              `[chat] session ${sessionId}: provider dropped the server-side session — rebuilding and retrying`,
+              `[chat] session ${sessionId}: provider session is no longer resumable — rebuilding and retrying`,
             );
             try {
               await liveSession.disconnect();
@@ -15826,12 +15826,18 @@ function looksStalledImpl(text: string): boolean {
  * session we think is live." Observed in the wild:
  *   - Copilot: `Request session.send failed with message: Session not found: <uuid>`
  *   - OpenAI: 400/404 with "Previous response with id ... not found"
+ *   - CLI providers: `SessionResumeError` may surface lazily from the first
+ *     `sendAndWait`, after `resumeSession` has already returned a session.
  * Kept deliberately narrow — a false positive causes a pointless session
  * rebuild but not data loss; a false negative leaves the user stranded.
  */
 
 function isSessionGoneError(err: unknown): boolean {
   if (!err) return false;
+  if (err instanceof SessionResumeError) return true;
+  // Preserve the typed signal across package/bundle boundaries where two
+  // copies of the class can make `instanceof` false.
+  if (err instanceof Error && err.name === 'SessionResumeError') return true;
   const msg = err instanceof Error ? err.message : String(err);
   const low = msg.toLowerCase();
   if (low.includes('session not found')) return true;

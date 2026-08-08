@@ -1358,6 +1358,34 @@ describe('ChatManager — resume', () => {
     expect(kinds.filter((k) => k === 'create').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('recovers when SessionResumeError surfaces lazily from sendAndWait', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('first');
+    await manager.send(session.id, 'hi');
+
+    // Codex CLI's resumeSession only constructs a lazy session. A missing
+    // rollout is discovered by `codex exec resume` on the first send instead
+    // of during resumeSession itself.
+    await manager.reset(session.id);
+    mock.scriptSendFailure(
+      '[codex-cli] thread resume failed: no rollout found for thread id deadbeef',
+      { name: 'SessionResumeError' },
+    );
+    mock.script('second, after lazy resume recovery');
+
+    const reply = await manager.send(session.id, 'are you back?');
+    expect(reply.content).toBe('second, after lazy resume recovery');
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.messages).toHaveLength(4);
+    expect(disk!.messages.at(-1)!.content).toBe('second, after lazy resume recovery');
+    expect(disk!.resumeFailed).toBeUndefined();
+
+    const kinds = mock.calls.map((c) => c.kind);
+    expect(kinds).toContain('resume');
+    expect(kinds.filter((k) => k === 'create').length).toBeGreaterThanOrEqual(2);
+  });
+
   // Regression: before the fix, resume for llama-cpp seeded a
   // fresh session with NO priorMessages — only Ollama got the transcript
   // replay. After an app restart, the model landed in the session with an
