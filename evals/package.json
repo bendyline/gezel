@@ -27,7 +27,8 @@
     "coverage:refresh": "tsx src/bin/model-coverage.ts --out runs/current-model-coverage-$(date +%F).md && tsx src/bin/compare-scores.ts --out runs/current-score-comparison-$(date +%F).md",
     "screenshot": "tsx src/bin/screenshot.ts",
     "thinking-report": "tsx src/bin/thinking-report.ts",
-    "report:engine-context": "tsx src/bin/report-engine-context.ts"
+    "report:engine-context": "tsx src/bin/report-engine-context.ts",
+    "scorecard": "tsx src/bin/scorecard.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
@@ -37,7 +38,8 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "js-yaml": "5.2.1",
     "playwright": "^1.61.1",
-    "selfsigned": "^5.5.0"
+    "selfsigned": "^5.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

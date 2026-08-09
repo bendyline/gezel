@@ -25,6 +25,8 @@ export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
 export * from './roles/index.js';
 export * from './deliverable.js';
+export * from './binary-document.js';
+export * from './scorecard/index.js';
 export * from './device-safety.js';
 export * from './toolset-trust.js';
 export * from './craftbook-collapse.js';

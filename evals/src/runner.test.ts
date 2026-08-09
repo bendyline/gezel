@@ -29,6 +29,7 @@ import {
   recoveryFilePathForSniff,
   repeatedPoisonedSessionFailure,
   retryLoopSniffKey,
+  runawaySessionFailure,
   selectSilentRecoveries,
   shouldDeferRetryLoopForInflight,
   shouldDeferRetryLoopForRecentEscalation,
@@ -84,6 +85,16 @@ describe('completed repair-action snapshots', () => {
         true,
       ),
     ).toEqual({ completedMutationTurns: 1, inflight: true });
+  });
+});
+
+describe('runaway session safety cap', () => {
+  it('fails an unbounded active-session fanout instead of counting it as progress forever', () => {
+    expect(runawaySessionFailure(63)).toBeNull();
+    expect(runawaySessionFailure(64)).toMatchObject({
+      failureMode: 'model-stuck',
+      reason: expect.stringContaining('64 active chat sessions'),
+    });
   });
 });
 
@@ -1523,8 +1534,12 @@ describe('retryLoopSniffKey', () => {
 });
 
 describe('sniffArtifactHasScored', () => {
-  it('keeps first-write score-0 sniffs exempt from scored-artifact retry paths', () => {
-    expect(sniffArtifactHasScored({ key: 'bookstore', score: 0 }, new Set())).toBe(false);
+  it('keeps truly absent score-0/0-byte sniffs exempt from artifact retry paths', () => {
+    expect(sniffArtifactHasScored({ key: 'bookstore', score: 0, bytes: 0 }, new Set())).toBe(false);
+  });
+
+  it('guards a score-0 near-miss once the checker observed real artifact bytes', () => {
+    expect(sniffArtifactHasScored({ key: 'deck', score: 0, bytes: 2017 }, new Set())).toBe(true);
   });
 
   it('treats a score-0 regression as an existing artifact once that sniff key scored', () => {
@@ -1606,8 +1621,23 @@ describe('nudge deliverability', () => {
     });
   });
 
+  it('drops an ad-hoc binary contract while preserving the repair send', () => {
+    const logged: string[] = [];
+    expect(
+      attachableDeliverable('deliverables/d-day.pptx', 'developer', (m) => logged.push(m)),
+    ).toEqual({});
+    expect(logged.join('\n')).toContain('craftbook owns production routing');
+  });
+
   it('treats every routing role as coordination-only', () => {
-    for (const role of ['voorman', 'Voorman', 'coordinator', 'planner', 'meester']) {
+    for (const role of [
+      'voorman',
+      'Voorman',
+      'coordinator',
+      'planner',
+      'planner calendar desk',
+      'meester',
+    ]) {
       expect(attachableDeliverable('a.md', role, () => {})).toEqual({});
     }
   });
@@ -1622,7 +1652,8 @@ describe('nudge deliverability', () => {
 describe('describeSendFailure', () => {
   it('surfaces the service error body alongside the status line', () => {
     const err = Object.assign(new Error('Gezel API error 400 on POST /api/gezels/x/message'), {
-      body: { error: 'gezel "caoimhe" has role "voorman", which cannot write workspace file' },
+      status: 400,
+      details: { error: 'gezel "caoimhe" has role "voorman", which cannot write workspace file' },
     });
     expect(describeSendFailure(err)).toMatch(/cannot write workspace file/);
     expect(describeSendFailure(err)).toMatch(/Gezel API error 400/);

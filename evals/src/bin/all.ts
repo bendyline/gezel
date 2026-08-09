@@ -27,10 +27,12 @@
  *                        Useful when one scenario is broken and you want
  *                        the rest of the matrix to still complete.
  *   --suite <id>         run a named suite from src/suites.ts (core,
- *                        smoke, extended-coding, extended-grounding,
- *                        extended-retrieval, headroom). `core` is the
- *                        standard model scorecard. Mutually exclusive
- *                        with --scenarios.
+ *                        smoke, productivity, productivity-smoke,
+ *                        extended-coding, extended-grounding,
+ *                        extended-retrieval, extended-writing, headroom).
+ *                        `core` is the standard model scorecard. Combine
+ *                        with --scenarios to run a SUBSET of the suite,
+ *                        in suite order; unknown ids are an error.
  *   --model <id>         chat model catalog id, default `gemma4-e4b-q4`
  *   --image-model <id>   image model catalog id; falls back to each
  *                        scenario's `defaultImageModelId` when unset.
@@ -51,6 +53,7 @@ import { checkGpuPanicGate } from '../gpu-panic-guard.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
+import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { formatPassClaim } from '../stats-discipline.ts';
 import { listSuites, suiteScenarios } from '../suites.ts';
 import { valueRequiredAllFlagError } from './all-args.ts';
@@ -62,26 +65,6 @@ import {
   resolveProviderFlag,
   resolveRenderModeFlag,
 } from './args.ts';
-
-function installSignalHandlers(): AbortController {
-  const ac = new AbortController();
-  let firstHit = false;
-  const handler = (sig: NodeJS.Signals) => {
-    if (!firstHit) {
-      firstHit = true;
-      console.error(
-        `\n[evals] ${sig} received — aborting current trial gracefully (Ctrl+C again to force-exit)`,
-      );
-      ac.abort();
-    } else {
-      console.error('[evals] second signal — forcing exit');
-      process.exit(130);
-    }
-  };
-  process.on('SIGINT', handler);
-  process.on('SIGTERM', handler);
-  return ac;
-}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -107,13 +90,17 @@ async function main() {
     return;
   }
 
-  // Scenario selection: `--suite <id>` or `--scenarios a,b`, otherwise all
-  // registered. Mutually exclusive — a suite is a curated set; silently
-  // intersecting it with an ad-hoc list would misreport what ran.
-  if (args.flags.suite !== undefined && args.flags.scenarios !== undefined) {
-    console.error('--suite and --scenarios are mutually exclusive');
-    process.exit(2);
-  }
+  // Scenario selection: `--suite <id>`, `--scenarios a,b`, both (a subset
+  // of the suite, in suite order), or neither (everything registered).
+  //
+  // The pair used to be rejected outright, on the grounds that silently
+  // intersecting a curated set with an ad-hoc list would misreport what
+  // ran. The reporting concern is real; the ban was the wrong fix. Suites
+  // are now long enough that "no way to run part of one" is the difference
+  // between a suite people try and a suite people don't — so the
+  // intersection is allowed, every requested id must actually belong to
+  // the suite (a typo is an error, never a silent no-op), and the run
+  // announces itself as a subset.
   if (args.flags.suite === true) {
     console.error('--suite requires a value (run with --list to see suites)');
     process.exit(2);
@@ -125,12 +112,35 @@ async function main() {
           .map((s) => s.trim())
           .filter(Boolean)
       : undefined;
-  const scenarios =
-    typeof args.flags.suite === 'string'
-      ? suiteScenarios(args.flags.suite)
-      : filter
-        ? filter.map((id) => getScenario(id))
-        : listScenarios();
+  let scenarios: ReturnType<typeof listScenarios>;
+  if (typeof args.flags.suite === 'string') {
+    const suiteId = args.flags.suite;
+    const members = suiteScenarios(suiteId);
+    if (filter) {
+      const memberIds = new Set(members.map((scenario) => scenario.id));
+      const unknown = filter.filter((id) => !memberIds.has(id));
+      if (unknown.length > 0) {
+        console.error(
+          `[evals] not in suite "${suiteId}": ${unknown.join(', ')}\n` +
+            `        suite members: ${members.map((s) => s.id).join(', ')}`,
+        );
+        process.exit(2);
+      }
+      // Keep SUITE order, not the order the operator typed — the suite
+      // orders cheapest-first so a run that gets cut short still covers
+      // the broadest ground.
+      scenarios = members.filter((scenario) => filter.includes(scenario.id));
+      console.log(
+        `[evals] running ${scenarios.length}/${members.length} of suite "${suiteId}" (SUBSET — not a suite scorecard)`,
+      );
+    } else {
+      scenarios = members;
+    }
+  } else if (filter) {
+    scenarios = filter.map((id) => getScenario(id));
+  } else {
+    scenarios = listScenarios();
+  }
   if (scenarios.length === 0) {
     console.error('[evals] no scenarios registered — nothing to run');
     process.exit(2);
@@ -194,7 +204,7 @@ async function main() {
     ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
   });
   try {
-    const ac = installSignalHandlers();
+    const ac = installEvalSignalHandlers();
     const matrix = await runMatrix(scenarios, {
       modelId,
       count,

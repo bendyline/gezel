@@ -8,8 +8,12 @@
  * Protocol (structured-clone messages over the worker port):
  *   host → worker:  { id, texts }
  *   worker → host:  { id, vectors }                 — success
- *                   { id, error, fatal }            — failure (fatal ⇒ model
- *                                                     unloadable, disable for good)
+ *                   { id, error, fatal,             — failure (fatal ⇒ model
+ *                     optionalPeerMissing }           unloadable, disable for
+ *                                                     good; optionalPeerMissing
+ *                                                     ⇒ the peer is just not
+ *                                                     installed, so the host
+ *                                                     degrades quietly)
  */
 
 import { parentPort } from 'node:worker_threads';
@@ -35,6 +39,7 @@ port.on('message', (msg: EmbedRequest) => {
         id: msg.id,
         error: err instanceof Error ? err.message : String(err),
         fatal: err instanceof PipelineLoadError,
+        optionalPeerMissing: err instanceof PipelineLoadError && err.optionalPeerMissing,
       });
     }
   })();

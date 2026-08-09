@@ -1113,6 +1113,51 @@ describe('postSniffFeedback', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(2);
   });
 
+  it('suppresses an identical permanent 4xx instead of retrying every poll', async () => {
+    const error = Object.assign(
+      new Error('Gezel API error 400 on POST /api/gezels/planner-1/message'),
+      {
+        status: 400,
+        details: { error: 'request shape is permanently invalid' },
+      },
+    );
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'planner-1', lastActivityAt: '2026-05-21T05:00:00Z' }],
+      messageGezelImpl: () => Promise.reject(error),
+    });
+    const ctx = makeCtx(client);
+    const sniff: SniffResult = {
+      ok: false,
+      signals: [],
+      score: 0,
+      missingRequiredSignals: ['x'],
+    };
+
+    await postSniffFeedback(ctx, 'brief.md', sniff);
+    await postSniffFeedback(ctx, 'brief.md', sniff);
+
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends planner feedback without the rejected file-owner contract', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'planner-1', lastActivityAt: '2026-05-21T05:00:00Z' }],
+      gezels: [{ id: 'planner-1', role: 'Planner' }],
+    });
+    const ctx = makeCtx(client);
+
+    await postSniffFeedback(ctx, 'meeting-brief.md', {
+      ok: false,
+      signals: [],
+      score: 1,
+      missingRequiredSignals: ['four-actions'],
+    });
+
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    const body = client.messageGezel.mock.calls[0]![1];
+    expect(body.expectedDeliverable).toBeUndefined();
+  });
+
   it('_resetSniffNudgeMemoryForTests clears the per-context dedup state', async () => {
     const client = makeClient({
       sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-05-21T05:00:00Z' }],
@@ -1154,6 +1199,57 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('write_file({ path: "index.html"');
     expect(body.text).toContain('Artifact-only plans');
     expect(body.text).not.toContain('full analysis so far');
+  });
+
+  it('nudges a craftbook worker about a PPTX without an invalid ad-hoc binary contract', async () => {
+    const client = makeClient({
+      sessions: [
+        {
+          id: 's',
+          gezelId: 'builder-1',
+          lastActivityAt: '2026-06-02T05:00:00Z',
+          projectId: 'deck-project',
+        },
+      ],
+      gezels: [{ id: 'builder-1', role: 'Developer' }],
+    });
+    const ctx = makeCtx(client);
+
+    await postMissingDeliverableFeedback(ctx, 'deliverables/d-day.pptx', {
+      minPolls: 1,
+      projectId: 'deck-project',
+    });
+
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    const body = client.messageGezel.mock.calls[0]![1];
+    expect(body.expectedDeliverable).toBeUndefined();
+    expect(body.text).toContain('convert_document');
+    expect(body.text).toContain('preview_document');
+    expect(body.text).toContain('save_artifact');
+    expect(body.text).toContain('copy_artifact_to_workspace');
+    expect(body.text).not.toContain('write_file({ path: "deliverables/d-day.pptx"');
+  });
+
+  it('suppresses repeated missing-deliverable sends after a permanent 4xx', async () => {
+    const error = Object.assign(new Error('Gezel API error 403'), {
+      status: 403,
+      details: { error: 'engagement disabled' },
+    });
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-06-02T05:00:00Z' }],
+      gezels: [{ id: 'builder-1', role: 'Developer' }],
+      messageGezelImpl: () => Promise.reject(error),
+    });
+    const ctx = makeCtx(client);
+
+    for (let i = 0; i < 10; i++) {
+      await postMissingDeliverableFeedback(ctx, 'index.html', {
+        minPolls: 1,
+        repeatEvery: 1,
+      });
+    }
+
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
   });
 
   it('prefers a writer over a more recent image generator for missing HTML', async () => {

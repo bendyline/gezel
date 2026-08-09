@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { minimalDocxFixture, minimalPptxFixture } from '../mock/mock-server.ts';
 import { type CraftbookEvalWorkspace, evaluateCraftbookGateChecks } from './gates.ts';
 
 function workspace(files: Record<string, string>): CraftbookEvalWorkspace {
@@ -11,6 +12,76 @@ function workspace(files: Record<string, string>): CraftbookEvalWorkspace {
     },
   };
 }
+
+function binaryWorkspace(
+  files: Record<string, Uint8Array>,
+  surface: 'workspace' | 'artifact' = 'workspace',
+): CraftbookEvalWorkspace {
+  const reader = async (file: string) => files[file] ?? null;
+  return {
+    async read() {
+      return null;
+    },
+    async list() {
+      return Object.keys(files);
+    },
+    ...(surface === 'workspace' ? { readBytes: reader } : { readArtifactBytes: reader }),
+  };
+}
+
+describe('binaryDocument gate check', () => {
+  const pptx = minimalPptxFixture();
+
+  it('accepts a real converted container in the workspace', async () => {
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'binaryDocument', file: 'deliverables/deck.pptx' }],
+      binaryWorkspace({ 'deliverables/deck.pptx': pptx }),
+    );
+    expect(result).toEqual({ pass: true, failures: [] });
+  });
+
+  it('rejects the Markdown source written to the binary path', async () => {
+    // The substitution a bare minBytes floor accepted: every DocBlocks tool
+    // called, then `write_file` with the deck source at the .pptx path.
+    const markdown = new TextEncoder().encode(
+      `# Slide one\n\n---\n\n# Slide two\n${'x'.repeat(2000)}`,
+    );
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'binaryDocument', file: 'deliverables/deck.pptx' }],
+      binaryWorkspace({ 'deliverables/deck.pptx': markdown }),
+    );
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toMatch(/not a real ZIP container/);
+  });
+
+  it('reads the artifacts drawer without delegating to the runtime evaluator', async () => {
+    // Eval-only kinds must not take the `artifact: true` delegation path —
+    // the runtime evaluator has never heard of them.
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'binaryDocument', file: 'report.docx', artifact: true }],
+      binaryWorkspace({ 'report.docx': minimalDocxFixture() }, 'artifact'),
+    );
+    expect(result).toEqual({ pass: true, failures: [] });
+  });
+
+  it('fails closed when the surface cannot serve bytes', async () => {
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'binaryDocument', file: 'deck.pptx' }],
+      workspace({ 'deck.pptx': 'text stand-in' }),
+    );
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toMatch(/cannot serve raw bytes/);
+  });
+
+  it('enforces a byte floor before the signature check', async () => {
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'binaryDocument', file: 'deck.pptx', minBytes: 100_000 }],
+      binaryWorkspace({ 'deck.pptx': pptx }),
+    );
+    expect(result.pass).toBe(false);
+    expect(result.failures[0]).toMatch(/at least 100000/);
+  });
+});
 
 describe('craftbook eval gate checks', () => {
   it('evaluates shared file checks', async () => {

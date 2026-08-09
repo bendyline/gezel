@@ -66,6 +66,7 @@ interface WorkerReply {
   vectors?: number[][];
   error?: string;
   fatal?: boolean;
+  optionalPeerMissing?: boolean;
 }
 
 let worker: Worker | null = null;
@@ -117,7 +118,7 @@ function onMessage(msg: WorkerReply): void {
   if (!p) return;
   pending.delete(msg.id);
   if (msg.error) {
-    if (msg.fatal) markDisabled(msg.error);
+    if (msg.fatal) markDisabled(msg.error, msg.optionalPeerMissing ?? false);
     p.reject(new Error(msg.error));
     return;
   }
@@ -157,16 +158,23 @@ async function embedInProcess(texts: string[]): Promise<number[][]> {
     return await runEmbed(texts);
   } catch (err) {
     if (err instanceof PipelineLoadError) {
-      markDisabled(err.message);
+      markDisabled(err.message, err.optionalPeerMissing);
       throw new EmbeddingsDisabledError(disabledReason ?? err.message);
     }
     throw err;
   }
 }
 
-function markDisabled(message: string): void {
+function markDisabled(message: string, optionalPeerMissing = false): void {
   if (disabledReason) return;
   disabledReason = firstLine(message);
+  if (optionalPeerMissing) {
+    // Not a fault: the base npm install deliberately omits the ML peers and the
+    // README documents that as supported. Reporting it as an error made every
+    // lean install look damaged on its first chat, so state it once and move on.
+    log.info(`[memory] vector memory is off — ${disabledReason}`);
+    return;
+  }
   // Loud once with the underlying model/runtime error. Subsequent callers get
   // the short `EmbeddingsDisabledError`.
   log.error(

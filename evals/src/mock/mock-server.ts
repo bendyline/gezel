@@ -9,6 +9,7 @@ import type { CraftbookTestSpec, MockService } from '@bendyline/gezel';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import selfsigned from 'selfsigned';
+import { z } from 'zod';
 
 /**
  * Live per-trial mock services for the craftbook eval rail.
@@ -495,10 +496,31 @@ async function handleMcpMockRequest(
     }
     const server = new McpServer({ name: `mock-mcp-${mock.id}`, version: '1.0.0' });
     for (const tool of mock.tools) {
-      // No inputSchema: the SDK skips argument validation entirely, so a
-      // model may pass any args (e.g. `ack_alert({id})`) without a
-      // rejection — the mock ignores them and serves the template.
-      server.registerTool(tool.name, { description: tool.description }, async (args) => {
+      // Tools WITHOUT a file effect stay schema-less on purpose: the SDK
+      // then skips argument validation, so a model may pass anything (e.g.
+      // `ack_alert({id})`) without a rejection and the mock serves the
+      // template regardless.
+      //
+      // A tool that MATERIALIZES A FILE cannot afford that. Wild-caught on
+      // the first two live runs of research-to-document: with no schema the
+      // model first guessed `destinationPath` against a spec expecting
+      // `destination.path`, then called `save_artifact` with NO arguments
+      // at all. Both times the call logged (satisfying `requiredTools`),
+      // the write found no path, and the trial failed on a missing document
+      // while every provenance check passed. The model was not being
+      // careless — nothing told it the argument existed.
+      //
+      // So the schema is DERIVED from the same `pathArgument` the fixture
+      // reads. One field, therefore no way for the declared contract and
+      // the consumed contract to drift.
+      const inputSchema = tool.writeFixture
+        ? fixturePathSchema(tool.writeFixture.pathArgument)
+        : undefined;
+      const config = {
+        description: tool.description,
+        ...(inputSchema ? { inputSchema } : {}),
+      };
+      server.registerTool(tool.name, config, async (args) => {
         started.requests.push({
           at: new Date().toISOString(),
           method: 'POST',
@@ -547,12 +569,82 @@ function valueAtPath(value: unknown, dottedPath: string): unknown {
   return current;
 }
 
-/** Materialize a deterministic fixture through the trial project's real file surfaces. */
+/**
+ * Build the input schema a file-materializing tool advertises, from the
+ * dotted `pathArgument` its fixture reads.
+ *
+ * `destination.path` → `{ destination: { path: string } }`
+ * `destinationPath`  → `{ destinationPath: string }`
+ *
+ * The description matters as much as the shape: it is what a model reads
+ * when deciding what to put there.
+ */
+function fixturePathSchema(pathArgument: string): Record<string, z.ZodTypeAny> {
+  const parts = pathArgument.split('.').filter(Boolean);
+  const leaf = z
+    .string()
+    .min(1)
+    .describe('Destination path for the saved file, relative to the target root.');
+  if (parts.length <= 1) return { [parts[0] ?? 'path']: leaf };
+  let current: z.ZodTypeAny = leaf;
+  for (let index = parts.length - 1; index >= 1; index--) {
+    current = z.object({ [parts[index]!]: current });
+  }
+  return { [parts[0]!]: current };
+}
+
+/**
+ * Resolve the destination path from a tool call whose argument SHAPE was
+ * never declared.
+ *
+ * Mock MCP tools register without an `inputSchema` (see the note in
+ * `handleMcpMockRequest`), so a model has nothing telling it whether the
+ * argument is `destination.path`, `destinationPath`, or plain `path`. It
+ * guesses — and a spec that pins exactly one spelling turns that guess into
+ * a silent failure: the tool call is logged (satisfying `requiredTools`),
+ * the fixture write throws, and no file appears. Wild-caught on the first
+ * live run of research-to-document: the model sent `destinationPath`, the
+ * spec declared `destination.path`, and the trial failed on a missing DOCX
+ * while every provenance check passed.
+ *
+ * The declared `pathArgument` stays authoritative; these are fallbacks so a
+ * reasonable guess still lands the file. `powerpoint-deck` carries the same
+ * unvalidated `destination.path` and is fixed by the same tolerance.
+ */
+function resolveFixturePath(args: unknown, declared: string): string | null {
+  const camel = declared.replace(/\.([a-z])/gi, (_, c: string) => c.toUpperCase());
+  const last = declared.split('.').pop() ?? declared;
+  const candidates = [declared, camel, last, 'destinationPath', 'destination.path', 'path'];
+  for (const candidate of candidates) {
+    const value = valueAtPath(args, candidate);
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return null;
+}
+
+/** Fixture id → the bytes it materializes. */
+const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = {
+  'minimal-pptx': () => minimalPptxFixture(),
+  'minimal-docx': () => minimalDocxFixture(),
+  'minimal-pdf': () => minimalPdfFixture(),
+};
+
+export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf';
+
+/**
+ * Materialize a deterministic fixture through the trial project's real file
+ * surfaces.
+ *
+ * `effect.fixture` used to be read from the spec and then ignored — every
+ * effect wrote a PPTX regardless. That was invisible while `minimal-pptx`
+ * was the only value, and would have silently written a presentation to a
+ * `.docx` path the moment a second fixture existed. Dispatch on it.
+ */
 export async function materializeMockToolFixture(
   effect: {
     surface: 'workspace' | 'artifact';
     pathArgument: string;
-    fixture: 'minimal-pptx';
+    fixture: MockToolFixture;
   },
   args: unknown,
   context: { trialHome?: string; projectId: string | null },
@@ -560,18 +652,23 @@ export async function materializeMockToolFixture(
   if (!context.trialHome || !context.projectId) {
     throw new Error('mock MCP file effect has no bound trial project');
   }
-  const rawPath = valueAtPath(args, effect.pathArgument);
-  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) {
-    throw new Error(`mock MCP file effect expected string argument ${effect.pathArgument}`);
+  const rawPath = resolveFixturePath(args, effect.pathArgument);
+  if (rawPath === null) {
+    throw new Error(
+      `mock MCP file effect could not resolve a destination path from ${JSON.stringify(args)} ` +
+        `(declared ${effect.pathArgument})`,
+    );
   }
   const normalized = rawPath.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (normalized.split('/').includes('..')) {
     throw new Error('mock MCP file effect path must stay inside the project');
   }
+  const bytes = MOCK_FIXTURE_BYTES[effect.fixture];
+  if (!bytes) throw new Error(`unknown mock MCP fixture "${effect.fixture}"`);
   const drawer = effect.surface === 'artifact' ? 'artifacts' : 'workspace';
   const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, minimalPptxFixture());
+  await writeFile(target, bytes());
 }
 
 /** Small deterministic ZIP-shaped Open XML presentation used only by eval mocks. */
@@ -599,6 +696,64 @@ export function minimalPptxFixture(): Uint8Array {
     ],
   ];
   return zipStored(files);
+}
+
+/** Small deterministic ZIP-shaped Open XML word document used only by eval mocks. */
+export function minimalDocxFixture(): Uint8Array {
+  const files: Array<[string, string]> = [
+    [
+      '[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    ],
+    [
+      '_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+    ],
+    [
+      'word/document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Deterministic DocBlocks eval document</w:t></w:r></w:p><w:p><w:r><w:t>Converted from the approved Markdown source.</w:t></w:r></w:p><w:sectPr/></w:body></w:document>',
+    ],
+    [
+      'word/_rels/document.xml.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+    ],
+  ];
+  return zipStored(files);
+}
+
+/**
+ * Smallest structurally valid PDF used only by eval mocks: header, four
+ * objects, xref table, trailer. Byte offsets in the xref are computed rather
+ * than hardcoded so edits to the object bodies can't silently desync it.
+ */
+export function minimalPdfFixture(): Uint8Array {
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Length 60 >>\nstream\nBT /F1 12 Tf 72 720 Td (DocBlocks eval report) Tj ET\nendstream\nendobj\n',
+  ];
+  const header = '%PDF-1.7\n%âãÏÓ\n';
+  const offsets: number[] = [];
+  let body = '';
+  for (const object of objects) {
+    offsets.push(header.length + body.length);
+    body += object;
+  }
+  const xrefStart = header.length + body.length;
+  const xref = [
+    'xref',
+    `0 ${objects.length + 1}`,
+    '0000000000 65535 f ',
+    ...offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n `),
+    'trailer',
+    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
+    'startxref',
+    String(xrefStart),
+    '%%EOF\n',
+  ].join('\n');
+  // latin1 so the binary comment bytes in the header stay single-byte.
+  return Uint8Array.from(`${header}${body}${xref}`, (char) => char.charCodeAt(0) & 0xff);
 }
 
 function zipStored(files: Array<[string, string]>): Uint8Array {

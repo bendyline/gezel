@@ -51,9 +51,32 @@ The registry has grown well past the point where "run everything" is a routine a
 - **`core`** — THE standard model scorecard: the 3 frozen anchors (kept for longitudinal comparability) + 8 scenarios each covering a distinct capability axis (multi-file refactor, tests-as-spec, undocumented-bug debugging, ETL precision, dense read → structured write, runbook execution with stop-on-anomaly, planning, conflict synthesis). Hermetic, medium-model-passable. "Evaluate this model" means this.
 - **`smoke`** — 3 fast probes for a pulse check before/after a risky change. Never a scorecard.
 - **`extended-coding` / `extended-grounding` / `extended-retrieval`** — per-axis deep dives, reached for when core surfaces a weakness on that axis or a change targets it.
+- **`productivity`** — end-user knowledge work: constrained communications, meeting follow-through, records, planning, calendar synthesis, experiment analysis, local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks document production (PPTX, DOCX, and a theme round-trip). Six of its thirteen members are shared with `core`/`extended-grounding` (the axes genuinely overlap with office work); the other seven are what it uniquely buys. Deliberately excludes creative writing (that's `extended-writing`) and coding. Three gate kinds: prose/structure, **arithmetic oracles** (a locked-schema JSON of computed figures checked field-by-field, so a well-shaped readout with a wrong p-value fails), and **binary container gates** (the DocBlocks members must produce a real ZIP-shaped PPTX/DOCX — a byte floor alone accepted the Markdown source renamed to `.pptx`). Hermetic by *enforcement*, not assertion: mocked dependencies, a mocked web-search backend, and a grader assertion that no live-retrieval tool was called — the live Wikipedia API is keyless and on by default, so a config-only guarantee would fail silently while every content gate still passed. Budget 6h05m at `--count 1`; `productivity-smoke` is the 1h15m pulse-check subset.
 - **`headroom`** — deliberately hard probes (arcade-deluxe, squisq-review) that are NOT expected to pass 100%; they keep a saturated scorecard honest and separate frontier-class from medium-class execution.
 
 Suite membership changes are deliberate: adding to `core` taxes every future scorecard's wall-clock, and removing breaks comparability across time. Grow the extended suites freely; promote into `core` only when an axis has proven to differentiate models and is missing there.
+
+## The published scorecard
+
+`core` and `productivity` are the two suites whose results **ship in the product** — the handboek's [How we test models](handboek/technical/how-we-test-models.md) and [Model scorecard](handboek/technical/model-scorecard.md) articles render them for end users. That raises the bar from "a number we discussed" to "a number a customer reads", so the path from measurement to publication is a single command:
+
+```bash
+pnpm eval:scorecard --list                    # plan: models, suites, wall-clock ceiling
+pnpm eval:scorecard --count 3                 # sweep every cached model, both suites
+pnpm eval:scorecard --count 3 --run-id <id> --models <new-model>   # add a model later
+```
+
+The script exists because a published comparison has properties a hand-run `eval:all` cannot guarantee:
+
+- **One run identity.** Every model in an invocation is stamped with the same device, git sha, catalog pin, and trial count. Comparability is by construction, not by remembering.
+- **Both suites, always.** No model is ever ranked on a subset.
+- **`--count 3` floor.** Below three trials the renderer prints a raw count, never a rate — `MIN_TRIALS_FOR_RATE` is enforced at the point of display, so an under-sampled cell cannot become a percentage.
+- **Failure attribution.** Only `failureClass: 'model'` trials count. Infra/operator/grader failures are recorded in a visible "not measured" column and removed from both sides of the ratio, so a wedged engine never books as a model weakness.
+- **No silent merging.** Results carry their `runId`. A model measured under different provenance renders in a separate table with the differences named (`different gezel build`, `different catalog version`). Adding a model to an existing sweep means passing the same `--run-id`; anything else starts a new round, which is the honest thing to do once the device or build has moved.
+
+The dataset lives at [packages/core/src/scorecard/data/scorecard.json](../packages/core/src/scorecard/data/scorecard.json) and is checked in — that file IS the published record. The articles hold no numbers of their own.
+
+**On judge drift.** `--llm-judge` axis scores are recorded with the judge model id and are only ever compared inside one run. The deterministic pass/fail is the longitudinal signal; the judge is colour. This is why the shipped articles quote pass counts and never a judge score.
 
 ## What a matrix run looks like
 

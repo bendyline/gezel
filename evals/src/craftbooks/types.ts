@@ -27,10 +27,22 @@ export interface NodeScriptPassesGateCheck {
   }>;
 }
 
+/**
+ * Assert a binary office/media deliverable really is the container its
+ * extension claims. Eval-only; mirrors `BinaryDocumentCheckSchema` in core.
+ */
+export interface BinaryDocumentGateCheck {
+  kind: 'binaryDocument';
+  file: string;
+  artifact?: boolean;
+  minBytes?: number;
+}
+
 export type CraftbookEvalGateCheck =
   | GateCheck
   | PrometheusAlertsGateCheck
-  | NodeScriptPassesGateCheck;
+  | NodeScriptPassesGateCheck
+  | BinaryDocumentGateCheck;
 
 export type CraftbookEvalCoverageStatus = 'missing' | 'planned' | 'implemented' | 'validated';
 
@@ -172,6 +184,10 @@ export interface CraftbookEvalSpec {
    * override when the scenario must prove role routing and tool handoffs.
    */
   runAsCraftbookTask?: boolean;
+  /** Max trial duration, ms. Unset inherits the runner's 8-hour default. */
+  timeoutMs?: number;
+  /** Hard no-progress timeout, ms. Unset inherits the runner's 45 minutes. */
+  progressTimeoutMs?: number;
 }
 
 export interface CraftbookTemplateSummary {

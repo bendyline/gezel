@@ -75,21 +75,101 @@ For a standardized set, run a named suite from
 [src/suites.ts](src/suites.ts) — `core` is the 11-scenario model
 scorecard (3 frozen anchors + 8 diverse capability axes) and the default
 answer to "evaluate this model"; `smoke` is a fast pulse check;
-`extended-coding` / `extended-grounding` / `extended-retrieval` are
-per-axis deep dives; `headroom` holds the deliberately hard probes:
+`extended-coding` / `extended-grounding` / `extended-retrieval` /
+`extended-writing` are per-axis deep dives; `productivity` is the
+office/knowledge-work scorecard (with `productivity-smoke` as its pulse
+check); `headroom` holds the deliberately hard probes:
 
 ```bash
 pnpm eval:all --suite core --count 3 --model gemma4-e4b-q4
 ```
+
+**`productivity`** grades the artifacts a non-technical user would
+recognize — communications, meeting follow-through, planning, a research
+brief, an A/B readout, a spreadsheet model, a PowerPoint deck, a Word
+document. It is fully hermetic: its Wikipedia, calendar, and DocBlocks
+dependencies are deterministic local mocks, `webSearch` is pinned to a
+mock backend, and the research scenario *asserts* that no live-retrieval
+tool was called rather than trusting configuration.
+
+Three kinds of gate carry the suite, and they are worth knowing apart:
+
+- **Prose/structure gates** — ordered sections, word bands, required
+  content. These mostly measure brief-compliance.
+- **Arithmetic oracles** — `craftbook-ab-test-readout` and
+  `craftbook-spreadsheet-model` write a locked-schema JSON of computed
+  figures which is checked field-by-field against values derived from the
+  seeded data. A structurally perfect readout with a wrong p-value fails.
+- **Binary container gates** — the three DocBlocks members produce a real
+  PPTX or DOCX through `convert_document` → `preview_document` →
+  `save_artifact`, and the gate verifies the ZIP signature. Writing the
+  Markdown source to the `.pptx` path no longer passes.
+
+Two things to know before starting it. Worst case is **6h05m at
+`--count 1`**, so a `--count 3` scorecard is a ~18h job — and below n=3
+the harness refuses to quote a pass *rate* at all (it prints a raw count),
+so `--count 1` is a spot check, not a score. And most members carry an
+advisory judge, so `--llm-judge` is where the qualitative signal lives.
+
+```bash
+# Full scorecard. Budget the wall-clock first.
+pnpm eval:all --suite productivity --count 3 --model gemma4-e4b-q4 --llm-judge
+
+# ~1h15m pulse check instead — one of each gate kind (prose, arithmetic
+# oracle, real DOCX through DocBlocks).
+pnpm eval:all --suite productivity-smoke --count 1 --model gemma4-e4b-q4 --llm-judge
+
+# Or a named subset of any suite — runs in suite order, and an id that
+# isn't a member of that suite is an error rather than a silent no-op.
+pnpm eval:all --suite productivity --scenarios meeting-followup,wikipedia-research-brief \
+  --count 3 --model gemma4-e4b-q4 --llm-judge
+```
+
+## The published scorecard
+
+`core` and `productivity` results ship inside the product: the handboek's
+**How we test models** and **Model scorecard** articles render them for end
+users. Use `eval:scorecard` rather than two `eval:all` invocations — it
+stamps every model in one sweep with the same device, git sha, catalog pin,
+and trial count, so the resulting table is comparable by construction.
+
+```bash
+# Plan first: which models are cached, and what the wall-clock ceiling is.
+pnpm eval:scorecard --list
+
+# The sweep. Both suites, every cached model, 3 trials (the floor for
+# quoting a rate at all).
+pnpm eval:scorecard --count 3
+
+# A new model arrives later — join it to the SAME round so it lands in the
+# same table rather than starting a fresh, incomparable one.
+pnpm eval:scorecard --count 3 --run-id 2026-08-09-mac-apple-m4-max --models qwen3.6-27b-q4
+
+# Rebuild the dataset from runs already on disk, without re-running anything.
+pnpm eval:scorecard --ingest-only --run-id 2026-08-09-mac-apple-m4-max
+```
+
+It writes [packages/core/src/scorecard/data/scorecard.json](../packages/core/src/scorecard/data/scorecard.json).
+That checked-in file is the published record; the articles carry no numbers
+of their own, so a re-run updates what ships with no article edits.
+
+The ceiling `--list` prints is the sum of authored timeouts, not an
+estimate — healthy models finish far inside them. For a full model set it is
+normal to accumulate the sweep across several sittings under one `--run-id`.
+
+Only `failureClass: 'model'` trials count toward a score. Infra, operator,
+and grader failures show in a separate "not measured" column and are removed
+from both sides of the ratio. See [docs/eval-strategy.md](../docs/eval-strategy.md)
+for the full comparability rules and the judge-drift policy.
 
 `--count <N>` is required for every `eval:all` run (except `--list`); there is no implicit
 trial-count default. For "every registered scenario × N trials", omit `--suite` deliberately:
 
 ```bash
 pnpm eval:all --count 5
-# Optional: filter to an ad-hoc subset (mutually exclusive with --suite)
+# Optional: filter to an ad-hoc subset of the whole registry
 pnpm eval:all --count 3 --scenarios tictactoe,petshop
-# List scenarios and suites
+# List scenarios and suites (suite descriptions carry their wall-clock budget)
 pnpm eval:all --list
 ```
 

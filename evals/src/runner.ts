@@ -13,6 +13,7 @@ import {
   readDaemonLogTailSync,
   summarizeNativeEngineIncidents,
 } from './failure-class.ts';
+import { attachableDeliverable, describeSendFailure } from './handoff.ts';
 import { summarizeKeurmeesterCases } from './keurmeester-metrics.ts';
 import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
@@ -58,6 +59,12 @@ import type {
   TrialResult,
   TrialStatus,
 } from './types.ts';
+
+export {
+  attachableDeliverable,
+  describeSendFailure,
+  isCoordinationOnlyRole,
+} from './handoff.ts';
 
 // Legacy camelCase spellings kept for scoring pre-rename run dirs.
 const COMPLETED_REPAIR_MUTATION_TOOLS = new Set([
@@ -1056,51 +1063,6 @@ const SELF_ORCHESTRATING_MIN_SOFT_PROGRESS_MS = 20 * 60 * 1000;
  * trial still failed claiming the model had ignored them.
  */
 const WRITE_CAPABLE_ROLES = /^(builder|developer|implementer|engineer)$/i;
-const COORDINATION_ONLY_ROLES = /^(voorman|coordinator|planner|meester|foreman)$/i;
-
-export function isCoordinationOnlyRole(role: string | null | undefined): boolean {
-  return role != null && COORDINATION_ONLY_ROLES.test(role.trim());
-}
-
-/**
- * The `expectedDeliverable` fragment for a nudge, dropped when the recipient
- * cannot own a file. Delivering the prose without the file contract beats a
- * rejected send: the recipient can still act, or re-delegate.
- */
-export function attachableDeliverable(
-  filePath: string | null | undefined,
-  role: string | null,
-  log: (msg: string) => void,
-): { expectedDeliverable?: { kind: 'file'; filePath: string } } {
-  if (!filePath) return {};
-  if (isCoordinationOnlyRole(role)) {
-    log(
-      `[poll] nudge target has coordination-only role "${role}" — sending without the ${filePath} file contract (the service rejects file handoffs to these roles)`,
-    );
-    return {};
-  }
-  return { expectedDeliverable: { kind: 'file', filePath } };
-}
-
-/**
- * Surface the service's own error text. The client wraps failures as
- * `Gezel API error <status> on <method> <path>` and drops the response body,
- * which left "400" as the only clue and made this class of bug undiagnosable
- * from run artifacts alone.
- */
-export function describeSendFailure(err: unknown): string {
-  if (err instanceof Error) {
-    const body = (err as { body?: unknown }).body;
-    const detail =
-      typeof body === 'string'
-        ? body
-        : body && typeof body === 'object' && 'error' in body
-          ? String((body as { error: unknown }).error)
-          : null;
-    return detail ? `${err.message} — ${detail}` : err.message;
-  }
-  return String(err);
-}
 
 /**
  * Default hard no-progress window. If the HARD digest (real product
@@ -1119,6 +1081,23 @@ export function describeSendFailure(err: unknown): string {
  * and `DEFAULT_MAX_DURATION_MS` (8 h) is the runaway backstop.
  */
 const DEFAULT_HARD_PROGRESS_TIMEOUT_MS = 45 * 60 * 1000;
+const MAX_ACTIVE_TRIAL_SESSIONS = 64;
+
+/**
+ * A bounded eval task should not create an unbounded forest of active chats.
+ * Session count used to count as hard progress forever; a broken craftbook
+ * fanout reached 144 active sessions and thereby kept a multi-hour trial alive.
+ */
+export function runawaySessionFailure(
+  sessionCount: number,
+  maximum = MAX_ACTIVE_TRIAL_SESSIONS,
+): EvalTerminalFailure | null {
+  if (sessionCount < maximum) return null;
+  return {
+    reason: `runaway orchestration: ${sessionCount} active chat sessions reached the eval safety cap of ${maximum}; session creation is no longer forward progress`,
+    failureMode: 'model-stuck',
+  };
+}
 
 /**
  * Soft-clock flatness at which a hard-watchdog kill is described as an idle
@@ -1988,6 +1967,11 @@ export async function pollUntilDone(
         latestSniff,
         args.daemonLogPath,
       );
+      const sessionRunaway = runawaySessionFailure(fp.sessionCount);
+      if (sessionRunaway) {
+        args.log(`[poll] terminal: ${sessionRunaway.reason}`);
+        return { success: false, ...sessionRunaway, ...finalSniffOf() };
+      }
       const digest = digestFingerprint(fp);
       const daemonNote = fp.daemonActivity
         ? `daemon[src=${fp.daemonActivity.source}](turns=${fp.daemonActivity.turnStarts},tools=${fp.daemonActivity.toolCalls},slot=${fp.daemonActivity.slotUpdates},stream=${fp.daemonActivity.streamPulses}) `
@@ -3253,11 +3237,19 @@ export function retryLoopSniffKey(
 }
 
 export function sniffArtifactHasScored(
-  sniff: Pick<TrialFinalSniff, 'key' | 'score'> | null | undefined,
+  sniff:
+    | (Pick<TrialFinalSniff, 'key' | 'score'> & Partial<Pick<TrialFinalSniff, 'bytes'>>)
+    | null
+    | undefined,
   scoredSniffKeys: ReadonlySet<string>,
 ): boolean {
   if (!sniff) return false;
-  return sniff.score > 0 || scoredSniffKeys.has(sniff.key);
+  // Some multi-deliverable gates report score=0 even after a substantial
+  // near-miss exists (for example a deck source/preview at the wrong binary
+  // path). Bytes are observable proof that the team has produced an artifact;
+  // exempting that state from every plateau guard lets active chatter run to
+  // the multi-hour ceiling. A true "not written yet" sniff remains 0/0.
+  return sniff.score > 0 || (sniff.bytes ?? 0) > 0 || scoredSniffKeys.has(sniff.key);
 }
 
 function retryLoopFailReasonKey(reason: string | undefined): string {

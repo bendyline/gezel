@@ -14,7 +14,12 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
-import { HF_CACHE_DIR_ENV, pinTransformersCacheDir } from '../transformers-cache.js';
+import {
+  HF_CACHE_DIR_ENV,
+  TRANSFORMERS_MODULE,
+  isMissingModule,
+  pinTransformersCacheDir,
+} from '../transformers-cache.js';
 
 export const log = createLogger('memory');
 
@@ -84,9 +89,16 @@ type Pipeline = (
  */
 export class PipelineLoadError extends Error {
   readonly code = 'PIPELINE_LOAD_FAILED';
-  constructor(message: string) {
+  /**
+   * The optional peer is simply not installed — a documented, supported npm
+   * configuration. Callers use this to degrade quietly instead of reporting a
+   * damaged runtime.
+   */
+  readonly optionalPeerMissing: boolean;
+  constructor(message: string, optionalPeerMissing = false) {
     super(message);
     this.name = 'PipelineLoadError';
+    this.optionalPeerMissing = optionalPeerMissing;
   }
 }
 
@@ -110,11 +122,13 @@ export async function loadPipeline(): Promise<Pipeline> {
         if (modelId !== DEFAULT_EMBED_MODEL) log.info(`[embed] using model ${modelId}`);
         return (await pipeline('feature-extraction', modelId)) as Pipeline;
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        const message = detail.includes('@huggingface/transformers')
+        const missing = isMissingModule(err, TRANSFORMERS_MODULE);
+        const message = missing
           ? 'Local memory embeddings are an optional npm feature. Install @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).'
-          : detail;
-        throw new PipelineLoadError(message);
+          : err instanceof Error
+            ? err.message
+            : String(err);
+        throw new PipelineLoadError(message, missing);
       }
     })();
     // A transient load failure (e.g. network blip during the first download)

@@ -11,10 +11,26 @@ export interface CraftbookEvalOverride {
   scenarioId?: string;
   /** Links a hand-authored scenario instead of the generic adapter. */
   existingScenarioId?: string;
-  coverage: CraftbookEvalSpec['coverage'];
+  /**
+   * Optional so an override can carry ONLY operational settings (a suite
+   * timeout, say) without inventing a coverage claim the book has not
+   * earned. Absent means the adapter's "adapted from test.json, no local
+   * validation recorded" default stands.
+   */
+  coverage?: CraftbookEvalSpec['coverage'];
   gaps?: string[];
   /** Run this non-fanout book through the real task/step dispatcher. */
   runAsCraftbookTask?: boolean;
+  /**
+   * Max trial duration, ms. Craftbook scenarios otherwise inherit the
+   * runner's 8-hour default, which is fine for a one-off book run and
+   * ruinous inside a curated suite — a handful of unbounded members turn a
+   * scorecard into a multi-day job with no way to predict it beforehand.
+   * Set this for any book that belongs to a suite.
+   */
+  timeoutMs?: number;
+  /** Hard no-progress timeout, ms. Defaults to the runner's 45 minutes. */
+  progressTimeoutMs?: number;
 }
 
 export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
@@ -29,11 +45,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'ab-test-readout': {
+    timeoutMs: 25 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
       notes:
-        'Validated locally with gemma4-e4b-q8. The run read the experiment brief and aggregate CSV, repaired a too-short first readout, and passed hypothesis, decision-rule, metric, confidence, guardrail, and no-ship recommendation gates. Needs a numeric oracle for p-value/CI correctness.',
+        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates. Now carries a harness-owned arithmetic oracle: data/stats.json is checked field-by-field with jsonPathEquals against figures derived from the seeded CSV, including the discriminating case where a significant positive lift still yields do_not_ship because the refund guardrail regresses 0.23pp against a 0.20pp limit. Needs a re-run under the new gates.',
     },
     gaps: ['Add a custom numeric oracle for significance and confidence interval calculations.'],
   },
@@ -76,6 +93,7 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'annotated-bibliography': {
+    timeoutMs: 25 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
@@ -477,7 +495,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'csv-transformer': {
     coverage: {
@@ -513,7 +533,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'data-join-merge': {
     coverage: {
@@ -522,7 +544,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'data-pipeline-etl': {
     coverage: {
@@ -578,7 +602,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'deep-security-review': {
     coverage: {
@@ -655,7 +681,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'doc-rewrite': {
     coverage: {
@@ -690,7 +718,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Generated generic data smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'due-diligence-brief': {
     coverage: {
@@ -769,7 +799,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'fact-check': {
     coverage: {
@@ -839,9 +871,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
       notes:
-        'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after classifier routing was fixed.',
+        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates, which were satisfiable by accident (contains "40" matched the raw revenue cell 1440). Now carries a harness-owned arithmetic oracle over data/model.json. Needs a re-run under the new gates.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'form-fill-batch': {
     coverage: {
@@ -1041,7 +1075,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'incident-comms-templates': {
     coverage: {
@@ -1160,7 +1196,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'library-package': {
     coverage: {
@@ -1407,7 +1445,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Generated generic data smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'parser-grammar': {
     coverage: {
@@ -1493,11 +1533,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'powerpoint-deck': {
+    timeoutMs: 35 * 60_000,
     runAsCraftbookTask: true,
     coverage: {
       status: 'implemented',
       notes:
-        'Runs the real multi-role craftbook task against a project-scoped fake DocBlocks MCP. Deterministic gates require convert, preview, save, and a ZIP-shaped PPTX at the requested workspace path; local-model validation is still pending.',
+        'Runs the real multi-role craftbook task against a project-scoped fake DocBlocks MCP. Deterministic gates require convert, preview, save, and — since the binaryDocument check landed — an actually ZIP-shaped PPTX at the requested workspace path. Before that the pptx gate was a 1000-byte floor, which the Markdown deck source cleared. Local-model validation still pending.',
     },
     gaps: ['Run the new end-to-end fake-DocBlocks scenario on at least one local model.'],
   },
@@ -1616,7 +1657,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'recurring-invoice-run': {
     coverage: {
@@ -1625,7 +1668,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'refactor-module': {
     coverage: {
@@ -1703,14 +1748,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
   },
   'research-to-document': {
+    timeoutMs: 30 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'The latest sidecar checks the complete Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset, real DOCX artifact gate, and removal of the obsolete validate_document call; the revised workflow has not yet been run on a local model.',
+        'Upgraded from a Markdown-source smoke eval to a real DocBlocks artifact-surface eval: a fake DocBlocks MCP serves the template family (list_templates / describe_template) plus convert/preview/save, save_artifact materializes a real DOCX into the artifacts drawer, and a binaryDocument check asserts the saved bytes are a ZIP rather than the Markdown renamed. Not yet run on a local model.',
     },
-    gaps: [
-      'Add a fake DocBlocks MCP that returns deterministic DOCX/PDF artifacts and page previews, then assert saved binaries and tool-call sequence.',
-    ],
+    gaps: ['Run the upgraded artifact-surface scenario on at least one local model.'],
   },
   'rest-api': {
     coverage: {
@@ -1877,16 +1921,21 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'spreadsheet-model': {
+    timeoutMs: 30 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
       notes:
-        'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after classifier routing was fixed.',
+        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates, which were satisfiable by accident (contains "40" matched the raw revenue cell 1440). Now carries a harness-owned arithmetic oracle over data/model.json. Needs a re-run under the new gates.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'sprite-sheet': {
     coverage: {
@@ -1904,7 +1953,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'standup-summary': {
     coverage: {
@@ -1940,7 +1991,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'subtitle-generator': {
     coverage: {
@@ -1967,7 +2020,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
   },
   'svg-animation': {
     coverage: {
@@ -2143,7 +2198,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Generated generic data smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
     },
-    gaps: ['Add parser-backed table/value equality checks for this data smoke class.'],
+    gaps: [
+      'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
+    ],
+  },
+  'week-plan': {
+    timeoutMs: 25 * 60_000,
   },
   'weekly-review': {
     coverage: {

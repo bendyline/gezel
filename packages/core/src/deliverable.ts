@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { isBinaryDocumentPath } from './binary-document.js';
 import type {
   AdvanceWhen,
   CraftbookStep,
@@ -157,6 +158,11 @@ function gateChecksFloor(kind: DeliverableKind, path: string, minBytes?: number)
     file: path,
     bytes: minBytes ?? fallback,
   });
+  // Binary containers carry compressed part streams and package metadata,
+  // so even a one-slide deck clears a kilobyte. The text-shaped sniffs
+  // below (`nonempty`, `data-table`) would read the bytes as UTF-8, so
+  // they are suppressed here for the same reason the gate scripts are.
+  if (isBinaryDocumentPath(path)) return [mb(1000)];
   switch (kind) {
     case 'html-game':
       return [mb(1500), { kind: 'htmlLint', file: path }];
@@ -235,6 +241,14 @@ function gateScriptsForKind(kind: DeliverableKind, path: string): GateScriptRef[
     scope: 'standard',
     inputs,
   });
+  // Every script below greps or parses the file as TEXT. On a binary
+  // office/media path that is not merely weak, it is inverted: the
+  // `markdown-report` heading check rejected a real DOCX (a ZIP) and
+  // accepted the Markdown source renamed to `.docx`. Binary deliverables
+  // are produced through the DocBlocks conversion route, so their floor is
+  // the container signature — see `declarativeChecksForKind`, which swaps
+  // in the byte floor, and the eval harness's `binaryDocument` check.
+  if (isBinaryDocumentPath(path)) return [];
   switch (kind) {
     case 'html-game':
       // checkJsParses is a deliberate TIGHTENING over the old html-game

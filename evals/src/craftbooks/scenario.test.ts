@@ -72,6 +72,52 @@ describe('craftbook generic scenario adapter', () => {
     expect(logs.some((line) => line.includes('sent kickoff to Ada'))).toBe(true);
   });
 
+  it('routes binary office outputs through DocBlocks instead of write_file', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      installToolset: vi.fn().mockResolvedValue({ ok: true }),
+      listGezels: vi.fn(),
+      addGezelToProject: vi.fn().mockResolvedValue({
+        projectId: 'project-1',
+        gezelIds: ['gezel-1'],
+        added: true,
+      }),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const spec: CraftbookEvalSpec = {
+      ...directWorkerSpec(),
+      success: {
+        summary: 'A reviewed source and real PPTX exist.',
+        deliverables: [
+          { path: 'deck.md', kind: 'markdown-doc', minBytes: 100 },
+          { path: 'deliverables/deck.pptx', kind: 'slide-deck', minBytes: 1000 },
+        ],
+      },
+    };
+    const scenario = craftbookScenarioFromSpec(spec);
+
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    const projectArgs = client.createProject.mock.calls[0]![0];
+    expect(projectArgs.missionObjectives).toContain('convert_document');
+    expect(projectArgs.missionObjectives).toContain('copy_artifact_to_workspace');
+    const kickoff = client.sendChatMessage.mock.calls[0]![1].message as string;
+    expect(kickoff).toContain('Write the text workspace deliverable');
+    expect(kickoff).toContain('deck.md');
+    expect(kickoff).toContain('convert_document');
+    expect(kickoff).toContain('preview_document');
+    expect(kickoff).toContain('save_artifact');
+    expect(kickoff).toContain('copy_artifact_to_workspace');
+    expect(kickoff).not.toContain('write_file({ path: "deliverables/deck.pptx"');
+  });
+
   it('runs a spawn/fanout book as a dispatched craftbook task instead of a freehand kickoff', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
