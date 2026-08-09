@@ -54,7 +54,6 @@ import {
   type ProjectGitHub,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
-  type ProjectMail,
   type ProjectNudgeConfig,
   ProjectSchema,
   type ProjectTabVisibility,
@@ -163,7 +162,12 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
+import {
+  intoWorkspaceRelative,
+  isProtectedDataPath,
+  resolveInside,
+  safeJoin,
+} from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -2678,8 +2682,6 @@ export class Store {
       about?: string;
       missionObjectives?: string;
       github?: { url?: string; branch?: string } | null;
-      /** Email association — `null` clears it. */
-      mail?: ProjectMail | null;
       /** External-data connector bindings — `null` clears them. */
       connectors?: import('@bendyline/gezel').ProjectConnectorBinding[] | null;
       allowGezelWrites?: boolean;
@@ -2752,11 +2754,6 @@ export class Store {
         ? { voormanAutoAssignedAt: patch.voormanAutoAssignedAt }
         : {}),
       ...(patch.github !== undefined ? { github: nextGitHub } : {}),
-      ...(patch.mail === null
-        ? { mail: undefined }
-        : patch.mail !== undefined
-          ? { mail: patch.mail }
-          : {}),
       ...(patch.connectors === null
         ? { connectors: undefined }
         : patch.connectors !== undefined
@@ -3725,10 +3722,14 @@ export class Store {
    */
   async assertWorkspaceWritable(
     id: string,
-    opts?: { initiatedByGezel?: boolean },
+    opts?: { initiatedByGezel?: boolean; path?: string | string[] },
   ): Promise<
     | { ok: true; workspaceDir: string; external: boolean }
-    | { ok: false; reason: 'missing-flag-external' | 'disabled-by-project'; workingDir: string }
+    | {
+        ok: false;
+        reason: 'missing-flag-external' | 'disabled-by-project' | 'data-subtree-readonly';
+        workingDir: string;
+      }
   > {
     const meta = await this.tryGetProjectMeta(id);
     const resolved = this.resolveWorkspaceDir(id, meta);
@@ -3737,6 +3738,24 @@ export class Store {
     }
     if (opts?.initiatedByGezel && meta?.allowGezelWrites === false) {
       return { ok: false, reason: 'disabled-by-project', workingDir: resolved.dir };
+    }
+    // The connector-corpus subtree (`data/**`) is inbound source-of-truth and
+    // read-only to gezels; only `_`-prefixed entries (drafts, outbox, flag
+    // sidecars) are the mutable surface. A deleted record is never re-fetched
+    // — the sync cursor has already advanced past it — so a gezel write here
+    // is silent permanent data loss, not a reversible edit.
+    if (opts?.initiatedByGezel && opts.path !== undefined) {
+      const paths = Array.isArray(opts.path) ? opts.path : [opts.path];
+      const rebase = (p: string): string => {
+        try {
+          return intoWorkspaceRelative(resolved.dir, p);
+        } catch {
+          return p;
+        }
+      };
+      if (paths.some((p) => isProtectedDataPath(rebase(p)))) {
+        return { ok: false, reason: 'data-subtree-readonly', workingDir: resolved.dir };
+      }
     }
     return {
       ok: true,
@@ -3768,7 +3787,10 @@ export class Store {
     content: string,
     ctx?: JournalContext,
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: filePath,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
@@ -3804,7 +3826,10 @@ export class Store {
     },
     ctx?: JournalContext,
   ): Promise<WorkspaceEditResult> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: args.path,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
@@ -3890,7 +3915,10 @@ export class Store {
     },
     ctx?: JournalContext,
   ): Promise<WorkspaceEditResult> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: args.path,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
@@ -3949,7 +3977,10 @@ export class Store {
     args: { path: string; diff: string },
     ctx?: JournalContext,
   ): Promise<WorkspaceEditResult> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: args.path,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
@@ -4021,7 +4052,10 @@ export class Store {
     edits: Array<{ path: string; diff: string }>,
     ctx?: JournalContext,
   ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: edits.map((e) => e.path),
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
 
     interface PlannedWrite {
@@ -4115,7 +4149,10 @@ export class Store {
     ctx?: JournalContext,
   ): Promise<WorkspaceEditResult> {
     const where = args.where ?? 'after';
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: args.path,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
@@ -4183,7 +4220,10 @@ export class Store {
     data: Buffer,
     ctx?: JournalContext,
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: filePath,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
@@ -4228,7 +4268,10 @@ export class Store {
     opts: { recursive?: boolean } = {},
     ctx?: JournalContext,
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: filePath,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     // `force: true` so removing a missing path is a no-op (matches the
@@ -4247,7 +4290,10 @@ export class Store {
   }
 
   async mkdirProjectWorkspace(id: string, dirPath: string, ctx?: JournalContext): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: dirPath,
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, dirPath);
     await mkdir(full, { recursive: true });
@@ -4268,7 +4314,10 @@ export class Store {
     toPath: string,
     ctx?: JournalContext,
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      path: [fromPath, toPath],
+    });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const fromFull = await resolveInside(gate.workspaceDir, fromPath);
     const toFull = await resolveInside(gate.workspaceDir, toPath);

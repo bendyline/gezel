@@ -19,8 +19,10 @@ export interface RecordRef {
   /** Adapter fetch handle passed back to `fetchRecord` (IMAP UID string, Gmail
    *  message id, issue id, …). The portable identifier within a scope. */
   id: string;
-  /** Newest-first ordering key (generalizes IMAP `uid`). Absent for sources
-   *  that order results themselves (Gmail history, Graph delta, REST search). */
+  /** Newest-first ordering key (generalizes IMAP `uid`; generic drivers derive
+   *  it from the record timestamp). When absent the engine's newest-first sort
+   *  is a stable no-op and the adapter's own ordering is preserved — only safe
+   *  for sources that order results themselves (Gmail history, Graph delta). */
   ordinalKey?: number;
   /** The raw list item, when a source returns full records from its list call
    *  (no separate fetch). `fetchRecord` may normalize this directly. */
@@ -30,11 +32,35 @@ export interface RecordRef {
   ts?: string;
 }
 
+/** Options the engine passes to an incremental scan. */
+export interface ListChangesOptions {
+  /**
+   * Batch-size hint. An adapter that can page SHOULD return at most this many
+   * records with `partial: true` and a cursor covering exactly the returned
+   * batch — the engine then loops the scope until done. An adapter that
+   * over-returns keeps working: the engine sorts newest-first, takes `limit`,
+   * counts the overflow as skipped, and logs it (the mail backfill-cap model).
+   */
+  limit?: number;
+}
+
 /** Result of an incremental scan of one scope. */
 export interface ChangeBatch<Cur> {
   records: RecordRef[];
   /** Advanced cursor to persist; resume from here next sync. */
   cursor: Cur;
+  /**
+   * More changes remain beyond this batch and `cursor` covers exactly the
+   * records returned — the engine may continue the scope immediately.
+   */
+  partial?: boolean;
+  /**
+   * This single batch is the complete current state of the scope (a full
+   * re-list, not an incremental delta). Under a mirror-completeness type this
+   * lets the engine prune records the source no longer returns. Mutually
+   * exclusive with `partial`; never set on incremental batches.
+   */
+  enumeratedAll?: boolean;
   /** Source asked us to back off (rate limited) — resume next tick. */
   rateLimited?: boolean;
 }
@@ -51,8 +77,9 @@ export interface ChangeBatch<Cur> {
 export interface NormalizedRecord {
   /** Content identity (mail: Message-ID). Hashed for idempotency + the filename. */
   recordId: string;
-  /** Slugged, path-safe dir components under the corpus dir (mail:
-   *  [accountSlug, folderSlug, threadDir]). */
+  /** Slugged, path-safe dir components under the corpus dir + engine-owned
+   *  scope level — optional adapter partitioning only (mail: the thread dir;
+   *  calendar: the month bucket). Adapters must NOT re-derive the scope here. */
   dirSegments: string[];
   /** Slugged filename stem, sans ordinal + hash (mail: `<iso-min>--from-<local>`).
    *  The writer builds `<NNN>--<fileStem>--<hash8>.md`. */
@@ -89,8 +116,16 @@ export interface ConnectorAdapter<Rec = NormalizedRecord, Cur = unknown> {
   ensureAuth(): Promise<void>;
   /** Partitions to sync (mail folders, calendars). `['']` for single-scope. */
   listScopes(): Promise<string[]>;
-  /** Records added since `cursor` in `scope`, plus the advanced cursor. */
-  listChangesSince(scope: string, cursor: Cur | undefined): Promise<ChangeBatch<Cur>>;
+  /**
+   * Records added since `cursor` in `scope`, plus the advanced cursor. The
+   * engine guarantees the cursor it passes for a scope is the cursor the
+   * adapter last returned for THAT scope — cursors never leak across scopes.
+   */
+  listChangesSince(
+    scope: string,
+    cursor: Cur | undefined,
+    opts?: ListChangesOptions,
+  ): Promise<ChangeBatch<Cur>>;
   /** Fetch + normalize one record (raw → canonical `NormalizedRecord`). */
   fetchRecord(scope: string, ref: RecordRef): Promise<Rec>;
   /** Write-back (Phase 7). Invoked at commit time by the outbox — never exposed

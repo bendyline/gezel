@@ -2,7 +2,8 @@ import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeMessage } from './storage.js';
+import { writeRecord } from '../connectors/writer.js';
+import { messageToRecord } from './storage.js';
 import type { MailMessage } from './types.js';
 
 let ws: string;
@@ -32,11 +33,16 @@ function makeMessage(over: Partial<MailMessage> = {}): MailMessage {
   };
 }
 
+// The converged layout: the engine hands the writer the binding corpus root +
+// the folder scope level; the record itself carries only the thread folder.
 const writer = (message: MailMessage) =>
-  writeMessage({ workspaceDir: ws, mailDir: 'mail', accountId: 'imap:alice@example.com', message });
+  writeRecord({
+    workspaceDir: ws,
+    corpusDir: 'data/work-mail/inbox',
+    record: messageToRecord('imap:alice@example.com', message),
+  });
 
 async function findMessageFile(): Promise<string | null> {
-  // mail/<acct>/inbox/<thread>/NNN--...md
   const walk = async (dir: string): Promise<string | null> => {
     for (const e of await readdir(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
@@ -49,21 +55,21 @@ async function findMessageFile(): Promise<string | null> {
     }
     return null;
   };
-  return walk(join(ws, 'mail'));
+  return walk(join(ws, 'data', 'work-mail'));
 }
 
-describe('writeMessage', () => {
+describe('messageToRecord + writeRecord', () => {
   it('writes a message into a thread folder with trust frontmatter', async () => {
     const r = await writer(makeMessage());
     expect(r.status).toBe('written');
     expect(r.relPath).toMatch(
-      /^mail\/imap-alice-example-com\/inbox\/2026-06-18--q2-roadmap--[0-9a-f]{8}\/001--.*\.md$/,
+      /^data\/work-mail\/inbox\/2026-06-18--q2-roadmap--[0-9a-f]{8}\/001--.*\.md$/,
     );
     const file = await findMessageFile();
     expect(file).not.toBeNull();
     const content = await readFile(file!, 'utf8');
     expect(content).toContain('trust: untrusted-external');
-    expect(content).toContain('from: ');
+    expect(content).toContain('imap:alice@example.com'); // account identity, not an opaque id
     expect(content).toContain('Thanks, the timeline looks good.');
   });
 
@@ -128,11 +134,10 @@ describe('writeMessage', () => {
       }),
     );
     expect(r.status).toBe('written');
-    // The written path stays under mail/.
-    expect(r.relPath!.startsWith('mail/')).toBe(true);
+    // The written path stays under the corpus.
+    expect(r.relPath!.startsWith('data/work-mail/')).toBe(true);
     expect(r.relPath).not.toContain('..');
-    // Nothing was created outside the workspace mail tree.
     const file = await findMessageFile();
-    expect(file!.startsWith(join(ws, 'mail'))).toBe(true);
+    expect(file!.startsWith(join(ws, 'data', 'work-mail'))).toBe(true);
   });
 });

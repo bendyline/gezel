@@ -146,15 +146,20 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
     return [''];
   }
 
-  async listChangesSince(_scope: string, cursor: unknown): Promise<ChangeBatch<GitHubWikiCursor>> {
+  async listChangesSince(
+    _scope: string,
+    cursor: unknown,
+    opts?: { limit?: number },
+  ): Promise<ChangeBatch<GitHubWikiCursor>> {
     this.assertReady();
     const prior = parseCursor(cursor);
     if (prior?.sha === this.commitSha && prior.complete) {
       return { records: [], cursor: prior };
     }
 
+    const batchSize = Math.max(1, Math.min(PAGE_BATCH_SIZE, opts?.limit ?? PAGE_BATCH_SIZE));
     const offset = prior?.sha === this.commitSha ? Math.min(prior.offset, this.pages.length) : 0;
-    const pageSlice = this.pages.slice(offset, offset + PAGE_BATCH_SIZE);
+    const pageSlice = this.pages.slice(offset, offset + batchSize);
     const nextOffset = offset + pageSlice.length;
     const nextCursor: GitHubWikiCursor = {
       sha: this.commitSha,
@@ -168,6 +173,10 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
         ...(this.commitDate ? { ts: this.commitDate } : {}),
       })),
       cursor: nextCursor,
+      ...(nextCursor.complete ? {} : { partial: true }),
+      // Only a single batch covering the whole page list from the start is a
+      // full enumeration (prune-safe); multi-round passes are not.
+      ...(nextCursor.complete && offset === 0 ? { enumeratedAll: true } : {}),
     };
   }
 
@@ -189,7 +198,11 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
     const format = extname(page.path).slice(1).toLowerCase();
     const repository = `${this.config!.owner}/${this.config!.repository}`;
     return {
-      recordId: `${page.path}:${page.blobSha}`,
+      // The page path is the record identity, so an edited page refreshes in
+      // place instead of accumulating revisions. Repo-global fields (HEAD
+      // commit sha/date) deliberately stay out of the frontmatter: they change
+      // on every wiki commit and would churn every page's content hash.
+      recordId: page.path,
       dirSegments: [slug(`${this.config!.owner}-${this.config!.repository}`, 64)],
       fileStem: slug(title, 72),
       frontmatter: {
@@ -199,8 +212,6 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
         path: page.path,
         format,
         url: wikiPageUrl(this.config!, page.path),
-        commit: this.commitSha,
-        ...(this.commitDate ? { date: this.commitDate } : {}),
       },
       bodyMarkdown,
       scanOrigin: 'github-wiki',

@@ -31,6 +31,7 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
+import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
@@ -79,7 +80,6 @@ import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexin
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
-import { MailManager } from './mail/manager.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
@@ -1783,24 +1783,22 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     onProjectMcpConfigChanged: (projectId) => chat.resetProjectToolsets(projectId),
   });
 
-  // Email sync engine. Drives mailbox linking + sync passes + outbound send.
-  const mail = new MailManager({
-    store,
-    secrets,
-    contentIndex,
-    isNightShiftActive: () => nightShift.isActive(),
-  });
-  // Generic connectors: register native adapters, then ONE idle/posture-gated
-  // sync loop covering both `project.connectors` bindings and legacy
-  // `project.mail` accounts (mail delegates to MailManager). This retires the
-  // separate MailSyncManager loop; fully moving mail accounts into
-  // `project.connectors` is a follow-up with a wider blast radius (the
-  // GEZEL_MAIL_ENABLED gate, chat env, and UI mail-tab detection key off
-  // `project.mail.accounts`).
+  // Connectors: mail, calendar, and wiki natives plus the generic drivers,
+  // all behind ONE idle/posture-gated sync loop over `project.connectors`.
+  // Mail accounts are ordinary `mail-*` bindings — the legacy `project.mail`
+  // stack (MailManager + its routes) was retired in the connector overhaul.
   registerMailAdapters();
   registerCalendarAdapters();
   registerGitHubWikiAdapters();
-  const connectors = new ConnectorManager({ store, secrets, catalog, contentIndex, scriptRunner });
+  const connectorLocks = new ProjectLocks();
+  const connectors = new ConnectorManager({
+    store,
+    secrets,
+    catalog,
+    contentIndex,
+    scriptRunner,
+    locks: connectorLocks,
+  });
   const connectorActions = new ConnectorActionManager({
     store,
     secrets,
@@ -1808,6 +1806,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     contentIndex,
     scriptRunner,
     isNightShiftActive: () => nightShift.isActive(),
+    locks: connectorLocks,
   });
   const connectorSync = new ConnectorSyncManager({
     store,
@@ -1816,12 +1815,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     isNightShiftActive: () => nightShift.isActive(),
     source: {
       label: 'connectors',
-      listBindings: (p) => [...(p.connectors ?? []), ...(p.mail?.accounts ?? [])],
+      listBindings: (p) => p.connectors ?? [],
       posture: (pol) => pol.allowExternalServices,
-      syncProject: async (p) => [
-        ...(await connectors.syncProject(p)),
-        ...(await mail.syncProject(p)),
-      ],
+      syncProject: (p) => connectors.syncProject(p),
     },
   });
 
@@ -1957,7 +1953,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     gitHubPrs,
     codeReviews,
     reportActions,
-    mail,
     connectors,
     connectorActions,
     renderer,

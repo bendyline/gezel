@@ -5,14 +5,19 @@ import {
   MAIL_PROVIDERS,
   type MailProviderId,
   connectMailboxOAuth,
+  linkImapMailbox,
   looksLikeEmail,
 } from './mail-link.js';
 
-type MailStatus = Awaited<ReturnType<typeof api.mailStatus>>;
+type ConnStatus = Awaited<ReturnType<typeof api.listConnectors>>;
+type MailBinding = ConnStatus['bindings'][number];
+
+const isMailBinding = (b: MailBinding): boolean => b.type.startsWith('mail-');
 
 /**
- * Project Mail tab — the management surface for an email-enabled project. Shows
- * linked accounts + last-sync state, a "Sync now" button, and a connect form
+ * Project Mail tab — a mail-flavored setup surface over the generic connector
+ * APIs. Mail accounts are `mail-*` connector bindings; this tab shows the
+ * linked ones + last-sync state, a "Sync now" button, and a connect form
  * (IMAP inline, or the loopback OAuth flow for Gmail / Microsoft).
  */
 export function ProjectMailTab({
@@ -22,7 +27,7 @@ export function ProjectMailTab({
   project: ProjectDetail;
   onProjectChange?: (p: ProjectDetail) => void;
 }) {
-  const [status, setStatus] = useState<MailStatus | null>(null);
+  const [status, setStatus] = useState<ConnStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -37,7 +42,7 @@ export function ProjectMailTab({
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await api.mailStatus(project.id));
+      setStatus(await api.listConnectors(project.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -61,8 +66,15 @@ export function ProjectMailTab({
     setError('');
     setNotice('');
     try {
-      const res = await api.syncMail(project.id);
-      const results = res.results as { written?: number; quarantined?: number }[];
+      const mailBindings = (status?.bindings ?? []).filter(isMailBinding);
+      const results: { written?: number; quarantined?: number }[] = await Promise.all(
+        mailBindings.map((b) =>
+          api
+            .syncConnector(project.id, b.id)
+            .then((r) => r.result as { written?: number; quarantined?: number })
+            .catch(() => ({}) as { written?: number; quarantined?: number }),
+        ),
+      );
       const n = results.reduce((sum, r) => sum + (r.written ?? 0) + (r.quarantined ?? 0), 0);
       setNotice(n > 0 ? `Synced ${n} new message(s).` : 'Synced — no new mail.');
       await refresh();
@@ -71,7 +83,7 @@ export function ProjectMailTab({
     } finally {
       setBusy(false);
     }
-  }, [project.id, refresh]);
+  }, [project.id, status, refresh]);
 
   const handleLink = useCallback(async () => {
     setError('');
@@ -88,17 +100,12 @@ export function ProjectMailTab({
     setBusy(true);
     try {
       if (provider === 'imap') {
-        await api.linkMailbox(project.id, {
-          provider: 'imap',
+        await linkImapMailbox(project.id, {
           address: addr,
-          imap: {
-            host: host.trim(),
-            ...(port.trim() ? { port: Number(port.trim()) } : {}),
-            secure,
-            user: addr,
-            pass,
-          },
-          syncFolders: ['INBOX'],
+          host: host.trim(),
+          ...(port.trim() ? { port: Number(port.trim()) } : {}),
+          secure,
+          pass,
         });
       } else {
         await connectMailboxOAuth(project.id, provider, addr);
@@ -131,7 +138,7 @@ export function ProjectMailTab({
     resetForm,
   ]);
 
-  const accounts = status?.accounts ?? [];
+  const accounts = (status?.bindings ?? []).filter(isMailBinding);
 
   return (
     <div className="gz-mail-tab">
@@ -154,8 +161,8 @@ export function ProjectMailTab({
           {accounts.map((a) => (
             <li key={a.id} className="gz-mail-account">
               <div>
-                <strong>{a.address}</strong>
-                <span className="muted small"> · {a.provider}</span>
+                <strong>{a.displayName ?? a.id}</strong>
+                <span className="muted small"> · {a.type.replace(/^mail-/, '')}</span>
               </div>
               <div className="small">
                 {a.lastError ? (

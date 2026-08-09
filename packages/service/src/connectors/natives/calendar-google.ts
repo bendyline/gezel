@@ -7,6 +7,7 @@
  * event normalizes to a `NormalizedRecord` directly (native normalize).
  */
 
+import { HttpStatusError, isRateLimitStatus } from '@bendyline/gezel';
 import { type OAuthEndpoints, isExpired, refreshToken } from '../oauth.js';
 import { connectorSecretKey, registerNativeAdapter } from '../registry.js';
 import type {
@@ -92,9 +93,17 @@ class GoogleCalendarAdapter implements ConnectorAdapter {
     const params = new URLSearchParams({ singleEvents: 'true', maxResults: '250' });
     if (typeof cursor === 'string' && cursor) params.set('syncToken', cursor);
     else params.set('timeMin', new Date(Date.now() - 90 * 86_400_000).toISOString());
-    const r = (await this.api(
-      `/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
-    )) as { items?: GEvent[]; nextSyncToken?: string };
+    let r: { items?: GEvent[]; nextSyncToken?: string };
+    try {
+      r = (await this.api(
+        `/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+      )) as typeof r;
+    } catch (err) {
+      if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) {
+        return { records: [], cursor, rateLimited: true };
+      }
+      throw err;
+    }
     const records: RecordRef[] = (r.items ?? [])
       .filter((e) => e.id)
       .map((e) => ({
@@ -116,7 +125,12 @@ class GoogleCalendarAdapter implements ConnectorAdapter {
     const res = await fetch(`${API}${path}`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json' },
     });
-    if (!res.ok) throw new Error(`calendar api ${res.status}: ${await res.text().catch(() => '')}`);
+    if (!res.ok) {
+      throw new HttpStatusError(
+        res.status,
+        `calendar api ${res.status}: ${await res.text().catch(() => '')}`.slice(0, 300),
+      );
+    }
     return res.json();
   }
 }
@@ -145,7 +159,9 @@ function eventToRecord(event: GEvent, calendarId: string): NormalizedRecord {
   const day = start.slice(0, 10) || 'undated';
   return {
     recordId: `${calendarId}:${event.id ?? title}`,
-    dirSegments: [slug(calendarId, 40), day.slice(0, 7) || 'undated'],
+    // The engine owns the calendar (scope) directory level; only the month
+    // bucket is adapter partitioning.
+    dirSegments: [day.slice(0, 7) || 'undated'],
     fileStem: `${day}--${slug(title, 40)}`,
     frontmatter,
     bodyMarkdown: event.description ?? '',

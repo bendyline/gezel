@@ -1,24 +1,20 @@
 /**
- * Mail provider factory + credential keys, plus mail's registration as a set of
- * `native` connector adapters. `createMailProvider` reads the legacy mail secret
- * (`mail-<provider>`/accountId); `mailAdapterFactory` reads the generic connector
- * secret (`connector-<type>`/bindingId) so a mail binding created through the
- * `/connectors/*` path drives the exact same providers + core.
+ * Mail provider factory + mail's registration as a set of `native` connector
+ * adapters. A mail account is an ordinary connector binding: the credential
+ * lives under the generic connector secret key (`connector-<type>`/bindingId),
+ * the account identity (`provider` / `address` / `syncFolders`) lives in the
+ * binding config, and `mailAdapterFactory` reconstructs the provider from
+ * both.
  */
 
-import type { ProjectMailAccount } from '@bendyline/gezel';
 import { connectorSecretKey, registerNativeAdapter } from '../connectors/registry.js';
 import type { AdapterFactory } from '../connectors/types.js';
-import type { SecretStore } from '../secrets/types.js';
 import { MailConnectorAdapter } from './adapter.js';
 import type { OAuthCredential } from './oauth.js';
 import { GmailMailProvider } from './providers/gmail.js';
 import { GraphMailProvider } from './providers/graph.js';
 import { ImapMailProvider } from './providers/imap.js';
-import type { ImapCredential, MailProvider } from './types.js';
-
-/** Toolset id under which IMAP connection blobs are stored in the SecretStore. */
-export const IMAP_TOOLSET_ID = 'mail-imap';
+import type { ImapCredential, MailProvider, MailProviderKind } from './types.js';
 
 export class MailCredentialMissingError extends Error {
   constructor(accountId: string) {
@@ -27,14 +23,15 @@ export class MailCredentialMissingError extends Error {
   }
 }
 
-/** The SecretStore key holding an account's connection credential. */
-export function mailSecretKey(account: Pick<ProjectMailAccount, 'id' | 'provider'>) {
-  return { kind: 'toolset' as const, toolsetId: `mail-${account.provider}`, fieldId: account.id };
+/** Provider-appropriate default sync folder ids. */
+export function defaultFoldersFor(provider: MailProviderKind): string[] {
+  if (provider === 'microsoft365' || provider === 'outlook') return ['inbox'];
+  return ['INBOX']; // Gmail's system inbox label is also 'INBOX'
 }
 
 /** Build a provider from an already-fetched credential blob + re-persist callback. */
 export function buildMailProvider(
-  account: Pick<ProjectMailAccount, 'provider' | 'address'>,
+  account: { provider: MailProviderKind; address: string },
   blob: string,
   persist: (cred: OAuthCredential) => Promise<void>,
 ): MailProvider {
@@ -51,40 +48,34 @@ export function buildMailProvider(
   }
 }
 
-/** Construct a connected-capable provider for an account (legacy mail secret). */
-export async function createMailProvider(
-  account: ProjectMailAccount,
-  secrets: SecretStore,
-): Promise<MailProvider> {
-  const raw = await secrets.get(mailSecretKey(account));
-  if (!raw) throw new MailCredentialMissingError(account.id);
-  return buildMailProvider(account, raw, (cred) =>
-    secrets.set(mailSecretKey(account), JSON.stringify(cred)),
-  );
-}
-
 /**
  * Native connector adapter for mail: reconstructs the account from the binding
  * config and reads the credential from the generic connector secret key.
  */
 export const mailAdapterFactory: AdapterFactory = async (binding, deps) => {
   const config = (binding.config ?? {}) as {
-    provider?: ProjectMailAccount['provider'];
+    provider?: MailProviderKind;
     address?: string;
+    displayName?: string;
     syncFolders?: string[];
   };
-  const account = {
-    provider: (config.provider ?? 'imap') as ProjectMailAccount['provider'],
-    address: String(config.address ?? ''),
-  };
-  const folders = Array.isArray(config.syncFolders) ? config.syncFolders : ['INBOX'];
+  const provider = (config.provider ?? 'imap') as MailProviderKind;
+  const address = String(config.address ?? '');
+  const folders =
+    Array.isArray(config.syncFolders) && config.syncFolders.length
+      ? config.syncFolders
+      : defaultFoldersFor(provider);
   const key = connectorSecretKey(binding.type, binding.id);
   const blob = await deps.secrets.get(key);
   if (!blob) throw new MailCredentialMissingError(binding.id);
-  const provider = buildMailProvider(account, blob, (cred) =>
+  const mailProvider = buildMailProvider({ provider, address }, blob, (cred) =>
     deps.secrets.set(key, JSON.stringify(cred)),
   );
-  return new MailConnectorAdapter(provider, folders, binding.id);
+  const accountId = address ? `${provider}:${address}` : binding.id;
+  return new MailConnectorAdapter(mailProvider, folders, accountId, {
+    ...(address ? { address } : {}),
+    ...(config.displayName ? { displayName: config.displayName } : {}),
+  });
 };
 
 /** Register mail's four provider variants as native connector adapters. */

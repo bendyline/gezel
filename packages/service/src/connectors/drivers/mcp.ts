@@ -13,7 +13,7 @@
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import { McpBridge, type McpServerSpec } from '../../providers/mcp-bridge.js';
-import { type NormalizeSpec, applyNormalize, jget } from '../normalize.js';
+import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import { connectorSecretKey } from '../registry.js';
 import type {
   AdapterDeps,
@@ -135,6 +135,7 @@ export class McpConnectorAdapter implements ConnectorAdapter {
         id: String(list.idPath ? (jget(it, list.idPath) ?? i) : i),
         raw: it,
         ...(typeof ts === 'string' ? { ts } : {}),
+        ...ordinalKeyFromTs(ts),
       };
     });
     const next = list.cursorFrom ? jget(json, list.cursorFrom) : deriveWindowCursor(records);

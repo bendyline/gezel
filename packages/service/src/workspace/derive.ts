@@ -60,7 +60,15 @@ export async function deriveWorkspaceFile(
   store: Store,
   opts: DeriveWorkspaceFileOptions,
 ): Promise<DeriveWorkspaceFileResult> {
-  const gate = await store.assertWorkspaceWritable(opts.projectId);
+  // `derive_data` is a model-facing tool with no non-gezel caller, so the
+  // gezel write contract applies — including the read-only `data/` corpus
+  // check on the declared output path. The script itself still runs with
+  // workspace-wide fs access (the documented sandbox gap); this gates the
+  // declared output, which is what the tool promises to produce.
+  const gate = await store.assertWorkspaceWritable(opts.projectId, {
+    initiatedByGezel: true,
+    path: opts.outputPath,
+  });
   if (!gate.ok) {
     throw new WorkspaceWriteDeniedError(gate);
   }

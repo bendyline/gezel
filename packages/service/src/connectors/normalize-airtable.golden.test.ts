@@ -41,7 +41,7 @@ describe('airtable-records normalize golden (shipped manifest)', () => {
 
     expect(rec).toEqual({
       recordId: 'recA1',
-      dirSegments: ['records'],
+      dirSegments: [],
       fileStem: 'design-review',
       frontmatter: {
         direction: 'inbound',

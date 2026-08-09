@@ -26,6 +26,12 @@ management, normalization, and the fault-tolerance envelope; the manifest names 
 Native adapters like mail are the exception, reserved for cornerstone corpora that resist
 declarative expression. See [Drivers](#drivers-most-connector-types-are-configuration-not-code).
 
+> This document is the architectural intent. For the normative rules an adapter, a driver, or
+> a gilde manifest must satisfy — above all **where a connector puts the data it retrieves** —
+> read [connector-standards.md](./connector-standards.md), whose conformance table records
+> the per-rule implementation state (all met since the August 2026 overhaul, with the
+> residual gaps named there).
+
 ## Vocabulary
 
 The word "connector" is overloaded; pin it down:
@@ -49,7 +55,10 @@ capability of a type.
 
 ## The proven pattern (mail is the reference implementation)
 
-Mail already does, end to end, exactly what a connector must do. Each row generalizes:
+Mail already did, end to end, exactly what a connector must do — and the generalization is
+now complete: the "mail today" column below is **historical** (the standalone mail stack it
+describes was retired once mail became ordinary `mail-*` connector bindings), kept because
+it documents where each concern in the connector core came from. Each row generalized:
 
 | Concern | Mail today | Generalized connector |
 |---|---|---|
@@ -57,11 +66,11 @@ Mail already does, end to end, exactly what a connector must do. Each row genera
 | Type registry | `createMailProvider` in [mail/registry.ts](../packages/service/src/mail/registry.ts) dispatches imap/gmail/graph | Catalog-seeded type registry |
 | Config binding | `ProjectMailAccount` on `project.json` ([schemas/project.ts](../packages/core/src/schemas/project.ts)) — binding + cursor, **credential never here** | `ProjectConnectorBinding` |
 | Incremental cursor | opaque per-provider (`imap` UID / `gmailHistoryId` / `graphDeltaLink`) | opaque `cursor` blob, persisted on the binding |
-| Sync engine | `MailSyncManager` — idle-gated, posture-gated, one project/tick, modeled on `IndexEnrichmentManager` | `ConnectorSyncManager` (one engine, all types) |
+| Sync engine | `MailSyncManager` (retired) — idle-gated, posture-gated, one project/tick, modeled on `IndexEnrichmentManager` | `ConnectorSyncManager` (one engine, all types) |
 | Normalized output | immutable per-message markdown with trust frontmatter, in [mail/storage.ts](../packages/service/src/mail/storage.ts) | per-record normalized files, same writer discipline |
 | Safety | `contentScanner.scan` → quarantine to `.gezel/quarantine/` (unindexed), path-safety via `resolveInside` | identical, in the shared writer |
 | Secrets | SecretStore keyed `{toolset: mail-<provider>, field: accountId}`, OAuth re-persist on refresh | SecretStore keyed by connector type + binding |
-| Write-back | `_drafts/` → `_outbox/` → `_sent/` with a deny-by-default allowlist ([mail/outbox.ts](../packages/service/src/mail/outbox.ts)) | connector **outbox** contract |
+| Write-back | `_drafts/` → `_outbox/` → `_sent/` with a deny-by-default allowlist (mail's outbox, since folded into the consent registry) | connector **outbox** contract |
 | AI read path | **none** — the AI reads synced markdown as ordinary files | unchanged: read = files |
 | AI write path | `draft_email` / `queue_email` / `send_email` MCP tools → `/api/projects/:id/mail/*` ([mcp/server.ts](../packages/mcp/src/server.ts)) | type-declared actions, same 3-step stage/gate |
 | Posture gate | autonomous sync rides `resolveSecurityPolicy(cfg).allowMail` | `allowExternalServices` per source |
@@ -81,13 +90,16 @@ when done), exactly like the mail adapters.
 interface ConnectorAdapter<Record, Cursor> {
   readonly typeId: string;                          // 'mail-gmail', 'calendar-google', …
   ensureAuth(): Promise<void>;                      // establish/refresh; throw on hard auth failure
-  listChangesSince(cursor: Cursor | undefined): Promise<{
+  listScopes(): Promise<string[]>;                  // partitions (folders, calendars); [''] for one
+  listChangesSince(scope: string, cursor: Cursor | undefined, opts?: { limit?: number }): Promise<{
     records: RecordRef[];                           // lightweight handles (cf. MailEnvelope)
-    cursor: Cursor;                                 // advanced cursor to persist
-    rateLimited?: boolean;                          // back off; resume next tick
+    cursor: Cursor;                                 // advanced cursor to persist (per scope)
+    partial?: boolean;                              // more remain; cursor covers this batch exactly
+    enumeratedAll?: boolean;                        // this batch IS the full scope (mirror prune gate)
+    rateLimited?: boolean;                          // back off; engine stops the pass
   }>;
-  fetchRecord(ref: RecordRef): Promise<Record>;     // fetch + NORMALIZE (raw → canonical)
-  runAction?(action: string, input: unknown): Promise<ActionResult>;  // optional write-back
+  fetchRecord(scope: string, ref: RecordRef): Promise<Record>;  // fetch + NORMALIZE (raw → canonical)
+  runAction?(action: string, input: unknown): Promise<unknown>; // write-back, commit-time only
   close(): Promise<void>;
 }
 ```
@@ -223,8 +235,11 @@ connector writer. Records land under the project workspace where the content ind
 them up:
 
 ```
-<workspace>/<connectorDir>/<type>/<binding-slug>/…normalized records…
+<workspace>/data/<corpusName>/<scope>/…normalized records…
 ```
+
+The naming, the scope level, the `_`-prefixed mutable surface, and the record-file shape are
+specified in [connector-standards.md §1](./connector-standards.md#1-the-data-placement-contract).
 
 Non-negotiable writer discipline, inherited verbatim from mail:
 
@@ -238,15 +253,20 @@ Non-negotiable writer discipline, inherited verbatim from mail:
 - **Path safety.** Every path component derived from source data is slugged and funneled
   through `resolveInside` / `safeJoin` — a hostile subject, filename, or record id cannot
   escape the workspace.
-- **Idempotent + immutable.** Records are content-hashed and never rewritten; re-sync is a
-  no-op on unchanged records. Mutable state (read/seen flags) goes in an unindexed sidecar.
+- **Idempotent, refresh-in-place.** Records are content-hashed: re-sync is a no-op on
+  unchanged records, replaces a changed record's file in place (stable ordinal), and — for
+  mirror-completeness sources, after a clean full enumeration — prunes records the source no
+  longer returns. Only connector code mutates the corpus. Mutable state (read/seen flags,
+  content hashes) goes in an unindexed sidecar.
 
-**Open design point — corpus writability.** Mail writes the corpus into the AI-readable,
-AI-writable workspace. A connector corpus is *inbound source-of-truth*; the AI should reason
-over it and write its analysis to `artifacts/`, not mutate the corpus. Recommend the corpus
-be **read-only to the AI** (writes rejected the way `/preview/*` is read-only), leaving
-`_drafts/` and flag sidecars as the only writable surfaces. This is a tightening of the mail
-model, flagged for a decision rather than assumed.
+**Corpus writability — decided and enforced.** A connector corpus is *inbound
+source-of-truth*; the AI reasons over it and writes its analysis to `artifacts/`, never
+mutating the corpus. The corpus is **read-only to the AI**, with `_`-prefixed entries
+(`_drafts/`, `_outbox/`, `_flags.json`) as the only writable surfaces — see
+[connector-standards.md §1.5–1.7](./connector-standards.md#15-the-_-rule-underscore-means-mutable).
+Enforced in `Store.assertWorkspaceWritable` (reason `data-subtree-readonly`), because a
+deleted record is never re-fetched — the cursor has already advanced past it. Sandboxed
+scripts writing with raw fs remain the documented residual gap.
 
 ## The isolation boundary — what it buys, and its one caveat
 
@@ -268,8 +288,8 @@ not the connector layer.
 
 ## Sync engine
 
-One `ConnectorSyncManager`, generalizing [mail/sync-manager.ts](../packages/service/src/mail/sync-manager.ts),
-serves every type. Its discipline is the reason autonomous sync is safe to leave running:
+One `ConnectorSyncManager` ([connectors/sync-manager.ts](../packages/service/src/connectors/sync-manager.ts),
+generalized from mail's original loop) serves every type. Its discipline is the reason autonomous sync is safe to leave running:
 
 - **Idle-gated.** Never fights a live chat turn; respects OS idle and the night-shift flag.
 - **Posture-gated.** Dormant under lockdown / super-lockdown; autonomous sync rides
@@ -291,7 +311,8 @@ that cost inside the adapter; it does not remove it.
 
 ## Write-back and the morning briefing
 
-Generalizes [mail/outbox.ts](../packages/service/src/mail/outbox.ts). A type may declare
+Generalized from mail's outbox (now [connectors/consent.ts](../packages/service/src/connectors/consent.ts) +
+[connectors/actions.ts](../packages/service/src/connectors/actions.ts)). A type may declare
 **actions** (mail declares "send"). Actions never execute inline:
 
 1. The AI calls a **draft** action → a draft file is written to `_drafts/`. **The draft file

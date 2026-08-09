@@ -1,20 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { type ScorecardFs, discoverScorecardModels, resolveModelEngine } from './scorecard.ts';
 
-/** In-memory cache tree: path → dir entries / manifest JSON. */
+/**
+ * In-memory cache tree: path → dir entries / manifest JSON. Discovery builds
+ * paths with the native `path.join` (backslashes on Windows), so every lookup
+ * is normalized to the forward-slash keys this tree uses.
+ */
 function fakeFs(tree: Record<string, { dirs?: string[]; files?: string[]; manifest?: unknown }>) {
+  const norm = (path: string) => path.replaceAll('\\', '/');
   const fs: ScorecardFs = {
-    exists: (path) => path in tree || Object.keys(tree).some((key) => key === path),
-    listDirs: (path) => tree[path]?.dirs ?? [],
-    listFiles: (path) => tree[path]?.files ?? [],
+    exists: (path) => norm(path) in tree,
+    listDirs: (path) => tree[norm(path)]?.dirs ?? [],
+    listFiles: (path) => tree[norm(path)]?.files ?? [],
     readJson: (path) => {
-      const dir = path.replace(/\/manifest\.json$/, '');
+      const dir = norm(path).replace(/\/manifest\.json$/, '');
       const manifest = tree[dir]?.manifest;
       return (manifest as Record<string, unknown> | undefined) ?? null;
     },
   };
   return fs;
 }
+
+/** Native-separator roots normalized back to the test's forward-slash form. */
+const normRoot = <T extends { root: string }>(entry: T): T => ({
+  ...entry,
+  root: entry.root.replaceAll('\\', '/'),
+});
 
 const HOME = '/home';
 const LLAMA = `${HOME}/.gezel-dev/engines/llama-cpp/models`;
@@ -33,7 +44,7 @@ describe('discoverScorecardModels', () => {
         files: ['model-00001-of-00002.safetensors', 'config.json'],
       },
     });
-    expect(discoverScorecardModels(HOME, fs)).toEqual([
+    expect(discoverScorecardModels(HOME, fs).map(normRoot)).toEqual([
       { id: 'gemma4-e4b-q4', engine: 'mlx', root: `${MLX}/gemma4-e4b-q4` },
     ]);
   });

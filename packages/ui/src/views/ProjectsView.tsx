@@ -253,9 +253,12 @@ function isMappableProject(p: {
 function isEmailProject(p: {
   projectTypeId?: string;
   detectedProjectType?: { id: string };
-  mail?: { accounts?: unknown[] };
+  connectors?: { type: string }[];
 }): boolean {
-  return resolveProjectTypeId(p) === 'email' || (p.mail?.accounts?.length ?? 0) > 0;
+  return (
+    resolveProjectTypeId(p) === 'email' ||
+    (p.connectors ?? []).some((b) => b.type.startsWith('mail-'))
+  );
 }
 
 function ProjectTabIcon({ tab }: { tab: ProjectTab }) {

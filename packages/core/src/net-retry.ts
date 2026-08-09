@@ -78,6 +78,14 @@ export function isTransientHttpStatus(status: number): boolean {
 }
 
 /**
+ * Statuses that mean "the service is throttling or shedding load — back off
+ * and come back later", as opposed to a fault worth retrying inline.
+ */
+export function isRateLimitStatus(status: number): boolean {
+  return status === 429 || status === 503;
+}
+
+/**
  * Undici surfaces network faults as `TypeError: fetch failed` with the real
  * errno on `.cause`, so match against the flattened chain rather than
  * `err.code`. Aborts are deliberately NOT transient — a cancel means stop.

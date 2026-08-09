@@ -87,6 +87,8 @@ describe('GitHubWikiAdapter', () => {
     const batch = await adapter.listChangesSince('', undefined);
     expect(batch.records).toHaveLength(2);
     expect(batch.cursor).toEqual({ sha: COMMIT, offset: 2, complete: true });
+    expect(batch.partial).toBeUndefined();
+    expect(batch.enumeratedAll).toBe(true); // single complete batch → prune-safe
 
     const clone = calls.find((call) => call.args.includes('clone'))!;
     expect(clone.args).toContain('https://github.com/octocat/Hello-World.wiki.git');
@@ -95,7 +97,10 @@ describe('GitHubWikiAdapter', () => {
     const guideRef = batch.records.find((record) => record.id.startsWith('guides/'))!;
     const guide = await adapter.fetchRecord('', guideRef);
     expect(guide).toMatchObject({
-      recordId: guideRef.id,
+      // Identity is the page path (stable across edits → refresh-in-place);
+      // repo-global commit fields stay out of the frontmatter so they don't
+      // churn every page's content hash.
+      recordId: 'guides/Setup-Guide.rst',
       dirSegments: ['octocat-hello-world'],
       fileStem: 'setup-guide',
       frontmatter: {
@@ -105,12 +110,11 @@ describe('GitHubWikiAdapter', () => {
         path: 'guides/Setup-Guide.rst',
         format: 'rst',
         url: 'https://github.com/octocat/Hello-World/wiki/guides/Setup-Guide',
-        commit: COMMIT,
-        date: COMMIT_DATE,
       },
       bodyMarkdown: 'Setup Guide\n===========',
       scanOrigin: 'github-wiki',
     });
+    expect(guide.frontmatter.commit).toBeUndefined();
 
     await expect(
       adapter.fetchRecord('', {

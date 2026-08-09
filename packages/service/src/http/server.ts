@@ -48,7 +48,6 @@ import { imagesRoutes } from './routes/images.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { machineEngineProxy } from './routes/machine-engine-proxy.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
-import { mailRoutes } from './routes/mail.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
 import { memoryRoutes } from './routes/memory.js';
@@ -532,7 +531,6 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', gitRoutes(ctx, 'github'));
   app.route('/api/projects', githubRoutes(ctx));
   // Per-project mail operations live at /api/projects/:id/mail/*
-  app.route('/api/projects', mailRoutes(ctx));
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*

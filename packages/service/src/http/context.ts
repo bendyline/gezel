@@ -22,7 +22,6 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import type { IndexEnrichmentManager } from '../index-store/enrichment-manager.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import type { IndexingJobControl } from '../index-store/indexing-job.js';
-import type { MailManager } from '../mail/manager.js';
 import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
@@ -107,7 +106,6 @@ export interface ServiceContext {
   codeReviews: CodeReviewManager;
   /** Lifecycle of report-embedded action requests (```gezel-action blocks). */
   reportActions: ReportActionManager;
-  mail: MailManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   renderer: ImageRenderer;

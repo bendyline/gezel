@@ -5,8 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { SecretStore } from '../secrets/types.js';
 import { ConnectorActionManager } from './actions.js';
+import { registerConsentEnforcer } from './consent.js';
 import { registerNativeAdapter } from './registry.js';
 import type { ConnectorAdapter } from './types.js';
+
+// Deny-by-default means even test actions need a registered scope.
+registerConsentEnforcer('test-approve', () => ({ ok: true }));
 
 let lastAction: { action: string; input: unknown } | null = null;
 
@@ -41,7 +45,11 @@ const MANIFEST = {
   driver: 'native' as const,
   source: { adapterId: 'fake-action' },
   normalize: { kind: 'native' as const },
-  actions: [{ name: 'comment', consentScope: 'x' }],
+  actions: [
+    { name: 'comment', consentScope: 'test-approve' },
+    { name: 'escalate', consentScope: 'no-such-scope' },
+    { name: 'send', consentScope: 'recipient-allowlist' },
+  ],
   availableVersions: ['1.0.0'],
 };
 
@@ -120,5 +128,65 @@ describe('ConnectorActionManager', () => {
     });
     await m.discard(project, draftId);
     expect((await m.list(project)).pending).toHaveLength(0);
+  });
+
+  it('rejects drafting an action the type does not declare', async () => {
+    const m = mgr();
+    await expect(
+      m.draft(project, { bindingId: 'fake-action-conn:abc', action: 'delete-everything' }),
+    ).rejects.toThrow(/declares no action 'delete-everything'.*available: comment, escalate, send/);
+  });
+
+  it('denies commit for a consent scope with no registered enforcer', async () => {
+    const m = mgr();
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'escalate',
+      input: {},
+    });
+    await expect(m.commit(project, draftId)).rejects.toThrow(
+      /commit denied: no enforcer registered for consent scope 'no-such-scope'/,
+    );
+    expect(lastAction).toBeNull();
+  });
+
+  it('recipient-allowlist: denies unlisted recipients, allows listed ones', async () => {
+    const m = mgr();
+    const denied = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'send',
+      input: { to: ['stranger@evil.example'], body: 'hi' },
+    });
+    await expect(m.commit(project, denied.draftId)).rejects.toThrow(
+      /not on the binding's allowlist: stranger@evil\.example/,
+    );
+    expect(lastAction).toBeNull();
+
+    project.connectors[0].config = { allowedRecipients: ['friend@ok.example'] };
+    try {
+      const allowed = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'send',
+        input: { to: ['Friend <friend@ok.example>'], body: 'hi' },
+      });
+      const r = await m.commit(project, allowed.draftId);
+      expect(r.status).toBe('committed');
+      expect(lastAction?.action).toBe('send');
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it('queue() stages a draft to _outbox without executing anything', async () => {
+    const m = mgr();
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'comment',
+      input: {},
+    });
+    await m.queue(project, draftId);
+    expect(lastAction).toBeNull();
+    const { pending } = await m.list(project);
+    expect(pending[0]?.status).toBe('queued');
   });
 });

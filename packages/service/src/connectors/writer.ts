@@ -1,13 +1,22 @@
 /**
  * Shared connector writer — the single on-disk chokepoint for every driver.
  * Generalized from `mail/storage.ts:writeMessage`. Turns a `NormalizedRecord`
- * into an immutable markdown file under the project workspace, where the content
- * indexer picks it up for free:
+ * into a markdown file under the project workspace, where the content indexer
+ * picks it up for free:
  *
  *   <workspace>/<corpusDir>/<...dirSegments>/
- *     <NNN>--<fileStem>--<recordHash8>.md   (immutable)
+ *     <NNN>--<fileStem>--<recordHash8>.md   (refresh-in-place: replaced when
+ *                                            upstream content changes, ordinal
+ *                                            + record identity stable)
  *     attachments/<NNN>/<safe-filename>      (original bytes)
- *     _flags.json                            (mutable sidecar)
+ *     _flags.json                            (mutable sidecar: read/flags state
+ *                                            + the content hash driving refresh)
+ *
+ * The corpus tracks the CURRENT state of upstream: a record whose `recordId`
+ * already exists is skipped when its content hash matches and replaced in
+ * place when it differs; `pruneRecords` (mirror sources only) removes records
+ * the source no longer returns. Only connector code mutates the corpus —
+ * gezels are read-only here.
  *
  * Security (inherited from mail verbatim): every path component derived from the
  * (attacker-controlled) source is slugged by the adapter AND every write goes
@@ -18,7 +27,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readdir } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { projectLocalQuarantineDir } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
@@ -51,7 +61,7 @@ function safeFilename(name: string): string {
   return base && base !== '.' && base !== '..' ? base.slice(0, 200) : 'attachment';
 }
 
-export type WriteStatus = 'written' | 'exists' | 'quarantined';
+export type WriteStatus = 'written' | 'refreshed' | 'exists' | 'quarantined';
 
 export interface WriteRecordInput {
   workspaceDir: string;
@@ -66,52 +76,82 @@ export interface WriteRecordResult {
   relPath?: string;
 }
 
-/** Count existing ordinal-prefixed record files in a dir + their content hashes. */
-async function existingRecords(dirAbs: string): Promise<{ count: number; hashes: Set<string> }> {
-  const hashes = new Set<string>();
-  let count = 0;
+const RECORD_FILE_RE = /^(\d{3})--.*--([0-9a-f]{8})\.md$/;
+
+/**
+ * Content identity of a record: hash of the domain frontmatter (key-sorted, so
+ * insertion order doesn't matter) + body. A changed upstream record changes
+ * this while `recordId` (the filename identity) stays put — that mismatch is
+ * what triggers a refresh-in-place.
+ */
+export function contentHash(record: NormalizedRecord): string {
+  const sortedFrontmatter = Object.fromEntries(
+    Object.entries(record.frontmatter).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  return sha8(`${JSON.stringify(sortedFrontmatter)}\n${record.bodyMarkdown}`);
+}
+
+/** Existing ordinal-prefixed record files in a dir, by record hash. */
+async function existingRecords(
+  dirAbs: string,
+): Promise<{ maxOrdinal: number; files: Map<string, { name: string; ordinal: string }> }> {
+  const files = new Map<string, { name: string; ordinal: string }>();
+  let maxOrdinal = 0;
   let entries: string[] = [];
   try {
     entries = await readdir(dirAbs);
   } catch {
-    return { count: 0, hashes };
+    return { maxOrdinal: 0, files };
   }
   for (const e of entries) {
-    const m = /^\d{3}--.*--([0-9a-f]{8})\.md$/.exec(e);
+    const m = RECORD_FILE_RE.exec(e);
     if (m) {
-      count++;
-      hashes.add(m[1]!);
+      maxOrdinal = Math.max(maxOrdinal, Number(m[1]));
+      files.set(m[2]!, { name: e, ordinal: m[1]! });
     }
   }
-  return { count, hashes };
+  return { maxOrdinal, files };
 }
 
 /**
- * Write one normalized record. Idempotent: a record already present (matched by
- * its content hash) is skipped. Scans the body, quarantines-or-writes, injects
+ * Write one normalized record. Idempotent on unchanged content: a record whose
+ * `recordId` AND content hash match an existing file is skipped; a matching
+ * `recordId` with changed content is replaced in place (same ordinal, so the
+ * attachment dir stays stable). Scans the body, quarantines-or-writes, injects
  * `trust`/`scan_action`, and manages attachments + the flags sidecar.
  */
 export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordResult> {
   const { workspaceDir, corpusDir, record } = input;
   const recordHash8 = sha8(record.recordId);
+  const hash = contentHash(record);
 
   const relDir = [corpusDir, ...record.dirSegments].join('/');
   const dirAbs = await resolveInside(workspaceDir, relDir);
   await mkdir(dirAbs, { recursive: true });
 
-  // Idempotency: immutable records are never rewritten.
-  const { count, hashes } = await existingRecords(dirAbs);
-  if (hashes.has(recordHash8)) return { status: 'exists' };
-
-  const ordinal = String(count + 1).padStart(3, '0');
+  const { maxOrdinal, files } = await existingRecords(dirAbs);
+  const prior = files.get(recordHash8);
+  let refreshed = false;
+  let ordinal: string;
+  if (prior) {
+    const sidecar = await readSidecar(dirAbs);
+    // A missing sidecar hash (pre-refresh corpus) counts as changed — the
+    // record is rewritten once and carries a hash from then on.
+    if (sidecar[recordHash8]?.contentHash === hash) return { status: 'exists' };
+    ordinal = prior.ordinal;
+    await rm(join(dirAbs, prior.name), { force: true });
+    await rm(join(dirAbs, 'attachments', ordinal), { recursive: true, force: true });
+    refreshed = true;
+  } else {
+    ordinal = String(maxOrdinal + 1).padStart(3, '0');
+  }
   const fileName = `${ordinal}--${record.fileStem}--${recordHash8}.md`;
   const relPath = `${relDir}/${fileName}`;
 
-  // Scan the (untrusted) body. Origin is cast until the scanner input widens
-  // beyond mail's `email`/`attachment` union (Phase 4).
+  // Scan the (untrusted) body.
   const verdict = contentScanner.scan({
     markdown: record.bodyMarkdown,
-    origin: record.scanOrigin as 'email' | 'attachment',
+    origin: record.scanOrigin,
     sourceRef: record.recordId,
   });
 
@@ -135,7 +175,7 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
       withFrontmatter(frontmatter, stub),
     );
     await writeAttachments(dirAbs, ordinal, record.attachments);
-    await updateSidecar(dirAbs, recordHash8, record);
+    await updateSidecar(dirAbs, recordHash8, record, { contentHash: hash, file: fileName });
     return { status: 'quarantined', relPath };
   }
 
@@ -144,8 +184,8 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
     withFrontmatter(frontmatter, verdict.cleaned),
   );
   await writeAttachments(dirAbs, ordinal, record.attachments);
-  await updateSidecar(dirAbs, recordHash8, record);
-  return { status: 'written', relPath };
+  await updateSidecar(dirAbs, recordHash8, record, { contentHash: hash, file: fileName });
+  return { status: refreshed ? 'refreshed' : 'written', relPath };
 }
 
 async function writeAttachments(
@@ -162,20 +202,96 @@ async function writeAttachments(
   }
 }
 
+interface SidecarEntry {
+  read: boolean;
+  flags: string[];
+  /** Content identity backing refresh-in-place. Absent on pre-refresh corpora. */
+  contentHash?: string;
+  /** Current record filename (tracks refreshes without re-listing the dir). */
+  file?: string;
+}
+
+/** Read a dir's `_flags.json` sidecar ({} when absent or unreadable). */
+async function readSidecar(dirAbs: string): Promise<Record<string, SidecarEntry>> {
+  try {
+    return JSON.parse(await readFile(join(dirAbs, '_flags.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 /** Mutable per-record sidecar of read/flags state. Never indexed. */
 async function updateSidecar(
   dirAbs: string,
   recordHash8: string,
   record: NormalizedRecord,
+  identity: { contentHash: string; file: string },
 ): Promise<void> {
-  const path = join(dirAbs, '_flags.json');
-  let current: Record<string, { read: boolean; flags: string[] }> = {};
-  try {
-    const { readFile } = await import('node:fs/promises');
-    current = JSON.parse(await readFile(path, 'utf8'));
-  } catch {
-    /* no sidecar yet */
+  const current = await readSidecar(dirAbs);
+  current[recordHash8] = {
+    read: record.seen ?? false,
+    flags: record.flags ?? [],
+    contentHash: identity.contentHash,
+    file: identity.file,
+  };
+  await writeFileAtomic(join(dirAbs, '_flags.json'), JSON.stringify(current, null, 2));
+}
+
+export interface PruneInput {
+  workspaceDir: string;
+  /** Scope-level corpus dir to prune (the same dir records were written to). */
+  corpusDir: string;
+  /** `sha8(recordId)` of every record the source still returns. */
+  keepHashes: Set<string>;
+}
+
+export interface PruneResult {
+  pruned: number;
+}
+
+/**
+ * Remove records the source no longer returns — mirror-completeness sources
+ * only, and only after a pass that enumerated the full scope with zero errors
+ * (the engine enforces those gates). Walks the scope subtree, skipping
+ * `_`-prefixed entries (the mutable surface) and `attachments/`; a pruned
+ * record loses its file, its attachment dir, and its sidecar entry. Ordinals
+ * go sparse by design — `writeRecord` allocates from the max, not the count.
+ */
+export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
+  const rootAbs = await resolveInside(input.workspaceDir, input.corpusDir);
+  let pruned = 0;
+
+  async function walk(dirAbs: string): Promise<void> {
+    let entries: Dirent[] = [];
+    try {
+      entries = await readdir(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    let sidecar: Record<string, SidecarEntry> | null = null;
+    let sidecarDirty = false;
+    for (const entry of entries) {
+      if (entry.name.startsWith('_')) continue;
+      if (entry.isDirectory()) {
+        if (entry.name !== 'attachments') await walk(join(dirAbs, entry.name));
+        continue;
+      }
+      const m = RECORD_FILE_RE.exec(entry.name);
+      if (!m || input.keepHashes.has(m[2]!)) continue;
+      await rm(join(dirAbs, entry.name), { force: true });
+      await rm(join(dirAbs, 'attachments', m[1]!), { recursive: true, force: true });
+      sidecar ??= await readSidecar(dirAbs);
+      if (m[2]! in sidecar) {
+        delete sidecar[m[2]!];
+        sidecarDirty = true;
+      }
+      pruned++;
+    }
+    if (sidecar && sidecarDirty) {
+      await writeFileAtomic(join(dirAbs, '_flags.json'), JSON.stringify(sidecar, null, 2));
+    }
   }
-  current[recordHash8] = { read: record.seen ?? false, flags: record.flags ?? [] };
-  await writeFileAtomic(path, JSON.stringify(current, null, 2));
+
+  await walk(rootAbs);
+  return { pruned };
 }

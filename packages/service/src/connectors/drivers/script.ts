@@ -13,7 +13,7 @@
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import type { ScriptRunner } from '../../scripts/runner.js';
-import { type NormalizeSpec, applyNormalize, jget } from '../normalize.js';
+import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import { connectorCredentialName } from '../registry.js';
 import type {
   AdapterDeps,
@@ -30,6 +30,8 @@ interface ScriptSource {
   scope?: 'user' | 'project' | 'craftbook' | 'standard';
   /** Path to the id field inside each record (default `$.id`). */
   idPath?: string;
+  /** Path to a record timestamp — drives newest-first ordering under the cap. */
+  tsPath?: string;
 }
 
 export class ScriptConnectorAdapter implements ConnectorAdapter {
@@ -80,10 +82,15 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
     if (run.status !== 'ok') throw new Error(run.error ?? 'connector fetch script failed');
     const out = (run.output ?? {}) as { records?: unknown[]; cursor?: unknown };
     const idPath = this.src.idPath ?? '$.id';
-    const records: RecordRef[] = (out.records ?? []).map((r, i) => ({
-      id: String(jget(r, idPath) ?? i),
-      raw: r,
-    }));
+    const records: RecordRef[] = (out.records ?? []).map((r, i) => {
+      const ts = this.src.tsPath ? jget(r, this.src.tsPath) : undefined;
+      return {
+        id: String(jget(r, idPath) ?? i),
+        raw: r,
+        ...(typeof ts === 'string' ? { ts } : {}),
+        ...ordinalKeyFromTs(ts),
+      };
+    });
     return { records, cursor: out.cursor };
   }
 

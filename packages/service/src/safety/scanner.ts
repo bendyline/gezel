@@ -16,7 +16,12 @@ import { type PatternHit, scanPatterns, scoreHits } from './patterns.js';
 
 export type TrustLevel = 'untrusted-external';
 export type ScanAction = 'pass' | 'annotate' | 'quarantine';
-export type ScanOrigin = 'email' | 'attachment';
+/**
+ * Where the content came from. `email`/`attachment` are the historical mail
+ * origins; connector records pass their connector-type id. The scanner treats
+ * every origin identically (all untrusted) — the origin is audit metadata.
+ */
+export type ScanOrigin = 'email' | 'attachment' | (string & {});
 
 export interface ScanInput {
   /** The markdown to inspect (email body, or attachment converted to markdown). */

@@ -22,6 +22,8 @@ const OAuthStartSchema = z.object({
   redirectUri: z.string().min(1),
   config: z.record(z.string(), z.unknown()).optional(),
   displayName: z.string().optional(),
+  /** Pre-fill the provider's account picker (mail: the address being linked). */
+  loginHint: z.string().optional(),
 });
 
 const OAuthCompleteSchema = z.object({
@@ -111,9 +113,11 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     return c.body(null, 204);
   });
 
-  // ── Write actions (draft → commit) ────────────────────────────────────────
-  // A gezel DRAFTS an action; committing (the live write) is a USER action and
-  // is never on the model's tool surface.
+  // ── Write actions (draft → queue → commit) ───────────────────────────────
+  // A gezel DRAFTS an action; committing (the live write) must clear the
+  // action's daemon-enforced consent scope. Generic actions have no enforcer
+  // an agent can satisfy, so their commit stays user-only; mail's send tools
+  // commit through the recipient-allowlist enforcer (deny-by-default).
 
   // Pending actions across the project's connectors (the review surface).
   app.get('/:id/connectors/actions', async (c) => {
@@ -122,7 +126,21 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     return c.json(await ctx.connectorActions.list(project));
   });
 
-  // Commit a drafted action (user-initiated). Defers during night shift.
+  // Stage a drafted action to the outbox (no network, no consent needed yet).
+  app.post('/:id/connectors/actions/:draftId/queue', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    if (!project) return c.json({ error: 'not found' }, 404);
+    try {
+      const result = await ctx.connectorActions.queue(project, c.req.param('draftId'));
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // Commit a drafted action. Reaches transmission only through the action's
+  // consent scope (daemon-enforced, deny-by-default) + night-shift deferral,
+  // so both users and enforcer-cleared agent tools (send_email) land here.
   app.post('/:id/connectors/actions/:draftId/commit', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);

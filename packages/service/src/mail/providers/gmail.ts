@@ -5,7 +5,7 @@
  * `persist` callback the registry supplies.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { HttpStatusError, createLogger } from '@bendyline/gezel';
 import { buildRawMime } from '../compose.js';
 import { parseRawMessage } from '../mime.js';
 import { type OAuthCredential, isExpired, refreshAccessToken } from '../oauth.js';
@@ -69,7 +69,10 @@ export class GmailMailProvider implements MailProvider {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`gmail api ${path} failed: HTTP ${res.status} ${body}`.slice(0, 300));
+      throw new HttpStatusError(
+        res.status,
+        `gmail api ${path} failed: HTTP ${res.status} ${body}`.slice(0, 300),
+      );
     }
     return res.json() as Promise<T>;
   }

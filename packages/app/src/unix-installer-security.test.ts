@@ -240,21 +240,26 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('giving up after 30');
     expect(macUninstall).toContain('exit 1');
     expect(macUninstall).toContain('done (service exit and account removal verified)');
+  });
 
-    // Exercise the exact state machine with a fake directory service. This
-    // reproduces the release failure: user deletion returns eDSPermissionError.
-    // The group must remain, the dscl error must be visible, and the function
-    // must return failure instead of printing a success claim.
-    const probeRoot = mkdtempSync(join(tmpdir(), 'gezel-uninstall-identity-'));
-    try {
-      const userRecord = join(probeRoot, 'user-record');
-      const groupRecord = join(probeRoot, 'group-record');
-      const calls = join(probeRoot, 'calls.log');
-      const output = join(probeRoot, 'output.log');
-      writeFileSync(userRecord, 'present');
-      writeFileSync(groupRecord, 'present');
+  it.skipIf(process.platform === 'win32')(
+    'live probe: retained user keeps the group and fails loudly (fake dscl)',
+    () => {
+      const removeIdentity = shellFunction(macUninstall, 'remove_service_identity', 'brace');
+      // Exercise the exact state machine with a fake directory service. This
+      // reproduces the release failure: user deletion returns eDSPermissionError.
+      // The group must remain, the dscl error must be visible, and the function
+      // must return failure instead of printing a success claim.
+      const probeRoot = mkdtempSync(join(tmpdir(), 'gezel-uninstall-identity-'));
+      try {
+        const userRecord = join(probeRoot, 'user-record');
+        const groupRecord = join(probeRoot, 'group-record');
+        const calls = join(probeRoot, 'calls.log');
+        const output = join(probeRoot, 'output.log');
+        writeFileSync(userRecord, 'present');
+        writeFileSync(groupRecord, 'present');
 
-      const script = `set -euo pipefail
+        const script = `set -euo pipefail
 DAEMON_USER="_gezeld"
 USER_RECORD=${JSON.stringify(userRecord)}
 GROUP_RECORD=${JSON.stringify(groupRecord)}
@@ -294,11 +299,12 @@ fi
 grep -q 'eDSPermissionError' "$OUTPUT"
 grep -q 'keeping /Groups/_gezeld because /Users/_gezeld remains' "$OUTPUT"
 `;
-      execFileSync('/bin/bash', ['-c', script], { stdio: 'pipe' });
-    } finally {
-      rmSync(probeRoot, { recursive: true, force: true });
-    }
-  });
+        execFileSync('/bin/bash', ['-c', script], { stdio: 'pipe' });
+      } finally {
+        rmSync(probeRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('repairs a daemon account that kept its user but lost its group', () => {
     // Group creation lives inside the `user does not exist` branch, so a
