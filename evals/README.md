@@ -75,11 +75,54 @@ For a standardized set, run a named suite from
 [src/suites.ts](src/suites.ts) — `core` is the 11-scenario model
 scorecard (3 frozen anchors + 8 diverse capability axes) and the default
 answer to "evaluate this model"; `smoke` is a fast pulse check;
-`extended-coding` / `extended-grounding` / `extended-retrieval` are
-per-axis deep dives; `headroom` holds the deliberately hard probes:
+`extended-coding` / `extended-grounding` / `extended-retrieval` /
+`extended-writing` are per-axis deep dives; `productivity` is the
+office/knowledge-work scorecard (with `productivity-smoke` as its pulse
+check); `headroom` holds the deliberately hard probes:
 
 ```bash
 pnpm eval:all --suite core --count 3 --model gemma4-e4b-q4
+```
+
+**`productivity`** grades the artifacts a non-technical user would
+recognize — communications, meeting follow-through, planning, a research
+brief, an A/B readout, a spreadsheet model, a PowerPoint deck, a Word
+document. It is fully hermetic: its Wikipedia, calendar, and DocBlocks
+dependencies are deterministic local mocks, `webSearch` is pinned to a
+mock backend, and the research scenario *asserts* that no live-retrieval
+tool was called rather than trusting configuration.
+
+Three kinds of gate carry the suite, and they are worth knowing apart:
+
+- **Prose/structure gates** — ordered sections, word bands, required
+  content. These mostly measure brief-compliance.
+- **Arithmetic oracles** — `craftbook-ab-test-readout` and
+  `craftbook-spreadsheet-model` write a locked-schema JSON of computed
+  figures which is checked field-by-field against values derived from the
+  seeded data. A structurally perfect readout with a wrong p-value fails.
+- **Binary container gates** — the three DocBlocks members produce a real
+  PPTX or DOCX through `convert_document` → `preview_document` →
+  `save_artifact`, and the gate verifies the ZIP signature. Writing the
+  Markdown source to the `.pptx` path no longer passes.
+
+Two things to know before starting it. Worst case is **6h05m at
+`--count 1`**, so a `--count 3` scorecard is a ~18h job — and below n=3
+the harness refuses to quote a pass *rate* at all (it prints a raw count),
+so `--count 1` is a spot check, not a score. And most members carry an
+advisory judge, so `--llm-judge` is where the qualitative signal lives.
+
+```bash
+# Full scorecard. Budget the wall-clock first.
+pnpm eval:all --suite productivity --count 3 --model gemma4-e4b-q4 --llm-judge
+
+# ~1h15m pulse check instead — one of each gate kind (prose, arithmetic
+# oracle, real DOCX through DocBlocks).
+pnpm eval:all --suite productivity-smoke --count 1 --model gemma4-e4b-q4 --llm-judge
+
+# Or a named subset of any suite — runs in suite order, and an id that
+# isn't a member of that suite is an error rather than a silent no-op.
+pnpm eval:all --suite productivity --scenarios meeting-followup,wikipedia-research-brief \
+  --count 3 --model gemma4-e4b-q4 --llm-judge
 ```
 
 `--count <N>` is required for every `eval:all` run (except `--list`); there is no implicit
@@ -87,9 +130,9 @@ trial-count default. For "every registered scenario × N trials", omit `--suite`
 
 ```bash
 pnpm eval:all --count 5
-# Optional: filter to an ad-hoc subset (mutually exclusive with --suite)
+# Optional: filter to an ad-hoc subset of the whole registry
 pnpm eval:all --count 3 --scenarios tictactoe,petshop
-# List scenarios and suites
+# List scenarios and suites (suite descriptions carry their wall-clock budget)
 pnpm eval:all --list
 ```
 

@@ -57,6 +57,8 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-service': 25_000_000, //          18.1 MB
 };
 
+const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');
+
 const caches: string[] = [];
 afterAll(() => {
   for (const dir of caches) rmSync(dir, { recursive: true, force: true });
@@ -124,6 +126,18 @@ describe('published package manifests', () => {
 
 describe('published package payloads', () => {
   const packed = new Map(packages.map((p) => [p.name, dryRunPack(p.path)] as const));
+
+  it.each(packages)('$name ships the workspace MIT license text', ({ name, path }) => {
+    // Each package carries its own copy rather than leaning on the package
+    // manager's implicit include. pnpm only injects the workspace-root LICENSE
+    // when the package looks license-free, so vendoring third-party texts
+    // silently suppresses it — that is how the service, which stages font
+    // licenses into `dist/licenses/`, once packed with no MIT text at all
+    // while still declaring `"license": "MIT"`.
+    const files = packed.get(name)!.files.map((file) => file.path.replace(/\\/g, '/'));
+    expect(files).toContain('LICENSE');
+    expect(readFileSync(resolve(path, 'LICENSE'), 'utf8')).toBe(ROOT_LICENSE);
+  });
 
   it.each(packages)('$name ships no source maps', ({ name }) => {
     const maps = packed.get(name)!.files.filter((f) => f.path.endsWith('.map'));

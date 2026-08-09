@@ -98,10 +98,16 @@ export const SUITES: Record<string, EvalSuite> = {
     id: 'extended-grounding',
     description:
       'Grounding + precision deep-dive: constraint-bound comms, records consolidation, ' +
+      'transcript-to-action-register reconciliation, tool-sourced cited research, ' +
       'distractor-resistant research, and the three research-verify trust tiers.',
     scenarios: [
       'constrained-comms',
       'records-intake',
+      // Both also sit in `productivity`. This is where their AXIS lives,
+      // so a grounding deep-dive reaches them without anyone remembering
+      // that the office suite exists.
+      'meeting-followup',
+      'wikipedia-research-brief',
       'decoy-research',
       'research-verify-t1',
       'research-verify-t2',
@@ -137,6 +143,84 @@ export const SUITES: Record<string, EvalSuite> = {
       'original fantasy against a constrained brief. Run with --llm-judge for the ' +
       'qualitative axis scores.',
     scenarios: ['historical-fiction', 'fantasy-fiction'],
+  },
+
+  // End-user office and knowledge-work scorecard. Unlike core, which
+  // deliberately spans product-wide capabilities, this suite stays on
+  // artifacts a non-technical user would recognize: communications,
+  // meeting follow-through, planning, research, quantitative readouts,
+  // spreadsheets, and presentations. Every external-looking dependency is
+  // a deterministic local mock, and the hermetic claim is ENFORCED — see
+  // wikipedia-research-brief's three layers, not just asserted in prose.
+  //
+  // Two deliberate exclusions. Creative writing lives in
+  // `extended-writing`; a fantasy short story is not office work, and
+  // including it made "productivity score" mean two different things.
+  // Coding lives in `core` and `extended-coding`.
+  //
+  // Six of the thirteen members are shared on purpose — two with core
+  // (plan-and-estimate, conflict-synthesis) and four with
+  // extended-grounding — because the axes genuinely overlap with office
+  // work. The seven remaining members are exclusive — six craftbook-driven
+  // artifacts plus the hand-authored theme round-trip — and they are what
+  // this suite uniquely buys you. Running core AND productivity double-pays
+  // for the shared two; do that deliberately, not by habit.
+  //
+  // `incident-postmortem` was dropped when the DocBlocks members landed:
+  // it is the most expensive scenario in the set, it already runs in core,
+  // and the dense-reading axis it covered is now carried by the research
+  // brief, the theme round-trip, and meeting follow-up.
+  //
+  // Three members produce a REAL binary document (a ZIP-shaped PPTX or
+  // DOCX) through the DocBlocks tool chain and assert the container, not
+  // just a byte count. That is the capability a byte floor silently failed
+  // to measure for as long as it existed.
+  //
+  // Every member declares a bounded `timeoutMs`, ordered cheapest-first,
+  // both enforced in suites.test.ts. Worst case is 365 min at --count 1,
+  // so a defensible --count 3 scorecard (below n=3 the harness refuses to
+  // quote a rate at all) is a ~17h job. Plan for it, or use
+  // `productivity-smoke`.
+  productivity: {
+    id: 'productivity',
+    description:
+      'Knowledge-work scorecard (13 scenarios, <=6h05m at --count 1): constrained communications, ' +
+      'meeting follow-up, records, planning, calendar synthesis, experiment analysis, ' +
+      'local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks ' +
+      'document production (PPTX, DOCX, theme round-trip). Fully hermetic. Run with --llm-judge — ' +
+      'the deterministic gates measure ' +
+      'brief-compliance; the judge axes are what differentiate models.',
+    // Cheap and broad first, so a run that gets cut short still says
+    // something. Roughly ascending by authored timeoutMs.
+    scenarios: [
+      'constrained-comms',
+      'craftbook-week-plan',
+      'craftbook-ab-test-readout',
+      'craftbook-annotated-bibliography',
+      'records-intake',
+      'plan-and-estimate',
+      'meeting-followup',
+      'craftbook-spreadsheet-model',
+      'conflict-synthesis',
+      'docblocks-theme-roundtrip',
+      'craftbook-research-to-document',
+      'craftbook-powerpoint-deck',
+      'wikipedia-research-brief',
+    ],
+  },
+
+  // Pulse check for "is office work broken?" — one of each KIND of gate
+  // the suite carries, which is what makes three scenarios informative:
+  // prose constraints, a harness-owned arithmetic oracle, and a real
+  // binary container produced through DocBlocks. Not a scorecard; the same
+  // relationship to `productivity` that `smoke` has to `core`.
+  'productivity-smoke': {
+    id: 'productivity-smoke',
+    description:
+      'Fast knowledge-work pulse check (3 scenarios, <=1h15m): constrained comms, an A/B ' +
+      'readout checked against an arithmetic oracle, and a DOCX produced through DocBlocks. ' +
+      'Not a scorecard — use productivity for that.',
+    scenarios: ['constrained-comms', 'craftbook-ab-test-readout', 'craftbook-research-to-document'],
   },
 
   // Deliberately hard probes that are NOT expected to pass 100% — they

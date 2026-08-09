@@ -1,3 +1,5 @@
+import { binaryDocumentExtension, isBinaryDocumentPath } from '@bendyline/gezel';
+
 export interface BinaryDocumentCraftbookRoute {
   craftbookId: string;
   label: string;
@@ -11,17 +13,14 @@ const ROUTES_BY_EXTENSION: Readonly<Record<string, BinaryDocumentCraftbookRoute>
   gif: { craftbookId: 'narrated-slideshow', label: 'animated slideshow' },
 };
 
-const BINARY_DOCUMENT_EXTENSIONS = new Set([
-  ...Object.keys(ROUTES_BY_EXTENSION),
-  'xlsx',
-  'epub',
-  'dbk',
-]);
-
-function extension(path: string): string | null {
-  const match = /\.([a-z0-9]+)$/i.exec(path.trim());
-  return match?.[1]?.toLowerCase() ?? null;
-}
+/**
+ * Extensions this module claims to route. Every one must also be a core
+ * binary-document extension — otherwise `isBinaryDocumentOutputPath` would
+ * refuse a path we advertise a craftbook for, and the handoff would fall
+ * through to a Builder. Asserted in document-routing.test.ts rather than at
+ * import time; a module-level throw would take the MCP server down on load.
+ */
+export const ROUTED_DOCUMENT_EXTENSIONS: readonly string[] = Object.keys(ROUTES_BY_EXTENSION);
 
 /**
  * Normalize a user-facing workspace/artifact deliverable to the relative path
@@ -38,8 +37,7 @@ export function normalizeDocumentOutputPath(path: string): string {
 }
 
 export function isBinaryDocumentOutputPath(path: string): boolean {
-  const ext = extension(path);
-  return ext !== null && BINARY_DOCUMENT_EXTENSIONS.has(ext);
+  return isBinaryDocumentPath(path);
 }
 
 /**
@@ -48,6 +46,6 @@ export function isBinaryDocumentOutputPath(path: string): boolean {
  * permission to fall back to a Builder.
  */
 export function binaryDocumentCraftbookRoute(path: string): BinaryDocumentCraftbookRoute | null {
-  const ext = extension(path);
+  const ext = binaryDocumentExtension(path);
   return ext ? (ROUTES_BY_EXTENSION[ext] ?? null) : null;
 }

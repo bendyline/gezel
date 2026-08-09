@@ -1,7 +1,7 @@
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
 import type { SniffResult } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
-import { provisionScenarioGezel } from './helpers.ts';
+import { provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
 import {
   provenanceShellOverwritesPath,
   provenanceShellReadPrecedesMutation,
@@ -587,53 +587,6 @@ async function listWorkspacePaths(
   }
 }
 
-async function readRunbookToolTrace(
-  client: EvalContext['client'],
-  projectId: string,
-): Promise<RunbookToolCall[] | null> {
-  try {
-    const { sessions } = await client.listChatSessions({ projectId });
-    const fullSessions = await Promise.all(
-      sessions.map((session) => client.getChatSession(session.id)),
-    );
-    const events: Array<{
-      atMs: number;
-      sessionIndex: number;
-      messageIndex: number;
-      callIndex: number;
-      call: RunbookToolCall;
-    }> = [];
-    for (let sessionIndex = 0; sessionIndex < fullSessions.length; sessionIndex++) {
-      const session = fullSessions[sessionIndex];
-      for (let messageIndex = 0; messageIndex < (session?.messages.length ?? 0); messageIndex++) {
-        const message = session?.messages[messageIndex];
-        for (let callIndex = 0; callIndex < (message?.toolCalls?.length ?? 0); callIndex++) {
-          const call = message?.toolCalls?.[callIndex];
-          if (!call) continue;
-          const parsedAt = Date.parse(message?.at ?? '');
-          events.push({
-            atMs: Number.isFinite(parsedAt) ? parsedAt : Number.MAX_SAFE_INTEGER,
-            sessionIndex,
-            messageIndex,
-            callIndex,
-            call,
-          });
-        }
-      }
-    }
-    events.sort(
-      (a, b) =>
-        a.atMs - b.atMs ||
-        a.sessionIndex - b.sessionIndex ||
-        a.messageIndex - b.messageIndex ||
-        a.callIndex - b.callIndex,
-    );
-    return events.map((event) => event.call);
-  } catch {
-    return null;
-  }
-}
-
 async function setup(ctx: EvalContext): Promise<void> {
   const { client, log } = ctx;
   let projectId = await findProjectId(client);
@@ -698,7 +651,7 @@ export const opsRunbookScenario: EvalScenario = {
       readWorkspaceText(client, projectId, RUNLOG_PATH),
       readWorkspaceText(client, projectId, HALT_REPORT_PATH),
       listWorkspacePaths(client, projectId),
-      readRunbookToolTrace(client, projectId),
+      readProjectToolTrace(client, projectId),
     ]);
     if (workspacePaths === null) {
       logChanged(

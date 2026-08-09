@@ -9,6 +9,7 @@ import { conflictSynthesisScenario } from './conflict-synthesis.ts';
 import { constrainedCommsScenario } from './constrained-comms.ts';
 import { dataWrangleScenario } from './data-wrangle.ts';
 import { decoyResearchScenario } from './decoy-research.ts';
+import { docblocksThemeRoundtripScenario } from './docblocks-theme-roundtrip.ts';
 import { failingTestsSpecScenario } from './failing-tests-spec.ts';
 import { fantasyFictionScenario } from './fantasy-fiction.ts';
 import { fictionalSdkScenario } from './fictional-sdk.ts';
@@ -18,6 +19,7 @@ import { incidentPostmortemScenario } from './incident-postmortem.ts';
 import { indexBenchScenario } from './index-bench.ts';
 import { interfaceContractScenario } from './interface-contract.ts';
 import { jobHuntScenario } from './job-hunt.ts';
+import { meetingFollowupScenario } from './meeting-followup.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
@@ -37,6 +39,7 @@ import { ticTacToeScenario } from './tictactoe.ts';
 import { toolRoutingCraftbookScenario } from './tool-routing-craftbook.ts';
 import { toolRoutingImageScenario } from './tool-routing-image.ts';
 import { toolRoutingRetrievalScenario } from './tool-routing-retrieval.ts';
+import { wikipediaResearchScenario } from './wikipedia-research-brief.ts';
 
 const CRAFTBOOK_SCENARIOS = Object.fromEntries(
   runnableGenericCraftbookSpecs().map((spec) => [spec.scenarioId, craftbookScenarioFromSpec(spec)]),
@@ -71,6 +74,17 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [researchVerifyT1.id]: researchVerifyT1,
   [researchVerifyT2.id]: researchVerifyT2,
   [researchVerifyT3.id]: researchVerifyT3,
+  // Office-shaped source work, hand-authored because each contract is
+  // stronger than a generic craftbook `test.json` sidecar can express:
+  //   - theme round-trip: cited values must equal what the DocBlocks tools
+  //     returned, AND the saved deck must be a real ZIP
+  //   - meeting follow-up: per-row register equality with per-row repair
+  //     routing across two deliverables
+  //   - wikipedia research: three-layer hermeticity whose last layer is a
+  //     grader assertion that no live-retrieval tool was called
+  [docblocksThemeRoundtripScenario.id]: docblocksThemeRoundtripScenario,
+  [meetingFollowupScenario.id]: meetingFollowupScenario,
+  [wikipediaResearchScenario.id]: wikipediaResearchScenario,
   [opsRunbookScenario.id]: opsRunbookScenario,
   // Direct index-quality benchmark (no agent): golden-query
   // retrieval before/after enrichment on a pinned squisq corpus. The

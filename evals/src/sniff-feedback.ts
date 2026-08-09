@@ -26,6 +26,12 @@
  * separate makes the call sites obvious and the dedup state simple.
  */
 
+import {
+  attachableDeliverable,
+  describeSendFailure,
+  isBinaryDocumentDeliverablePath,
+  isPermanentHandoffError,
+} from './handoff.ts';
 import type { SniffResult } from './success-check.ts';
 import type { EvalContext, EvalTerminalFailure } from './types.ts';
 
@@ -34,6 +40,9 @@ import type { EvalContext, EvalTerminalFailure } from './types.ts';
  * failure" hashes. WeakMap-keyed for auto-cleanup on trial end.
  */
 const nudgeMemory = new WeakMap<EvalContext, Set<string>>();
+/** Permanent request-shape failures are deduped per target; retrying the same
+ * rejected payload every five seconds only floods logs and cannot heal. */
+const permanentNudgeFailureMemory = new WeakMap<EvalContext, Set<string>>();
 const INFLIGHT_FEEDBACK_DEFER_MS = 4 * 60_000;
 
 /**
@@ -472,6 +481,14 @@ export async function postSniffFeedback(
     return { status: 'unroutable' };
   }
 
+  let permanentFailures = permanentNudgeFailureMemory.get(ctx);
+  if (!permanentFailures) {
+    permanentFailures = new Set();
+    permanentNudgeFailureMemory.set(ctx, permanentFailures);
+  }
+  const permanentFailureKey = `${key}::target:${target.gezelId}`;
+  if (permanentFailures.has(permanentFailureKey)) return { status: 'deduped' };
+
   const appendOnlyRepair = hasAppendOnlyRepairDirective(opts.repairDirective);
   const combinedRepair = hasCombinedRepairDirective(opts.repairDirective);
   const postReadMutationRepair = !!opts.postReadMutationTarget;
@@ -505,6 +522,9 @@ export async function postSniffFeedback(
     opts.expectedDeliverable === undefined
       ? { kind: 'file' as const, filePath }
       : opts.expectedDeliverable;
+  const deliverableFragment = expectedDeliverable
+    ? attachableDeliverable(expectedDeliverable.filePath, target.role, ctx.log)
+    : {};
   let repairActionBaseline: Awaited<ReturnType<NonNullable<EvalContext['snapshotRepairActions']>>> =
     null;
   if (target.sessionId && ctx.snapshotRepairActions) {
@@ -524,7 +544,7 @@ export async function postSniffFeedback(
     const delivered = await ctx.client.messageGezel(target.gezelId, {
       fromGezelId: ctx.meesterId,
       text,
-      ...(expectedDeliverable ? { expectedDeliverable } : {}),
+      ...deliverableFragment,
       ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
     });
     if (opts.notifyMeester) {
@@ -542,7 +562,7 @@ export async function postSniffFeedback(
       await ctx.client.messageGezel(ensured.gezelId, {
         fromGezelId: ctx.meesterId,
         text: opts.assetHandoff.message,
-        expectedDeliverable: { kind: 'file', filePath: opts.assetHandoff.filePath },
+        ...attachableDeliverable(opts.assetHandoff.filePath, ensured.role ?? 'Developer', ctx.log),
         ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
       });
       ctx.log(
@@ -582,7 +602,13 @@ export async function postSniffFeedback(
     );
     return { status: 'sent', stage: stage as 0 | 1 | 2, attempts: stagedAttempts };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeSendFailure(err);
+    if (isPermanentHandoffError(err)) {
+      permanentFailures.add(permanentFailureKey);
+      ctx.log(
+        `[sniff-feedback] suppressing identical repair sends to ${target.gezelId} after permanent client error`,
+      );
+    }
     ctx.log(`[sniff-feedback] messageGezel failed for ${target.gezelId}: ${msg}`);
     return { status: 'send-failed' };
   }
@@ -1145,6 +1171,7 @@ export async function postMissingDeliverableFeedback(
       (!specialist && minimumScore != null && state.absentPolls >= coordinatorFallbackAfterPolls),
     repairDirective: opts.repairDirective,
   });
+  let attemptedTargetId = specialist?.gezelId;
   try {
     if (specialist && !urgentWrongSurfaceNearMiss) {
       const deliveryProjectId = opts.projectId ?? specialist.projectId;
@@ -1158,7 +1185,7 @@ export async function postMissingDeliverableFeedback(
       await ctx.client.messageGezel(specialist.gezelId, {
         fromGezelId: ctx.meesterId,
         text,
-        expectedDeliverable: { kind: 'file', filePath },
+        ...attachableDeliverable(filePath, specialist.role, ctx.log),
         ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
       });
       ctx.log(
@@ -1178,10 +1205,11 @@ export async function postMissingDeliverableFeedback(
         const ensured = await ctx.client.ensureGezel({
           jobTitle: 'Developer',
         });
+        attemptedTargetId = ensured.gezelId;
         await ctx.client.messageGezel(ensured.gezelId, {
           fromGezelId: ctx.meesterId,
           text,
-          expectedDeliverable: { kind: 'file', filePath },
+          ...attachableDeliverable(filePath, ensured.role ?? 'Developer', ctx.log),
           ...(opts.projectId ? { projectId: opts.projectId } : {}),
         });
         state.coordinatorFallbackSentAtPoll = state.absentPolls;
@@ -1214,7 +1242,18 @@ export async function postMissingDeliverableFeedback(
     if (nearMissKey) state.lastNearMissKey = nearMissKey;
     perCtx.set(filePath, state);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeSendFailure(err);
+    if (isPermanentHandoffError(err)) {
+      // Suppress this exact, permanently-rejected target while still allowing
+      // a newly selected specialist to receive the repair later.
+      state.nudgesSent = maxNudges;
+      if (attemptedTargetId) state.lastTargetGezelId = attemptedTargetId;
+      if (nearMissKey) state.lastNearMissKey = nearMissKey;
+      perCtx.set(filePath, state);
+      ctx.log(
+        `[sniff-feedback] suppressing repeated missing-deliverable sends to ${attemptedTargetId ?? 'unknown target'} after permanent client error`,
+      );
+    }
     ctx.log(`[sniff-feedback] missing-deliverable nudge failed for ${filePath}: ${msg}`);
   }
 }
@@ -1252,34 +1291,52 @@ function formatMissingDeliverableNudge(
   opts: { coordinatorFallback?: boolean; repairDirective?: string } = {},
 ): string {
   const isHtml = /\.html?$/i.test(filePath);
-  const deliverableHint = isHtml
-    ? 'Build the actual browser deliverable now: a complete, self-contained HTML file with the requested UI and behavior.'
-    : 'Write the actual deliverable file now with the requested content.';
-  const handoffHint =
-    isHtml || isSourceFile(filePath)
+  const isBinaryDocument = isBinaryDocumentDeliverablePath(filePath);
+  const deliverableHint = isBinaryDocument
+    ? 'Produce the real requested binary through the already-active craftbook production workflow; a text file with the right extension is invalid.'
+    : isHtml
+      ? 'Build the actual browser deliverable now: a complete, self-contained HTML file with the requested UI and behavior.'
+      : 'Write the actual deliverable file now with the requested content.';
+  const handoffHint = isBinaryDocument
+    ? 'Do not convert this into an ad-hoc Developer/file handoff. Continue the active document craftbook: author/review the source, convert and preview with DocBlocks, save the artifact, then copy its real bytes to the exact workspace path.'
+    : isHtml || isSourceFile(filePath)
       ? `If your current role does not have \`write_file\`, do not translate this into another planning, design, review, or image request. Make a blocking file handoff instead: first call \`ensure_gezel\` for a Builder/Developer, then call \`message_gezel\` for that gezel with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and tell them to write \`${filePath}\` now. Do not call \`ask_specialist\` for this file deliverable.`
       : '';
   const artifactCopySource = artifactNearMissSource(filePath, nearMiss);
-  const landingInstruction = artifactCopySource
-    ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
-    : `${deliverableHint} Stop reading/planning and write the file now: \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
-  const landingToolPhrase = artifactCopySource
-    ? '`copy_artifact_to_workspace` or `write_file`'
-    : '`write_file`';
+  const landingInstruction = isBinaryDocument
+    ? `${deliverableHint} Use DocBlocks \`convert_document\` from the approved Markdown, \`preview_document\` for visual QA, and \`save_artifact\` with destination path \`${filePath}\`; then call \`copy_artifact_to_workspace({ source: "${filePath}", dest: "${filePath}" })\`. Do not call \`write_file\` for \`${filePath}\`.`
+    : artifactCopySource
+      ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
+      : `${deliverableHint} Stop reading/planning and write the file now: \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
+  const landingToolPhrase = isBinaryDocument
+    ? '`convert_document` → `preview_document` → `save_artifact` → `copy_artifact_to_workspace`'
+    : artifactCopySource
+      ? '`copy_artifact_to_workspace` or `write_file`'
+      : '`write_file`';
   const nearMissLines = nearMiss
     ? [
         `[scenario check] I did find \`${nearMiss.path}\` at \`${nearMiss.location}\`${nearMiss.bytes == null ? '' : ` (${nearMiss.bytes} bytes)`}, but that is the wrong deliverable path or location. A plan, notes file, artifact/library-only file, draft, or alternate filename does not count.`,
-        `Your next tool call must create or replace the exact file \`${filePath}\`. Do not keep expanding \`${nearMiss.path}\` unless you first move or rewrite it as \`${filePath}\`.`,
+        isBinaryDocument
+          ? `Resume the DocBlocks save/copy sequence now so the real binary lands at \`${filePath}\`; do not rewrite \`${nearMiss.path}\` as text.`
+          : `Your next tool call must create or replace the exact file \`${filePath}\`. Do not keep expanding \`${nearMiss.path}\` unless you first move or rewrite it as \`${filePath}\`.`,
         '',
       ]
     : [];
   const coordinatorLines = opts.coordinatorFallback
-    ? [
-        '',
-        'No implementation specialist is active yet. If you are coordinating this project, immediately create or ensure a Developer/Builder and send them this exact deliverable directive, or write the file yourself before ending the turn. For HTML/source files, do not delegate the shipping file to a Designer and do not ask anyone to paste file contents in chat. A Designer can supply visual direction or assets; the Developer/Builder writes the workspace file.',
-        `The handoff must include \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` so the assignee writes the workspace file instead of answering in chat.`,
-      ]
+    ? isBinaryDocument
+      ? [
+          '',
+          'No production specialist is active yet. Resume or invoke the matching document craftbook and execute its DocBlocks production step; do not recruit a generic Developer or attach an ad-hoc binary expected-deliverable contract.',
+        ]
+      : [
+          '',
+          'No implementation specialist is active yet. If you are coordinating this project, immediately create or ensure a Developer/Builder and send them this exact deliverable directive, or write the file yourself before ending the turn. For HTML/source files, do not delegate the shipping file to a Designer and do not ask anyone to paste file contents in chat. A Designer can supply visual direction or assets; the Developer/Builder writes the workspace file.',
+          `The handoff must include \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` so the assignee writes the workspace file instead of answering in chat.`,
+        ]
     : [];
+  const completionLine = isBinaryDocument
+    ? `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Do not end your turn until ${landingToolPhrase} has landed the real binary workspace file. If you delegated this, the production work has not happened: resume the craftbook step and complete it.`
+    : `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replace_in_file\`/\`append_to_file\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`;
   return [
     ...nearMissLines,
     `[scenario check] There is still **no \`${filePath}\`** in the workspace. The deliverable is the FILE — prose in chat does not count and will not be seen.`,
@@ -1291,7 +1348,7 @@ function formatMissingDeliverableNudge(
     `If \`${filePath}\` already exists by the time you read this queued message, treat this message as stale: re-read \`${filePath}\` and patch the latest concrete scenario-check failure instead of rewriting from scratch or replying in prose.`,
     ...coordinatorLines,
     '',
-    `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replace_in_file\`/\`append_to_file\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`,
+    completionLine,
   ].join('\n');
 }
 
@@ -1309,6 +1366,7 @@ interface TargetGezel {
   gezelId: string;
   sessionId?: string;
   projectId?: string;
+  role?: string | null;
 }
 
 interface TargetCandidate extends TargetGezel {
@@ -1333,12 +1391,14 @@ async function pickTargetGezel(
     .map((s) => ({ gezelId: s.gezelId, sessionId: s.id, projectId: s.projectId }));
   if (opts.targetGezelId) {
     const existing = candidates.find((candidate) => candidate.gezelId === opts.targetGezelId);
-    return (
-      existing ?? {
-        gezelId: opts.targetGezelId,
-        ...(opts.projectId ? { projectId: opts.projectId } : {}),
-      }
-    );
+    if (existing) {
+      const roleMap = await loadGezelRoles(ctx);
+      return { ...existing, role: roleMap.get(existing.gezelId) ?? null };
+    }
+    return {
+      gezelId: opts.targetGezelId,
+      ...(opts.projectId ? { projectId: opts.projectId } : {}),
+    };
   }
 
   const roleMap = await loadGezelRoles(ctx);
@@ -1379,6 +1439,7 @@ async function pickTargetGezel(
     gezelId: target.gezelId,
     sessionId: target.sessionId,
     projectId: target.projectId,
+    role: target.role,
   };
 }
 
@@ -1497,5 +1558,6 @@ function isSourceFile(filePath: string): boolean {
  */
 export function _resetSniffNudgeMemoryForTests(ctx: EvalContext): void {
   nudgeMemory.delete(ctx);
+  permanentNudgeFailureMemory.delete(ctx);
   escalationMemory.delete(ctx);
 }

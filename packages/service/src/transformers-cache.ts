@@ -33,6 +33,28 @@ export function transformersCacheDir(home: string): string {
   return join(home, 'engines', 'hf-cache');
 }
 
+/** The optional peer both TTS and memory embeddings load lazily. */
+export const TRANSFORMERS_MODULE = '@huggingface/transformers';
+
+/**
+ * True when Node is reporting that `specifier` itself is not installed, rather
+ * than the package being present and failing to load.
+ *
+ * `@huggingface/transformers` and `kokoro-js` are optional peers that an
+ * ordinary npm install omits, so absence is a supported configuration and must
+ * be distinguishable from breakage before anything picks a log level. Matched
+ * on the resolver's error code plus the specifier it names, not on a substring
+ * of the message: a genuine failure *inside* transformers also mentions the
+ * package, and used to be misreported as "not installed".
+ */
+export function isMissingModule(err: unknown, specifier: string): boolean {
+  if (!(err instanceof Error)) return false;
+  const { code } = err as NodeJS.ErrnoException;
+  if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return false;
+  const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(String.raw`Cannot find (?:package|module) '${escaped}'`).test(err.message);
+}
+
 /** The mutable subset of transformers' `env` we touch. */
 export interface TransformersEnv {
   cacheDir: string;
@@ -98,6 +120,12 @@ export async function pinTransformersCacheDir(
     env.allowRemoteModels = true;
     pinned.add(cacheDir);
   } catch (err) {
+    if (isMissingModule(err, TRANSFORMERS_MODULE)) {
+      // Optional peer absent — nothing to pin, and nothing wrong. The caller
+      // that actually needs the model surfaces the actionable install message.
+      log.debug(`skipped transformers cache pin: ${TRANSFORMERS_MODULE} is not installed`);
+      return;
+    }
     log.warn(
       `could not pin transformers cache dir "${cacheDir}": ${err instanceof Error ? err.message : String(err)}`,
     );

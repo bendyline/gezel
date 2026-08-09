@@ -33,6 +33,7 @@ import {
 } from '../sniff-feedback.ts';
 import type { SniffResult } from '../success-check.ts';
 import type { EvalContext, SuccessCheckResult } from '../types.ts';
+import type { ProvenanceToolCall } from './tool-provenance.ts';
 
 export type { RuntimeAssertion };
 
@@ -236,6 +237,69 @@ export async function listAllFiles(
     }
   }
   return out;
+}
+
+/**
+ * Every tool call across every chat session in a project, ordered by the
+ * message timestamp and then by stable position, so provenance checks can
+ * reason about "was X read before Y was written" and "was a forbidden tool
+ * ever reached for".
+ *
+ * Returns `null` when the trace cannot be read at all (transport error,
+ * sessions not yet created). Callers must distinguish that from `[]` — an
+ * empty trace is "the model called nothing", an unreadable trace is "we
+ * don't know", and grading a negative assertion on `null` would silently
+ * pass every trial where the read failed.
+ *
+ * Only OpenAI/Mock providers surface tool calls to the bridge (Copilot runs
+ * them inside its own subprocess), so provenance gates built on this are
+ * blind on Copilot trials by construction.
+ */
+export async function readProjectToolTrace(
+  client: GezelClient,
+  projectId: string,
+): Promise<ProvenanceToolCall[] | null> {
+  try {
+    const { sessions } = await client.listChatSessions({ projectId });
+    const fullSessions = await Promise.all(
+      sessions.map((session) => client.getChatSession(session.id)),
+    );
+    const events: Array<{
+      atMs: number;
+      sessionIndex: number;
+      messageIndex: number;
+      callIndex: number;
+      call: ProvenanceToolCall;
+    }> = [];
+    for (let sessionIndex = 0; sessionIndex < fullSessions.length; sessionIndex++) {
+      const session = fullSessions[sessionIndex];
+      for (let messageIndex = 0; messageIndex < (session?.messages.length ?? 0); messageIndex++) {
+        const message = session?.messages[messageIndex];
+        for (let callIndex = 0; callIndex < (message?.toolCalls?.length ?? 0); callIndex++) {
+          const call = message?.toolCalls?.[callIndex];
+          if (!call) continue;
+          const parsedAt = Date.parse(message?.at ?? '');
+          events.push({
+            atMs: Number.isFinite(parsedAt) ? parsedAt : Number.MAX_SAFE_INTEGER,
+            sessionIndex,
+            messageIndex,
+            callIndex,
+            call,
+          });
+        }
+      }
+    }
+    events.sort(
+      (a, b) =>
+        a.atMs - b.atMs ||
+        a.sessionIndex - b.sessionIndex ||
+        a.messageIndex - b.messageIndex ||
+        a.callIndex - b.callIndex,
+    );
+    return events.map((event) => event.call);
+  } catch {
+    return null;
+  }
 }
 
 export async function readSurfaceText(client: GezelClient, ref: ProjectFileRef): Promise<string> {

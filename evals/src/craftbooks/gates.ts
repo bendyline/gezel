@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { promisify } from 'node:util';
 import type { GateCheck, StepSniff } from '@bendyline/gezel';
+import { verifyBinaryDocumentBytes } from '@bendyline/gezel';
 import { evaluateGate } from '@bendyline/gezel-service';
 import {
   type WorkspaceLike,
@@ -47,6 +48,18 @@ export interface CraftbookEvalGateResult {
   failures: string[];
 }
 
+/**
+ * Check kinds that exist only in `test.json` (`CraftbookTestCheckSchema`)
+ * and never in core's `GateCheckSchema`. Keep this in step with the
+ * eval-only members of that union and with `successChecksForSpec`, which
+ * routes the same set past `completionGate`.
+ */
+const EVAL_ONLY_CHECK_KINDS = new Set(['prometheusAlerts', 'nodeScriptPasses', 'binaryDocument']);
+
+export function isEvalOnlyCheck(check: { kind: string }): boolean {
+  return EVAL_ONLY_CHECK_KINDS.has(check.kind);
+}
+
 async function delegateToRuntimeEvaluator(
   check: GateCheck,
   ws: CraftbookEvalWorkspace,
@@ -75,7 +88,11 @@ async function evaluateOne(
   // Artifact-drawer checks delegate straight to the runtime evaluator,
   // which owns the workspace↔artifact reader swap — the local fast paths
   // below all read the workspace and would judge the wrong tree.
-  if ((check as { artifact?: boolean }).artifact === true) {
+  //
+  // Eval-only kinds are exempt: the runtime evaluator has never heard of
+  // them, so delegating would judge an unknown check rather than the file.
+  // Each one handles both surfaces itself.
+  if ((check as { artifact?: boolean }).artifact === true && !isEvalOnlyCheck(check)) {
     return delegateToRuntimeEvaluator(check as GateCheck, ws);
   }
   switch (check.kind) {
@@ -148,6 +165,8 @@ async function evaluateOne(
       return evaluatePrometheusAlerts(check, ws);
     case 'nodeScriptPasses':
       return evaluateNodeScriptPasses(check, ws);
+    case 'binaryDocument':
+      return evaluateBinaryDocument(check, ws);
     case 'jsParses': {
       const file = check.file ?? 'index.html';
       const content = await ws.read(file);
@@ -492,6 +511,36 @@ function yamlPath(path: Array<string | number>): string {
       typeof part === 'number' ? `[${part}]` : part.includes('.') ? `["${part}"]` : part,
     )
     .join('.');
+}
+
+/**
+ * Verify a binary office/media deliverable really is the container its
+ * extension claims.
+ *
+ * Fails CLOSED when the surface can't serve bytes: reading a ZIP through
+ * the text `read()` is lossy, so "we couldn't check" must never render as
+ * "it passed" — that is the exact shape of the hole this check exists to
+ * close (a byte floor alone accepted the Markdown source renamed to
+ * `.pptx`, while every DocBlocks tool had genuinely been called).
+ */
+async function evaluateBinaryDocument(
+  check: Extract<CraftbookEvalGateCheck, { kind: 'binaryDocument' }>,
+  ws: CraftbookEvalWorkspace,
+): Promise<string | null> {
+  const surface = check.artifact ? 'artifacts drawer' : 'workspace';
+  const reader = check.artifact ? ws.readArtifactBytes : ws.readBytes;
+  if (!reader) {
+    return `${check.file}: the ${surface} cannot serve raw bytes, so the binary container could not be verified`;
+  }
+  const bytes = await reader.call(ws, check.file);
+  if (bytes === null) return `${check.file} not found in the ${surface}`;
+
+  const minBytes = check.minBytes ?? 1000;
+  if (bytes.length < minBytes) {
+    return `${check.file} is ${bytes.length} bytes; a real converted document is at least ${minBytes}`;
+  }
+  const verdict = verifyBinaryDocumentBytes(check.file, bytes);
+  return verdict.ok ? null : verdict.detail;
 }
 
 async function evaluatePrometheusAlerts(

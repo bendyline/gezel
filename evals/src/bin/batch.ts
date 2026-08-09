@@ -27,6 +27,7 @@ import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
+import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { formatPassClaim } from '../stats-discipline.ts';
 import { valueRequiredBatchFlagError } from './all-args.ts';
 import {
@@ -36,26 +37,6 @@ import {
   resolveKeurmeesterFlag,
   resolveProviderFlag,
 } from './args.ts';
-
-function installSignalHandlers(): AbortController {
-  const ac = new AbortController();
-  let firstHit = false;
-  const handler = (sig: NodeJS.Signals) => {
-    if (!firstHit) {
-      firstHit = true;
-      console.error(
-        `\n[evals] ${sig} received — aborting current trial gracefully (Ctrl+C again to force-exit)`,
-      );
-      ac.abort();
-    } else {
-      console.error('[evals] second signal — forcing exit');
-      process.exit(130);
-    }
-  };
-  process.on('SIGINT', handler);
-  process.on('SIGTERM', handler);
-  return ac;
-}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -119,7 +100,7 @@ async function main() {
   });
   try {
     const keurmeester = resolveKeurmeesterFlag(args.flags);
-    const ac = installSignalHandlers();
+    const ac = installEvalSignalHandlers();
     const opts = {
       modelId,
       count,

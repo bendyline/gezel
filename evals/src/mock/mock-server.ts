@@ -547,12 +547,29 @@ function valueAtPath(value: unknown, dottedPath: string): unknown {
   return current;
 }
 
-/** Materialize a deterministic fixture through the trial project's real file surfaces. */
+/** Fixture id → the bytes it materializes. */
+const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = {
+  'minimal-pptx': () => minimalPptxFixture(),
+  'minimal-docx': () => minimalDocxFixture(),
+  'minimal-pdf': () => minimalPdfFixture(),
+};
+
+export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf';
+
+/**
+ * Materialize a deterministic fixture through the trial project's real file
+ * surfaces.
+ *
+ * `effect.fixture` used to be read from the spec and then ignored — every
+ * effect wrote a PPTX regardless. That was invisible while `minimal-pptx`
+ * was the only value, and would have silently written a presentation to a
+ * `.docx` path the moment a second fixture existed. Dispatch on it.
+ */
 export async function materializeMockToolFixture(
   effect: {
     surface: 'workspace' | 'artifact';
     pathArgument: string;
-    fixture: 'minimal-pptx';
+    fixture: MockToolFixture;
   },
   args: unknown,
   context: { trialHome?: string; projectId: string | null },
@@ -568,10 +585,12 @@ export async function materializeMockToolFixture(
   if (normalized.split('/').includes('..')) {
     throw new Error('mock MCP file effect path must stay inside the project');
   }
+  const bytes = MOCK_FIXTURE_BYTES[effect.fixture];
+  if (!bytes) throw new Error(`unknown mock MCP fixture "${effect.fixture}"`);
   const drawer = effect.surface === 'artifact' ? 'artifacts' : 'workspace';
   const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, minimalPptxFixture());
+  await writeFile(target, bytes());
 }
 
 /** Small deterministic ZIP-shaped Open XML presentation used only by eval mocks. */
@@ -599,6 +618,64 @@ export function minimalPptxFixture(): Uint8Array {
     ],
   ];
   return zipStored(files);
+}
+
+/** Small deterministic ZIP-shaped Open XML word document used only by eval mocks. */
+export function minimalDocxFixture(): Uint8Array {
+  const files: Array<[string, string]> = [
+    [
+      '[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    ],
+    [
+      '_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+    ],
+    [
+      'word/document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Deterministic DocBlocks eval document</w:t></w:r></w:p><w:p><w:r><w:t>Converted from the approved Markdown source.</w:t></w:r></w:p><w:sectPr/></w:body></w:document>',
+    ],
+    [
+      'word/_rels/document.xml.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+    ],
+  ];
+  return zipStored(files);
+}
+
+/**
+ * Smallest structurally valid PDF used only by eval mocks: header, four
+ * objects, xref table, trailer. Byte offsets in the xref are computed rather
+ * than hardcoded so edits to the object bodies can't silently desync it.
+ */
+export function minimalPdfFixture(): Uint8Array {
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Length 60 >>\nstream\nBT /F1 12 Tf 72 720 Td (DocBlocks eval report) Tj ET\nendstream\nendobj\n',
+  ];
+  const header = '%PDF-1.7\n%âãÏÓ\n';
+  const offsets: number[] = [];
+  let body = '';
+  for (const object of objects) {
+    offsets.push(header.length + body.length);
+    body += object;
+  }
+  const xrefStart = header.length + body.length;
+  const xref = [
+    'xref',
+    `0 ${objects.length + 1}`,
+    '0000000000 65535 f ',
+    ...offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n `),
+    'trailer',
+    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
+    'startxref',
+    String(xrefStart),
+    '%%EOF\n',
+  ].join('\n');
+  // latin1 so the binary comment bytes in the header stay single-byte.
+  return Uint8Array.from(`${header}${body}${xref}`, (char) => char.charCodeAt(0) & 0xff);
 }
 
 function zipStored(files: Array<[string, string]>): Uint8Array {

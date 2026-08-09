@@ -70,6 +70,30 @@ export const NodeScriptPassesCheckSchema = z
 export type NodeScriptPassesCheck = z.infer<typeof NodeScriptPassesCheckSchema>;
 
 /**
+ * Assert a binary office/media deliverable really is the container its
+ * extension claims (ZIP for OOXML/EPUB/DBK, `%PDF-`, `GIF8`, MP4 `ftyp`).
+ *
+ * Eval-only because it is a *substitution* detector, not a quality bar.
+ * Without it a binary deliverable's whole gate is a byte floor — the eval
+ * harness drops `completionGate`'s scripts and keeps only its declarative
+ * checks — so a model that called every DocBlocks tool and then wrote its
+ * Markdown source to `deck.pptx` passed. That is precisely the failure the
+ * `BINARY_PRODUCTION_REQUIRED` repair directive warns against, and nothing
+ * was checking for it.
+ */
+export const BinaryDocumentCheckSchema = z
+  .object({
+    kind: z.literal('binaryDocument'),
+    file: z.string().min(1),
+    /** Look in the artifacts drawer instead of the workspace. */
+    artifact: z.boolean().optional(),
+    /** Floor on the container's byte length; defaults to 1000. */
+    minBytes: z.number().int().positive().optional(),
+  })
+  .strict();
+export type BinaryDocumentCheck = z.infer<typeof BinaryDocumentCheckSchema>;
+
+/**
  * Everything a test.json check slot accepts: the full core gate-check
  * vocabulary (including `judge` for enforcing quality floors) plus the
  * two eval-only executable kinds.
@@ -78,6 +102,7 @@ export const CraftbookTestCheckSchema = z.union([
   GateCheckSchema,
   PrometheusAlertsCheckSchema,
   NodeScriptPassesCheckSchema,
+  BinaryDocumentCheckSchema,
 ]);
 export type CraftbookTestCheck = z.infer<typeof CraftbookTestCheckSchema>;
 
@@ -170,12 +195,18 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
               name: z.string().min(1),
               description: z.string().min(1),
               resultTemplate: z.unknown().optional(),
-              /** Deterministic eval-only file materialization after this tool call. */
+              /**
+               * Deterministic eval-only file materialization after this
+               * tool call. The fixture must match the container the
+               * deliverable's extension claims — a `minimal-pptx` written
+               * to a `.docx` path now fails the `binaryDocument` check on
+               * content type rather than sliding through a byte floor.
+               */
               writeFixture: z
                 .object({
                   surface: z.enum(['workspace', 'artifact']),
                   pathArgument: z.string().min(1),
-                  fixture: z.enum(['minimal-pptx']),
+                  fixture: z.enum(['minimal-pptx', 'minimal-docx', 'minimal-pdf']),
                 })
                 .strict()
                 .optional(),

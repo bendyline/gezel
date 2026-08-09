@@ -1,5 +1,7 @@
+import { BINARY_DOCUMENT_EXTENSIONS } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  ROUTED_DOCUMENT_EXTENSIONS,
   binaryDocumentCraftbookRoute,
   isBinaryDocumentOutputPath,
   normalizeDocumentOutputPath,
@@ -14,6 +16,14 @@ describe('binary document craftbook routing', () => {
     ['launch.gif', 'narrated-slideshow'],
   ])('routes %s by production capability', (path, craftbookId) => {
     expect(binaryDocumentCraftbookRoute(path)?.craftbookId).toBe(craftbookId);
+  });
+
+  it('only routes extensions core also recognizes as binary documents', () => {
+    // A routable extension core does not know is a silent hole: the handoff
+    // guard would wave the path through to a Builder that hand-writes bytes.
+    for (const ext of ROUTED_DOCUMENT_EXTENSIONS) {
+      expect(BINARY_DOCUMENT_EXTENSIONS, `routed extension "${ext}"`).toContain(ext);
+    }
   });
 
   it('recognizes unsupported binary documents without inventing a Builder route', () => {

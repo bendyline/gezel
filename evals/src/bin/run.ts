@@ -22,6 +22,7 @@ import { assertLocalEngineSource } from '../model-sources.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
 import { runTrial } from '../runner.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
+import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { maybeJudgeTrial } from '../trial-llm-judge.ts';
 import type { EvalScenario } from '../types.ts';
 import {
@@ -32,32 +33,6 @@ import {
   resolveProviderFlag,
   resolveRenderModeFlag,
 } from './args.ts';
-
-/**
- * Wire SIGINT + SIGTERM to an AbortController so a Ctrl+C still produces
- * a fully captured postmortem. First signal: graceful abort (lets the
- * runner's finally block snapshot artifacts/sessions/history). Second
- * signal: hard exit.
- */
-function installSignalHandlers(): AbortController {
-  const ac = new AbortController();
-  let firstHit = false;
-  const handler = (sig: NodeJS.Signals) => {
-    if (!firstHit) {
-      firstHit = true;
-      console.error(
-        `\n[evals] ${sig} received — aborting trial gracefully (Ctrl+C again to force-exit)`,
-      );
-      ac.abort();
-    } else {
-      console.error('[evals] second signal — forcing exit');
-      process.exit(130);
-    }
-  };
-  process.on('SIGINT', handler);
-  process.on('SIGTERM', handler);
-  return ac;
-}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -108,7 +83,7 @@ async function main() {
     ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
   });
   try {
-    const ac = installSignalHandlers();
+    const ac = installEvalSignalHandlers('trial');
     const result = await runTrial(scenario, {
       modelId,
       ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
