@@ -13,20 +13,28 @@
  * doesn't permit gezel writes yet. Callers typically want to catch
  * them together but render different copy.
  */
+export type WorkspaceWriteDeniedReason =
+  | 'missing-flag-external'
+  | 'disabled-by-project'
+  | 'data-subtree-readonly';
+
+function deniedMessage(info: { reason: WorkspaceWriteDeniedReason; workingDir: string }): string {
+  switch (info.reason) {
+    case 'disabled-by-project':
+      return 'Gezel writes are turned off for this project ("Allow gezels to modify the workspace directory" in Project → Settings). Flip it on to let gezels modify files here.';
+    case 'data-subtree-readonly':
+      return 'The data/ directory holds mirrored connector corpora and is read-only to gezels: editing or deleting a synced record causes permanent, silent data loss (a deleted record is never re-fetched). Write analysis and conclusions to another folder, such as artifacts/.';
+    default:
+      return `Gezel writes are disabled for this project's external workspace (${info.workingDir}). Enable "Allow gezels to modify the workspace directory" in Project → Settings.`;
+  }
+}
+
 export class WorkspaceWriteDeniedError extends Error {
   readonly code = 'workspace-write-denied' as const;
-  readonly reason: 'missing-flag-external' | 'disabled-by-project';
+  readonly reason: WorkspaceWriteDeniedReason;
   readonly workingDir: string;
-  constructor(
-    info:
-      | { reason: 'missing-flag-external'; workingDir: string }
-      | { reason: 'disabled-by-project'; workingDir: string },
-  ) {
-    super(
-      info.reason === 'disabled-by-project'
-        ? 'Gezel writes are turned off for this project ("Allow gezels to modify the workspace directory" in Project → Settings). Flip it on to let gezels modify files here.'
-        : `Gezel writes are disabled for this project's external workspace (${info.workingDir}). Enable "Allow gezels to modify the workspace directory" in Project → Settings.`,
-    );
+  constructor(info: { reason: WorkspaceWriteDeniedReason; workingDir: string }) {
+    super(deniedMessage(info));
     this.name = 'WorkspaceWriteDeniedError';
     this.reason = info.reason;
     this.workingDir = info.workingDir;

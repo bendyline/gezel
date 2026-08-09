@@ -37,6 +37,18 @@ interface RecordFields {
   frontmatter?: Record<string, unknown>;
 }
 
+/**
+ * Newest-first ordering key for a record ref: epoch millis of its timestamp.
+ * Without one, the engine's sort preserves source order — fine for sources
+ * that order results themselves, silently wrong under the backfill cap
+ * otherwise.
+ */
+export function ordinalKeyFromTs(ts: unknown): { ordinalKey: number } | Record<string, never> {
+  if (typeof ts !== 'string') return {};
+  const ms = Date.parse(ts);
+  return Number.isFinite(ms) ? { ordinalKey: ms } : {};
+}
+
 /** Tiny JSONPath-lite: `$.a.b.c` (dot paths from the root). */
 export function jget(raw: unknown, path: unknown): unknown {
   if (typeof path !== 'string' || !path.startsWith('$')) return undefined;
@@ -92,7 +104,9 @@ export async function applyNormalize(
 function buildRecord(fields: RecordFields, namespace: string): NormalizedRecord {
   const id = fields.id != null ? String(fields.id) : sha8(JSON.stringify(fields));
   const title = fields.title != null ? String(fields.title) : id;
-  const group = fields.group != null ? slug(String(fields.group)) : 'records';
+  // `group` is optional adapter partitioning below the engine-owned scope
+  // level; ungrouped records land at the scope root (no filler directory).
+  const group = fields.group != null ? slug(String(fields.group)) : undefined;
   const frontmatter: Record<string, string> = { direction: 'inbound' };
   if (fields.title != null) frontmatter.title = title;
   if (fields.date != null) frontmatter.date = String(fields.date);
@@ -107,7 +121,7 @@ function buildRecord(fields: RecordFields, namespace: string): NormalizedRecord 
         : '';
   return {
     recordId: id,
-    dirSegments: [group],
+    dirSegments: group ? [group] : [],
     fileStem: slug(title || id),
     frontmatter,
     bodyMarkdown: body,

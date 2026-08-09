@@ -9,7 +9,7 @@
  */
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
-import { type NormalizeSpec, applyNormalize, jget } from '../normalize.js';
+import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import { connectorSecretKey } from '../registry.js';
 import type {
   AdapterDeps,
@@ -28,6 +28,8 @@ interface SpectralSource {
   connectionInput: string;
   inputs?: Record<string, string>;
   itemsPath: string;
+  /** Path to a record timestamp — drives newest-first ordering under the cap. */
+  tsPath?: string;
   cursor?: { argInput?: string; fromPath?: string };
 }
 
@@ -110,12 +112,19 @@ export class SpectralConnectorAdapter implements ConnectorAdapter {
       inputs,
     });
     const items = (jget({ data }, this.src.itemsPath) as unknown[]) ?? [];
-    const records: RecordRef[] = items.map((r, i) => ({
-      id: String((r as { id?: unknown })?.id ?? i),
-      raw: r,
-    }));
+    const records: RecordRef[] = items.map((r, i) => {
+      const ts = this.src.tsPath ? jget(r, this.src.tsPath) : undefined;
+      return {
+        id: String((r as { id?: unknown })?.id ?? i),
+        raw: r,
+        ...(typeof ts === 'string' ? { ts } : {}),
+        ...ordinalKeyFromTs(ts),
+      };
+    });
     const next = this.src.cursor?.fromPath ? jget({ data }, this.src.cursor.fromPath) : undefined;
-    return { records, cursor: next };
+    // A cursor-less source re-lists everything each pass (the Airtable model),
+    // so the batch is the complete current state — mirror types may prune.
+    return { records, cursor: next, ...(this.src.cursor ? {} : { enumeratedAll: true }) };
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {

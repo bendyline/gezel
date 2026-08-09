@@ -4,10 +4,18 @@
  * engine and message writer speak only these types, never a provider SDK.
  */
 
-import type { ProjectMailAccount } from '@bendyline/gezel';
+export type MailProviderKind = 'imap' | 'gmail' | 'microsoft365' | 'outlook';
 
-export type MailProviderKind = ProjectMailAccount['provider'];
-export type MailCursor = NonNullable<ProjectMailAccount['cursor']>;
+/**
+ * Provider-shaped incremental-sync cursor. Under the connector engine's
+ * per-scope envelope each folder scope carries its own blob; the shape still
+ * self-merges per folder (`imap[folder]`) for providers that report several.
+ */
+export interface MailCursor {
+  imap?: Record<string, { uidValidity: number; lastUid: number }>;
+  gmailHistoryId?: string;
+  graphDeltaLink?: string;
+}
 
 /** A mailbox folder / label. */
 export interface MailFolder {

@@ -1,17 +1,20 @@
 /**
  * Mail's mapping from a parsed `MailMessage` to the generic connector writer.
  * The on-disk layout, trust frontmatter, injection scan, quarantine, path
- * safety, attachments, and the flags sidecar all live in `connectors/writer.ts`
- * now; this file only computes the mail-specific slugs + frontmatter and hands a
- * `NormalizedRecord` to `writeRecord`. `writeMessage`'s signature is unchanged.
+ * safety, attachments, and the flags sidecar all live in
+ * `connectors/writer.ts`; this file only computes the mail-specific slugs +
+ * frontmatter and hands a `NormalizedRecord` to the sync engine.
  *
- *   <workspace>/<mailDir>/<accountSlug>/<folder>/
+ * The engine owns the corpus root (the binding's `corpusDir`) and the folder
+ * (scope) level, so a record carries only its thread folder:
+ *
+ *   <workspace>/<corpusDir>/<folderSlug>/
  *     <yyyy-mm-dd>--<subject-slug>--<threadHash8>/
  *       001--<iso-min>--from-<local>--<msgHash8>.md
  */
 
 import type { NormalizedRecord } from '../connectors/types.js';
-import { sha8, slug, writeRecord } from '../connectors/writer.js';
+import { sha8, slug } from '../connectors/writer.js';
 import type { MailMessage } from './types.js';
 
 /** Local-part of the first email address in a From header. */
@@ -25,26 +28,8 @@ function subjectSlug(subject: string): string {
   return slug(subject.replace(/^\s*((re|fwd|fw)\s*:\s*)+/i, ''), 40);
 }
 
-export interface WriteMessageInput {
-  workspaceDir: string;
-  mailDir: string;
-  /** `<provider>:<address>` — the account binding (frontmatter `account`). */
-  accountId: string;
-  message: MailMessage;
-}
-
-export type WriteStatus = 'written' | 'exists' | 'quarantined';
-
-export interface WriteMessageResult {
-  status: WriteStatus;
-  /** Workspace-relative path of the message markdown, when one was written. */
-  relPath?: string;
-}
-
 /** Map a parsed message to the generic connector record (mail's normalize). */
 export function messageToRecord(accountId: string, message: MailMessage): NormalizedRecord {
-  const accountSlug = slug(accountId.replace(/[:@]/g, '-'), 60);
-  const folderSlug = slug(message.folder, 32);
   const threadDirName = `${message.date.slice(0, 10)}--${subjectSlug(message.subject)}--${sha8(message.threadKey)}`;
   const isoMin = message.date.slice(0, 16).replace(/:/g, '-');
 
@@ -69,7 +54,7 @@ export function messageToRecord(accountId: string, message: MailMessage): Normal
 
   return {
     recordId: message.messageId,
-    dirSegments: [accountSlug, folderSlug, threadDirName],
+    dirSegments: [threadDirName],
     fileStem: `${isoMin}--from-${fromLocalPart(message.from)}`,
     frontmatter,
     bodyMarkdown: message.bodyMarkdown,
@@ -80,16 +65,4 @@ export function messageToRecord(accountId: string, message: MailMessage): Normal
     flags: message.flags,
     seen: message.flags.includes('\\Seen'),
   };
-}
-
-/**
- * Write one synced message to disk. Idempotent (delegates to `writeRecord`).
- * Byte-for-byte identical to the pre-extraction layout + frontmatter.
- */
-export async function writeMessage(input: WriteMessageInput): Promise<WriteMessageResult> {
-  return writeRecord({
-    workspaceDir: input.workspaceDir,
-    corpusDir: input.mailDir,
-    record: messageToRecord(input.accountId, input.message),
-  });
 }

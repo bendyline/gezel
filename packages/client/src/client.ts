@@ -4441,73 +4441,6 @@ export class GezelClient {
     );
   }
 
-  // ── Mail (email-enabled projects) ─────────────────────────────────
-  mailStatus(id: string): Promise<{
-    configured: boolean;
-    accounts: {
-      id: string;
-      provider: string;
-      address: string;
-      syncFolders: string[];
-      lastSyncedAt?: string;
-      lastError?: string;
-    }[];
-  }> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/mail/status`);
-  }
-
-  /** Link an IMAP mailbox (host/user/pass blob stored in the SecretStore). */
-  linkMailbox(
-    id: string,
-    body: {
-      provider: 'imap' | 'gmail' | 'microsoft365' | 'outlook';
-      address: string;
-      displayName?: string;
-      syncFolders?: string[];
-      imap?: {
-        host: string;
-        port?: number;
-        secure?: boolean;
-        user: string;
-        pass: string;
-        smtp?: { host: string; port?: number; secure?: boolean; user?: string; pass?: string };
-      };
-    },
-  ): Promise<{ ok: boolean; account: { id: string; provider: string; address: string } }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/mail/link`, body);
-  }
-
-  /** Trigger a manual sync of all linked accounts. */
-  syncMail(id: string): Promise<{ ok: boolean; results: unknown[] }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/mail/sync`, {});
-  }
-
-  /** Begin an OAuth mailbox link; returns the URL the shell opens. */
-  startMailOAuth(
-    id: string,
-    body: {
-      provider: 'gmail' | 'microsoft365' | 'outlook';
-      address: string;
-      redirectUri: string;
-      tenant?: string;
-      syncFolders?: string[];
-    },
-  ): Promise<{ ok: boolean; authUrl: string; state: string }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/mail/oauth/start`, body);
-  }
-
-  /** Finish an OAuth mailbox link with the captured authorization code. */
-  completeMailOAuth(
-    id: string,
-    body: { state: string; code: string },
-  ): Promise<{ ok: boolean; account: { id: string; provider: string; address: string } }> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/mail/oauth/complete`,
-      body,
-    );
-  }
-
   // ── Connectors (external-data sources) ────────────────────────────────────
 
   /** Browse available connector types (catalog). */
@@ -4522,9 +4455,13 @@ export class GezelClient {
       id: string;
       type: string;
       displayName?: string;
+      /** `mirror` (faithful copy) vs `window` (recent activity only). */
+      completeness?: string;
       lastSyncedAt?: string;
       lastError?: string;
       disabled?: boolean;
+      /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
+      backoffUntil?: string;
     }[];
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/connectors`);
@@ -4568,6 +4505,8 @@ export class GezelClient {
       redirectUri: string;
       config?: Record<string, unknown>;
       displayName?: string;
+      /** Pre-fill the provider's account picker (mail: the address being linked). */
+      loginHint?: string;
     },
   ): Promise<{ ok: boolean; authUrl: string; state: string }> {
     return this.request(
@@ -4601,6 +4540,15 @@ export class GezelClient {
     }[];
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/connectors/actions`);
+  }
+
+  /** Stage a drafted action to the outbox (no network). */
+  queueConnectorAction(id: string, draftId: string): Promise<{ ok: boolean; relPath: string }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/connectors/actions/${encodeURIComponent(draftId)}/queue`,
+      {},
+    );
   }
 
   /** Commit a drafted action (the live write). Defers during night shift. */

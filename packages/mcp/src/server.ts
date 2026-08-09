@@ -401,29 +401,43 @@ server.tool(
   },
 );
 
-// ── email (mail-enabled projects) ────────────────────────────────────────
+// ── email (projects with a mail-type connector binding) ──────────────────
 // Reading email is done by reading the synced markdown files like any other
-// file. These three tools are the WRITE path: drafting is free, sending is the
-// consent-gated action (the daemon enforces the project's recipient allowlist
-// and refuses to transmit during night shift). Registered only when the chat
-// manager set GEZEL_MAIL_ENABLED (i.e. the project has a linked mailbox).
-async function mailApi(
+// file. These three tools are the WRITE path over the connector action
+// surface: drafting stages a `send` action under the mail binding's corpus,
+// and send_email commits it through the daemon-enforced recipient-allowlist
+// consent scope (deny-by-default; night shift defers to the outbox).
+// Registered only when the chat manager set GEZEL_MAIL_ENABLED (i.e. the
+// project has a mail-type connector binding).
+async function connectorActionApi(
   path: string,
-  body: unknown,
+  method: string,
+  body?: unknown,
 ): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const res = await fetchImpl(`${baseUrl}/api/projects/${projectId}/mail/${path}`, {
-    method: 'POST',
+  const url = `${baseUrl}/api/projects/${projectId}/connectors${path ? `/${path}` : ''}`;
+  const res = await fetchImpl(url, {
+    method,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return { ok: res.ok, data };
 }
 
+/** Mail-type bindings on the project (accountId narrows to one). */
+async function resolveMailBinding(accountId?: string): Promise<string | null> {
+  const { ok, data } = await connectorActionApi('', 'GET');
+  if (!ok) return null;
+  const bindings = (data.bindings ?? []) as { id: string; type: string }[];
+  const mail = bindings.filter((b) => typeof b.type === 'string' && b.type.startsWith('mail-'));
+  if (accountId) return mail.find((b) => b.id === accountId)?.id ?? null;
+  return mail[0]?.id ?? null;
+}
+
 function registerEmailTools() {
   server.tool(
     'draft_email',
-    "Compose an email draft and save it for review. This does NOT send — it writes a draft file under the project's mail/_drafts/ folder. Use queue_email to stage it and send_email to actually transmit (sending is restricted to allowlisted recipients).",
+    "Compose an email draft and save it for review. This does NOT send — it stages a send action under the mail connector's corpus. Use queue_email to stage it for approval and send_email to actually transmit (sending is restricted to allowlisted recipients).",
     {
       to: z.array(z.string()).describe('Recipient email addresses'),
       cc: z.array(z.string()).optional().describe('CC recipients'),
@@ -434,10 +448,22 @@ function registerEmailTools() {
       accountId: z
         .string()
         .optional()
-        .describe('Which linked account to send from (defaults to the first)'),
+        .describe('Which mail connector binding to send from (defaults to the first)'),
     },
     async (args) => {
-      const { ok, data } = await mailApi('draft', args);
+      const bindingId = await resolveMailBinding(args.accountId);
+      if (!bindingId)
+        return {
+          content: [
+            { type: 'text' as const, text: 'ERROR: this project has no linked mail connector.' },
+          ],
+        };
+      const { accountId: _drop, ...input } = args;
+      const { ok, data } = await connectorActionApi(
+        `${encodeURIComponent(bindingId)}/actions`,
+        'POST',
+        { action: 'send', input },
+      );
       if (!ok)
         return {
           content: [{ type: 'text' as const, text: `ERROR: ${data.error ?? 'draft failed'}` }],
@@ -455,10 +481,13 @@ function registerEmailTools() {
 
   server.tool(
     'queue_email',
-    'Stage a saved draft for sending by moving it to the mail/_outbox/ folder. Does not transmit.',
+    'Stage a saved draft for sending by moving it to the outbox. Does not transmit.',
     { draftId: z.string().describe('The draft id returned by draft_email') },
     async ({ draftId }) => {
-      const { ok, data } = await mailApi('queue', { draftId });
+      const { ok, data } = await connectorActionApi(
+        `actions/${encodeURIComponent(draftId)}/queue`,
+        'POST',
+      );
       if (!ok)
         return {
           content: [{ type: 'text' as const, text: `ERROR: ${data.error ?? 'queue failed'}` }],
@@ -471,19 +500,20 @@ function registerEmailTools() {
 
   server.tool(
     'send_email',
-    'Transmit a drafted/queued email. The daemon enforces the project recipient allowlist (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
+    'Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
     { draftId: z.string().describe('The draft id to send') },
     async ({ draftId }) => {
-      const { ok, data } = await mailApi('send', { draftId });
+      const { ok, data } = await connectorActionApi(
+        `actions/${encodeURIComponent(draftId)}/commit`,
+        'POST',
+      );
       if (!ok) {
-        const extra =
-          data.code === 'RECIPIENT_NOT_ALLOWED'
-            ? " Ask the user to add the recipient to the project's allowed recipients/domains."
-            : '';
+        const message = String(data.error ?? 'send failed');
+        const extra = /allowlist/i.test(message)
+          ? " Ask the user to add the recipient to the connector's allowed recipients/domains."
+          : '';
         return {
-          content: [
-            { type: 'text' as const, text: `ERROR: ${data.error ?? 'send failed'}.${extra}` },
-          ],
+          content: [{ type: 'text' as const, text: `ERROR: ${message}.${extra}` }],
         };
       }
       if (data.status === 'queued-night-shift') {
@@ -496,11 +526,12 @@ function registerEmailTools() {
           ],
         };
       }
+      const result = (data.result ?? {}) as { messageId?: string };
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Sent.${data.messageId ? ` Message-ID: ${data.messageId}` : ''}`,
+            text: `Sent.${result.messageId ? ` Message-ID: ${result.messageId}` : ''}`,
           },
         ],
       };
@@ -533,22 +564,9 @@ if (process.env.GEZEL_SCRIPT_TOOLS) {
 // ── connectors (write actions) ───────────────────────────────────────────
 // Reading a connector's synced data is done by reading its files. This is the
 // WRITE path: the gezel can DRAFT an action; committing (the live write) is a
-// USER action and is never exposed here (ingest-bound). Registered when the
-// project has bound connectors (GEZEL_CONNECTORS_ENABLED).
-async function connectorApi(
-  path: string,
-  method: string,
-  body?: unknown,
-): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const res = await fetchImpl(`${baseUrl}/api/projects/${projectId}/connectors/${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  return { ok: res.ok, data };
-}
-
+// USER action and is never exposed here (ingest-bound; the mail send tools
+// above are the one exception, gated by their daemon-enforced consent scope).
+// Registered when the project has bound connectors (GEZEL_CONNECTORS_ENABLED).
 function registerConnectorTools() {
   server.tool(
     'draft_connector_action',
@@ -559,7 +577,7 @@ function registerConnectorTools() {
       input: z.record(z.string(), z.unknown()).optional().describe('Action payload'),
     },
     async (args) => {
-      const { ok, data } = await connectorApi(
+      const { ok, data } = await connectorActionApi(
         `${encodeURIComponent(args.bindingId)}/actions`,
         'POST',
         { action: args.action, input: args.input },
@@ -2222,6 +2240,9 @@ function explainWriteFailure(err: unknown): string {
   // HTTP status line, which is useless to the model.
   const detailsMessage = extractApiErrorMessage(err);
   const message = detailsMessage ?? (err instanceof Error ? err.message : String(err));
+  if (/data-subtree-readonly/i.test(message) || /mirrored connector corpora/i.test(message)) {
+    return 'The data/ directory holds mirrored connector corpora (synced email, calendar events, issues) and is read-only to you: editing or deleting a record there causes permanent, silent data loss, because the sync cursor has already advanced past it and it will never be re-fetched. Read these files freely, but write your analysis, summaries, or outputs to another location such as artifacts/ or a different workspace folder. To change something at the source, draft a connector action for the user to approve instead.';
+  }
   if (/workspace-write-denied/i.test(message) || /Gezel writes are disabled/i.test(message)) {
     return `This project's workspace is read-only to gezels. The user pointed the project at an external directory and hasn't enabled writes. Ask the user to open Project → Settings and toggle "Allow gezels to modify the workspace directory." Do not retry until they've done that.`;
   }

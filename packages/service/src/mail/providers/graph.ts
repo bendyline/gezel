@@ -5,10 +5,10 @@
  * raw-MIME fetch via `/$value`, and outbound via `/sendMail`.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { HttpStatusError, createLogger } from '@bendyline/gezel';
+import { extractEmail } from '../../connectors/consent.js';
 import { parseRawMessage } from '../mime.js';
 import { type OAuthCredential, isExpired, refreshAccessToken } from '../oauth.js';
-import { extractEmail } from '../outbox.js';
 import type {
   FolderChanges,
   MailCursor,
@@ -99,7 +99,10 @@ export class GraphMailProvider implements MailProvider {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`graph ${url} failed: HTTP ${res.status} ${body}`.slice(0, 300));
+      throw new HttpStatusError(
+        res.status,
+        `graph ${url} failed: HTTP ${res.status} ${body}`.slice(0, 300),
+      );
     }
     return res.json() as Promise<T>;
   }

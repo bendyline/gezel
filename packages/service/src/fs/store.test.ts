@@ -734,6 +734,68 @@ describe('project workspace', () => {
     });
   });
 
+  // The connector-corpus subtree (`data/**`) is read-only to gezels; only
+  // `_`-prefixed entries below it (drafts, sidecars, _meta.json) are the
+  // mutable surface. User/app-initiated writes stay exempt.
+  describe('data/ corpus read-only gate', () => {
+    const gezelWrite = (path: string | string[]) =>
+      store.assertWorkspaceWritable('pcorpus', { initiatedByGezel: true, path });
+
+    beforeEach(async () => {
+      await store.createProject({ name: 'PCorpus' }).catch(() => {});
+    });
+
+    it('denies gezel writes to corpus records, allows the _-prefixed surface', async () => {
+      for (const path of [
+        'data/work-gmail/inbox/001--hello--deadbeef.md',
+        'data/work-gmail',
+        'data\\work-gmail\\inbox\\001--x--00000000.md',
+        'artifacts/../data/work-gmail/002--x--00000000.md',
+      ]) {
+        const gate = await gezelWrite(path);
+        expect(gate.ok, path).toBe(false);
+        if (!gate.ok) expect(gate.reason).toBe('data-subtree-readonly');
+      }
+      for (const path of [
+        'data/work-gmail/_actions/_drafts/abc.md',
+        'data/work-gmail/inbox/_flags.json',
+        'data/work-gmail/_meta.json',
+        'artifacts/report.md',
+        'notes/data/file.md',
+      ]) {
+        const gate = await gezelWrite(path);
+        expect(gate.ok, path).toBe(true);
+      }
+    });
+
+    it('rename is denied when either endpoint touches the corpus', async () => {
+      const outOf = await gezelWrite(['data/x/001--r--00000000.md', 'artifacts/stolen.md']);
+      expect(outOf.ok).toBe(false);
+      const into = await gezelWrite(['artifacts/a.md', 'data/x/001--r--00000000.md']);
+      expect(into.ok).toBe(false);
+    });
+
+    it('user-initiated writes into data/ stay permitted', async () => {
+      const gate = await store.assertWorkspaceWritable('pcorpus', {
+        path: 'data/work-gmail/inbox/001--hello--deadbeef.md',
+      });
+      expect(gate.ok).toBe(true);
+    });
+
+    it('write path enforces it end to end with the actionable error', async () => {
+      await expect(
+        store.writeProjectWorkspaceFile('pcorpus', 'data/c/001--r--deadbeef.md', 'tampered', {
+          gezelId: 'g1',
+        }),
+      ).rejects.toThrow(/read-only to gezels/);
+      await expect(
+        store.writeProjectWorkspaceFile('pcorpus', 'data/c/_actions/_drafts/d.md', 'draft', {
+          gezelId: 'g1',
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   // Phase 2 one-shot migration: existing projects with a legacy `gh/`
   // checkout get the clone moved into the workspace dir. We simulate
   // the legacy state by hand (no real git involved — just the on-disk

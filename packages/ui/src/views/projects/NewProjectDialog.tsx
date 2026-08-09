@@ -13,7 +13,7 @@ import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
-import { connectMailboxOAuth } from '../../components/mail-link.js';
+import { connectMailboxOAuth, linkImapMailbox } from '../../components/mail-link.js';
 import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
@@ -590,22 +590,15 @@ export function NewProjectDialog({
             .updateProject(created.id, { projectTypeId: 'email' })
             .catch(() => created);
           if (emailProvider === 'imap') {
-            await api
-              .linkMailbox(created.id, {
-                provider: 'imap',
-                address: addr,
-                imap: {
-                  host: imapHost.trim(),
-                  ...(imapPort.trim() ? { port: Number(imapPort.trim()) } : {}),
-                  secure: imapSecure,
-                  user: addr,
-                  pass: imapPass,
-                },
-                syncFolders: ['INBOX'],
-              })
-              // Non-fatal: the project is created + email-typed; the Mail tab is
-              // the recovery surface if linking didn't take.
-              .catch((err: unknown) => console.warn('linkMailbox failed:', err));
+            await linkImapMailbox(created.id, {
+              address: addr,
+              host: imapHost.trim(),
+              ...(imapPort.trim() ? { port: Number(imapPort.trim()) } : {}),
+              secure: imapSecure,
+              pass: imapPass,
+              // Non-fatal: the project is created + email-typed; the Mail tab
+              // is the recovery surface if linking didn't take.
+            }).catch((err: unknown) => console.warn('mail link failed:', err));
           } else {
             // OAuth: run the loopback browser flow via the desktop shell.
             // Non-fatal — when the shell is absent (browser dev) or the user

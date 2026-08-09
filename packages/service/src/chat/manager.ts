@@ -12659,9 +12659,10 @@ export class ChatManager {
       ...(retrievalFirstActive ? { retrievalFirstHint: true } : {}),
       workspaceWritable,
       ...(layeredPrefixCacheEnabled ? { layeredPrefixCache: true } : {}),
-      // Mail-enabled projects can surface untrusted email content — turn on the
-      // provenance-framing block so the model treats it as data, not commands.
-      ...(project?.mail?.accounts?.length ? { untrustedContentPresent: true } : {}),
+      // Any bound connector mirrors untrusted external content (email, events,
+      // issues) into the corpus — turn on the provenance-framing block so the
+      // model treats it as data, not commands.
+      ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
     });
 
     // Debug-mode contract check against the ACTUAL rendered prompt and the
@@ -13261,9 +13262,12 @@ export class ChatManager {
         // Scope craftbook: the unified craftbook_* tools default their
         // target to this template when editing in the explicit editor.
         ...(record.craftbookRef ? { GEZEL_CRAFTBOOK_ID: record.craftbookRef } : {}),
-        // Only mail-enabled projects expose the email write tools, so a
-        // non-mail project's agent never sees draft_email/queue_email/send_email.
-        ...(project?.mail?.accounts?.length ? { GEZEL_MAIL_ENABLED: '1' } : {}),
+        // Only projects with a mail-type connector binding expose the email
+        // write tools, so a non-mail project's agent never sees
+        // draft_email/queue_email/send_email.
+        ...(project?.connectors?.some((b) => b.type.startsWith('mail-'))
+          ? { GEZEL_MAIL_ENABLED: '1' }
+          : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
         // Named script-backed tools from the applied project type; gezel-mcp

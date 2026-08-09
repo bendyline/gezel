@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -49,7 +49,14 @@ const MANIFEST = {
 
 interface FakeProject {
   id: string;
-  connectors?: { id: string; type: string; cursor?: unknown; lastSyncedAt?: string }[];
+  connectors?: {
+    id: string;
+    type: string;
+    displayName?: string;
+    corpusDir?: string;
+    cursor?: unknown;
+    lastSyncedAt?: string;
+  }[];
   grantedCredentials?: string[];
 }
 type SecretKeyLike = { toolsetId: string; fieldId: string };
@@ -122,7 +129,7 @@ describe('ConnectorManager', () => {
     expect(r.written).toBe(1);
     expect(r.errors).toBe(0);
     const stored = h.getProject().connectors?.[0];
-    expect(stored?.cursor).toBe('C1');
+    expect(stored?.cursor).toEqual({ v: 2, scopes: { '': 'C1' } });
     expect(stored?.lastSyncedAt).toBeTruthy();
   });
 
@@ -149,6 +156,62 @@ describe('ConnectorManager', () => {
     await h.mgr.unbind(h.getProject() as never, binding.id);
     expect(h.getProject().connectors).toEqual([]);
     expect(h.secretMap.has(`connector-fake-conn:${binding.id}`)).toBe(false);
+  });
+
+  it('resolves corpusDir at bind time from displayName, with collision suffixes', async () => {
+    const h = harness();
+    const a = await h.mgr.bind(h.getProject() as never, {
+      type: 'fake-conn',
+      displayName: 'Work Data',
+    });
+    const b = await h.mgr.bind(h.getProject() as never, {
+      type: 'fake-conn',
+      displayName: 'Work Data',
+    });
+    const c = await h.mgr.bind(h.getProject() as never, { type: 'fake-conn' });
+    expect(a.corpusDir).toBe('data/work-data');
+    expect(b.corpusDir).toBe('data/work-data-2');
+    expect(c.corpusDir).toBe('data/fake-conn');
+  });
+
+  it('lazily resolves + persists corpusDir for a pre-corpusDir binding and writes _meta.json', async () => {
+    const h = harness();
+    const binding = await h.mgr.bind(h.getProject() as never, {
+      type: 'fake-conn',
+      credential: '{}',
+    });
+    // Simulate a binding created before corpusDir existed.
+    const project = h.getProject();
+    project.connectors = project.connectors?.map(({ corpusDir: _drop, ...rest }) => rest);
+    const r = await h.mgr.syncBinding(h.getProject() as never, binding.id);
+    expect(r.written).toBe(1);
+    const stored = h.getProject().connectors?.[0] as { corpusDir?: string };
+    expect(stored?.corpusDir).toBe('data/fake-conn');
+    const meta = JSON.parse(await readFile(join(ws, 'data', 'fake-conn', '_meta.json'), 'utf8'));
+    expect(meta).toMatchObject({
+      binding: binding.id,
+      type: 'fake-conn',
+      completeness: 'mirror',
+      scopes: [''],
+    });
+    expect(meta.lastSyncedAt).toBeTruthy();
+  });
+
+  it('rejects a bind whose config fails the configSchema', async () => {
+    const h = harness();
+    (MANIFEST as { configSchema?: unknown }).configSchema = {
+      type: 'object',
+      properties: { owner: { type: 'string' } },
+      required: ['owner'],
+    };
+    try {
+      await expect(h.mgr.bind(h.getProject() as never, { type: 'fake-conn' })).rejects.toThrow(
+        /invalid fake-conn configuration: owner: required/,
+      );
+      expect(h.getProject().connectors ?? []).toHaveLength(0);
+    } finally {
+      (MANIFEST as { configSchema?: unknown }).configSchema = undefined;
+    }
   });
 
   it('rejects a sync for an unknown driver', async () => {

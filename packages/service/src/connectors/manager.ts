@@ -13,19 +13,25 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import type {
   ConnectorTypeManifest,
   ProjectConnectorBinding,
   ProjectDetail,
 } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import { backoffDelayMs, createLogger, retryTransient } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '../fs/atomic.js';
+import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { SecretStore } from '../secrets/types.js';
+import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
+import { ProjectLocks } from './lock.js';
 import {
   type OAuthEndpoints,
   buildAuthorizeUrl,
@@ -42,17 +48,82 @@ import type {
   ConnectorBindingRef,
   NormalizedRecord,
 } from './types.js';
-import { type WriteRecordResult, writeRecord as defaultWriteRecord, slug } from './writer.js';
+import {
+  type PruneInput,
+  type PruneResult,
+  type WriteRecordResult,
+  writeRecord as defaultWriteRecord,
+  pruneRecords,
+  sha8,
+  slug,
+} from './writer.js';
 
 const log = createLogger('connectors');
 
 const DEFAULT_BACKFILL_LIMIT = 500;
 
+/**
+ * Corpus root for a binding: `data/<slug(displayName || type)>`, suffixed
+ * `-2`/`-3`… on collision with another binding's persisted root. Resolved once
+ * (at bind time, or lazily for pre-corpusDir bindings) and persisted — never
+ * recomputed, so renames don't strand corpora.
+ */
+export function resolveCorpusDir(
+  existing: Pick<ProjectConnectorBinding, 'corpusDir'>[],
+  type: string,
+  displayName?: string,
+): string {
+  const taken = new Set(existing.map((b) => b.corpusDir).filter(Boolean));
+  const base = `data/${displayName?.trim() ? slug(displayName) : slug(type)}`;
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/**
+ * The corpus root to use for a binding right now: the persisted `corpusDir`,
+ * or the deterministic resolution a future sync will persist. Shared with the
+ * action manager so drafts and records always land in the same corpus.
+ */
+export function corpusDirFor(
+  bindings: ProjectConnectorBinding[],
+  binding: ProjectConnectorBinding,
+): string {
+  if (binding.corpusDir) return binding.corpusDir;
+  return resolveCorpusDir(
+    bindings.filter((b) => b.id !== binding.id),
+    binding.type,
+    binding.displayName,
+  );
+}
+
 export interface SyncBindingOptions<Cur = unknown> {
   workspaceDir: string;
   /** Top dir under the workspace where this connector's corpus lands. */
   corpusDir: string;
-  /** Newest-N cap per scope on each pass. */
+  /**
+   * When true (the default), the engine owns the scope directory level: each
+   * scope's records land under `<corpusDir>/<slug(scope)>/` (omitted for the
+   * single empty scope). Adapters must not re-derive the scope in
+   * `dirSegments`.
+   */
+  scopeAsDir?: boolean;
+  /**
+   * When true (the default), the persisted cursor is a per-scope envelope
+   * (`{v: 2, scopes: {...}}`) and each scope only ever sees the cursor it last
+   * returned. The opt-out exists for tests that assert flat-cursor threading.
+   */
+  scopedCursors?: boolean;
+  /**
+   * Permit pruning records the source no longer returns. Set only for
+   * mirror-completeness types; the engine additionally requires a clean,
+   * single-batch, full-enumeration pass (`enumeratedAll`, no overflow, zero
+   * errors) before it prunes a scope.
+   */
+  allowPrune?: boolean;
+  /** Newest-N cap per scope on each round. */
   backfillLimit: number;
   /** Starting cursor (opaque, adapter-shaped). */
   cursor: Cur | undefined;
@@ -62,77 +133,182 @@ export interface SyncBindingOptions<Cur = unknown> {
     corpusDir: string;
     record: NormalizedRecord;
   }) => Promise<WriteRecordResult>;
+  /** Injectable pruner — defaults to the real `pruneRecords`. */
+  prune?: (input: PruneInput) => Promise<PruneResult>;
 }
 
 export interface BindingSyncResult<Cur = unknown> {
   written: number;
   quarantined: number;
   skipped: number;
+  /** Records the source no longer returns, removed by a mirror prune. */
+  pruned: number;
   errors: number;
   /** Advanced cursor to persist. */
   cursor: Cur | undefined;
+  /** Scopes the pass covered (feeds the corpus `_meta.json`). */
+  scopes?: string[];
+  /**
+   * The source rate-limited the pass: what it returned was written and the
+   * cursor persisted, but remaining scopes were left for later. The manager
+   * backs the binding off before its next autonomous sync.
+   */
+  rateLimited?: boolean;
   /** Hard failure (auth / list) message, when the whole pass aborted. */
   error?: string;
 }
+
+/** Persisted shape of a per-scope cursor envelope. */
+export interface ScopedCursor {
+  v: 2;
+  scopes: Record<string, unknown>;
+}
+
+/**
+ * Read a persisted cursor as a per-scope envelope. Anything that isn't a v2
+ * envelope (including pre-envelope flat cursors) is discarded — the writer's
+ * idempotency makes the resulting re-backfill safe, just a wasted re-fetch.
+ */
+export function asScopedCursor(raw: unknown): ScopedCursor {
+  if (
+    raw !== null &&
+    typeof raw === 'object' &&
+    (raw as ScopedCursor).v === 2 &&
+    typeof (raw as ScopedCursor).scopes === 'object' &&
+    (raw as ScopedCursor).scopes !== null
+  ) {
+    return { v: 2, scopes: { ...(raw as ScopedCursor).scopes } };
+  }
+  return { v: 2, scopes: {} };
+}
+
+/** Max same-scope continuation rounds per pass when an adapter pages via `partial`. */
+const MAX_PARTIAL_ROUNDS = 4;
 
 /**
  * Run one sync pass for a single binding through its adapter. Always calls
  * `adapter.close()`. Never throws — hard failures land in `result.error` with
  * the cursor left unadvanced.
+ *
+ * Cursor discipline: each scope only ever sees the cursor it last returned
+ * (per-scope envelope), and a scope's cursor advances only when its whole
+ * batch fetched + wrote with zero errors — on failure the prior cursor is kept
+ * so the batch retries next pass (the writer is idempotent, so already-written
+ * records dedupe rather than the failed one being skipped forever).
  */
 export async function syncWithAdapter<Cur = unknown>(
   adapter: ConnectorAdapter<NormalizedRecord, Cur>,
   opts: SyncBindingOptions<Cur>,
 ): Promise<BindingSyncResult<Cur>> {
   const write = opts.write ?? defaultWriteRecord;
+  const prune = opts.prune ?? pruneRecords;
+  const scoped = opts.scopedCursors ?? true;
+  const envelope = scoped ? asScopedCursor(opts.cursor) : null;
   const result: BindingSyncResult<Cur> = {
     written: 0,
     quarantined: 0,
     skipped: 0,
+    pruned: 0,
     errors: 0,
-    cursor: opts.cursor,
+    cursor: scoped ? (envelope as unknown as Cur) : opts.cursor,
   };
-  let cursor: Cur | undefined = opts.cursor;
+  // Legacy (non-scoped) mode threads one flat cursor through the pass.
+  let flatCursor: Cur | undefined = opts.cursor;
 
   try {
     await adapter.ensureAuth();
-    for (const scope of await adapter.listScopes()) {
-      const scopeCursorBefore = cursor;
-      const changes = await adapter.listChangesSince(scope, scopeCursorBefore);
-      // Newest-first, bounded by the backfill cap; older overflow is skipped
-      // (already below the advanced cursor). Sources with no ordinalKey keep
-      // the adapter's own order.
-      const ordered = [...changes.records].sort(
-        (a, b) => (b.ordinalKey ?? 0) - (a.ordinalKey ?? 0),
-      );
-      const take = ordered.slice(0, opts.backfillLimit);
-      result.skipped += ordered.length - take.length;
-      let scopeErrors = 0;
-      for (const ref of take) {
-        try {
-          const record = await adapter.fetchRecord(scope, ref);
-          const w = await write({
-            workspaceDir: opts.workspaceDir,
-            corpusDir: opts.corpusDir,
-            record,
-          });
-          if (w.status === 'written') result.written++;
-          else if (w.status === 'quarantined') result.quarantined++;
-          else result.skipped++;
-        } catch (err) {
-          scopeErrors++;
-          result.errors++;
-          log.warn(`fetch/write failed (${adapter.typeId} ${scope} id ${ref.id}): ${err}`);
+    const scopes = await adapter.listScopes();
+    result.scopes = scopes;
+    outer: for (const scope of scopes) {
+      const scopeCorpusDir =
+        (opts.scopeAsDir ?? true) && scope !== ''
+          ? `${opts.corpusDir}/${slug(scope)}`
+          : opts.corpusDir;
+      for (let round = 0; round < MAX_PARTIAL_ROUNDS; round++) {
+        const before = scoped ? (envelope!.scopes[scope] as Cur | undefined) : flatCursor;
+        const changes = await adapter.listChangesSince(scope, before, {
+          limit: opts.backfillLimit,
+        });
+        // Newest-first, bounded by the backfill cap. Overflow past the cap is
+        // deliberate windowing (the mail backfill-cap model) but never silent:
+        // it is counted skipped and logged.
+        const ordered = [...changes.records].sort(
+          (a, b) => (b.ordinalKey ?? 0) - (a.ordinalKey ?? 0),
+        );
+        const take = ordered.slice(0, opts.backfillLimit);
+        const overflow = ordered.length - take.length;
+        if (overflow > 0) {
+          result.skipped += overflow;
+          log.warn(
+            `${adapter.typeId} ${scope || '(default)'}: ${overflow} record(s) past the ` +
+              `${opts.backfillLimit}-record cap were skipped this pass (adapter returned ` +
+              `${ordered.length}; page with 'partial' to backfill completely)`,
+          );
         }
+        let scopeErrors = 0;
+        const seenHashes = new Set<string>();
+        for (const ref of take) {
+          try {
+            // Transient faults (5xx/408/429, socket drops) get three attempts
+            // with jittered backoff; real errors rethrow immediately.
+            const record = await retryTransient(() => adapter.fetchRecord(scope, ref), {
+              attempts: 3,
+              label: `${adapter.typeId} record ${ref.id}`,
+            });
+            seenHashes.add(sha8(record.recordId));
+            const w = await write({
+              workspaceDir: opts.workspaceDir,
+              corpusDir: scopeCorpusDir,
+              record,
+            });
+            if (w.status === 'written' || w.status === 'refreshed') result.written++;
+            else if (w.status === 'quarantined') result.quarantined++;
+            else result.skipped++;
+          } catch (err) {
+            scopeErrors++;
+            result.errors++;
+            log.warn(`fetch/write failed (${adapter.typeId} ${scope} id ${ref.id}): ${err}`);
+          }
+        }
+        // Advance only on a clean batch; otherwise keep the prior cursor so
+        // the batch retries next pass.
+        if (scopeErrors === 0) {
+          if (scoped) envelope!.scopes[scope] = changes.cursor;
+          else flatCursor = changes.cursor;
+        }
+        // Mirror prune: only after a clean, single-batch, full enumeration of
+        // the scope — anything less and absence from the batch proves nothing.
+        if (
+          opts.allowPrune &&
+          changes.enumeratedAll &&
+          !changes.partial &&
+          round === 0 &&
+          scopeErrors === 0 &&
+          overflow === 0
+        ) {
+          const p = await prune({
+            workspaceDir: opts.workspaceDir,
+            corpusDir: scopeCorpusDir,
+            keepHashes: seenHashes,
+          });
+          result.pruned += p.pruned;
+        }
+        // Rate limited: what the source returned is written and its cursor
+        // persisted; stop the whole pass and let the manager back off.
+        if (changes.rateLimited) {
+          result.rateLimited = true;
+          break outer;
+        }
+        // Continue the same scope only when the adapter paged cleanly and
+        // declared more; leftover pages resume on the next tick.
+        if (scopeErrors !== 0 || !changes.partial) break;
       }
-      // Advance only on a clean batch; otherwise keep the prior cursor to retry.
-      cursor = scopeErrors === 0 ? changes.cursor : scopeCursorBefore;
     }
-    result.cursor = cursor;
+    result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
     result.errors++;
-    result.cursor = cursor;
+    result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } finally {
     await adapter.close().catch(() => {});
   }
@@ -174,6 +350,8 @@ export interface ConnectorManagerOptions {
   contentIndex?: ContentIndex;
   /** For `script`-driver connectors + script-normalize. */
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
+  /** Shared with the action manager so commits can't race syncs. */
+  locks?: ProjectLocks;
 }
 
 export interface BindConnectorInput {
@@ -199,6 +377,8 @@ export interface ConnectorStatus {
     lastSyncedAt?: string;
     lastError?: string;
     disabled?: boolean;
+    /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
+    backoffUntil?: string;
   }[];
 }
 
@@ -223,25 +403,39 @@ interface PendingConnectorOAuth {
   completion?: { bindingId: string; credential: string };
 }
 
+/** Rate-limit backoff ladder: 1m → 5m → 15m → 30m (jittered). */
+const RATE_LIMIT_BACKOFF_MS = [60_000, 300_000, 900_000, 1_800_000] as const;
+
 export class ConnectorManager {
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks: ProjectLocks;
   /** In-flight OAuth link sessions keyed by `state` (10-min TTL). */
   private readonly pendingOAuth = new Map<string, PendingConnectorOAuth>();
+  /**
+   * In-memory rate-limit backoff per binding. Deliberately not persisted:
+   * a restart resetting backoff costs at most one extra request, and keeping
+   * it here avoids project.json churn on every rate-limit event.
+   */
+  private readonly backoff = new Map<string, { consecutive: number; nextEligibleAt: number }>();
 
-  constructor(private readonly opts: ConnectorManagerOptions) {}
+  constructor(private readonly opts: ConnectorManagerOptions) {
+    this.locks = opts.locks ?? new ProjectLocks();
+  }
+
+  /** When the binding's rate-limit backoff expires (undefined = eligible now). */
+  backoffUntil(bindingId: string): number | undefined {
+    const entry = this.backoff.get(bindingId);
+    return entry && entry.nextEligibleAt > Date.now() ? entry.nextEligibleAt : undefined;
+  }
+
+  private noteRateLimit(bindingId: string): void {
+    const consecutive = (this.backoff.get(bindingId)?.consecutive ?? 0) + 1;
+    const delay = backoffDelayMs(consecutive - 1, RATE_LIMIT_BACKOFF_MS);
+    this.backoff.set(bindingId, { consecutive, nextEligibleAt: Date.now() + delay });
+    log.info(`rate limited (${bindingId}); backing off ${Math.round(delay / 1000)}s`);
+  }
 
   private withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.locks.get(projectId) ?? Promise.resolve();
-    const next = prev.then(fn, fn);
-    const tail = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(projectId, tail);
-    void tail.then(() => {
-      if (this.locks.get(projectId) === tail) this.locks.delete(projectId);
-    });
-    return next;
+    return this.locks.run(projectId, fn);
   }
 
   private async loadType(
@@ -257,25 +451,30 @@ export class ConnectorManager {
     return { manifest: detail.manifest, sourceId: detail.sourceId };
   }
 
-  /** Bind a new connector: validate the type, store the credential, record it. */
+  /** Bind a new connector: validate the type + config, store the credential, record it. */
   async bind(project: ProjectDetail, input: BindConnectorInput): Promise<ProjectConnectorBinding> {
     const resolved = await this.loadType(input.type, input.version, input.sourceId);
     const type = resolved.manifest;
+    const configErrors = validateConnectorConfig(type.configSchema, input.config ?? {});
+    if (configErrors.length) {
+      throw new Error(`invalid ${input.type} configuration: ${configErrors.join('; ')}`);
+    }
     const id = input.bindingId ?? `${input.type}:${randomUUID().slice(0, 8)}`;
     return this.withLock(project.id, async () => {
       if (input.credential !== undefined) {
         await this.opts.secrets.set(connectorSecretKey(input.type, id), input.credential);
       }
+      const current = await this.reread(project);
+      const existing = current.connectors ?? [];
       const binding: ProjectConnectorBinding = {
         id,
         type: input.type,
         sourceId: resolved.sourceId,
         version: type.version,
+        corpusDir: resolveCorpusDir(existing, input.type, input.displayName),
         config: input.config ?? {},
         ...(input.displayName ? { displayName: input.displayName } : {}),
       };
-      const current = await this.reread(project);
-      const existing = current.connectors ?? [];
       // A `script` connector's fetch script reaches its credential parent-side
       // via `gezel.http.authed` — grant the named credential on the project so
       // the plaintext never enters the sandbox.
@@ -313,6 +512,8 @@ export class ConnectorManager {
       redirectUri: string;
       config?: Record<string, unknown>;
       displayName?: string;
+      /** Pre-fill the provider's account picker (mail: the address being linked). */
+      loginHint?: string;
     },
   ): Promise<{ authUrl: string; state: string }> {
     const resolved = await this.loadType(input.type);
@@ -371,6 +572,7 @@ export class ConnectorManager {
       state,
       challenge,
       ...(shape.authParams ? { extraParams: shape.authParams } : {}),
+      ...(input.loginHint ? { loginHint: input.loginHint } : {}),
     });
     return { authUrl, state };
   }
@@ -457,16 +659,30 @@ export class ConnectorManager {
 
   async status(project: ProjectDetail): Promise<ConnectorStatus> {
     const bindings = project.connectors ?? [];
+    const completenessByType = new Map<string, string | undefined>();
+    for (const b of bindings) {
+      if (completenessByType.has(b.type)) continue;
+      const manifest = await this.loadType(b.type, b.version, b.sourceId ?? 'bundled')
+        .then((r) => r.manifest)
+        .catch(() => null);
+      completenessByType.set(b.type, manifest?.completeness);
+    }
     return {
       configured: bindings.length > 0,
-      bindings: bindings.map((b) => ({
-        id: b.id,
-        type: b.type,
-        ...(b.displayName ? { displayName: b.displayName } : {}),
-        ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
-        ...(b.lastError ? { lastError: b.lastError } : {}),
-        ...(b.disabled ? { disabled: b.disabled } : {}),
-      })),
+      bindings: bindings.map((b) => {
+        const backoffAt = this.backoffUntil(b.id);
+        const completeness = completenessByType.get(b.type);
+        return {
+          id: b.id,
+          type: b.type,
+          ...(b.displayName ? { displayName: b.displayName } : {}),
+          ...(completeness ? { completeness } : {}),
+          ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
+          ...(b.lastError ? { lastError: b.lastError } : {}),
+          ...(b.disabled ? { disabled: b.disabled } : {}),
+          ...(backoffAt ? { backoffUntil: new Date(backoffAt).toISOString() } : {}),
+        };
+      }),
     };
   }
 
@@ -491,6 +707,9 @@ export class ConnectorManager {
       const results: BindingSyncResult[] = [];
       for (const binding of current.connectors ?? []) {
         if (binding.disabled) continue;
+        // Rate-limit backoff applies to the autonomous loop; a user-initiated
+        // syncBinding deliberately bypasses it.
+        if (this.backoffUntil(binding.id)) continue;
         results.push(await this.syncBindingInner(current, binding));
         current = await this.reread(project);
       }
@@ -522,12 +741,17 @@ export class ConnectorManager {
         projectId: project.id,
       });
       const workspaceDir = await this.opts.store.projectWorkspaceDir(project.id);
+      const corpusDir = await this.ensureCorpusDir(project, binding);
       const r = await syncWithAdapter(adapter, {
         workspaceDir,
-        corpusDir: `connectors/${slug(binding.id)}`,
+        corpusDir,
+        allowPrune: resolved.manifest.completeness === 'mirror',
         backfillLimit: DEFAULT_BACKFILL_LIMIT,
         cursor: binding.cursor,
       });
+      if (r.rateLimited) this.noteRateLimit(binding.id);
+      else if (!r.error) this.backoff.delete(binding.id);
+      const lastSyncedAt = new Date().toISOString();
       if (r.error) {
         await this.persistBinding(project.id, binding.id, {
           cursor: r.cursor,
@@ -536,9 +760,13 @@ export class ConnectorManager {
       } else {
         await this.persistBinding(project.id, binding.id, {
           cursor: r.cursor,
-          lastSyncedAt: new Date().toISOString(),
+          lastSyncedAt,
         });
       }
+      await this.writeCorpusMeta(workspaceDir, corpusDir, binding, resolved.manifest, {
+        scopes: r.scopes ?? [],
+        ...(r.error ? {} : { lastSyncedAt }),
+      }).catch(() => {});
       return r;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -551,6 +779,7 @@ export class ConnectorManager {
         written: 0,
         quarantined: 0,
         skipped: 0,
+        pruned: 0,
         errors: 1,
         cursor: binding.cursor,
         error: message,
@@ -558,10 +787,47 @@ export class ConnectorManager {
     }
   }
 
+  /**
+   * The binding's persisted corpus root, lazily resolved + persisted for
+   * bindings created before `corpusDir` existed.
+   */
+  private async ensureCorpusDir(
+    project: ProjectDetail,
+    binding: ProjectConnectorBinding,
+  ): Promise<string> {
+    if (binding.corpusDir) return binding.corpusDir;
+    const corpusDir = corpusDirFor(project.connectors ?? [], binding);
+    binding.corpusDir = corpusDir;
+    await this.persistBinding(project.id, binding.id, { corpusDir }).catch(() => {});
+    return corpusDir;
+  }
+
+  /** `_meta.json` at the corpus root — what this directory is, for humans + gezels. */
+  private async writeCorpusMeta(
+    workspaceDir: string,
+    corpusDir: string,
+    binding: ProjectConnectorBinding,
+    manifest: ConnectorTypeManifest,
+    pass: { scopes: string[]; lastSyncedAt?: string },
+  ): Promise<void> {
+    const abs = await resolveInside(workspaceDir, `${corpusDir}/_meta.json`);
+    await mkdir(dirname(abs), { recursive: true });
+    const meta = {
+      binding: binding.id,
+      type: binding.type,
+      version: binding.version ?? manifest.version,
+      ...(binding.displayName ? { displayName: binding.displayName } : {}),
+      scopes: pass.scopes,
+      completeness: manifest.completeness ?? 'mirror',
+      ...(pass.lastSyncedAt ? { lastSyncedAt: pass.lastSyncedAt } : {}),
+    };
+    await writeFileAtomic(abs, `${JSON.stringify(meta, null, 2)}\n`);
+  }
+
   private async persistBinding(
     projectId: string,
     bindingId: string,
-    patch: { cursor?: unknown; lastSyncedAt?: string; lastError?: string },
+    patch: { cursor?: unknown; lastSyncedAt?: string; lastError?: string; corpusDir?: string },
   ): Promise<void> {
     const project = await this.opts.store.getProject(projectId);
     if (!project?.connectors) return;
@@ -570,6 +836,7 @@ export class ConnectorManager {
         ? {
             ...b,
             ...(patch.cursor !== undefined ? { cursor: patch.cursor } : {}),
+            ...(patch.corpusDir ? { corpusDir: patch.corpusDir } : {}),
             ...(patch.lastSyncedAt
               ? { lastSyncedAt: patch.lastSyncedAt, lastError: undefined }
               : {}),

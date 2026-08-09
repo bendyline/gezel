@@ -50,63 +50,11 @@ export const ProjectGitHubSchema = z.object({
 export type ProjectGitHub = z.infer<typeof ProjectGitHubSchema>;
 
 /**
- * One bound mailbox on a mail-enabled project. The account's credential is
- * stored in the SecretStore (keyed by toolset `mail-<provider>` / `id`), never
- * here; this carries only the binding + incremental-sync cursor state.
- */
-export const ProjectMailAccountSchema = z.object({
-  /** Stable id `<provider>:<address>` — also the frontmatter `account` value. */
-  id: z.string().min(1),
-  provider: z.enum(['imap', 'gmail', 'microsoft365', 'outlook']),
-  address: z.string().min(1),
-  displayName: z.string().optional(),
-  /** Provider-native folders/labels to mirror. Default `['INBOX']`. */
-  syncFolders: z.array(z.string()).optional(),
-  /**
-   * Opaque, provider-shaped incremental-sync cursor. IMAP tracks per-folder
-   * UIDVALIDITY+UID; Gmail a historyId; Graph a delta link. Persisted so a
-   * resync resumes instead of re-walking the mailbox.
-   */
-  cursor: z
-    .object({
-      imap: z
-        .record(z.string(), z.object({ uidValidity: z.number(), lastUid: z.number() }))
-        .optional(),
-      gmailHistoryId: z.string().optional(),
-      graphDeltaLink: z.string().optional(),
-    })
-    .optional(),
-  lastSyncedAt: z.string().optional(),
-  /** Last sync error, surfaced in the UI; cleared on the next success. */
-  lastError: z.string().optional(),
-});
-export type ProjectMailAccount = z.infer<typeof ProjectMailAccountSchema>;
-
-/**
- * Optional email association for a project. When set, the MailSyncManager
- * mirrors each account's messages into `<workspace>/<mailDir>/` as immutable
- * per-message markdown (one thread folder per conversation) that the content
- * indexer picks up for free. Outbound send is consent-gated and constrained to
- * the recipient allowlist below.
- */
-export const ProjectMailSchema = z.object({
-  accounts: z.array(ProjectMailAccountSchema),
-  /** Folder under the workspace where mail lands. Default `'mail'`. */
-  mailDir: z.string().optional(),
-  /** Cap on messages backfilled per folder on first sync. Default 500. */
-  backfillLimit: z.number().int().positive().optional(),
-  /** Exact recipient addresses the agent is permitted to send to. */
-  allowedRecipients: z.array(z.string()).optional(),
-  /** Recipient domains the agent is permitted to send to. */
-  allowedDomains: z.array(z.string()).optional(),
-});
-export type ProjectMail = z.infer<typeof ProjectMailSchema>;
-
-/**
- * One bound external-data source on a project. Generalizes
- * {@link ProjectMailAccountSchema}: the credential lives in the SecretStore
- * (keyed `connector-<type>` / `id`), never here — this carries only the binding
- * + its opaque, adapter-shaped incremental-sync cursor.
+ * One bound external-data source on a project. The credential lives in the
+ * SecretStore (keyed `connector-<type>` / `id`), never here — this carries
+ * only the binding + its opaque, adapter-shaped incremental-sync cursor.
+ * Mail accounts are ordinary bindings (`type: mail-gmail` / `mail-imap` / …);
+ * the historical `project.mail` stack was retired in the connector overhaul.
  */
 export const ProjectConnectorBindingSchema = z.object({
   /** Stable binding id; also the SecretStore `fieldId` + corpus-slug seed. */
@@ -118,6 +66,11 @@ export const ProjectConnectorBindingSchema = z.object({
   /** Pinned connector-type version. */
   version: z.string().optional(),
   displayName: z.string().optional(),
+  /**
+   * Workspace-relative corpus root (`data/<corpusName>`), resolved once at bind
+   * time and never recomputed — renaming a binding must not strand its corpus.
+   */
+  corpusDir: z.string().optional(),
   /** Per-binding config, validated at bind time against the type's `configSchema`. */
   config: z.record(z.string(), z.unknown()).default({}),
   /** Opaque, adapter-shaped incremental-sync cursor. Persisted so resync resumes. */
@@ -297,8 +250,6 @@ export const ProjectSchema = z.object({
    */
   indexingEnabled: z.boolean().optional(),
   github: ProjectGitHubSchema.optional(),
-  /** Optional email association — see {@link ProjectMailSchema}. */
-  mail: ProjectMailSchema.optional(),
   connectors: z.array(ProjectConnectorBindingSchema).optional(),
   nudgeConfig: ProjectNudgeConfigSchema.optional(),
   nudgeState: ProjectNudgeStateSchema.optional(),

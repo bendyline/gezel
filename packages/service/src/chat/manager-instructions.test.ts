@@ -182,6 +182,53 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
   });
 });
 
+describe('buildInstructions connected data', () => {
+  const base = {
+    id: 'p1',
+    name: 'Ops',
+  } as unknown as ProjectDetail;
+
+  it('names each binding corpus, and is absent without bindings (cache stability)', () => {
+    const withBindings = buildInstructions({
+      name: 'Wren',
+      about: 'Help with general work.',
+      project: {
+        ...base,
+        connectors: [
+          {
+            id: 'mail-gmail:abc',
+            type: 'mail-gmail',
+            displayName: 'Work Gmail',
+            corpusDir: 'data/work-gmail',
+            config: {},
+            lastSyncedAt: '2026-08-08T10:00:00.000Z',
+          },
+          {
+            id: 'linear-issues:def',
+            type: 'linear-issues',
+            corpusDir: 'data/linear-issues',
+            config: {},
+            disabled: true,
+          },
+        ],
+      } as unknown as ProjectDetail,
+    }).full;
+    expect(withBindings).toContain('### Connected data');
+    expect(withBindings).toContain(
+      '**Work Gmail** (mail-gmail, synced 2026-08-08): `data/work-gmail/`',
+    );
+    expect(withBindings).not.toContain('linear-issues'); // disabled bindings hidden
+    expect(withBindings).toContain('read-only mirrors');
+
+    const without = buildInstructions({
+      name: 'Wren',
+      about: 'Help with general work.',
+      project: base,
+    }).full;
+    expect(without).not.toContain('Connected data');
+  });
+});
+
 describe('buildInstructions assigned pronouns', () => {
   const soloProject = {
     id: 'solo-job',
