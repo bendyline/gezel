@@ -56,6 +56,28 @@ The registry has grown well past the point where "run everything" is a routine a
 
 Suite membership changes are deliberate: adding to `core` taxes every future scorecard's wall-clock, and removing breaks comparability across time. Grow the extended suites freely; promote into `core` only when an axis has proven to differentiate models and is missing there.
 
+## The published scorecard
+
+`core` and `productivity` are the two suites whose results **ship in the product** — the handboek's [How we test models](handboek/technical/how-we-test-models.md) and [Model scorecard](handboek/technical/model-scorecard.md) articles render them for end users. That raises the bar from "a number we discussed" to "a number a customer reads", so the path from measurement to publication is a single command:
+
+```bash
+pnpm eval:scorecard --list                    # plan: models, suites, wall-clock ceiling
+pnpm eval:scorecard --count 3                 # sweep every cached model, both suites
+pnpm eval:scorecard --count 3 --run-id <id> --models <new-model>   # add a model later
+```
+
+The script exists because a published comparison has properties a hand-run `eval:all` cannot guarantee:
+
+- **One run identity.** Every model in an invocation is stamped with the same device, git sha, catalog pin, and trial count. Comparability is by construction, not by remembering.
+- **Both suites, always.** No model is ever ranked on a subset.
+- **`--count 3` floor.** Below three trials the renderer prints a raw count, never a rate — `MIN_TRIALS_FOR_RATE` is enforced at the point of display, so an under-sampled cell cannot become a percentage.
+- **Failure attribution.** Only `failureClass: 'model'` trials count. Infra/operator/grader failures are recorded in a visible "not measured" column and removed from both sides of the ratio, so a wedged engine never books as a model weakness.
+- **No silent merging.** Results carry their `runId`. A model measured under different provenance renders in a separate table with the differences named (`different gezel build`, `different catalog version`). Adding a model to an existing sweep means passing the same `--run-id`; anything else starts a new round, which is the honest thing to do once the device or build has moved.
+
+The dataset lives at [packages/core/src/scorecard/data/scorecard.json](../packages/core/src/scorecard/data/scorecard.json) and is checked in — that file IS the published record. The articles hold no numbers of their own.
+
+**On judge drift.** `--llm-judge` axis scores are recorded with the judge model id and are only ever compared inside one run. The deterministic pass/fail is the longitudinal signal; the judge is colour. This is why the shipped articles quote pass counts and never a judge score.
+
 ## What a matrix run looks like
 
 The primary cadence is `pnpm eval:all --suite core --count <N> --model gemma4-e4b-q4` — the standardized scorecard × N trials × one model. `--count` is required; use 1 for a diagnostic pass and at least 3 for a comparative scorecard. Omitting `--suite` runs every registered scenario and is reserved for an explicitly exhaustive sweep. For a real strategy signal:

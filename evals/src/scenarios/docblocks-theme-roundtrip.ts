@@ -366,9 +366,17 @@ async function setup(ctx: EvalContext): Promise<void> {
     path: 'mocks/services.md',
     content: mocks.servicesMarkdown(),
   });
-  await client.installToolset(mockMcpToolsetId('docblocks'), {
-    scope: { kind: 'project', projectId },
-  });
+  // Derive the catalog id from the declared mock rather than restating it.
+  // The runner registers the toolset as `mockMcpToolsetId(id, toolsetId)`,
+  // and this mock sets `toolsetId: 'docblocks'` — so a hardcoded
+  // `mockMcpToolsetId('docblocks')` resolved to `mock-mcp-docblocks` and
+  // the install 404'd before the scenario ran a single turn. Same drift
+  // class as the fixture-path bug: two places naming one contract.
+  const docblocksMock = THEME_MOCK_SERVICES[0]!;
+  await client.installToolset(
+    mockMcpToolsetId(docblocksMock.id, (docblocksMock as { toolsetId?: string }).toolsetId),
+    { scope: { kind: 'project', projectId } },
+  );
   log('[scenario:setup] installed the local DocBlocks MCP toolset');
 
   const designer = await provisionScenarioGezel(ctx, {

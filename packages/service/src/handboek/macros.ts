@@ -8,11 +8,15 @@ import type {
   HandboekRenderMode,
   ProjectTypeManifest,
 } from '@bendyline/gezel';
-import type { ModelTier, RoleId } from '@bendyline/gezel';
+import type { ModelTier, RoleId, ScorecardDataset } from '@bendyline/gezel';
 import {
   MODEL_TIER_ORDER,
   ROLES,
+  SCORECARD,
+  buildSuiteScoreboard,
   createLogger,
+  describeProvenance,
+  provenanceDifferences,
   resolveRoleId,
   toolsetGroupsForRole,
 } from '@bendyline/gezel';
@@ -58,6 +62,7 @@ export const MACROS: Record<string, MacroFn> = {
   'craftbook-list': craftbookList,
   'device-hardware': deviceHardware,
   'installed-models': installedModels,
+  'model-scorecard': modelScorecard,
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
 };
@@ -505,6 +510,84 @@ async function installedModels(_attrs: Record<string, string>, ctx: MacroContext
     (m) => `| ${m.name ?? m.id} | ${m.provider} | ${m.parameterSize ?? '—'} | ${m.tier} |`,
   );
   return ['| Model | Engine | Size | Tier |', '| --- | --- | --- | --- |', ...rows].join('\n');
+}
+
+/**
+ * `::handboek-model-scorecard{suite=core}` — measured results for a suite.
+ *
+ * Renders the checked-in scorecard dataset rather than any live state, so
+ * the shipped article shows the same numbers on every device: these are
+ * measurements from a specific machine on a specific day, not a claim
+ * about the reader's hardware.
+ *
+ * The rendering rules are not cosmetic. Each is a guard against a true-
+ * looking number the data cannot support:
+ *   - the headline table holds ONE run, so every row is comparable;
+ *   - results from other runs are listed separately, with the reason they
+ *     are not comparable spelled out;
+ *   - a sample below three trials prints as a count, never a percentage;
+ *   - trials lost to infrastructure are shown, not silently dropped.
+ */
+async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  const suiteId = attrs.suite?.trim();
+  if (!suiteId) return '';
+  return renderScorecardMarkdown(SCORECARD, suiteId, { includeTaskCount: ctx.mode !== 'site' });
+}
+
+/**
+ * Pure renderer behind `::handboek-model-scorecard`. Split out from the
+ * macro so the rendering RULES — which are the honesty guarantees — can be
+ * tested against fixture datasets instead of whatever happens to be
+ * checked in.
+ */
+export function renderScorecardMarkdown(
+  dataset: ScorecardDataset,
+  suiteId: string,
+  opts: { includeTaskCount: boolean },
+): string {
+  const board = buildSuiteScoreboard(dataset, suiteId);
+  if (!board || board.scores.length === 0) {
+    return [
+      `No ${suiteId} results have been recorded yet.`,
+      '',
+      'Results appear here once a scorecard sweep has been run and checked in.',
+    ].join('\n');
+  }
+
+  const lines: string[] = [];
+  lines.push(`**${describeProvenance(board.run)}**`);
+  lines.push('');
+  lines.push('| Model | Size | Tasks passed | Not measured |');
+  lines.push('| --- | --- | --- | --- |');
+  for (const score of board.scores) {
+    const discarded =
+      score.discardedTrials > 0
+        ? `${score.discardedTrials} run${score.discardedTrials === 1 ? '' : 's'} lost to the machine`
+        : '—';
+    lines.push(
+      `| ${score.result.label} | ${score.result.parameterSize ?? score.result.tier} | ${score.claim} | ${discarded} |`,
+    );
+  }
+
+  if (board.otherRunScores.length > 0) {
+    lines.push('');
+    lines.push('Measured in an earlier round, so not directly comparable with the table above:');
+    lines.push('');
+    lines.push('| Model | Tasks passed | Why it is listed apart |');
+    lines.push('| --- | --- | --- |');
+    for (const entry of board.otherRunScores) {
+      const why = provenanceDifferences(board.run, entry.run);
+      lines.push(
+        `| ${entry.result.label} | ${entry.claim} | ${why.length > 0 ? why.join(', ') : 'earlier round'} |`,
+      );
+    }
+  }
+
+  if (opts.includeTaskCount) {
+    lines.push('');
+    lines.push(`Tasks in this set: ${board.scenarioIds.length}.`);
+  }
+  return lines.join('\n');
 }
 
 /** `::handboek-project-type-composition{id=language-trainer}`. */

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { THEME_FACTS, THEME_SEED_FILES, checkThemeReport } from './docblocks-theme-roundtrip.ts';
+import { mockMcpToolsetId } from '../mock/mock-server.ts';
+import {
+  THEME_FACTS,
+  THEME_MOCK_SERVICES,
+  THEME_SEED_FILES,
+  checkThemeReport,
+} from './docblocks-theme-roundtrip.ts';
 
 function validReport(): string {
   return [
@@ -105,5 +111,16 @@ describe('docblocks theme report grader', () => {
         value.toLowerCase(),
       );
     }
+  });
+});
+
+describe('mock toolset wiring', () => {
+  it('installs the catalog id the runner actually registers', () => {
+    // Wild-caught: the mock declares `toolsetId: 'docblocks'`, so the runner
+    // registers it as `docblocks` — but setup installed the hardcoded
+    // default `mock-mcp-docblocks` and the trial died on a 404 before
+    // running a single turn. Both sides must derive from one declaration.
+    const mock = THEME_MOCK_SERVICES[0] as { id: string; toolsetId?: string };
+    expect(mockMcpToolsetId(mock.id, mock.toolsetId)).toBe('docblocks');
   });
 });

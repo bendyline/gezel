@@ -9,6 +9,7 @@ import type { CraftbookTestSpec, MockService } from '@bendyline/gezel';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import selfsigned from 'selfsigned';
+import { z } from 'zod';
 
 /**
  * Live per-trial mock services for the craftbook eval rail.
@@ -495,10 +496,31 @@ async function handleMcpMockRequest(
     }
     const server = new McpServer({ name: `mock-mcp-${mock.id}`, version: '1.0.0' });
     for (const tool of mock.tools) {
-      // No inputSchema: the SDK skips argument validation entirely, so a
-      // model may pass any args (e.g. `ack_alert({id})`) without a
-      // rejection — the mock ignores them and serves the template.
-      server.registerTool(tool.name, { description: tool.description }, async (args) => {
+      // Tools WITHOUT a file effect stay schema-less on purpose: the SDK
+      // then skips argument validation, so a model may pass anything (e.g.
+      // `ack_alert({id})`) without a rejection and the mock serves the
+      // template regardless.
+      //
+      // A tool that MATERIALIZES A FILE cannot afford that. Wild-caught on
+      // the first two live runs of research-to-document: with no schema the
+      // model first guessed `destinationPath` against a spec expecting
+      // `destination.path`, then called `save_artifact` with NO arguments
+      // at all. Both times the call logged (satisfying `requiredTools`),
+      // the write found no path, and the trial failed on a missing document
+      // while every provenance check passed. The model was not being
+      // careless — nothing told it the argument existed.
+      //
+      // So the schema is DERIVED from the same `pathArgument` the fixture
+      // reads. One field, therefore no way for the declared contract and
+      // the consumed contract to drift.
+      const inputSchema = tool.writeFixture
+        ? fixturePathSchema(tool.writeFixture.pathArgument)
+        : undefined;
+      const config = {
+        description: tool.description,
+        ...(inputSchema ? { inputSchema } : {}),
+      };
+      server.registerTool(tool.name, config, async (args) => {
         started.requests.push({
           at: new Date().toISOString(),
           method: 'POST',
@@ -547,6 +569,59 @@ function valueAtPath(value: unknown, dottedPath: string): unknown {
   return current;
 }
 
+/**
+ * Build the input schema a file-materializing tool advertises, from the
+ * dotted `pathArgument` its fixture reads.
+ *
+ * `destination.path` → `{ destination: { path: string } }`
+ * `destinationPath`  → `{ destinationPath: string }`
+ *
+ * The description matters as much as the shape: it is what a model reads
+ * when deciding what to put there.
+ */
+function fixturePathSchema(pathArgument: string): Record<string, z.ZodTypeAny> {
+  const parts = pathArgument.split('.').filter(Boolean);
+  const leaf = z
+    .string()
+    .min(1)
+    .describe('Destination path for the saved file, relative to the target root.');
+  if (parts.length <= 1) return { [parts[0] ?? 'path']: leaf };
+  let current: z.ZodTypeAny = leaf;
+  for (let index = parts.length - 1; index >= 1; index--) {
+    current = z.object({ [parts[index]!]: current });
+  }
+  return { [parts[0]!]: current };
+}
+
+/**
+ * Resolve the destination path from a tool call whose argument SHAPE was
+ * never declared.
+ *
+ * Mock MCP tools register without an `inputSchema` (see the note in
+ * `handleMcpMockRequest`), so a model has nothing telling it whether the
+ * argument is `destination.path`, `destinationPath`, or plain `path`. It
+ * guesses — and a spec that pins exactly one spelling turns that guess into
+ * a silent failure: the tool call is logged (satisfying `requiredTools`),
+ * the fixture write throws, and no file appears. Wild-caught on the first
+ * live run of research-to-document: the model sent `destinationPath`, the
+ * spec declared `destination.path`, and the trial failed on a missing DOCX
+ * while every provenance check passed.
+ *
+ * The declared `pathArgument` stays authoritative; these are fallbacks so a
+ * reasonable guess still lands the file. `powerpoint-deck` carries the same
+ * unvalidated `destination.path` and is fixed by the same tolerance.
+ */
+function resolveFixturePath(args: unknown, declared: string): string | null {
+  const camel = declared.replace(/\.([a-z])/gi, (_, c: string) => c.toUpperCase());
+  const last = declared.split('.').pop() ?? declared;
+  const candidates = [declared, camel, last, 'destinationPath', 'destination.path', 'path'];
+  for (const candidate of candidates) {
+    const value = valueAtPath(args, candidate);
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return null;
+}
+
 /** Fixture id → the bytes it materializes. */
 const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = {
   'minimal-pptx': () => minimalPptxFixture(),
@@ -577,9 +652,12 @@ export async function materializeMockToolFixture(
   if (!context.trialHome || !context.projectId) {
     throw new Error('mock MCP file effect has no bound trial project');
   }
-  const rawPath = valueAtPath(args, effect.pathArgument);
-  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) {
-    throw new Error(`mock MCP file effect expected string argument ${effect.pathArgument}`);
+  const rawPath = resolveFixturePath(args, effect.pathArgument);
+  if (rawPath === null) {
+    throw new Error(
+      `mock MCP file effect could not resolve a destination path from ${JSON.stringify(args)} ` +
+        `(declared ${effect.pathArgument})`,
+    );
   }
   const normalized = rawPath.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (normalized.split('/').includes('..')) {
