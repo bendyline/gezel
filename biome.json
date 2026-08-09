@@ -22,7 +22,7 @@
       "**/test-results/**",
       "**/playwright-report/**",
       "**/ux-screenshots/**",
-      "**/.import-state/runs/**",
+      "**/.import-state/**",
       "**/.import-cache/**",
       "evals/runs/**",
       "artifacts/**",

@@ -290,6 +290,20 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Questions with an attached document.** When a pending question carries a
+document — a night-shift report, a draft plan — the document is not a
+ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
+it into its own right-hand column (`.pending-question-split*` in
+[styles.css](../packages/ui/src/styles.css)): the card and its actions on
+the left, the whole document as a portrait page on the right, scrolling in
+place. `.pending-question-splitwrap` is a named `question-card` query
+container, so the same card falls back to one column in a narrow chat
+bubble and the panel keeps its own scroll there. Two rules travel with the
+pattern: the document's own `#`/`##` headings are pulled back to panel
+scale (a report title must not out-shout the question it belongs to), and
+an *answered* card — which collapses to one line — stays single-column,
+because a full-height panel beside one sentence reads as broken.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:
@@ -358,6 +372,19 @@ empty-pool stripes: it is physically occupied, but remains available when the
 operating system needs the capacity.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
+
+**Identity codes.** When two people must compare a cryptographic value
+out loud — device pairing is the only case today — show a short grouped
+**identity code** (`.device-code`, the first 16 hex characters in groups
+of four) and keep the full value behind a "Show the full fingerprint"
+disclosure. Both ends of the comparison must show the *same* form, and the
+prompt asks the user to *check that the codes match*, never to "read it
+across". Length is a security floor, not a style choice: 16 hex characters
+is 64 bits, and a shorter code can be ground out offline by an attacker
+who wants a colliding prefix. Full-length values still travel in the API
+and are what the code compares —
+[RemoteServersPanel](../packages/ui/src/components/RemoteServersPanel.tsx)
+is the reference.
 
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along

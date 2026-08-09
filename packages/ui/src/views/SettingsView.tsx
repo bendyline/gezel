@@ -3024,12 +3024,6 @@ export function SettingsView() {
                 </option>
               </select>
             </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Per-gezel override lives in the gezel's frontmatter as{' '}
-              <code>claudePermissionMode</code>. <code>acceptEdits</code> is a sensible default for
-              chat-driven gezellen; flip <code>bypassPermissions</code> on builders you trust to run
-              shell commands without a prompt.
-            </p>
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
@@ -3053,10 +3047,6 @@ export function SettingsView() {
                 onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
               />
             </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Passed to Claude Code through <code>CLAUDE_CODE_EFFORT_LEVEL</code>. Options follow
-              the selected model; gezels can override it with their own effort setting.
-            </p>
 
             <details style={{ marginTop: '1rem' }}>
               <summary style={{ cursor: 'pointer' }}>

@@ -393,11 +393,7 @@ h6 {
 .home-intro-body > p,
 .home-intro-body > p strong,
 .msg-body,
-.msg-body-rich,
-/* Titlebar nav (the Questions toggle) keeps the editorial register to
-   match the logotype. */
-  .app-header
-  .nav {
+.msg-body-rich {
   font-family: var(--font-display);
 }
 
@@ -2527,13 +2523,21 @@ html.embedded-chat #root {
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* Top-nav "Questions" button — only rendered when pending-question
+/* Top-nav "Updates" button — only rendered when pending-question
    count > 0. Styled as a regular tab but with an amber accent so it
-   reads as actionable. */
+   reads as actionable. It briefly wore the serif to match the logotype;
+   it's a control, not a heading, so it takes the sans like every other
+   button (docs/ux.md, "Typography"). Pinned rather than inherited —
+   `.nav` uses `font: inherit`, so any future editorial ancestor in the
+   titlebar would silently drag it back. */
 .app-nav-questions {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  font-family: var(--font-ui);
+  /* `.nav` uses `font: inherit`, which picked up the 16px document default
+     and left the label louder than every other control in the titlebar. */
+  font-size: var(--text-sm);
 }
 .app-nav-questions .app-nav-badge {
   background: var(--accent, #b0724c);
@@ -2544,7 +2548,7 @@ html.embedded-chat #root {
   line-height: 1.4;
   min-width: 1.1rem;
   text-align: center;
-  transform: translateY(2px);
+  transform: translateY(1px);
 }
 
 /* Questions overlay — drops down from beneath the app header. The
@@ -2578,10 +2582,16 @@ html.embedded-chat #root {
   /* Override the UA default block styling on <dialog>: by default a
      non-modal <dialog open> gets `margin: auto` (centers itself),
      a light border, and UA-native padding. We want it flush to the
-     edges of the viewport below the nav. */
+     edges of the viewport below the nav.
+     `width: auto` is load-bearing — the UA sheet sets `width: fit-content`
+     on <dialog>, which shrink-wraps the drawer to its content and quietly
+     defeats the `left: 0; right: 0` stretch above (clearing `max-width`
+     alone does nothing). Without it the report card never gets the width
+     to split into two columns. */
   margin: 0;
+  width: auto;
   max-width: none;
-  max-height: calc(100vh - var(--app-header-height, 44px) - 1rem);
+  max-height: calc(100vh - var(--app-header-height, 44px));
   overflow-y: auto;
   background: var(--bg);
   color: inherit;
@@ -3218,6 +3228,12 @@ html.embedded-chat #root {
   width: min(560px, 92vw);
   max-height: 82vh;
   overflow: auto;
+}
+/* A question with an attached document renders two columns; at 560px
+   they'd stack and the panel would just be a taller letterbox. */
+.project-questions-dialog:has(.pending-question-splitwrap) {
+  width: min(1080px, 94vw);
+  max-height: 90vh;
 }
 .sr-only {
   position: absolute;
@@ -18369,6 +18385,83 @@ a.license-button:hover {
   font-size: 0.75rem;
 }
 
+/* ── Attached-document split ──────────────────────────────────────
+   A question that carries a document (a night-shift report, a plan)
+   lifts it out of the card's context strip into its own column, so a
+   report reads as a portrait page that scrolls on its own instead of a
+   ten-line letterbox above the answer keys. The wrapper is the query
+   container: the card lives in a chat bubble, a sidebar dialog, and the
+   full-width questions overlay, and only the last two are reliably wide
+   enough for two columns. */
+.pending-question-splitwrap {
+  container: question-card / inline-size;
+}
+
+.pending-question-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+/* 680px is deliberately low: the overlay's container is the window width
+   minus its padding, and an ~800px window still deserves two columns.
+   The document takes the larger share — it's what the user is here to
+   read; the card beside it is a prompt and two keys. */
+@container question-card (min-width: 680px) {
+  .pending-question-split {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 1.15fr);
+  }
+}
+
+.pending-question-split-main {
+  min-width: 0;
+}
+
+/* The panel is a fixed portrait window, not a column that grows with the
+   document — min and max are deliberately the same height. Without the
+   cap the panel stretches to the document's full length and the *host
+   surface* scrolls instead, which is the letterbox problem again in a
+   taller costume. */
+.pending-question-document-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 18rem;
+  max-height: 28rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+}
+
+/* Both question surfaces are viewport-anchored, so the panel can claim
+   real height there; inside a chat bubble it keeps the modest default. */
+.app-questions-overlay .pending-question-document-panel,
+.project-questions-dialog .pending-question-document-panel {
+  min-height: min(62vh, 44rem);
+  max-height: min(62vh, 44rem);
+}
+
+.pending-question-document-panel .pending-question-document-preview {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+/* The document is a preview, not this surface's own heading hierarchy —
+   a report's `# Title` set at page scale dwarfs the question it belongs
+   to. Pull the top two levels back toward panel scale. */
+.pending-question-document-panel .pending-question-document-preview :is(h1, h2) {
+  font-size: var(--text-xl);
+  margin-top: 0.4rem;
+}
+
+.pending-question-document-panel .pending-question-document-preview :is(h3, h4, h5, h6) {
+  font-size: var(--text-lg);
+}
+
 .pending-question-prompt {
   font-size: 0.95rem;
 }
@@ -24460,6 +24553,32 @@ button.boekwachter-pill:focus-visible {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+/* Identity code — the out-of-band pairing check two people read to each
+   other. Set larger and looser than surrounding code spans on purpose:
+   this is the one string in the app a user has to transcribe by voice, so
+   the grouping and character spacing are the whole point. */
+.device-code-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.2rem;
+}
+.device-code {
+  font-size: var(--text-lg);
+  letter-spacing: 0.06em;
+  word-spacing: 0.35em;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+}
+.device-code-full > summary {
+  cursor: pointer;
+}
+.device-code-full > code {
+  display: block;
+  margin-top: 0.25rem;
 }
 
 /* ==========================================================================

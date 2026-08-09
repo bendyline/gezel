@@ -4,7 +4,7 @@ import type {
   Question,
   Task,
 } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab } from './nav-actions.js';
@@ -34,6 +34,14 @@ function npmIntentPackages(question: Question): NpmInstallApprovalPackage[] {
 }
 
 /**
+ * Set while the host has already lifted the attached document into its
+ * own column (see {@link PendingQuestionCard}). {@link ContextStrip} then
+ * renders the task row only — the document is on screen already, beside
+ * the card rather than squeezed inside it.
+ */
+const DocumentHoisted = createContext(false);
+
+/**
  * Interactive card for a structured question. Rendered:
  *   - inline below the assistant bubble that asked it (chat-bubbles.tsx)
  *   - in the Home "Needs your input" panel (HomeView)
@@ -41,12 +49,14 @@ function npmIntentPackages(question: Question): NpmInstallApprovalPackage[] {
  * Same component, same answer flow either way. When the underlying
  * `question` arrives with `answer` set, the card auto-collapses to the
  * read-only "Answered" form.
+ *
+ * A question that carries a document (a night-shift report, a plan) gets
+ * a two-column layout: the card on the left, the document as a tall
+ * portrait panel on the right that scrolls on its own. Answered cards
+ * collapse to a single line, so they keep the plain one-column shape —
+ * a full-height document panel next to one sentence reads as broken.
  */
-export function PendingQuestionCard({
-  question,
-  onAnswered,
-  onOpenInChat,
-}: {
+export function PendingQuestionCard(props: {
   question: Question;
   /** Called after a successful submit/skip — parent can refresh lists. */
   onAnswered?: (q: Question) => void;
@@ -54,6 +64,34 @@ export function PendingQuestionCard({
    * Optional "Open in chat" link target. The chat-bubble surface
    * doesn't pass this (we're already in chat); the Home pane does.
    */
+  onOpenInChat?: (question: Question) => void;
+}) {
+  const { question } = props;
+  const body = <QuestionBody {...props} />;
+  if (question.answer || !question.documentPath) return body;
+  return (
+    <div className="pending-question-splitwrap">
+      <div className="pending-question-split">
+        <div className="pending-question-split-main">
+          <DocumentHoisted.Provider value={true}>{body}</DocumentHoisted.Provider>
+        </div>
+        <DocumentContext
+          projectId={question.projectId}
+          documentPath={question.documentPath}
+          layout="panel"
+        />
+      </div>
+    </div>
+  );
+}
+
+function QuestionBody({
+  question,
+  onAnswered,
+  onOpenInChat,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
   onOpenInChat?: (question: Question) => void;
 }) {
   if (question.answer) {
@@ -1000,11 +1038,13 @@ function NpmInstallApprovalForm({
 // ── Context strip (task / document attachments) ─────────────────────
 
 function ContextStrip({ question }: { question: Question }) {
-  if (!question.taskRef && !question.documentPath) return null;
+  const documentHoisted = useContext(DocumentHoisted);
+  const showDocument = Boolean(question.documentPath) && !documentHoisted;
+  if (!question.taskRef && !showDocument) return null;
   return (
     <div className="pending-question-context">
       {question.taskRef && <TaskContext taskRef={question.taskRef} />}
-      {question.documentPath && (
+      {showDocument && question.documentPath && (
         <DocumentContext projectId={question.projectId} documentPath={question.documentPath} />
       )}
     </div>
@@ -1070,10 +1110,18 @@ function TaskContext({ taskRef }: { taskRef: string }) {
 function DocumentContext({
   projectId,
   documentPath,
+  layout = 'inline',
 }: {
   projectId: string;
   documentPath: string;
+  /**
+   * `inline` sits inside the card's context strip and shows a ten-line
+   * teaser with an expand toggle. `panel` is the hoisted right-hand
+   * column: the whole document, scrolling in place, no toggle.
+   */
+  layout?: 'inline' | 'panel';
 }) {
+  const panel = layout === 'panel';
   const [content, setContent] = useState<string | null>(null);
   const [resolvedKind, setResolvedKind] = useState<
     'document' | 'project-document' | 'artifact' | null
@@ -1121,9 +1169,10 @@ function DocumentContext({
 
   const previewLines = useMemo(() => {
     if (!content) return '';
+    if (panel) return content;
     const lines = content.split('\n');
     return expanded ? content : lines.slice(0, 10).join('\n');
-  }, [content, expanded]);
+  }, [content, expanded, panel]);
 
   const kindLabel =
     resolvedKind === 'artifact'
@@ -1133,7 +1182,7 @@ function DocumentContext({
         : 'Document';
 
   return (
-    <div className="pending-question-document">
+    <div className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}`}>
       <div className="pending-question-context-row">
         <span className="muted">{kindLabel}</span>
         <span className="pending-question-context-title">{documentPath.split('/').pop()}</span>
@@ -1146,12 +1195,13 @@ function DocumentContext({
         </button>
       </div>
       {error && <p className="muted small">Couldn't load preview: {error}</p>}
+      {panel && content === null && !error && <p className="muted small">Loading document…</p>}
       {content !== null && (
         <>
           <div className="pending-question-document-preview">
             <RenderedMarkdown markdown={previewLines} />
           </div>
-          {content.split('\n').length > 10 && (
+          {!panel && content.split('\n').length > 10 && (
             <button
               type="button"
               className="pending-question-document-expand subtle"
