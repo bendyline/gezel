@@ -41,15 +41,17 @@ import { defaultProvider } from '../providers.ts';
 import {
   captureDevice,
   currentHarnessCommit,
+  discoverScorecardModels,
   mergeScorecard,
   modelResultFromMatrix,
+  nodeScorecardFs,
+  resolveModelEngine,
   resolvedGildeVersion,
   runIdFor,
 } from '../scorecard.ts';
 import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
 import { parseArgs } from './args.ts';
-import { defaultModelRoots, discoverCachedModelInventory } from './model-coverage.ts';
 
 /** The suites a scorecard always covers. Not configurable on purpose. */
 const SCORECARD_SUITES = ['core', 'productivity'] as const;
@@ -106,7 +108,9 @@ function main(): void {
     process.exit(2);
   }
 
-  const inventory = discoverCachedModelInventory(defaultModelRoots());
+  const forced = typeof args.flags.provider === 'string' ? args.flags.provider : undefined;
+  const preferred = defaultProvider();
+  const candidates = discoverScorecardModels(homedir(), nodeScorecardFs());
   const requested =
     typeof args.flags.models === 'string'
       ? args.flags.models
@@ -114,29 +118,32 @@ function main(): void {
           .map((value) => value.trim())
           .filter(Boolean)
       : null;
-  const models = requested
-    ? inventory.cachedModels.filter((model) => requested.includes(model.id))
-    : inventory.cachedModels;
 
-  if (requested) {
-    const missing = requested.filter((id) => !models.some((model) => model.id === id));
-    if (missing.length > 0) {
-      console.error(
-        `[scorecard] not cached on this device: ${missing.join(', ')}\n` +
-          `            cached: ${inventory.cachedModels.map((m) => m.id).join(', ') || '(none)'}`,
-      );
-      process.exit(2);
+  const uniqueIds = [...new Set(candidates.map((entry) => entry.id))].sort();
+  const models: Array<{ id: string; engine: string }> = [];
+  const skipped: string[] = [];
+  for (const id of requested ?? uniqueIds) {
+    const resolved = resolveModelEngine(candidates, id, {
+      ...(forced ? { forced } : {}),
+      preferred,
+    });
+    if (!resolved) {
+      // Never silently switch engines. The engine is part of what a
+      // published number MEANS, so an unavailable pairing is reported
+      // rather than papered over — pinning one provider for every model
+      // would have handed `--provider mlx` to a ds4-only model.
+      skipped.push(forced ? `${id} (no ${forced} install)` : `${id} (no known engine install)`);
+      continue;
     }
+    models.push({ id, engine: resolved.engine });
   }
 
-  // Pin the engine rather than inferring it. The cached-model inventory
-  // only scans llama-cpp/ds4 roots, so it labelled an MLX run "llama-cpp" —
-  // and on this harness MLX is the Apple Silicon default. Publishing the
-  // wrong engine is not cosmetic: the two diverge materially on tool-loop
-  // work, so a mislabelled table invites the wrong conclusion. Pinning it
-  // also makes the sweep reproducible instead of platform-dependent.
-  const provider =
-    typeof args.flags.provider === 'string' ? args.flags.provider : defaultProvider();
+  if (requested && skipped.length > 0) {
+    console.error(`[scorecard] cannot measure: ${skipped.join(', ')}`);
+    console.error(`            available: ${uniqueIds.join(', ') || '(none)'}`);
+    process.exit(2);
+  }
+
   const device = captureDevice();
   const startedAt = args.flags['started-at']
     ? String(args.flags['started-at'])
@@ -157,7 +164,7 @@ function main(): void {
   if (args.flags.list) {
     console.log(`Run id:      ${runId}`);
     console.log(`Device:      ${device.label} (${device.memoryGb} GB)`);
-    console.log(`Engine:      ${provider}`);
+    console.log(`Engine:      ${forced ?? `${preferred} preferred, per-model fallback`}`);
     console.log(`Suites:      ${suites.join(', ')}`);
     console.log(`Trials:      ${count} per scenario`);
     if (verify) {
@@ -171,7 +178,11 @@ function main(): void {
       );
     }
     console.log(`Models (${models.length}):`);
-    for (const model of models) console.log(`  ${model.id}  [${model.engine}]`);
+    for (const model of models) console.log(`  ${model.id.padEnd(30)} [${model.engine}]`);
+    if (skipped.length > 0) {
+      console.log(`\nSkipped (${skipped.length}):`);
+      for (const entry of skipped) console.log(`  ${entry}`);
+    }
     // Report the ceiling honestly AND make it actionable. The number is
     // large because it sums authored timeouts, and core's is dominated by
     // the two-hour game anchors; a healthy model finishes far inside them.
@@ -188,12 +199,6 @@ function main(): void {
         `  pnpm eval:scorecard --count ${count} --run-id ${runId} --models ${models[0]?.id ?? '<id>'}`,
       ].join('\n'),
     );
-    if (inventory.excludedCachedModels.length > 0) {
-      console.log('\nExcluded (unsupported runtime):');
-      for (const model of inventory.excludedCachedModels) {
-        console.log(`  ${model.id} — ${model.reason}`);
-      }
-    }
     return;
   }
 
@@ -225,7 +230,7 @@ function main(): void {
             '--model',
             model.id,
             '--provider',
-            provider,
+            model.engine,
             '--llm-judge',
             '--runs-dir',
             matrixRoot,
@@ -269,8 +274,8 @@ function main(): void {
           {
             modelId: model.id,
             label: model.id,
-            engine: provider,
-            tier: classifyEvalModelTier({ engine: provider as never, modelId: model.id }),
+            engine: model.engine,
+            tier: classifyEvalModelTier({ engine: model.engine as never, modelId: model.id }),
             suiteId,
             matrix,
             matrixRoot,

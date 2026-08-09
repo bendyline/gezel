@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { cpus, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -233,4 +233,121 @@ export function runIdFor(startedAt: string, device: ScorecardDevice): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   return `${startedAt.slice(0, 10)}-${slug}`;
+}
+
+/** A model this device can actually run, and the engine it would run on. */
+export interface ScorecardModelCandidate {
+  id: string;
+  engine: string;
+  root: string;
+}
+
+/** Filesystem seam so discovery is testable without a populated cache. */
+export interface ScorecardFs {
+  exists: (path: string) => boolean;
+  listDirs: (path: string) => string[];
+  listFiles: (path: string) => string[];
+  readJson: (path: string) => Record<string, unknown> | null;
+}
+
+/**
+ * Every local root a scorecard may draw models from.
+ *
+ * `model-coverage`'s `defaultModelRoots()` deliberately covers only the
+ * llama-cpp and ds4 caches — the right denominator for ITS report. A
+ * scorecard needs more: on Apple Silicon the harness defaults to MLX, so a
+ * sweep built from the llama-cpp inventory alone both misses MLX-only
+ * models and hands MLX-forced runs to models with no MLX weights.
+ */
+export function scorecardModelRoots(home: string): Array<{ root: string; engine: string }> {
+  const roots: Array<{ root: string; engine: string }> = [];
+  for (const base of ['.gezel-eval-cache', '.gezel-dev']) {
+    for (const engine of ['llama-cpp', 'mlx', 'ds4']) {
+      roots.push({ root: join(home, base, 'engines', engine, 'models'), engine });
+    }
+  }
+  return roots;
+}
+
+/**
+ * Discover installed models across every engine cache.
+ *
+ * Completeness is judged PER ENGINE because the layouts differ: llama.cpp
+ * and ds4 name a single weights file in the manifest, while MLX ships
+ * sharded safetensors with an index and no `weightsFilename` at all —
+ * which is exactly why a llama-cpp-shaped probe skipped the entire MLX
+ * cache and the sweep could not see 5 installed models.
+ */
+export function discoverScorecardModels(home: string, fs: ScorecardFs): ScorecardModelCandidate[] {
+  const found = new Map<string, ScorecardModelCandidate>();
+  for (const { root, engine } of scorecardModelRoots(home)) {
+    if (!fs.exists(root)) continue;
+    for (const id of fs.listDirs(root)) {
+      const dir = join(root, id);
+      const manifest = fs.readJson(join(dir, 'manifest.json'));
+      if (!manifest) continue;
+      // A manifest may name its own engine (ds4 entries do); otherwise the
+      // cache root it sits in is authoritative.
+      const declaredEngine = typeof manifest.engine === 'string' ? manifest.engine : engine;
+      const weights = (manifest.weightsFilename ?? manifest.filename) as string | undefined;
+      const complete =
+        engine === 'mlx'
+          ? fs.listFiles(dir).some((file) => file.endsWith('.safetensors'))
+          : !!weights && fs.exists(join(dir, weights));
+      if (!complete) continue;
+      const key = `${declaredEngine} ${id}`;
+      if (!found.has(key)) found.set(key, { id, engine: declaredEngine, root: dir });
+    }
+  }
+  return [...found.values()].sort(
+    (a, b) => a.id.localeCompare(b.id) || a.engine.localeCompare(b.engine),
+  );
+}
+
+/**
+ * Choose the engine a model is measured on.
+ *
+ * The order is explicit rather than incidental, because the engine is part
+ * of what a published number MEANS: a forced `--provider` wins, then the
+ * platform default, then whatever the model is actually installed for. A
+ * model that cannot run on a FORCED provider is skipped loudly — never
+ * silently switched. Pinning one provider for every model was the bug this
+ * replaces: it would have handed `--provider mlx` to a ds4-only model.
+ */
+export function resolveModelEngine(
+  candidates: readonly ScorecardModelCandidate[],
+  modelId: string,
+  opts: { forced?: string; preferred: string },
+): { engine: string; root: string } | null {
+  const forModel = candidates.filter((entry) => entry.id === modelId);
+  if (forModel.length === 0) return null;
+  if (opts.forced) {
+    const match = forModel.find((entry) => entry.engine === opts.forced);
+    return match ? { engine: match.engine, root: match.root } : null;
+  }
+  const chosen = forModel.find((entry) => entry.engine === opts.preferred) ?? forModel[0]!;
+  return { engine: chosen.engine, root: chosen.root };
+}
+
+/** Default filesystem implementation. */
+export function nodeScorecardFs(): ScorecardFs {
+  return {
+    exists: (path) => existsSync(path),
+    listDirs: (path) =>
+      readdirSync(path, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name),
+    listFiles: (path) =>
+      readdirSync(path, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name),
+    readJson: (path) => {
+      if (!existsSync(path)) return null;
+      try {
+        return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    },
+  };
 }
