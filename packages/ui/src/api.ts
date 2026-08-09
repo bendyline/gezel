@@ -226,11 +226,12 @@ function resolveToken(): string {
   const fromQuery = new URLSearchParams(window.location.search).get('token');
   if (fromQuery) {
     // One-time token URL — `gezel start --web` prints
-    // `http://127.0.0.1:6228/?token=…`. Persist it so reloads and
-    // client-side navigation stay authed (the fixed canonical port gives
-    // a stable origin, so localStorage survives across launches), then
-    // scrub it from the URL so the secret doesn't linger in the address
-    // bar / browser history.
+    // `http://127.0.0.1:<port>/?token=…`. Persist it so reloads and
+    // client-side navigation stay authed (localStorage is origin-scoped,
+    // so this survives across launches only when the daemon claimed the
+    // same port — guaranteed only on installs without a machine service),
+    // then scrub it from the URL so the secret doesn't linger in the
+    // address bar / browser history.
     try {
       window.localStorage.setItem('gezel:token', fromQuery);
     } catch {

@@ -15,6 +15,13 @@ export function systemServiceHome(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
+  // Operator/test override. In particular, the service test harness points
+  // this at an unpopulated per-run directory so a developer's installed
+  // machine broker cannot become an accidental dependency of a "fresh home"
+  // test. Explicit machineEngineHome options still take precedence at the
+  // bridge call site.
+  const override = env.GEZEL_SYSTEM_SERVICE_HOME;
+  if (override?.trim()) return override;
   if (platform === 'win32') {
     const base = env.ProgramData || env.PROGRAMDATA || 'C:\\ProgramData';
     return win32.join(base, 'Gezel');

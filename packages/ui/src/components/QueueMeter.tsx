@@ -30,22 +30,35 @@ import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
-type ProviderName = 'copilot' | 'openai' | 'ollama' | 'llama-cpp' | 'mlx' | 'ds4';
+/** Every provider queue the service exposes through `/api/queues`. */
+type QueueProviderName = keyof QueueStatusResponse['providers'];
 
-const PROVIDER_ORDER: ProviderName[] = ['copilot', 'openai', 'ollama', 'llama-cpp', 'mlx', 'ds4'];
+// The Record check is deliberately exhaustive: adding another provider to
+// QueueStatusResponse now fails the UI build until the header can display it.
+const PROVIDER_ORDER = Object.keys({
+  copilot: null,
+  openai: null,
+  anthropic: null,
+  'anthropic-cli': null,
+  'codex-cli': null,
+  ollama: null,
+  'llama-cpp': null,
+  mlx: null,
+  ds4: null,
+} satisfies Record<QueueProviderName, null>) as QueueProviderName[];
 
 // Platform read once per render — `providerLabel` uses it to pick
 // "This Windows PC" / "This Linux device" / "On-device" for the
 // llama-cpp chip. Bridge value is process.platform; undefined in the
 // plain-web build (the helper falls back to "On-device").
-function getPlatformPillLabel(name: ProviderName): string {
+function getPlatformPillLabel(name: QueueProviderName): string {
   return providerLabel(name, window.__GEZEL__?.platform);
 }
 // Short form ("Windows" / "Linux" / "Mac") used by the chip's
 // container-query fallback when the titlebar slot is too narrow for
 // the full label. CSS in styles.css picks which of the two spans is
 // visible — see `.queue-meter-chip-label-full` / `-short` rules.
-function getCompactPillLabel(name: ProviderName): string {
+function getCompactPillLabel(name: QueueProviderName): string {
   return providerLabel(name, window.__GEZEL__?.platform, { compact: true });
 }
 
@@ -187,7 +200,7 @@ function queueActorTooltip(
   actor: QueueActorIdentity,
   projectId: string | undefined,
   projects: Map<string, Project>,
-  provider?: ProviderName,
+  provider?: QueueProviderName,
 ): string {
   const lines = [actor.label];
   const role = queueActorRole(actor);
@@ -279,7 +292,7 @@ function QueueChipIdentity({
   projects,
   boringMode,
 }: {
-  provider: ProviderName;
+  provider: QueueProviderName;
   actor: QueueActorIdentity;
   projectId: string | undefined;
   projects: Map<string, Project>;
@@ -529,7 +542,7 @@ export function QueueMeter() {
   // live-turn subscription so it stays open across the "Preparing"
   // window (when the provider is missing from `status.providers`). A
   // cloud-only user resolves to null and never holds a connection.
-  const onDeviceProvider: ProviderName | null =
+  const onDeviceProvider: QueueProviderName | null =
     activeProvider === 'llama-cpp'
       ? 'llama-cpp'
       : activeProvider === 'mlx'
@@ -699,7 +712,7 @@ function QueueMeterPanel({
   preparingTurns: Array<[string, LiveTurnState]>;
   /** Active on-device provider, or null when the active provider is a
    *  cloud one. Labels the preparing section. */
-  onDeviceProvider: ProviderName | null;
+  onDeviceProvider: QueueProviderName | null;
   /** Boring mode keeps the provider/status treatment and suppresses character art. */
   boringMode: boolean;
   onClose: () => void;

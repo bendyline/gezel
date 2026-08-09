@@ -187,7 +187,11 @@ export async function queryMachineServiceState(
     }
     if (platform === 'linux') {
       try {
+        // `--system` is explicit: the user-level autostart unit historically
+        // shared this unit name (now gezeld-user.service), and an unqualified
+        // query in a user session could answer for the wrong scope.
         const { stdout } = await exec('systemctl', [
+          '--system',
           'show',
           LINUX_SERVICE_UNIT,
           '--property=LoadState',

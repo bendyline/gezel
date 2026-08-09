@@ -37,7 +37,7 @@ export interface UsageTurn {
 }
 
 export interface ProviderUsage {
-  /** Non-empty only for providers that report quotas (today: Copilot). */
+  /** Non-empty only for providers that report account quota windows. */
   quotaBuckets: QuotaBucket[];
   todayTurns: number;
   todayTokensIn: number;
@@ -79,6 +79,7 @@ export interface UsageSummary {
 
 interface TrackerState {
   latestQuotaBuckets: QuotaBucket[];
+  quotaUpdatedAt: string | null;
   turns: UsageTurn[];
 }
 
@@ -101,7 +102,26 @@ export class UsageTracker {
     });
     if (turn.quotaBuckets && turn.quotaBuckets.length > 0) {
       state.latestQuotaBuckets = turn.quotaBuckets;
+      state.quotaUpdatedAt = turn.at;
     }
+  }
+
+  /**
+   * Record a provider quota snapshot that arrived outside a chat turn.
+   *
+   * CLI-backed subscriptions expose their account windows through their
+   * local runtimes rather than as token-usage fields on a model response.
+   * Keeping this separate from {@link recordTurn} lets the header surface
+   * those windows without inventing a zero-token turn or skewing totals.
+   */
+  recordQuotaBuckets(
+    provider: ProviderName,
+    buckets: QuotaBucket[],
+    at = new Date().toISOString(),
+  ): void {
+    const state = this.ensure(provider);
+    state.latestQuotaBuckets = buckets;
+    state.quotaUpdatedAt = at;
   }
 
   summary(): UsageSummary {
@@ -110,7 +130,8 @@ export class UsageTracker {
     let overallLast: string | null = null;
     for (const [name, state] of this.byProvider) {
       const todayTurns = state.turns.filter((t) => t.at.startsWith(today));
-      const last = state.turns.length > 0 ? state.turns[state.turns.length - 1]!.at : null;
+      const lastTurn = state.turns.length > 0 ? state.turns[state.turns.length - 1]!.at : null;
+      const last = laterTimestamp(lastTurn, state.quotaUpdatedAt);
       if (last && (!overallLast || last > overallLast)) overallLast = last;
       providers[name] = {
         quotaBuckets: state.latestQuotaBuckets,
@@ -136,11 +157,17 @@ export class UsageTracker {
   private ensure(provider: ProviderName): TrackerState {
     let state = this.byProvider.get(provider);
     if (!state) {
-      state = { latestQuotaBuckets: [], turns: [] };
+      state = { latestQuotaBuckets: [], quotaUpdatedAt: null, turns: [] };
       this.byProvider.set(provider, state);
     }
     return state;
   }
+}
+
+function laterTimestamp(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
 }
 
 /** Median of a numeric list, or null when empty. Exported for tests. */

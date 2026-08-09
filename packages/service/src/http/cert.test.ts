@@ -22,15 +22,20 @@ describe('generateLoopbackCert', () => {
     expect(details?.modulusLength).toBe(2048);
   });
 
-  it('sets validity to about a day from now', async () => {
+  it('sets a validity window that outlives an always-on daemon between restarts', async () => {
     const cert = await generateLoopbackCert();
     const x509 = new X509Certificate(cert.certPem);
     const validFrom = new Date(x509.validFrom).getTime();
     const validTo = new Date(x509.validTo).getTime();
     const span = validTo - validFrom;
-    // 1 day window. Allow ±60 s for clock-rounding inside selfsigned.
-    expect(span).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 60_000);
-    expect(span).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 60_000);
+    const day = 24 * 60 * 60 * 1000;
+    // 90-day window. A 1-day cert took the machine service (and every
+    // rejectUnauthorized:true client of a long-running user daemon) down
+    // ~24h after boot; anything under 30 days is a regression back toward
+    // that outage. Allow ±60 s for clock-rounding inside selfsigned.
+    expect(span).toBeGreaterThanOrEqual(90 * day - 60_000);
+    expect(span).toBeLessThanOrEqual(90 * day + 60_000);
+    expect(validTo).toBeGreaterThan(Date.now() + 30 * day);
   });
 
   it('returns a fingerprint that matches the cert', async () => {

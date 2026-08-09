@@ -39,8 +39,8 @@ Night work is deliberately quiet-handed. The suggested craftbooks write
 **reports, findings, and sidecar files** — a security posture report in
 the artifacts drawer, translations beside the originals — rather than
 editing your work in place. Each enabled item runs **at most once per
-night**, inside the window, and everything it does lands in History like
-any other work.
+night**, inside the window. Its task transitions and tool completions that
+Gezel observes land in History like other work.
 
 Some values are shared across night work: the Translator's target
 language, for instance, is a **project property** — set once in project
@@ -59,8 +59,8 @@ one click away — fire a craftbook, delegate a fix, apply a reviewed set
 of file edits — appears **inside the report as an action card**. You see
 exactly what would run (including the full diff for file edits) and fire
 it, or dismiss it, right from the page. Nothing a report suggests ever
-runs on its own: firing is always your click, and everything fired lands
-in History like any other work.
+runs on its own: firing is always your click, and Gezel records the
+resulting task and observed tool activity in History.
 
 For the Night Shift to run while the app is closed, enable the background
 service in Settings.

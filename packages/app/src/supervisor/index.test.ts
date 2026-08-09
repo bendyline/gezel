@@ -31,6 +31,7 @@ const ctx = vi.hoisted(() => ({
     | undefined
     | ((
         signal?: AbortSignal,
+        connection?: { baseUrl: string; token: string },
       ) => Promise<{ ok: boolean; version: string; machineEngineConnected?: boolean }>),
   runtime: null as null | {
     pid: number;
@@ -177,9 +178,10 @@ vi.mock('./log-rotator.js', () => ({
 }));
 vi.mock('@bendyline/gezel-client/node', () => ({
   GezelClient: class MockGezelClient {
+    constructor(private readonly connection: { baseUrl: string; token: string }) {}
     health(signal?: AbortSignal) {
       if (!ctx.health) throw new Error('test forgot to set ctx.health');
-      return ctx.health(signal);
+      return ctx.health(signal, this.connection);
     }
     getSystemHomeInfo() {
       if (!ctx.systemHomeInfo) {
@@ -735,6 +737,39 @@ describe('Branch 2 — local-adopt', () => {
     await svc.shutdown();
   });
 
+  it('refreshes rotated runtime credentials instead of killing the healthy daemon', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:6666',
+      token: 'stale-token',
+      cert: 'STALE-CERT',
+      pid: 99999,
+    });
+    ctx.runtime = {
+      baseUrl: 'https://127.0.0.1:7777',
+      port: 7777,
+      token: 'fresh-token',
+      cert: 'FRESH-CERT',
+      pid: 99999,
+    };
+    ctx.health = (_signal, connection) =>
+      connection?.token === 'fresh-token'
+        ? Promise.resolve({ ok: true, version: '1.0.0' })
+        : Promise.reject(new Error('stale bearer token'));
+    ctx.processAlive = true;
+
+    // Even with no remaining wait budget, a newly published runtime
+    // generation gets one bounded health probe before any stop is considered.
+    const svc = await connectOrStart(baseOpts({ adoptHealthWaitMs: 0 }));
+
+    expect(svc.mode).toBe('local-adopt');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:7777');
+    expect(svc.token).toBe('fresh-token');
+    expect(svc.cert).toBe('FRESH-CERT');
+    expect(stopDaemonProcessByPid).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
   it('stops a wedged adopted daemon once its start budget expires, then recovers', async () => {
     vi.mocked(resolveMode).mockResolvedValue({
       kind: 'local-adopt',
@@ -1067,6 +1102,34 @@ describe('mode-aware restart', () => {
     expect(health).toHaveBeenCalledTimes(2);
     expect(discoverOrSpawn).not.toHaveBeenCalled();
     expect(svc.mode).toBe('remote');
+    await svc.shutdown();
+  });
+
+  it('restart in remote mode THROWS when the re-probe fails and does NOT fall back', async () => {
+    // The loud-fail contract holds at restart time too: a remote daemon that
+    // stopped answering must surface as an error on the existing remote
+    // connection, never silently drift into embedded/spawned mode.
+    let healthy = true;
+    ctx.health = () =>
+      healthy
+        ? Promise.resolve({ ok: true, version: '1.0.0' })
+        : Promise.reject(new Error('connection refused'));
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    vi.mocked(discoverOrSpawn).mockClear();
+    healthy = false;
+
+    await expect(svc.restart('reconnect after outage')).rejects.toThrow(/did not respond/i);
+
+    expect(svc.mode).toBe('remote');
+    expect(svc.baseUrl).toBe('https://remote.example.test');
+    expect(svc.fallbackReason).toBeNull();
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
     await svc.shutdown();
   });
 

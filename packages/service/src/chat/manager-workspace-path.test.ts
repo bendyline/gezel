@@ -1,6 +1,6 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { buildInstructions } from './manager.js';
+import { buildInstructions } from './instructions.js';
 
 /**
  * Regression: an external-`workingDir` project must NOT leak its host

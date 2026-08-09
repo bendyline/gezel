@@ -121,6 +121,30 @@ describe('ChatEventBus — publishProjectEvent (lifecycle signals)', () => {
     expect(project[0]?.event).toMatchObject({ type: 'project_created', projectId: 'eliza' });
   });
 
+  it('fans task audit events to project subscribers without session scope', () => {
+    const bus = new ChatEventBus();
+    const project: ChatEventEnvelope[] = [];
+    bus.subscribeProject('eliza', (env) => project.push(env));
+
+    bus.publishProjectEvent('eliza', {
+      type: 'task_event',
+      eventId: 'event-1',
+      kind: 'task.step.completed',
+      summary: 'Completed step "Draft" on eliza/3',
+      at: '2026-08-08T12:00:00.000Z',
+      taskRef: 'eliza/3',
+    });
+
+    expect(project).toEqual([
+      expect.objectContaining({
+        sessionId: '',
+        gezelId: '',
+        projectId: 'eliza',
+        event: expect.objectContaining({ type: 'task_event', taskRef: 'eliza/3' }),
+      }),
+    ]);
+  });
+
   it('is NOT replayed to a subscriber that joins afterwards (one-shot, history-free)', () => {
     // A lifecycle signal isn't part of a replayable transcript — unlike
     // `publish`, it must not re-fire when a late subscriber connects, or

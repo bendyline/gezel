@@ -2,7 +2,6 @@ import type {
   ChatEventEnvelope,
   NightShiftReviewResponse,
   NightShiftTasksResponse,
-  ProviderName,
   RecentTab,
   RecentTabArea,
 } from '@bendyline/gezel';
@@ -32,7 +31,6 @@ import {
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
-import { UI_FALLBACK_PROVIDER } from './provider-default.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -136,10 +134,6 @@ function FullApp() {
   // of the painted area inward.
   const [titlebarBgPosY] = useState(() => -Math.floor(Math.random() * 512));
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  // The active default provider, mirrored from config so the quota meter
-  // can hide itself when the engine is local (on-device / remote) — there
-  // is no cloud quota to show, and the EngineStatusPill covers that case.
-  const [provider, setProvider] = useState<ProviderName>('copilot');
   const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
   // Per-project signals painted on the sidebar rows: which projects have a
@@ -227,13 +221,22 @@ function FullApp() {
     },
     [openArea],
   );
+  const openProviderSettings = useCallback(
+    (section: 'copilot' | 'codexCli' | 'anthropicCli') => {
+      requestSettingsSection(section);
+      openArea('settings');
+      window.dispatchEvent(
+        new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
+      );
+    },
+    [openArea],
+  );
 
   useEffect(() => {
     api
       .getConfig()
       .then((cfg) => {
         setEngagementMode((cfg.aiEngagementMode ?? 'proactive') as EngagementMode);
-        setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER);
       })
       .catch(() => {});
     api
@@ -400,13 +403,6 @@ function FullApp() {
     api
       .getUsage()
       .then(setUsage)
-      .catch(() => {});
-    // Re-read the active provider on the same tick. Settings changes it via
-    // a plain config save (no broadcast), so the header — like the
-    // EngineStatusPill — picks it up by polling.
-    api
-      .getConfig()
-      .then((cfg) => setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER))
       .catch(() => {});
   }, []);
 
@@ -675,6 +671,7 @@ function FullApp() {
           <BoekwachterPill />
           <EngineStatusPill />
           <ClaudeCliPoolPill />
+          <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
           <NightShiftMenu state={nightShift} onChange={setNightShift} />
           <EngagementMenu mode={engagementMode} />
           {outputPaneMaximized && (
@@ -688,11 +685,6 @@ function FullApp() {
               <OutputPaneRestoreIcon />
             </button>
           )}
-          <QuotaMeter
-            usage={usage}
-            provider={provider}
-            onOpenSettings={() => openArea('settings')}
-          />
         </div>
       </header>
       {questionsOpen && (
@@ -1223,13 +1215,102 @@ function NightShiftWorkRow({
   );
 }
 
-function QuotaMeter({
+const QUOTA_PROVIDERS = [
+  { key: 'copilot', label: 'Copilot', settingsSection: 'copilot', showTurnsFallback: true },
+  { key: 'codex-cli', label: 'Codex', settingsSection: 'codexCli', showTurnsFallback: false },
+  {
+    key: 'anthropic-cli',
+    label: 'Claude',
+    settingsSection: 'anthropicCli',
+    showTurnsFallback: false,
+  },
+] as const;
+
+const QUOTA_ACTIVITY_POLL_MS = 3_000;
+
+type QuotaProviderKey = (typeof QUOTA_PROVIDERS)[number]['key'];
+type QuotaSettingsSection = (typeof QUOTA_PROVIDERS)[number]['settingsSection'];
+
+function QuotaMeters({
   usage,
-  provider,
   onOpenSettings,
 }: {
   usage: UsageResponse | null;
-  provider: ProviderName;
+  onOpenSettings: (section: QuotaSettingsSection) => void;
+}) {
+  const [activeProviders, setActiveProviders] = useState<ReadonlySet<QuotaProviderKey>>(
+    () => new Set(),
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = () => {
+      void api
+        .getQueueStatus()
+        .then((status) => {
+          if (!mounted) return;
+          const next = new Set<QuotaProviderKey>();
+          for (const provider of QUOTA_PROVIDERS) {
+            if ((status.providers[provider.key]?.running ?? 0) > 0) next.add(provider.key);
+          }
+          setActiveProviders((current) => {
+            if (current.size === next.size && [...current].every((key) => next.has(key))) {
+              return current;
+            }
+            return next;
+          });
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, QUOTA_ACTIVITY_POLL_MS);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  if (!usage) return null;
+  return (
+    <>
+      {QUOTA_PROVIDERS.map((provider) => {
+        if (!activeProviders.has(provider.key)) return null;
+        const providerUsage = usage.providers[provider.key];
+        if (!providerUsage) return null;
+        const limitedBuckets = providerUsage.quotaBuckets.filter((bucket) => !bucket.isUnlimited);
+        if (
+          limitedBuckets.length === 0 &&
+          (!provider.showTurnsFallback || providerUsage.todayTurns === 0)
+        ) {
+          return null;
+        }
+        return (
+          <ProviderQuotaMeter
+            key={provider.key}
+            providerKey={provider.key}
+            label={provider.label}
+            buckets={limitedBuckets}
+            todayTurns={providerUsage.todayTurns}
+            onOpenSettings={() => onOpenSettings(provider.settingsSection)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function ProviderQuotaMeter({
+  providerKey,
+  label,
+  buckets,
+  todayTurns,
+  onOpenSettings,
+}: {
+  providerKey: string;
+  label: string;
+  buckets: QuotaBucket[];
+  todayTurns: number;
   onOpenSettings: () => void;
 }) {
   // Clicking the pill opens the same numbers the tooltip carries, so they
@@ -1255,55 +1336,36 @@ function QuotaMeter({
   // can swallow the mousedown before it reaches the handler above.
   useEffect(() => {
     const close = (event: Event) => {
-      if ((event as CustomEvent<{ source?: string }>).detail?.source === 'quota') return;
+      if ((event as CustomEvent<{ source?: string }>).detail?.source === `quota-${providerKey}`)
+        return;
       setOpen(false);
     };
     window.addEventListener('gezel:close-header-popovers', close);
     return () => window.removeEventListener('gezel:close-header-popovers', close);
-  }, []);
+  }, [providerKey]);
 
   const toggle = useCallback(() => {
     setOpen((current) => {
       if (!current) {
         window.dispatchEvent(
-          new CustomEvent('gezel:close-header-popovers', { detail: { source: 'quota' } }),
+          new CustomEvent('gezel:close-header-popovers', {
+            detail: { source: `quota-${providerKey}` },
+          }),
         );
       }
       return !current;
     });
-  }, []);
-  // Local-compute engines (on-device MLX/llama.cpp, paired remote, Ollama)
-  // don't bill against a cloud quota. When one of them is the active
-  // provider, any quota number we'd show is a leftover from an earlier
-  // cloud provider — surfacing it is misleading. Hide the meter; the
-  // EngineStatusPill already reports local engine status in its place.
-  const isLocalEngine =
-    provider === 'mlx' ||
-    provider === 'llama-cpp' ||
-    provider === 'ollama' ||
-    provider === 'remote';
+  }, [providerKey]);
 
   const mostConstrained = useMemo<QuotaBucket | null>(() => {
-    if (!usage) return null;
-    const all: QuotaBucket[] = [];
-    for (const p of Object.values(usage.providers)) {
-      if (!p) continue;
-      for (const b of p.quotaBuckets) if (!b.isUnlimited) all.push(b);
-    }
-    if (all.length === 0) return null;
-    return all.sort((a, b) => a.remainingPercent - b.remainingPercent)[0] ?? null;
-  }, [usage]);
+    if (buckets.length === 0) return null;
+    return [...buckets].sort((a, b) => a.remainingPercent - b.remainingPercent)[0] ?? null;
+  }, [buckets]);
 
-  if (isLocalEngine) return null;
-  if (!usage?.lastUpdated) return null;
-  const totalTurnsToday =
-    (usage.providers.copilot?.todayTurns ?? 0) + (usage.providers.openai?.todayTurns ?? 0);
-
-  // No limited quota surfaced (e.g. OpenAI-only or Copilot hasn't reported
-  // yet). Thin, but it still gets the popover so a click means the same
-  // thing on both variants of this pill.
+  // Copilot may have turn usage before its SDK emits the first quota event.
+  // Keep its existing lightweight "today" fallback; Codex and Claude only
+  // mount after a real account window arrives.
   if (!mostConstrained) {
-    if (totalTurnsToday === 0) return null;
     return (
       <div className="quota-meter-root" ref={rootRef}>
         <button
@@ -1311,23 +1373,31 @@ function QuotaMeter({
           className="quota-meter"
           onClick={toggle}
           aria-expanded={open}
-          title={`${totalTurnsToday} turns today`}
+          title={`${label}: ${todayTurns} turns today`}
         >
-          <span className="quota-label">{totalTurnsToday} today</span>
+          <span className="quota-label quota-label-provider">{label}</span>
+          <span className="quota-label">{todayTurns} today</span>
         </button>
         {open && (
           <div className="quota-popover">
-            <div className="quota-popover-header">Usage</div>
+            <div className="quota-popover-header">{label} usage</div>
             <dl className="quota-popover-stats">
               <dt>Today</dt>
               <dd>
-                {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+                {todayTurns} {todayTurns === 1 ? 'turn' : 'turns'}
               </dd>
             </dl>
             <p className="quota-popover-note">
-              No quota limit reported yet — it appears after the provider returns one.
+              No quota limit reported yet — it appears after {label} returns one.
             </p>
-            <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+            <button
+              type="button"
+              className="quota-popover-action"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
               Provider settings
             </button>
           </div>
@@ -1345,7 +1415,15 @@ function QuotaMeter({
   const usedPercent = Math.round(rawUsedPercent);
   const isWarn = usedPercent > 80;
   const isCritical = usedPercent > 95;
-  const tooltip = `${humanizeBucketName(q.name)}: ${q.used.toLocaleString()} / ${q.limit.toLocaleString()} (${usedPercent}%)\n${q.remaining.toLocaleString()} remaining${q.resetDate ? `\nResets ${formatResetDate(q.resetDate)}` : ''}${q.overage > 0 ? `\n${q.overage} overage` : ''}\n${totalTurnsToday} turns today`;
+  const tooltip = [
+    `${label} quota`,
+    ...buckets.map((bucket) => {
+      const bucketUsedPercent =
+        bucket.limit > 0 ? Math.round((bucket.used / bucket.limit) * 100) : 0;
+      return `${humanizeBucketName(bucket.name)}: ${bucketUsedPercent}% used, ${Math.round(bucket.remainingPercent)}% left${bucket.resetDate ? `; resets ${formatResetDate(bucket.resetDate)}` : ''}`;
+    }),
+    `${todayTurns} turns today`,
+  ].join('\n');
 
   return (
     <div className="quota-meter-root" ref={rootRef}>
@@ -1354,6 +1432,7 @@ function QuotaMeter({
         className="quota-meter"
         onClick={toggle}
         aria-expanded={open}
+        aria-label={`${label} quota: ${q.used}/${q.limit} used, ${Math.round(q.remainingPercent)}% left`}
         title={tooltip}
       >
         <div className="quota-ring-wrap">
@@ -1380,44 +1459,58 @@ function QuotaMeter({
             />
           </svg>
         </div>
-        <span className="quota-label">
-          {q.used}/{q.limit}
+        <span className="quota-label quota-label-provider">{label}</span>
+        <span className="quota-label quota-label-remaining">
+          {Math.round(q.remainingPercent)}% left
         </span>
       </button>
       {open && (
         <div className="quota-popover">
-          <div className="quota-popover-header">{humanizeBucketName(q.name)}</div>
+          <div className="quota-popover-header">{label} quota</div>
           <dl className="quota-popover-stats">
-            <dt>Used</dt>
-            <dd>
-              {q.used.toLocaleString()} / {q.limit.toLocaleString()} ({usedPercent}%)
-            </dd>
-            <dt>Remaining</dt>
-            <dd>{q.remaining.toLocaleString()}</dd>
-            {q.overage > 0 && (
-              <>
-                <dt>Overage</dt>
-                <dd>{q.overage.toLocaleString()}</dd>
-              </>
-            )}
-            {q.resetDate && (
-              <>
-                <dt>Resets</dt>
-                <dd>{formatResetDate(q.resetDate)}</dd>
-              </>
-            )}
+            {buckets.map((bucket) => {
+              const bucketUsedPercent =
+                bucket.limit > 0 ? Math.round((bucket.used / bucket.limit) * 100) : 0;
+              return (
+                <div className="quota-popover-bucket" key={bucket.name}>
+                  <dt>{humanizeBucketName(bucket.name)}</dt>
+                  <dd>
+                    {formatQuotaCount(bucket.used)} / {formatQuotaCount(bucket.limit)} (
+                    {bucketUsedPercent}%)
+                    {bucket.resetDate && (
+                      <span className="quota-popover-reset">
+                        Resets {formatResetDate(bucket.resetDate)}
+                      </span>
+                    )}
+                  </dd>
+                  <dt>Remaining</dt>
+                  <dd>{formatQuotaCount(bucket.remaining)}</dd>
+                </div>
+              );
+            })}
             <dt>Today</dt>
             <dd>
-              {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+              {todayTurns} {todayTurns === 1 ? 'turn' : 'turns'}
             </dd>
           </dl>
-          <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+          <button
+            type="button"
+            className="quota-popover-action"
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings();
+            }}
+          >
             Provider settings
           </button>
         </div>
       )}
     </div>
   );
+}
+
+function formatQuotaCount(value: number): string {
+  return value.toLocaleString('en-US');
 }
 
 /**

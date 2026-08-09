@@ -368,7 +368,10 @@ read as pressable. Everything that overlays out of a bottom bar opens upward
 — hand-positioned menus anchor with `bottom: calc(100% + …)`, Radix surfaces
 take `side="top"` (selects flip on their own). The project status bar
 ([ProjectGitStatusBar](../packages/ui/src/components/ProjectGitStatusBar.tsx))
-is the reference.
+is the reference. When a project's active provider is Codex, its access key is
+the compact four-state `Plan / Edit / Reviewed / Full` control: this is an
+ambient project posture, so changing it belongs here rather than in the chat
+composer or a modal.
 
 **Save state is ambient, so it lives in the status bar.** An editor's
 saved/unsaved indicator goes in the shell's status bar

@@ -1152,6 +1152,14 @@ html.embedded-chat #root {
   font-variant-numeric: tabular-nums;
 }
 
+.quota-label-provider {
+  font-weight: 600;
+}
+
+.quota-label-remaining {
+  opacity: 0.82;
+}
+
 /* Quota popover extras. The slab, header, and stats grid come from the
    shared header-popover recipe above (`.engine-pill-popover` et al.);
    only these two pieces are quota-specific. */
@@ -1164,6 +1172,20 @@ html.embedded-chat #root {
   font-size: var(--text-xs);
   opacity: 0.7;
   line-height: 1.35;
+}
+
+/* A <div> is permitted to group dt/dd pairs inside a <dl>. Contents keeps
+   each provider window on the shared two-column grid while still giving
+   React a stable key for the pair. */
+.quota-popover-bucket {
+  display: contents;
+}
+
+.quota-popover-reset {
+  display: block;
+  margin-top: 0.08rem;
+  font-size: 0.7rem;
+  opacity: 0.68;
 }
 
 .quota-popover-action {
@@ -9247,7 +9269,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 /* Per-project gezel-edits dropdown — sibling of the status select. "Edits
    on" is the quiet default; "Edits off" tints muted so the read-only
-   posture is visible from every tab without alarming. */
+   posture is visible from every tab without alarming. Provider-level edit
+   access uses the same muted face plus the shared disabled treatment. */
 .project-writes-select.gz-select-trigger {
   flex: 0 0 auto;
   padding: 0.2rem 0.5rem;
@@ -9347,6 +9370,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: rgba(127, 127, 127, 0.12);
 }
 
+.project-controls-overflow-item[disabled] {
+  color: var(--text-muted);
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 @container project-status-bar (max-width: 430px) {
   .project-git-status-bar.is-compact .project-controls-inline {
     display: none;
@@ -9370,9 +9399,22 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   height: 0.9rem;
 }
 
-.project-writes-select-off.gz-select-trigger {
+.project-writes-select-off.gz-select-trigger,
+.project-writes-select-provider.gz-select-trigger,
+.project-codex-mode-plan.gz-select-trigger {
   color: var(--text-muted, var(--text));
   background: rgba(127, 127, 127, 0.1);
+}
+
+.project-codex-mode-reviewed.gz-select-trigger {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.project-codex-mode-full.gz-select-trigger {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  color: color-mix(in srgb, var(--warning) 72%, var(--text));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
 
 /* Super-lockdown: a calm, neutral-toned sibling of the writes pill. It's a
@@ -16535,6 +16577,15 @@ button.timeline-session-divider-continuing::before {
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* Model cards sit one warm paper step away from their panel so the grid
+   reads as a collection of objects instead of ruled-off page sections.
+   Keep the lift quiet: these cards are informational, not clickable. */
+.catalog-browser--models .catalog-item {
+  border-color: color-mix(in srgb, var(--border) 88%, var(--accent));
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
 .catalog-item-header {
   display: flex;
   gap: 0.6rem;
@@ -16660,9 +16711,10 @@ button.timeline-session-divider-continuing::before {
 
 .catalog-ollama-list > .catalog-ollama-action {
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
   /* Cards in a row share the tallest one's height: start their text at
      the top edge and keep the key on the bottom one, rather than letting
      the whole row float to the bottom of a short card. */
@@ -24385,6 +24437,29 @@ button.boekwachter-pill:focus-visible {
   .boekwachter-pill-label-short {
     display: inline;
   }
+}
+
+/* Remote Servers — server-settings field grid. Inputs inherit the global
+   input recipe; this only lays out label-above-input pairs compactly. */
+.remote-serving-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin: 0.6rem 0 0.2rem;
+  max-width: 46rem;
+}
+.remote-serving-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.remote-serving-field-wide {
+  grid-column: 1 / -1;
+}
+.remote-serving-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 /* ==========================================================================

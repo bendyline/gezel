@@ -10,3 +10,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0001](0001-runtime-tool-inventory.md) | Accepted | Generate model tool instructions from the runtime tool surface |
 | [0002](0002-onnxruntime-public-hoist.md) | Accepted | Publicly hoist `onnxruntime-*` packages under pnpm |
 | [0003](0003-throughput-scaled-eval-ceilings.md) | Accepted | Scale eval hard ceilings by measured decode throughput |
+| [0004](0004-accounts-and-project-acls.md) | Proposed | Accounts and per-project ACLs for shared machines |

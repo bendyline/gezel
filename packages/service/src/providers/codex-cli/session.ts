@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { normalizeCodexPermissionMode } from '@bendyline/gezel';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
 import { type ProviderQueue, runInQueue } from '../queue.js';
@@ -13,6 +14,7 @@ import type {
   ToolCallEvent,
   TurnUsage,
 } from '../types.js';
+import type { CodexBinaryCapabilities } from './binary.js';
 import { CODEX_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
 import { type CodexInvokerHooks, type CodexPermissionMode, runCodexTurn } from './invoker.js';
 import type { CodexReasoningEffort } from './reasoning.js';
@@ -26,6 +28,7 @@ export interface CodexSessionDeps {
   binaryPath: string;
   model: string;
   permissionMode: CodexPermissionMode;
+  binaryCapabilities?: CodexBinaryCapabilities;
   reasoningEffort?: CodexReasoningEffort;
   systemMessage: string;
   context: NonNullable<SessionOpts['codexCliContext']>;
@@ -155,6 +158,9 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
         hooks,
         timeoutMs: turnTimeoutMs,
       };
+      if (this.deps.binaryCapabilities?.stdinPrompt) invokerOpts.promptViaStdin = true;
+      if (this.deps.binaryCapabilities?.strictConfig) invokerOpts.strictConfig = true;
+      if (runtime.safetyHookInstalled) invokerOpts.trustManagedHooks = true;
       if (imagePaths.length > 0) {
         invokerOpts.imagePaths = imagePaths;
       }
@@ -192,7 +198,11 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
    * which case `codex exec` runs against the user's default
    * `~/.codex/` and gezel-mcp tools won't be visible to the model.
    */
-  private async ensureCodexHome(): Promise<{ codexHome: string; env: Record<string, string> }> {
+  private async ensureCodexHome(): Promise<{
+    codexHome: string;
+    env: Record<string, string>;
+    safetyHookInstalled: boolean;
+  }> {
     const path = join(
       this.deps.runtimeDir,
       this.deps.context.projectId,
@@ -202,15 +212,28 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       // Caller opted out — return a no-op pointer at the user's
       // default. Codex CLI honors `CODEX_HOME` whether or not it's
       // a directory we wrote.
-      return { codexHome: process.env.CODEX_HOME ?? '', env: {} };
+      return { codexHome: process.env.CODEX_HOME ?? '', env: {}, safetyHookInstalled: false };
     }
     const mcpServers: Record<string, CodexMcpServerEntry> = {};
     const codexEnv: Record<string, string> = {};
+    // A packaged Electron executable can run the generated CommonJS hook as
+    // Node when this inherited flag is present. Plain Node ignores it.
+    if (process.versions.electron) codexEnv.ELECTRON_RUN_AS_NODE = '1';
+    const permissionMode = normalizeCodexPermissionMode(this.deps.permissionMode);
+    const extraApprovalMode =
+      permissionMode === 'reviewed' || permissionMode === 'plan' ? 'prompt' : 'approve';
     if (this.deps.mcpServer) {
       mcpServers.gezel = {
         command: this.deps.mcpServer.command,
         args: this.deps.mcpServer.args,
         env: this.deps.mcpServer.env,
+        // `codex exec` is non-interactive. Its process-level
+        // `--ask-for-approval never` policy rejects (rather than approves)
+        // an MCP call whose server policy still asks for review. The primary
+        // server is already role-pruned and every sensitive sink keeps its
+        // Gezel-side consent/security checks, so admit calls here just as the
+        // bridge-backed providers do.
+        defaultToolsApprovalMode: 'approve',
         disabledTools: [...CODEX_CLI_EXCLUDED_MCP_TOOLS],
         ...(this.deps.toolAllowlist
           ? {
@@ -221,6 +244,12 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           : {}),
       };
     }
+    // ChatManager only passes extras that survived install/project consent
+    // and the active security posture. Codex owns the native MCP loop, so it
+    // cannot hand a per-call approval prompt back to Gezel's chat UI. Admit
+    // them directly in Edit/Full. In Reviewed, leave them on Codex's prompt
+    // path so the independent auto-reviewer sees the boundary. Plan also uses
+    // prompt; paired with `--ask-for-approval never`, that denies the call.
     for (const extra of this.deps.extraMcpServers ?? []) {
       if (extra.kind === 'http') {
         const envHttpHeaders: Record<string, string> = {};
@@ -234,6 +263,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
         mcpServers[extra.id] = {
           kind: 'http',
           url: extra.url,
+          defaultToolsApprovalMode: extraApprovalMode,
           ...(Object.keys(envHttpHeaders).length > 0 ? { envHttpHeaders } : {}),
         };
       } else {
@@ -241,6 +271,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           command: extra.command,
           args: extra.args,
           env: extra.env,
+          defaultToolsApprovalMode: extraApprovalMode,
           ...(extra.cwd ? { cwd: extra.cwd } : {}),
         };
       }
@@ -268,8 +299,13 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     if (this.deps.reasoningEffort) {
       config.reasoningEffort = this.deps.reasoningEffort;
     }
-    const codexHome = await writeRuntimeCodexHome({ path, config });
-    return { codexHome, env: codexEnv };
+    const safetyHookInstalled = this.deps.binaryCapabilities?.managedHooks === true;
+    const codexHome = await writeRuntimeCodexHome({
+      path,
+      config,
+      installSafetyHook: safetyHookInstalled,
+    });
+    return { codexHome, env: codexEnv, safetyHookInstalled };
   }
 
   private buildTurnHooks(): CodexInvokerHooks {

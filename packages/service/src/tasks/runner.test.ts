@@ -726,6 +726,21 @@ describe('TaskRunner — startup rehydration', () => {
       updatedAt: now,
       createdBy: { kind: 'user' },
     });
+    // A schedule host is active but inert; the scheduler spawns its children.
+    await store.writeTask({
+      projectId: 'p1',
+      num: 4,
+      ref: 'p1/4',
+      title: 'scheduled host',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([{ id: 'wait', name: 'wait', createdAt: now }]),
+      activeStepId: 'wait',
+      cron: { expression: '* * * * *', nextTickAt: '2099-01-01T00:00:00Z' },
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
     // A completed task — should NOT be rehydrated.
     await store.writeTask({
       projectId: 'p1',
@@ -748,7 +763,14 @@ describe('TaskRunner — startup rehydration', () => {
       ]),
     );
     const runner = new TaskRunner({ store, dispatcher });
-    await runner.rehydrateFromStore();
+    const p1 = await runner.rehydrateFromStore({ projectId: 'p1' });
+
+    expect(p1.taskRefs.sort()).toEqual(['p1/1', 'p1/3']);
+    expect(p1.nightShiftTaskRefs).toEqual([]);
+    expect(runner.snapshot().pendingCount).toBe(2);
+
+    const p2 = await runner.rehydrateFromStore({ projectId: 'p2' });
+    expect(p2.taskRefs).toEqual(['p2/1']);
 
     expect(runner.snapshot().pendingCount).toBe(3);
     expect(runner.snapshot().pendingByGezel).toEqual({ bea: 2, cid: 1 });

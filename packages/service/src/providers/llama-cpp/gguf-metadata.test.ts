@@ -378,6 +378,7 @@ describe('readGgufSummary', () => {
         true,
         false,
       ])
+      .metaU32('gemma4.attention.shared_kv_layers', 2)
       .metaU32('gemma4.attention.key_length_swa', 256)
       .metaU32('gemma4.attention.value_length_swa', 256)
       .finish();
@@ -389,6 +390,7 @@ describe('readGgufSummary', () => {
     expect(s.headCountKvPerLayer).toEqual([8, 8, 8, 8, 8, 2]);
     expect(s.slidingWindow).toBe(1024);
     expect(s.slidingWindowPattern).toEqual([true, true, true, true, true, false]);
+    expect(s.sharedKvLayers).toBe(2);
     expect(s.keyLengthSwa).toBe(256);
     expect(s.valueLengthSwa).toBe(256);
   });

@@ -263,8 +263,8 @@ function RamSpilloverChoice({ status, onSaved }: EngineMemoryBudgetPanelProps) {
         ))}
       </fieldset>
       <p className="muted small">
-        Automatic uses system memory on cards up to 12 GB, where models rarely fit together anyway,
-        and unloads on larger ones. On this machine that means{' '}
+        Automatic unloads one model so concurrent models stay within graphics memory. Choose Use
+        system memory only if you explicitly prefer avoiding reloads. On this machine that means{' '}
         {spillover.auto ? 'using system memory' : 'unloading one'}.
       </p>
       {error && <p className="error">{error}</p>}

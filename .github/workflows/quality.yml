@@ -108,6 +108,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  windows-service-portability:
+    name: Windows service portability contracts
+    needs: workflow-policy
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Build the service dependency graph
+        run: pnpm --filter @bendyline/gezel-service... run build
+      - name: Verify platform service-home resolution
+        run: pnpm --filter @bendyline/gezel-client test src/system-service.test.ts
+      - name: Exercise Windows host isolation and command shims
+        run: >-
+          pnpm --filter @bendyline/gezel-service test
+          src/test-pool.test.ts
+          src/providers/codex-cli/binary.test.ts
+          src/fs/store.test.ts
+          src/fs/machine-shared-store.test.ts
+          src/chat/manager-machine-shared-mcp.test.ts
+          src/machine-engine/bridge.integration.test.ts
+
   stability:
     name: Test stability (UI and service repeats)
     needs: workflow-policy
@@ -153,7 +178,8 @@ jobs:
     name: Supply-chain audit
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # No build needed — the inventory reads node_modules, not dist output.
+    # The font redistribution inventory is the service's built UI payload, not
+    # the hand-curated source directory, so legal/SBOM checks need dist output.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -161,6 +187,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Build redistributed assets
+        run: pnpm build
       - name: Verify lockfile supply-chain policies
         run: pnpm audit:lockfile
       - name: Generate production SBOM
@@ -169,9 +197,8 @@ jobs:
         # Blocks at critical only, matching the release workflows exactly —
         # publish must never fail on something CI passed. Advisories are
         # published against our pinned versions on npm's clock, not ours, so
-        # anything below critical prints as a warning here and surfaces
-        # within a day via the scheduled supply-chain-audit workflow instead
-        # of failing whatever unrelated PR happens to be open.
+        # anything below critical prints as a warning without failing whatever
+        # unrelated PR happens to be open.
         run: pnpm audit:vulnerabilities --audit-level=critical
       - name: Dependency license policy gate
         run: pnpm audit:licenses

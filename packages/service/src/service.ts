@@ -37,6 +37,7 @@ import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js'
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
+import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
@@ -47,6 +48,7 @@ import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
+import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
@@ -111,6 +113,7 @@ import { loadOrCreateDeviceIdentity } from './remotes/identity.js';
 import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
+import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
@@ -142,21 +145,28 @@ import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 const log = createLogger('service');
 
 /**
- * Canonical fixed port for the Gezel daemon's public surface (the
- * OpenAI-compatible `/v1/*` API and everything else served alongside it).
- * `6228` spells "MAAT" on a phone keypad (M-A-A-T → 6-2-2-8). "Maat" is
- * Dutch for a mate, companion, or fellow worker — a close sibling to
- * "gezel". It sits in the IANA User Port range and below the default
- * ephemeral-allocation windows on Windows, macOS, and Linux.
+ * Canonical fixed port for the Gezel daemon. `6228` spells "MAAT" on a
+ * phone keypad (M-A-A-T → 6-2-2-8). "Maat" is Dutch for a mate, companion,
+ * or fellow worker — a close sibling to "gezel". It sits in the IANA User
+ * Port range and below the default ephemeral-allocation windows on Windows,
+ * macOS, and Linux.
  *
- * The user-facing daemons (standalone `gezeld` and the embedded desktop
- * service) try to claim this so third-party OpenAI-compatible clients —
- * the ones we don't ship and can't teach to read the runtime files — get
- * a stable `https://127.0.0.1:6228/v1` base URL. It's a strong default,
- * not a guarantee: if the port is taken the daemon falls back to an
- * ephemeral port, and the *actual* bound port is always written to
- * `~/.gezel/runtime/port` for first-party discovery. Force an exact port
- * (no fallback) with `--port` / `GEZEL_PORT`.
+ * Who holds it depends on the install. On machine installs the INSTALLERS
+ * pin the machine-engine broker here (`GEZEL_PORT=6228`), so 6228 answers
+ * with the compute broker — not the product `/v1` API — and third-party
+ * clients that land on it get an actionable redirect envelope (see
+ * http/machine-engine-hints.ts). User-facing daemons (standalone `gezeld`,
+ * the embedded desktop service, `gezel start` when no machine service is
+ * registered) prefer this port so that on installs WITHOUT a machine
+ * service, third-party OpenAI-compatible clients — the ones we don't ship
+ * and can't teach to read the runtime files — get a stable
+ * `https://127.0.0.1:6228/v1` base URL. It's a strong default, not a
+ * guarantee: if the port is taken the daemon falls back to an ephemeral
+ * port. The *actual* bound port is always written to
+ * `<home>/runtime/port`, which is the only universally-correct discovery;
+ * the Ollama-emulation listener (fixed 11434, opt-in) is the stable-port
+ * alternative for third-party apps on machine installs. Force an exact
+ * port (no fallback) with `--port` / `GEZEL_PORT`.
  */
 export const DEFAULT_PORT = 6228;
 
@@ -447,6 +457,29 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const httpsEnabled = process.env.GEZEL_INSECURE_TRANSPORT !== '1';
   const cert = httpsEnabled ? await generateLoopbackCert() : null;
   const chatEvents = new ChatEventBus();
+  // TaskManager already writes a durable, human-readable History event for
+  // every meaningful task transition. Mirror those events onto the existing
+  // project SSE stream only after the append succeeds, giving terminal and
+  // other lightweight clients live task updates without a parallel task bus.
+  // Scheduler ticks are operational heartbeats, not transcript-worthy news.
+  history.subscribe((event) => {
+    if (
+      !event.projectId ||
+      event.kind === 'task.tick' ||
+      (!event.kind.startsWith('task.') && !event.kind.startsWith('tasknote.'))
+    ) {
+      return;
+    }
+    const ref = event.details?.ref;
+    chatEvents.publishProjectEvent(event.projectId, {
+      type: 'task_event',
+      eventId: event.id,
+      kind: event.kind,
+      summary: event.summary,
+      at: event.at,
+      ...(typeof ref === 'string' ? { taskRef: ref } : {}),
+    });
+  });
   // Shared gezels can be recruited from inside a chat (`ensure_gezel`), by
   // workspace imports, or by a direct UI/API create. Bridge the Store's
   // creation choke point onto the global SSE stream so every connected UI
@@ -460,7 +493,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   const memory = new MemoryManager(store);
   const tasks = new TaskManager(store, history);
-  const catalog = new CatalogService(undefined, { localRoot: home });
+  // The gilde update manager must exist before the CatalogService: it owns
+  // the effective content root, and the catalog's default sources capture it
+  // as a provider closure (re-read on every disk access, so a live content
+  // activation flips the whole catalog without a reconstruct).
+  const gildeUpdates = await GildeUpdateManager.create({ home, store, history });
+  gildeUpdates.onContentChanged(() => {
+    invalidateModelsCache();
+    clearCraftbookSuggestVectorCache();
+  });
+  const catalog = new CatalogService(undefined, {
+    localRoot: home,
+    contentRoot: () => gildeUpdates.contentDataDir(),
+  });
   // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
   // construction (unlike the Store-owned Meester/Klerk ensures above) so the
   // canonical gilde about.md and template provenance are preserved.
@@ -1842,6 +1887,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return remoteFetchRef.value;
     },
   });
+  const remoteTenantLimits = createTenantLimiter(config.remoteServing?.limits);
 
   // Opt-in unauthenticated Ollama-compat listener (port 11434). Same
   // deferred-fetch shape as remote serving: the controller is created
@@ -1898,11 +1944,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     growth,
     tasks,
     taskRunner,
+    taskScheduler: scheduler,
     nightShift,
     indexEnrichment,
     meesterStatus,
     scriptRunner,
     catalog,
+    gildeUpdates,
     handboek,
     secrets,
     git,
@@ -1939,6 +1987,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remotes,
     ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
+    remoteTenantLimits,
     ollamaEmulation,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
@@ -2200,12 +2249,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   // One live controller owns the LAN socket for startup, Settings changes,
   // rebinds, and shutdown. Persisted state can no longer drift from reality.
-  if (serviceRole !== 'machine-engine') {
+  //
+  // On machine installs the BROKER owns LAN serving: it holds the engines,
+  // outlives logins (headless serving), and reads its own system-home config
+  // via the /v1/remote/manage/serving surface. A user daemon that has adopted
+  // a broker defers so 6229 isn't double-bound and peers don't pay a second
+  // streaming hop. A broker that is installed-but-down at this boot leaves
+  // the user daemon serving until its next restart — logged, accepted.
+  const lanServingDelegatedToBroker =
+    serviceRole === 'user' && machineEngine?.isRequired() === true;
+  if (!lanServingDelegatedToBroker) {
     await remoteServing.reconfigure(config.remoteServing).catch((err) => {
       log.error(
         `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
       );
     });
+  } else if (config.remoteServing?.enabled) {
+    log.info(
+      '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
+    );
   }
   // Same contract for the Ollama emulation: non-fatal at boot (usually
   // means real Ollama grabbed 11434 since the toggle was set) — the
@@ -2350,6 +2412,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   if (serviceRole !== 'machine-engine') digestGenerator.start();
+  if (serviceRole !== 'machine-engine') gildeUpdates.startScheduler();
 
   // Meester status report: idle-gated, budgeted, change-gated sweep.
   // The activity tracker starts with it — its stamps feed the change
@@ -2432,6 +2495,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
+      gildeUpdates.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
       await activityTracker.stop();

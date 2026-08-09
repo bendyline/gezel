@@ -7,7 +7,7 @@
  * both.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -167,6 +167,36 @@ describe('published package payloads', () => {
     expect(files.some((file) => file.includes('/__pycache__/'))).toBe(false);
     expect(files.some((file) => file.endsWith('.pyc'))).toBe(false);
     expect(files.some((file) => /\/(?:[^/]+_test|[^/]+_modeltest)\.py$/.test(file))).toBe(false);
+  });
+
+  it('ships attribution and license texts for every service UI font', () => {
+    const service = packages.find((pkg) => pkg.name === '@bendyline/gezel-service')!;
+    const files = new Set(
+      packed.get(service.name)!.files.map((file) => file.path.replace(/\\/g, '/')),
+    );
+    expect(files.has('dist/NOTICE.md')).toBe(true);
+
+    const fontAssets = [...files].filter(
+      (file) => file.startsWith('dist/ui/assets/') && /\.(?:woff2?|ttf|otf)$/i.test(file),
+    );
+    expect(fontAssets.length).toBeGreaterThan(0);
+
+    const legalRoot = resolve(service.dist, 'licenses/fonts');
+    const legalFiles = readdirSync(legalRoot);
+    expect(legalFiles).toHaveLength(19);
+    for (const file of legalFiles) {
+      expect(files.has(`dist/licenses/fonts/${file}`), file).toBe(true);
+    }
+
+    const notice = readFileSync(resolve(service.dist, 'NOTICE.md'), 'utf8');
+    for (const attribution of [
+      'OpenMoji attribution note',
+      'Font Awesome Free 7.2.0',
+      'Visual Studio Code icons',
+      'Microsoft Corporation',
+    ]) {
+      expect(notice, attribution).toContain(attribution);
+    }
   });
 
   it.each(packages)(

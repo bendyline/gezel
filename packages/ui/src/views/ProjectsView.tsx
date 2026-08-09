@@ -1,13 +1,19 @@
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
+  CodexPermissionMode,
   GezelSummary,
   Project,
   ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
 } from '@bendyline/gezel';
-import { getProjectType, listProjectTypes, resolveProjectTypeId } from '@bendyline/gezel';
+import {
+  getProjectType,
+  listProjectTypes,
+  normalizeCodexPermissionMode,
+  resolveProjectTypeId,
+} from '@bendyline/gezel';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -30,13 +36,28 @@ import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
+  type OutsideInLayout,
+  chooseOutsideInSource,
   createArtifactsContentContainer,
   createDocumentLinkProvider,
+  createProjectContentContainer,
+  importOutsideInDocument,
+  isOutsideInInternalPath,
+  relativePath,
+  renderOutsideInDocument,
+  resolveOutsideInLayout,
+  runtimePathForTarget,
+  withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
+import {
+  type AiProviderEditabilityConfig,
+  projectEditableViaAiProvider,
+  projectUsesCodex,
+} from '../components/project-ai-editability.js';
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
@@ -133,6 +154,10 @@ function basenameOf(path: string): string {
 }
 
 type FileTab = 'workspace' | 'artifacts';
+interface OutsideInOpenFile {
+  layout: OutsideInLayout;
+  sourcePath: string;
+}
 type ProjectTab =
   | 'settings'
   | 'about'
@@ -476,6 +501,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     path: string;
     content: string;
     source: FileTab;
+    outsideIn?: OutsideInOpenFile;
   } | null>(null);
   const [newFileName, setNewFileName] = useState('');
   // Output-pane visibility override. `null` = follow the auto default
@@ -493,6 +519,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     pageTools?: string[];
   } | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [projectLocalGezelRoster, setProjectLocalGezelRoster] = useState<{
+    projectId: string;
+    gezels: GezelSummary[];
+  } | null>(null);
+  const [aiProviderConfig, setAiProviderConfig] = useState<AiProviderEditabilityConfig | null>(
+    null,
+  );
   const [boekwachterGezelId, setBoekwachterGezelId] = useState<string | undefined>();
   const [workingDirDraft, setWorkingDirDraft] = useState('');
   const [showAllowWritesConfirm, setShowAllowWritesConfirm] = useState(false);
@@ -577,27 +610,89 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:project-deleted', onDeleted);
   }, [refresh]);
 
-  useEffect(() => {
-    api
-      .listGezels()
-      .then((res) => setGezels(res.gezels))
-      .catch((err) => {
-        console.error('[ProjectsView] listGezels failed', err);
-      });
-    api
-      .getConfig()
-      .then((config) => setBoekwachterGezelId(config.boekwachterGezelId))
-      .catch(() => {});
+  const refreshGezels = useCallback(async () => {
+    try {
+      setGezels((await api.listGezels()).gezels);
+    } catch (err) {
+      console.error('[ProjectsView] listGezels failed', err);
+    }
+  }, []);
+
+  const refreshProjectConfig = useCallback(async () => {
+    try {
+      const config = await api.getConfig();
+      setBoekwachterGezelId(config.boekwachterGezelId);
+      setAiProviderConfig(config);
+    } catch {
+      /* non-fatal — the status bar keeps the scoped edits control */
+    }
   }, []);
 
   useEffect(() => {
-    const onConfigUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ boekwachterGezelId?: string }>).detail;
-      setBoekwachterGezelId(detail?.boekwachterGezelId);
-    };
+    void refreshGezels();
+    void refreshProjectConfig();
+  }, [refreshGezels, refreshProjectConfig]);
+
+  useEffect(() => {
+    const onConfigUpdated = () => void refreshProjectConfig();
     window.addEventListener('gezel:config-updated', onConfigUpdated);
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
-  }, []);
+  }, [refreshProjectConfig]);
+
+  useEffect(() => {
+    const onGezelUpdated = () => void refreshGezels();
+    window.addEventListener('gezel:gezel-updated', onGezelUpdated);
+    return () => window.removeEventListener('gezel:gezel-updated', onGezelUpdated);
+  }, [refreshGezels]);
+
+  const selectedProjectId = selected?.id;
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectLocalGezelRoster(null);
+      return;
+    }
+    let cancelled = false;
+    const refreshProjectLocalGezels = () => {
+      api
+        .listProjectLocalGezels(selectedProjectId)
+        .then((response) => {
+          if (!cancelled) {
+            setProjectLocalGezelRoster({ projectId: selectedProjectId, gezels: response.gezels });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setProjectLocalGezelRoster({ projectId: selectedProjectId, gezels: [] });
+          }
+        });
+    };
+    const onGezelUpdated = () => refreshProjectLocalGezels();
+    refreshProjectLocalGezels();
+    window.addEventListener('gezel:gezel-updated', onGezelUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('gezel:gezel-updated', onGezelUpdated);
+    };
+  }, [selectedProjectId]);
+
+  const aiAccess = useMemo(() => {
+    if (!selected) return { editableViaAiProvider: false, codexInUse: false };
+    const projectLocalGezels =
+      projectLocalGezelRoster?.projectId === selected.id ? projectLocalGezelRoster.gezels : [];
+    return {
+      editableViaAiProvider: projectEditableViaAiProvider(
+        selected,
+        gezels,
+        projectLocalGezels,
+        aiProviderConfig,
+      ),
+      codexInUse: projectUsesCodex(selected, gezels, projectLocalGezels, aiProviderConfig),
+    };
+  }, [selected, gezels, projectLocalGezelRoster, aiProviderConfig]);
+
+  const effectiveCodexMode = normalizeCodexPermissionMode(
+    selected?.codexPermissionMode ?? aiProviderConfig?.codexCli?.defaultPermissionMode,
+  );
 
   const addProjectGezel = useCallback(
     async (gezelId: string) => {
@@ -1002,6 +1097,19 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
+  const saveCodexPermissionMode = useCallback(
+    async (next: CodexPermissionMode) => {
+      if (!selected) return;
+      try {
+        const updated = await api.updateProject(selected.id, { codexPermissionMode: next });
+        setSelected(updated);
+      } catch (err) {
+        console.error('updateProject(codexPermissionMode) failed:', err);
+      }
+    },
+    [selected],
+  );
+
   const saveIndexingEnabled = useCallback(
     async (next: boolean) => {
       if (!selected) return;
@@ -1057,9 +1165,84 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
+  const canWriteProjectFiles = useCallback(
+    (source: FileTab): boolean =>
+      source === 'artifacts' || !selected?.workingDir || selected.allowGezelWrites === true,
+    [selected],
+  );
+
   const openFileEntry = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
+      const layout = resolveOutsideInLayout(entry.path);
+      if (layout) {
+        try {
+          const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
+          let sourcePath = chooseOutsideInSource(
+            layout,
+            entries
+              .filter((candidate) => !candidate.isDirectory)
+              .map((candidate) => candidate.path),
+          );
+          let content: string;
+          if (sourcePath) {
+            const response =
+              source === 'workspace'
+                ? await api.readProjectWorkspaceFile(selected.id, sourcePath)
+                : await api.readProjectArtifact(selected.id, sourcePath);
+            content = response.content;
+          } else {
+            if (!canWriteProjectFiles(source)) {
+              throw new Error(
+                'Enable workspace writes for this external project before importing its editable companion.',
+              );
+            }
+            const blob =
+              source === 'workspace'
+                ? await api.fetchProjectWorkspaceBlob(selected.id, entry.path)
+                : await api.fetchProjectArtifactBlob(selected.id, entry.path);
+            const imported = await importOutsideInDocument(await blob.arrayBuffer(), layout);
+            const container = createProjectContentContainer({
+              projectId: selected.id,
+              root: layout.companionDirectory,
+              client: api,
+              primaryDocumentFilename: layout.markdownFilename,
+              source,
+            });
+            for (const importedEntry of await imported.container.listFiles()) {
+              if (/\.md$/i.test(importedEntry.path)) continue;
+              const data = await imported.container.readFile(importedEntry.path);
+              if (!data) continue;
+              await container.writeFile(importedEntry.path, data, importedEntry.mimeType);
+            }
+            await container.writeDocument(imported.markdown, layout.markdownFilename);
+            sourcePath = layout.markdownPath;
+            content = imported.markdown;
+            await refreshFiles(selected.id);
+          }
+          const linkedContent = withOutsideInMetadata(content, layout);
+          if (linkedContent !== content && canWriteProjectFiles(source)) {
+            if (source === 'workspace') {
+              await api.writeProjectWorkspaceFile(selected.id, {
+                path: sourcePath,
+                content: linkedContent,
+              });
+            } else {
+              await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
+            }
+          }
+          setOpenFile({
+            path: entry.path,
+            content: linkedContent,
+            source,
+            outsideIn: { layout: { ...layout, markdownPath: sourcePath }, sourcePath },
+          });
+          setError(null);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Could not open this rendered document.');
+        }
+        return;
+      }
       // Media is rendered from a binary blob, never read as text. Reading an
       // MP4/MP3/etc. through the text API and feeding it to EditorShell paints
       // the raw bytes as garbled characters.
@@ -1077,7 +1260,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setOpenFile({ ...res, content, source });
       }
     },
-    [selected],
+    [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
   );
 
   // Stable identity + functional setState. Inline arrow + stale closure here
@@ -1088,16 +1271,87 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   }, []);
 
   const saveArtifact = useCallback(async () => {
-    if (
-      !selected ||
-      !openFile ||
-      openFile.source !== 'artifacts' ||
-      NON_TEXT_CONTENT.has(openFile.content)
-    )
+    if (!selected || !openFile || NON_TEXT_CONTENT.has(openFile.content)) return;
+    if (openFile.outsideIn) {
+      if (!canWriteProjectFiles(openFile.source)) return;
+      const { layout, sourcePath } = openFile.outsideIn;
+      const container = createProjectContentContainer({
+        projectId: selected.id,
+        root: layout.companionDirectory,
+        client: api,
+        primaryDocumentFilename: basenameOf(sourcePath),
+        source: openFile.source,
+      });
+      const allEntries = openFile.source === 'workspace' ? workspaceFiles : artifactFiles;
+      const runtimePath =
+        layout.format === 'html'
+          ? runtimePathForTarget(
+              layout.targetPath,
+              new Set(
+                allEntries
+                  .filter((entry) => entry.isDirectory)
+                  .map((entry) => entry.path.replace(/^\/+/, '')),
+              ),
+            )
+          : undefined;
+      const linkedContent = withOutsideInMetadata(openFile.content, layout);
+      const rendered = await renderOutsideInDocument(
+        linkedContent,
+        layout,
+        container,
+        runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
+      );
+
+      if (openFile.source === 'workspace') {
+        await api.writeProjectWorkspaceFile(selected.id, {
+          path: sourcePath,
+          content: linkedContent,
+        });
+      } else {
+        await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
+      }
+      if (runtimePath) {
+        const { PLAYER_BUNDLE } = await import('@bendyline/squisq-react/standalone-source');
+        if (openFile.source === 'workspace') {
+          await api.writeProjectWorkspaceFile(selected.id, {
+            path: runtimePath,
+            content: PLAYER_BUNDLE,
+          });
+        } else {
+          await api.writeProjectArtifact(selected.id, runtimePath, PLAYER_BUNDLE);
+        }
+      }
+      if (openFile.source === 'workspace') {
+        await api.writeProjectWorkspaceBinary(
+          selected.id,
+          layout.targetPath,
+          rendered.bytes,
+          rendered.mimeType,
+        );
+      } else {
+        await api.writeProjectArtifactBinary(
+          selected.id,
+          layout.targetPath,
+          rendered.bytes,
+          rendered.mimeType,
+        );
+      }
+      setOpenFile((current) => (current ? { ...current, content: linkedContent } : current));
+      await refreshProjectFiles(selected.id);
       return;
+    }
+    if (openFile.source !== 'artifacts') return;
     await api.writeProjectArtifact(selected.id, openFile.path, openFile.content);
     await refreshFiles(selected.id);
-  }, [selected, openFile, refreshFiles]);
+  }, [
+    selected,
+    openFile,
+    canWriteProjectFiles,
+    workspaceFiles,
+    artifactFiles,
+    refreshProjectFiles,
+    refreshFiles,
+  ]);
 
   const createArtifact = useCallback(async () => {
     if (!selected || !newFileName.trim()) return;
@@ -1133,7 +1387,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const activeEntries = fileTab === 'workspace' ? workspaceFiles : artifactFiles;
-  const isReadOnly = fileTab === 'workspace';
+  const visibleActiveEntries = activeEntries.filter(
+    (entry) => !isOutsideInInternalPath(entry.path),
+  );
+  const isReadOnly = openFile?.outsideIn
+    ? !canWriteProjectFiles(openFile.source)
+    : fileTab === 'workspace';
 
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the
@@ -2268,7 +2527,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </div>
                         )}
                         <div className="file-tree">
-                          {activeEntries.length === 0 && (
+                          {visibleActiveEntries.length === 0 && (
                             <p className="muted" style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
                               {fileTab === 'workspace'
                                 ? selected.workingDir
@@ -2278,7 +2537,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </p>
                           )}
                           <FileTree
-                            entries={activeEntries}
+                            entries={visibleActiveEntries}
                             selectedPath={openFile?.path}
                             onSelect={(e) => void openFileEntry(e, fileTab)}
                             onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
@@ -2295,7 +2554,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <div className="file-viewer-panel">
                         {openFile ? (
-                          openFile.content === MEDIA_IMAGE ? (
+                          openFile.outsideIn ? (
+                            <ProjectOutsideInEditor
+                              key={`${openFile.source}:${openFile.path}`}
+                              projectId={selected.id}
+                              file={openFile}
+                              outsideIn={openFile.outsideIn}
+                              isReadOnly={isReadOnly}
+                              editorTheme={editorTheme}
+                              onChange={handleEditorContentChange}
+                              onSave={saveArtifact}
+                            />
+                          ) : openFile.content === MEDIA_IMAGE ? (
                             <div className="image-preview">
                               <AuthedImagePreview
                                 projectId={selected.id}
@@ -2436,6 +2706,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   void saveAllowGezelWrites(next);
                 }
               }}
+              editableViaAiProvider={aiAccess.editableViaAiProvider}
+              codexMode={aiAccess.codexInUse ? effectiveCodexMode : undefined}
+              onCodexModeChange={aiAccess.codexInUse ? saveCodexPermissionMode : undefined}
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
               status={selected.status ?? 'active'}
               statusLocked={selected.archived === true}
@@ -2463,6 +2736,89 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
  * in the Preview tab bumps the iframe key so the reload picks up any
  * sibling-file edits the user or a gezel has made since.
  */
+
+function ProjectOutsideInEditor({
+  projectId,
+  file,
+  outsideIn,
+  isReadOnly,
+  editorTheme,
+  onChange,
+  onSave,
+}: {
+  projectId: string;
+  file: {
+    path: string;
+    content: string;
+    source: FileTab;
+  };
+  outsideIn: OutsideInOpenFile;
+  isReadOnly: boolean;
+  editorTheme: 'light' | 'dark';
+  onChange: (source: string) => void;
+  onSave: () => void | Promise<void>;
+}) {
+  const { layout, sourcePath } = outsideIn;
+  const container = useMemo(
+    () =>
+      createProjectContentContainer({
+        projectId,
+        root: layout.companionDirectory,
+        client: api,
+        primaryDocumentFilename: basenameOf(sourcePath),
+        source: file.source,
+      }),
+    [file.source, layout.companionDirectory, projectId, sourcePath],
+  );
+  const documentLinkProvider = useMemo(
+    () =>
+      file.source === 'artifacts'
+        ? createDocumentLinkProvider({
+            client: api,
+            currentDocumentPath: sourcePath,
+            source: 'project-artifacts',
+            projectId,
+          })
+        : undefined,
+    [file.source, projectId, sourcePath],
+  );
+  return (
+    <div className="editor-wrap" style={{ height: '100%' }}>
+      <EditorShell
+        initialMarkdown={file.content}
+        fileName={file.path}
+        onChange={isReadOnly ? undefined : onChange}
+        height="100%"
+        colorScheme={editorTheme}
+        fullWidth
+        workspaceContainer={container}
+        documentLinkProvider={documentLinkProvider}
+        allowVersioning={!isReadOnly}
+        versionBasename={basenameOf(sourcePath)}
+        outline
+        toolbarSlotAfterActions={
+          !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+        }
+        toolbarSlotRight={
+          <>
+            {!isReadOnly && (
+              <button type="button" onClick={() => void onSave()} style={{ marginLeft: '0.5rem' }}>
+                Save {layout.format.toUpperCase()}
+              </button>
+            )}
+            {file.source === 'artifacts' && (
+              <ExportToolbarControls
+                selectedFile={file.path}
+                mediaContainer={container}
+                mediaSource={{ kind: 'project-artifacts', projectId }}
+              />
+            )}
+          </>
+        }
+      />
+    </div>
+  );
+}
 
 /**
  * Markdown-artifact editor with the full squisq feature set — Play

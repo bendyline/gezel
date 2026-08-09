@@ -141,3 +141,18 @@ describe('CatalogService against bundled data', () => {
     expect(github.length).toBeGreaterThan(0);
   });
 });
+
+describe('CatalogService content root', () => {
+  it('reports the provider value, re-read on every call', () => {
+    let root = '/tmp/gilde-a';
+    const service = new CatalogService(undefined, { contentRoot: () => root });
+    expect(service.contentRoot()).toBe('/tmp/gilde-a');
+    root = '/tmp/gilde-b';
+    expect(service.contentRoot()).toBe('/tmp/gilde-b');
+  });
+
+  it('is null without a provider (explicit sources or plain defaults)', () => {
+    expect(new CatalogService([new BundledSource()]).contentRoot()).toBeNull();
+    expect(new CatalogService().contentRoot()).toBeNull();
+  });
+});

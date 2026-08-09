@@ -41,7 +41,6 @@ import {
   ModelNotInstalledError,
   type TurnUsage,
 } from '../../providers/types.js';
-import { type TenantLimiter, createTenantLimiter } from '../../remotes/tenant-limits.js';
 import type { ServiceContext } from '../context.js';
 import { resolveModelTarget } from '../openai-compat/translate.js';
 import { serializeSseWrites } from './chat-events.js';
@@ -55,6 +54,20 @@ const log = createLogger('remote-cache');
  */
 function namespaceRemoteId(value: string, originDeviceId: string): string {
   return `dev:${originDeviceId}:${value}`;
+}
+
+/**
+ * The user-daemon → broker bridge authenticates with the shared
+ * `machine-engine-client` credential (scopes include `machine-models`), so
+ * every LOCAL user's chats pool under one tenant id on this surface. Serving
+ * policy — allowModels, tenant caps, lane demotion — exists to constrain
+ * PAIRED LAN devices; applying it to the bridge would let a LAN admission
+ * policy throttle the machine's own users. Root keeps the same exemption.
+ */
+function isFirstPartyMachineTenant(auth: { scopes?: readonly string[] } | undefined): boolean {
+  return (
+    auth?.scopes?.includes('machine-models') === true || auth?.scopes?.includes('root') === true
+  );
 }
 
 function mapWireQueueToB(
@@ -151,26 +164,14 @@ async function prewarmRemoteCache(
 export function v1RemoteRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
-  // Per-tenant admission gate, built lazily on first use from the server's
-  // configured limits. Persists across requests (in-memory counters).
-  let limiter: TenantLimiter | null = null;
-  const getLimiter = async (): Promise<TenantLimiter> => {
-    if (!limiter) {
-      const cfg =
-        ctx.serviceRole === 'machine-engine'
-          ? null
-          : await ctx.store.readConfig().catch(() => null);
-      limiter = createTenantLimiter(cfg?.remoteServing?.limits);
-    }
-    return limiter;
-  };
-
   // Inference-only model discovery: what this server will run for clients.
-  // No project/session state — pure capability enumeration.
+  // No project/session state — pure capability enumeration. The broker reads
+  // its own system-home config here: serving policy lives with whichever
+  // daemon owns the LAN listener.
   app.get('/models', async (c) => {
-    const config =
-      ctx.serviceRole === 'machine-engine' ? null : await ctx.store.readConfig().catch(() => null);
-    const allow = config?.remoteServing?.allowModels;
+    const config = await ctx.store.readConfig().catch(() => null);
+    const auth = c.get('auth') as { scopes?: readonly string[] } | undefined;
+    const allow = isFirstPartyMachineTenant(auth) ? undefined : config?.remoteServing?.allowModels;
     const allowSet = allow && allow.length > 0 ? new Set(allow) : null;
     const models: RemoteModelDescriptor[] = [];
     await Promise.all(
@@ -353,12 +354,24 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
     }
 
-    const auth = c.get('auth') as { appId: string } | undefined;
+    const auth = c.get('auth') as { appId: string; scopes?: readonly string[] } | undefined;
     const originDeviceId = auth?.appId ?? 'unknown';
-    const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
-    if (!release) {
-      c.header('Retry-After', '1');
-      return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
+    let release: () => void = () => {};
+    if (!isFirstPartyMachineTenant(auth)) {
+      const admission = ctx.remoteTenantLimits.tryAcquire(originDeviceId, 'chat');
+      if (!admission.ok) {
+        c.header('Retry-After', String(admission.retryAfterSec));
+        return c.json(
+          {
+            error:
+              admission.reason === 'rate_limit'
+                ? 'tenant_rate_limited'
+                : 'tenant_concurrency_exceeded',
+          },
+          429,
+        );
+      }
+      release = admission.release;
     }
     let probe: LLMSession | null = null;
     try {
@@ -414,17 +427,31 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
     }
 
-    const auth = c.get('auth') as { appId: string } | undefined;
+    const auth = c.get('auth') as { appId: string; scopes?: readonly string[] } | undefined;
     const originDeviceId = auth?.appId ?? 'unknown';
-    const cfg =
-      ctx.serviceRole === 'machine-engine' ? null : await ctx.store.readConfig().catch(() => null);
+    const firstParty = isFirstPartyMachineTenant(auth);
+    const cfg = await ctx.store.readConfig().catch(() => null);
 
-    // Per-tenant admission: reject early (429) when this device is at its cap,
-    // before we touch the GPU/engine. Released when the turn ends.
-    const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
-    if (!release) {
-      c.header('Retry-After', '1');
-      return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
+    // Per-tenant admission: reject early (429) when this device is at its
+    // concurrency cap or rate limit, before we touch the GPU/engine.
+    // Released when the turn ends. First-party bridge traffic bypasses the
+    // limiter — see isFirstPartyMachineTenant.
+    let release: () => void = () => {};
+    if (!firstParty) {
+      const admission = ctx.remoteTenantLimits.tryAcquire(originDeviceId, 'chat');
+      if (!admission.ok) {
+        c.header('Retry-After', String(admission.retryAfterSec));
+        return c.json(
+          {
+            error:
+              admission.reason === 'rate_limit'
+                ? 'tenant_rate_limited'
+                : 'tenant_concurrency_exceeded',
+          },
+          429,
+        );
+      }
+      release = admission.release;
     }
 
     // Resolve B's local provider for the model up front so model-not-loaded /
@@ -454,7 +481,9 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       throw err;
     }
 
-    const lane = effectiveLane(body.queue.lane, cfg?.remoteServing?.priority);
+    const lane = firstParty
+      ? body.queue.lane
+      : effectiveLane(body.queue.lane, cfg?.remoteServing?.priority);
 
     return streamSSE(c, async (stream) => {
       // Native sessions can synchronously emit content, reasoning, phase, and

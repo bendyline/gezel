@@ -1,4 +1,5 @@
 import { createSecureServer as createSecureHttp2Server } from 'node:http2';
+import { isIP } from 'node:net';
 import type { GezelConfig } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import { type ServerType, serve } from '@hono/node-server';
@@ -45,7 +46,17 @@ export function createRemoteServingController(opts: {
       if (!opts.cert) {
         throw new Error('Remote serving requires HTTPS; insecure transport cannot be exposed');
       }
-      const host = config.bindAddress ?? '0.0.0.0';
+      // Enforced here rather than as a zod refine: a schema failure fails the
+      // ENTIRE config read at boot, which would brick an install over one
+      // hand-edited field. Throwing here surfaces as a clean rollback/409 on
+      // the write path and never disturbs an already-healthy listener.
+      const bind = config.bindAddress;
+      if (bind !== undefined && bind !== '' && isIP(bind) === 0) {
+        throw new Error(
+          `remoteServing.bindAddress must be an IP literal or empty (got ${JSON.stringify(bind)})`,
+        );
+      }
+      const host = bind || '0.0.0.0';
       const port = config.port ?? 6229;
       if (server && current.listening && current.host === host && current.port === port) {
         return { ...current };

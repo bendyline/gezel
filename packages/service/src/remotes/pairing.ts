@@ -16,6 +16,7 @@
  * confirm (SSH "host identity changed") before overwriting the pin.
  */
 
+import { isIP } from 'node:net';
 import { hostname } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import type { ServiceContext } from '../http/context.js';
@@ -80,6 +81,18 @@ export function normalizeRemoteBaseUrl(input: string): string {
     url.hash
   ) {
     throw new Error('pairing: remote URL must be an exact HTTPS origin');
+  }
+  // The serving side's host guard admits only IP-literal authorities (DNS
+  // names stay forbidden so DNS rebinding cannot mint authority), so a
+  // DNS-name origin used to pair successfully and then 403 on every later
+  // request. Reject it here, at inspect time, with the fix in hand.
+  // mDNS/.local support needs an exact-allowlist design on the server first.
+  const bareHost = url.hostname.replace(/^\[/, '').replace(/\]$/, '');
+  if (isIP(bareHost) === 0) {
+    throw new Error(
+      "pairing: use the server's IP address (e.g. https://192.168.1.50:6229) — " +
+        'names are rejected because the serving side only answers requests addressed to an IP literal',
+    );
   }
   return url.origin;
 }

@@ -27,6 +27,7 @@ export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
   listGezels: { gezels: [] },
+  listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },
   listProjectWorkspaceHtmlPages: { files: [] },
   listWorkspaceWrites: { entries: [] },

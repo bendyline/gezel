@@ -32,12 +32,19 @@ export interface LoopbackCert {
 }
 
 /**
- * Validity window. One day is plenty for a per-launch cert; long
- * enough that a developer leaving the daemon running overnight
- * doesn't get bitten by clock-skew rounding, short enough that a
- * leaked PEM ages out quickly.
+ * Validity window. Must comfortably outlast the longest-lived daemon:
+ * the machine service runs from boot and user daemons stay up for
+ * weeks. Every `rejectUnauthorized: true` client — the CLI/SDK
+ * trusting fetch and the machine-engine bridge's pinned fetch —
+ * hard-fails with CERT_HAS_EXPIRED the moment the leaf expires, and
+ * the bridge deliberately never falls back to local engines, so an
+ * expired cert is an outage, not a warning. (This was 1 day once; the
+ * always-on machine service outlived it within 24 hours.) The cert is
+ * public material, the key never leaves memory, and the fingerprint
+ * pin — not the validity window — is the security boundary; a fresh
+ * cert is still minted on every process start.
  */
-const CERT_VALIDITY_DAYS = 1;
+const CERT_VALIDITY_DAYS = 90;
 
 export async function generateLoopbackCert(): Promise<LoopbackCert> {
   const now = new Date();

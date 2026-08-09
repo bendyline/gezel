@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  describeMachineEngineBroker,
   fileTokenStorage,
   findHealthySystemService,
   isSystemProductServiceRole,
   normalizeServiceUrl,
   resolveCliAppId,
+  resolveStartPortEnv,
   shouldTrySystemService,
   validateGlobals,
 } from './connection.js';
@@ -114,6 +116,67 @@ describe('system-service selection', () => {
       });
     },
   );
+});
+
+describe('machine-engine broker reporting', () => {
+  const endpoint = {
+    port: 6228,
+    baseUrl: 'https://127.0.0.1:6228',
+    cert: null,
+    home: '/machine/gezel',
+  };
+
+  it('reports absence when no machine service is registered', async () => {
+    await expect(describeMachineEngineBroker({ readEndpoint: async () => null })).resolves.toEqual({
+      present: false,
+    });
+  });
+
+  it('reports a healthy machine-engine broker instead of "unavailable"', async () => {
+    await expect(
+      describeMachineEngineBroker({
+        readEndpoint: async () => endpoint,
+        probeHealth: async () => ({
+          ok: true,
+          version: '9.9.9',
+          serviceRole: 'machine-engine',
+          startedAt: new Date(0).toISOString(),
+        }),
+      }),
+    ).resolves.toMatchObject({
+      present: true,
+      healthy: true,
+      port: 6228,
+      serviceRole: 'machine-engine',
+      version: '9.9.9',
+    });
+  });
+
+  it('reports present-but-unreachable when the probe fails', async () => {
+    await expect(
+      describeMachineEngineBroker({
+        readEndpoint: async () => endpoint,
+        probeHealth: async () => {
+          throw new Error('connection refused');
+        },
+      }),
+    ).resolves.toMatchObject({ present: true, healthy: false, port: 6228 });
+  });
+});
+
+describe('start-port selection', () => {
+  it('hard-binds an explicit --port regardless of the machine service', () => {
+    expect(resolveStartPortEnv(7000, true)).toBe('7000');
+    expect(resolveStartPortEnv(7000, false)).toBe('7000');
+  });
+
+  it('stays ephemeral while a machine service holds the canonical port', () => {
+    expect(resolveStartPortEnv(undefined, false)).toBe('0');
+  });
+
+  it('omits GEZEL_PORT (canonical preference) when no machine service exists', () => {
+    expect(resolveStartPortEnv(undefined, true)).toBeUndefined();
+  });
 });
 
 describe('CLI grant token storage', () => {

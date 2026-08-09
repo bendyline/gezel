@@ -12,6 +12,7 @@ import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
+import { usesMachineEngine } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 const log = createLogger('http');
@@ -243,6 +244,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       mlxPackageSpec: config.mlxPackageSpec,
       mlxKvBits: config.mlxKvBits,
       anthropicCli: config.anthropicCli,
+      codexCli: config.codexCli,
       anthropicCliStatus: cliDetections.anthropicCli,
       codexCliStatus: cliDetections.codexCli,
       imageProvider: config.imageProvider,
@@ -260,6 +262,9 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // Hand-pick into the whitelist like everything above, or the panel's
       // toggle/dropdown would render defaults on the next GET.
       openaiEndpoints: config.openaiEndpoints,
+      // Live gilde content updates toggle (Settings → About). Same
+      // whitelist rule as above.
+      gildeUpdates: config.gildeUpdates,
       remoteServing: {
         ...(config.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,
@@ -280,6 +285,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
         {
           error: 'restart-required',
           hint: 'Use POST /api/folders/move to change externalized folders.',
+        },
+        409,
+      );
+    }
+    // On machine installs the broker owns the LAN listener (it holds the
+    // engines and serves headless); flipping this daemon's copy on would
+    // double-bind 6229. Managed through /api/machine-serving instead.
+    // Disabling stays allowed so a stale pre-broker flag can be cleared.
+    if (body.remoteServing?.enabled === true && usesMachineEngine(ctx)) {
+      return c.json(
+        {
+          error: 'remote-serving-managed-by-machine',
+          hint: "This machine's LAN serving is controlled by the machine service — manage it in Settings → Remote Servers.",
         },
         409,
       );
@@ -326,6 +344,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+      ctx.remoteTenantLimits.setLimits(updated.remoteServing?.limits);
     }
     // Ollama emulation follows the remote-serving contract: the live
     // listener must track config, and a bind failure (usually real
@@ -345,6 +364,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+    }
+    // Live gilde updates: enabling kicks a background check; disabling
+    // reverts to bundled content immediately and prunes the cache. Never
+    // fails the config write — check failures land in the status surface.
+    if (body.gildeUpdates !== undefined) {
+      await ctx.gildeUpdates.setEnabled(updated.gildeUpdates?.enabled === true);
     }
     // Summaries carry the gezel's NAME — the id is a slug ("ada-lovelace")
     // that reads as plumbing in the History view; ids stay in `details`.
@@ -425,6 +450,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
       'ollamaBaseUrl',
       'ollamaNumPredict',
       'ollamaThink',
+      // CodexCliProvider snapshots this nested object (including its
+      // reasoning default) when the provider is constructed. Rebuild it so
+      // a Settings change applies to the next turn instead of only after a
+      // daemon restart. The object also carries permission/runtime settings,
+      // so treating the whole field as a hard boundary is intentional.
+      'codexCli',
       'securityPolicy',
     ];
     // `defaultModel` / `defaultReasoningEffort` also need a reset because
@@ -613,6 +644,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       mlxModelPath: updated.mlxModelPath,
       mlxPackageSpec: updated.mlxPackageSpec,
       mlxKvBits: updated.mlxKvBits,
+      // Keep PUT response parity with GET. Settings swaps this response into
+      // local state, so omitting the nested Codex settings made the effort
+      // picker jump straight back to the model default after every change.
+      codexCli: updated.codexCli,
       imageProvider: updated.imageProvider,
       defaultImageModel: updated.defaultImageModel,
       imageGenerationConfirmation: updated.imageGenerationConfirmation,

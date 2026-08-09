@@ -65,11 +65,19 @@ describe('parseCodexLine', () => {
 
   it('extracts tool name from mcp_tool_call items', () => {
     const ev = parseCodexLine(
-      '{"type":"item.completed","item":{"id":"i2","type":"mcp_tool_call","name":"search_memory"}}',
+      '{"type":"item.completed","item":{"id":"i2","type":"mcp_tool_call","tool":"search_memory"}}',
     );
     if (ev?.kind !== 'item-completed') throw new Error('expected item-completed');
     expect(ev.itemType).toBe('mcp_tool_call');
     expect(ev.text).toBe('search_memory');
+  });
+
+  it('still accepts the older MCP name field', () => {
+    const ev = parseCodexLine(
+      '{"type":"item.completed","item":{"id":"i2","type":"mcp_tool_call","name":"save_memory"}}',
+    );
+    if (ev?.kind !== 'item-completed') throw new Error('expected item-completed');
+    expect(ev.text).toBe('save_memory');
   });
 
   it('extracts command from command_execution items when text absent', () => {

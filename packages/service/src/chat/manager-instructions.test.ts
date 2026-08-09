@@ -1,6 +1,6 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { type BuildInstructionsOptions, buildInstructions } from './manager.js';
+import { type BuildInstructionsOptions, buildInstructions } from './instructions.js';
 
 function promptWithTools(names: string[]): string {
   return buildInstructions({
@@ -42,6 +42,31 @@ describe('buildInstructions coordinator routing', () => {
     expect(prompt).toContain('Do not claim a project, task, or deliverable exists');
     expect(prompt).toContain('`convert_document`');
     expect(prompt).toContain('`save_artifact`');
+  });
+
+  it('recognizes Codex-qualified MCP names when generating routing guidance', () => {
+    const prompt = promptWithTools([
+      'mcp__gezel__ensure_gezel',
+      'mcp__gezel__message_gezel',
+      'mcp__gezel__start_project',
+      'mcp__gezel__suggest_craftbook',
+      'mcp__gezel__invoke_craftbook',
+      'mcp__docblocks__convert_document',
+    ]);
+
+    expect(prompt).toContain(
+      '`start_project({ name, about, missionObjectives, taskDescription })`',
+    );
+    expect(prompt).toContain('Call `suggest_craftbook` exactly once');
+    expect(prompt).toContain('`ensure_gezel`');
+    expect(prompt).toContain('`message_gezel`');
+    expect(prompt).toContain('`convert_document`');
+    expect(prompt).not.toContain(
+      'Manage the team with the tools actually wired this turn (none wired)',
+    );
+    expect(prompt).not.toContain(
+      'Manage projects and tasks with the tools actually wired this turn (none wired)',
+    );
   });
 });
 

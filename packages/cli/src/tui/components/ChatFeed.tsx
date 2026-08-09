@@ -2,18 +2,13 @@ import { GEZEL_VERSION, type GezelSummary } from '@bendyline/gezel';
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 import { type FeedRow, gezelLabel } from '../feed.js';
+import { humanizeToolMarkup } from '../tool-markup.js';
 
-const BENCH_FACE_WIDTH = 21;
-const benchLabel = `gezel ${GEZEL_VERSION}`;
-const benchLabelPadding = Math.max(0, BENCH_FACE_WIDTH - benchLabel.length);
-const centeredBenchLabel = `${' '.repeat(Math.floor(benchLabelPadding / 2))}${benchLabel}${' '.repeat(
-  Math.ceil(benchLabelPadding / 2),
-)}`;
-const BENCH_LOGO = [
-  '      ______________________',
-  `     /${centeredBenchLabel}/|`,
-  '    /_____________________/ |',
-  '      ||               ||',
+const TABLE_LOGO = [
+  '   o  ____________________',
+  'o-[O]|____________________|',
+  '   |    /|____________|\\',
+  '   o   /_|            |_\\',
 ].join('\n');
 
 const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
@@ -22,6 +17,7 @@ const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
   tool: 'yellow',
   note: 'magenta',
   error: 'red',
+  shell: undefined,
 };
 
 /**
@@ -43,13 +39,26 @@ export function ChatFeed(props: {
   return (
     <Box flexDirection="column" flexGrow={1}>
       {shown.length === 0 ? (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color="yellow">{BENCH_LOGO}</Text>
-          <Text> </Text>
-          <Text dimColor>Type a message to begin · /help for commands</Text>
+        <Box flexDirection="row" marginBottom={1}>
+          <Text color="yellow">{TABLE_LOGO}</Text>
+          <Box flexDirection="column" marginLeft={3}>
+            <Text>gezel {GEZEL_VERSION}</Text>
+            <Text dimColor>Type a message to begin</Text>
+            <Text dimColor>/help for commands</Text>
+          </Box>
         </Box>
       ) : (
         shown.map((row) => {
+          // Shell output is already a terminal-formatted block. Rendering a
+          // speaker label inline steals width from only its first line, which
+          // makes column-aware output such as `ls` wrap asymmetrically.
+          if (row.kind === 'shell' && row.sessionId.startsWith('term-')) {
+            return (
+              <Text key={row.key} wrap="wrap">
+                {clip(row.text)}
+              </Text>
+            );
+          }
           const who =
             row.kind === 'user'
               ? 'you'
@@ -57,13 +66,15 @@ export function ChatFeed(props: {
                 ? gezelLabel(row.gezelId, gezels, boring)
                 : row.kind === 'tool'
                   ? 'tool'
-                  : row.kind === 'error'
-                    ? 'error'
-                    : 'system';
+                  : row.kind === 'shell'
+                    ? 'shell'
+                    : row.kind === 'error'
+                      ? 'error'
+                      : 'system';
           const isFocused = focusedSessionId && row.sessionId === focusedSessionId;
-          // Full message body, wrapped to the terminal width (ink's default).
-          // Only the speaker prefix is fixed; long replies and multi-line
-          // shell output render in full rather than being clipped to a line.
+          // Full message body, wrapped to the terminal width (Ink's default).
+          // Only the speaker prefix is fixed; long chat replies render in
+          // full rather than being clipped to a line.
           return (
             <Box key={row.key} flexDirection="row">
               <Text dimColor={!isFocused} color={isFocused ? 'green' : undefined}>
@@ -74,7 +85,9 @@ export function ChatFeed(props: {
                   {who}
                   {': '}
                 </Text>
-                <Text color={KIND_COLOR[row.kind]}>{clip(row.text)}</Text>
+                <Text color={KIND_COLOR[row.kind]}>
+                  {clip(row.kind === 'assistant' ? humanizeToolMarkup(row.text) : row.text)}
+                </Text>
               </Text>
             </Box>
           );

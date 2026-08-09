@@ -83,6 +83,7 @@ interface ReportActionsFile {
  */
 export class ReportActionManager {
   private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly fires = new Map<string, Promise<FireReportActionResponse>>();
 
   constructor(private readonly deps: ReportActionManagerDeps) {}
 
@@ -129,7 +130,26 @@ export class ReportActionManager {
    * persisted so a failed craftbook lookup or a rejected diff pack leaves
    * the card fireable instead of stranding it in a lying `fired` state.
    */
-  async fire(
+  fire(
+    projectId: string,
+    reportPath: string,
+    actionId: string,
+    params?: Record<string, string>,
+  ): Promise<FireReportActionResponse> {
+    const key = JSON.stringify([projectId, reportPath, actionId]);
+    const inFlight = this.fires.get(key);
+    if (inFlight) return inFlight;
+
+    const run = this.fireOnce(projectId, reportPath, actionId, params);
+    this.fires.set(key, run);
+    const forget = () => {
+      if (this.fires.get(key) === run) this.fires.delete(key);
+    };
+    void run.then(forget, forget);
+    return run;
+  }
+
+  private async fireOnce(
     projectId: string,
     reportPath: string,
     actionId: string,
@@ -139,6 +159,21 @@ export class ReportActionManager {
 
     if (action.kind === 'apply-edits') {
       return { record: await this.applyEdits(projectId, reportPath, action) };
+    }
+
+    // A retried click or HTTP request must not create another task for an
+    // unchanged action. Concurrent requests share the in-flight promise
+    // above; later retries resolve through the durable record here.
+    const previous = await this.getRecord(projectId, reportPath, action.id);
+    if (
+      previous?.state === 'fired' &&
+      previous.contentHash === action.contentHash &&
+      previous.taskRef
+    ) {
+      const task = await this.deps.tasks.getByRef(previous.taskRef).catch(() => null);
+      if (task && task.status !== 'canceled') {
+        return { record: previous, taskRef: previous.taskRef };
+      }
     }
 
     const targetProjectId = await this.resolveTargetProject(projectId, action.projectId);
@@ -336,28 +371,43 @@ export class ReportActionManager {
   ): Promise<ReportActionRecord> {
     const targetProjectId = await this.resolveTargetProject(projectId, action.projectId);
 
-    const edits: Array<{ path: string; diff: string }> = [];
-    const missing: Array<{ path: string; ok: false; error: string }> = [];
+    const validated: Array<
+      { ok: true; path: string; diff: string } | { ok: false; path: string; error: string }
+    > = [];
     for (const edit of action.edits) {
       const diff = await this.deps.store
         .readProjectArtifact(projectId, edit.diffArtifact)
         .catch(() => null);
       if (diff === null) {
-        missing.push({
-          path: edit.path,
+        validated.push({
           ok: false,
+          path: edit.path,
           error: `diff artifact "${edit.diffArtifact}" not found in project ${projectId}`,
         });
         continue;
       }
-      edits.push({ path: edit.path, diff });
+      validated.push({ ok: true, path: edit.path, diff });
     }
 
     // No journal context on purpose: the user's click is the authority
     // here, so the apply is gated as user-initiated, not gezel-initiated.
-    const outcome = missing.length
-      ? { ok: false, results: missing }
-      : await this.deps.store.applyEditPackToProjectWorkspace(targetProjectId, edits);
+    const edits = validated.filter(
+      (edit): edit is { ok: true; path: string; diff: string } => edit.ok,
+    );
+    const invalid = edits.length !== validated.length;
+    const outcome = invalid
+      ? {
+          ok: false,
+          results: validated.map((edit) =>
+            edit.ok
+              ? { path: edit.path, ok: false as const, error: 'skipped — pack validation failed' }
+              : edit,
+          ),
+        }
+      : await this.deps.store.applyEditPackToProjectWorkspace(
+          targetProjectId,
+          edits.map((edit) => ({ path: edit.path, diff: edit.diff })),
+        );
 
     const record = await this.upsert(projectId, reportPath, action, (draft) => {
       draft.state = outcome.ok ? 'applied' : 'failed';
@@ -466,6 +516,18 @@ export class ReportActionManager {
       apply(record);
       return { record: { ...record }, changed: true };
     });
+  }
+
+  private async getRecord(
+    projectId: string,
+    reportPath: string,
+    actionId: string,
+  ): Promise<ReportActionRecord | null> {
+    return this.mutate(projectId, async (rows) => ({
+      record:
+        rows.find((row) => row.reportPath === reportPath && row.actionId === actionId) ?? null,
+      changed: false,
+    }));
   }
 
   private async readRecords(projectId: string): Promise<ReportActionRecord[]> {

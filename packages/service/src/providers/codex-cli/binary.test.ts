@@ -20,8 +20,18 @@ async function makeFakeCodex(stdout: string, exitCode = 0): Promise<string> {
     // (which iterates PATHEXT extensions) can find it. Mirrors the
     // makeFakeClaude shape in anthropic-cli/binary.test.ts.
     const path = join(dir, 'codex.cmd');
-    const escaped = stdout.replace(/[\r\n]+$/, '').replaceAll('%', '%%');
-    const script = `@echo off\r\n<NUL set /p =${escaped}\r\necho.\r\nexit /b ${exitCode}\r\n`;
+    // Emit every logical line separately. Interpolating multiline stdout
+    // into one `set /p` command makes cmd.exe execute line two onward as
+    // commands (`--strict-config is not recognized`, etc.). The quoted SET
+    // form keeps shell metacharacters literal; percent still needs doubling
+    // because cmd expands it even inside quotes.
+    const output = stdout
+      .replace(/\r\n?/g, '\n')
+      .replace(/\n+$/, '')
+      .split('\n')
+      .map((line) => `<NUL set /p "=${line.replaceAll('%', '%%').replaceAll('"', '""')}"\r\necho(`)
+      .join('\r\n');
+    const script = `@echo off\r\n${output}\r\nexit /b ${exitCode}\r\n`;
     await writeFile(path, script, 'utf8');
     return path;
   }
@@ -40,6 +50,26 @@ describe('resolveCodexBinary', () => {
     // from PATHEXT iteration in `which`. See the `which` test below.
     expect(out.path.toLowerCase()).toBe(path.toLowerCase());
     expect(out.version).toBe('codex 0.125.0');
+  });
+
+  it('detects optional safety and reliability features from CLI help', async () => {
+    const path = await makeFakeCodex(
+      [
+        'codex 0.147.0',
+        '--approve-for-me',
+        '--strict-config',
+        '--dangerously-bypass-hook-trust',
+        'Instructions are read from stdin',
+        'If `-` is used, read from stdin',
+      ].join('\n'),
+    );
+    const out = await resolveCodexBinary({ override: path });
+    expect(out.capabilities).toEqual({
+      autoReview: true,
+      strictConfig: true,
+      managedHooks: true,
+      stdinPrompt: true,
+    });
   });
 
   it('throws an actionable error when nothing on PATH and no override', async () => {

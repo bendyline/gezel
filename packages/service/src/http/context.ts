@@ -10,6 +10,7 @@ import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { JobManager } from '../folders/job-manager.js';
 import type { Store } from '../fs/store.js';
+import type { GildeUpdateManager } from '../gilde-updates/manager.js';
 import type { GitManager } from '../git/manager.js';
 import type { CodeReviewManager } from '../git/reviews.js';
 import type { GitHubPrs } from '../github/prs.js';
@@ -42,6 +43,7 @@ import type { UvRuntime } from '../python/uv-runtime.js';
 import type { DeviceIdentity } from '../remotes/identity.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import type { RemoteServingController } from '../remotes/serving.js';
+import type { TenantLimiter } from '../remotes/tenant-limits.js';
 import type { ImageRenderer } from '../rendering/image-renderer.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -54,6 +56,7 @@ import type { SpawnCapability } from '../system/spawn-capability.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { NightShiftManager } from '../tasks/night-shift-manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
+import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { TerminalEventBus } from '../terminal/events.js';
 import type { TerminalManager } from '../terminal/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
@@ -75,6 +78,7 @@ export interface ServiceContext {
   growth: GrowthEngine;
   tasks: TaskManager;
   taskRunner: TaskRunner;
+  taskScheduler: TaskScheduler;
   nightShift: NightShiftManager;
   indexEnrichment: IndexEnrichmentManager;
   /**
@@ -85,6 +89,12 @@ export interface ServiceContext {
   meesterStatus: MeesterStatusGenerator;
   scriptRunner: ScriptRunner;
   catalog: CatalogService;
+  /**
+   * Opt-in live gilde content updates: owns `~/.gezel/gilde/`, the effective
+   * catalog content root, and the daily registry check. Backs
+   * `/api/gilde-updates` and the config toggle dispatcher.
+   */
+  gildeUpdates: GildeUpdateManager;
   /**
    * The built-in documentation engine (TOC + articles, personalized per
    * render mode). Backs `/api/handboek` and the `how_do_i` MCP tool.
@@ -228,6 +238,12 @@ export interface ServiceContext {
   };
   /** Live owner of the optional LAN listener. */
   remoteServing: RemoteServingController;
+  /**
+   * Per-tenant admission control for `/v1/remote/*`. Context-owned rather
+   * than router-local so a `remoteServing.limits` change applies live via
+   * `setLimits` while in-flight counters survive the swap.
+   */
+  remoteTenantLimits: TenantLimiter;
   /**
    * Live owner of the opt-in, unauthenticated Ollama-compatible
    * loopback listener (port 11434). See http/ollama-emulation.ts.

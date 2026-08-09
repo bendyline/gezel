@@ -85,7 +85,12 @@ export function terminalRoutes(ctx: ServiceContext): Hono {
         400,
       );
     }
-    const outcome = await ctx.terminals.enqueueRun(projectId, body.workingDir, body.input);
+    const outcome = await ctx.terminals.enqueueRun(
+      projectId,
+      body.workingDir,
+      body.input,
+      body.columns,
+    );
     if (outcome.resolution.kind === 'empty') {
       return c.json({ error: 'empty input' }, 400);
     }

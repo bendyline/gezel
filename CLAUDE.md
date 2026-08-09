@@ -66,7 +66,7 @@ The supervisor also runs a health-watch on spawned children (15s interval, 3 con
 
 **Autostart** ([packages/app/src/autostart/](packages/app/src/autostart/)) is an opt-in toggle in Settings → Daemon. Writes a user-level LaunchAgent / systemd `--user` unit / Task Scheduler on-logon task — no admin required. Enabling it makes gezeld run independently of Electron, unlocking scheduled jobs and other "always on" features. Disabling uninstalls the unit. This is the "mode 2" of the original intent — packaged spawn (branch 4) is the foundation; autostart is the operational flip that keeps gezeld running when the app is closed.
 
-**Remote mode (branch 1)** is wire-complete — the supervisor probes and connects — but the UI for configuring a remote URL is not yet built. The service-side work (TLS, non-loopback binding, stronger auth than a per-launch bearer token) is deliberately deferred.
+**Remote mode (branch 1)** is wire-complete — the supervisor probes and connects — but the UI for configuring a remote URL is not yet built. `service:{url,token}` is declared in `GezelConfigSchema` so Store writes round-trip it (a hand-edited config now survives settings saves). The supported way to reach a remote daemon's full product API + web UI today is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback); recipes and the first-class remote-access design live in [docs/remote-access.md](docs/remote-access.md). Remote *inference* between paired devices is a separate, shipped subsystem (`packages/service/src/remotes/`, `/v1/remote/*`, LAN listener on 6229) and is not this branch.
 
 Do not bake "the service is in-process" assumptions into new code — go through the HTTP API (via `@bendyline/gezel-client`) and you'll be fine across every branch.
 
@@ -175,6 +175,31 @@ check and `build-index` **silently drops the item from the index** (no
 error; surfaced only by `node ../gilde/tools/build-index.mjs --verbose` as
 `skip … invalid-identity`). The daemon then falls back to defaults as if
 your edit never happened. See the `gilde:export-schemas` gotcha below.
+
+**Live gilde updates (opt-in, default off).** Between app releases, the
+daemon can pick up newer gilde content on its own:
+[GildeUpdateManager](packages/service/src/gilde-updates/manager.ts) checks
+registry.npmjs.org roughly daily for newer `@bendyline/gilde` **patch
+releases on the bundled pin's minor line**, verifies the tarball against
+the registry's `dist.integrity`, stages it under `~/.gezel/gilde/`, and
+activates it only after an empirical no-regression gate
+(`validateGildeContentUpgrade` in
+[packages/catalog/src/live/](packages/catalog/src/live/)): every item
+resolvable from the current content must still resolve from the candidate.
+Activation is restart-free — the manager owns the effective content root,
+`CatalogService` reads it through a provider closure
+(`BundledSourceOptions.dataDir` accepts a function), and catalog reads are
+lazy, so the flip is visible on the next read; live chat sessions re-resolve
+tuning via the `catalogContentSnapshot` drift check in `ensureState`.
+Controlled from Settings → About → Catalog content
+(`config.gildeUpdates.enabled`, additionally gated by the security policy's
+`allowAppNetwork`); surfaced at `/api/gilde-updates`. `GEZEL_GILDE_DATA_DIR`
+keeps absolute priority — with it set the manager reports `overridden` and
+never fetches, so dev/`link:gilde`/evals are unaffected. Line bumps (new
+minor) deliberately ride app releases, and the identity pick-lists in
+`mergeIdentityAndVersion` (source.ts) still drop manifest *fields* this
+build doesn't know — live updates deliver value changes and new items, not
+new schema surface.
 
 ## Core concepts
 
@@ -325,6 +350,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/logs/` — owned by the logger / log-rotator
   - `~/.gezel/history.jsonl` and `~/.gezel/projects/{id}/history.jsonl` — append-only, owned by [HistoryManager](packages/service/src/history/manager.ts)
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
+  - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` — sqlite-vec index (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
   - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts, the history log, and the documents library, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)

@@ -56,6 +56,40 @@ describe('TaskScheduler', () => {
     expect(Date.parse(updated!.cron!.nextTickAt!)).toBeGreaterThan(Date.now());
   });
 
+  it('can process due schedules in only one project', async () => {
+    await store.createProject({ name: 'Other' });
+    const selected = await tasks.create('cron', {
+      title: 'Selected schedule',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Main' }],
+      cron: { expression: '* * * * *' },
+    });
+    const other = await tasks.create('other', {
+      title: 'Other schedule',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Main' }],
+      cron: { expression: '* * * * *' },
+    });
+    for (const task of [selected, other]) {
+      const stored = await store.readTask(task.projectId, task.num);
+      await store.writeTask({
+        ...stored!,
+        cron: { ...stored!.cron!, nextTickAt: '2020-01-01T00:00:00Z' },
+      });
+    }
+
+    const scheduler = new TaskScheduler({ manager: tasks });
+    const result = await scheduler.tickCrons({ projectId: 'cron' });
+
+    expect(result).toEqual({
+      processedTaskRefs: [selected.ref],
+      heldTaskRefs: [],
+      spawnedTaskRefs: [],
+    });
+    expect((await store.readTask('cron', selected.num))?.cron?.lastTickAt).toBeTruthy();
+    expect((await store.readTask('other', other.num))?.cron?.lastTickAt).toBeUndefined();
+  });
+
   it('skips non-active tasks', async () => {
     const t = await tasks.create('cron', {
       title: 'Paused one',
@@ -1525,13 +1559,21 @@ describe('TaskScheduler — engagement mode gates cron ticks', () => {
     await store.writeConfig({ aiEngagementMode: 'reactive' });
 
     const scheduler = new TaskScheduler({ manager: tasks, store });
-    await scheduler.tick();
+    const held = await scheduler.tickCrons({ projectId: 'cron' });
+    expect(held).toEqual({
+      processedTaskRefs: [],
+      heldTaskRefs: [created.ref],
+      spawnedTaskRefs: [],
+      holdReason: 'engagement-paused',
+    });
     const ticksReactive = await history.listEvents({ kinds: ['task.tick'] });
     expect(ticksReactive).toHaveLength(0);
 
     // Flip to scheduled — now the tick should fire.
     await store.writeConfig({ aiEngagementMode: 'scheduled' });
-    await scheduler.tick();
+    const fired = await scheduler.tickCrons({ projectId: 'cron' });
+    expect(fired.processedTaskRefs).toEqual([created.ref]);
+    expect(fired.holdReason).toBeUndefined();
     const ticksScheduled = await history.listEvents({ kinds: ['task.tick'] });
     expect(ticksScheduled).toHaveLength(1);
   });

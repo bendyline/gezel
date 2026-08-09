@@ -1,6 +1,7 @@
 [
   {
     "id": "pull-request-review",
+    "role": "maintenance-review",
     "name": "Pull Request Review",
     "description": "Run a rigorous staff-engineer code review on a pull request or local diff and emit a structured, actionable review report. First reads the PR description and the full diff to scope intent and a reviewer checklist (correctness, edge cases, tests, security, style, scope-creep), then audits the diff hunk-by-hunk against that checklist tracing data flow and failure modes, then writes a prioritized report with blocking vs non-blocking findings, each pinned to file:line with a concrete fix. Use this for code review, PR review, reviewing a diff, a second pair of eyes on a change, or a pre-merge sign-off — it catches bugs, missing tests, and risky changes before merge rather than rubber-stamping.",
     "tags": ["review", "code-review", "pull-request", "quality", "diff"],
@@ -46,6 +47,7 @@
   },
   {
     "id": "live-browser-qa",
+    "role": "maintenance-review",
     "name": "Live Browser QA Pass",
     "description": "Run a hands-on quality-assurance pass on a running web app or page by actually exercising it in a browser, then emit a defect report with reproduction steps and severity. First derives a test plan and acceptance criteria from the app's intended behavior (happy paths, edge cases, error states, responsive/console health), then drives the UI step-by-step clicking and typing through each flow while watching the console and network for errors, then writes a bug report where every defect has numbered repro steps, expected vs actual, and severity. Use this for QA, manual testing, smoke testing, exploratory testing, click-testing a build, or verifying a feature works in the real browser before shipping — it finds broken flows, console errors, and visual breakage that unit tests miss.",
     "tags": ["qa", "testing", "browser", "manual-test", "smoke-test"],
@@ -91,6 +93,7 @@
   },
   {
     "id": "investigate-root-cause",
+    "role": "maintenance-review",
     "name": "Root-Cause Investigation",
     "description": "Debug a defect or production incident down to its true root cause and document the diagnosis with evidence, instead of patching the first symptom. First reproduces the failure reliably and locks what 'understood' means (a confirmed repro, the failing assertion, the exact trigger condition), then narrows the cause by forming and testing hypotheses, bisecting, reading stack traces and logs, and tracing the data path until one hypothesis is proven, then writes a root-cause report with the evidence chain, the smallest fix, and how to prevent recurrence. Use this for debugging, root-cause analysis, investigating a bug or flaky test, diagnosing an incident, or figuring out why something breaks — it produces a proven cause backed by evidence, not a guess.",
     "tags": ["debugging", "investigation", "root-cause", "incident", "diagnosis"],
@@ -136,6 +139,7 @@
   },
   {
     "id": "pr-security-review",
+    "role": "maintenance-review",
     "name": "Security Review of a Diff",
     "description": "Perform a focused security review of a code change or diff and produce a vulnerability report mapped to a threat checklist. First scopes the change's attack surface and locks a security checklist (injection, authn/authz, secrets, deserialization, SSRF, crypto misuse, input validation, dependency risk), then audits the diff against each class while tracing tainted data from untrusted sources to dangerous sinks, then writes a findings report rating each issue by severity and likelihood with a concrete remediation. Use this for a security review, secure code review, vulnerability assessment of a diff, an AppSec pass, or checking a change for injection/auth/secret-leak risks before merge — it surfaces exploitable flaws tied to specific lines rather than generic security platitudes.",
     "tags": ["security", "review", "appsec", "vulnerability", "diff"],
@@ -181,6 +185,7 @@
   },
   {
     "id": "a11y-audit",
+    "role": "maintenance-review",
     "name": "Accessibility Audit",
     "description": "Audit a web page or UI for accessibility against WCAG 2.1 AA and produce a prioritized remediation report. First scopes the components and flows in play and locks a WCAG checklist (semantic structure, keyboard operability, focus management, color contrast, alt text, form labels, ARIA correctness, motion/reflow), then audits each criterion by inspecting the markup, simulating keyboard and screen-reader use, and measuring contrast, then writes a findings report citing the failing WCAG success criterion, the affected element, and the fix. Use this for an accessibility audit, a11y review, WCAG compliance check, screen-reader or keyboard-navigation testing, or making a page accessible — it ties each defect to a numbered WCAG criterion with a concrete code remedy rather than vague 'improve accessibility' notes.",
     "tags": [
@@ -235,6 +240,7 @@
   },
   {
     "id": "design-review",
+    "role": "maintenance-review",
     "name": "UX & Visual Design Review",
     "description": "Critique a UI's user experience and visual design and produce a prioritized design-review report. First scopes the screens and flows and locks a heuristic checklist (visual hierarchy, spacing rhythm and alignment, typographic scale, color and contrast, consistency, affordance and feedback, empty/loading/error states, and the primary task's friction), then reviews each screen against those heuristics with a designer's eye for both polish and usability, then writes a findings report rating each issue by impact with a concrete, specific design fix. Use this for a design review, UX critique, visual QA, design feedback, a heuristic evaluation, or 'does this look and feel right' — it gives actionable, specific design fixes (exact spacing, color, hierarchy changes) rather than 'make it pop'.",
     "tags": ["design", "ux", "visual", "review", "critique"],
@@ -280,6 +286,7 @@
   },
   {
     "id": "copy-review",
+    "role": "maintenance-review",
     "name": "Editorial & Tone Review",
     "description": "Run an editorial review on a piece of content for clarity, correctness, and brand voice, then produce a line-edit report and a clean revised version. First scopes the audience, purpose, and voice/style rules and locks an editorial checklist (grammar and spelling, clarity and concision, consistent terminology, active voice, reading level, tone match, scannability, and CTA strength), then reviews the copy line-by-line against those rules marking every issue with a suggested rewrite, then writes a report of categorized edits plus a clean revised draft. Use this for a copy review, editorial pass, proofreading, line edit, tone/voice review, or tightening writing — it returns specific tracked edits with rewrites and a polished final draft rather than 'tighten this up'.",
     "tags": ["copy", "editorial", "writing", "review", "proofreading"],
@@ -325,6 +332,7 @@
   },
   {
     "id": "perf-audit",
+    "role": "maintenance-review",
     "name": "Performance Audit",
     "description": "Audit an application or page for performance problems with measurements, then produce a report of the highest-impact optimizations. First scopes the workloads and locks a performance budget and checklist (load time and Core Web Vitals, bundle/asset weight, render and main-thread cost, network waterfall and request count, server/query latency, memory and re-render churn), then MEASURES each against a baseline using real profiling rather than guessing, then writes a report that ranks bottlenecks by impact-vs-effort with a specific fix and the expected gain for each. Use this for a performance audit, speed optimization, finding bottlenecks, a Lighthouse-style review, reducing load time, or profiling slowness — it grounds every recommendation in a measured number and an estimated payoff, not 'it feels slow'.",
     "tags": ["performance", "audit", "optimization", "profiling", "speed"],
@@ -370,6 +378,7 @@
   },
   {
     "id": "dependency-audit",
+    "role": "maintenance-review",
     "sourceDiscipline": "Evidence discipline:\n\n- Treat supplied manifests, lockfiles, audit JSON, and dependency notes as the source of truth. Do not invent CVEs, licenses, package age, or network-audit results that are not in the evidence.\n- If evidence says no patched version exists, do not recommend a patch upgrade; recommend replacement, containment, or a human decision.\n- If evidence names a copyleft or incompatible license, the License flags section must name the package and license. Do not write that no license flags were found.\n- Dependencies with no seeded CVE, license issue, or maintenance issue should be explicitly deferred, not inflated into security or replacement work.\n- Recommended order is risk-first: critical no-patch security items come before unused cleanup and low-effort maintenance upgrades, even when the cleanup is easier.\n- Maintenance-only upgrades can still be recommended, but label them maintenance-only; do not describe them as security posture work unless the evidence names a vulnerability.\n- Copy exact license identifiers and exact target versions from the evidence, such as `GPL-3.0-only` or `4.18.3`; do not replace them with vague family labels or \"monitor later\" language.\n- Copy named replacement alternatives from the evidence, such as `chart.js 4.x`; do not replace them with vague \"find an alternative\" language.\n- If a dependency has no seeded CVE, avoid words like security, advisory, vulnerability, patch, or posture in that dependency's action unless the evidence explicitly supports them.\n- Do not infer missing licenses. If the evidence does not state a license for a dependency, say the license was not provided rather than guessing MIT or writing \"assumed.\"",
     "disciplinePlacement": "after-boilerplate",
     "name": "Dependency Audit",
@@ -426,6 +435,7 @@
   },
   {
     "id": "api-contract-review",
+    "role": "maintenance-review",
     "name": "API Contract Review",
     "description": "Review an API contract or specification (OpenAPI/REST/GraphQL) for correctness, consistency, and developer ergonomics, then produce a findings report. First scopes the surface and locks an API design checklist (resource naming and HTTP semantics, status codes, pagination and filtering, error schema consistency, auth, versioning and backward compatibility, idempotency, and schema/type rigor), then reviews each endpoint and type against those rules and REST/GraphQL best practices, then writes a findings report rating each issue and giving the corrected contract snippet. Use this for an API design review, reviewing an OpenAPI/Swagger spec, a REST or GraphQL contract review, endpoint/schema critique, or checking an API for consistency and backward compatibility before it ships — it returns specific, spec-anchored fixes rather than 'make the API cleaner'.",
     "tags": [
@@ -480,6 +490,7 @@
   },
   {
     "id": "threat-model",
+    "role": "general",
     "name": "Lightweight Threat Model",
     "artifactNote": "Every deliverable lands in the project's **artifacts drawer** (`write_artifact`),\nnot the shipped workspace — a threat model is review/analysis output, not\nproduct source — and each is gated for size/shape there exactly as a workspace\nfile would be.",
     "description": "Produce a lightweight threat model for a feature or system using a structured method (STRIDE over a simple data-flow diagram) and output a prioritized mitigation plan. First scopes the system by drawing its data-flow — actors, processes, data stores, and trust boundaries — and locks what is in scope, then enumerates threats per element using STRIDE (spoofing, tampering, repudiation, info-disclosure, denial-of-service, elevation-of-privilege) and rates each by likelihood and impact, then writes a threat-model report mapping each credible threat to a concrete mitigation and an owner. Use this for a threat model, security design review, STRIDE analysis, attack-surface mapping, or thinking through what could go wrong before building a feature — it yields a structured, prioritized set of threats and mitigations rather than an ad-hoc list of worries.",
@@ -543,6 +554,7 @@
   },
   {
     "id": "content-accuracy-review",
+    "role": "maintenance-review",
     "sourceDiscipline": "Source discipline:\n\n- Extract only checkable claims that appear in the supplied content.\n- Verify against the supplied or fetched sources; never create extra claims, companies, metrics, quotes, or source sections to make the report longer.\n- Preserve enough of the original claim text that a reader can trace each verdict back to the draft.\n- Mark unsupported but plausible claims as `UNVERIFIABLE` or `FALSE` according to the evidence, not as true by assumption.",
     "name": "Content Accuracy Review",
     "description": "Fact-check a piece of content for accuracy and produce a claim-by-claim verification report. First scopes the content and extracts every checkable claim (statistics, dates, quotes, attributions, causal and factual statements) and locks a verification standard, then verifies each claim against authoritative sources rating it true/false/misleading/unverifiable with the supporting evidence, then writes a report flagging every inaccuracy with the correction and source plus an overall trust rating. Use this for a fact-check, accuracy review, content verification, checking claims and statistics, source-checking an article, or vetting content before publishing — it returns a claim-level verdict backed by cited sources rather than a vague 'seems accurate'.",
@@ -589,6 +601,7 @@
   },
   {
     "id": "test-coverage-review",
+    "role": "maintenance-review",
     "name": "Test Coverage Review",
     "description": "Review a codebase or module's test suite for real coverage and quality, then produce a gap report and a prioritized backlog of tests to add. First scopes the units under review and locks a coverage standard distinguishing line coverage from behavioral coverage (critical paths, branches, edge cases, error handling, and regression protection), then audits the existing tests for what they actually assert and which behaviors and branches are untested or weakly tested, then writes a report ranking the highest-value missing or low-quality tests with a concrete description of each. Use this for a test coverage review, finding test gaps, auditing test quality, deciding what to test next, or assessing whether a module is well-tested — it distinguishes meaningful behavioral coverage from a green coverage number and returns a prioritized testing backlog rather than 'add more tests'.",
     "tags": [
@@ -643,6 +656,7 @@
   },
   {
     "id": "release-readiness-review",
+    "role": "maintenance-review",
     "name": "Release Readiness Review",
     "description": "Run a go/no-go release readiness review against a structured pre-launch checklist and produce a sign-off report with a clear ship decision. First scopes the release and locks a readiness checklist (acceptance criteria met, tests and CI green, no open blockers, migrations and rollback ready, monitoring and alerts in place, docs and changelog updated, feature flags and config set, and on-call/comms prepared), then verifies each item by inspecting the actual state rather than assuming, then writes a go/no-go report listing every blocker that must clear before ship and the residual risks. Use this for a release readiness review, a go/no-go decision, a pre-launch checklist, a ship-readiness gate, a launch review, or deciding if a change is safe to deploy — it produces an evidence-backed ship decision rather than a gut-feel 'looks good'.",
     "tags": ["release", "readiness", "go-no-go", "review", "launch"],
@@ -688,6 +702,7 @@
   },
   {
     "id": "deep-security-review",
+    "role": "maintenance-review",
     "name": "Deep Security Review",
     "description": "Run a slow, thorough, WHOLE-CODEBASE security audit that looks for SYSTEMIC weaknesses — a vulnerability class repeated across many routes, a missing control at an architectural layer, inconsistent authorization, ad-hoc secret handling, a trust-boundary violation — not just isolated issues in one file. First reconnoiters the whole system using gezel's static security index (dependency inventory, attack surface, source/sink findings, taint reachability), then builds a threat model to find the highest-blast-radius areas, then audits those areas holistically confirming real source-to-sink paths and consistency of controls across every entry point, then clusters findings into root-cause systemic themes, then writes a prioritized report with a machine-readable findings file. Use this for a deep or systemic security review, a codebase security audit, a nightly security sweep, or finding security issues across a whole project — it is intentionally broader and deeper than a PR-time diff review (see pr-security-review for that).",
     "tags": [

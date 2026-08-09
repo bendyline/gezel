@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDs4LaunchCtx } from './manager.js';
+import { resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
 
 /**
  * The RAM tier is calibrated on DeepSeek V4 Flash, which keeps only ~4 GiB of

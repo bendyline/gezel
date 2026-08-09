@@ -4,8 +4,9 @@ import { hueFromString } from './seed.js';
 /**
  * Theme-aware city palette. Two flat-design cities: light is "parchment
  * daylight" (grass ground, warm paving), dark is "dusk" (near-black ground,
- * dim paving, amber accents). Depth comes from 2–3 tone steps per material —
- * no gradients or textures.
+ * dim paving, amber accents). Depth comes from 2–3 tone steps per material;
+ * street-tier construction grain is projected vector linework in
+ * `iso/town-buildings.ts`, never a bitmap texture pasted over the canvas.
  */
 export interface CityPalette {
   dark: boolean;

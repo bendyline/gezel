@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CodexPermissionModeSchema } from './codex.js';
 
 /** A credential destination is an exact HTTPS origin, never a URL path. */
 export const HttpsOriginSchema = z
@@ -326,6 +327,12 @@ export const ProjectSchema = z.object({
    * the user (UI / HTTP) can flip it.
    */
   allowGezelWrites: z.boolean().optional(),
+  /**
+   * Per-project Codex execution posture selected from the project status bar.
+   * It overrides per-gezel/install Codex defaults so the visible control is
+   * authoritative for every Codex session in this project.
+   */
+  codexPermissionMode: CodexPermissionModeSchema.optional(),
   /**
    * Operational state for ambient gezel work on this project.
    *

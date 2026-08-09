@@ -70,10 +70,21 @@ describe('remote pairing trust', () => {
   });
 
   it('accepts only an exact HTTPS origin as a remote base URL', () => {
-    expect(normalizeRemoteBaseUrl('https://Example.COM:443/')).toBe('https://example.com');
-    expect(() => normalizeRemoteBaseUrl('http://example.com')).toThrow(/exact HTTPS origin/);
-    expect(() => normalizeRemoteBaseUrl('https://example.com/api')).toThrow(/exact HTTPS origin/);
-    expect(() => normalizeRemoteBaseUrl('https://user@example.com')).toThrow(/exact HTTPS origin/);
+    expect(normalizeRemoteBaseUrl('https://192.0.2.10:443/')).toBe('https://192.0.2.10');
+    expect(normalizeRemoteBaseUrl('https://192.168.1.50:6229/')).toBe('https://192.168.1.50:6229');
+    expect(() => normalizeRemoteBaseUrl('http://192.0.2.10')).toThrow(/exact HTTPS origin/);
+    expect(() => normalizeRemoteBaseUrl('https://192.0.2.10/api')).toThrow(/exact HTTPS origin/);
+    expect(() => normalizeRemoteBaseUrl('https://user@192.0.2.10')).toThrow(/exact HTTPS origin/);
+  });
+
+  it('rejects DNS-name origins at inspect time with the IP-address fix in hand', () => {
+    // The serving side's host guard admits IP-literal authorities only, so a
+    // name-based origin would pair and then 403 on every later request.
+    expect(() => normalizeRemoteBaseUrl('https://example.com')).toThrow(/IP address/);
+    expect(() => normalizeRemoteBaseUrl('https://mybox.local:6229')).toThrow(/IP address/);
+    expect(() => normalizeRemoteBaseUrl('https://localhost:6229')).toThrow(/IP address/);
+    // IPv6 literals stay accepted (bracketed authority form).
+    expect(normalizeRemoteBaseUrl('https://[fd00::5]:6229/')).toBe('https://[fd00::5]:6229');
   });
 
   it('accepts only a self-consistent, signed identity document during inspection', async () => {

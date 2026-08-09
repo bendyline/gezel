@@ -75,6 +75,32 @@ describe('PreviewCapabilityStore', () => {
     ).toEqual({ ok: false, reason: 'scope' });
   });
 
+  it('lets nested outside-in HTML load only ancestor shared-player files', () => {
+    const store = new PreviewCapabilityStore({ now: () => 1_000 });
+    const minted = store.mint({
+      source: 'workspace',
+      projectId: 'p',
+      entryPath: 'history/1940/battle.html',
+    });
+
+    expect(
+      store.authorize({
+        token: minted.token,
+        source: 'workspace',
+        projectId: 'p',
+        path: 'history/_squisq/squisq-player.js',
+      }).ok,
+    ).toBe(true);
+    expect(
+      store.authorize({
+        token: minted.token,
+        source: 'workspace',
+        projectId: 'p',
+        path: '_squisq/private.js',
+      }),
+    ).toEqual({ ok: false, reason: 'scope' });
+  });
+
   it('uses a sliding idle expiry with a bounded absolute lifetime', () => {
     let now = 0;
     const store = new PreviewCapabilityStore({

@@ -1,8 +1,17 @@
-import type { GezelSummary, Question } from '@bendyline/gezel';
+import type {
+  ChatSessionSummary,
+  CodexPermissionMode,
+  GezelSummary,
+  NightShiftTasksResponse,
+  Question,
+  Task,
+  TaskStatus,
+} from '@bendyline/gezel';
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashCommands } from './commands.js';
+import { activeAccessMode } from './active-access.js';
+import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashWordwheel } from './commands.js';
 import { ChatFeed } from './components/ChatFeed.js';
 import { Picker, type PickerItem } from './components/Picker.js';
 import { PromptLine } from './components/PromptLine.js';
@@ -12,6 +21,13 @@ import {
   questionOptionCount,
 } from './components/QuestionPrompt.js';
 import {
+  type StartCraftbook,
+  craftbookCategories,
+  craftbookStartRequest,
+  findCraftbook,
+  normalizeCraftbooks,
+} from './craftbook-start.js';
+import {
   type FeedRow,
   type TurnMap,
   appendNote,
@@ -20,7 +36,9 @@ import {
   gezelLabel,
   reduceFeed,
   reduceTurns,
+  sessionToFeedRows,
 } from './feed.js';
+import { type ModelChoice, loadModelChoices, modelProviderLabel } from './model-picker.js';
 import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
@@ -30,35 +48,52 @@ interface PendingInput {
   promptLine: string;
 }
 
-/** Terminal height, kept live across resizes — drives how many feed rows fit. */
-function useTerminalRows(): number {
+/** Terminal size, kept live across resizes for feed height and shell layout. */
+function useTerminalSize(): { rows: number; columns: number } {
   const { stdout } = useStdout();
-  const [rows, setRows] = useState(stdout?.rows ?? 24);
+  const [size, setSize] = useState({ rows: stdout?.rows ?? 24, columns: stdout?.columns ?? 80 });
   useEffect(() => {
     if (!stdout) return;
-    const onResize = () => setRows(stdout.rows ?? 24);
+    const onResize = () => setSize({ rows: stdout.rows ?? 24, columns: stdout.columns ?? 80 });
     stdout.on('resize', onResize);
     return () => {
       stdout.off('resize', onResize);
     };
   }, [stdout]);
-  return rows;
+  return size;
 }
 
-type Overlay = null | 'project' | 'gezel' | 'task' | 'focus';
+type Overlay =
+  | null
+  | 'project'
+  | 'gezel'
+  | 'model'
+  | 'thread'
+  | 'task'
+  | 'start-category'
+  | 'start-craftbook'
+  | 'focus';
+type TaskOverlay = 'task' | 'task-actions' | 'task-status' | 'task-assignee';
 interface ProjectRow {
   id: string;
   name: string;
   workingDir?: string;
+  allowGezelWrites?: boolean;
+  codexPermissionMode?: CodexPermissionMode;
 }
-interface TaskRow {
-  ref: string;
-  title: string;
-  status: string;
+interface TaskTextPrompt {
+  kind: 'create' | 'title' | 'description';
+  promptLine: string;
+  taskRef?: string;
 }
 
 const HELP = [
-  '/project — switch project   /gezel — switch gezel   /task — set active task',
+  '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/thread — switch or start a chat thread',
+  '/task — list, inspect, create, edit, assign, or change task status',
+  '/start — choose a craftbook and start it as a task',
+  '/continue — process due schedules and active tasks in this project',
+  '/nightshift start|stop|list — manage Night Shift',
   '/focus — send into another active chat   /cli — CLI mode   /chat — chat mode',
   '!cmd — run shell   @tools — list tools   @tool <name> {json} — run a tool',
   '/clear — clear feed   /quit — exit',
@@ -78,7 +113,21 @@ export function App(props: {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [threads, setThreads] = useState<ChatSessionSummary[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [craftbooks, setCraftbooks] = useState<StartCraftbook[]>([]);
+  const [craftbookProjectType, setCraftbookProjectType] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [suggestedCraftbookIds, setSuggestedCraftbookIds] = useState<Set<string>>(() => new Set());
+  const [craftbooksNeedingSetup, setCraftbooksNeedingSetup] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [startCategoryId, setStartCategoryId] = useState<string | null>(null);
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>([]);
+  const [modelChoicesLoading, setModelChoicesLoading] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(false);
   const [pendingQuestions, setPendingQuestions] = useState<Question[]>([]);
 
   const [projectId, setProjectId] = useState(props.initialProjectId);
@@ -86,9 +135,10 @@ export function App(props: {
   const [activeGezelId, setActiveGezelId] = useState<string | null>(null);
   const [ownSessionId, setOwnSessionId] = useState<string | null>(null);
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
+  const [activeThreadTitle, setActiveThreadTitle] = useState<string | null>(null);
 
   const [mode, setMode] = useState<'chat' | 'cli'>('chat');
-  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [overlay, setOverlay] = useState<Overlay | TaskOverlay>(null);
   const [value, setValue] = useState('');
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [turns, setTurns] = useState<TurnMap>(() => new Map());
@@ -96,18 +146,33 @@ export function App(props: {
   const [history, setHistory] = useState<string[]>([]);
   const [activeRuns, setActiveRuns] = useState<Set<string>>(() => new Set());
   const [pendingInput, setPendingInput] = useState<PendingInput | null>(null);
-  const [selectedTaskRef, setSelectedTaskRef] = useState<string | null>(null);
+  const [managedTaskRef, setManagedTaskRef] = useState<string | null>(null);
+  const [taskPrompt, setTaskPrompt] = useState<TaskTextPrompt | null>(null);
   const [exitArmed, setExitArmed] = useState(false);
   const pendingQuestion = pendingQuestions[0];
-  const termRows = useTerminalRows();
+  const { rows: termRows, columns: termColumns } = useTerminalSize();
+  // The root Ink box has one cell of horizontal padding on each side.
+  // Tell the PTY the remaining width so programs such as `ls` choose a
+  // column layout that reaches the edge without being re-wrapped by Ink.
+  const shellColumns = Math.min(500, Math.max(20, termColumns - 2));
   const wordwheelCount =
-    overlay === null && !pendingInput && !pendingQuestion ? suggestSlashCommands(value).length : 0;
+    overlay === null && !pendingInput && !pendingQuestion
+      ? suggestSlashWordwheel(value, craftbooks).length
+      : 0;
   const wordwheelRows =
     wordwheelCount > 0 ? Math.min(SLASH_COMMAND_WORDWHEEL_SIZE, wordwheelCount) + 1 : 0;
   const questionRows = pendingQuestion
     ? Math.min(QUESTION_OPTION_WINDOW_SIZE, Math.max(1, questionOptionCount(pendingQuestion))) + 4
     : 0;
-  const visibleRows = Math.max(4, termRows - 7 - wordwheelRows - questionRows);
+  const modelPickerWindowSize = Math.max(4, Math.min(10, termRows - 12));
+  const inventoryPickerRows =
+    overlay === 'model' || overlay === 'start-category' || overlay === 'start-craftbook'
+      ? modelPickerWindowSize + 5
+      : 0;
+  const visibleRows = Math.max(
+    4,
+    termRows - 7 - wordwheelRows - questionRows - inventoryPickerRows,
+  );
 
   // Keep terminal labels compact and task-oriented regardless of the desktop
   // UI preference. The TUI defaults to role-based names without mutating the
@@ -135,18 +200,58 @@ export function App(props: {
     [],
   );
 
+  const taskLoadSequence = useRef(0);
+  const refreshTasks = useCallback(async () => {
+    const sequence = ++taskLoadSequence.current;
+    try {
+      const res = await client.listProjectTasks(projectId);
+      if (sequence !== taskLoadSequence.current) return;
+      setTasks(sortTasks(res.tasks));
+    } catch {
+      /* retain the last good snapshot; the fallback poll will retry */
+    }
+  }, [client, projectId]);
+
+  const craftbookLoadSequence = useRef(0);
+  const refreshCraftbooks = useCallback(async (): Promise<StartCraftbook[]> => {
+    const sequence = ++craftbookLoadSequence.current;
+    const result = await client.listProjectCraftbooks(projectId);
+    if (sequence !== craftbookLoadSequence.current) return [];
+    const next = normalizeCraftbooks(result.items);
+    setCraftbooks(next);
+    setCraftbookProjectType(result.projectType ?? null);
+    setSuggestedCraftbookIds(new Set(result.suggestedIds ?? []));
+    setCraftbooksNeedingSetup(new Set(Object.keys(result.missingToolsets)));
+    return next;
+  }, [client, projectId]);
+
   // Live feeds for the whole project (chat across all gezels + terminal).
   useProjectEvents(
     client,
     projectId,
-    useCallback((env) => {
-      setRows((r) => reduceFeed(r, env));
-      setTurns((t) => reduceTurns(t, env));
-      if (env.event.type === 'question_asked' || env.event.type === 'question_answered') {
-        const question = env.event.question;
-        setPendingQuestions((questions) => updatePendingQuestion(questions, question));
-      }
-    }, []),
+    useCallback(
+      (env) => {
+        setRows((r) => reduceFeed(r, env));
+        setTurns((t) => reduceTurns(t, env));
+        if (env.event.type === 'task_event') void refreshTasks();
+        if (env.event.type === 'user_message' && env.sessionId === ownSessionId) {
+          const nextTitle = env.event.message.content.slice(0, 60).trim() || 'Untitled';
+          setActiveThreadTitle((current) => (current === 'New thread' ? nextTitle : current));
+          setThreads((current) =>
+            current.map((thread) =>
+              thread.id === env.sessionId && thread.title === 'New session'
+                ? { ...thread, title: nextTitle }
+                : thread,
+            ),
+          );
+        }
+        if (env.event.type === 'question_asked' || env.event.type === 'question_answered') {
+          const question = env.event.question;
+          setPendingQuestions((questions) => updatePendingQuestion(questions, question));
+        }
+      },
+      [ownSessionId, refreshTasks],
+    ),
   );
   useTerminalEvents(
     client,
@@ -190,12 +295,64 @@ export function App(props: {
         const session = await client.createChatSession({ gezelId, projectId: pid });
         setOwnSessionId(session.id);
         setFocusedSessionId(session.id);
+        setActiveThreadTitle(displayThreadTitle(session.title));
+        return true;
       } catch (err) {
         note(`could not start a session: ${errMsg(err)}`, 'error');
+        return false;
       }
     },
     [client, note],
   );
+
+  const openThreadPicker = useCallback(async () => {
+    if (!activeGezelId) return note('no active gezel yet.', 'error');
+    if (threadsLoading) return;
+    setThreadsLoading(true);
+    try {
+      const result = await client.listChatSessions({ gezelId: activeGezelId, projectId });
+      setThreads(result.sessions.filter((session) => !session.archived && !session.taskRef));
+      setOverlay('thread');
+    } catch (err) {
+      note(`could not load threads: ${errMsg(err)}`, 'error');
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [activeGezelId, client, note, projectId, threadsLoading]);
+
+  const switchThread = useCallback(
+    async (sessionId: string) => {
+      setOverlay(null);
+      try {
+        const session = await client.getChatSession(sessionId);
+        if (session.gezelId !== activeGezelId || session.projectId !== projectId) {
+          throw new Error('thread no longer belongs to the active gezel and project');
+        }
+        setOwnSessionId(session.id);
+        setFocusedSessionId(session.id);
+        setActiveThreadTitle(displayThreadTitle(session.title));
+        setRows(sessionToFeedRows(session));
+      } catch (err) {
+        note(`could not switch thread: ${errMsg(err)}`, 'error');
+      }
+    },
+    [activeGezelId, client, note, projectId],
+  );
+
+  const startNewThread = useCallback(async () => {
+    setOverlay(null);
+    if (!activeGezelId) return note('no active gezel yet.', 'error');
+    try {
+      const session = await client.createChatSession({ gezelId: activeGezelId, projectId });
+      setOwnSessionId(session.id);
+      setFocusedSessionId(session.id);
+      setActiveThreadTitle(displayThreadTitle(session.title));
+      setRows([]);
+      setThreads((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+    } catch (err) {
+      note(`could not start a thread: ${errMsg(err)}`, 'error');
+    }
+  }, [activeGezelId, client, note, projectId]);
 
   // Initial load. Mount-only — project/gezel switches are driven by their
   // pickers, which call ensureSession directly.
@@ -212,7 +369,15 @@ export function App(props: {
         if (cancelled) return;
         setConfig(cfg);
         setGezels(gz.gezels);
-        setProjects(pj.projects.map((p) => ({ id: p.id, name: p.name, workingDir: p.workingDir })));
+        setProjects(
+          pj.projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            workingDir: p.workingDir,
+            allowGezelWrites: p.allowGezelWrites,
+            codexPermissionMode: p.codexPermissionMode,
+          })),
+        );
         const gezelId = cfg.meesterGezelId ?? gz.gezels[0]?.id ?? null;
         setActiveGezelId(gezelId);
         setStatus(null);
@@ -245,40 +410,47 @@ export function App(props: {
     };
   }, [client, projectId]);
 
-  // Refresh tasks for the active project. Deliberately NOT polling
+  // Seed tasks for the active project and retain a slow fallback poll in
+  // case a daemon restart interrupts SSE. Normal changes refresh instantly
+  // via `task_event` above. Deliberately NOT polling
   // /api/config here: that endpoint reads provider credentials from the
   // OS keychain, which (under a bare `node` dev run) re-prompts on every
   // read. Provider is read once in the initial load; it rarely changes
   // mid-session. `listTasks` only touches task files.
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await client.listTasks();
-        if (cancelled) return;
-        setTasks(
-          res.tasks
-            .filter((t) => t.ref.startsWith(`${projectId}/`))
-            .map((t) => ({ ref: t.ref, title: t.title, status: t.status })),
-        );
-      } catch {
-        /* leave prior tasks */
-      }
-    };
-    load();
-    const id = setInterval(load, 15000);
+    void refreshTasks();
+    const id = setInterval(() => void refreshTasks(), 30_000);
     return () => {
-      cancelled = true;
       clearInterval(id);
     };
-  }, [client, projectId]);
+  }, [refreshTasks]);
 
-  const activeTaskRef = useMemo(() => {
-    // User's explicit `/task` pick wins; otherwise fall back to the first
-    // active task for the project as the ambient "active task".
-    if (selectedTaskRef && tasks.some((t) => t.ref === selectedTaskRef)) return selectedTaskRef;
-    return tasks.find((t) => t.status === 'active')?.ref;
-  }, [tasks, selectedTaskRef]);
+  // Keep the active project's craftbooks warm so `/start ` can wordwheel
+  // immediately. A manual `/start` retries and surfaces an error if this
+  // background refresh failed.
+  useEffect(() => {
+    void refreshCraftbooks().catch(() => {
+      /* non-fatal — /start retries with visible error handling */
+    });
+  }, [refreshCraftbooks]);
+
+  const managedTask = useMemo(
+    () => tasks.find((task) => task.ref === managedTaskRef),
+    [managedTaskRef, tasks],
+  );
+  const startCategories = useMemo(
+    () => craftbookCategories(craftbooks, suggestedCraftbookIds, craftbookProjectType),
+    [craftbookProjectType, craftbooks, suggestedCraftbookIds],
+  );
+  const startCategory = useMemo(
+    () => startCategories.find((category) => category.id === startCategoryId),
+    [startCategories, startCategoryId],
+  );
+  const startCategoryBooks = useMemo(
+    () =>
+      startCategory ? craftbooks.filter((book) => startCategory.bookIds.has(book.id)) : craftbooks,
+    [craftbooks, startCategory],
+  );
 
   const gezelLine = useMemo(() => {
     const g = gezels.find((x) => x.id === activeGezelId);
@@ -286,6 +458,20 @@ export function App(props: {
     if (boring) return g.roleBasedName ?? g.role ?? g.id;
     return g.role ? `${g.name} · ${g.role}` : g.name;
   }, [gezels, activeGezelId, boring]);
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === projectId),
+    [projects, projectId],
+  );
+  const accessMode = useMemo(
+    () =>
+      activeAccessMode({
+        provider: effectiveProvider,
+        project: activeProject,
+        gezel: activeGezel,
+        config,
+      }),
+    [activeGezel, activeProject, config, effectiveProvider],
+  );
 
   // Distinct active chat sessions seen in the feed — targets for /focus.
   const focusItems = useMemo<PickerItem[]>(() => {
@@ -318,6 +504,106 @@ export function App(props: {
     return true;
   }, [turns, activeRuns, client, projectId]);
 
+  const rememberTask = useCallback((task: Task) => {
+    setTasks((current) => sortTasks([...current.filter((item) => item.ref !== task.ref), task]));
+  }, []);
+
+  const startCraftbook = useCallback(
+    async (book: StartCraftbook) => {
+      setOverlay(null);
+      note(`starting ${book.name}…`);
+      try {
+        const created = await client.createTask(projectId, craftbookStartRequest(book));
+        rememberTask(created);
+        setManagedTaskRef(created.ref);
+        note(`started ${created.ref} — ${created.title}`);
+      } catch (err) {
+        note(`could not start ${book.name}: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, projectId, rememberTask],
+  );
+
+  const submitTaskPrompt = useCallback(
+    async (raw: string) => {
+      const prompt = taskPrompt;
+      if (!prompt) return;
+      const text = raw.trim();
+      if (!text) {
+        note('task edit canceled.');
+        setTaskPrompt(null);
+        return;
+      }
+      setTaskPrompt(null);
+      try {
+        if (prompt.kind === 'create') {
+          const created = await client.createTask(projectId, {
+            title: text,
+            description: `${text} — complete this task and verify that the result meets the requested outcome.`,
+            assignee: { kind: 'user' },
+            steps: [{ name: 'Main' }],
+          });
+          rememberTask(created);
+          setManagedTaskRef(created.ref);
+          setOverlay('task-actions');
+          return;
+        }
+        const task = tasks.find((item) => item.ref === prompt.taskRef);
+        if (!task) throw new Error(`task ${prompt.taskRef ?? ''} is no longer available`);
+        const updated = await client.updateTask(task.projectId, task.num, {
+          [prompt.kind]: text,
+        });
+        rememberTask(updated);
+        setManagedTaskRef(updated.ref);
+        setOverlay('task-actions');
+      } catch (err) {
+        note(`task update failed: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, projectId, rememberTask, taskPrompt, tasks],
+  );
+
+  const applyTaskStatus = useCallback(
+    async (status: TaskStatus) => {
+      const task = managedTask;
+      if (!task) return setOverlay('task');
+      setOverlay(null);
+      try {
+        const updated =
+          task.status === 'draft' && status === 'active'
+            ? await client.activateTask(task.projectId, task.num)
+            : await client.setTaskStatus(task.projectId, task.num, status);
+        rememberTask(updated);
+        setManagedTaskRef(updated.ref);
+        setOverlay('task-actions');
+      } catch (err) {
+        note(`could not change ${task.ref}: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, managedTask, note, rememberTask],
+  );
+
+  const applyTaskAssignee = useCallback(
+    async (value: string) => {
+      const task = managedTask;
+      if (!task) return setOverlay('task');
+      setOverlay(null);
+      try {
+        const updated = await client.setTaskAssignee(
+          task.projectId,
+          task.num,
+          value === '__user__' ? { kind: 'user' } : { kind: 'gezel', gezelId: value },
+        );
+        rememberTask(updated);
+        setManagedTaskRef(updated.ref);
+        setOverlay('task-actions');
+      } catch (err) {
+        note(`could not reassign ${task.ref}: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, managedTask, note, rememberTask],
+  );
+
   const runInput = useCallback(
     async (raw: string) => {
       // A shell run is waiting on stdin — route this line straight to it
@@ -330,6 +616,10 @@ export function App(props: {
         } catch (err) {
           note(`input failed: ${errMsg(err)}`, 'error');
         }
+        return;
+      }
+      if (taskPrompt) {
+        await submitTaskPrompt(raw);
         return;
       }
       const parsed = parseInput(raw, mode === 'cli');
@@ -351,9 +641,13 @@ export function App(props: {
         }
         case 'shell': {
           if (!parsed.text) return;
-          note(`$ ${parsed.text}`);
+          note(`$ ${parsed.text}`, 'shell');
           try {
-            await client.runTerminalCommand(projectId, { workingDir: '', input: parsed.text });
+            await client.runTerminalCommand(projectId, {
+              workingDir: '',
+              input: parsed.text,
+              columns: shellColumns,
+            });
           } catch (err) {
             note(`shell failed: ${errMsg(err)}`, 'error');
           }
@@ -392,11 +686,22 @@ export function App(props: {
         }
       }
     },
-    [client, mode, projectId, focusedSessionId, ownSessionId, note, pendingInput],
+    [
+      client,
+      mode,
+      projectId,
+      shellColumns,
+      focusedSessionId,
+      ownSessionId,
+      note,
+      pendingInput,
+      submitTaskPrompt,
+      taskPrompt,
+    ],
   );
 
   const runCommand = useCallback(
-    async (name: string, _rest: string) => {
+    async (name: string, rest: string) => {
       switch (name) {
         case 'help':
         case '?':
@@ -406,8 +711,136 @@ export function App(props: {
           return setOverlay('project');
         case 'gezel':
           return setOverlay('gezel');
+        case 'model': {
+          if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+          if (activeGezel.fixedFunction) {
+            return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+          }
+          if (modelChoicesLoading) return note('model choices are already loading.');
+          setModelChoicesLoading(true);
+          note('loading available engines and models…');
+          try {
+            const choices = await loadModelChoices(client, config ?? (await client.getConfig()));
+            if (choices.length === 0) {
+              return note('no engines with available chat models were found.', 'error');
+            }
+            setModelChoices(choices);
+            setOverlay('model');
+          } catch (err) {
+            note(`could not load models: ${errMsg(err)}`, 'error');
+          } finally {
+            setModelChoicesLoading(false);
+          }
+          return;
+        }
+        case 'thread':
+          await openThreadPicker();
+          return;
         case 'task':
+          setManagedTaskRef(null);
           return setOverlay('task');
+        case 'continue': {
+          try {
+            const result = await client.continueProject(projectId);
+            await refreshTasks();
+            const activeCount = result.activeTaskRefs.length;
+            const scheduledCount = result.scheduledTaskRefs.length;
+            const heldScheduledCount = result.heldScheduledTaskRefs.length;
+            const spawnedCount = result.spawnedTaskRefs.length;
+            const deferredCount = result.deferredNightShiftTaskRefs.length;
+            const parts: string[] = [];
+            if (scheduledCount > 0) {
+              parts.push(
+                `processed ${scheduledCount} due schedule${scheduledCount === 1 ? '' : 's'}${
+                  spawnedCount > 0
+                    ? ` and spawned ${spawnedCount} task${spawnedCount === 1 ? '' : 's'}`
+                    : ''
+                }`,
+              );
+            }
+            if (activeCount > 0) {
+              parts.push(`reconciled ${activeCount} active task${activeCount === 1 ? '' : 's'}`);
+            }
+            if (heldScheduledCount > 0) {
+              parts.push(
+                `held ${heldScheduledCount} due schedule${heldScheduledCount === 1 ? '' : 's'}`,
+              );
+            }
+            if (deferredCount > 0) {
+              parts.push(
+                `left ${deferredCount} Night Shift task${deferredCount === 1 ? '' : 's'} queued for the shift`,
+              );
+            }
+            if (parts.length === 0) {
+              if (result.projectStatus !== 'active') {
+                note(`${projectName} is ${result.projectStatus}; no project work was started.`);
+              } else {
+                note(`no due schedules or gezel-owned active tasks found in ${projectName}.`);
+              }
+            } else {
+              note(`continue: ${parts.join('; ')}.`);
+            }
+            if (result.holdReason) note(projectContinueHoldMessage(result.holdReason));
+          } catch (err) {
+            note(`could not continue ${projectName}: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
+        case 'start': {
+          let available = craftbooks;
+          if (available.length === 0) {
+            try {
+              available = await refreshCraftbooks();
+            } catch (err) {
+              return note(`could not load craftbooks: ${errMsg(err)}`, 'error');
+            }
+          }
+          if (available.length === 0) {
+            return note('no craftbooks are available for this project.', 'error');
+          }
+          if (!rest.trim()) {
+            setStartCategoryId(null);
+            return setOverlay('start-category');
+          }
+          const book = findCraftbook(available, rest);
+          if (!book) {
+            return note(`craftbook not found: ${rest.trim()} (try /start)`, 'error');
+          }
+          await startCraftbook(book);
+          return;
+        }
+        case 'nightshift': {
+          const subcommand = rest.trim().toLowerCase();
+          if (!['start', 'stop', 'list'].includes(subcommand)) {
+            return note('usage: /nightshift start|stop|list', 'error');
+          }
+          try {
+            if (subcommand === 'start') {
+              const state = await client.setNightShiftManual('start');
+              if (state.active) {
+                note(`night shift started${state.source ? ` (${state.source})` : ''}.`);
+              } else {
+                note(
+                  'night shift stayed off — there is no pending night-shift work, or Night Shift is disabled.',
+                );
+              }
+              return;
+            }
+            if (subcommand === 'stop') {
+              await client.setNightShiftManual('stop');
+              note('night shift stopped; work already in flight may finish.');
+              return;
+            }
+            const [state, work] = await Promise.all([
+              client.getNightShiftStatus(),
+              client.getNightShiftTasks(),
+            ]);
+            note(formatNightShiftList(state, work));
+          } catch (err) {
+            note(`night shift command failed: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
         case 'focus':
           return setOverlay('focus');
         case 'cli':
@@ -428,7 +861,56 @@ export function App(props: {
           return note(`unknown command: /${name} (try /help)`, 'error');
       }
     },
-    [note, exit],
+    [
+      activeGezel,
+      activeGezelId,
+      client,
+      config,
+      craftbooks,
+      modelChoicesLoading,
+      note,
+      exit,
+      openThreadPicker,
+      projectId,
+      projectName,
+      refreshCraftbooks,
+      refreshTasks,
+      startCraftbook,
+    ],
+  );
+
+  const applyModelChoice = useCallback(
+    async (value: string) => {
+      setOverlay(null);
+      if (!activeGezelId || !activeGezel || !config) return;
+      const choice = modelChoices.find((item) => item.value === value);
+      const nextProvider = choice?.provider ?? null;
+      const nextModel = choice?.model.id;
+      const providerChanged = (activeGezel.provider ?? null) !== nextProvider;
+      try {
+        const updated = await client.updateGezelSettings(activeGezelId, {
+          provider: nextProvider,
+          model: nextModel ?? null,
+          ...(providerChanged || !nextModel ? { reasoningEffort: null } : {}),
+        });
+        setGezels((current) =>
+          current.map((gezel) => (gezel.id === activeGezelId ? updated : gezel)),
+        );
+        const started = await ensureSession(activeGezelId, projectId);
+        const sessionNote = started ? '; started a new chat.' : '.';
+        if (choice) note(`model → ${choice.label}${sessionNote}`);
+        else {
+          const defaultModel = config.defaultModel?.[config.provider];
+          const identity = defaultModel
+            ? `${modelProviderLabel(config.provider)} · ${defaultModel}`
+            : modelProviderLabel(config.provider);
+          note(`model → default (${identity})${sessionNote}`);
+        }
+      } catch (err) {
+        note(`could not switch model: ${errMsg(err)}`, 'error');
+      }
+    },
+    [activeGezel, activeGezelId, client, config, ensureSession, modelChoices, note, projectId],
   );
 
   const onSubmit = useCallback(
@@ -437,12 +919,12 @@ export function App(props: {
       // Record real submissions for ↑/↓ recall — but never stdin answers
       // (which may be passwords) and never bare blanks.
       const trimmed = raw.trim();
-      if (trimmed && !pendingInput) {
+      if (trimmed && !pendingInput && !taskPrompt) {
         setHistory((h) => (h[h.length - 1] === trimmed ? h : [...h, trimmed].slice(-100)));
       }
       void runInput(raw);
     },
-    [runInput, pendingInput],
+    [runInput, pendingInput, taskPrompt],
   );
 
   // Esc / Ctrl+C interrupt in-flight work; a second Ctrl+C on an idle prompt
@@ -468,12 +950,18 @@ export function App(props: {
           void cancelActiveRef.current().then((did) => did && note('interrupted.'));
         } else if (pendingInput) {
           setPendingInput(null);
+        } else if (taskPrompt) {
+          setTaskPrompt(null);
+          note('task edit canceled.');
         } else if (ownSessionId) {
           setFocusedSessionId(ownSessionId);
         }
       }
     },
-    { isActive: overlay === null && (!pendingQuestion || pendingInput !== null) },
+    {
+      isActive:
+        overlay === null && (!pendingQuestion || pendingInput !== null || taskPrompt !== null),
+    },
   );
 
   if (status) {
@@ -509,7 +997,16 @@ export function App(props: {
             setActiveRuns(new Set());
             setPendingInput(null);
             setPendingQuestions([]);
-            setSelectedTaskRef(null);
+            setThreads([]);
+            setActiveThreadTitle(null);
+            setTasks([]);
+            setCraftbooks([]);
+            setCraftbookProjectType(null);
+            setSuggestedCraftbookIds(new Set());
+            setCraftbooksNeedingSetup(new Set());
+            setStartCategoryId(null);
+            setManagedTaskRef(null);
+            setTaskPrompt(null);
             if (activeGezelId) void ensureSession(activeGezelId, id);
           }}
         />
@@ -527,23 +1024,186 @@ export function App(props: {
             setOverlay(null);
             if (id === activeGezelId) return;
             setActiveGezelId(id);
+            setThreads([]);
+            setActiveThreadTitle(null);
             void ensureSession(id, projectId);
+          }}
+        />
+      ) : null}
+      {overlay === 'model' ? (
+        <Picker
+          title="Choose engine + model"
+          items={[
+            {
+              label: 'Use default',
+              value: '__default__',
+              hint: `${modelProviderLabel(config?.provider ?? 'llama-cpp')}${
+                config?.defaultModel?.[config.provider]
+                  ? ` · ${config.defaultModel[config.provider]}`
+                  : ''
+              }`,
+            },
+            ...modelChoices.map((choice) => ({
+              label: choice.label,
+              value: choice.value,
+              hint:
+                activeGezel?.provider === choice.provider && activeGezel.model === choice.model.id
+                  ? 'current'
+                  : choice.model.supportsReasoning
+                    ? 'reasoning'
+                    : undefined,
+            })),
+          ]}
+          initialValue={
+            activeGezel?.provider && activeGezel.model
+              ? `${activeGezel.provider}:${activeGezel.model}`
+              : '__default__'
+          }
+          windowSize={modelPickerWindowSize}
+          onCancel={() => setOverlay(null)}
+          onSelect={(value) => void applyModelChoice(value)}
+        />
+      ) : null}
+      {overlay === 'start-category' ? (
+        <Picker
+          title="Choose a craftbook category"
+          items={startCategories.map((category) => ({
+            label: category.label,
+            value: category.id,
+            hint: category.hint,
+          }))}
+          windowSize={modelPickerWindowSize}
+          onCancel={() => setOverlay(null)}
+          onSelect={(id) => {
+            setStartCategoryId(id);
+            setOverlay('start-craftbook');
+          }}
+        />
+      ) : null}
+      {overlay === 'start-craftbook' ? (
+        <Picker
+          title={startCategory?.label ?? 'Start a craftbook'}
+          items={startCategoryBooks.map((book) => ({
+            label: book.name,
+            value: book.id,
+            hint: `${book.stepCount} ${book.stepCount === 1 ? 'step' : 'steps'} · ${book.source}${
+              craftbooksNeedingSetup.has(book.id) ? ' · needs setup' : ''
+            }`,
+          }))}
+          windowSize={modelPickerWindowSize}
+          onCancel={() => setOverlay('start-category')}
+          onSelect={(id) => {
+            const book = startCategoryBooks.find((item) => item.id === id);
+            if (book) void startCraftbook(book);
+          }}
+        />
+      ) : null}
+      {overlay === 'thread' ? (
+        <Picker
+          title={`Threads with ${gezelLine}`}
+          items={[
+            { label: 'Start new thread…', value: '__new__' },
+            ...threads.map((thread) => ({
+              label: displayThreadTitle(thread.title),
+              value: thread.id,
+              hint: threadHint(thread, thread.id === ownSessionId),
+            })),
+          ]}
+          initialValue={ownSessionId ?? '__new__'}
+          windowSize={Math.max(4, Math.min(10, termRows - 12))}
+          onCancel={() => setOverlay(null)}
+          onSelect={(sessionId) => {
+            if (sessionId === '__new__') void startNewThread();
+            else void switchThread(sessionId);
           }}
         />
       ) : null}
       {overlay === 'task' ? (
         <Picker
-          title="Active task"
+          title={`Tasks · ${tasks.filter((task) => task.status === 'active').length} active`}
           items={[
-            { label: '(none)', value: '' },
-            ...tasks.map((t) => ({ label: t.ref, value: t.ref, hint: t.title })),
+            { label: 'Create task…', value: '__create__', hint: 'new active task' },
+            ...tasks.map((task) => ({
+              label: `${task.ref}  ${task.title}`,
+              value: task.ref,
+              hint: `${task.status} · ${taskAssigneeLabel(task, gezels, boring)}`,
+            })),
           ]}
+          windowSize={Math.max(4, Math.min(10, termRows - 12))}
           onCancel={() => setOverlay(null)}
           onSelect={(ref) => {
-            setOverlay(null);
-            setSelectedTaskRef(ref || null);
-            note(ref ? `active task → ${ref}` : 'active task cleared.');
+            if (ref === '__create__') {
+              setOverlay(null);
+              setTaskPrompt({ kind: 'create', promptLine: 'Task title' });
+              return;
+            }
+            setManagedTaskRef(ref);
+            setOverlay('task-actions');
           }}
+        />
+      ) : null}
+      {overlay === 'task-actions' && managedTask ? (
+        <Picker
+          title={`${managedTask.ref} · ${managedTask.status}`}
+          items={[
+            { label: 'Show details', value: 'show', hint: managedTask.title },
+            { label: 'Edit title…', value: 'title' },
+            { label: 'Edit description…', value: 'description' },
+            {
+              label: 'Change assignee…',
+              value: 'assignee',
+              hint: taskAssigneeLabel(managedTask, gezels, boring),
+            },
+            { label: 'Change status…', value: 'status', hint: managedTask.status },
+          ]}
+          onCancel={() => setOverlay('task')}
+          onSelect={(action) => {
+            if (action === 'show') {
+              setOverlay(null);
+              note(formatTaskDetails(managedTask, gezels, boring));
+            } else if (action === 'title' || action === 'description') {
+              setOverlay(null);
+              setTaskPrompt({
+                kind: action,
+                taskRef: managedTask.ref,
+                promptLine: action === 'title' ? 'New task title' : 'New task description',
+              });
+            } else if (action === 'assignee') {
+              setOverlay('task-assignee');
+            } else if (action === 'status') {
+              setOverlay('task-status');
+            }
+          }}
+        />
+      ) : null}
+      {overlay === 'task-status' && managedTask ? (
+        <Picker
+          title={`Set ${managedTask.ref} status`}
+          items={taskStatusChoices(managedTask)}
+          onCancel={() => setOverlay('task-actions')}
+          onSelect={(status) => void applyTaskStatus(status as TaskStatus)}
+        />
+      ) : null}
+      {overlay === 'task-assignee' && managedTask ? (
+        <Picker
+          title={`Assign ${managedTask.ref}`}
+          items={[
+            {
+              label: 'You',
+              value: '__user__',
+              hint: managedTask.assignee.kind === 'user' ? 'current' : undefined,
+            },
+            ...gezels.map((gezel) => ({
+              label: boring ? (gezel.roleBasedName ?? gezel.role ?? gezel.id) : gezel.name,
+              value: gezel.id,
+              hint:
+                managedTask.assignee.kind === 'gezel' && managedTask.assignee.gezelId === gezel.id
+                  ? 'current'
+                  : gezel.role,
+            })),
+          ]}
+          onCancel={() => setOverlay('task-actions')}
+          onSelect={(assignee) => void applyTaskAssignee(assignee)}
         />
       ) : null}
       {overlay === 'focus' ? (
@@ -573,17 +1233,21 @@ export function App(props: {
       <PromptLine
         projectName={projectName}
         gezelLabel={gezelLine}
-        taskRef={activeTaskRef}
+        threadTitle={activeThreadTitle ?? undefined}
         mode={mode}
         provider={effectiveProvider}
         model={effectiveModel}
+        accessMode={accessMode}
         busy={busy}
         statusLabel={statusLabel}
         value={value}
-        active={overlay === null && (!pendingQuestion || pendingInput !== null)}
+        active={
+          overlay === null && (!pendingQuestion || pendingInput !== null || taskPrompt !== null)
+        }
         history={history}
-        pendingPrompt={pendingInput?.promptLine}
-        pendingMode={pendingInput?.mode}
+        craftbooks={craftbooks}
+        pendingPrompt={pendingInput?.promptLine ?? taskPrompt?.promptLine}
+        pendingMode={pendingInput?.mode ?? (taskPrompt ? 'text' : undefined)}
         onChange={setValue}
         onSubmit={onSubmit}
       />
@@ -593,4 +1257,134 @@ export function App(props: {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function displayThreadTitle(title: string): string {
+  return title === 'New session' ? 'New thread' : title;
+}
+
+function threadHint(thread: ChatSessionSummary, current: boolean): string {
+  const engine = thread.model ? `${thread.providerName} · ${thread.model}` : thread.providerName;
+  return [current ? 'current' : null, formatRelativeTime(thread.lastActivityAt), engine]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return iso;
+  const minutes = Math.floor(Math.max(0, Date.now() - then) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function projectContinueHoldMessage(
+  reason: 'engagement-off' | 'engagement-paused' | 'provider-busy',
+): string {
+  switch (reason) {
+    case 'engagement-off':
+      return 'project work is held because AI engagement is Off.';
+    case 'engagement-paused':
+      return 'project work is held because AI engagement is Reactive.';
+    case 'provider-busy':
+      return 'task work is queued until an engine slot is free.';
+  }
+}
+
+function formatNightShiftList(
+  state: { active: boolean; source: 'scheduled' | 'manual' | null },
+  work: NightShiftTasksResponse,
+): string {
+  const lines = [
+    `Night Shift: ${state.active ? `active${state.source ? ` (${state.source})` : ''}` : 'off'}`,
+  ];
+  if (work.background.length > 0) {
+    lines.push('Background:');
+    for (const item of work.background) {
+      lines.push(`  - ${item.title}${item.detail ? ` — ${item.detail}` : ''}`);
+    }
+  }
+  if (work.active.length > 0) {
+    lines.push('Working on:');
+    for (const task of work.active) lines.push(`  - ${formatNightShiftTask(task)}`);
+  }
+  if (work.upcoming.length > 0) {
+    lines.push(state.active ? 'Up next:' : 'Queued for the next shift:');
+    for (const task of work.upcoming) lines.push(`  - ${formatNightShiftTask(task)}`);
+  }
+  if (work.background.length + work.active.length + work.upcoming.length === 0) {
+    lines.push('No work is running or queued.');
+  }
+  return lines.join('\n');
+}
+
+function formatNightShiftTask(task: NightShiftTasksResponse['active'][number]): string {
+  return `${task.ref} ${task.title} — ${task.projectName}${task.stepName ? ` · ${task.stepName}` : ''}`;
+}
+
+const TASK_STATUS_ORDER: Record<TaskStatus, number> = {
+  active: 0,
+  draft: 1,
+  paused: 2,
+  complete: 3,
+  canceled: 4,
+};
+
+function sortTasks(tasks: ReadonlyArray<Task>): Task[] {
+  return [...tasks].sort((left, right) => {
+    const byStatus = TASK_STATUS_ORDER[left.status] - TASK_STATUS_ORDER[right.status];
+    if (byStatus !== 0) return byStatus;
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
+}
+
+function taskAssigneeLabel(
+  task: Task,
+  gezels: ReadonlyArray<GezelSummary>,
+  boring: boolean,
+): string {
+  if (task.assignee.kind === 'user') return 'you';
+  const gezelId = task.assignee.gezelId;
+  const gezel = gezels.find((item) => item.id === gezelId);
+  if (!gezel) return gezelId;
+  return boring ? (gezel.roleBasedName ?? gezel.role ?? gezel.id) : gezel.name;
+}
+
+function taskStatusChoices(task: Task): PickerItem[] {
+  const statuses: TaskStatus[] =
+    task.status === 'draft'
+      ? ['active', 'canceled']
+      : task.origin?.kind === 'system-job'
+        ? ['active', 'paused']
+        : ['active', 'paused', 'complete', 'canceled'];
+  const labels: Record<TaskStatus, string> = {
+    draft: 'Move to draft',
+    active: task.status === 'draft' ? 'Activate' : 'Resume / reopen',
+    paused: 'Pause',
+    complete: 'Mark complete',
+    canceled: 'Cancel',
+  };
+  return statuses
+    .filter((status) => status !== task.status)
+    .map((status) => ({ label: labels[status], value: status }));
+}
+
+function formatTaskDetails(
+  task: Task,
+  gezels: ReadonlyArray<GezelSummary>,
+  boring: boolean,
+): string {
+  const steps = task.craftbook.steps.map((step) => {
+    const marker = step.completedAt ? '✓' : step.id === task.activeStepId ? '→' : '·';
+    return `  ${marker} ${step.name}`;
+  });
+  return [
+    `${task.ref} [${task.status}] ${task.title}`,
+    `assignee: ${taskAssigneeLabel(task, gezels, boring)}`,
+    ...(task.description ? [`description: ${task.description}`] : []),
+    ...(steps.length > 0 ? ['steps:', ...steps] : []),
+  ].join('\n');
 }

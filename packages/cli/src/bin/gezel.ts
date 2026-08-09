@@ -22,10 +22,13 @@ import {
   applyHome,
   connectForRun,
   connectOwned,
+  describeMachineEngineBroker,
   findHealthySystemService,
   resolveDevHome,
   resolveRunProject,
+  resolveStartPortEnv,
   resolveTuiProject,
+  shouldPreferCanonicalPort,
   validateGlobals,
 } from '../connection.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
@@ -110,13 +113,18 @@ program
     const userEnv = { ...process.env };
     delete userEnv.GEZEL_SERVICE_ROLE;
     delete userEnv.GEZEL_SYSTEM_SCOPE;
+    delete userEnv.GEZEL_PORT;
     const spawnEnv: NodeJS.ProcessEnv = {
       ...userEnv,
-      // A CLI-owned foreground/web daemon must not reserve the canonical
-      // machine-service port unless the user explicitly asks for it.
-      GEZEL_PORT: port !== undefined ? String(port) : '0',
       GEZEL_SERVICE_ROLE: 'user',
     };
+    // Explicit --port hard-binds. With a machine service registered the
+    // daemon stays ephemeral ('0') — the broker owns canonical 6228.
+    // Otherwise GEZEL_PORT is omitted so gezeld prefers 6228 with
+    // ephemeral fallback, giving standalone installs the stable
+    // third-party /v1 base URL.
+    const portEnv = resolveStartPortEnv(port, await shouldPreferCanonicalPort());
+    if (portEnv !== undefined) spawnEnv.GEZEL_PORT = portEnv;
     if (opts.web) {
       spawnEnv.GEZEL_WEB = '1';
       spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
@@ -269,6 +277,16 @@ program
       );
       return;
     }
+    const broker = await describeMachineEngineBroker();
+    if (broker.present && broker.healthy && broker.serviceRole === 'machine-engine') {
+      console.log(
+        `gezeld machine engine broker port=${broker.port} health=ok version=${broker.version} (compute only — the product API is the per-user daemon below)`,
+      );
+    } else if (broker.present && broker.healthy === false) {
+      console.log(
+        `gezeld machine service: runtime files present but unreachable (port ${broker.port})`,
+      );
+    }
     const runtime = await readRuntime();
     if (!runtime) {
       console.log('gezeld is not running');
@@ -286,7 +304,13 @@ program
     });
     try {
       const health = await client.health();
-      console.log(`health ok: version=${health.version} startedAt=${health.startedAt}`);
+      const engineNote =
+        health.machineEngineConnected !== undefined
+          ? ` machineEngine=${health.machineEngineConnected ? 'connected' : 'unavailable'}`
+          : '';
+      console.log(
+        `health ok: version=${health.version} startedAt=${health.startedAt}${engineNote}`,
+      );
     } catch (err) {
       console.error(`health failed: ${(err as Error).message}`);
     }
@@ -969,14 +993,47 @@ program
   .action(async () => {
     const globals = cliGlobals();
     const system = globals.connect ? null : await findHealthySystemService(globals);
+    const broker = globals.connect ? null : await describeMachineEngineBroker();
     const runtime = await readRuntime();
     console.log(`node: ${process.version}`);
-    console.log(
-      `system service: ${system ? `healthy (${system.baseUrl})` : 'not selected or unavailable'}`,
-    );
+    if (globals.connect) {
+      console.log('machine service: skipped (--connect)');
+    } else if (system) {
+      console.log(`system service (product): healthy (${system.baseUrl})`);
+    } else if (broker?.present && broker.healthy && broker.serviceRole === 'machine-engine') {
+      console.log(
+        `machine engine: healthy (${broker.baseUrl}) version=${broker.version} — compute broker; the product API is the per-user daemon`,
+      );
+    } else if (broker?.present && broker.healthy === false) {
+      console.log(`machine service: runtime files present but unreachable (port ${broker.port})`);
+    } else if (broker?.present) {
+      console.log(
+        `machine service: healthy (${broker.baseUrl}) role=${broker.serviceRole ?? 'legacy-full'} (not selected for this command)`,
+      );
+    } else {
+      console.log('machine service: not installed');
+    }
     console.log(`runtime file: ${runtime ? 'present' : 'missing'}`);
     if (runtime) {
-      console.log(`  port=${runtime.port} pid=${runtime.pid} alive=${isProcessAlive(runtime.pid)}`);
+      const alive = isProcessAlive(runtime.pid);
+      console.log(`  port=${runtime.port} pid=${runtime.pid} alive=${alive}`);
+      if (alive) {
+        try {
+          const client = new GezelClient({
+            baseUrl: runtime.baseUrl,
+            token: '',
+            ...(runtime.cert ? { fetch: createTrustingFetch({ cert: runtime.cert }) } : {}),
+          });
+          const health = await client.health();
+          const engineNote =
+            health.machineEngineConnected !== undefined
+              ? ` machine engine connected: ${health.machineEngineConnected ? 'yes' : 'no'}`
+              : '';
+          console.log(`  role=${health.serviceRole ?? 'user'}${engineNote}`);
+        } catch {
+          /* doctor's per-field probes stay best-effort */
+        }
+      }
     }
   });
 

@@ -1,6 +1,7 @@
 [
   {
     "id": "practice-exam",
+    "role": "general",
     "name": "Practice Exam",
     "description": "Take the exam before the exam: a timed, self-scoring practice paper blueprinted from the deck — weighted toward what the review record says is weak — with an answer key that explains, not just grades. Locks the blueprint FIRST — topic coverage, weak-spot weighting from the deck's boxes and miss counts, timing, honest scoring — then builds the interactive exam page, then writes the key. Use for practice exams, mock tests, 'test me before the test', timed practice papers, and exam-week dress rehearsals.",
     "tags": ["study", "exam", "flashcards", "interactive", "practice"],
@@ -59,6 +60,7 @@
   },
   {
     "id": "weak-spot-drill",
+    "role": "general",
     "name": "Weak-Spot Drill",
     "description": "Stop practicing what you already know: read the review record, name the actual weak spots with the numbers as evidence, and build a short targeted drill plus the follow-up schedule that closes them. Locks the ranked weak list FIRST — from the deck's boxes and miss counts, not vibes — then builds the drill page around only that material, then writes the plan that says when the spot counts as closed. Use for targeted practice, 'I keep missing the same ones', closing weak spots, drilling trouble topics, and study sessions that skip what already sticks.",
     "tags": ["study", "drill", "flashcards", "practice", "interactive"],
@@ -110,6 +112,7 @@
   },
   {
     "id": "juice-pass",
+    "role": "general",
     "name": "Juice Pass",
     "description": "Make the game feel alive without breaking it: feedback on every player action — hit-flash, screenshake, sound hooks, particles, score pops — added with restraint and verified playable after every change. Locks the juice checklist FIRST — every player action gets visible feedback, effects stay tasteful, nothing regresses — then edits the game in place, re-checking that it still runs and still ends. Use for 'the game feels dead', game feel passes, adding screenshake and particles, polishing an arcade game, and making hits feel like hits.",
     "tags": ["game", "arcade", "juice", "polish", "web"],
@@ -145,6 +148,7 @@
   },
   {
     "id": "playtest-report",
+    "role": "maintenance-review",
     "name": "Playtest Report",
     "description": "Playtest like it matters: a structured pass over the mechanics, the edge inputs, and the score loop, every finding written with its repro steps — a ranked fix list, not vibes. Locks the test plan FIRST — what to try and what correct looks like — then plays through it taking notes, then writes the findings with a ranked issue table. Use for playtesting a game before sharing it, 'is the game actually solid', bug hunts on an arcade page, pre-release game QA, and turning playtest feelings into a fix list.",
     "tags": ["game", "playtest", "qa", "review", "report"],
@@ -200,6 +204,7 @@
   },
   {
     "id": "character-sheet",
+    "role": "general",
     "name": "Character Sheet",
     "description": "Lock a character before the pages need them: reference images across the poses and expressions the story calls for, the palette and silhouette written down, and every seed and prompt persisted in a manifest — so page twelve's hero is page one's hero. Locks the character brief FIRST — silhouette, palette, expression and pose list — then generates the reference set with its manifest, then lays the contact sheet anyone can draw from. Use for character sheets, locking a character's look, reference sets before more pages, 'keep them looking the same', and building a comic's cast bible.",
     "tags": ["comic", "character", "reference", "images", "consistency"],
@@ -243,6 +248,7 @@
   },
   {
     "id": "page-spread",
+    "role": "general",
     "name": "Page Spread",
     "description": "Produce one page spread from script to panels: beats planned, panel art generated against the character sheets — never freehand from memory — lettered and laid out as the page the reader turns to. Locks the panel plan FIRST — each panel naming the sheet references that anchor it and the caption text it carries — then generates the panels from those anchors, then assembles the lettered spread. Use for producing a comic page, 'let's do page three', panel-and-letter passes, turning a script page into art, and the per-page ritual of a whole book.",
     "tags": ["comic", "pages", "panels", "layout", "images"],
@@ -286,6 +292,7 @@
   },
   {
     "id": "tileset-batch",
+    "role": "general",
     "name": "Tileset Batch",
     "description": "Produce a style-locked batch of tiles and account for every one: named to the convention, sized to spec, generated against the library's style anchor, and appended to the manifest with tags — an asset library a game engine can trust, not a folder of maybes. Locks the tile list and the naming convention FIRST, then generates the batch in the house style, then writes the manifest records and the batch summary. Use for tile batches, 'we need forest tiles', growing a game's asset library, style-consistent tilesets, and keeping the asset manifest honest.",
     "tags": ["assets", "tiles", "game", "images", "library"],
@@ -341,6 +348,7 @@
   },
   {
     "id": "character-turnaround",
+    "role": "general",
     "name": "Character Turnaround",
     "description": "Give one character the full turnaround treatment: front, side, back, and three-quarter views generated against the same style anchor, every view manifest-recorded with the seed and prompt that made it — the reference every future sprite leans on. Locks the angle list and the style anchor FIRST, then generates the views as one consistent figure, then writes the records and the summary. Use for character turnarounds, 'we need the knight from all sides', sprite reference sets, model sheets for game characters, and locking a character before animation work.",
     "tags": ["assets", "character", "turnaround", "images", "reference"],

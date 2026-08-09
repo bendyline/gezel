@@ -31,6 +31,7 @@ import {
   type CapacityBudget,
   autoAllowRamSpillover,
   computeCapacityBudget,
+  fastMemoryBudgetBytes,
 } from './capacity-budget.js';
 import type { LocalProviderName } from './engine-key.js';
 
@@ -38,11 +39,12 @@ export {
   autoAllowRamSpillover,
   autoDetectBudgetBytes,
   computeCapacityBudget,
-  fastMemoryBudgetBytes,
   getDetectedGpuVramBytes,
   setDetectedGpuVramBytes,
   type CapacityBudget,
 } from './capacity-budget.js';
+
+export { fastMemoryBudgetBytes };
 
 const log = createLogger('capacity-broker');
 
@@ -513,16 +515,6 @@ export class CapacityBroker {
 const GIB = 1024 ** 3;
 
 /**
- * Demand-shaped default concurrent-slot count for a SUPERVISED local engine —
- * llama-server's `--parallel N` or the MLX server's `--max-concurrency N` —
- * keyed on total system RAM. A single-user desktop rarely has more than a
- * couple of genuinely-concurrent turns, and every idle slot still reserves a
- * full context window of KV cache, so these stay modest. Returns 1 under
- * 16 GB (≈ batching off). For llama.cpp the per-model memory ceiling
- * ({@link llamaCppSlotCeiling}) clamps further on tight-RAM + big-model
- * combos; an explicit `providerConcurrency[engine]` config overrides verbatim.
- */
-/**
  * RECLAIMABLE-aware free RAM. `os.freemem()` reports truly-free pages
  * only: on macOS, file-backed cache and purgeable memory count as "used"
  * even though the kernel hands them back on demand — and a just-exited
@@ -581,17 +573,28 @@ export function parseMeminfoAvailableBytes(text: string): number | null {
   return m ? Number(m[1]) * 1024 : null;
 }
 
-export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): number {
-  const gb = systemRamBytes / GIB;
-  if (gb < 16) return 1;
-  if (gb < 32) return 2;
-  if (gb < 64) return 3;
+/**
+ * Demand-shaped default concurrent-slot count for a supervised local engine.
+ * The input is usable FAST memory: VRAM on a discrete GPU, the shared pool on
+ * UMA, and the engine RAM budget on CPU. System RAM beside a dGPU must never
+ * raise `--parallel` / `--max-concurrency`; it is only a single-large-model
+ * offload pool. Thresholds are expressed against the safety-discounted pool,
+ * so an 8 GiB card resolves to 1 and a 16 GiB card to 2.
+ *
+ * The exact model/KV ceiling clamps this further. An explicit
+ * `providerConcurrency[engine]` setting remains an operator override.
+ */
+export function defaultLocalEngineSlots(fastMemoryBytes: number = fastMemoryBudgetBytes()): number {
+  const gb = fastMemoryBytes / GIB;
+  if (gb < 12) return 1;
+  if (gb < 24) return 2;
+  if (gb < 48) return 3;
   return 4;
 }
 
 /**
  * Slots a launch would be admitted at before the context-admission ladder
- * gets its say: an explicit operator setting, else the RAM tier default
+ * gets its say: an explicit operator setting, else the fast-memory tier default
  * capped by what memory can actually hold.
  *
  * Exists so every caller resolves slots the same way. The launch-preview

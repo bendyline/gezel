@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MachineMemoryUsageSchema } from '@bendyline/gezel';
@@ -445,4 +446,84 @@ describe('split user + machine services', () => {
       await user.context.imageProvider.reset();
     }
   });
+
+  it('proxies LAN-serving administration to the broker with the broker identity', async () => {
+    const res = await api('/api/machine-serving');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      status: { listening: boolean };
+      identity: { deviceId: string; fingerprint: string };
+    };
+    expect(body.status.listening).toBe(false);
+    // The panel shows the fingerprint peers must verify — the BROKER's, not
+    // this user daemon's.
+    expect(body.identity.deviceId).toBe(machine.context.deviceIdentity.deviceId);
+    expect(body.identity.fingerprint).toBe(machine.context.deviceIdentity.fingerprint);
+    expect(body.identity.fingerprint).not.toBe(user.context.deviceIdentity.fingerprint);
+  });
+
+  it('flips the broker LAN listener through the proxy', async () => {
+    const port = await new Promise<number>((resolve) => {
+      const s = net.createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const p = (s.address() as net.AddressInfo).port;
+        s.close(() => resolve(p));
+      });
+    });
+    const on = await api('/api/machine-serving', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, bindAddress: '127.0.0.1', port }),
+    });
+    expect(on.status).toBe(200);
+    await expect(on.json()).resolves.toMatchObject({ status: { listening: true, port } });
+    expect(machine.context.remoteServing.status()).toMatchObject({ listening: true, port });
+
+    const off = await api('/api/machine-serving', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(off.status).toBe(200);
+    expect(machine.context.remoteServing.status()).toMatchObject({ listening: false });
+  });
+
+  it("rejects enabling the user daemon's own LAN listener while the broker owns serving", async () => {
+    const res = await api('/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ remoteServing: { enabled: true } }),
+    });
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'remote-serving-managed-by-machine',
+    });
+    // Disabling stays allowed so a stale pre-broker flag can be cleared.
+    const disable = await api('/api/config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ remoteServing: { enabled: false } }),
+    });
+    expect(disable.status).toBe(200);
+  });
+
+  it('defers boot-time LAN serving to the broker even when its own config enables it', async () => {
+    const home2 = await mkdtemp(join(tmpdir(), 'gezel-user-defer-'));
+    await writeFile(
+      join(home2, 'config.json'),
+      JSON.stringify({ remoteServing: { enabled: true, bindAddress: '127.0.0.1', port: 36231 } }),
+    );
+    const user2 = await startService({
+      home: home2,
+      role: 'user',
+      machineEngineHome: machineHome,
+    });
+    try {
+      expect(user2.context.machineEngine?.isRequired()).toBe(true);
+      expect(user2.context.remoteServing.status()).toMatchObject({ listening: false });
+    } finally {
+      await user2.stop();
+      await rm(home2, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }, 60_000);
 });

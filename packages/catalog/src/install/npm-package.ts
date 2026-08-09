@@ -12,7 +12,7 @@ import {
 } from '@bendyline/gezel';
 import * as tar from 'tar';
 
-const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
+export const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org';
 const MAX_PACKUMENT_BYTES = 5 * 1024 * 1024;
 const MAX_TARBALL_BYTES = 100 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 500 * 1024 * 1024;
@@ -40,7 +40,7 @@ export interface NpmInstallResult {
 export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise<NpmInstallResult> {
   const { manifest } = opts;
   const { package: packageName, version, sha256: expectedHash, entry } = manifest.runtime;
-  const registry = validateRegistry(opts.registry ?? DEFAULT_REGISTRY);
+  const registry = validateRegistry(opts.registry ?? DEFAULT_NPM_REGISTRY);
   const slug = `${packageName.replace('/', '__')}@${version}`;
   const target = join(opts.installRoot, slug);
   const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
@@ -111,7 +111,7 @@ export async function verifyTarballSha256(tarballPath: string): Promise<string> 
   return hash.digest('hex');
 }
 
-function validateRegistry(input: string): URL {
+export function validateRegistry(input: string): URL {
   const registry = new URL(input.endsWith('/') ? input : `${input}/`);
   const loopback = registry.hostname === '127.0.0.1' || registry.hostname === 'localhost';
   if (
@@ -157,11 +157,11 @@ async function resolveTarballUrl(
   }
 }
 
-function encodePackumentPath(packageName: string): string {
+export function encodePackumentPath(packageName: string): string {
   return packageName.startsWith('@') ? packageName.replace('/', '%2f') : packageName;
 }
 
-async function downloadTarball(url: string, dest: string, origin: string): Promise<string> {
+export async function downloadTarball(url: string, dest: string, origin: string): Promise<string> {
   const { response, dispose } = await fetchSameOrigin(new URL(url), origin, DOWNLOAD_TIMEOUT_MS);
   const handle = await open(dest, 'wx', 0o600);
   let total = 0;
@@ -291,7 +291,7 @@ async function resolvePackageEntry(packageDir: string, entry: string): Promise<s
   return candidate;
 }
 
-async function readBoundedBody(response: Response, maxBytes: number): Promise<Uint8Array> {
+export async function readBoundedBody(response: Response, maxBytes: number): Promise<Uint8Array> {
   if (!response.body) throw new Error('[catalog] registry returned an empty response');
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -320,10 +320,11 @@ async function readBoundedBody(response: Response, maxBytes: number): Promise<Ui
   return joined;
 }
 
-async function fetchSameOrigin(
+export async function fetchSameOrigin(
   initial: URL,
   origin: string,
   timeoutMs: number,
+  headers?: Record<string, string>,
 ): Promise<{ response: Response; dispose: () => void }> {
   let current = initial;
   for (let redirects = 0; redirects <= 3; redirects++) {
@@ -337,7 +338,11 @@ async function fetchSameOrigin(
       timeoutMs,
     );
     try {
-      const response = await fetch(current, { redirect: 'manual', signal: controller.signal });
+      const response = await fetch(current, {
+        redirect: 'manual',
+        signal: controller.signal,
+        ...(headers ? { headers } : {}),
+      });
       if (response.status >= 300 && response.status < 400) {
         clearTimeout(timer);
         const location = response.headers.get('location');

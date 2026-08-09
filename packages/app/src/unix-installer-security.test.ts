@@ -58,6 +58,20 @@ describe('macOS machine-service filesystem security', () => {
     );
   });
 
+  it('fails the package instead of accepting an unpublished partial migration', () => {
+    const migration = position(
+      macPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"',
+    );
+    const aclSetup = macPostinstall.indexOf('assert_not_symlink "$SHARED_DIR"', migration);
+    expect(aclSetup).toBeGreaterThan(migration);
+    const migrationBlock = macPostinstall.slice(migration, aclSetup);
+
+    expect(migrationBlock).not.toContain('|| migration_ok=0');
+    expect(migrationBlock).not.toContain('exit 0');
+    expect(macPostinstall).not.toContain('migration_ok=');
+  });
+
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(macPostinstall).toContain('umask 077');
     expect(macPostinstall).toContain(
@@ -193,6 +207,97 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('waiting for Gezel process ${WAIT_FOR_PID} to exit');
     expect(macUninstall).toContain('PACKAGE_ID="com.bendyline.gezel"');
     expect(macUninstall).toContain('/usr/sbin/pkgutil --forget "$PACKAGE_ID"');
+  });
+
+  it('waits for the LaunchDaemon job and process to exit before destructive cleanup', () => {
+    const stop = shellFunction(macUninstall, 'stop_machine_service', 'brace');
+    expect(stop).toContain('service_pid=$(launchd_service_pid)');
+    expect(stop).toContain('/bin/launchctl print "system/${DAEMON_LABEL}"');
+    expect(stop).toContain('/bin/kill -0 "$service_pid"');
+    expect(stop).toContain('GezelService stopped (verified)');
+    expect(stop).toContain('cleanup stopped before removing its files or account');
+
+    const stopCall = macUninstall.lastIndexOf('\nstop_machine_service\n');
+    const removePlist = position(macUninstall, '/bin/rm -f -- "$PLIST"');
+    const removeIdentity = position(macUninstall, 'if ! remove_service_identity; then');
+    expect(stopCall).toBeGreaterThanOrEqual(0);
+    expect(stopCall).toBeLessThan(removePlist);
+    expect(stopCall).toBeLessThan(removeIdentity);
+  });
+
+  it('keeps the service group and reports remediation when macOS retains the user', () => {
+    const removeIdentity = shellFunction(macUninstall, 'remove_service_identity', 'brace');
+    const deleteUser = position(removeIdentity, 'delete_directory_record "user"');
+    const deleteGroup = position(removeIdentity, 'delete_directory_record "group"');
+    expect(deleteUser).toBeLessThan(deleteGroup);
+    expect(removeIdentity.slice(deleteUser, deleteGroup)).toContain('return 1');
+    expect(macUninstall).toContain('No unconditional success is being reported');
+    expect(macUninstall).toContain(
+      'Remove the matching group only after the user is verified absent',
+    );
+    expect(macUninstall).toContain('display alert "Gezel uninstall needs attention"');
+    expect(macUninstall).toContain('See /var/tmp/gezel-uninstall.log');
+    expect(macUninstall).toContain('giving up after 30');
+    expect(macUninstall).toContain('exit 1');
+    expect(macUninstall).toContain('done (service exit and account removal verified)');
+
+    // Exercise the exact state machine with a fake directory service. This
+    // reproduces the release failure: user deletion returns eDSPermissionError.
+    // The group must remain, the dscl error must be visible, and the function
+    // must return failure instead of printing a success claim.
+    const probeRoot = mkdtempSync(join(tmpdir(), 'gezel-uninstall-identity-'));
+    try {
+      const userRecord = join(probeRoot, 'user-record');
+      const groupRecord = join(probeRoot, 'group-record');
+      const calls = join(probeRoot, 'calls.log');
+      const output = join(probeRoot, 'output.log');
+      writeFileSync(userRecord, 'present');
+      writeFileSync(groupRecord, 'present');
+
+      const script = `set -euo pipefail
+DAEMON_USER="_gezeld"
+USER_RECORD=${JSON.stringify(userRecord)}
+GROUP_RECORD=${JSON.stringify(groupRecord)}
+CALLS=${JSON.stringify(calls)}
+OUTPUT=${JSON.stringify(output)}
+directory_service() {
+  printf '%s:%s\\n' "$2" "$3" >>"$CALLS"
+  case "$2:$3" in
+    -read:/Users/_gezeld)
+      [ -e "$USER_RECORD" ] && { echo present; return 0; }
+      ;;
+    -read:/Groups/_gezeld)
+      [ -e "$GROUP_RECORD" ] && { echo present; return 0; }
+      ;;
+    -delete:/Users/_gezeld)
+      echo 'DS Error: -14090 (eDSPermissionError)' >&2
+      return 70
+      ;;
+    -delete:/Groups/_gezeld)
+      rm -f "$GROUP_RECORD"
+      return 0
+      ;;
+  esac
+  echo 'DS Error: -14136 (eDSRecordNotFound)' >&2
+  return 56
+}
+${shellFunction(macUninstall, 'directory_record_state', 'brace')}
+${shellFunction(macUninstall, 'delete_directory_record', 'brace')}
+${removeIdentity}
+if remove_service_identity >"$OUTPUT" 2>&1; then
+  echo 'identity removal unexpectedly succeeded' >&2
+  exit 90
+fi
+[ -e "$USER_RECORD" ]
+[ -e "$GROUP_RECORD" ]
+! grep -q -- '-delete:/Groups/_gezeld' "$CALLS"
+grep -q 'eDSPermissionError' "$OUTPUT"
+grep -q 'keeping /Groups/_gezeld because /Users/_gezeld remains' "$OUTPUT"
+`;
+      execFileSync('/bin/bash', ['-c', script], { stdio: 'pipe' });
+    } finally {
+      rmSync(probeRoot, { recursive: true, force: true });
+    }
   });
 
   it('repairs a daemon account that kept its user but lost its group', () => {

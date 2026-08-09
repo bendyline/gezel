@@ -142,9 +142,9 @@ export abstract class StreamingSessionBase {
   /**
    * Subscribe to "still working" heartbeats — fired when a provider
    * signals ongoing activity even though no visible text/tool event
-   * has arrived. Today Copilot wires this from its `thinking_start` /
-   * `thinking_stop` SDK events so long server-side reasoning phases
-   * don't look like silence to the UI.
+   * has arrived. Copilot wires SDK thinking/tool events; CLI adapters
+   * also use this channel for transient, concretely named tool activity
+   * so long silent phases do not look stalled or become persisted dividers.
    */
   onHeartbeat(handler: (label: string | undefined) => void): () => void {
     this.heartbeatHandlers.add(handler);

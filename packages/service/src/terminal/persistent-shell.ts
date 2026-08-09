@@ -61,6 +61,8 @@ export interface PersistentShellRunResult {
 export interface PersistentShellOptions {
   /** Initial cwd for the shell. Must be an absolute path. */
   cwd: string;
+  /** Initial PTY width. Defaults to the desktop terminal surface's legacy width. */
+  columns?: number;
   /** Per-command wall-clock timeout. Default 5 min. */
   commandTimeoutMs?: number;
   /** Test seam: override the platform shell selection. */
@@ -259,7 +261,7 @@ export class PersistentShell {
     log.info(`spawning shell ${spec.file} ${spec.args.join(' ')} (cwd=${options.cwd})`);
     const pty = ptySpawn(spec.file, spec.args, {
       name: 'xterm-256color',
-      cols: 200,
+      cols: options.columns ?? 200,
       rows: 50,
       cwd: options.cwd,
       env,
@@ -388,6 +390,7 @@ export class PersistentShell {
   async run(
     command: string,
     opts: {
+      columns?: number;
       onChunk?: (chunk: string) => void;
       onPromptDetected?: (info: {
         promptLine: string;
@@ -395,6 +398,11 @@ export class PersistentShell {
       }) => void;
     } = {},
   ): Promise<PersistentShellRunResult> {
+    if (opts.columns !== undefined) {
+      // Keep a long-lived shell in sync with whichever client submits the
+      // next command. This also updates COLUMNS inside the shell process.
+      this.pty.resize(opts.columns, 50);
+    }
     return this.runInternal(command, {
       discardOutput: false,
       onChunk: opts.onChunk,

@@ -20,35 +20,101 @@ Gezel layers its guardrails:
 
 ### The service is locked to your machine
 
-The background service only accepts connections from your own computer, over an encrypted local channel, with a token that rotates every time the service starts. Other software on the machine can't impersonate the app, and nothing is reachable from the network.
+The background service listens only on your computer, over an encrypted
+loopback channel, and requires a credential that rotates every time the
+service starts. The desktop app also pins the service's certificate. These
+controls keep the service off your local network and reject clients that do
+not have a current credential.
+
+They are not a wall against malicious software already running as **your**
+operating-system account, or against an administrator. Software with those
+powers can generally read files your account can read, including Gezel's
+user-scoped connection details. The separately installed machine engine has a
+credential that local user daemons can discover by design, but that credential
+is limited to inference and model management — it cannot read projects,
+gezellen, chats, tools, or credentials.
 
 ### Workspaces have walls
 
-A gezel working in a project sees that project's workspace — not your whole disk. Paths a model asks for are checked against the workspace boundary before any file is read or written, so "../" tricks and symlink hops end at the wall.
+A gezel using Gezel's workspace tools sees that project's workspace — not your
+whole disk. Paths those tools receive are checked against the workspace
+boundary before a file is read or written, so "../" tricks and symlink hops
+end at the wall. Provider-native tools and explicitly approved full-trust
+commands are different execution classes; their limits are described below.
 
 ### Scripts run in layered isolation
 
-When a gezel runs code, that code doesn't run inside the app and doesn't get your full user powers. It runs in a separate process wrapped in several independent layers, so no single slip opens the whole machine:
+Gezel's **sandboxed standalone-script tools** run code in a separate process
+wrapped in several independent layers:
 
-- **Its own small world.** The script gets a fresh scratch area, and its writes are confined to that area and the project workspace — not your disk. The JavaScript runtime itself enforces the file boundary.
+- **Its own small world.** The script gets a fresh scratch area, and its writes are confined to that area and the project workspace — not your disk. Node's permission model checks the file boundary as one layer of the sandbox.
 - **No calling for backup.** The script can't launch other programs, spawn workers, or load native extensions. A script also can't quietly open its own connection to the internet — when a gezel needs the web, it goes through gezel's named tools (search, fetch, the browser), which are policy-checked and show up in History. In most configurations, whatever a gezel does, it does alone, inside the fence of the project workspace.
-- **The operating system holds the outer wall.** When a script is meant to run without network access, that's enforced by the OS itself — macOS's sandbox on Mac, a confined service on Linux — not by asking the code to behave. If the machine can't provide that wall, gezel refuses to run the script at all rather than quietly settle for less.
+- **The operating system holds the outer wall where it can.** Untrusted code that must run without network access starts only when Gezel can apply a supported OS boundary — macOS Seatbelt, or a probed systemd boundary for compatible Linux jobs. Otherwise Gezel refuses to start it. One narrow compatibility path exists for byte-verified first-party scripts shipped in Gezel's standard library or catalog: on Windows and Linux jobs that cannot use the OS boundary, those trusted bytes may run with the remaining filesystem limits, subprocess/worker/addon denial, environment scrubbing, and JavaScript network-denial layers. Edited, user-authored, and model-authored scripts do not receive that exception.
 - **A time and memory leash.** Every run has a deadline and can be capped on memory, so a runaway script gets stopped instead of dragging your machine down.
 
-The layers deliberately overlap: even if one were bypassed, the next is still standing.
+The layers deliberately overlap, but they are defense in depth rather than a
+promise that hostile code can never escape.
+
+Some tools deliberately run with more authority. After showing the exact
+command and receiving your approval, **package scripts and installed package
+binaries** (`run_package_script` and `run_npx`) run as your operating-system
+account. They may start other programs, use the network, and read or change
+files outside the project. Third-party MCP servers are also not inside the
+standalone-script sandbox; because they are unconfined local or remote code,
+Gezel enables them only under the corresponding Security & Compliance setting.
 
 ### Mutations need consent
 
-Reading is cheap; changing things is not. Writes to project files, anything touching git, and outward-facing actions go through per-project consent you control in Settings. Git itself stays yours: gezellen work in your working copy but don't commit, branch, or push on their own.
+Reading is cheap; changing things is not. Changes made through Gezel-managed
+tools — project-file writes, git operations, and outward-facing actions — go
+through the policy and per-project consent you control in Settings. Approving a
+full-trust package command authorizes that command as a whole; Gezel cannot
+separately mediate every side effect produced inside it. Git itself stays
+yours in the default managed workflow: gezellen work in your working copy while
+you control commits, branches, and pushes. A full-trust command can perform any
+of those operations if the command you approve includes them.
 
-### Where possible, we never let a gezel directly connect to services
+### Prefer mediated connections to services
 
-We still want gezel to be useful, and being useful means connecting to services like e-mail or data services. But we never let the local gezel just have access to pull that data directly. Instead, outside of the purview of a gezel, we have a system of connectors and toolsets that pull down data and place it in the gezel workspace; for example, each e-mail is a file in your workspace folder. The gezel can then reason over that e-mail as a file in an isolated folder. If it needs to work with e-mail (e.g., send an e-mail), it does so through an abstracted request, with your permission.
+Being useful means connecting to services like e-mail or data systems.
+Wherever possible, Gezel keeps that connection in a named, policy-checked
+connector or tool and gives the model a file or a narrow operation instead of
+the raw credential. For example, e-mail can arrive as files in the workspace,
+and sending uses a reviewed request.
+
+That is the preferred path, not a universal guarantee. An approved full-trust
+package command or an enabled third-party MCP server can make its own network
+connections. Provider-native tools follow that provider's security and
+permission model.
 
 ### Leverage the node.js/NPM open source ecosystem
 
-At your direction, gezel can download additional scripts and tools to extend what you can do with gezel. For this, we use the NPM (node.js) package manager. NPM is a package catalog owned and managed by GitHub/Microsoft, and is used by millions of developers for building many of the apps you may already be using. NPM is not perfect, and there have been compromises of NPM. Gezel applies the standard hardening locally: packages install with their install-time scripts disabled — the classic supply-chain trick never runs — and the code they bring executes inside the script sandbox described above. The collective eyes of the community on this open source catalog, coupled with those local practices, help make this the best but always imperfect system for people to leverage other people's honest open source at scale.
+At your direction, Gezel can download additional scripts and tools from NPM
+(the Node.js package catalog). NPM is widely used, but it is not perfect and
+has experienced compromises. Gezel installs packages with their install-time
+scripts disabled, preventing that common supply-chain execution path.
 
-### Everything is on the record
+What happens later depends on the tool type. A standalone script uses the
+sandbox described above. A package command runs with your account's authority
+after explicit approval. A third-party MCP server is unconfined and requires
+the security posture that permits non-builtin toolsets. Review the package,
+publisher, requested capabilities, and exact command before granting that
+authority.
 
-Tool calls, project changes, crew changes — all land in the History log. Supervision you can't audit isn't supervision; the log is the floor the rest stands on.
+### What History records
+
+Gezel writes durable History events for project and crew changes and for tool
+completions it can observe. Calls through Gezel's own MCP bridge have the
+strongest coverage. Provider-native tool loops — such as Claude CLI, Codex CLI,
+or GitHub Copilot — are recorded when their SDK or event stream exposes enough
+information, so a missing History entry is not proof that an external provider
+performed no action.
+
+Copilot's built-in tools are disabled by default in favor of Gezel's scoped MCP
+tools. The explicit `sandboxCopilot: false` compatibility setting restores those
+built-ins. Their observed completions may still appear in History, but they do
+not receive Gezel's MCP scope and action-level sink checks, and their audit
+detail can be incomplete.
+
+History is a useful, user-owned local activity record. It is not a
+tamper-evident compliance ledger.

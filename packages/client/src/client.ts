@@ -115,6 +115,7 @@ import type {
   GezelResponse,
   GezmodelEngine,
   GezmodelImportReview,
+  GildeUpdateStatusResponse,
   GitAbandonMergeResponse,
   GitAiMergeResponse,
   GitBranchesResponse,
@@ -416,7 +417,14 @@ export interface UsageResponse {
   providers: {
     copilot?: ProviderUsage;
     openai?: ProviderUsage;
+    anthropic?: ProviderUsage;
+    'anthropic-cli'?: ProviderUsage;
+    'codex-cli'?: ProviderUsage;
     ollama?: ProviderUsage;
+    'llama-cpp'?: ProviderUsage;
+    mlx?: ProviderUsage;
+    ds4?: ProviderUsage;
+    remote?: ProviderUsage;
   };
   lastUpdated: string | null;
 }
@@ -527,6 +535,22 @@ export interface TaskRunnerState {
     /** ISO time the next window opens; null when Night Shift is off. */
     opensAt: string | null;
   };
+}
+
+export interface ProjectContinuationResponse {
+  projectId: string;
+  projectStatus: 'active' | 'stable' | 'readonly' | 'inactive';
+  /** Due schedule hosts whose tick metadata was advanced. */
+  scheduledTaskRefs: string[];
+  /** Due schedule hosts held by the current engagement mode. */
+  heldScheduledTaskRefs: string[];
+  /** Fresh instances created from those schedule hosts. */
+  spawnedTaskRefs: string[];
+  /** Existing active gezel-owned tasks reconciled with the runner. */
+  activeTaskRefs: string[];
+  /** Active Night Shift work left parked because the shift is currently off. */
+  deferredNightShiftTaskRefs: string[];
+  holdReason?: 'engagement-off' | 'engagement-paused' | 'provider-busy';
 }
 
 /**
@@ -1176,7 +1200,14 @@ export interface ConfigResponse {
   codexCli?: {
     binaryPath?: string;
     manageRuntimeFiles?: boolean;
-    defaultPermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+    defaultPermissionMode?:
+      | 'plan'
+      | 'edit'
+      | 'reviewed'
+      | 'full'
+      | 'default'
+      | 'acceptEdits'
+      | 'bypassPermissions';
     defaultReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     extraModels?: Array<{ id: string; name: string }>;
     extraConfigOverrides?: Record<string, string>;
@@ -1256,6 +1287,13 @@ export interface ConfigResponse {
     /** Host an unauthenticated Ollama-compatible listener on port 11434. Default off. */
     emulateOllama?: boolean;
   };
+  /**
+   * Opt-in live gilde content updates (Settings → About). Default off.
+   * See `GezelConfig.gildeUpdates` in core schemas.
+   */
+  gildeUpdates?: {
+    enabled?: boolean;
+  };
   /** Remote model execution: serving this device's models to paired clients. */
   remoteServing?: {
     enabled?: boolean;
@@ -1282,6 +1320,51 @@ export interface PairedRemoteInfo {
   pairedAt: number;
   lastSeenAt?: number;
   hasToken: boolean;
+}
+
+/** remoteServing config as managed on the machine broker. */
+export interface MachineServingConfig {
+  enabled?: boolean;
+  bindAddress?: string;
+  port?: number;
+  priority?: 'equal' | 'below-local' | 'above-local';
+  reserveLocalGb?: number;
+  allowModels?: string[];
+  limits?: {
+    maxConcurrentPerDevice?: number;
+    maxChatPerDevice?: number;
+    requestsPerMinute?: number;
+  };
+}
+
+/**
+ * GET/PUT /api/machine-serving response. `config.enabled` reflects the
+ * actual listener state; `identity` is the BROKER's device identity (the
+ * fingerprint peers verify out-of-band), not the user daemon's.
+ */
+export interface MachineServingState {
+  config: MachineServingConfig;
+  status: { listening: boolean; host?: string; port?: number };
+  identity: { deviceId: string; fingerprint: string };
+}
+
+export interface MachineServingGrant {
+  id: string;
+  appId: string;
+  appName: string;
+  scopes: string[];
+  status: 'pending' | 'approved' | 'denied' | string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
+export interface MachineServingDevice {
+  appId: string;
+  appName: string;
+  scopes: string[];
+  createdAt: number;
+  lastUsedAt?: number;
+  deviceId?: string;
 }
 
 export type SendChannelResult =
@@ -1938,6 +2021,18 @@ export class GezelClient {
     return this.request('PUT', '/api/config', body);
   }
 
+  // ---------- live gilde content updates ----------
+
+  getGildeUpdateStatus(): Promise<GildeUpdateStatusResponse> {
+    return this.request('GET', '/api/gilde-updates');
+  }
+
+  /** Kick a manual check. 202-style: resolves as soon as the run is
+   * started (or attached); poll `getGildeUpdateStatus` for the outcome. */
+  checkGildeUpdates(): Promise<{ started: boolean }> {
+    return this.request('POST', '/api/gilde-updates/check');
+  }
+
   // ---------- night shift ----------
 
   getNightShiftStatus(): Promise<{ active: boolean; source: 'scheduled' | 'manual' | null }> {
@@ -2481,7 +2576,8 @@ export class GezelClient {
 
   /**
    * Craftbook templates applicable to a project — the catalog craftbooks
-   * whose `requirements` the project's GitHub/branch state satisfies. The
+   * whose `requirements` the project's GitHub/branch state satisfies, with
+   * blank-workspace project starters omitted for established codebases. The
    * command-launcher rail uses this instead of the project-agnostic
    * `listCatalogItems('craftbook-template')` so non-applicable craftbooks
    * aren't offered.
@@ -2494,6 +2590,8 @@ export class GezelClient {
     projectType?: { id: string; label: string } | null;
     /** Ids of craftbooks suggested for the project type (tag intersection). */
     suggestedIds?: string[];
+    /** True when the workspace already has codebase markers or source files. */
+    establishedCodebase: boolean;
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/craftbooks`);
   }
@@ -4205,6 +4303,40 @@ export class GezelClient {
     return this.request('DELETE', `/api/remotes/${encodeURIComponent(remoteId)}`);
   }
 
+  // ---- Machine-broker LAN serving (this device as SERVER, broker-owned) ----
+  // Proxied by the user daemon to the machine engine's
+  // /v1/remote/manage/serving surface; 503 `machine_engine_unavailable`
+  // when no broker has been adopted (the UI then falls back to the user
+  // daemon's own remoteServing config).
+
+  getMachineServing(): Promise<MachineServingState> {
+    return this.request('GET', '/api/machine-serving');
+  }
+
+  updateMachineServing(config: MachineServingConfig): Promise<MachineServingState> {
+    return this.request('PUT', '/api/machine-serving', config);
+  }
+
+  listMachineServingGrants(): Promise<{ grants: MachineServingGrant[] }> {
+    return this.request('GET', '/api/machine-serving/grants');
+  }
+
+  approveMachineServingGrant(id: string): Promise<{ ok: true; status: string }> {
+    return this.request('POST', `/api/machine-serving/grants/${encodeURIComponent(id)}/approve`);
+  }
+
+  denyMachineServingGrant(id: string): Promise<{ ok: true; status: string }> {
+    return this.request('POST', `/api/machine-serving/grants/${encodeURIComponent(id)}/deny`);
+  }
+
+  listMachineServingDevices(): Promise<{ devices: MachineServingDevice[] }> {
+    return this.request('GET', '/api/machine-serving/devices');
+  }
+
+  revokeMachineServingDevice(appId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/machine-serving/devices/${encodeURIComponent(appId)}`);
+  }
+
   listRemoteModels(remoteId: string): Promise<{
     remoteId: string;
     models: Array<{
@@ -4850,6 +4982,35 @@ export class GezelClient {
     body: { path: string; content: string; gezelId?: string; sessionId?: string },
   ): Promise<{ ok: true; path: string }> {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/workspace/file`, body);
+  }
+
+  /** Raw-byte sibling used by direct user editing of rendered documents and media. */
+  async writeProjectWorkspaceBinary(
+    projectId: string,
+    filePath: string,
+    data: Blob | ArrayBuffer | Uint8Array,
+    mimeType = 'application/octet-stream',
+  ): Promise<{ ok: true; path: string }> {
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}`;
+    const body =
+      data instanceof Blob
+        ? data
+        : data instanceof Uint8Array
+          ? data
+          : new Uint8Array(data as ArrayBuffer);
+    const res = await this.fetchImpl(url, {
+      method: 'PUT',
+      headers: {
+        'content-type': mimeType,
+        Authorization: `Bearer ${this.token}`,
+      },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`workspace binary write failed (${res.status}): ${text}`);
+    }
+    return res.json() as Promise<{ ok: true; path: string }>;
   }
 
   copyArtifactToWorkspace(
@@ -5801,6 +5962,11 @@ export class GezelClient {
   }
 
   // ── tasks (per-project, stable numeric IDs) ──
+
+  /** Process due schedules and reconcile active task handoffs in one project. */
+  continueProject(projectId: string): Promise<ProjectContinuationResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/continue`);
+  }
 
   listTasks(filter?: { status?: TaskStatus; assignee?: string }): Promise<ListTasksResponse> {
     const params = new URLSearchParams();

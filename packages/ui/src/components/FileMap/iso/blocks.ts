@@ -325,11 +325,11 @@ function drawOneBlock(
   const massing = s.ageLens ? null : massingPrism(s, b, g, style);
   // An N/W wing paints BEFORE the main mass and an S/E wing after, so the
   // secondary volume occludes correctly against its own building.
-  if (massing?.behind) drawMassing(ctx, massing.prism, colors);
+  if (massing?.behind) drawMassing(ctx, s, massing.prism, style, colors);
   drawTownBuilding(ctx, s, prism, style, colors, {
     suppressDetails: s.ageLens === true,
   });
-  if (massing && !massing.behind) drawMassing(ctx, massing.prism, colors);
+  if (massing && !massing.behind) drawMassing(ctx, s, massing.prism, style, colors);
   // NW edge highlight along the top-north rim.
   ctx.strokeStyle = colors.edge;
   ctx.lineWidth = 1;
@@ -375,10 +375,30 @@ function massingPrism(
 
 function drawMassing(
   ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
   prism: PrismScreen,
+  style: TownStyle,
   colors: { top: string; wallL: string; wallR: string; edge: string },
 ): void {
-  drawPrism(ctx, prism, colors);
+  // The secondary mass is an actual wing or stepped upper floor, not a modern
+  // flat-roofed extrusion. Reuse the period painter while stripping furniture
+  // that belongs only on the main ridge.
+  drawTownBuilding(
+    ctx,
+    s,
+    prism,
+    {
+      ...style,
+      chimneys: 0,
+      dormers: 0,
+      awning: false,
+      cupola: false,
+      clock: false,
+      cap: 'none',
+    },
+    colors,
+    { compact: true, suppressDetails: s.ageLens === true },
+  );
   ctx.strokeStyle = colors.edge;
   ctx.lineWidth = 0.8;
   ctx.beginPath();

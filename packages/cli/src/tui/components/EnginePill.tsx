@@ -10,20 +10,31 @@ import type { JSX } from 'react';
 export function EnginePill(props: {
   provider: string | undefined;
   model: string | undefined;
+  accessMode?: string | undefined;
   busy: boolean;
   label?: string | undefined;
 }): JSX.Element {
-  const { provider, model, busy, label } = props;
-  const text = busy ? `● ${label ?? 'working'}` : '○ idle';
-  const engine = formatEngineIdentity(provider, model);
+  const { provider, model, accessMode, busy, label } = props;
+  const text = formatEngineStatus(provider, model, busy, label, accessMode);
   return (
     <Box>
       <Text backgroundColor={busy ? 'yellow' : 'blackBright'} color={busy ? 'black' : 'white'}>
         {' '}
-        {text} · {engine}{' '}
+        {text}{' '}
       </Text>
     </Box>
   );
+}
+
+export function formatEngineStatus(
+  provider: string | undefined,
+  model: string | undefined,
+  busy: boolean,
+  label?: string,
+  accessMode?: string,
+): string {
+  const activity = busy ? `● ${label ?? 'working'}` : '○ idle';
+  return [activity, accessMode, formatEngineIdentity(provider, model)].filter(Boolean).join(' · ');
 }
 
 export function formatEngineIdentity(

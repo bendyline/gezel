@@ -89,6 +89,9 @@ export function drawTownBuilding(
   const ridge = drawRoof(ctx, s, prism, style, roofPx, colors);
 
   if (!options.suppressDetails && s.tier === 'street') {
+    drawRoofMaterial(ctx, prism, style, ridge, colors, compact);
+    drawEavesAndBargeboards(ctx, prism, style, ridge, colors, compact);
+
     // Caps mount on the ridge and must fit in whatever headroom is left inside
     // the declared budget. Deriving their size from what remains — rather than
     // from the block's width — makes the roofFactor contract structural: a cap
@@ -140,6 +143,168 @@ function drawRoof(
     case 'conical':
       return drawConicalRoof(ctx, p, rise, c);
   }
+}
+
+interface RoofPlane {
+  ridgeA: ScreenPt;
+  ridgeB: ScreenPt;
+  eaveA: ScreenPt;
+  eaveB: ScreenPt;
+}
+
+/** The two long planes of a pitched roof, expressed from ridge to eave. */
+function roofPlanes(p: PrismScreen, ridge: RoofRidge, axis: RidgeAxis): RoofPlane[] {
+  return axis === 'x'
+    ? [
+        { ridgeA: ridge.a, ridgeB: ridge.b, eaveA: p.tn, eaveB: p.te },
+        { ridgeA: ridge.a, ridgeB: ridge.b, eaveA: p.tw, eaveB: p.ts },
+      ]
+    : [
+        { ridgeA: ridge.a, ridgeB: ridge.b, eaveA: p.tn, eaveB: p.tw },
+        { ridgeA: ridge.a, ridgeB: ridge.b, eaveA: p.te, eaveB: p.ts },
+      ];
+}
+
+/**
+ * Slate courses, tile joints, thatch strokes, and industrial roof seams.
+ *
+ * The marks are interpolated inside each projected roof plane, so they remain
+ * crisp vector linework through zooming and HiDPI rendering. This is the useful
+ * kind of texture here: it describes how a roof is assembled without adding a
+ * repeating bitmap that swims when the camera moves.
+ */
+function drawRoofMaterial(
+  ctx: CanvasRenderingContext2D,
+  p: PrismScreen,
+  style: TownStyle,
+  ridge: RoofRidge,
+  colors: PrismColors,
+  compact: boolean,
+): void {
+  const widthPx = p.te.x - p.tw.x;
+  if (widthPx < (compact ? 24 : 30)) return;
+  if (
+    style.roof === 'sawtooth' ||
+    style.roof === 'monitor' ||
+    style.roof === 'pyramid' ||
+    style.roof === 'barrel' ||
+    style.roof === 'conical' ||
+    style.roof === 'parapet'
+  ) {
+    return;
+  }
+
+  const planes = roofPlanes(p, ridge, style.ridge);
+  const material = style.roof === 'thatch' ? 'thatch' : style.material.roof;
+  const line = (a: ScreenPt, b: ScreenPt) => {
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  };
+
+  ctx.strokeStyle = colors.wallR;
+  ctx.lineWidth = material === 'iron' ? 0.75 : 0.6;
+  ctx.globalAlpha = material === 'thatch' ? 0.34 : 0.26;
+  ctx.beginPath();
+
+  for (const plane of planes) {
+    if (material === 'slate' || material === 'tile') {
+      const courses = material === 'slate' ? [0.28, 0.48, 0.66, 0.82] : [0.34, 0.6, 0.82];
+      let previous = 0.08;
+      for (let row = 0; row < courses.length; row++) {
+        const t = courses[row]!;
+        line(lerp(plane.ridgeA, plane.eaveA, t), lerp(plane.ridgeB, plane.eaveB, t));
+        if (widthPx >= 38) {
+          // Staggered vertical joints keep the courses from becoming stripes.
+          const count = compact ? 3 : 5;
+          for (let i = 1; i < count; i++) {
+            const u = (i + (row % 2 === 0 ? 0.28 : -0.18)) / count;
+            if (u <= 0 || u >= 1) continue;
+            const onRidge = lerp(plane.ridgeA, plane.ridgeB, u);
+            const onEave = lerp(plane.eaveA, plane.eaveB, u);
+            line(lerp(onRidge, onEave, previous), lerp(onRidge, onEave, t));
+          }
+        }
+        previous = t;
+      }
+    } else if (material === 'thatch') {
+      const count = compact ? 4 : 7;
+      for (let i = 1; i < count; i++) {
+        const u = i / count;
+        const onRidge = lerp(plane.ridgeA, plane.ridgeB, u);
+        const onEave = lerp(plane.eaveA, plane.eaveB, u);
+        line(lerp(onRidge, onEave, 0.12), lerp(onRidge, onEave, 0.94));
+      }
+    } else if (material === 'iron' || material === 'glass') {
+      const count = compact ? 4 : 7;
+      for (let i = 1; i < count; i++) {
+        const u = i / count;
+        line(lerp(plane.ridgeA, plane.ridgeB, u), lerp(plane.eaveA, plane.eaveB, u));
+      }
+      if (material === 'glass') {
+        line(lerp(plane.ridgeA, plane.eaveA, 0.55), lerp(plane.ridgeB, plane.eaveB, 0.55));
+      }
+    }
+  }
+
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * A roof should visibly project past its wall. The heavy lower line is the
+ * eaves shadow; the light line above is the fascia/bargeboard catching the NW
+ * light. Even at campus scale this turns a lid-on-a-box into carpentry.
+ */
+function drawEavesAndBargeboards(
+  ctx: CanvasRenderingContext2D,
+  p: PrismScreen,
+  style: TownStyle,
+  ridge: RoofRidge,
+  colors: PrismColors,
+  compact: boolean,
+): void {
+  if (style.roof === 'parapet' || style.roof === 'conical' || style.roof === 'pyramid') return;
+  const widthPx = p.te.x - p.tw.x;
+  const weight = Math.max(1, Math.min(compact ? 1.7 : 2.2, widthPx * 0.024));
+
+  ctx.strokeStyle = colors.wallR;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = weight + 0.8;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(p.tw.x, p.tw.y + 1);
+  ctx.lineTo(p.ts.x, p.ts.y + 1);
+  ctx.lineTo(p.te.x, p.te.y + 1);
+  ctx.stroke();
+
+  ctx.strokeStyle = colors.edge;
+  ctx.globalAlpha = 0.72;
+  ctx.lineWidth = weight;
+  ctx.beginPath();
+  ctx.moveTo(p.tw.x, p.tw.y);
+  ctx.lineTo(p.ts.x, p.ts.y);
+  ctx.lineTo(p.te.x, p.te.y);
+
+  if (
+    style.roof === 'gable' ||
+    style.roof === 'thatch' ||
+    style.roof === 'catslide' ||
+    style.roof === 'half-hip'
+  ) {
+    // The near gable gets a bright V-shaped bargeboard.
+    if (style.ridge === 'x') {
+      ctx.moveTo(p.te.x, p.te.y);
+      ctx.lineTo(ridge.b.x, ridge.b.y);
+      ctx.lineTo(p.ts.x, p.ts.y);
+    } else {
+      ctx.moveTo(p.tw.x, p.tw.y);
+      ctx.lineTo(ridge.b.x, ridge.b.y);
+      ctx.lineTo(p.ts.x, p.ts.y);
+    }
+  }
+  ctx.stroke();
+  ctx.lineJoin = 'miter';
+  ctx.globalAlpha = 1;
 }
 
 /** The two eaves-line midpoints a ridge runs between, for a given axis. */
@@ -534,6 +699,104 @@ interface WallQuad {
   gb: ScreenPt;
 }
 
+/**
+ * Procedural wall grain, drawn in facade-relative coordinates.
+ *
+ * These are construction marks, not a bitmap pasted over the building: brick
+ * courses follow the wall, weatherboards meet the corners, and ashlar joints
+ * stagger. That keeps the linework sharp at every device scale and costs no
+ * image fetches or texture atlas memory. It is deliberately street-tier only;
+ * below 34px the same marks turn into moire and make a campus less legible.
+ */
+function drawWallMaterial(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  w: WallQuad,
+  style: TownStyle,
+  fine: boolean,
+  side: number,
+): void {
+  if (!fine) return;
+  const patch = (u0: number, u1: number, v0: number, v1: number) =>
+    wallPatch(w.ta, w.tb, w.ga, w.gb, u0, u1, v0, v1);
+  const line = (u0: number, v0: number, u1: number, v1: number) => {
+    const a = patch(u0, u0, v0, v0)[0];
+    const b = patch(u1, u1, v1, v1)[0];
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  };
+  const random = seeded(style.seed ^ 0x4f1bbcdc ^ (side * 0x9e3779b9));
+
+  ctx.strokeStyle = s.palette.masonry;
+  ctx.lineWidth = 0.55;
+  ctx.globalAlpha = s.palette.dark ? 0.3 : 0.22;
+  ctx.beginPath();
+
+  switch (style.material.wall) {
+    case 'brick': {
+      const courses = 6;
+      for (let row = 1; row <= courses; row++) {
+        const v = 0.08 + (row * 0.86) / (courses + 1);
+        line(0.02, v, 0.98, v);
+        // Two restrained head joints per course are enough to read as brick;
+        // drawing every brick at map scale becomes a checkerboard.
+        const offset = row % 2 === 0 ? 0.2 : 0.36;
+        for (let u = offset; u < 0.96; u += 0.42) {
+          const half = 0.86 / (courses + 1) / 2;
+          line(u, v - half, u, v + half);
+        }
+      }
+      break;
+    }
+    case 'stone': {
+      const courses = 4;
+      for (let row = 1; row <= courses; row++) {
+        const v = 0.1 + (row * 0.82) / (courses + 1);
+        line(0.02, v, 0.98, v);
+        const jointA = 0.18 + random() * 0.22;
+        const jointB = 0.58 + random() * 0.24;
+        const half = 0.82 / (courses + 1) / 2;
+        line(jointA, v - half, jointA, v + half);
+        line(jointB, v - half, jointB, v + half);
+      }
+      break;
+    }
+    case 'timber': {
+      // Narrow painted weatherboards are a much stronger 1900–1915 cue than a
+      // flat brown wall. The heavier framing for farm/service buildings is
+      // layered separately by drawWallStructure.
+      for (let i = 1; i <= 7; i++) {
+        const v = 0.06 + (i * 0.88) / 8;
+        line(0.02, v, 0.98, v);
+      }
+      break;
+    }
+    case 'stucco': {
+      // Sparse trowel/scuff marks keep limewash from looking like plastic while
+      // preserving the calm plane that distinguishes it from masonry.
+      for (let i = 0; i < 6; i++) {
+        const u = 0.1 + random() * 0.76;
+        const v = 0.12 + random() * 0.72;
+        line(u, v, Math.min(0.94, u + 0.06 + random() * 0.08), v + (random() - 0.5) * 0.03);
+      }
+      break;
+    }
+    case 'iron':
+    case 'glass': {
+      for (let i = 1; i <= 6; i++) {
+        const u = i / 7;
+        line(u, 0.05, u, 0.95);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 function drawFacadeDetails(
   ctx: CanvasRenderingContext2D,
   s: IsoRenderState,
@@ -552,7 +815,9 @@ function drawFacadeDetails(
     { q: { ta: p.ts, tb: p.te, ga: p.gs, gb: p.ge }, bays: Math.max(1, bays - 1) },
   ];
 
-  for (const { q, bays: n } of walls) {
+  for (let side = 0; side < walls.length; side++) {
+    const { q, bays: n } = walls[side]!;
+    drawWallMaterial(ctx, s, q, style, fine, side);
     drawWallStructure(ctx, s, q, style, fine, n);
     drawWallWindows(ctx, q, rows, n, fine, () =>
       random() < 0.24 ? s.palette.windowLit : s.palette.window,
@@ -600,14 +865,20 @@ function drawGroundFloor(
 
   switch (style.ground) {
     case 'shopfront': {
-      // Wide glazing over a stallriser, with two mullions.
-      fillQuad(ctx, s.palette.windowLit, ...wall(0.06, 0.94, 0.6, 0.88));
+      // Edwardian shopfront: a proper fascia, paired display panes, recessed
+      // center door, transom, and masonry stallriser. The old uninterrupted
+      // yellow strip was the single most modern-looking facade in the map.
+      fillQuad(ctx, s.palette.sidewalk, ...wall(0.05, 0.95, 0.5, 0.59));
+      fillQuad(ctx, s.palette.windowLit, ...wall(0.06, 0.43, 0.61, 0.88));
+      fillQuad(ctx, s.palette.windowLit, ...wall(0.63, 0.94, 0.61, 0.88));
+      fillQuad(ctx, s.palette.window, ...wall(0.46, 0.6, 0.64, 0.98));
+      fillQuad(ctx, s.palette.windowLit, ...wall(0.46, 0.6, 0.59, 0.68));
       fillQuad(ctx, s.palette.masonry, ...wall(0.06, 0.94, 0.88, 0.98));
       ctx.strokeStyle = s.palette.masonry;
       ctx.lineWidth = 0.8;
       ctx.beginPath();
-      for (const u of [0.36, 0.64]) {
-        const a = at(u, 0.6);
+      for (const u of [0.24, 0.43, 0.63, 0.79]) {
+        const a = at(u, 0.61);
         const b = at(u, 0.88);
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -632,8 +903,16 @@ function drawGroundFloor(
       ctx.strokeStyle = s.palette.masonry;
       ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.moveTo(at(0.24, 0.5).x, at(0.24, 0.5).y);
-      ctx.lineTo(at(0.74, 0.5).x, at(0.74, 0.5).y);
+      const lt = at(0.24, 0.5);
+      const rt = at(0.74, 0.5);
+      const lb = at(0.24, 0.98);
+      const rb = at(0.74, 0.98);
+      ctx.moveTo(lt.x, lt.y);
+      ctx.lineTo(rt.x, rt.y);
+      ctx.moveTo(lt.x, lt.y);
+      ctx.lineTo(rb.x, rb.y);
+      ctx.moveTo(rt.x, rt.y);
+      ctx.lineTo(lb.x, lb.y);
       ctx.stroke();
       break;
     }
@@ -644,6 +923,16 @@ function drawGroundFloor(
       }
       const ped = wall(0.14, 0.78, 0.44, 0.55);
       fillQuad(ctx, s.palette.sidewalk, ...ped);
+      const pedLeft = at(0.14, 0.44);
+      const pedRight = at(0.78, 0.44);
+      const pedCenter = mid(pedLeft, pedRight);
+      fillTriangle(
+        ctx,
+        s.palette.sidewalk,
+        pedLeft,
+        { x: pedCenter.x, y: pedCenter.y - Math.max(2, (pedRight.x - pedLeft.x) * 0.08) },
+        pedRight,
+      );
       ctx.strokeStyle = s.palette.masonry;
       ctx.lineWidth = 0.7;
       ctx.beginPath();
@@ -652,11 +941,60 @@ function drawGroundFloor(
       ctx.stroke();
       break;
     }
-    default:
-      // A dark, narrow door keeps the little structures from reading as
-      // decorated blocks rather than inhabited buildings.
-      fillQuad(ctx, s.palette.window, ...wall(0.12, 0.3, 0.58, 0.98));
+    default: {
+      // Framed paneled door, fanlight/transom, and a shallow stone stoop. The
+      // entrance is intentionally narrow and tall — the previous dark slot was
+      // proportioned like a service vent.
+      fillQuad(ctx, s.palette.sidewalk, ...wall(0.09, 0.32, 0.54, 0.99));
+      fillQuad(ctx, s.palette.window, ...wall(0.125, 0.285, 0.64, 0.99));
+      fillQuad(ctx, s.palette.windowLit, ...wall(0.125, 0.285, 0.55, 0.65));
+      ctx.strokeStyle = s.palette.masonry;
+      ctx.globalAlpha = 0.72;
+      ctx.lineWidth = 0.65;
+      ctx.beginPath();
+      const panelA = at(0.135, 0.82);
+      const panelB = at(0.275, 0.82);
+      ctx.moveTo(panelA.x, panelA.y);
+      ctx.lineTo(panelB.x, panelB.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // The stoop projects into the yard in screen space, grounding the door.
+      const stepA = at(0.075, 0.98);
+      const stepB = at(0.335, 0.98);
+      fillQuad(
+        ctx,
+        s.palette.sidewalk,
+        stepA,
+        stepB,
+        { x: stepB.x + 1.2, y: stepB.y + 2.5 },
+        { x: stepA.x + 1.2, y: stepA.y + 2.5 },
+      );
+
+      // Cottages and farmhouses earn a tiny bracketed porch hood once the
+      // facade is wide enough to resolve it.
+      if (
+        p.te.x - p.tw.x >= 38 &&
+        (style.archetype === 'cottage' ||
+          style.archetype === 'farmhouse' ||
+          style.archetype === 'cottage-row' ||
+          style.archetype === 'boarding-house')
+      ) {
+        const hood = wall(0.055, 0.355, 0.47, 0.54);
+        fillQuad(ctx, s.palette.masonry, ...hood);
+        ctx.strokeStyle = s.palette.sidewalk;
+        ctx.lineWidth = 0.75;
+        ctx.beginPath();
+        for (const u of [0.08, 0.33]) {
+          const top = at(u, 0.53);
+          const foot = at(u, 0.96);
+          ctx.moveTo(top.x, top.y);
+          ctx.lineTo(foot.x, foot.y);
+        }
+        ctx.stroke();
+      }
       break;
+    }
   }
 }
 
@@ -763,9 +1101,16 @@ function drawWallStructure(
   fillQuad(ctx, s.palette.sidewalk, ...patch(0.965, 1, 0.07, 0.93));
   ctx.globalAlpha = 1;
 
-  // Half-timbering: the village signature, and genuinely period. A rail and a
-  // few posts, not a texture fill — structure drawn as structure.
-  if (style.material.wall === 'timber') {
+  // Exposed framing belongs on working/rural buildings; ordinary timber houses
+  // get the weatherboards above instead. Putting posts on every cottage made
+  // the settlement read Tudor rather than Edwardian.
+  const framed =
+    style.material.wall === 'timber' &&
+    (style.archetype === 'farmhouse' ||
+      style.archetype === 'barn' ||
+      style.archetype === 'smithy' ||
+      style.archetype === 'mill');
+  if (framed) {
     ctx.strokeStyle = s.palette.masonry;
     ctx.globalAlpha = 0.55;
     ctx.lineWidth = 1;
@@ -781,6 +1126,16 @@ function drawWallStructure(
       const t1 = patch(u, u, 0.92, 0.92)[0];
       ctx.moveTo(t0.x, t0.y);
       ctx.lineTo(t1.x, t1.y);
+    }
+    // One diagonal brace in each bay keeps the frame structural rather than a
+    // modern curtain-wall grid.
+    for (let i = 0; i < bays; i++) {
+      const u0 = 0.06 + (0.88 * i) / Math.max(1, bays);
+      const u1 = 0.06 + (0.88 * (i + 1)) / Math.max(1, bays);
+      const a = patch(u0, u0, 0.5, 0.5)[0];
+      const b = patch(u1, u1, 0.88, 0.88)[0];
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -809,11 +1164,13 @@ function drawWallWindows(
   for (let row = 0; row < rows; row++) {
     const band = 0.72 / rows;
     const v0 = 0.12 + row * band;
-    const v1 = Math.min(0.86, v0 + band * 0.43);
+    const v1 = Math.min(0.86, v0 + band * 0.58);
     for (let bay = 0; bay < bays; bay++) {
       const span = 0.82 / bays;
-      const u0 = 0.09 + bay * span + span * 0.2;
-      const u1 = 0.09 + (bay + 1) * span - span * 0.2;
+      // Tall, narrow sash proportions. The old 60%-of-bay opening read as a
+      // horizontal strip once projected onto an isometric wall.
+      const u0 = 0.09 + bay * span + span * 0.27;
+      const u1 = 0.09 + (bay + 1) * span - span * 0.27;
       const glass = color();
 
       if (fine) {
@@ -884,8 +1241,10 @@ function drawRoofFurniture(
   for (let i = 0; i < style.chimneys; i++) {
     const t = style.chimneys === 1 ? 0.5 : 0.27 + (i / (style.chimneys - 1)) * 0.46;
     const at = lerp(ridge.a, ridge.b, t);
-    const x = at.x + (random() - 0.5) * unit * 0.6;
-    drawStack(ctx, x, at.y, unit, unit * 2.4, s.palette.masonry);
+    const stackWidth = fit(unit, 1.9);
+    if (stackWidth < 1.5) continue;
+    const x = at.x + (random() - 0.5) * stackWidth * 0.6;
+    drawStack(ctx, x, at.y, stackWidth, stackWidth * 1.9, s.palette.masonry);
   }
 
   if (style.cupola && style.cap !== 'clock-tower') {
@@ -963,12 +1322,20 @@ function drawFinial(
 ): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
+  const vaneY = at.y - size * 0.68;
   ctx.beginPath();
   ctx.moveTo(at.x, at.y);
   ctx.lineTo(at.x, at.y - size);
+  ctx.moveTo(at.x - size * 0.2, vaneY);
+  ctx.lineTo(at.x + size * 0.38, vaneY);
   ctx.stroke();
-  ctx.fillStyle = color;
-  ctx.fillRect(at.x - size * 0.28, at.y - size, size * 0.56, 1.2);
+  fillTriangle(
+    ctx,
+    color,
+    { x: at.x + size * 0.38, y: vaneY },
+    { x: at.x + size * 0.18, y: vaneY - size * 0.12 },
+    { x: at.x + size * 0.18, y: vaneY + size * 0.12 },
+  );
 }
 
 /** The city landmark's clock tower. Its extra height is declared by the
@@ -1037,14 +1404,19 @@ function drawStack(
   color: string,
 ): void {
   const half = width / 2;
+  // Leave the 0.45px pot lip inside `height`; roof headroom is a hard culling
+  // and hit-test contract, not merely a sizing hint.
+  const top = y - height + 0.45;
+  const potH = Math.max(0.8, width * 0.34);
+  const bodyTop = top + potH;
   ctx.fillStyle = color;
   path(
     ctx,
     [
-      { x: x - half, y },
+      { x: x - half, y: bodyTop },
+      { x, y: bodyTop + half * 0.45 },
       { x, y: y + half * 0.45 },
-      { x, y: y + height },
-      { x: x - half, y: y + height - half * 0.45 },
+      { x: x - half, y },
     ],
     true,
   );
@@ -1053,16 +1425,27 @@ function drawStack(
   path(
     ctx,
     [
-      { x, y: y + half * 0.45 },
+      { x, y: bodyTop + half * 0.45 },
+      { x: x + half, y: bodyTop },
       { x: x + half, y },
-      { x: x + half, y: y + height - half * 0.45 },
-      { x, y: y + height },
+      { x, y: y + half * 0.45 },
     ],
     true,
   );
   ctx.fill();
   ctx.globalAlpha = 1;
-  ctx.fillRect(x - half - 0.5, y - 1, width + 1, 1.5);
+  // Oversailing cap plus one or two terracotta chimney pots. Their upward
+  // silhouette is the period cue; the previous implementation grew the whole
+  // stack downward from the ridge and looked like a post driven into the roof.
+  ctx.fillStyle = LINTEL;
+  ctx.fillRect(x - half - 0.5, bodyTop - 1, width + 1, Math.max(1, width * 0.16));
+  const pots = width >= 4.5 ? 2 : 1;
+  const potW = Math.max(0.8, width * (pots === 2 ? 0.27 : 0.34));
+  for (let i = 0; i < pots; i++) {
+    const px = pots === 1 ? x : x + (i === 0 ? -width * 0.23 : width * 0.23);
+    ctx.fillRect(px - potW / 2, top, potW, potH + 0.4);
+    ctx.fillRect(px - potW * 0.62, top - 0.45, potW * 1.24, 0.7);
+  }
 }
 
 function drawCupola(

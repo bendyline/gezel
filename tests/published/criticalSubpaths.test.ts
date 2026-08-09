@@ -41,9 +41,23 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
 }> = [
   {
     specifier: '@bendyline/gezel-service/dist/bin/gezeld.js',
-    from: 'client',
+    from: 'cli',
     mode: 'require',
-    usedBy: 'src/discover-or-spawn.ts resolveDaemonEntry() — how the CLI spawns the daemon',
+    usedBy:
+      'src/bin/gezel.ts and src/connection.ts via client resolveDaemonEntry(parentUrl) — how the CLI spawns the daemon',
+  },
+  {
+    specifier: '@bendyline/gezel-service/dist/bin/gezeld.js',
+    from: 'app',
+    mode: 'require',
+    usedBy:
+      'src/supervisor/index.ts via client resolveDaemonEntry(parentUrl) — the desktop dev-mode spawn path',
+  },
+  {
+    specifier: '@bendyline/gezel-service/dist/bin/gezeld.js',
+    from: 'vscode',
+    mode: 'require',
+    usedBy: 'src/daemon.ts resolveDaemonEntryFromExtension() — how the extension spawns the daemon',
   },
   {
     specifier: '@bendyline/gezel-mcp/dist/server.js',

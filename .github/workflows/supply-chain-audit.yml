@@ -1,9 +1,7 @@
-# Daily advisory alarm. The PR-time and release-workflow gates block at
-# critical only (and must stay in lockstep — a publish must never fail on
-# something CI passed), because advisories are published against our pinned
-# versions on npm's clock, not ours. This schedule is the one place that
-# fails at high, so a new high-severity advisory surfaces as a failed
-# scheduled run within a day instead of blocking anyone's PR or release.
+# Daily advisory report. Every CI and release workflow blocks at critical only
+# and reports lower-severity findings without failing. Advisories are published
+# against our pinned versions on npm's clock, not ours, so this schedule keeps
+# new high/moderate/low findings visible without turning them into release gates.
 name: Supply-chain audit
 
 on:
@@ -31,5 +29,5 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
       - name: Verify lockfile supply-chain policies
         run: pnpm audit:lockfile
-      - name: Production dependency vulnerability audit at high severity
-        run: pnpm audit:vulnerabilities --audit-level=high
+      - name: Production dependency vulnerability audit
+        run: pnpm audit:vulnerabilities --audit-level=critical

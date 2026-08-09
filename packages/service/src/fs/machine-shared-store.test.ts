@@ -27,7 +27,10 @@ beforeEach(async () => {
   userHome = join(root, 'user');
   sharedHome = join(root, 'shared');
   previousSharedOverride = process.env.GEZEL_MACHINE_SHARED_HOME;
-  delete process.env.GEZEL_MACHINE_SHARED_HOME;
+  // Keep default host discovery disabled while constructing the pre-split
+  // fixture. Deleting the central Vitest override would mount a developer's
+  // real installer-managed shared root on an installed workstation.
+  process.env.GEZEL_MACHINE_SHARED_HOME = join(root, 'inactive-shared');
 
   // Build a representative pre-split home before publishing it as shared.
   const legacy = new Store({ home: sharedHome });

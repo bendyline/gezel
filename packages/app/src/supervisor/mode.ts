@@ -190,7 +190,10 @@ export async function resolvePerUserMode(opts: ResolveModeOptions): Promise<Mode
  * Bare-JSON read of the remote-service config from `~/.gezel/config.json`.
  * This runs before the `Store` exists, so we don't go through the normal
  * Zod-validated read path — we just pull the one field we need and fall
- * through silently on any I/O or shape error.
+ * through silently on any I/O or shape error. The field IS declared in
+ * `GezelConfigSchema` (as `service`) so daemon-side Store writes round-trip
+ * it instead of stripping it; this raw read stays deliberately independent
+ * of that schema.
  */
 async function readRemoteConfig(home: string): Promise<{ baseUrl: string; token: string } | null> {
   try {

@@ -255,6 +255,12 @@ const cases: ContractCase[] = [
     invoke: (c) => c.getProject('project/one'),
   },
   {
+    name: 'project continue with escaping',
+    method: 'POST',
+    path: '/api/projects/project%2Fone/continue',
+    invoke: (c) => c.continueProject('project/one'),
+  },
+  {
     name: 'reference file location',
     method: 'GET',
     path: '/api/projects/project%2Fone/reference-file-location?kind=artifact&path=reports%2Fone.md',

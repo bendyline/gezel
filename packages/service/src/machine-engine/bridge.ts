@@ -22,6 +22,27 @@ const log = createLogger('machine-engine');
 const MACHINE_REMOTE_ID = 'this-machine';
 const REFRESH_INTERVAL_MS = 5_000;
 
+/**
+ * An expired broker leaf is an outage with a one-step fix (restart the
+ * machine service to mint a fresh cert), not generic unreachability —
+ * every pinned fetch verifies validity dates, and this bridge never
+ * falls back to local engines once the broker was adopted.
+ */
+function isExpiredCertError(error: unknown): boolean {
+  for (let cause = error; cause instanceof Error; cause = cause.cause as Error | undefined) {
+    if ((cause as NodeJS.ErrnoException).code === 'CERT_HAS_EXPIRED') return true;
+  }
+  return false;
+}
+
+function describeBridgeFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isExpiredCertError(error)) {
+    return `the machine service's TLS certificate has expired (the service has been running past the certificate's validity window) — restart the Gezel machine service to mint a fresh certificate (${message})`;
+  }
+  return message;
+}
+
 export interface MachineEngineBridge {
   isConnected(): boolean;
   isRequired(): boolean;
@@ -130,9 +151,7 @@ export async function startMachineEngineBridge(args: {
         // because the broker is restarting. The existing remote stays in
         // place and its next request fails visibly until refresh succeeds.
         healthy = false;
-        log.warn(
-          `[machine-engine] discovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        log.warn(`[machine-engine] discovery failed: ${describeBridgeFailure(error)}`);
       })
       .finally(() => {
         refreshInFlight = null;
@@ -187,9 +206,7 @@ export async function startMachineEngineBridge(args: {
         } as RequestInit & { duplex?: 'half' });
       } catch (error) {
         healthy = false;
-        log.warn(
-          `[machine-engine] proxy failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        log.warn(`[machine-engine] proxy failed: ${describeBridgeFailure(error)}`);
         return new Response(JSON.stringify({ error: 'machine_engine_unavailable' }), {
           status: 503,
           headers: { 'content-type': 'application/json; charset=utf-8' },

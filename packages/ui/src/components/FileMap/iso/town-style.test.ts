@@ -122,9 +122,10 @@ describe('1910 town styles', () => {
     expect(at('village').archetype).toBe('parish-hall');
     expect(at('town').archetype).toBe('guildhall');
     expect(at('city').archetype).toBe('town-hall');
-    // Only the city landmark builds a tower, and it declares the headroom.
-    expect(at('city').roofFactor).toBe(1.6);
-    expect(at('town').roofFactor).toBeUndefined();
+    // Only the city landmark builds a tower, but both raised roof caps declare
+    // their real headroom so they stay cullable and clickable.
+    expect(at('city').roofFactor).toBeGreaterThan(1.6);
+    expect(at('town').roofFactor).toBeGreaterThan(1);
   });
 
   it('city buildings get masonry trim and a tighter bay rhythm than village ones', () => {

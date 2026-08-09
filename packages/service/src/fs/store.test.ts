@@ -47,6 +47,20 @@ describe('config', () => {
     expect(cfg.githubToken).toBe('abc');
   });
 
+  it('round-trips the supervisor remote-service config through unrelated writes', async () => {
+    // `service:{url,token}` is read RAW by the Electron supervisor (Branch-1
+    // remote mode). Before it joined the schema, readConfig stripped it and
+    // the next settings save silently deleted the remote configuration.
+    const service = { url: 'https://remote.example:6228', token: 'remote-token' };
+    await store.writeConfig({ service });
+    await store.writeConfig({ githubToken: 'unrelated-write' });
+    const cfg = await store.readConfig();
+    expect(cfg.service).toEqual(service);
+    expect(cfg.githubToken).toBe('unrelated-write');
+    await store.writeConfig({ service: null });
+    expect((await store.readConfig()).service).toBeUndefined();
+  });
+
   it('fails loudly and preserves a malformed config instead of overwriting it', async () => {
     const configPath = join(home, 'config.json');
     const malformed = '{ "provider": "openai", this is truncated';
