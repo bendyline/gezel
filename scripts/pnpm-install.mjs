@@ -141,6 +141,41 @@ function waitForChild(child) {
   });
 }
 
+/** Run pnpm install after the caller has acquired the checkout mutation lock. */
+export async function runPnpmInstallChild(options = {}) {
+  const repoRoot = options.repoRoot ?? defaultRepoRoot;
+  const args = options.args ?? [];
+  const command = `pnpm install${args.length > 0 ? ` ${args.join(' ')}` : ''}`;
+
+  console.log(`[pnpm-install] ${command}`);
+  const child = (options.spawnPnpmFn ?? spawnPnpm)(['install', ...args], {
+    cwd: repoRoot,
+    env: options.env ?? process.env,
+    stdio: 'inherit',
+  });
+  const completion = waitForChild(child);
+  await options.setChildPid?.(child.pid);
+  const forwardSigint = () => {
+    if (!child.killed) child.kill('SIGINT');
+  };
+  const forwardSigterm = () => {
+    if (!child.killed) child.kill('SIGTERM');
+  };
+  process.once('SIGINT', forwardSigint);
+  process.once('SIGTERM', forwardSigterm);
+  try {
+    const { code, signal } = await completion;
+    if (signal) {
+      console.error(`[pnpm-install] pnpm exited on ${signal}`);
+      return 1;
+    }
+    return code ?? 1;
+  } finally {
+    process.off('SIGINT', forwardSigint);
+    process.off('SIGTERM', forwardSigterm);
+  }
+}
+
 export async function runSerializedPnpmInstall(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const args = options.args ?? [];
@@ -155,33 +190,13 @@ export async function runSerializedPnpmInstall(options = {}) {
         return 0;
       }
 
-      console.log(`[pnpm-install] ${command}`);
-      const child = (options.spawnPnpmFn ?? spawnPnpm)(['install', ...args], {
-        cwd: repoRoot,
-        env: options.env ?? process.env,
-        stdio: 'inherit',
+      return runPnpmInstallChild({
+        repoRoot,
+        args,
+        env: options.env,
+        spawnPnpmFn: options.spawnPnpmFn,
+        setChildPid,
       });
-      const completion = waitForChild(child);
-      await setChildPid(child.pid);
-      const forwardSigint = () => {
-        if (!child.killed) child.kill('SIGINT');
-      };
-      const forwardSigterm = () => {
-        if (!child.killed) child.kill('SIGTERM');
-      };
-      process.once('SIGINT', forwardSigint);
-      process.once('SIGTERM', forwardSigterm);
-      try {
-        const { code, signal } = await completion;
-        if (signal) {
-          console.error(`[pnpm-install] pnpm exited on ${signal}`);
-          return 1;
-        }
-        return code ?? 1;
-      } finally {
-        process.off('SIGINT', forwardSigint);
-        process.off('SIGTERM', forwardSigterm);
-      }
     },
     {
       command,

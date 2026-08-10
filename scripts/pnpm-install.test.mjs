@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -109,4 +109,19 @@ test('parses wrapper-only flags without leaking them to pnpm', () => {
     ifMissing: true,
     args: ['--frozen-lockfile'],
   });
+});
+
+test('link and release-update workflows lock config edits together with installs', async () => {
+  for (const script of ['gilde-link.mjs', 'squisq-link.mjs', 'update-gilde.mjs']) {
+    const source = await readFile(new URL(script, import.meta.url), 'utf8');
+    const lockStart = source.indexOf('withPnpmInstallLock(');
+    const lockedWorkspaceRead = source.indexOf("readFile(workspacePath, 'utf8')", lockStart);
+    const lockedInstall = source.indexOf('runPnpmInstallChild({', lockStart);
+    assert.notEqual(lockStart, -1, `${script} must acquire the checkout dependency lock`);
+    assert.ok(
+      lockedWorkspaceRead > lockStart,
+      `${script} must read dependency config after acquiring the lock`,
+    );
+    assert.ok(lockedInstall > lockedWorkspaceRead, `${script} must install while holding the lock`);
+  }
 });

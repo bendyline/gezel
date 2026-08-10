@@ -4,6 +4,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runPnpmInstallChild, withPnpmInstallLock } from './pnpm-install.mjs';
+
 const GILDE_PACKAGE = '@bendyline/gilde';
 const CATALOG_PACKAGE = '@bendyline/gezel-catalog';
 const VERSION_PATTERN =
@@ -133,15 +135,53 @@ async function main() {
     return;
   }
 
-  await writeFile(catalogPackagePath, updatePinnedDependency(catalogSource, latest), 'utf8');
-  console.log(`[gilde:update] updating ${current} -> ${latest}`);
+  const updated = await withPnpmInstallLock(
+    repoRoot,
+    async ({ setChildPid }) => {
+      // Re-read after acquiring the lock. A link/unlink or another Gilde update
+      // may have completed while the registry query or lock wait was in flight.
+      const [lockedCatalogSource, lockedWorkspaceSource] = await Promise.all([
+        readFile(catalogPackagePath, 'utf8'),
+        readFile(workspacePath, 'utf8'),
+      ]);
+      const lockedCurrent = readPinnedDependency(lockedCatalogSource);
+      if (!hasPackageWideAgeExemption(lockedWorkspaceSource)) {
+        throw new Error(
+          `${workspacePath} must exempt "${GILDE_PACKAGE}" by package name before updating`,
+        );
+      }
+      if (hasLocalGildeOverride(lockedWorkspaceSource)) {
+        throw new Error('local Gilde linking is active; run "pnpm unlink:gilde" before updating');
+      }
+      if (lockedCurrent === latest) {
+        console.log(`[gilde:update] ${GILDE_PACKAGE}@${latest} was updated by another task`);
+        return false;
+      }
 
-  run('pnpm', ['install', '--filter', CATALOG_PACKAGE], {
-    cwd: repoRoot,
-    label: 'refreshing the lockfile and installed package',
-  });
+      await writeFile(
+        catalogPackagePath,
+        updatePinnedDependency(lockedCatalogSource, latest),
+        'utf8',
+      );
+      console.log(`[gilde:update] updating ${lockedCurrent} -> ${latest}`);
 
-  await verifyInstalledVersion(latest);
+      const installStatus = await runPnpmInstallChild({
+        repoRoot,
+        args: ['--filter', CATALOG_PACKAGE],
+        setChildPid,
+      });
+      if (installStatus !== 0) {
+        throw new Error(
+          `refreshing the lockfile and installed package failed with exit code ${installStatus}`,
+        );
+      }
+
+      await verifyInstalledVersion(latest);
+      return true;
+    },
+    { command: 'pnpm gilde:update' },
+  );
+  if (!updated) return;
 
   run(
     process.execPath,

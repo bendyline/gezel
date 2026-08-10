@@ -5,6 +5,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runPnpmInstallChild, withPnpmInstallLock } from './pnpm-install.mjs';
+
 const mode = process.argv[2];
 if (mode !== 'link' && mode !== 'unlink') {
   console.error('Usage: squisq-link.mjs <link|unlink>');
@@ -57,60 +59,62 @@ if (mode === 'link') {
   }
 }
 
-const pkgRaw = await readFile(pkgPath, 'utf8');
-const pkg = JSON.parse(pkgRaw);
-const workspaceRaw = await readFile(workspacePath, 'utf8');
+const installStatus = await withPnpmInstallLock(
+  repoRoot,
+  async ({ setChildPid }) => {
+    const pkgRaw = await readFile(pkgPath, 'utf8');
+    const pkg = JSON.parse(pkgRaw);
+    const workspaceRaw = await readFile(workspacePath, 'utf8');
 
-// pnpm 10.33 moved overrides to pnpm-workspace.yaml. Remove the legacy
-// package.json entries as part of either operation so older local checkouts
-// migrate automatically instead of printing an ignored-setting warning.
-const legacyBefore = JSON.stringify(pkg.pnpm?.overrides ?? {});
-for (const key of Object.keys(OVERRIDES)) delete pkg.pnpm?.overrides?.[key];
-if (pkg.pnpm?.overrides && Object.keys(pkg.pnpm.overrides).length === 0) {
-  delete pkg.pnpm.overrides;
-}
-const legacyChanged = legacyBefore !== JSON.stringify(pkg.pnpm?.overrides ?? {});
-const nextWorkspace = updateWorkspaceOverrides(workspaceRaw, mode);
-const workspaceChanged = nextWorkspace !== workspaceRaw;
+    // pnpm 10.33 moved overrides to pnpm-workspace.yaml. Remove the legacy
+    // package.json entries as part of either operation so older local checkouts
+    // migrate automatically instead of printing an ignored-setting warning.
+    const legacyBefore = JSON.stringify(pkg.pnpm?.overrides ?? {});
+    for (const key of Object.keys(OVERRIDES)) delete pkg.pnpm?.overrides?.[key];
+    if (pkg.pnpm?.overrides && Object.keys(pkg.pnpm.overrides).length === 0) {
+      delete pkg.pnpm.overrides;
+    }
+    const legacyChanged = legacyBefore !== JSON.stringify(pkg.pnpm?.overrides ?? {});
+    const nextWorkspace = updateWorkspaceOverrides(workspaceRaw, mode);
+    const workspaceChanged = nextWorkspace !== workspaceRaw;
 
-if (legacyChanged) await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-if (workspaceChanged) await writeFile(workspacePath, nextWorkspace);
+    if (legacyChanged) await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    if (workspaceChanged) await writeFile(workspacePath, nextWorkspace);
 
-// JSON.stringify always expands arrays one-element-per-line, but biome's
-// formatter wants short arrays inline (line width 100). Without this
-// pass, every link/unlink leaves package.json failing `pnpm lint`.
-if (legacyChanged) {
-  const fmt = spawnSync('pnpm', ['exec', 'biome', 'format', '--write', 'package.json'], {
-    stdio: 'inherit',
-    cwd: repoRoot,
-    shell: process.platform === 'win32',
-  });
-  if (fmt.status !== 0) {
-    console.error('[squisq] biome format failed - package.json may be lint-dirty');
-    process.exit(fmt.status ?? 1);
-  }
-}
+    // JSON.stringify always expands arrays one-element-per-line, but biome's
+    // formatter wants short arrays inline (line width 100). Without this
+    // pass, every link/unlink leaves package.json failing `pnpm lint`.
+    if (legacyChanged) {
+      const fmt = spawnSync('pnpm', ['exec', 'biome', 'format', '--write', 'package.json'], {
+        stdio: 'inherit',
+        cwd: repoRoot,
+        shell: process.platform === 'win32',
+      });
+      if (fmt.status !== 0) {
+        console.error('[squisq] biome format failed - package.json may be lint-dirty');
+        return fmt.status ?? 1;
+      }
+    }
 
-if (!legacyChanged && !workspaceChanged) {
-  console.log(
-    mode === 'link'
-      ? '[squisq] local resolution already active - linked builds refreshed'
-      : '[squisq] already unlinked - nothing to change',
-  );
-  process.exit(0);
-}
+    if (!legacyChanged && !workspaceChanged) {
+      console.log(
+        mode === 'link'
+          ? '[squisq] local resolution already active - reconciling the lockfile and install'
+          : '[squisq] already unlinked - reconciling the lockfile and install',
+      );
+    } else {
+      console.log(
+        mode === 'link'
+          ? '[squisq] linked local packages via pnpm-workspace.yaml overrides'
+          : '[squisq] removed squisq overrides - reinstalling from registry',
+      );
+    }
 
-console.log(
-  mode === 'link'
-    ? '[squisq] linked local packages via pnpm-workspace.yaml overrides'
-    : '[squisq] removed squisq overrides - reinstalling from registry',
+    return runPnpmInstallChild({ repoRoot, setChildPid });
+  },
+  { command: `pnpm ${mode}:squisq` },
 );
-
-const result = spawnSync(process.execPath, [join(scriptsDir, 'pnpm-install.mjs')], {
-  stdio: 'inherit',
-  cwd: repoRoot,
-});
-process.exit(result.status ?? 1);
+process.exitCode = installStatus;
 
 function updateWorkspaceOverrides(source, operation) {
   const newline = source.includes('\r\n') ? '\r\n' : '\n';
