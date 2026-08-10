@@ -28,7 +28,8 @@
     "screenshot": "tsx src/bin/screenshot.ts",
     "thinking-report": "tsx src/bin/thinking-report.ts",
     "report:engine-context": "tsx src/bin/report-engine-context.ts",
-    "scorecard": "tsx src/bin/scorecard.ts"
+    "scorecard": "tsx src/bin/scorecard.ts",
+    "judge-sweep": "tsx src/bin/judge-sweep.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

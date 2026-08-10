@@ -48,6 +48,7 @@
     "eval:batch": "pnpm --filter @bendyline/gezel-evals run batch",
     "eval:all": "pnpm --filter @bendyline/gezel-evals run all",
     "eval:scorecard": "pnpm --filter @bendyline/gezel-evals run scorecard",
+    "eval:judge-sweep": "pnpm --filter @bendyline/gezel-evals run judge-sweep",
     "eval:postmortems": "pnpm --filter @bendyline/gezel-evals run postmortems",
     "eval:viewer": "pnpm --filter @bendyline/gezel-eval-viewer run dev",
     "eval:viewer:build": "pnpm --filter @bendyline/gezel-eval-viewer run build",

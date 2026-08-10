@@ -99,7 +99,7 @@ describe('sample-size discipline across scenarios', () => {
       1,
     );
     expect(score.passRate).toBeNull();
-    expect(score.claim).toBe('2/3 (each task run once — count not rate)');
+    expect(score.claim).toBe('2/3 (some tasks run once — count not rate)');
   });
 
   it('quotes a rate once every task has been repeated', () => {
@@ -110,6 +110,40 @@ describe('sample-size discipline across scenarios', () => {
       ]),
       3,
     );
+    expect(score.claim).toBe('4/6 (67%)');
+  });
+});
+
+describe('per-scenario repeat gating', () => {
+  it('refuses a rate when ANY task ran once, however large the aggregate', () => {
+    // Wild-caught on the first real sweep: `--count 3` silently ran ONE
+    // trial for every craftbook scenario (suggestedTrials caps it), so six
+    // of thirteen productivity tasks were unrepeated while the requested
+    // count still said 3. Trusting the requested count would have printed
+    // a confident percentage over a half-unrepeated suite.
+    const score = scoreModel(
+      result('m', 'r1', [
+        ['repeated-a', 3, 3, 0],
+        ['repeated-b', 3, 2, 0],
+        ['craftbook-once', 1, 1, 0],
+      ]),
+      3,
+    );
+    expect(score.passRate).toBeNull();
+    expect(score.weakestCellTrials).toBe(1);
+    expect(score.underRepeatedScenarios).toEqual(['craftbook-once']);
+    expect(score.claim).toBe('6/7 (some tasks run once — count not rate)');
+  });
+
+  it('quotes a rate only when every task cleared the threshold', () => {
+    const score = scoreModel(
+      result('m', 'r1', [
+        ['a', 3, 3, 0],
+        ['b', 3, 1, 0],
+      ]),
+      3,
+    );
+    expect(score.weakestCellTrials).toBe(3);
     expect(score.claim).toBe('4/6 (67%)');
   });
 });

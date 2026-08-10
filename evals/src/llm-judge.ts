@@ -42,12 +42,16 @@
  * Keeping this as a flat `Record<string, number>` so score-trial.ts +
  * postmortem authors can `.scoreAxes.<name>` either shape.
  */
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+
 export type JudgeScoreAxes = Record<string, number>;
 
 export interface JudgeReport {
   /** Which model + provider did the judging — keep for audit. */
   judgeModel: string;
-  judgeProvider: 'anthropic' | 'openai';
+  judgeProvider: 'anthropic' | 'openai' | 'anthropic-cli';
   scenarioId: string;
   scoreAxes: JudgeScoreAxes;
   /** Mean of the axes. Provided so the skill can drop a single line in the report. */
@@ -112,6 +116,12 @@ const ARTIFACT_FENCE_LANG: Record<NonNullable<RunLlmJudgeOpts['artifactKind']>, 
 };
 
 const ANTHROPIC_MODEL = 'claude-haiku-4-5';
+/**
+ * Model id for the CLI backend. Dashed, not dotted — the Claude CLI
+ * rejects `claude-sonnet-4.6` and the mistake is silent until the call
+ * fails (wild-caught during the anthropic-cli provider bring-up).
+ */
+const CLI_MODEL = 'claude-sonnet-4-6';
 const OPENAI_MODEL = 'gpt-5-mini';
 
 export interface RunLlmJudgeOpts {
@@ -157,8 +167,13 @@ export interface RunLlmJudgeOpts {
 export async function runLlmJudge(opts: RunLlmJudgeOpts): Promise<JudgeReport | null> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (!anthropicKey && !openaiKey) {
-    opts.log('[llm-judge] skipped: no ANTHROPIC_API_KEY or OPENAI_API_KEY in env');
+  // Third backend: the locally-authenticated Claude CLI. It needs no API
+  // key (macOS keychain / subscription auth), which is the common case on
+  // a developer machine — without it the judge silently no-ops and the
+  // qualitative axes never get collected at all.
+  const cliPath = !anthropicKey && !openaiKey ? resolveJudgeCli() : null;
+  if (!anthropicKey && !openaiKey && !cliPath) {
+    opts.log('[llm-judge] skipped: no ANTHROPIC_API_KEY, OPENAI_API_KEY, or claude CLI on PATH');
     return null;
   }
 
@@ -183,10 +198,16 @@ export async function runLlmJudge(opts: RunLlmJudgeOpts): Promise<JudgeReport | 
 
   const startedAt = Date.now();
   try {
-    const provider = anthropicKey ? 'anthropic' : 'openai';
+    const provider: JudgeReport['judgeProvider'] = anthropicKey
+      ? 'anthropic'
+      : openaiKey
+        ? 'openai'
+        : 'anthropic-cli';
     const result = anthropicKey
       ? await callAnthropic(anthropicKey, userMessage)
-      : await callOpenAI(openaiKey ?? '', userMessage);
+      : openaiKey
+        ? await callOpenAI(openaiKey, userMessage)
+        : await callClaudeCli(cliPath!, userMessage);
     const parsed = parseJudgeResponse(
       result.text,
       axes.map((a) => a.name),
@@ -200,7 +221,12 @@ export async function runLlmJudge(opts: RunLlmJudgeOpts): Promise<JudgeReport | 
       axisValues.length > 0 ? axisValues.reduce((s, v) => s + v, 0) / axisValues.length : 0;
     const report: JudgeReport = {
       judgeProvider: provider,
-      judgeModel: provider === 'anthropic' ? ANTHROPIC_MODEL : OPENAI_MODEL,
+      judgeModel:
+        provider === 'anthropic'
+          ? ANTHROPIC_MODEL
+          : provider === 'openai'
+            ? OPENAI_MODEL
+            : CLI_MODEL,
       scenarioId: opts.scenarioId,
       scoreAxes: parsed.scoreAxes,
       meanScore: Math.round(meanScore * 10) / 10,
@@ -242,6 +268,52 @@ interface RawJudgeResponse {
   text: string;
   promptTokens?: number;
   completionTokens?: number;
+}
+
+/**
+ * Locate a usable Claude CLI.
+ *
+ * `GEZEL_JUDGE_CLI` overrides for operators with a non-standard install;
+ * otherwise the first `claude` on PATH. Returns null when absent so the
+ * caller can degrade rather than throw.
+ */
+export function resolveJudgeCli(): string | null {
+  const override = process.env.GEZEL_JUDGE_CLI?.trim();
+  if (override) return existsSync(override) ? override : null;
+  const found = spawnSync('which', ['claude'], { encoding: 'utf8' });
+  const path = found.status === 0 ? found.stdout.trim() : '';
+  return path && existsSync(path) ? path : null;
+}
+
+/**
+ * Judge through the locally-authenticated Claude CLI.
+ *
+ * Deliberately non-interactive and tool-less: `-p` prints one response
+ * and exits, and the judge must reason ONLY from the prompt it is given.
+ * A judge that could read the repository could look up the grader it is
+ * being asked to second-guess, which would make its score a function of
+ * the harness rather than of the artifact.
+ *
+ * Token counts are unavailable from the CLI, so they stay undefined —
+ * better an absent number than an invented one.
+ */
+async function callClaudeCli(cliPath: string, prompt: string): Promise<RawJudgeResponse> {
+  const result = spawnSync(cliPath, ['-p', prompt, '--model', CLI_MODEL], {
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 120_000,
+    // Inherit nothing that would let the CLI pick up repo context.
+    cwd: tmpdir(),
+  });
+  if (result.error) throw new Error(`claude CLI failed to start: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new Error(
+      `claude CLI exited ${result.status}: ${(result.stderr || result.stdout || '').slice(0, 200)}`,
+    );
+  }
+  const text = (result.stdout ?? '').trim();
+  if (!text) throw new Error('claude CLI returned no output');
+  return { text };
 }
 
 async function callAnthropic(apiKey: string, prompt: string): Promise<RawJudgeResponse> {
