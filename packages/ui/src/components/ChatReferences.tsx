@@ -212,10 +212,9 @@ export function ChatReferences({
   chatKey: string;
   /**
    * When set, the side rail gains a "Skills" tab listing this project's
-   * workspace skills and any pending bash→JS import approvals. The rail
-   * is always visible while this prop is set, even with no references in
-   * the chat. Omit for chats that aren't scoped to a single project
-   * workspace (the global Meester timeline).
+   * workspace skills and any pending bash→JS import approvals. The tab is
+   * omitted while both sources are empty. Omit for chats that aren't scoped
+   * to a single project workspace (the global Meester timeline).
    *
    * Runnable commands and craftbooks deliberately do NOT appear here:
    * commands live in the terminal composer's toolbar galleries, and
@@ -242,10 +241,12 @@ export function ChatReferences({
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<RailSection>(
-    skillsProjectId ? 'skills' : 'references',
-  );
+  const [activeTab, setActiveTab] = useState<RailSection>('references');
   const [compactPane, setCompactPane] = useState<CompactPane>('chat');
+  // Store the id, rather than a bare boolean, so switching projects cannot
+  // briefly expose the previous project's Skills rail while the new probe is
+  // still settling.
+  const [skillsAvailableProjectId, setSkillsAvailableProjectId] = useState<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey is the reset trigger — the effect body doesn't read it, but changing it must re-fire.
   useEffect(() => {
@@ -255,6 +256,40 @@ export function ChatReferences({
     setActiveTaskRef(null);
     setCompactPane('chat');
   }, [chatKey]);
+
+  // The Skills panel owns richer polling while it is visible, but it cannot
+  // discover that it should mount in the first place. This lightweight probe
+  // keeps empty project chats full-width and notices newly-added skills or
+  // pending imports without requiring a reload.
+  useEffect(() => {
+    if (!skillsProjectId) {
+      setSkillsAvailableProjectId(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      const [skillsResult, importsResult] = await Promise.allSettled([
+        api.getProjectSkills(skillsProjectId),
+        api.getProjectImportsPending(skillsProjectId),
+      ]);
+      if (
+        cancelled ||
+        skillsResult.status !== 'fulfilled' ||
+        importsResult.status !== 'fulfilled'
+      ) {
+        return;
+      }
+      const available =
+        skillsResult.value.skills.length > 0 || importsResult.value.items.length > 0;
+      setSkillsAvailableProjectId(available ? skillsProjectId : null);
+    };
+    void refresh();
+    const intervalId = window.setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [skillsProjectId]);
 
   const handleTaskReference = useCallback(
     (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => {
@@ -392,7 +427,7 @@ export function ChatReferences({
     }
   }, []);
 
-  const api = useMemo<ChatReferencesApi>(
+  const referenceApi = useMemo<ChatReferencesApi>(
     () => ({
       onToolActivity: handleToolActivity,
       onArtifactReference: handleArtifactReference,
@@ -423,7 +458,7 @@ export function ChatReferences({
 
   const effectiveActive = activeRef ?? references[0] ?? null;
   const hasReferences = effectiveActive !== null;
-  const hasSkills = Boolean(skillsProjectId);
+  const hasSkills = Boolean(skillsProjectId && skillsAvailableProjectId === skillsProjectId);
   // Pinned-first ordering: the session's own task sits at the top, then
   // mentioned tasks in first-seen order.
   const orderedTasks = useMemo(
@@ -455,6 +490,34 @@ export function ChatReferences({
   useEffect(() => {
     if (hasTasks && !hasReferences) setActiveTab('tasks');
   }, [hasTasks, hasReferences]);
+
+  // Skills arrive asynchronously from the availability probe. Select them
+  // only when they are the sole side context; task/reference arrivals retain
+  // their existing precedence and never get yanked away.
+  useEffect(() => {
+    if (hasSkills && !hasTasks && !hasReferences) setActiveTab('skills');
+  }, [hasSkills, hasTasks, hasReferences]);
+
+  // Approving the final pending import can empty the Skills panel while it is
+  // open. Move to another meaningful pane (or back to Chat in compact mode)
+  // instead of leaving a selected tab with no content.
+  useEffect(() => {
+    if (hasSkills) return;
+    if (activeTab === 'skills') {
+      setActiveTab(hasReferences ? 'references' : hasTasks ? 'tasks' : 'references');
+    }
+    if (compactPane === 'skills') {
+      setCompactPane(hasReferences ? 'references' : hasTasks ? 'tasks' : 'chat');
+    }
+  }, [hasSkills, hasReferences, hasTasks, activeTab, compactPane]);
+
+  const handleSkillsAvailabilityChange = useCallback(
+    (available: boolean) => {
+      if (!skillsProjectId) return;
+      setSkillsAvailableProjectId(available ? skillsProjectId : null);
+    },
+    [skillsProjectId],
+  );
 
   // Side width is stored as a fraction of the container width so the
   // split reflows sensibly when the window resizes. Persisted across
@@ -574,7 +637,7 @@ export function ChatReferences({
             className="chat-rail-compact-panel chat-rail-compact-chat"
             value="chat"
           >
-            <div className="chat-rail-main">{children(api)}</div>
+            <div className="chat-rail-main">{children(referenceApi)}</div>
           </Tabs.Content>
 
           {hasTasks && effectiveTaskRef && (
@@ -605,7 +668,12 @@ export function ChatReferences({
 
           {hasSkills && skillsProjectId && (
             <Tabs.Content className="chat-rail-compact-panel" value="skills">
-              <CommandsPanel projectId={skillsProjectId} section="skills" />
+              <CommandsPanel
+                key={skillsProjectId}
+                projectId={skillsProjectId}
+                section="skills"
+                onAvailabilityChange={handleSkillsAvailabilityChange}
+              />
             </Tabs.Content>
           )}
 
@@ -649,7 +717,7 @@ export function ChatReferences({
         ['--chat-rail-grip-track-width' as string]: `${CHAT_RAIL_GRIP_TRACK_PX}px`,
       }}
     >
-      <div className="chat-rail-main">{children(api)}</div>
+      <div className="chat-rail-main">{children(referenceApi)}</div>
 
       {hasSide && (
         <div
@@ -663,8 +731,8 @@ export function ChatReferences({
         />
       )}
 
-      <aside className="chat-rail-side">
-        {hasSide && (
+      {hasSide && (
+        <aside className="chat-rail-side">
           <div className="chat-rail-side-inner">
             {([hasTasks, hasReferences, hasSkills].filter(Boolean).length > 1 ||
               orderedTasks.length > 1 ||
@@ -760,12 +828,17 @@ export function ChatReferences({
             )}
             {activeTab === 'skills' && skillsProjectId && (
               <div className="chat-rail-section-body">
-                <CommandsPanel projectId={skillsProjectId} section="skills" />
+                <CommandsPanel
+                  key={skillsProjectId}
+                  projectId={skillsProjectId}
+                  section="skills"
+                  onAvailabilityChange={handleSkillsAvailabilityChange}
+                />
               </div>
             )}
           </div>
-        )}
-      </aside>
+        </aside>
+      )}
     </div>
   );
 }

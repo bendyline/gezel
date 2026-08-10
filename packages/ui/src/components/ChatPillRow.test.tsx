@@ -1,4 +1,10 @@
-import type { ChatEventEnvelope, ChatSessionSummary, GezelSummary, Task } from '@bendyline/gezel';
+import type {
+  ChatEventEnvelope,
+  ChatSessionSummary,
+  GezelSummary,
+  Task,
+  TerminalThreadSummary,
+} from '@bendyline/gezel';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -103,6 +109,7 @@ function task(ref: string, title: string): Task {
 function renderRow(props: Partial<Parameters<typeof ChatPillRow>[0]> = {}) {
   const onFocusThread = vi.fn();
   const onFocusTask = vi.fn();
+  const onFocusTerminal = vi.fn();
   const onNewTask = vi.fn();
   const utils = render(
     <ChatPillRow
@@ -110,11 +117,12 @@ function renderRow(props: Partial<Parameters<typeof ChatPillRow>[0]> = {}) {
       gezels={GEZELS}
       onFocusThread={onFocusThread}
       onFocusTask={onFocusTask}
+      onFocusTerminal={onFocusTerminal}
       onNewTask={onNewTask}
       {...props}
     />,
   );
-  return { ...utils, onFocusThread, onFocusTask, onNewTask };
+  return { ...utils, onFocusThread, onFocusTask, onFocusTerminal, onNewTask };
 }
 
 beforeEach(() => {
@@ -122,6 +130,7 @@ beforeEach(() => {
   vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [] });
   vi.mocked(api.listInflightTurns).mockResolvedValue({ inflight: [] });
   vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [] });
+  vi.mocked(api.listTerminalThreads).mockResolvedValue({ threads: [] });
 });
 
 describe('ChatPillRow', () => {
@@ -279,6 +288,29 @@ describe('ChatPillRow', () => {
     expect(onFocusThread).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 's1', gezelId: 'g1' }),
     );
+  });
+
+  it('shows a recent terminal window and restores it from its task-bar chip', async () => {
+    const terminal: TerminalThreadSummary = {
+      id: 'packages-ui',
+      projectId: 'p1',
+      workingDir: 'packages/ui',
+      createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+      lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    };
+    vi.mocked(api.listTerminalThreads).mockResolvedValue({ threads: [terminal] });
+    const user = userEvent.setup();
+    const { onFocusTerminal } = renderRow({ activeTerminalThreadId: terminal.id });
+
+    const chip = await screen.findByRole('button', {
+      name: 'Terminal /packages/ui. Updated 2 minutes ago',
+    });
+    expect(chip).toHaveAttribute('aria-pressed', 'true');
+    expect(chip).toHaveTextContent('Terminal');
+    expect(chip).toHaveTextContent('/packages/ui');
+
+    await user.click(chip);
+    expect(onFocusTerminal).toHaveBeenCalledWith(terminal);
   });
 
   it('routes overflow menu items through the same thread-focus handler', async () => {

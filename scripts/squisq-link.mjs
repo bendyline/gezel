@@ -106,10 +106,9 @@ console.log(
     : '[squisq] removed squisq overrides - reinstalling from registry',
 );
 
-const result = spawnSync('pnpm', ['install'], {
+const result = spawnSync(process.execPath, [join(scriptsDir, 'pnpm-install.mjs')], {
   stdio: 'inherit',
   cwd: repoRoot,
-  shell: process.platform === 'win32',
 });
 process.exit(result.status ?? 1);
 

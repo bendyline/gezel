@@ -1086,21 +1086,46 @@ export function planCtxTokensForMemory(
   };
 }
 
+/**
+ * The concurrency floor automatic growth may trade down to. Growth may
+ * consolidate a 3- or 4-lane launch to two lanes when that buys a longer
+ * window, but the second lane is never traded away — a single busy slot
+ * turns every other chat on the machine into a queue, and SWA models with
+ * one slot re-prefill wholesale on session alternation (the same wall the
+ * q8_0 KV trade in {@link planLlamaCppKv} exists to avoid).
+ */
+export const ADAPTIVE_GROWTH_MIN_SLOTS = 2;
+
+/**
+ * A lane is only traded when the window it buys is at least this much
+ * longer than the no-trade grown window. Pure KV-bound consolidation from
+ * 3 → 2 lanes yields 1.5× by construction, so real trades clear this
+ * easily; what it filters out is spending a lane to close the last few
+ * percent toward a target the untraded launch nearly reaches anyway.
+ */
+export const ADAPTIVE_GROWTH_TRADE_MIN_GAIN = 1.25;
+
 export interface AdaptiveCtxGrowthInput {
   /** The ladder-settled per-turn grant the launch would use without growth. */
   basePerTurnCtxTokens: number;
   /** `LlamaCppContextRequirement.growthTargetTokens` — native ∧ ceilings. */
   targetPerTurnCtxTokens: number;
-  /** The ladder-settled slot count. Growth never changes it. */
+  /** The ladder-settled slot count growth starts from. */
   slots: number;
   /**
    * The SAME per-slot KV linearization the accepted admission plan used —
-   * windowed `bytesPerToken` (with `fixedBytes × slots` folded into
-   * `weightsResidentBytes`) when the SWA re-plan produced the plan, the
+   * windowed `bytesPerToken` when the SWA re-plan produced the plan, the
    * full-attention figure otherwise. Feeding a different linearization here
    * would let growth and admission disagree about the same launch.
    */
   kvBytesPerToken: number;
+  /**
+   * Fixed per-slot KV block (windowed models' window-capped SWA layers).
+   * Kept separate from `weightsResidentBytes` — it scales with the slot
+   * count growth itself may change.
+   */
+  kvFixedPerSlotBytes?: number;
+  /** Resident weights WITHOUT any per-slot KV folded in. */
   weightsResidentBytes: number;
   /** Fast pool the growth is confined to (broker fast budget or `fastBytes`). */
   fastBudgetBytes: number;
@@ -1112,10 +1137,23 @@ export interface AdaptiveCtxGrowthInput {
   freeSystemRamBytes: number;
   /** Routed-expert model? Growth on a discrete card is disabled for these. */
   isMoE?: boolean;
+  /**
+   * May growth trade slots for a longer window (never below
+   * {@link ADAPTIVE_GROWTH_MIN_SLOTS})? Callers pass false when an explicit
+   * `providerConcurrency` pin exists — a user-chosen lane count is not
+   * growth's to spend.
+   */
+  allowSlotTrade?: boolean;
 }
 
 export interface AdaptiveCtxGrowthResult {
   perTurnCtxTokens: number;
+  /**
+   * The slot count the grown launch should use. Equals the input count
+   * unless a slot trade bought a longer window; callers must apply it the
+   * same way they apply the admission ladder's slot reduction.
+   */
+  slots: number;
   grown: boolean;
   /** Info-level rationale, set only when grown. Not a warning. */
   reason: string | null;
@@ -1129,9 +1167,16 @@ export interface AdaptiveCtxGrowthResult {
  * Deliberately a second clamp pass rather than a bigger first request:
  * the first ladder pass sizes slot ceilings, the `--swa-full` fit verdict,
  * and RAM-spillover admission, all of which must stay anchored on the
- * practical 64K target — growing the request there would shed concurrency
- * to buy context, decline `--swa-full` for models whose full cache fits at
- * 64K, and grow KV into system-RAM spill on discrete cards.
+ * practical 64K target — growing the request there would decline
+ * `--swa-full` for models whose full cache fits at 64K and grow KV into
+ * system-RAM spill on discrete cards.
+ *
+ * Slot trade: when `allowSlotTrade` is set and the target is out of reach
+ * at the settled slot count, growth walks the count down — taking the
+ * LARGEST count that reaches the target, else the longest window at
+ * {@link ADAPTIVE_GROWTH_MIN_SLOTS}. It never consolidates when the target
+ * is already reachable, never goes below two lanes, and never returns a
+ * smaller window than the un-traded grant.
  *
  * Confinement: on a discrete GPU the clamp sees only the fast budget and
  * usable VRAM (`freeSystemRamBytes` zeroed) so grown KV never pages through
@@ -1147,34 +1192,68 @@ export interface AdaptiveCtxGrowthResult {
  */
 export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): AdaptiveCtxGrowthResult {
   const base = Math.max(1, Math.floor(input.basePerTurnCtxTokens));
-  const noGrowth: AdaptiveCtxGrowthResult = { perTurnCtxTokens: base, grown: false, reason: null };
+  const startSlots = Math.max(1, Math.floor(input.slots));
+  const noGrowth: AdaptiveCtxGrowthResult = {
+    perTurnCtxTokens: base,
+    slots: startSlots,
+    grown: false,
+    reason: null,
+  };
   const target = Math.floor(input.targetPerTurnCtxTokens);
   if (!(target > base) || !(input.kvBytesPerToken > 0)) return noGrowth;
   const discrete = input.budgetKind === 'discrete-gpu';
   if (input.isMoE && discrete) return noGrowth;
-  const safe = clampCtxTokensForMemory({
-    requestedPerTurnCtxTokens: target,
-    slots: input.slots,
-    kvBytesPerToken: input.kvBytesPerToken,
-    weightsResidentBytes: input.weightsResidentBytes,
-    budgetBytes: input.fastBudgetBytes,
-    ...(input.committedOtherBytes !== undefined
-      ? { committedOtherBytes: input.committedOtherBytes }
-      : {}),
-    freeSystemRamBytes: discrete ? 0 : input.freeSystemRamBytes,
-    vramBytes: discrete ? input.vramBytes : 0,
-    minPerTurnCtxTokens: 1,
-  });
-  const grownTo = Math.max(base, Math.min(target, safe.perTurnCtxTokens));
+  const kvFixedPerSlot = Math.max(0, input.kvFixedPerSlotBytes ?? 0);
+  const safeAt = (slots: number): number => {
+    const safe = clampCtxTokensForMemory({
+      requestedPerTurnCtxTokens: target,
+      slots,
+      kvBytesPerToken: input.kvBytesPerToken,
+      weightsResidentBytes: input.weightsResidentBytes + kvFixedPerSlot * slots,
+      budgetBytes: input.fastBudgetBytes,
+      ...(input.committedOtherBytes !== undefined
+        ? { committedOtherBytes: input.committedOtherBytes }
+        : {}),
+      freeSystemRamBytes: discrete ? 0 : input.freeSystemRamBytes,
+      vramBytes: discrete ? input.vramBytes : 0,
+      minPerTurnCtxTokens: 1,
+    });
+    return Math.min(target, safe.perTurnCtxTokens);
+  };
+  // Walk the slot count down only while the target stays out of reach:
+  // the first (largest) count that reaches it wins, else the floor count
+  // holds the longest achievable window.
+  const floorSlots = input.allowSlotTrade
+    ? Math.min(startSlots, ADAPTIVE_GROWTH_MIN_SLOTS)
+    : startSlots;
+  const noTradeCtx = safeAt(startSlots);
+  let chosenSlots = startSlots;
+  let chosenCtx = noTradeCtx;
+  for (let slots = startSlots - 1; slots >= floorSlots && chosenCtx < target; slots -= 1) {
+    const ctx = safeAt(slots);
+    if (ctx > chosenCtx) {
+      chosenSlots = slots;
+      chosenCtx = ctx;
+    }
+  }
+  // A lane costs real concurrency; don't spend one on a marginal gain.
+  if (chosenSlots < startSlots && chosenCtx < noTradeCtx * ADAPTIVE_GROWTH_TRADE_MIN_GAIN) {
+    chosenSlots = startSlots;
+    chosenCtx = noTradeCtx;
+  }
+  const grownTo = Math.max(base, chosenCtx);
   if (grownTo <= base) return noGrowth;
   const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  const slotNote =
+    chosenSlots < startSlots ? `, consolidating ${startSlots} → ${chosenSlots} engine lanes` : '';
   return {
     perTurnCtxTokens: grownTo,
+    slots: chosenSlots,
     grown: true,
     reason:
-      `growing context ${base} → ${grownTo} tokens/turn at ${input.slots} slot${input.slots === 1 ? '' : 's'} ` +
+      `growing context ${base} → ${grownTo} tokens/turn at ${chosenSlots} slot${chosenSlots === 1 ? '' : 's'}${slotNote} ` +
       `(target ${target}): weights ~${gb(input.weightsResidentBytes)} + grown KV ` +
-      `~${gb(grownTo * input.slots * input.kvBytesPerToken)} fits fast memory ` +
+      `~${gb(chosenSlots * (kvFixedPerSlot + grownTo * input.kvBytesPerToken))} fits fast memory ` +
       `~${gb(Math.max(0, input.fastBudgetBytes - (input.committedOtherBytes ?? 0)))}`,
   };
 }

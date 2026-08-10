@@ -208,7 +208,9 @@ function ProjectChatBody({
   // routing-change action.
   const [terminalThreadDir, setTerminalThreadDir] = useState<string>('');
   const [terminalPickerDisplay, setTerminalPickerDisplay] = useState<string>('');
+  const [activeTerminalThreadId, setActiveTerminalThreadId] = useState<string>('');
   const pickTerminalFolder = useCallback((next: string) => {
+    setActiveTerminalThreadId('');
     setTerminalThreadDir(next);
     setTerminalPickerDisplay(next);
   }, []);
@@ -230,6 +232,10 @@ function ProjectChatBody({
   // Live SSE normally paints it first; this key closes the narrow gap where
   // a stream frame is lost while the command itself was safely stored.
   const [terminalRefreshKey, setTerminalRefreshKey] = useState(0);
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState<{
+    threadId: string;
+    requestKey: number;
+  } | null>(null);
   const [terminalSubmission, setTerminalSubmission] = useState<{
     runId: string;
     threadId: string;
@@ -351,15 +357,37 @@ function ProjectChatBody({
           <ChatPillRow
             projectId={project.id}
             gezels={recipientGezels}
-            activeSessionId={sessionId || undefined}
-            activeTaskRef={activeTask?.ref ?? null}
+            activeSessionId={composeMode === 'chat' ? sessionId || undefined : undefined}
+            activeTaskRef={composeMode === 'chat' ? (activeTask?.ref ?? null) : null}
+            activeTerminalThreadId={composeMode === 'terminal' ? activeTerminalThreadId : null}
             refreshKey={pillRefreshKey}
+            terminalRefreshKey={terminalRefreshKey}
             onFocusThread={(pill) =>
               focusThread(pill.sessionId, pill.gezelId, pill.taskRef ? { ref: pill.taskRef } : null)
             }
             onFocusTask={(task) => {
               onTaskReference(task.ref, { focus: true });
               void focusTask(task);
+            }}
+            onFocusTerminal={(thread) => {
+              pickTerminalFolder(thread.workingDir);
+              setActiveTerminalThreadId(thread.id);
+              setComposeMode('terminal');
+              setTerminalFocusRequest((current) => ({
+                threadId: thread.id,
+                requestKey: (current?.requestKey ?? 0) + 1,
+              }));
+              // The thread anchor identifies the persistent shell, while its
+              // latest message records where that shell actually cd'd.
+              void api
+                .getTerminalThread(project.id, thread.id)
+                .then((detail) => {
+                  const cwd = [...detail.messages]
+                    .reverse()
+                    .find((message) => message.cwd !== undefined)?.cwd;
+                  if (cwd !== undefined) setTerminalPickerDisplay(cwd);
+                })
+                .catch(() => {});
             }}
             onNewTask={() => setNewTaskOpen(true)}
           />
@@ -379,6 +407,7 @@ function ProjectChatBody({
             }}
             terminalRefreshKey={terminalRefreshKey}
             {...(terminalSubmission ? { terminalSubmission } : {})}
+            {...(terminalFocusRequest ? { terminalFocusRequest } : {})}
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
@@ -469,6 +498,7 @@ function ProjectChatBody({
                   }
                   initialInput={terminalInitialInput}
                   onSent={(input, result) => {
+                    setActiveTerminalThreadId(result.threadId);
                     setTerminalSubmission({
                       runId: result.runId,
                       threadId: result.threadId,

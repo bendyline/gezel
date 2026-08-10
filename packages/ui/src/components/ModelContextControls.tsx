@@ -2,8 +2,8 @@
  * Per-model row controls for the Local models lists: the "…" actions menu
  * and the context-size editor it opens.
  *
- * The menu replaces the flat Export / Update / Delete link run so a fourth
- * action (Context size…) doesn't turn every row into a toolbar. The editor
+ * The menu replaces the flat fitness / Export / Update / Delete link run so
+ * row actions don't turn every model into a toolbar. The context editor
  * is the third user of the shared `.gz-budget-slider` recipe (see the CSS
  * comment in styles.css) and follows the EngineMemoryBudgetPanel pattern:
  * a draft that is `null` while following automatic, an "Auto" marker tick
@@ -65,6 +65,7 @@ export function ModelActionsMenu({
   contextSupported,
   contextEditorOpen,
   onToggleContextEditor,
+  fitnessAction,
   onUpdate,
   updateLabel = { idle: 'Update', busy: 'Updating…' },
   onDelete,
@@ -76,6 +77,7 @@ export function ModelActionsMenu({
   contextSupported: boolean;
   contextEditorOpen: boolean;
   onToggleContextEditor: () => void;
+  fitnessAction?: { label: string; checking?: boolean; onRun: () => void };
   onUpdate?: () => void;
   /** MLX says "Download again" for a stale catalog install; same action slot. */
   updateLabel?: { idle: string; busy: string };
@@ -115,6 +117,16 @@ export function ModelActionsMenu({
                 onSelect={() => onToggleContextEditor()}
               >
                 {contextEditorOpen ? 'Hide context size' : 'Context size…'}
+              </DropdownMenu.Item>
+            )}
+            {fitnessAction && (
+              <DropdownMenu.Item
+                className="app-nav-menu-item"
+                disabled={fitnessAction.checking}
+                title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
+                onSelect={() => fitnessAction.onRun()}
+              >
+                {fitnessAction.label}
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Item

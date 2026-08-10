@@ -694,24 +694,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                               >
                                 {badge.label}
                               </span>
-                              <button
-                                type="button"
-                                className="home-link"
-                                disabled={badge.tier === 'probing'}
-                                title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
-                                onClick={() => {
-                                  void api
-                                    .runModelFitnessProbe('mlx', m.id)
-                                    .then(() => refreshFitness())
-                                    .catch(() => {});
-                                }}
-                              >
-                                {badge.tier === 'probing'
-                                  ? 'Checking…'
-                                  : entry && !entry.stale && entry.record.status !== 'blocked'
-                                    ? 'Re-run'
-                                    : 'Run fitness check'}
-                              </button>
                             </div>
                           </td>
                           <td className="model-actions-table-cell">
@@ -736,6 +718,21 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                                   onToggleContextEditor={() =>
                                     setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                                   }
+                                  fitnessAction={{
+                                    label:
+                                      badge.tier === 'probing'
+                                        ? 'Checking fitness…'
+                                        : entry && !entry.stale && entry.record.status !== 'blocked'
+                                          ? 'Re-run fitness check'
+                                          : 'Run fitness check',
+                                    checking: badge.tier === 'probing',
+                                    onRun: () => {
+                                      void api
+                                        .runModelFitnessProbe('mlx', m.id)
+                                        .then(() => refreshFitness())
+                                        .catch(() => {});
+                                    },
+                                  }}
                                   onUpdate={() => startInstall(m.id)}
                                   updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
                                   onDelete={() => setToDelete(m.id)}

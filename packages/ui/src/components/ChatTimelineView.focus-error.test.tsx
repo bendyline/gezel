@@ -255,4 +255,54 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
 
     await waitFor(() => expect(timeline.scrollTo).toHaveBeenCalledWith({ top: 88 }));
   });
+
+  it('jumps a recent-terminal chip to the newest row in that terminal thread', async () => {
+    const command: TerminalTimelineEntry = {
+      threadId: 'terminal-1',
+      projectId: 'p1',
+      workingDir: '',
+      threadCreatedAt: '2026-07-25T11:00:00.000Z',
+      threadLastActivityAt: '2026-07-25T11:00:01.000Z',
+      messageId: 'terminal-command-1',
+      msgKind: 'command',
+      content: 'ls',
+      at: '2026-07-25T11:00:00.000Z',
+    };
+    const output: TerminalTimelineEntry = {
+      ...command,
+      messageId: 'terminal-output-1',
+      msgKind: 'output',
+      content: 'alpha.txt',
+      at: '2026-07-25T11:00:01.000Z',
+      exitCode: 0,
+    };
+    const props = {
+      scopeKey: 'project:p1',
+      activeSessionId: undefined,
+      loadTimeline: async (): Promise<ListTimelineResponse> => ({
+        messages: [],
+        terminalEntries: [command, output],
+        hasMore: false,
+      }),
+      streamUrl: () => 'https://example.invalid/events',
+      inflightScope: { projectId: 'p1' },
+    };
+    const view = render(<ChatTimelineView {...props} />);
+    const outputRow = await waitFor(() => {
+      const el = document.querySelector('[data-terminal-message-id="terminal-output-1"]');
+      if (!el) throw new Error('terminal output not rendered yet');
+      return el as HTMLElement;
+    });
+
+    view.rerender(
+      <ChatTimelineView
+        {...props}
+        terminalFocusRequest={{ threadId: 'terminal-1', requestKey: 1 }}
+      />,
+    );
+
+    await waitFor(() => expect(outputRow.scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
+    expect(outputRow).toHaveClass('timeline-focus-flash');
+    expect(screen.getByRole('button', { name: 'Jump to newest and follow' })).toBeVisible();
+  });
 });

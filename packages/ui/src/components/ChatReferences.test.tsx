@@ -16,6 +16,8 @@ const apiMocks = vi.hoisted(() => ({
   readProjectArtifact: vi.fn(),
   readDocument: vi.fn(),
   readProjectWorkspaceFile: vi.fn(),
+  getProjectSkills: vi.fn(),
+  getProjectImportsPending: vi.fn(),
 }));
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
@@ -51,6 +53,10 @@ beforeEach(() => {
   apiMocks.fetchProjectArtifactBlob.mockResolvedValue(new Blob(['media']));
   apiMocks.fetchProjectWorkspaceBlob.mockResolvedValue(new Blob(['media']));
   apiMocks.fetchDocumentBlob.mockResolvedValue(new Blob(['media']));
+  apiMocks.getProjectSkills.mockResolvedValue({
+    skills: [{ name: 'summarize', source: '.claude/skills/summarize/SKILL.md' }],
+  });
+  apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
   Object.defineProperty(URL, 'createObjectURL', {
     configurable: true,
     value: vi.fn(() => 'blob:reference-preview'),
@@ -126,6 +132,22 @@ function task(ref: string, title: string): Task {
 }
 
 describe('ChatReferences responsive split', () => {
+  it('does not reserve a context pane when the project has no workspace skills or imports', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [] });
+    apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
+
+    const { container } = renderProjectRail();
+
+    await waitFor(() => {
+      expect(apiMocks.getProjectSkills).toHaveBeenCalledWith('project-1');
+      expect(apiMocks.getProjectImportsPending).toHaveBeenCalledWith('project-1');
+    });
+    expect(container.querySelector('.chat-rail-body-split')).toBeNull();
+    expect(container.querySelector('.chat-rail-side')).toBeNull();
+    expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
+  });
+
   it('replaces the right pane with full-width tabs below the split threshold', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
     const user = userEvent.setup();
@@ -136,7 +158,7 @@ describe('ChatReferences responsive split', () => {
     });
     expect(container.querySelector('aside')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Skills' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Skills' })).toBeInTheDocument();
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'Skills' }));

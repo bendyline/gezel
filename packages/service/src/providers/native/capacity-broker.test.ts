@@ -1277,6 +1277,85 @@ describe('adaptive context growth', () => {
       expect(shared.perTurnCtxTokens).toBeLessThan(alone.perTurnCtxTokens);
     });
   });
+
+  describe('planAdaptiveContextGrowth — slot trade', () => {
+    // A 32 GB-class card: 30 GB fast pool, 19 GB of resident weights,
+    // ~36 KB/token of KV. The 11 GB KV allowance splits as 84,992
+    // tokens/slot at 3 lanes and 128,000 at 2.
+    const THREE_LANES = {
+      basePerTurnCtxTokens: 65_536,
+      targetPerTurnCtxTokens: 262_144,
+      slots: 3,
+      kvBytesPerToken: 36_864,
+      weightsResidentBytes: 19 * GB,
+      fastBudgetBytes: 30 * GB,
+      committedOtherBytes: 0,
+      budgetKind: 'discrete-gpu' as const,
+      vramBytes: 30 * GB,
+      freeSystemRamBytes: 0,
+      allowSlotTrade: true,
+    };
+
+    it('consolidates 3 → 2 lanes when the target is out of reach and the gain is real', () => {
+      const result = planAdaptiveContextGrowth(THREE_LANES);
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 128_000 });
+      expect(result.reason).toMatch(/consolidating 3 → 2 engine lanes/);
+    });
+
+    it('never trades lanes without allowSlotTrade — an explicit pin is not growth’s to spend', () => {
+      const result = planAdaptiveContextGrowth({ ...THREE_LANES, allowSlotTrade: false });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 84_992 });
+    });
+
+    it('keeps every lane when the target is already reachable without trading', () => {
+      // 80K target fits at 3 lanes (84,992 available per slot).
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        targetPerTurnCtxTokens: 81_920,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 81_920 });
+    });
+
+    it('takes the LARGEST lane count that reaches the target, not always two', () => {
+      // At 4 lanes the pool yields 63,488/slot; the 80K target is reachable
+      // at 3 — consolidating all the way to 2 would spend a lane for nothing.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        slots: 4,
+        targetPerTurnCtxTokens: 81_920,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 81_920 });
+    });
+
+    it('never consolidates below two lanes', () => {
+      const result = planAdaptiveContextGrowth({ ...THREE_LANES, slots: 2 });
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 128_000 });
+    });
+
+    it('refuses a marginal trade — a lane is worth more than a few percent of window', () => {
+      // 88K target: 3 lanes already grant 84,992, so trading to 2 buys only
+      // ~6% — under the materiality bar, the lanes win.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        targetPerTurnCtxTokens: 90_112,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 84_992 });
+    });
+
+    it('prices the windowed fixed block per LANE, so trading also frees fixed KV', () => {
+      // SWA-class shape: modest slope, large per-slot fixed block. Dropping
+      // a lane returns its whole 3 GB fixed block to the pool: 3 lanes leave
+      // only (30−19−9)×0.8 = 1.6 GB of slope KV (~69K/slot), while 2 lanes
+      // leave (30−19−6)×0.8 = 4 GB — the full native window.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        kvBytesPerToken: 8 * 1024,
+        kvFixedPerSlotBytes: 3 * GB,
+        targetPerTurnCtxTokens: 262_144,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 262_144 });
+    });
+  });
 });
 
 describe('minViableLocalContextTokens', () => {

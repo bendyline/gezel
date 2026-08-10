@@ -27,7 +27,8 @@ const MODEL = {
 };
 
 describe('ModelActionsMenu', () => {
-  it('offers context, export, update, and delete for an ordinary row', () => {
+  it('offers fitness, context, export, update, and delete for an ordinary row', () => {
+    const onRunFitnessCheck = vi.fn();
     render(
       <ModelActionsMenu
         engine="llama-cpp"
@@ -35,11 +36,15 @@ describe('ModelActionsMenu', () => {
         contextSupported
         contextEditorOpen={false}
         onToggleContextEditor={() => {}}
+        fitnessAction={{ label: 'Re-run fitness check', onRun: onRunFitnessCheck }}
         onUpdate={() => {}}
         onDelete={() => {}}
       />,
     );
     expect(screen.getByRole('menuitem', { name: 'Context size…' })).toBeEnabled();
+    const fitness = screen.getByRole('menuitem', { name: 'Re-run fitness check' });
+    fireEvent.click(fitness);
+    expect(onRunFitnessCheck).toHaveBeenCalledOnce();
     expect(screen.getByRole('menuitem', { name: 'Export' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Update' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();

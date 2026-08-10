@@ -7,6 +7,12 @@ publicHoistPattern:
 
 confirmModulesPurge: false
 
+# A build/test command must never turn itself into a surprise install. Multiple
+# Codex tasks share this checkout, and concurrent installers can rewrite the
+# live node_modules tree out from under running tests. Intentional installs go
+# through `pnpm deps:install`, which holds the cross-process checkout lock.
+verifyDepsBeforeRun: warn
+
 # The packageManager pin in package.json is authoritative. Warn immediately
 # when the pnpm on PATH differs instead of silently downloading another pnpm
 # before the requested command starts (which can look like a hung command).
@@ -91,6 +97,7 @@ overrides:
   "sharp": "workspace:0.35.3"
   "tar": "7.5.21"
   "ws": "8.21.1"
+  "@bendyline/gilde": "link:../gilde"
 
 patchedDependencies:
   "app-builder-lib@26.15.3": "patches/app-builder-lib@26.15.3.patch"

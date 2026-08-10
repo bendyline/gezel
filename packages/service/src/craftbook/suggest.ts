@@ -7,7 +7,7 @@ import {
   embed as defaultEmbed,
   embedBatch as defaultEmbedBatch,
 } from '../memory/embeddings.js';
-import { listApplicableCraftbooks } from './applicable.js';
+import { type ProjectGitStatusReader, listApplicableCraftbooks } from './applicable.js';
 
 const log = createLogger('craftbook');
 
@@ -47,6 +47,12 @@ export interface CraftbookCandidate {
 // client and MCP layer share the contract. A candidate is the same shape
 // minus the relevance fields the ranker adds.
 export type { CraftbookSuggestion };
+
+interface CraftbookSuggestionDeps {
+  catalog: CatalogService;
+  store: Store;
+  git?: ProjectGitStatusReader;
+}
 
 interface Embedder {
   embed(text: string): Promise<number[]>;
@@ -208,7 +214,7 @@ function clamp01(x: number): number {
  * the meester's shortlist-and-pin at project creation.
  */
 export async function suggestCraftbooks(
-  deps: { catalog: CatalogService; store: Store },
+  deps: CraftbookSuggestionDeps,
   opts: { projectId?: string; query: string; topK?: number; minScore?: number },
 ): Promise<CraftbookSuggestion[]> {
   const candidates = await gatherCandidates(deps, opts.projectId);
@@ -219,7 +225,7 @@ export async function suggestCraftbooks(
 }
 
 async function gatherCandidates(
-  deps: { catalog: CatalogService; store: Store },
+  deps: CraftbookSuggestionDeps,
   projectId?: string,
 ): Promise<CraftbookCandidate[]> {
   const out: CraftbookCandidate[] = [];
@@ -254,9 +260,9 @@ async function gatherCandidates(
   // Bundled comes through `listApplicableCraftbooks`, which both filters by
   // the project's requirement context (no GitHub-only book on a fresh
   // project) and hands back full manifests so we keep tags + triggers.
-  const bundled = await listApplicableCraftbooks(deps.catalog, deps.store, projectId ?? '').catch(
-    () => [],
-  );
+  const bundled = await listApplicableCraftbooks(deps.catalog, deps.store, projectId ?? '', {
+    ...(deps.git ? { git: deps.git } : {}),
+  }).catch(() => []);
   for (const it of bundled) {
     if (it.manifest.kind !== 'craftbook-template') continue;
     const m = it.manifest;

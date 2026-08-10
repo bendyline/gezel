@@ -27,10 +27,9 @@ if (probe.status !== 0) {
   process.exit(1);
 }
 
-console.log('[bootstrap] node_modules missing — running pnpm install');
-const result = spawnSync('pnpm', ['install'], {
+console.log('[bootstrap] node_modules missing — waiting for the shared install lock');
+const result = spawnSync(process.execPath, [join(scriptsDir, 'pnpm-install.mjs'), '--if-missing'], {
   stdio: 'inherit',
   cwd: repoRoot,
-  shell: process.platform === 'win32',
 });
 process.exit(result.status ?? 1);

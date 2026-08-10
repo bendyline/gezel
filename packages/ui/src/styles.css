@@ -14463,7 +14463,7 @@ button.bench-step-foot:disabled {
 
 .chat-rail-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 22rem;
+  grid-template-columns: minmax(0, 1fr);
   /* Stretch the single grid row to fill the container's flex height.
      Without this the implicit row sizes to content (timeline + composer),
      and the chat panel stops short of the bottom edge — leaving dead
@@ -14747,6 +14747,9 @@ body.chat-rail-resizing webview {
   align-items: stretch;
   gap: 0.12rem;
   text-align: left;
+}
+.chat-pill-terminal .terminal-prompt-sigil {
+  flex: 0 0 auto;
 }
 .chat-pill-thread-line {
   display: flex;

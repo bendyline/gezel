@@ -31,6 +31,7 @@ import { Hono } from 'hono';
 import { previewFolder } from '../../about/folder-preview.js';
 import { generateProjectAboutFromRepo } from '../../about/project-generator.js';
 import {
+  craftbookContextForProject,
   listApplicableCraftbooks,
   missingToolsetsForCraftbooks,
   projectCraftbookSummaries,
@@ -372,12 +373,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/craftbooks', async (c) => {
     const id = c.req.param('id');
     const establishedCodebase = await projectHasEstablishedCodebase(ctx.store, id);
+    const requirementContext = await craftbookContextForProject(ctx.store, id, ctx.git);
     const catalogItems = await listApplicableCraftbooks(ctx.catalog, ctx.store, id, {
       establishedCodebase,
+      requirementContext,
     });
     // Project-local books (including project-type installs) shadow same-id
     // catalog entries — mirroring the task resolver's precedence.
-    const projectItems = await projectCraftbookSummaries(ctx.store, id);
+    const projectItems = await projectCraftbookSummaries(ctx.store, id, { requirementContext });
     const projectIds = new Set(projectItems.map((it) => it.manifest.id));
     const items = [
       ...projectItems,

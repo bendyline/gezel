@@ -11183,17 +11183,21 @@ export class ChatManager {
             targetPerTurnCtxTokens: requirement.growthTargetTokens,
             slots,
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
-            weightsResidentBytes:
-              Math.round(installed.approxSizeBytes * 1.2) +
-              ladderKvLinearization.fixedPerSlotBytes * slots,
+            kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
+            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
             vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
             freeSystemRamBytes: availableSystemRamBytes(),
             isMoE: (summary.expertCount ?? 0) > 1,
+            // A user-chosen lane count is not growth's to spend.
+            allowSlotTrade: configuredSlots === undefined,
           });
-          if (growth.grown) grantedCtx = growth.perTurnCtxTokens;
+          if (growth.grown) {
+            grantedCtx = growth.perTurnCtxTokens;
+            slots = growth.slots;
+          }
         }
       } catch (error) {
         if (error instanceof CapacityDeniedError) throw error;

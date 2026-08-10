@@ -475,6 +475,11 @@ export interface ChatTimelineViewProps {
     input: string;
   };
   /**
+   * Requests navigation to the newest rendered row for a terminal thread.
+   * `requestKey` makes repeated clicks on the same task-bar chip distinct.
+   */
+  terminalFocusRequest?: { threadId: string; requestKey: number };
+  /**
    * Fired when the terminal SSE channel reports a `workingDirChanged`
    * event — i.e. the shell behind a thread cd'd to a new path. The
    * parent (ProjectChat) updates its `terminalWorkingDir` display
@@ -546,6 +551,7 @@ export function ChatTimelineView({
   terminalStreamUrl,
   terminalRefreshKey,
   terminalSubmission,
+  terminalFocusRequest,
   onTerminalWorkingDirChanged,
   showProjectName,
   inflightScope,
@@ -763,6 +769,7 @@ export function ChatTimelineView({
     | null
   >(null);
   const [alignedSubmissionKey, setAlignedSubmissionKey] = useState<string | null>(null);
+  const consumedTerminalFocusKeyRef = useRef<number | null>(null);
   const paginatingRef = useRef(false);
   /**
    * Sticky context header — surfaces the user message + assistant
@@ -2331,6 +2338,30 @@ export function ChatTimelineView({
     el.scrollTo({ top });
     setAlignedSubmissionKey(submissionAnchor.key);
   }, [messages, terminalEntries, submissionAnchor, alignedSubmissionKey]);
+
+  /**
+   * A recent-terminal chip restores both halves of the terminal window: the
+   * parent switches the composer back to that persistent shell, while this
+   * effect lands the timeline on the thread's newest visible row. Keep the
+   * request pending until history has rendered so a click during the initial
+   * snapshot load is not lost.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: terminalEntries retries a still-pending focus request after durable terminal rows render.
+  useEffect(() => {
+    if (!terminalFocusRequest) return;
+    if (consumedTerminalFocusKeyRef.current === terminalFocusRequest.requestKey) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const escaped = cssAttrValue(terminalFocusRequest.threadId);
+    const rows = el.querySelectorAll<HTMLElement>(`[data-terminal-thread-id="${escaped}"]`);
+    const target = rows[rows.length - 1];
+    if (!target) return;
+    consumedTerminalFocusKeyRef.current = terminalFocusRequest.requestKey;
+    setPinnedToBottom(false);
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' });
+    target.classList.add('timeline-focus-flash');
+    window.setTimeout(() => target.classList.remove('timeline-focus-flash'), FOCUS_FLASH_MS);
+  }, [terminalFocusRequest, terminalEntries]);
 
   /**
    * Scroll to a session's failed-turn banner (falling back to that

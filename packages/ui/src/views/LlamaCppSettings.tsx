@@ -475,12 +475,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           <em>Adaptive</em> starts from model tuning (64K by default), reduces concurrency before it
           shortens a larger tuned window, and grows the window toward the model's maximum when fast
-          memory has room to spare — concurrency is never reduced to grow. Each model can also be
-          pinned to a specific size from its row in the list below. <em>Model maximum</em> requests
-          the model's full advertised window; if one engine slot cannot hold it safely, the model
-          will not start. This is a machine-wide managed-engine setting. Changing it restarts idle
-          local engines right away; a model that is mid-conversation finishes its current turn
-          first.
+          memory has room to spare — consolidating down to two concurrent chats when that buys a
+          meaningfully longer window, never fewer. Each model can also be pinned to a specific size
+          from its row in the list below. <em>Model maximum</em> requests the model's full
+          advertised window; if one engine slot cannot hold it safely, the model will not start.
+          This is a machine-wide managed-engine setting. Changing it restarts idle local engines
+          right away; a model that is mid-conversation finishes its current turn first.
           {hasExternalBaseUrl ? ' External engine URLs manage their own context size.' : ''}
         </p>
 

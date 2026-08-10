@@ -64,7 +64,7 @@ Source builds require Node.js 24 or newer and the pnpm version pinned by the rep
 ```bash
 corepack enable
 corepack prepare pnpm@11.15.1 --activate
-pnpm install
+pnpm deps:install
 pnpm build
 pnpm dev
 ```

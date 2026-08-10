@@ -697,6 +697,14 @@ export class TerminalManager {
     this.activeRunThreads.set(runId, threadId);
 
     let result: Awaited<ReturnType<typeof this.shellPool.run>>;
+    // Keep the live transcript as a safety net for the settled handoff. The
+    // PTY normally returns the same complete buffer from `run()`, but the UI
+    // must never replace visible streamed output with an empty durable row if
+    // a platform-specific prompt/sentinel edge case leaves that final buffer
+    // blank. The streaming path is already scrubbed of command echo and
+    // sentinel bytes by PersistentShell, so it is safe to persist as the
+    // fallback transcript.
+    let streamedOutput = '';
     try {
       try {
         result = await this.shellPool.run(threadId, {
@@ -704,6 +712,7 @@ export class TerminalManager {
           command: resolution.run,
           columns,
           onChunk: (chunk) => {
+            streamedOutput += chunk;
             // Cap individual envelope payloads at ~8KB to keep the
             // SSE pipe from holding a single multi-megabyte event in
             // a synchronous publish loop. Larger chunks (rare —
@@ -763,11 +772,12 @@ export class TerminalManager {
     // inside the workspace; otherwise pass the absolute path so the
     // picker can display it and the user knows where they are.
     const newDisplayDir = projectRelativeOrAbsolute(wsRoot, result.newCwd);
+    const settledOutput = result.output || streamedOutput.replace(/\s+$/, '');
 
     const outputMessage: TerminalMessage = {
       id: randomUUID(),
       kind: 'output',
-      content: result.output,
+      content: settledOutput,
       at: nowIso(),
       exitCode: result.exitCode,
       durationMs: result.durationMs,
@@ -778,13 +788,13 @@ export class TerminalManager {
       cwd: newDisplayDir,
       // PTY merges stdout + stderr; surface as stdout, leave stderr
       // unset rather than fake-splitting.
-      ...(result.output ? { stdout: result.output } : {}),
+      ...(settledOutput ? { stdout: settledOutput } : {}),
       ...(result.truncated ? { truncated: true } : {}),
       ...(await this.collectListingFileReferences(
         projectId,
         preRunCwdDisplay,
         resolution,
-        result.output,
+        settledOutput,
       )),
     };
     await this.store.appendTerminalMessage(projectId, threadId, workingDir, outputMessage);

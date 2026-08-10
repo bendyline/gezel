@@ -42,6 +42,12 @@ interface Props {
   /** Slice of the panel to render. Defaults to the full list. */
   section?: CommandsPanelSection;
   /**
+   * Reports whether the selected slice has real workspace content. Used by
+   * the project chat to remove its Skills rail after the last skill/import
+   * disappears. Loading and filter text do not affect availability.
+   */
+  onAvailabilityChange?: (available: boolean) => void;
+  /**
    * Stage a command string into the project-chat terminal for the user
    * to review + run (the craftbook command launcher). Absent → the
    * launcher is unavailable and clicks show a hint toast.
@@ -96,7 +102,12 @@ const GROUP_ORDER: Array<{
  * `section` only fetches the sources that section renders, so the
  * terminal's three toolbar popovers don't each pay for all of them.
  */
-export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Props) {
+export function CommandsPanel({
+  projectId,
+  section = 'all',
+  onAvailabilityChange,
+  onStageCommand,
+}: Props) {
   const showCommands = section === 'all' || section === 'commands';
   const showScripts = section === 'all' || section === 'scripts';
   const showCraftbooks = section === 'all' || section === 'tasks';
@@ -125,8 +136,11 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
   // The same for a skills-scoped panel, which never fetches craftbooks and so
   // can't take its cue from `tasksLoaded`.
   const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [skillsLoadSucceeded, setSkillsLoadSucceeded] = useState(false);
   // Bash→JS translations awaiting review before they're written to disk.
   const [pendingImports, setPendingImports] = useState<PendingImportItem[]>([]);
+  const [pendingImportsLoaded, setPendingImportsLoaded] = useState(false);
+  const [pendingImportsLoadSucceeded, setPendingImportsLoadSucceeded] = useState(false);
   const [filter, setFilter] = useState('');
   // The craftbook whose param form is currently open (null = none).
   const [paramTarget, setParamTarget] = useState<CraftbookTemplateManifest | null>(null);
@@ -177,6 +191,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
     try {
       const skillsRes = await api.getProjectSkills(projectId);
       setSkills(skillsRes.skills);
+      setSkillsLoadSucceeded(true);
     } catch {
       /* skills index is optional — silently degrade */
     } finally {
@@ -251,10 +266,35 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
     try {
       const res = await api.getProjectImportsPending(projectId);
       setPendingImports(res.items);
+      setPendingImportsLoadSucceeded(true);
     } catch {
       /* optional — pre-existing projects may have no .gezel/ yet */
+    } finally {
+      setPendingImportsLoaded(true);
     }
   }, [projectId]);
+
+  useEffect(() => {
+    if (
+      section !== 'skills' ||
+      !skillsLoaded ||
+      !pendingImportsLoaded ||
+      !skillsLoadSucceeded ||
+      !pendingImportsLoadSucceeded
+    ) {
+      return;
+    }
+    onAvailabilityChange?.(skills.length > 0 || pendingImports.length > 0);
+  }, [
+    section,
+    skillsLoaded,
+    pendingImportsLoaded,
+    skillsLoadSucceeded,
+    pendingImportsLoadSucceeded,
+    skills.length,
+    pendingImports.length,
+    onAvailabilityChange,
+  ]);
 
   const reviewImport = useCallback(
     async (skillSource: string, action: 'approve' | 'reject') => {

@@ -1866,7 +1866,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     // recognized as terminal commands — so e.g. `pull-request-review`
     // isn't a command in a non-GitHub project.
     listCraftbookCommands: async (projectId) => {
-      const items = await listApplicableCraftbooks(catalog, store, projectId);
+      const items = await listApplicableCraftbooks(catalog, store, projectId, { git });
       return items.flatMap((it) =>
         it.manifest.kind === 'craftbook-template'
           ? [

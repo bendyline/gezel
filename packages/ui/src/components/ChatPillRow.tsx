@@ -1,11 +1,20 @@
-import type { GezelSummary, Task } from '@bendyline/gezel';
+import type { GezelSummary, Task, TerminalThreadSummary } from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../api.js';
 import { DropdownMenu } from '../primitives/index.js';
 import { GezelIcon } from './GezelIcon.js';
+import { formatFolderLabel } from './terminal-folder-label.js';
 import { type ThreadPill, useChatThreadPills } from './useChatThreadPills.js';
 import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+
+const RECENT_TERMINAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function timestampMs(iso: string): number {
+  const parsed = Date.parse(iso);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
 
 /**
  * The status band across the top of a project chat: one pill per thread
@@ -23,10 +32,13 @@ export function ChatPillRow({
   gezels,
   activeSessionId,
   activeTaskRef,
+  activeTerminalThreadId,
   onFocusThread,
   onFocusTask,
+  onFocusTerminal,
   onNewTask,
   refreshKey,
+  terminalRefreshKey,
 }: {
   projectId: string;
   /** Narrow the thread list to one gezel. Omit on the project chat. */
@@ -36,11 +48,15 @@ export function ChatPillRow({
   /** The thread the composer posts into — always keeps its pill. */
   activeSessionId?: string | undefined;
   activeTaskRef?: string | null;
+  activeTerminalThreadId?: string | null;
   onFocusThread: (pill: ThreadPill) => void;
   onFocusTask: (task: Task) => void;
+  /** Omit on chat-only surfaces; supplying it adds recent terminal windows. */
+  onFocusTerminal?: (thread: TerminalThreadSummary) => void;
   /** Omit to hide the "+" on surfaces that can't create project tasks. */
   onNewTask?: (() => void) | undefined;
   refreshKey?: number | undefined;
+  terminalRefreshKey?: number | undefined;
 }) {
   const { tasks } = useProjectActiveTasks({ projectId, refreshKey });
   // An idle thread for a task that already has its own pill is redundant.
@@ -52,6 +68,39 @@ export function ChatPillRow({
     suppressedTaskRefs: taskRefs,
     refreshKey,
   });
+  const [terminalThreads, setTerminalThreads] = useState<TerminalThreadSummary[]>([]);
+  const showTerminalThreads = onFocusTerminal !== undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: terminalRefreshKey is a post-submit bump that deliberately re-reads durable terminal summaries.
+  useEffect(() => {
+    if (!showTerminalThreads) {
+      setTerminalThreads([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .listTerminalThreads(projectId)
+      .then((res) => {
+        if (cancelled) return;
+        const cutoff = Date.now() - RECENT_TERMINAL_WINDOW_MS;
+        setTerminalThreads(
+          res.threads.filter(
+            (thread) => !thread.archived && timestampMs(thread.lastActivityAt) >= cutoff,
+          ),
+        );
+      })
+      .catch(() => {
+        // Preserve the last good set during a transient service failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, showTerminalThreads, terminalRefreshKey]);
+  // ProjectChat stays mounted through some project transitions. Never show
+  // a prior project's terminal windows during the next project's fetch.
+  const visibleTerminalThreads = useMemo(
+    () => terminalThreads.filter((thread) => thread.projectId === projectId),
+    [terminalThreads, projectId],
+  );
 
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const nameFor = (id: string): string => {
@@ -73,10 +122,10 @@ export function ChatPillRow({
     .filter(Boolean)
     .join(', ');
 
-  const empty = pills.length === 0 && tasks.length === 0;
+  const empty = pills.length === 0 && visibleTerminalThreads.length === 0 && tasks.length === 0;
 
   return (
-    <div className="chat-pill-row" role="toolbar" aria-label="Threads and tasks">
+    <div className="chat-pill-row" role="toolbar" aria-label="Threads, terminal windows, and tasks">
       <output className="sr-only">{announcement}</output>
       <div className="chat-pill-row-scroll">
         {empty && <span className="chat-pill-row-empty muted small">No recent threads</span>}
@@ -117,6 +166,16 @@ export function ChatPillRow({
           </DropdownMenu.Root>
         )}
 
+        {onFocusTerminal &&
+          visibleTerminalThreads.map((thread) => (
+            <TerminalPillButton
+              key={thread.id}
+              thread={thread}
+              active={thread.id === activeTerminalThreadId}
+              onFocus={onFocusTerminal}
+            />
+          ))}
+
         {tasks.map((task) => (
           <TaskPillButton
             key={task.ref}
@@ -139,6 +198,38 @@ export function ChatPillRow({
         </button>
       )}
     </div>
+  );
+}
+
+function TerminalPillButton({
+  thread,
+  active,
+  onFocus,
+}: {
+  thread: TerminalThreadSummary;
+  active: boolean;
+  onFocus: (thread: TerminalThreadSummary) => void;
+}) {
+  const folder = formatFolderLabel(thread.workingDir);
+  const updated = formatLongRelativeTime(thread.lastActivityAt);
+  return (
+    <button
+      type="button"
+      className={`chat-pill chat-pill-thread chat-pill-terminal${active ? ' is-active' : ''}`}
+      aria-pressed={active}
+      aria-label={`Terminal ${folder}. Updated ${updated}`}
+      title={`Terminal · ${folder} · updated ${updated}`}
+      onClick={() => onFocus(thread)}
+    >
+      <span className="chat-pill-thread-line chat-pill-thread-title">Terminal</span>
+      <span className="chat-pill-thread-line chat-pill-thread-context">
+        <span className="terminal-prompt-sigil" aria-hidden="true">
+          &gt;
+        </span>
+        <span className="chat-pill-message-preview">{folder}</span>
+      </span>
+      <span className="chat-pill-thread-line chat-pill-thread-update">Updated {updated}</span>
+    </button>
   );
 }
 

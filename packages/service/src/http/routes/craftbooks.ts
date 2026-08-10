@@ -178,7 +178,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
     });
     const body = SuggestRequestSchema.parse(await c.req.json());
     const suggestions = await suggestCraftbooks(
-      { catalog: ctx.catalog, store: ctx.store },
+      { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
       {
         query: body.query,
         ...(body.projectId ? { projectId: body.projectId } : {}),

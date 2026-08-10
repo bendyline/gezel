@@ -910,19 +910,26 @@ export async function buildLlamaCppProvider(opts: {
               targetPerTurnCtxTokens: contextRequirement.growthTargetTokens,
               slots,
               kvBytesPerToken: ladderKvLinearization.bytesPerToken,
-              weightsResidentBytes: residentBytes + ladderKvLinearization.fixedPerSlotBytes * slots,
+              kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
+              weightsResidentBytes: residentBytes,
               fastBudgetBytes,
               committedOtherBytes,
               budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
               vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
               freeSystemRamBytes: availableSystemRamBytes(),
               isMoE,
+              // A user-chosen lane count is not growth's to spend.
+              allowSlotTrade: configuredSlots === undefined,
             });
             if (growth.grown) {
               log.info(
                 `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: ${growth.reason}`,
               );
               effectiveNumCtx = growth.perTurnCtxTokens;
+              if (growth.slots < slots) {
+                slots = growth.slots;
+                batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+              }
             }
           }
         }
