@@ -39,6 +39,30 @@ describe('atomic file publishing', () => {
     await expectNoStagingFiles();
   });
 
+  it('publishes create-only backups without replacing an existing original', async () => {
+    const target = join(dir, 'original.docx');
+    const original = Uint8Array.from([1, 2, 3]);
+    await writeFileAtomic(target, original, { noReplace: true });
+
+    await expect(
+      writeFileAtomic(target, Uint8Array.from([9, 9, 9]), { noReplace: true }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(new Uint8Array(await readFile(target))).toEqual(original);
+    await expectNoStagingFiles();
+  });
+
+  it('publishes create-only backups without replacing an existing original', async () => {
+    const target = join(dir, 'original.docx');
+    const original = Uint8Array.from([1, 2, 3]);
+    await writeFileAtomic(target, original, { noReplace: true });
+
+    await expect(
+      writeFileAtomic(target, Uint8Array.from([9, 9, 9]), { noReplace: true }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(new Uint8Array(await readFile(target))).toEqual(original);
+    await expectNoStagingFiles();
+  });
+
   it('uses collision-free staging paths for concurrent writers', async () => {
     const target = join(dir, 'session.json');
     const payloads = Array.from({ length: 12 }, (_, index) => `payload-${index}`);

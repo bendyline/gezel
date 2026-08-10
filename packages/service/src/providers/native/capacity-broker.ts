@@ -762,6 +762,19 @@ function envMinContextTokens(): number | null {
 }
 
 /**
+ * Operator/eval brake on adaptive context growth. Growth is uncapped by
+ * default — it already cannot exceed the model's native window or fast
+ * memory — but a fleet operator or an eval harness may want a deterministic
+ * ceiling independent of the machine it runs on.
+ */
+function envGrowthCeilingTokens(): number | null {
+  const raw = process.env.GEZEL_LLAMA_GROWTH_CEILING_TOKENS;
+  if (!raw) return null;
+  const tokens = Number.parseInt(raw, 10);
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
+/**
  * The context floor THIS host is held to. A 16 GB Mac or an 8 GB card cannot
  * back a 64K window next to the weights, and the admission ladder's only
  * remaining move there is to deny the launch — so those hosts run at
@@ -842,6 +855,16 @@ export interface LlamaCppContextRequirement extends LocalContextRequirement {
    * Gemma model under model-max.
    */
   strict: boolean;
+  /**
+   * Adaptive growth target: the per-turn window the launch should try to
+   * grow toward AFTER the admission ladder settles slots and grants the
+   * un-grown request — never an admission requirement. Emitted only when
+   * every disable condition is absent (strict model-max, an explicit
+   * numeric override, an authored per-model tuning ceiling at or below the
+   * request, an unknown native window) so launch and preview cannot
+   * disagree about eligibility. Consumed by {@link planAdaptiveContextGrowth}.
+   */
+  growthTargetTokens?: number;
 }
 
 /**
@@ -857,6 +880,15 @@ export function resolveLlamaCppContextRequirement(opts: {
   adaptiveContextWindow?: number;
   contextSizing?: LlamaCppContextSizing;
   minViableContextTokens?: number;
+  /**
+   * Authored `tuning.engine.llamaCpp.contextSize` when the catalog carries
+   * one. Documented as a per-model launch CEILING, so adaptive growth must
+   * not exceed it. Pass it only when authored — the 65_536 fallback the
+   * caller substitutes for the adaptive request must not cap growth.
+   */
+  manifestContextSize?: number;
+  /** Test seam; defaults to `GEZEL_LLAMA_GROWTH_CEILING_TOKENS`, else uncapped. */
+  growthCeilingTokens?: number;
 }): LlamaCppContextRequirement {
   const strictModelMax =
     opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
@@ -872,9 +904,38 @@ export function resolveLlamaCppContextRequirement(opts: {
       ? { minViableContextTokens: opts.minViableContextTokens }
       : {}),
   });
-  return strictModelMax
-    ? { ...resolved, minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens, strict: true }
-    : { ...resolved, strict: false };
+  if (strictModelMax) {
+    return {
+      ...resolved,
+      minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens,
+      strict: true,
+    };
+  }
+  const base: LlamaCppContextRequirement = { ...resolved, strict: false };
+  // Growth eligibility: adaptive policy (not strict — handled above), no
+  // explicit numeric override (env, machine-wide, or per-model — the caller
+  // folds all three into explicitContextWindow), and a genuinely known
+  // native window to grow toward.
+  if (
+    opts.explicitContextWindow === undefined &&
+    opts.modelContextWindow !== undefined &&
+    opts.modelContextWindow > 0
+  ) {
+    const ceiling =
+      opts.growthCeilingTokens ?? envGrowthCeilingTokens() ?? Number.POSITIVE_INFINITY;
+    const cap = Math.min(
+      Math.floor(opts.modelContextWindow),
+      ceiling,
+      opts.manifestContextSize && opts.manifestContextSize > 0
+        ? Math.floor(opts.manifestContextSize)
+        : Number.POSITIVE_INFINITY,
+    );
+    const target = Number.isFinite(cap) ? Math.floor(cap / 1024) * 1024 : 0;
+    if (target > resolved.requestedPerTurnCtxTokens) {
+      return { ...base, growthTargetTokens: target };
+    }
+  }
+  return base;
 }
 
 /** Numerical floor for the low-level clamp calculation. Production admission
@@ -1022,6 +1083,99 @@ export function planCtxTokensForMemory(
     slots: 1,
     minimumPerTurnCtxTokens: minimum,
     minimumSatisfied: false,
+  };
+}
+
+export interface AdaptiveCtxGrowthInput {
+  /** The ladder-settled per-turn grant the launch would use without growth. */
+  basePerTurnCtxTokens: number;
+  /** `LlamaCppContextRequirement.growthTargetTokens` — native ∧ ceilings. */
+  targetPerTurnCtxTokens: number;
+  /** The ladder-settled slot count. Growth never changes it. */
+  slots: number;
+  /**
+   * The SAME per-slot KV linearization the accepted admission plan used —
+   * windowed `bytesPerToken` (with `fixedBytes × slots` folded into
+   * `weightsResidentBytes`) when the SWA re-plan produced the plan, the
+   * full-attention figure otherwise. Feeding a different linearization here
+   * would let growth and admission disagree about the same launch.
+   */
+  kvBytesPerToken: number;
+  weightsResidentBytes: number;
+  /** Fast pool the growth is confined to (broker fast budget or `fastBytes`). */
+  fastBudgetBytes: number;
+  committedOtherBytes?: number;
+  budgetKind: CapacityBudget['kind'];
+  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
+  vramBytes: number;
+  /** Live free RAM — consulted only on shared-pool hosts. */
+  freeSystemRamBytes: number;
+  /** Routed-expert model? Growth on a discrete card is disabled for these. */
+  isMoE?: boolean;
+}
+
+export interface AdaptiveCtxGrowthResult {
+  perTurnCtxTokens: number;
+  grown: boolean;
+  /** Info-level rationale, set only when grown. Not a warning. */
+  reason: string | null;
+}
+
+/**
+ * Grow an adaptive launch's per-turn context toward the model's native
+ * window using only the fast memory left over AFTER the admission ladder
+ * settled slots and granted the un-grown request.
+ *
+ * Deliberately a second clamp pass rather than a bigger first request:
+ * the first ladder pass sizes slot ceilings, the `--swa-full` fit verdict,
+ * and RAM-spillover admission, all of which must stay anchored on the
+ * practical 64K target — growing the request there would shed concurrency
+ * to buy context, decline `--swa-full` for models whose full cache fits at
+ * 64K, and grow KV into system-RAM spill on discrete cards.
+ *
+ * Confinement: on a discrete GPU the clamp sees only the fast budget and
+ * usable VRAM (`freeSystemRamBytes` zeroed) so grown KV never pages through
+ * system RAM; on unified / system-ram hosts fast memory IS the budget, so
+ * the inputs match the base clamp. Inherits `VRAM_USABLE_FRACTION` and
+ * {@link LOCAL_ENGINE_COMPUTE_HEADROOM} through the shared clamp.
+ *
+ * MoE models never grow on a discrete card: `planMoeOffload` places routed
+ * experts around the KV reserve, and a grown reserve would silently evict
+ * experts from VRAM — trading decode speed for context behind the user's
+ * back. (Models whose resident weights exceed the fast pool get a zero
+ * allowance and don't grow regardless, which covers CPU-spilled MoE.)
+ */
+export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): AdaptiveCtxGrowthResult {
+  const base = Math.max(1, Math.floor(input.basePerTurnCtxTokens));
+  const noGrowth: AdaptiveCtxGrowthResult = { perTurnCtxTokens: base, grown: false, reason: null };
+  const target = Math.floor(input.targetPerTurnCtxTokens);
+  if (!(target > base) || !(input.kvBytesPerToken > 0)) return noGrowth;
+  const discrete = input.budgetKind === 'discrete-gpu';
+  if (input.isMoE && discrete) return noGrowth;
+  const safe = clampCtxTokensForMemory({
+    requestedPerTurnCtxTokens: target,
+    slots: input.slots,
+    kvBytesPerToken: input.kvBytesPerToken,
+    weightsResidentBytes: input.weightsResidentBytes,
+    budgetBytes: input.fastBudgetBytes,
+    ...(input.committedOtherBytes !== undefined
+      ? { committedOtherBytes: input.committedOtherBytes }
+      : {}),
+    freeSystemRamBytes: discrete ? 0 : input.freeSystemRamBytes,
+    vramBytes: discrete ? input.vramBytes : 0,
+    minPerTurnCtxTokens: 1,
+  });
+  const grownTo = Math.max(base, Math.min(target, safe.perTurnCtxTokens));
+  if (grownTo <= base) return noGrowth;
+  const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  return {
+    perTurnCtxTokens: grownTo,
+    grown: true,
+    reason:
+      `growing context ${base} → ${grownTo} tokens/turn at ${input.slots} slot${input.slots === 1 ? '' : 's'} ` +
+      `(target ${target}): weights ~${gb(input.weightsResidentBytes)} + grown KV ` +
+      `~${gb(grownTo * input.slots * input.kvBytesPerToken)} fits fast memory ` +
+      `~${gb(Math.max(0, input.fastBudgetBytes - (input.committedOtherBytes ?? 0)))}`,
   };
 }
 

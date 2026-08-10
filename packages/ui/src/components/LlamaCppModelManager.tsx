@@ -13,7 +13,7 @@ import type {
   LlamaCppInstalledModel,
   ModelFitnessEntry,
 } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
   MODEL_INVENTORY_CHANGED_EVENT,
@@ -24,7 +24,8 @@ import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
-import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
+import { ImportModelBundleButton } from './ModelBundleControls.js';
+import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { formatContextWindow } from './model-context.js';
@@ -201,6 +202,11 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [toDelete, setToDelete] = useState<string | null>(null);
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // Which model row has the context-size editor expanded beneath it.
+  const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // False until the override endpoint answers — an older daemon or machine
+  // broker 404s and the affordance hides rather than erroring per row.
+  const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
   const [probing, setProbing] = useState<string[]>([]);
@@ -258,6 +264,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       .getMemoryProfile()
       .then((m) => setMemory(m as MemoryProfile))
       .catch(() => {});
+    void api
+      .getModelContextOverrides('llama-cpp')
+      .then(() => setContextOverridesSupported(true))
+      .catch(() => setContextOverridesSupported(false));
   }, [refresh]);
 
   useEffect(() => {
@@ -662,7 +672,16 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           )}
           {modelsError && <p className="error">{modelsError}</p>}
           {models.length > 0 && (
-            <table className="ollama-model-table">
+            <div className="ollama-model-table-wrap">
+              <table className="ollama-model-table">
+              <colgroup>
+                <col className="model-name-column" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Name</th>
@@ -718,136 +737,156 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                         })
                       : null;
                   return (
-                    <tr key={m.id}>
-                      <td>
-                        <code>{m.id}</code>
-                        {hint && (
-                          <span
-                            className={`home-status-pill${hint.kind === 'moe-good-match' ? ' home-status-ok' : ''}`}
-                            style={{ marginLeft: '0.5rem' }}
-                            title={hint.detail}
-                          >
-                            {hint.label}
-                          </span>
-                        )}
-                        {m.updateAvailable && (
-                          <span
-                            className="home-status-pill home-status-warn"
-                            style={{ marginLeft: '0.5rem' }}
-                            title={
-                              m.availableVersion
-                                ? `A newer build is available in the catalog (→ v${m.availableVersion}). Update re-downloads and replaces it in place.`
-                                : 'A newer build is available in the catalog.'
-                            }
-                          >
-                            update available
-                          </span>
-                        )}
-                      </td>
-                      <td title={modelSizeTitle(m)}>
-                        {formatBytes(m.approxSizeBytes)}
-                        {modelMemoryHeadline(m) ? (
-                          <span className="muted small">{modelMemoryHeadline(m)}</span>
-                        ) : null}
-                      </td>
-                      <td title={quantizationTitle(m.quantization)}>
-                        {approximateQuantizationLabel(m.quantization)}
-                      </td>
-                      <td
-                        title={
-                          m.effectiveContextWindow
-                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory.`
-                            : m.contextSizingStatus === 'restart-required'
-                              ? 'This model is running with a smaller context window than the current sizing policy requires. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
-                              : m.contextSizingStatus === 'insufficient-memory'
-                                ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
-                                : 'The effective context size is unavailable.'
-                        }
-                      >
-                        {m.contextSizingStatus === 'restart-required'
-                          ? 'Restart needed'
-                          : m.contextSizingStatus === 'insufficient-memory'
-                            ? "Won't fit"
-                            : formatContextWindow(m.effectiveContextWindow)}
-                      </td>
-                      <td className="model-fitness-table-cell">
-                        <div className="model-fitness-cell">
-                          <span
-                            className={`home-status-pill model-fitness-badge${
-                              badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
-                            }${
-                              badge.tier === 'ok'
-                                ? ' home-status-ok'
-                                : badge.tier === 'warn'
-                                  ? ' home-status-warn'
-                                  : ''
-                            }`}
-                            title={badge.detail}
-                          >
-                            {badge.label}
-                          </span>
-                          <button
-                            type="button"
-                            className="home-link"
-                            disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
-                            onClick={() => {
-                              void api
-                                .runModelFitnessProbe('llama-cpp', m.id)
-                                .then(() => refreshFitness())
-                                .catch(() => {});
-                            }}
-                          >
-                            {badge.tier === 'probing'
-                              ? 'Checking…'
-                              : entry && !entry.stale && entry.record.status !== 'blocked'
-                                ? 'Re-run'
-                                : 'Run fitness check'}
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ marginRight: '0.75rem' }}>
-                          <ExportModelBundleButton engine="llama-cpp" id={m.id} />
-                        </span>
-                        {m.updateAvailable && (
-                          <button
-                            type="button"
-                            className="home-link"
-                            disabled={updating}
-                            style={{ marginRight: '0.75rem' }}
-                            title={
-                              m.availableVersion
-                                ? `Re-download the current build (→ v${m.availableVersion}) and replace in place.`
-                                : 'Re-download the current build and replace in place.'
-                            }
-                            onClick={() => startInstall(m.id)}
-                          >
-                            {updating ? 'Updating…' : 'Update'}
-                          </button>
-                        )}
-                        {m.readOnly ? (
-                          <span
-                            className="muted small"
-                            title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
-                          >
-                            Machine model
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="home-link"
-                            onClick={() => setToDelete(m.id)}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={m.id}>
+                      <tr>
+                        <td className="model-name-table-cell">
+                          <div className="model-name-cell">
+                            <code>{m.id}</code>
+                            <div className="model-name-meta">
+                              {hint && (
+                                <span
+                                  className={`home-status-pill${hint.kind === 'moe-good-match' ? ' home-status-ok' : ''}`}
+                                  title={hint.detail}
+                                >
+                                  {hint.label}
+                                </span>
+                              )}
+                              {m.updateAvailable && (
+                                <span
+                                  className="home-status-pill home-status-warn"
+                                  title={
+                                    m.availableVersion
+                                      ? `A newer build is available in the catalog (→ v${m.availableVersion}). Update re-downloads and replaces it in place.`
+                                      : 'A newer build is available in the catalog.'
+                                  }
+                                >
+                                  update available
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td title={modelSizeTitle(m)}>
+                          {formatBytes(m.approxSizeBytes)}
+                          {modelMemoryHeadline(m) ? (
+                            <span className="muted small model-memory-headline">
+                              {modelMemoryHeadline(m)}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td title={quantizationTitle(m.quantization)}>
+                          {approximateQuantizationLabel(m.quantization)}
+                        </td>
+                        <td
+                          title={
+                            m.effectiveContextWindow
+                              ? m.overrideContextTokens !== undefined
+                                ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
+                                : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory — Adaptive grows it past 64K when fast memory has room.`
+                              : m.contextSizingStatus === 'restart-required'
+                                ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                                : m.contextSizingStatus === 'insufficient-memory'
+                                  ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
+                                  : 'The effective context size is unavailable.'
+                          }
+                        >
+                          {m.contextSizingStatus === 'restart-required' ? (
+                            'Restart needed'
+                          ) : m.contextSizingStatus === 'insufficient-memory' ? (
+                            "Won't fit"
+                          ) : (
+                            <>
+                              {formatContextWindow(m.effectiveContextWindow)}
+                              {m.overrideContextTokens !== undefined && (
+                                <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                                  custom
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="model-fitness-table-cell">
+                          <div className="model-fitness-cell">
+                            <span
+                              className={`home-status-pill model-fitness-badge${
+                                badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
+                              }${
+                                badge.tier === 'ok'
+                                  ? ' home-status-ok'
+                                  : badge.tier === 'warn'
+                                    ? ' home-status-warn'
+                                    : ''
+                              }`}
+                              title={badge.detail}
+                            >
+                              {badge.label}
+                            </span>
+                            <button
+                              type="button"
+                              className="home-link"
+                              disabled={badge.tier === 'probing'}
+                              title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
+                              onClick={() => {
+                                void api
+                                  .runModelFitnessProbe('llama-cpp', m.id)
+                                  .then(() => refreshFitness())
+                                  .catch(() => {});
+                              }}
+                            >
+                              {badge.tier === 'probing'
+                                ? 'Checking…'
+                                : entry && !entry.stale && entry.record.status !== 'blocked'
+                                  ? 'Re-run'
+                                  : 'Run fitness check'}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="model-actions-table-cell">
+                          <div className="model-actions-cell">
+                            <div className="model-action-status">
+                              {m.readOnly && (
+                                <span
+                                  className="muted small"
+                                  title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                                >
+                                  Machine model
+                                </span>
+                              )}
+                            </div>
+                            <div className="model-action-links">
+                              <ModelActionsMenu
+                                engine="llama-cpp"
+                                model={m}
+                                updating={updating}
+                                contextSupported={contextOverridesSupported}
+                                contextEditorOpen={contextEditorFor === m.id}
+                                onToggleContextEditor={() =>
+                                  setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                                }
+                                onUpdate={() => startInstall(m.id)}
+                                onDelete={() => setToDelete(m.id)}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {contextEditorFor === m.id && (
+                        <tr className="model-context-editor-row">
+                          <td colSpan={6}>
+                            <ModelContextSliderPanel
+                              engine="llama-cpp"
+                              model={m}
+                              onSaved={refresh}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </div>
       )}

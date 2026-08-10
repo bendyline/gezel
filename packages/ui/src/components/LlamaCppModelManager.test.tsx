@@ -6,6 +6,7 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('./ModelBundleControls.js', () => ({
   ExportModelBundleButton: () => null,
   ImportModelBundleButton: () => <button type="button">Import .gezmodel</button>,
+  useExportModelBundle: () => ({ run: async () => {}, busy: false, error: null }),
 }));
 
 const { LlamaCppModelManager } = await import('./LlamaCppModelManager.js');
@@ -76,6 +77,57 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('64K')).toBeInTheDocument();
     expect(screen.queryByText('128K')).not.toBeInTheDocument();
+  });
+
+  it('tags a per-model context override as custom in the Context size column', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'qwen3.6-27b-q4',
+          name: 'Qwen 3.6 (27B)',
+          approxSizeBytes: 17_100_000_000,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/qwen3.6-27b-q4/model.gguf',
+          contextWindow: 262_144,
+          effectiveContextWindow: 98_304,
+          overrideContextTokens: 98_304,
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const tag = await screen.findByText('custom');
+    expect(tag.closest('td')?.textContent).toContain('96K');
+    expect(tag.closest('td')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/You've set this model to 98,304 tokens/),
+    );
+  });
+
+  it('shows Restart needed while a warm engine still holds a stale window', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'qwen3.6-27b-q4',
+          name: 'Qwen 3.6 (27B)',
+          approxSizeBytes: 17_100_000_000,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/qwen3.6-27b-q4/model.gguf',
+          contextWindow: 262_144,
+          contextSizingStatus: 'restart-required',
+          overrideContextTokens: 98_304,
+          quantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('Restart needed')).toBeInTheDocument();
   });
 
   it('shows the expected in-memory footprint beside the on-disk size', async () => {

@@ -130,14 +130,14 @@ Catalog **content** is not in this repo. It lives across three repos:
 
 - **gezel** (this repo) — the app plus the catalog *loader*
   (`packages/catalog`: `CatalogService`, sources, npm-toolset install
-  pipeline) and the content *authoring* scripts
-  (`packages/catalog/scripts/`: `build-manifest`, `generate-craftbooks`,
-  `pin-revisions`, `import-mcp-registry`), which stay here because they
-  import unpublished core Zod schemas.
+  pipeline) and schema-aware compilers that genuinely depend on unpublished
+  core APIs. It contains no chat-model authoring recipes or generator.
 - **[`bendyline/gilde`](https://github.com/bendyline/gilde)** — the
   content: `data/` (chat/image/video models, toolsets, connector types,
   project types, gezel role templates, craftbooks + `test.json` eval
-  sidecars, and the bot-managed `data/community/` MCP-registry tier).
+  sidecars, and the bot-managed `data/community/` MCP-registry tier), plus
+  every chat-model recipe under `authoring/chat-models/` and its local
+  generator. Model introductions require no Gezel source change.
   Repo root **is** the npm package root of `@bendyline/gilde`, so the
   published package and the checkout are interchangeable. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation
@@ -158,9 +158,9 @@ at runtime through `gildeDataDir()` in
 authoring scripts locate the sibling checkout via `GILDE_DIR` (default
 `../gilde`).
 
-The content-change dance: edit or generate into the sibling `../gilde`
-checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) →
-`pnpm --filter @bendyline/gezel-catalog build-index` → gilde PR → CI
+The content-change dance: edit or generate in the sibling `../gilde`
+checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) → run
+Gilde's `npm run fix && npm run check` → gilde PR → CI
 validates → merge → the pipeline publishes → bump the pin in
 `packages/catalog/package.json` **and** the `minimumReleaseAgeExclude`
 entry in `pnpm-workspace.yaml` → `pnpm unlink:gilde`. Content regressions

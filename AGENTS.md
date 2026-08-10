@@ -128,7 +128,7 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 | `packages/ui` | React/Vite web app. Served by the service at `/`. |
 | `packages/app` | Electron shell. Holds the supervisor (machine-service adoption on every packaged platform, per-user spawn, and embedded fallback), loads the UI, and ships platform installer/autostart scaffolding. |
 | `packages/cli` | `gezel` command-line for headless scenarios. |
-| `packages/catalog` | Catalog *loader* (sources, install pipeline, authoring/generation scripts). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
+| `packages/catalog` | Catalog *loader* (sources, install pipeline, schema-aware compilers). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
 | `packages/plugin-sdk` | Helpers for writing gezel plugins (legacy surface, kept for compatibility). |
 | `packages/sdk` | Newer extension surface — typed entry points for external integrations and embedders. The plugin-sdk is the historical equivalent; treat `sdk` as the preferred surface for new work. |
 | `packages/vscode` | VSCode extension that surfaces gezel features inside the editor. |
@@ -142,17 +142,15 @@ Catalog **content** is not in this repo. It lives across three repos:
 
 - **gezel** (this repo) — the app plus the catalog *loader*
   (`packages/catalog`: `CatalogService`, sources, npm-toolset install
-  pipeline) and the content *authoring* scripts
-  (`packages/catalog/scripts/`: `build-manifest`, `generate-craftbooks`,
-  `pin-revisions`, `import-mcp-registry`), which stay here because they
-  import unpublished core Zod schemas. Content-bearing inputs for generated
-  families live in gilde's `authoring/` tree; Gezel keeps only the
-  schema-aware compiler code.
+  pipeline) and schema-aware compilers that genuinely depend on unpublished
+  core APIs. It contains no chat-model authoring recipes or generator.
 - **[`bendyline/gilde`](https://github.com/bendyline/gilde)** — the
   content: `data/` (chat/image/video models, toolsets, connector types,
   project types, gezel role templates, craftbooks + `test.json` eval
   sidecars, and the bot-managed `data/community/` MCP-registry tier), plus
-  `authoring/` source material for generated catalog families.
+  `authoring/` source material for generated catalog families, including
+  every chat-model recipe and `tools/build-chat-model.mjs`. A model can be
+  introduced and released entirely in Gilde without a Gezel source change.
   Repo root **is** the npm package root of `@bendyline/gilde`, so the
   published package and the checkout are interchangeable. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation
@@ -170,12 +168,12 @@ Gezel consumes the content as an **exact-pinned registry dep** of
 at runtime through `gildeDataDir()` in
 [packages/catalog/src/gilde-data.ts](packages/catalog/src/gilde-data.ts).
 `GEZEL_GILDE_DATA_DIR` overrides resolution for tests/evals/operators;
-authoring scripts locate the sibling checkout via `GILDE_DIR` (default
-`../gilde`).
+Gezel-side schema-aware compilers locate the sibling checkout via `GILDE_DIR`
+(default `../gilde`).
 
-The content-change dance: edit or generate into the sibling `../gilde`
-checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) →
-`pnpm --filter @bendyline/gezel-catalog build-index` → gilde PR → CI
+The content-change dance: edit or generate in the sibling `../gilde`
+checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) → run
+Gilde's `npm run fix && npm run check` → gilde PR → CI
 validates → merge → the pipeline publishes → bump the pin in
 `packages/catalog/package.json` **and** the `minimumReleaseAgeExclude`
 entry in `pnpm-workspace.yaml` → `pnpm unlink:gilde`. Content regressions

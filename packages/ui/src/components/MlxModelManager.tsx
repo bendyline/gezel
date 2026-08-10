@@ -6,7 +6,7 @@ import type {
   MlxInstalledModel,
   ModelFitnessEntry,
 } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
   MODEL_INVENTORY_CHANGED_EVENT,
@@ -17,7 +17,8 @@ import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
-import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
+import { ImportModelBundleButton } from './ModelBundleControls.js';
+import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
@@ -139,6 +140,11 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
+  // Which model row has the context-size editor expanded beneath it.
+  const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // False until the override endpoint answers — an older daemon or machine
+  // broker 404s and the affordance hides rather than erroring per row.
+  const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
   const [probing, setProbing] = useState<string[]>([]);
@@ -182,6 +188,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       .getMemoryProfile()
       .then((m) => setMemory(m as MemoryProfile))
       .catch(() => {});
+    void api
+      .getModelContextOverrides('mlx')
+      .then(() => setContextOverridesSupported(true))
+      .catch(() => setContextOverridesSupported(false));
   }, [refresh]);
 
   useEffect(() => {
@@ -566,7 +576,16 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
           {modelsError && <p className="error">{modelsError}</p>}
           {models.length > 0 && (
-            <table className="ollama-model-table">
+            <div className="ollama-model-table-wrap">
+              <table className="ollama-model-table">
+              <colgroup>
+                <col className="model-name-column" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Name</th>
@@ -603,110 +622,141 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     probing: probing.includes(fitnessKey),
                   });
                   return (
-                    <tr key={m.id}>
-                      <td>
-                        <code>{m.id}</code>
-                        {outOfDate && (
-                          <span
-                            className="home-status-pill home-status-warn"
-                            style={{ marginLeft: '0.5rem' }}
-                            title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
-                          >
-                            out of date
-                          </span>
-                        )}
-                      </td>
-                      <td title={modelSizeTitle(m)}>
-                        {formatBytes(m.approxSizeBytes)}
-                        {modelMemoryHeadline(m) ? (
-                          <span className="muted small">{modelMemoryHeadline(m)}</span>
-                        ) : null}
-                      </td>
-                      <td title={quantizationTitle(m.quantization)}>
-                        {approximateQuantizationLabel(m.quantization)}
-                      </td>
-                      <td
-                        title={
-                          m.effectiveContextWindow
-                            ? `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
-                            : 'The effective context size is unavailable.'
-                        }
-                      >
-                        {formatContextWindow(m.effectiveContextWindow)}
-                      </td>
-                      <td className="model-fitness-table-cell">
-                        <div className="model-fitness-cell">
-                          <span
-                            className={`home-status-pill model-fitness-badge${
-                              badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
-                            }${
-                              badge.tier === 'ok'
-                                ? ' home-status-ok'
-                                : badge.tier === 'warn'
-                                  ? ' home-status-warn'
-                                  : ''
-                            }`}
-                            title={badge.detail}
-                          >
-                            {badge.label}
-                          </span>
-                          <button
-                            type="button"
-                            className="home-link"
-                            disabled={badge.tier === 'probing'}
-                            title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
-                            onClick={() => {
-                              void api
-                                .runModelFitnessProbe('mlx', m.id)
-                                .then(() => refreshFitness())
-                                .catch(() => {});
-                            }}
-                          >
-                            {badge.tier === 'probing'
-                              ? 'Checking…'
-                              : entry && !entry.stale && entry.record.status !== 'blocked'
-                                ? 'Re-run'
-                                : 'Run fitness check'}
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ marginRight: '0.75rem' }}>
-                          <ExportModelBundleButton engine="mlx" id={m.id} />
-                        </span>
-                        {outOfDate && (
-                          <button
-                            type="button"
-                            className="home-link"
-                            disabled={reinstalling}
-                            onClick={() => startInstall(m.id)}
-                            style={{ marginRight: '0.5rem' }}
-                          >
-                            {reinstalling ? 'Downloading…' : 'Download again'}
-                          </button>
-                        )}
-                        {m.readOnly ? (
-                          <span
-                            className="muted small"
-                            title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
-                          >
-                            Machine model
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="home-link"
-                            onClick={() => setToDelete(m.id)}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={m.id}>
+                      <tr>
+                        <td className="model-name-table-cell">
+                          <div className="model-name-cell">
+                            <code>{m.id}</code>
+                            <div className="model-name-meta">
+                              {outOfDate && (
+                                <span
+                                  className="home-status-pill home-status-warn"
+                                  title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
+                                >
+                                  out of date
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td title={modelSizeTitle(m)}>
+                          {formatBytes(m.approxSizeBytes)}
+                          {modelMemoryHeadline(m) ? (
+                            <span className="muted small model-memory-headline">
+                              {modelMemoryHeadline(m)}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td title={quantizationTitle(m.quantization)}>
+                          {approximateQuantizationLabel(m.quantization)}
+                        </td>
+                        <td
+                          title={
+                            m.effectiveContextWindow
+                              ? m.overrideContextTokens !== undefined
+                                ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
+                                : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
+                              : m.contextSizingStatus === 'restart-required'
+                                ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                                : m.contextSizingStatus === 'insufficient-memory'
+                                  ? 'The requested context window does not fit in memory safely. Unload another model or free memory before trying again.'
+                                  : 'The effective context size is unavailable.'
+                          }
+                        >
+                          {m.contextSizingStatus === 'restart-required' ? (
+                            'Restart needed'
+                          ) : m.contextSizingStatus === 'insufficient-memory' ? (
+                            "Won't fit"
+                          ) : (
+                            <>
+                              {formatContextWindow(m.effectiveContextWindow)}
+                              {m.overrideContextTokens !== undefined && (
+                                <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                                  custom
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="model-fitness-table-cell">
+                          <div className="model-fitness-cell">
+                            <span
+                              className={`home-status-pill model-fitness-badge${
+                                badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
+                              }${
+                                badge.tier === 'ok'
+                                  ? ' home-status-ok'
+                                  : badge.tier === 'warn'
+                                    ? ' home-status-warn'
+                                    : ''
+                              }`}
+                              title={badge.detail}
+                            >
+                              {badge.label}
+                            </span>
+                            <button
+                              type="button"
+                              className="home-link"
+                              disabled={badge.tier === 'probing'}
+                              title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
+                              onClick={() => {
+                                void api
+                                  .runModelFitnessProbe('mlx', m.id)
+                                  .then(() => refreshFitness())
+                                  .catch(() => {});
+                              }}
+                            >
+                              {badge.tier === 'probing'
+                                ? 'Checking…'
+                                : entry && !entry.stale && entry.record.status !== 'blocked'
+                                  ? 'Re-run'
+                                  : 'Run fitness check'}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="model-actions-table-cell">
+                          <div className="model-actions-cell">
+                            <div className="model-action-status">
+                              {m.readOnly && (
+                                <span
+                                  className="muted small"
+                                  title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                                >
+                                  Machine model
+                                </span>
+                              )}
+                            </div>
+                            <div className="model-action-links">
+                              <ModelActionsMenu
+                                engine="mlx"
+                                model={{ ...m, updateAvailable: outOfDate }}
+                                updating={reinstalling}
+                                contextSupported={contextOverridesSupported}
+                                contextEditorOpen={contextEditorFor === m.id}
+                                onToggleContextEditor={() =>
+                                  setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                                }
+                                onUpdate={() => startInstall(m.id)}
+                                updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
+                                onDelete={() => setToDelete(m.id)}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {contextEditorFor === m.id && (
+                        <tr className="model-context-editor-row">
+                          <td colSpan={6}>
+                            <ModelContextSliderPanel engine="mlx" model={m} onSaved={refresh} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </div>
       )}

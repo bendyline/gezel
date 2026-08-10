@@ -132,7 +132,7 @@ Rules:
 - **Only a spectrum's extremes may recolor the latch.** The pressed face
   defaults to the accent. When a group is a spectrum with meaningful ends,
   the end keys may override it — the AI engagement "Off" latches
-  danger-red (emergency stop), the security posture latches sealed-green
+  danger-red (hard stop), the security posture latches sealed-green
   on Super Lockdown and open-amber on Unrestricted. Middle options keep
   the accent; never give every key its own color.
 - **State groups are the exception: they latch in the state's own color.**
@@ -155,6 +155,40 @@ Rules:
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
+
+## Controls: budget sliders
+
+The standard treatment for **continuous "how much may gezel take" ranges** —
+memory budgets, cache budgets, per-model context size. One CSS recipe
+(`.gz-budget-slider` in [styles.css](../packages/ui/src/styles.css)), one
+interaction contract, shared by every user (`EngineMemoryBudgetPanel`,
+`CacheControlsPanel`, `ModelContextSliderPanel`). Don't restyle a slider
+per-surface; if a surface needs something the recipe lacks, extend the recipe
+(and this section) instead.
+
+The contract:
+
+- **"Automatic" is a visible position, not a hidden default.** A `▲ Auto ·
+  <value>` tick sits under the track at the auto-derived value, so an
+  override always shows how far it drifts from what gezel would pick for
+  this machine. Dragging within one step of the tick snaps back to
+  Automatic.
+- **Draft, then Save.** The slider holds a draft (`null` = following
+  automatic); nothing persists until an explicit **Save**, and an active
+  override always offers **Back to automatic** as a first-class button —
+  never make users hunt for the escape hatch.
+- **Show the consequence while dragging.** The head row updates live with
+  what the position costs (`~X GB in memory`, a value tag flipping
+  Automatic → Custom → a warning tone when past what's recommended or
+  fits).
+- **Warn above the safe zone, don't block.** Positions past what the
+  machine can comfortably back stay reachable — flagged with an `<output>`
+  line explaining what actually happens (clamping, swapping) — because the
+  honest failure mode is visible degradation, not a wall.
+- The native range input keeps `accent-color: var(--accent)`; the thumb is
+  a sanctioned true circle (see the keys-in-trays rules above). The
+  machine-health temperature control's key-shaped thumb is the one
+  deliberate variant.
 
 ## Typography
 

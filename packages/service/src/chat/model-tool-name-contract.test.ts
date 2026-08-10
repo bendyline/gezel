@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { TOOL_REGISTRY } from '@bendyline/gezel-mcp';
 import { describe, expect, it } from 'vitest';
 import {
@@ -5,6 +6,7 @@ import {
   extractModelFacingStringCorpus,
   lintModelToolNameEntries,
   normalizeModelToolCorpusSource,
+  partitionPinnedGildeDebt,
 } from './model-tool-name-contract.js';
 
 function promptEntry(source: string, text: string, line = 1): ModelToolNameCorpusEntry {
@@ -13,13 +15,77 @@ function promptEntry(source: string, text: string, line = 1): ModelToolNameCorpu
 
 describe('model-facing tool-name contract', () => {
   it('normalizes Windows corpus paths for source policies and pinned-debt matching', () => {
-    expect(
-      normalizeModelToolCorpusSource(
-        'node_modules\\.pnpm\\@bendyline+gilde@0.1.18\\node_modules\\@bendyline\\gilde\\data\\craftbook-templates\\example.json',
-      ),
-    ).toBe(
-      'node_modules/.pnpm/@bendyline+gilde@0.1.18/node_modules/@bendyline/gilde/data/craftbook-templates/example.json',
-    );
+    for (const version of ['0.1.18', '0.1.19']) {
+      expect(
+        normalizeModelToolCorpusSource(
+          `node_modules\\.pnpm\\@bendyline+gilde@${version}\\node_modules\\@bendyline\\gilde\\data\\craftbook-templates\\example.json`,
+        ),
+      ).toBe(
+        `node_modules/.pnpm/@bendyline+gilde@${version}/node_modules/@bendyline/gilde/data/craftbook-templates/example.json`,
+      );
+    }
+  });
+
+  it('carries an exact pinned-debt fingerprint across gilde package updates', () => {
+    const relativeSource = 'craftbook-templates/example.json';
+    const signature = `${relativeSource}|9|/plan|legacy-tool-name|readFile`;
+    const waiver = {
+      count: 1,
+      sha256: createHash('sha256').update(signature).digest('hex'),
+    };
+    const finding = {
+      source: '',
+      category: 'generated-catalog' as const,
+      jsonPointer: '/plan',
+      severity: 'error' as const,
+      rule: 'legacy-tool-name' as const,
+      tool: 'readFile',
+      line: 9,
+      detail: 'Use read_file.',
+      excerpt: 'Call readFile.',
+    };
+
+    for (const gildeVersion of ['0.1.18', '0.1.19']) {
+      const report = partitionPinnedGildeDebt({
+        gildeVersion,
+        waiver,
+        findings: [
+          {
+            ...finding,
+            source: `node_modules/.pnpm/@bendyline+gilde@${gildeVersion}/node_modules/@bendyline/gilde/data/${relativeSource}`,
+          },
+        ],
+      });
+
+      expect(report.errors).toEqual([]);
+      expect(report.pinnedDebt).toHaveLength(1);
+      expect(report.fingerprint).toMatchObject({ version: gildeVersion, matchesWaiver: true });
+    }
+  });
+
+  it('rejects changed pinned debt even when the package version changes', () => {
+    const report = partitionPinnedGildeDebt({
+      gildeVersion: '0.1.20',
+      waiver: { count: 1, sha256: 'not-the-current-fingerprint' },
+      findings: [
+        {
+          source:
+            'node_modules/.pnpm/@bendyline+gilde@0.1.20/node_modules/@bendyline/gilde/data/craftbook-templates/example.json',
+          category: 'generated-catalog',
+          jsonPointer: '/plan',
+          severity: 'error',
+          rule: 'legacy-tool-name',
+          tool: 'readFile',
+          line: 9,
+          detail: 'Use read_file.',
+          excerpt: 'Call readFile.',
+        },
+      ],
+    });
+
+    expect(report.errors).toHaveLength(1);
+    expect(report.pinnedDebt).toEqual([]);
+    expect(report.fingerprint?.matchesWaiver).toBe(false);
   });
 
   it('extracts runtime strings while ignoring source comments and identifiers', () => {

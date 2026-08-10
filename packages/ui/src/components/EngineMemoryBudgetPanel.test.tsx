@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { EngineMemoryBudgetPanel } from './EngineMemoryBudgetPanel.js';
 
-vi.mock('../api.js', () => ({ api: { updateConfig: vi.fn() } }));
+vi.mock('../api.js', () => ({
+  api: {
+    updateEngineMemoryBudget: vi.fn(),
+    updateEngineRamSpillover: vi.fn(),
+  },
+}));
 
 const GB = 1024 ** 3;
 
@@ -31,8 +36,10 @@ function status(overrides: Partial<EngineStatusResponse> = {}): EngineStatusResp
 
 describe('EngineMemoryBudgetPanel — RAM spillover', () => {
   beforeEach(() => {
-    vi.mocked(api.updateConfig).mockReset();
-    vi.mocked(api.updateConfig).mockResolvedValue({} as never);
+    vi.mocked(api.updateEngineMemoryBudget).mockReset();
+    vi.mocked(api.updateEngineMemoryBudget).mockResolvedValue({} as never);
+    vi.mocked(api.updateEngineRamSpillover).mockReset();
+    vi.mocked(api.updateEngineRamSpillover).mockResolvedValue({} as never);
   });
 
   it('latches Automatic until the user picks a side', async () => {
@@ -59,7 +66,7 @@ describe('EngineMemoryBudgetPanel — RAM spillover', () => {
     await user.click(screen.getByRole('radio', { name: 'Use system memory' }));
 
     await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({ allowRamSpillover: true });
+      expect(api.updateEngineRamSpillover).toHaveBeenCalledWith(true);
       expect(onSaved).toHaveBeenCalled();
     });
 
@@ -91,7 +98,7 @@ describe('EngineMemoryBudgetPanel — RAM spillover', () => {
     await user.click(screen.getByRole('radio', { name: 'Automatic' }));
 
     await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({ allowRamSpillover: null });
+      expect(api.updateEngineRamSpillover).toHaveBeenCalledWith(null);
     });
   });
 

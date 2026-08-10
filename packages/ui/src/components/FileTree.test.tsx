@@ -34,4 +34,21 @@ describe('FileTree row actions', () => {
 
     expect(onDelete).toHaveBeenCalledWith(NOTE);
   });
+
+  it('offers host-defined actions from the row menu', async () => {
+    const user = userEvent.setup();
+    const allowEditing = vi.fn();
+    render(
+      <FileTree
+        entries={[NOTE]}
+        onSelect={vi.fn()}
+        actionsForEntry={() => [{ label: 'Allow editing via markdown', onSelect: allowEditing }]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for notes.md' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Allow editing via markdown' }));
+
+    expect(allowEditing).toHaveBeenCalledWith(NOTE);
+  });
 });

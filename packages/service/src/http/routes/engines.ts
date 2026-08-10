@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
   LlamaCppContextSizingResponseSchema,
+  ModelContextOverrideUpdateSchema,
   type NativeEngineName,
 } from '@bendyline/gezel';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
@@ -10,8 +11,9 @@ import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
+import { EngineBusyError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
+import { isMachineEngineProvider, machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
@@ -118,6 +120,36 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
     return c.json(snap);
   });
 
+  /** Immediately unload one retained model replica, provided it is still idle. */
+  app.post('/unload', async (c) => {
+    const body = z
+      .object({
+        provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+        modelId: z
+          .string()
+          .min(1)
+          .refine((value) => !value.includes(':'), {
+            message: 'must not contain ":"',
+          }),
+        replicaIdx: z.number().int().nonnegative(),
+      })
+      .parse(await c.req.json());
+    try {
+      const unloaded = await ctx.chat.unloadIdleEngine(
+        body.provider,
+        body.modelId,
+        body.replicaIdx,
+      );
+      if (!unloaded) return c.json({ error: 'That model is no longer loaded.' }, 404);
+      return c.json({ ok: true as const });
+    } catch (error) {
+      if (error instanceof EngineBusyError) {
+        return c.json({ error: 'That model is in use and cannot be unloaded yet.' }, 409);
+      }
+      throw error;
+    }
+  });
+
   /** Engine-owner retention policy; proxied to the machine broker in production. */
   app.get('/retention', async (c) => {
     const config = await ctx.store.readConfig();
@@ -144,6 +176,30 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       await ctx.chat.resetClient({ deferBusy: true });
     }
     return c.json({ idleTimeoutMs: body.idleTimeoutMs });
+  });
+
+  /**
+   * Machine-owner memory budget. This lives beside the other engine policy
+   * routes so packaged user daemons proxy the write to the process that owns
+   * the models instead of persisting an inert per-user value.
+   */
+  app.put('/memory-budget', async (c) => {
+    const body = z
+      .object({ localEngineMemoryGb: z.number().positive().nullable() })
+      .parse(await c.req.json());
+    await ctx.store.writeConfig({ localEngineMemoryGb: body.localEngineMemoryGb });
+    await ctx.chat.setLocalEngineMemoryBudget(
+      body.localEngineMemoryGb === null ? null : Math.round(body.localEngineMemoryGb * 1024 ** 3),
+    );
+    return c.json({ localEngineMemoryGb: body.localEngineMemoryGb });
+  });
+
+  /** Persist the discrete-GPU co-residency policy on the engine owner. */
+  app.put('/ram-spillover', async (c) => {
+    const body = z.object({ allowRamSpillover: z.boolean().nullable() }).parse(await c.req.json());
+    await ctx.store.writeConfig({ allowRamSpillover: body.allowRamSpillover });
+    await ctx.chat.setAllowRamSpillover(body.allowRamSpillover);
+    return c.json({ allowRamSpillover: body.allowRamSpillover });
   });
 
   /**
@@ -178,6 +234,58 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       await ctx.chat.resetClient({ deferBusy: true });
     }
     return c.json({ policy: effective });
+  });
+
+  /**
+   * Per-model context overrides (Settings → Local models → Context size…).
+   * Engine-owner state like the sizing policy above — packaged user daemons
+   * proxy these to the machine engine so the override lands in the config
+   * of the process that actually performs admission. Keys on disk are
+   * `"<engine>:<modelId>"` in `config.modelContextOverrides`; the wire map
+   * is keyed by model id alone (engine is in the route).
+   */
+  app.get('/:engine/model-context', async (c) => {
+    const engine = c.req.param('engine');
+    if (!isMachineEngineProvider(engine)) {
+      return c.json({ error: 'engine must be "llama-cpp", "mlx", or "ds4"' }, 400);
+    }
+    const record = (await ctx.store.readConfig()).modelContextOverrides ?? {};
+    const prefix = `${engine}:`;
+    const overrides: Record<string, number> = {};
+    for (const [key, tokens] of Object.entries(record)) {
+      if (key.startsWith(prefix)) overrides[key.slice(prefix.length)] = tokens;
+    }
+    return c.json({ overrides });
+  });
+
+  app.put('/:engine/model-context/:modelId', async (c) => {
+    const engine = c.req.param('engine');
+    if (!isMachineEngineProvider(engine)) {
+      return c.json({ error: 'engine must be "llama-cpp", "mlx", or "ds4"' }, 400);
+    }
+    const modelId = c.req.param('modelId');
+    const body = ModelContextOverrideUpdateSchema.parse(await c.req.json());
+    const key = `${engine}:${modelId}`;
+    const record = { ...((await ctx.store.readConfig()).modelContextOverrides ?? {}) };
+    const previous = record[key];
+    if (body.contextTokens === null) delete record[key];
+    else record[key] = body.contextTokens;
+    // Store.writeConfig replaces this record wholesale (only externalFolders
+    // deep-merges), so the read-merge-write above is what preserves other
+    // models' overrides; null clears the field when the record empties.
+    await ctx.store.writeConfig({
+      modelContextOverrides: Object.keys(record).length > 0 ? record : null,
+    });
+    const effective = body.contextTokens ?? undefined;
+    if (effective !== previous) {
+      // Same contract as the sizing policy above: overrides govern LAUNCH
+      // arguments, so tear idle providers down now; a busy engine finishes
+      // its turn first and the models list shows "Restart needed" until the
+      // relaunch picks the new window up.
+      invalidateModelsCache();
+      await ctx.chat.resetClient({ deferBusy: true });
+    }
+    return c.json({ modelId, contextTokens: body.contextTokens });
   });
 
   /**

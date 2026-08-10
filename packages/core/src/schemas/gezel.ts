@@ -628,7 +628,7 @@ export const ChatMessageSchema = z.object({
   warnings: z.array(z.string()).optional(),
   /**
    * Chain-of-thought captured during this turn. Local providers
-   * (ollama, llama-cpp, mlx) extract `<think>…</think>` /
+   * (ollama, llama-cpp, mlx, ds4) extract `<think>…</think>` /
    * `<reasoning>…</reasoning>` tagged blocks during commit so they
    * don't pollute the visible reply; Copilot captures its
    * `assistant.reasoning_delta` stream; Anthropic captures

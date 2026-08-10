@@ -704,10 +704,15 @@ export class BundledSource implements CatalogSource {
       return null;
     }
     if (kind === 'chat-model') {
-      const v = parsedVersion as { ollama?: unknown; llamaCpp?: unknown; mlx?: unknown };
-      if (!v.ollama && !v.llamaCpp && !v.mlx) {
+      const v = parsedVersion as {
+        ollama?: unknown;
+        llamaCpp?: unknown;
+        mlx?: unknown;
+        ds4?: unknown;
+      };
+      if (!v.ollama && !v.llamaCpp && !v.mlx && !v.ds4) {
         console.warn(
-          `[catalog] ${versionFile}: chat-model version has no ollama / llamaCpp / mlx source — skipping`,
+          `[catalog] ${versionFile}: chat-model version has no ollama / llamaCpp / mlx / ds4 source — skipping`,
         );
         return null;
       }

@@ -75,9 +75,10 @@ describe('isSelfOrchestratingProvider', () => {
 });
 
 describe('isLocalEngine', () => {
-  it('is true only for llama-cpp and mlx', () => {
+  it('is true only for llama-cpp, mlx, and ds4', () => {
     expect(isLocalEngine('llama-cpp')).toBe(true);
     expect(isLocalEngine('mlx')).toBe(true);
+    expect(isLocalEngine('ds4')).toBe(true);
     expect(isLocalEngine('codex-cli')).toBe(false);
     expect(isLocalEngine('anthropic-cli')).toBe(false);
     expect(isLocalEngine('copilot')).toBe(false);

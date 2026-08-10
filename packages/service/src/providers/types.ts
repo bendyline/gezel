@@ -216,7 +216,7 @@ export interface SessionOpts {
    */
   numCtx?: number;
   /**
-   * Local-providers only (llama-cpp, mlx, ollama): callback the session
+   * Local-providers only (llama-cpp, mlx, ds4, ollama): callback the session
    * invokes mid-tool-loop when its in-memory transcript is filling the
    * context window. The session passes the messages BEFORE the current
    * turn's user message — the callback runs a one-shot compaction LLM
@@ -850,7 +850,7 @@ export interface LLMSession {
   setSystemMessage?(text: string): void;
   /**
    * Captured chain-of-thought from the most recent `sendAndWait`. Set
-   * by local providers (ollama, llama-cpp, mlx) when the model wraps
+   * by local providers (ollama, llama-cpp, mlx, ds4) when the model wraps
    * deliberation in `<think>…</think>` / `<reasoning>…</reasoning>`
    * tags — see `extractReasoning` — and by cloud providers that stream
    * a reasoning trace (Copilot's `assistant.reasoning_delta`,

@@ -47,7 +47,7 @@ export interface ModelToolNameContractReport {
   entryCount: number;
   allowedToolCount: number;
   errors: ModelToolNameContractFinding[];
-  /** Exact, version-bound debt in the immutable pinned gilde package. */
+  /** Exact, content-fingerprint-bound debt in the immutable pinned gilde package. */
   pinnedDebt: ModelToolNameContractFinding[];
   pinnedDebtFingerprint?: {
     version: string;
@@ -133,14 +133,14 @@ const SOURCE_IGNORES = [
 ];
 
 /**
- * The exact 0.1.18 catalog pin retains historical versions that predate
- * canonical tool naming. Its content is
- * published from the separate gilde repo, so Gezel cannot edit it in place.
- * Keep a narrow occurrence budget for those immutable versions: newer 0.1.18
- * versions are clean, a new file/name occurrence still fails CI, and changing
- * the pin disables this waiver completely.
+ * Published gilde packages retain historical versions that predate canonical
+ * tool naming. Their content is published from the separate gilde repo, so
+ * Gezel cannot edit an already-published package in place. Keep a narrow,
+ * content-addressed occurrence budget for those immutable versions: an
+ * unchanged package update keeps the same waiver, while any added, removed,
+ * renamed, or relocated occurrence changes the fingerprint and fails CI.
  */
-const PINNED_GILDE_0_1_18_DEBT = {
+const PINNED_GILDE_TOOL_NAME_DEBT = {
   count: 153,
   // SHA-256 of sorted `relative-source|line|json-pointer|rule|tool`
   // occurrences. This makes the waiver exact without checking a 150-line
@@ -309,16 +309,17 @@ async function projectTypeToolsByGezelTemplate(
   return new Map([...byTemplate].map(([id, tools]) => [id, [...tools]]));
 }
 
-function partitionPinnedGildeDebt(args: {
+export function partitionPinnedGildeDebt(args: {
   findings: ModelToolNameContractFinding[];
   gildeVersion: string;
+  waiver?: { count: number; sha256: string };
 }): {
   errors: ModelToolNameContractFinding[];
   pinnedDebt: ModelToolNameContractFinding[];
   fingerprint?: ModelToolNameContractReport['pinnedDebtFingerprint'];
 } {
-  if (args.gildeVersion !== '0.1.18') return { errors: args.findings, pinnedDebt: [] };
   const errors: ModelToolNameContractFinding[] = [];
+  const waiver = args.waiver ?? PINNED_GILDE_TOOL_NAME_DEBT;
   const candidates: Array<{ finding: ModelToolNameContractFinding; signature: string }> = [];
   for (const finding of args.findings) {
     const marker = '/@bendyline/gilde/data/';
@@ -334,6 +335,7 @@ function partitionPinnedGildeDebt(args: {
       signature: `${relativeSource}|${finding.line}|${finding.jsonPointer ?? ''}|${finding.rule}|${finding.tool ?? ''}`,
     });
   }
+  if (candidates.length === 0) return { errors, pinnedDebt: [] };
   const digest = createHash('sha256')
     .update(
       candidates
@@ -342,9 +344,7 @@ function partitionPinnedGildeDebt(args: {
         .join('\n'),
     )
     .digest('hex');
-  const matchesWaiver =
-    candidates.length === PINNED_GILDE_0_1_18_DEBT.count &&
-    digest === PINNED_GILDE_0_1_18_DEBT.sha256;
+  const matchesWaiver = candidates.length === waiver.count && digest === waiver.sha256;
   const fingerprint = {
     version: args.gildeVersion,
     count: candidates.length,

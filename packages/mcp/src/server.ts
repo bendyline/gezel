@@ -78,6 +78,7 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
+import { prioritizePullsForCurrentBranch } from './github-pr-selection.js';
 import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
@@ -10656,21 +10657,34 @@ server.tool(
 
 server.tool(
   'github_pr_list',
-  "List open pull requests on the current project's linked GitHub repo. Returns title, author, branches, and PR number. Use this to find the right PR for a review or ship operation.",
+  "List open pull requests on the current project's linked GitHub repo. Returns title, author, branches, and PR number. When the project has a local checkout, PRs whose head matches the checked-out branch are listed first and explicitly marked as the default. Use this to find the right PR for a review or ship operation.",
   {
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
   },
   async ({ project }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGitHubPulls(resolved);
-      if (!res.pulls.length) {
+      const [res, status] = await Promise.all([
+        api.listProjectGitHubPulls(resolved),
+        api.getProjectGitStatus(resolved).catch(() => null),
+      ]);
+      const prioritized = prioritizePullsForCurrentBranch(res.pulls, status?.branch);
+      if (!prioritized.pulls.length) {
         return { content: [{ type: 'text' as const, text: 'No open pull requests.' }] };
       }
-      const lines = res.pulls.map(
-        (p) =>
-          `#${p.number} — ${p.title} (${p.author}, ${p.headRef} → ${p.baseRef}${p.draft ? ', draft' : ''})\n  ${p.url}`,
-      );
+      const lines = prioritized.pulls.map((p) => {
+        const currentBranchMatch =
+          prioritized.currentBranch && p.headRef === prioritized.currentBranch;
+        return [
+          `#${p.number} — ${p.title} (${p.author}, ${p.headRef} → ${p.baseRef}${p.draft ? ', draft' : ''})`,
+          `  ${p.url}`,
+          ...(currentBranchMatch
+            ? [
+                `  Current branch match${prioritized.matchingCount === 1 ? ' — default' : ''}: ${prioritized.currentBranch}`,
+              ]
+            : []),
+        ].join('\n');
+      });
       return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

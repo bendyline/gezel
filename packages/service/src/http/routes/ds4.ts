@@ -2,6 +2,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -23,7 +24,47 @@ export function ds4Routes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/ds4', '/v1/remote/manage/ds4'));
 
   app.get('/models', async (c) => {
-    const models = await ctx.ds4Models.listInstalled();
+    const installed = await ctx.ds4Models.listInstalled();
+    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
+    // Decorate with the launch-context preview (effective window, override,
+    // ceiling) the same way llama-cpp/mlx do. ds4 rows never carried these
+    // before; the preview is cheap (no GGUF read — RAM tier + catalog cap).
+    const models = await Promise.all(
+      installed.map(async (model) => {
+        const overrideContextTokens = overrides[`ds4:${model.id}`];
+        const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
+        try {
+          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id);
+          return {
+            ...model,
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.plannedResidentBytes
+              ? { predictedResidentBytes: plan.plannedResidentBytes }
+              : {}),
+            ...(plan.autoContextWindow !== undefined
+              ? { autoContextWindow: plan.autoContextWindow }
+              : {}),
+            ...(plan.contextCeilingTokens !== undefined
+              ? { contextCeilingTokens: plan.contextCeilingTokens }
+              : {}),
+            ...overrideField,
+          };
+        } catch (error) {
+          return {
+            ...model,
+            ...(error instanceof CapacityDeniedError
+              ? {
+                  contextSizingStatus:
+                    error.reason === 'resident-below-minimum'
+                      ? ('restart-required' as const)
+                      : ('insufficient-memory' as const),
+                }
+              : {}),
+            ...overrideField,
+          };
+        }
+      }),
+    );
     return c.json({ models });
   });
 

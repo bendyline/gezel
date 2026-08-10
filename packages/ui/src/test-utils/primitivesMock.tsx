@@ -193,12 +193,22 @@ const DropdownMenu = {
   Content: ({ children }: { children?: ReactNode }) => <div role="menu">{children}</div>,
   Item: ({
     children,
+    disabled,
+    title,
     onSelect,
   }: {
     children?: ReactNode;
-    onSelect?: () => void;
+    disabled?: boolean;
+    title?: string;
+    onSelect?: (event: Event) => void;
   }) => (
-    <button type="button" role="menuitem" onClick={onSelect}>
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      title={title}
+      onClick={() => onSelect?.(new Event('select'))}
+    >
       {children}
     </button>
   ),

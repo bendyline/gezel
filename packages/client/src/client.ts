@@ -18,6 +18,7 @@ import type {
   ListInstalledVideoModelsResponse,
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
+  ModelContextOverridesResponse,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -631,7 +632,7 @@ export interface ClaudeCliPoolView {
 
 export interface EngineStatusEntry {
   key: string;
-  provider: 'llama-cpp' | 'mlx';
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
   modelId: string;
   replicaIdx: number;
   residentBytes: number;
@@ -682,9 +683,15 @@ export interface EngineStatusResponse {
 }
 
 export interface ReconcileEnginePoolRequest {
-  provider: 'llama-cpp' | 'mlx';
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
   /** Clone count per modelId. Missing modelIds are left alone. */
   clones: Record<string, number>;
+}
+
+export interface UnloadIdleEngineRequest {
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
+  modelId: string;
+  replicaIdx: number;
 }
 
 export interface ProviderCacheStatsResponse {
@@ -1548,6 +1555,29 @@ export interface LlamaCppInstalledModel {
    * needed).
    */
   contextSizingStatus?: 'insufficient-memory' | 'restart-required';
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /**
+   * What automatic sizing would grant right now. Present only while an
+   * override is active — without one, `effectiveContextWindow` IS the
+   * automatic value. Feeds the context slider's "Auto" marker.
+   */
+  autoContextWindow?: number;
+  /**
+   * Post-quant single-slot KV linearization so the UI can price
+   * "~X GB in memory" live while the context slider drags:
+   * `weightsResidentBytes + kvFixedBytesPerSlot + kvBytesPerTokenPerSlot × ctx`.
+   * Absent for ds4 rows (context-independent resident set) and older daemons.
+   */
+  kvBytesPerTokenPerSlot?: number;
+  kvFixedBytesPerSlot?: number;
+  weightsResidentBytes?: number;
+  /**
+   * ds4 rows only: the context slider's max — min(native window, catalog
+   * maxLaunchCtx). ds4 has no ctx-vs-memory admission, so the authored
+   * launch ceiling is the only guard against an unserveable window.
+   */
+  contextCeilingTokens?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -1685,6 +1715,20 @@ export interface MlxInstalledModel {
   reservedResidentBytes?: number;
   /** Concurrent engine slots the launch would be admitted at. */
   plannedSlots?: number;
+  /**
+   * Present when the selected context policy cannot be admitted right now —
+   * same contract as the llama.cpp rows (`insufficient-memory` /
+   * `restart-required`).
+   */
+  contextSizingStatus?: 'insufficient-memory' | 'restart-required';
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /** What automatic sizing would grant; present only while an override is active. */
+  autoContextWindow?: number;
+  /** Post-quant single-slot KV linearization for the context slider's live estimate. */
+  kvBytesPerTokenPerSlot?: number;
+  kvFixedBytesPerSlot?: number;
+  weightsResidentBytes?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -3193,6 +3237,25 @@ export class GezelClient {
     return this.request('PUT', '/api/engines/retention', { idleTimeoutMs });
   }
 
+  /** Persist the resident-model memory budget on the process that owns the engines. */
+  updateEngineMemoryBudget(
+    localEngineMemoryGb: number | null,
+  ): Promise<{ localEngineMemoryGb: number | null }> {
+    return this.request('PUT', '/api/engines/memory-budget', { localEngineMemoryGb });
+  }
+
+  /** Persist the discrete-GPU co-residency policy on the engine owner. */
+  updateEngineRamSpillover(
+    allowRamSpillover: boolean | null,
+  ): Promise<{ allowRamSpillover: boolean | null }> {
+    return this.request('PUT', '/api/engines/ram-spillover', { allowRamSpillover });
+  }
+
+  /** Immediately unload one retained local-model replica if it is still idle. */
+  unloadIdleEngine(body: UnloadIdleEngineRequest): Promise<{ ok: true }> {
+    return this.request('POST', '/api/engines/unload', body);
+  }
+
   /** Effective context-sizing policy owned by the managed llama.cpp engine. */
   getLlamaCppContextSizing(): Promise<LlamaCppContextSizingResponse> {
     return this.request('GET', '/api/engines/llama-cpp/context-sizing');
@@ -3203,6 +3266,31 @@ export class GezelClient {
     policy: LlamaCppContextSizing,
   ): Promise<LlamaCppContextSizingResponse> {
     return this.request('PUT', '/api/engines/llama-cpp/context-sizing', { policy });
+  }
+
+  /**
+   * Per-model context overrides for one local engine, keyed by model id.
+   * Owned by the process that owns the engines (proxied to the machine
+   * broker in packaged installs). Also the UI's feature-detect: a 404 from
+   * an older daemon/broker means the override surface is unavailable.
+   */
+  getModelContextOverrides(
+    engine: 'llama-cpp' | 'mlx' | 'ds4',
+  ): Promise<ModelContextOverridesResponse> {
+    return this.request('GET', `/api/engines/${engine}/model-context`);
+  }
+
+  /** Set (tokens) or clear (null) one model's context override on the engine owner. */
+  updateModelContextOverride(
+    engine: 'llama-cpp' | 'mlx' | 'ds4',
+    modelId: string,
+    contextTokens: number | null,
+  ): Promise<{ modelId: string; contextTokens: number | null }> {
+    return this.request(
+      'PUT',
+      `/api/engines/${engine}/model-context/${encodeURIComponent(modelId)}`,
+      { contextTokens },
+    );
   }
 
   /** Source-pinned native release and executable availability in the daemon. */
@@ -4890,8 +4978,10 @@ export class GezelClient {
     filePath: string,
     data: Blob | ArrayBuffer | Uint8Array,
     mimeType: string,
+    options?: { createOnly?: boolean },
   ): Promise<{ ok: true; path: string }> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}`;
+    const create = options?.createOnly ? '&create=1' : '';
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}${create}`;
     const body =
       data instanceof Blob
         ? data
@@ -4985,8 +5075,10 @@ export class GezelClient {
     filePath: string,
     data: Blob | ArrayBuffer | Uint8Array,
     mimeType = 'application/octet-stream',
+    options?: { createOnly?: boolean },
   ): Promise<{ ok: true; path: string }> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}`;
+    const create = options?.createOnly ? '&create=1' : '';
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}${create}`;
     const body =
       data instanceof Blob
         ? data

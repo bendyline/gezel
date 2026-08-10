@@ -14,7 +14,7 @@ describe('model memory copy', () => {
     expect(formatMemoryBytes(bytes)).toBe('21.2 GB');
     expect(
       modelMemoryHeadline({ approxSizeBytes: 17_106_773_120, predictedResidentBytes: bytes }),
-    ).toBe(' · ~21.2 GB in memory');
+    ).toBe('~21.2 GB in memory');
   });
 
   it('keeps disk and memory scales distinct in the explanatory tooltip', () => {

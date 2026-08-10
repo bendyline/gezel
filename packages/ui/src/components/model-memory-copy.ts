@@ -35,7 +35,7 @@ export interface ModelSizeCopyInput {
  */
 export function modelMemoryHeadline(input: ModelSizeCopyInput): string | null {
   if (!input.predictedResidentBytes) return null;
-  return ` · ~${formatMemoryBytes(input.predictedResidentBytes)} in memory`;
+  return `~${formatMemoryBytes(input.predictedResidentBytes)} in memory`;
 }
 
 export function modelSizeTitle(input: ModelSizeCopyInput): string {

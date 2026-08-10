@@ -43,7 +43,12 @@ interface LooseManifest {
   style?: { reasoningFormat?: string };
   tuning?: {
     sampling?: Record<string, unknown>;
-    reasoning?: { thinkingBudget?: number; effort?: string; enableThinking?: boolean };
+    reasoning?: {
+      thinkingBudget?: number;
+      effort?: string;
+      enableThinking?: boolean;
+      templateKwargs?: { reasoning_strength?: string };
+    };
     profiles?: Record<string, unknown>;
   };
   behaviors?: Array<string | { id?: string }>;
@@ -213,12 +218,13 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
     const bounded =
       typeof r?.thinkingBudget === 'number' ||
       typeof r?.effort === 'string' ||
+      typeof r?.templateKwargs?.reasoning_strength === 'string' ||
       r?.enableThinking === false;
     if (!bounded) {
       errors.push({
         modelId,
         rule: 'unbounded-reasoning',
-        detail: `style.reasoningFormat=${reasoningFormat} but tuning.reasoning has no thinkingBudget / effort / enableThinking:false — unbounded thinking stalls turns (deepseek-r1 was 0/19 until thinkingBudget:512 landed)`,
+        detail: `style.reasoningFormat=${reasoningFormat} but tuning.reasoning has no thinkingBudget / effort / templateKwargs.reasoning_strength / enableThinking:false — unbounded thinking stalls turns (deepseek-r1 was 0/19 until thinkingBudget:512 landed)`,
       });
     }
   }

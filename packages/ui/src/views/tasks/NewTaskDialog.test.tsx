@@ -137,6 +137,32 @@ describe('NewTaskDialog', () => {
     expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
   });
 
+  it('ranks recommended title matches first when searching', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('content-accuracy-review', 'Content Accuracy Review'),
+        bookItem('pull-request-review', 'Pull Request Review', {
+          tags: ['review', 'pull-request', 'recommended'],
+        }),
+        bookItem('code-review', 'Code Review', { tags: ['review', 'recommended'] }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+      establishedCodebase: true,
+    });
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole('searchbox', { name: 'Search craftbooks' }), 'review');
+
+    expect(screen.getAllByRole('radio').map((item) => item.getAttribute('aria-label'))).toEqual([
+      'Code Review',
+      'Pull Request Review',
+      'Content Accuracy Review',
+    ]);
+  });
+
   it('creates a general task as a ready-to-fire draft', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/1',
@@ -215,8 +241,8 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
 
-    // The pane shows the recipe: both steps with their role hints.
-    expect(await screen.findByText(/The recipe — 2 steps/)).toBeInTheDocument();
+    // The pane shows both steps with their role hints.
+    expect(await screen.findByText(/^2 steps$/)).toBeInTheDocument();
     expect(screen.getByText('Build')).toBeInTheDocument();
     expect(screen.getByText('reviewer')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Upstream review' })).toHaveAttribute(

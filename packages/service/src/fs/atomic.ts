@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type FileHandle, copyFile, open, rename, rm, writeFile } from 'node:fs/promises';
+import { type FileHandle, copyFile, link, open, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -46,7 +46,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 export async function writeFileAtomic(
   absPath: string,
   content: string | Uint8Array,
-  opts?: { mode?: number; durable?: boolean },
+  opts?: { mode?: number; durable?: boolean; noReplace?: boolean },
 ): Promise<void> {
   const tmp = `${absPath}.tmp-${process.pid}-${randomUUID()}`;
   // When a mode is given (secret files), create the tmp with it so the
@@ -62,6 +62,15 @@ export async function writeFileAtomic(
       await writeFile(tmp, content, modeOpt);
     }
     if (opts?.durable) await fsyncPath(tmp);
+    if (opts?.noReplace) {
+      // A hard link publishes the fully written sibling inode only when the
+      // destination is absent. This gives backups create-only semantics
+      // without exposing a partially written target or a check/write race.
+      await link(tmp, absPath);
+      await rm(tmp, { force: true }).catch(() => undefined);
+      if (opts.durable) await fsyncDirectoryIfSupported(dirname(absPath));
+      return;
+    }
     await renameWithWindowsRetry(tmp, absPath);
     if (opts?.durable) await fsyncDirectoryIfSupported(dirname(absPath));
   } catch (err) {

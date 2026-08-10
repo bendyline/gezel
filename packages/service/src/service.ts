@@ -462,7 +462,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   // The EnsureModel orchestrator construction happens after the local
   // model managers + catalog are built — see the assignment below the
-  // `catalog`/`llamaCppModels`/`mlxModels` lines.
+  // `catalog`/`llamaCppModels`/`ds4Models`/`mlxModels` lines.
   // HTTPS+HTTP/2 is the default loopback transport. The browser/Electron
   // renderer needs it to multiplex our SSE streams over a single TCP
   // connection (Chromium caps HTTP/1.1 at 6 conns/origin and the chat
@@ -721,11 +721,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     onInstalled: scheduleInstallProbe,
   });
   // Backs `POST /v1/models/ensure` + `GET /v1/models/ensure/:jobId/events`.
-  // Wraps the two local model managers above into a single uniform
+  // Wraps the local model managers above into a single uniform
   // "ensure this model is downloaded" primitive so third-party apps
   // don't need to learn either install API.
   const ensureModel = await createEnsureModelOrchestrator({
     llamaCpp: llamaCppModels,
+    ds4: ds4Models,
     mlx: mlxModels,
     catalog,
   });
@@ -876,9 +877,16 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           resolveInstalled: resolveInstalledForFitness,
           resolveReasoningBudget: (modelId) => resolveCatalogReasoningBudget(catalog, modelId),
           detectMemory: detectMemoryProfile,
-          configuredNumCtx: async (engine) => {
+          configuredNumCtx: async (engine, modelId) => {
             const cfg = await store.readConfig();
-            return engine === 'mlx' ? cfg.mlxNumCtx : cfg.llamaCppNumCtx;
+            return (
+              cfg.modelContextOverrides?.[`${engine}:${modelId}`] ??
+              (engine === 'mlx'
+                ? cfg.mlxNumCtx
+                : engine === 'ds4'
+                  ? cfg.ds4NumCtx
+                  : cfg.llamaCppNumCtx)
+            );
           },
         },
         args,

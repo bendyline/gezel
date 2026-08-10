@@ -292,7 +292,7 @@ export function EngineStatusPill() {
         ))}
       <ConfirmDialog
         open={emergencyStopOpen}
-        title="Emergency stop all chats?"
+        title="Hard stop all chats?"
         message={
           <>
             Every chat in progress will stop, queued chat messages will be discarded, and Gezel will
@@ -304,7 +304,7 @@ export function EngineStatusPill() {
             )}
           </>
         }
-        confirmLabel="Emergency stop"
+        confirmLabel="Hard stop"
         danger
         onConfirm={emergencyStop}
         onCancel={() => {
@@ -1053,7 +1053,7 @@ function EngineStatusPillForProvider({
                 disabled={emergencyStopping}
                 onClick={onEmergencyStopRequest}
               >
-                {emergencyStopping ? 'Stopping…' : 'Emergency Stop'}
+                {emergencyStopping ? 'Stopping…' : 'Hard Stop'}
               </button>
               {emergencyStopNotice && (
                 <output className="engine-pill-emergency-notice">{emergencyStopNotice}</output>

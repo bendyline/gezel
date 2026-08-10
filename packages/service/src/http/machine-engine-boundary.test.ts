@@ -52,6 +52,9 @@ describe('machine-engine service boundary', () => {
     expect((await machineFetch('/v1/remote/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/llama-cpp/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/engines/status')).status).toBe(200);
+    expect((await machineFetch('/v1/remote/manage/engines/llama-cpp/model-context')).status).toBe(
+      200,
+    );
     expect((await machineFetch('/v1/remote/manage/system/memory/usage')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/image-gen/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/video-gen/models')).status).toBe(200);

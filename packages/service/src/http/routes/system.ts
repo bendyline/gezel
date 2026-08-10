@@ -623,6 +623,7 @@ export function systemMemoryRoutes(ctx: ServiceContext): Hono {
         forceMainMemory,
       }),
       enginePools: engineSnapshot?.pools ?? null,
+      ...(engineSnapshot?.ramSpillover ? { engineRamSpillover: engineSnapshot.ramSpillover } : {}),
     };
     return c.json(MachineMemoryUsageSchema.parse(snapshot));
   });

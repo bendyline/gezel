@@ -103,7 +103,12 @@ export async function buildMlxProvider(opts: {
   // context window, and KV dtype resolve — a memory-aware slot ceiling needs
   // all three. Sizing concurrency here (pre-resolve) from a model-blind default
   // alone is what let a 27B model open a width-4 engine gate and abort Metal.
-  const numCtx = config.mlxNumCtx;
+  // Per-model context override (Settings → Local models → Context size…)
+  // wins over the machine-wide mlxNumCtx cap for the model being launched.
+  const perModelCtxOverride = defaultModelId
+    ? config.modelContextOverrides?.[`mlx:${defaultModelId}`]
+    : undefined;
+  const numCtx = perModelCtxOverride ?? config.mlxNumCtx;
   const baseProviderOpts = {
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(concurrency ? { concurrency } : {}),
@@ -177,7 +182,13 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
-  const mlxContextFloor = minViableLocalContextTokens();
+  // A per-model override below the host floor is deliberate user intent —
+  // lower the floor to the override instead of silently raising the request
+  // back to 64K. The machine-wide mlxNumCtx keeps its historical semantics.
+  const mlxContextFloor =
+    perModelCtxOverride !== undefined
+      ? Math.min(minViableLocalContextTokens(), perModelCtxOverride)
+      : minViableLocalContextTokens();
   let effectiveNumCtx = resolveMlxEffectiveNumCtx({
     ...(modelCatalogInfo?.contextWindow
       ? { modelContextWindow: modelCatalogInfo.contextWindow }

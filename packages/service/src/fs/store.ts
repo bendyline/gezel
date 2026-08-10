@@ -3453,8 +3453,13 @@ export class Store {
    * but takes a Buffer instead of a string. The caller supplies the full
    * relative path including extension.
    */
-  async writeProjectArtifactBinary(id: string, filePath: string, data: Buffer): Promise<string> {
-    return this.artifacts.writeProjectArtifactBinary(id, filePath, data);
+  async writeProjectArtifactBinary(
+    id: string,
+    filePath: string,
+    data: Buffer,
+    options?: { createOnly?: boolean },
+  ): Promise<string> {
+    return this.artifacts.writeProjectArtifactBinary(id, filePath, data, options);
   }
 
   async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
@@ -4219,6 +4224,7 @@ export class Store {
     filePath: string,
     data: Buffer,
     ctx?: JournalContext,
+    options?: { createOnly?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
@@ -4227,7 +4233,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
-    await writeFileAtomic(full, data);
+    await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.history?.log({
       kind: 'workspace.write',
       projectId: id,

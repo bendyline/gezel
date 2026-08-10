@@ -225,7 +225,10 @@ export function autoAllowRamSpillover(budget: Pick<CapacityBudget, 'kind' | 'vra
   if (budget.kind !== 'discrete-gpu') return true;
   // One intentionally offloaded model may still use the combined pool, but
   // automatic co-residency must stay within VRAM. Otherwise concurrency would
-  // incorrectly treat system RAM as additional graphics memory.
+  // incorrectly treat system RAM as additional graphics memory. This stays
+  // off even on <=12 GB cards: silently making every concurrent model slower
+  // is a worse default than serializing them, and the explicit override is
+  // available to users who prefer avoiding reloads on a constrained card.
   return false;
 }
 

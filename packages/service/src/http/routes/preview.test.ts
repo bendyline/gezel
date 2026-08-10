@@ -280,6 +280,10 @@ describe('preparePreviewHtml', () => {
     expect(prepared).not.toContain('<script type="module" src="/src/main.tsx"');
     expect(prepared).toContain('Gezel omitted unbuilt source module: /src/main.tsx');
     expect(prepared).toContain('Build the app and preview its generated dist/index.html');
+    expect(prepared).toContain('width:calc(100% - clamp(48px,12vw,96px))');
+    expect(prepared).toContain('padding:clamp(28px,5vw,36px)');
+    expect(prepared).toContain('background:color-mix(in srgb,currentColor 7%,transparent)');
+    expect(prepared).not.toContain('background:#f7f1e7');
     // The warning is injected before the page's meta CSP, so a source app that
     // disallows inline scripts still receives the clear failure state.
     expect(prepared.indexOf('Preview cannot run unbuilt')).toBeLessThan(

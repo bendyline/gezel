@@ -6,6 +6,7 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('./ModelBundleControls.js', () => ({
   ExportModelBundleButton: () => null,
   ImportModelBundleButton: () => <button type="button">Import .gezmodel</button>,
+  useExportModelBundle: () => ({ run: async () => {}, busy: false, error: null }),
 }));
 
 const { Ds4ModelManager } = await import('./Ds4ModelManager.js');

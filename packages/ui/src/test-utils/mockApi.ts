@@ -153,6 +153,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     canRemove: false,
   },
   getLlamaCppContextSizing: { policy: 'adaptive' },
+  getModelContextOverrides: { overrides: {} },
   // Copilot is an on-demand install, so most gates read this rather than a
   // stored token. Default to installed so tests that predate the gating keep
   // seeing the provider offered.

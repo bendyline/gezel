@@ -493,6 +493,32 @@ export class ProviderPool {
   }
 
   /**
+   * Immediately unload one resident engine, but only while it is idle.
+   *
+   * This is the user-triggered counterpart to the idle-retention timer. It
+   * deliberately refuses a busy engine instead of entering the ordinary
+   * bounded drain path: an "Unload now" click must never turn into a delayed
+   * teardown of work that started just after the status surface was sampled.
+   * Returns false when the engine has already gone away.
+   */
+  async unloadIdle(key: string): Promise<boolean> {
+    const existingEviction = this.evicting.get(key);
+    if (existingEviction) {
+      await existingEviction;
+      return true;
+    }
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    if (isBusy(entry)) {
+      throw new EngineBusyError(
+        `engine ${key} is currently serving requests and cannot be unloaded yet. Wait for current turns to finish.`,
+      );
+    }
+    await this.evict(key);
+    return true;
+  }
+
+  /**
    * Evict a specific entry. Awaits the provider's `shutdown` so the
    * disk-cache flush (Tier 1 prior plan) completes before the broker
    * releases capacity.

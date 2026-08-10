@@ -23,14 +23,15 @@ export function ImportModelBundleButton({ className }: { className?: string }) {
   );
 }
 
-/** Per-installed-model export link with native streaming-save support. */
-export function ExportModelBundleButton({
-  engine,
-  id,
-}: {
-  engine: GezmodelEngine;
-  id: string;
-}) {
+/**
+ * Export flow shared by the standalone button and the per-row actions menu:
+ * native streaming save when the Electron bridge is present, browser
+ * save-picker fallback otherwise.
+ */
+export function useExportModelBundle(
+  engine: GezmodelEngine,
+  id: string,
+): { run: () => Promise<void>; busy: boolean; error: string | null } {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = useCallback(async () => {
@@ -52,6 +53,18 @@ export function ExportModelBundleButton({
       setBusy(false);
     }
   }, [busy, engine, id]);
+  return { run, busy, error };
+}
+
+/** Per-installed-model export link with native streaming-save support. */
+export function ExportModelBundleButton({
+  engine,
+  id,
+}: {
+  engine: GezmodelEngine;
+  id: string;
+}) {
+  const { run, busy, error } = useExportModelBundle(engine, id);
 
   return (
     <>

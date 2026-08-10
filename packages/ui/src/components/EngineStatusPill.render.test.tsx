@@ -213,7 +213,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
   });
 
-  it('confirms an Emergency Stop, cancels all chats, and broadcasts Reactive mode', async () => {
+  it('confirms a Hard Stop, cancels all chats, and broadcasts Reactive mode', async () => {
     const user = userEvent.setup();
     vi.mocked(api.emergencyStopChats).mockResolvedValue({
       ok: true,
@@ -233,12 +233,12 @@ describe('EngineStatusPill — simultaneous local engines', () => {
           name: /DwarfStar.*DeepSeek V4 Flash/i,
         }),
       );
-      await user.click(screen.getByRole('button', { name: 'Emergency Stop' }));
+      await user.click(screen.getByRole('button', { name: 'Hard Stop' }));
 
       const dialog = screen.getByRole('alertdialog');
-      expect(within(dialog).getByText('Emergency stop all chats?')).toBeInTheDocument();
+      expect(within(dialog).getByText('Hard stop all chats?')).toBeInTheDocument();
       expect(within(dialog).getByText(/switch to Reactive/i)).toBeInTheDocument();
-      await user.click(within(dialog).getByRole('button', { name: 'Emergency stop' }));
+      await user.click(within(dialog).getByRole('button', { name: 'Hard stop' }));
 
       await waitFor(() => {
         expect(api.emergencyStopChats).toHaveBeenCalledTimes(1);
@@ -305,10 +305,10 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
   });
 
-  it('names Windows VRAM owners and shows the model unload countdown', async () => {
+  it('names Windows VRAM owners and can unload an idle model from its countdown', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
-    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+    const memoryUsage: Awaited<ReturnType<typeof api.getMachineMemoryUsage>> = {
       kind: 'vram',
       totalBytes: 32 * GiB,
       usedBytes: 31 * GiB,
@@ -356,7 +356,11 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       sampledAt: '2026-08-10T12:00:00.000Z',
       source: 'device-health',
       deviceNames: ['Radeon'],
-    });
+    };
+    vi.mocked(api.getMachineMemoryUsage)
+      .mockResolvedValueOnce(memoryUsage)
+      .mockResolvedValue({ ...memoryUsage, engineLifecycles: [] });
+    vi.mocked(api.unloadIdleEngine).mockResolvedValue({ ok: true });
     render(<EngineStatusPill />);
 
     await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
@@ -366,6 +370,17 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     ).toBeVisible();
     expect(screen.getByText(/Gezel development engine · gezel-llama-server\.exe/i)).toBeVisible();
     expect(screen.getByText(/Unloads in 5:00|Unloads in 4:59/i)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Unload Talkie 1930 13B now' }));
+    expect(api.unloadIdleEngine).toHaveBeenCalledWith({
+      provider: 'llama-cpp',
+      modelId: 'talkie-1930-13b-q4',
+      replicaIdx: 0,
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: 'Unload Talkie 1930 13B now' }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it('states the reservation and its models instead of filling the bar the driver cannot measure', async () => {
@@ -438,6 +453,72 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.getByText('~19.1 GB')).toBeInTheDocument();
     expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
+  });
+
+  it('shows the on-card ceiling when discrete-GPU spillover is off', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'vram',
+      totalBytes: 31.9 * GiB,
+      usedBytes: null,
+      gezelBytesEstimated: 0,
+      gezelBytesObserved: null,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 0,
+      engineReservedBytes: 29.3 * GiB,
+      engineBudgetBytes: 68.4 * GiB,
+      enginePools: {
+        kind: 'discrete-gpu',
+        vramBytes: 30.4 * GiB,
+        ramShareBytes: 38 * GiB,
+        fastBytes: 30.4 * GiB,
+      },
+      engineRamSpillover: {
+        allowed: false,
+        auto: false,
+        overridden: false,
+        coResidencyBytes: 30.4 * GiB,
+      },
+      residentModels: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'qwen3.6-27b-q4',
+          reservedBytes: 19.1 * GiB,
+          replicaCount: 1,
+        },
+        {
+          provider: 'llama-cpp',
+          modelId: 'gemma4-4b-q4',
+          reservedBytes: 10.2 * GiB,
+          replicaCount: 1,
+        },
+      ],
+      gezelEngineProcessCount: 2,
+      orphanedGezelEngineProcessCount: 0,
+      otherBytes: null,
+      cachedBytes: null,
+      freeBytes: null,
+      sampledAt: '2026-08-10T12:00:00.000Z',
+      source: 'capacity-only',
+      deviceNames: ['AMD Radeon AI PRO R9700'],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    const capacityMeter = screen.getByRole('img', {
+      name: /On-card model capacity: about 29\.3 GB of 30\.4 GB reserved/i,
+    });
+    expect(capacityMeter).toBeVisible();
+    expect(screen.getByText('On-card model capacity')).toBeVisible();
+    expect(
+      screen.getByText(
+        /Concurrent models stay within ~30\.4 GB of graphics memory; system memory is allowed only for a single model too large for the card/i,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/of ~68\.4 GB reserved/i)).not.toBeInTheDocument();
   });
 
   it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {

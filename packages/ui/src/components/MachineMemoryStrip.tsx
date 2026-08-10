@@ -1,4 +1,4 @@
-import type { MachineMemoryUsage } from '@bendyline/gezel';
+import type { LocalEngineLifecycle, MachineMemoryUsage } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
@@ -35,6 +35,16 @@ function formatCountdown(unloadAt: number): string {
   return `Unloads in ${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+type UnloadableProvider = 'llama-cpp' | 'mlx' | 'ds4';
+
+function isUnloadableProvider(provider: string): provider is UnloadableProvider {
+  return provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4';
+}
+
+function lifecycleKey(engine: LocalEngineLifecycle): string {
+  return `${engine.provider}:${engine.modelId}:${engine.replicaIdx}`;
+}
+
 function gpuOwnerLabel(
   owner: NonNullable<MachineMemoryUsage['gpuProcesses']>[number]['owner'],
 ): string {
@@ -62,10 +72,24 @@ function describeReservation(usage: MachineMemoryUsage): string {
     : `Models reserve ${reserved} of ${budget} available to models`;
 }
 
-function describeCapacityPools(usage: MachineMemoryUsage): string | null {
+function describeCapacityPools(
+  usage: MachineMemoryUsage,
+  usesOnCardCeiling: boolean,
+  residentReplicaCount: number,
+): string | null {
   const pools = usage.enginePools;
   if (!pools) return null;
   if (pools.kind === 'discrete-gpu') {
+    const spillover = usage.engineRamSpillover;
+    if (spillover && !spillover.allowed) {
+      if (usesOnCardCeiling) {
+        return `Concurrent models stay within ~${formatBytes(spillover.coResidencyBytes)} of graphics memory; system memory is allowed only for a single model too large for the card`;
+      }
+      if (residentReplicaCount <= 1) {
+        return `This single model may use ~${formatBytes(pools.vramBytes)} of graphics memory plus system memory; additional models will unload it rather than spill together`;
+      }
+      return `Current reservations exceed the ~${formatBytes(spillover.coResidencyBytes)} on-card limit; the next model load will serialize them`;
+    }
     return `Capacity: ~${formatBytes(pools.vramBytes)} VRAM + ~${formatBytes(pools.ramShareBytes)} system RAM`;
   }
   if (pools.kind === 'unified') {
@@ -86,13 +110,16 @@ function describeCapacityPools(usage: MachineMemoryUsage): string | null {
  *
  * A discrete card whose driver reports capacity but not use omits the live-use
  * bar rather than showing an unactionable unknown meter or filling it from the
- * reservation. The broker reservation gets a separate capacity meter with its
- * own combined-pool denominator — see the service-side note in
- * `sampleMachineMemoryUsage`.
+ * reservation. The broker reservation gets a separate capacity meter. On a
+ * discrete GPU with spillover off, that meter uses the on-card co-residency
+ * ceiling; a single oversized model still uses the combined-pool denominator.
+ * See the service-side note in `sampleMachineMemoryUsage`.
  */
 export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [unloadingEngines, setUnloadingEngines] = useState<ReadonlySet<string>>(() => new Set());
+  const [unloadError, setUnloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +145,49 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
       clearInterval(timer);
     };
   }, [pollMs]);
+
+  const unloadNow = async (engine: LocalEngineLifecycle, engineLabel: string) => {
+    if (!isUnloadableProvider(engine.provider)) return;
+    const key = lifecycleKey(engine);
+    setUnloadError(null);
+    setUnloadingEngines((current) => new Set(current).add(key));
+    try {
+      await api.unloadIdleEngine({
+        provider: engine.provider,
+        modelId: engine.modelId,
+        replicaIdx: engine.replicaIdx,
+      });
+      // Remove the completed release immediately; the refreshed sample below
+      // fills in the corresponding measured-use and reservation changes.
+      setUsage((current) =>
+        current
+          ? {
+              ...current,
+              engineLifecycles: current.engineLifecycles?.filter(
+                (candidate) => lifecycleKey(candidate) !== key,
+              ),
+            }
+          : current,
+      );
+      try {
+        const next = await api.getMachineMemoryUsage();
+        setUsage(next);
+        setUnavailable(false);
+      } catch {
+        setUnavailable(true);
+      }
+    } catch (error) {
+      setUnloadError(
+        `Could not unload ${engineLabel}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setUnloadingEngines((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   if (!usage) {
     return (
@@ -185,19 +255,30 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const hasMeasuredLegend =
     attributed || usage.otherBytes !== null || cachedBytes !== null || usage.freeBytes !== null;
   const reservationBudgetBytes = usage.engineBudgetBytes ?? 0;
-  const hasReservationMeter = usage.engineReservedBytes > 0 && reservationBudgetBytes > 0;
+  const residentReplicaCount = residentModels.reduce((sum, model) => sum + model.replicaCount, 0);
+  const spillover = usage.engineRamSpillover;
+  const coResidencyBytes = spillover?.coResidencyBytes ?? 0;
+  const usesOnCardCeiling =
+    usage.enginePools?.kind === 'discrete-gpu' &&
+    spillover?.allowed === false &&
+    coResidencyBytes > 0 &&
+    usage.engineReservedBytes <= coResidencyBytes;
+  const effectiveReservationBudgetBytes = usesOnCardCeiling
+    ? coResidencyBytes
+    : reservationBudgetBytes;
+  const hasReservationMeter = usage.engineReservedBytes > 0 && effectiveReservationBudgetBytes > 0;
   const reservationNote =
     usage.engineReservedBytes > 0 && !hasReservationMeter ? describeReservation(usage) : null;
-  const capacityPoolSummary = describeCapacityPools(usage);
+  const capacityPoolSummary = describeCapacityPools(usage, usesOnCardCeiling, residentReplicaCount);
   const vramCapacityPercent =
     hasReservationMeter && usage.enginePools?.kind === 'discrete-gpu'
-      ? percent(usage.enginePools.vramBytes, reservationBudgetBytes)
+      ? percent(usage.enginePools.vramBytes, effectiveReservationBudgetBytes)
       : 0;
   const ramCapacityPercent =
     hasReservationMeter && usage.enginePools
       ? Math.min(
           100 - vramCapacityPercent,
-          percent(usage.enginePools.ramShareBytes, reservationBudgetBytes),
+          percent(usage.enginePools.ramShareBytes, effectiveReservationBudgetBytes),
         )
       : 0;
   const reservationSegments =
@@ -218,9 +299,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
         ];
   const reservationAriaSummary = hasReservationMeter
     ? [
-        `Model capacity: about ${formatBytes(usage.engineReservedBytes)} of ${formatBytes(
-          reservationBudgetBytes,
-        )} reserved`,
+        `${usesOnCardCeiling ? 'On-card model capacity' : 'Model capacity'}: about ${formatBytes(
+          usage.engineReservedBytes,
+        )} of ${formatBytes(effectiveReservationBudgetBytes)} reserved`,
         capacityPoolSummary,
         ...reservationSegments.map(
           (segment) => `${segment.label} about ${formatBytes(segment.bytes)} reserved`,
@@ -348,6 +429,13 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
           <div className="machine-memory-detail-heading">Model release</div>
           {engineLifecycles.map((engine) => {
             const engineLabel = modelNames?.get(engine.modelId) ?? engine.modelId;
+            const key = lifecycleKey(engine);
+            const canUnloadNow =
+              engine.running &&
+              !engine.active &&
+              engine.unloadAt !== null &&
+              isUnloadableProvider(engine.provider);
+            const unloading = unloadingEngines.has(key);
             const releaseText = !engine.running
               ? 'Released'
               : engine.active
@@ -356,24 +444,40 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
                   ? `${engine.releaseReason === 'memory-pressure' ? 'VRAM pressure · ' : ''}${formatCountdown(engine.unloadAt)}`
                   : 'Resident';
             return (
-              <div
-                className="machine-memory-detail-row"
-                key={`${engine.provider}:${engine.modelId}:${engine.replicaIdx}`}
-              >
+              <div className="machine-memory-detail-row" key={key}>
                 <span>{engineLabel}</span>
-                <span>{releaseText}</span>
+                <span className="machine-memory-release-state">
+                  <span>{releaseText}</span>
+                  {canUnloadNow && (
+                    <button
+                      type="button"
+                      className="secondary machine-memory-unload-button"
+                      aria-label={`Unload ${engineLabel}${engine.replicaIdx > 0 ? ` replica ${engine.replicaIdx + 1}` : ''} now`}
+                      disabled={unloading}
+                      onClick={() => void unloadNow(engine, engineLabel)}
+                    >
+                      {unloading ? 'Unloading…' : 'Unload now'}
+                    </button>
+                  )}
+                </span>
               </div>
             );
           })}
+          {unloadError && (
+            <div className="machine-memory-unload-error error" role="alert">
+              {unloadError}
+            </div>
+          )}
         </div>
       )}
       {hasReservationMeter && (
         <div className="machine-memory-reservation">
           <div className="machine-memory-reservation-heading">
-            <span>Reserved model capacity</span>
+            <span>{usesOnCardCeiling ? 'On-card model capacity' : 'Reserved model capacity'}</span>
             <span>
-              ~{formatBytes(usage.engineReservedBytes)} of ~{formatBytes(reservationBudgetBytes)}{' '}
-              reserved
+              {`~${formatBytes(usage.engineReservedBytes)} of ~${formatBytes(
+                effectiveReservationBudgetBytes,
+              )} reserved`}
             </span>
           </div>
           <div
@@ -398,7 +502,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
                 <i
                   key={segment.key}
                   className="machine-memory-reservation-segment"
-                  style={{ width: `${percent(segment.bytes, reservationBudgetBytes)}%` }}
+                  style={{ width: `${percent(segment.bytes, effectiveReservationBudgetBytes)}%` }}
                   title={`${segment.label} · ~${formatBytes(segment.bytes)} reserved`}
                 />
               ))}

@@ -283,14 +283,19 @@ export class ProjectArtifactsStore {
     await this.touchProject(id);
   }
 
-  async writeProjectArtifactBinary(id: string, filePath: string, data: Buffer): Promise<string> {
+  async writeProjectArtifactBinary(
+    id: string,
+    filePath: string,
+    data: Buffer,
+    options?: { createOnly?: boolean },
+  ): Promise<string> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
-    await writeFileAtomic(full, data);
+    await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.touchProject(id);
     return cleaned;
   }

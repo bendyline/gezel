@@ -46,7 +46,7 @@ const PAGE_SIZE = 100;
 // long, opaque, and uninteresting at a glance, so we never surface them
 // as a drift pill in the bubble header — the model is available on hover
 // via the author-name tooltip instead. Cloud providers still show drift.
-const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set(['ollama', 'llama-cpp', 'mlx']);
+const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set(['ollama', 'llama-cpp', 'mlx', 'ds4']);
 const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 /**
  * Gap past which a reply inside a thread is "late": it keeps its

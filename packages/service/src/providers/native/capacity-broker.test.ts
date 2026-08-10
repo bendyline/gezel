@@ -20,6 +20,7 @@ import {
   minViableLocalContextTokens,
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
+  planAdaptiveContextGrowth,
   planCtxTokensForMemory,
   plannedLocalEngineSlots,
   resolveLlamaCppContextRequirement,
@@ -1071,6 +1072,209 @@ describe('model-aware context admission', () => {
     ).toMatchObject({
       minimumPerTurnCtxTokens: 65_536,
       requestedPerTurnCtxTokens: 131_072,
+    });
+  });
+
+  it('a per-model override below the floor is honored via a reduced caller floor', () => {
+    const requirement = resolveLlamaCppContextRequirement({
+      modelContextWindow: 262_144,
+      explicitContextWindow: 32_768,
+      adaptiveContextWindow: 65_536,
+      contextSizing: 'adaptive',
+      // Callers pass min(hostFloor, override) so an explicit 32K survives
+      // the 64K floor's max() instead of being silently raised.
+      minViableContextTokens: 32_768,
+    });
+    expect(requirement).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 32_768,
+      strict: false,
+    });
+    expect(requirement.growthTargetTokens).toBeUndefined();
+  });
+});
+
+describe('adaptive context growth', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  describe('resolveLlamaCppContextRequirement growth target', () => {
+    it('emits the native window as the target for a plain adaptive launch', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(262_144);
+    });
+
+    it('floors an off-grid native window to 1024 alignment', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 100_000,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(99_328);
+    });
+
+    it('emits no target under strict model-max, explicit overrides, or unknown native', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'model-max',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          explicitContextWindow: 98_304,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      expect(
+        resolveLlamaCppContextRequirement({
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+    });
+
+    it('treats an authored manifest contextSize as a growth ceiling', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 98_304,
+          manifestContextSize: 98_304,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      // A manifest ceiling above the request still allows growth up to it.
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          manifestContextSize: 131_072,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(131_072);
+    });
+
+    it('honors the explicit and env growth ceilings', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+          growthCeilingTokens: 131_072,
+        }).growthTargetTokens,
+      ).toBe(131_072);
+      vi.stubEnv('GEZEL_LLAMA_GROWTH_CEILING_TOKENS', '98304');
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(98_304);
+    });
+  });
+
+  describe('planAdaptiveContextGrowth', () => {
+    // A 24 GB discrete card holding a dense ~27B q4: weights ~19.1 GB
+    // resident against a 22.8 GB usable fast pool, ~36 KB/token of KV.
+    const DENSE_ON_CARD = {
+      basePerTurnCtxTokens: 65_536,
+      targetPerTurnCtxTokens: 262_144,
+      slots: 1,
+      kvBytesPerToken: 36 * 1024,
+      weightsResidentBytes: 19.1 * GB,
+      fastBudgetBytes: 22.8 * GB,
+      committedOtherBytes: 0,
+      budgetKind: 'discrete-gpu' as const,
+      vramBytes: 22.8 * GB,
+      freeSystemRamBytes: 64 * GB,
+    };
+
+    it('grows a dense model into leftover VRAM, 1024-aligned, above the base grant', () => {
+      const result = planAdaptiveContextGrowth(DENSE_ON_CARD);
+      expect(result.grown).toBe(true);
+      expect(result.perTurnCtxTokens).toBeGreaterThan(65_536);
+      expect(result.perTurnCtxTokens % 1024).toBe(0);
+      expect(result.reason).toMatch(/growing context 65536/);
+      // The grown KV plus weights stays inside the fast pool with the
+      // compute headroom the shared clamp enforces.
+      const kv = result.perTurnCtxTokens * DENSE_ON_CARD.kvBytesPerToken;
+      expect(DENSE_ON_CARD.weightsResidentBytes + kv / 0.8).toBeLessThanOrEqual(
+        DENSE_ON_CARD.fastBudgetBytes + 1024,
+      );
+    });
+
+    it('confines discrete-GPU growth to the card — free system RAM is invisible', () => {
+      const dry = planAdaptiveContextGrowth({ ...DENSE_ON_CARD, freeSystemRamBytes: 0 });
+      const flooded = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        freeSystemRamBytes: 999 * GB,
+      });
+      expect(flooded.perTurnCtxTokens).toBe(dry.perTurnCtxTokens);
+    });
+
+    it('uses live free RAM on shared-pool hosts', () => {
+      const unified = {
+        ...DENSE_ON_CARD,
+        budgetKind: 'unified' as const,
+        vramBytes: 0,
+        weightsResidentBytes: 8.6 * GB,
+        fastBudgetBytes: 44.8 * GB,
+      };
+      const tight = planAdaptiveContextGrowth({ ...unified, freeSystemRamBytes: 14 * GB });
+      const roomy = planAdaptiveContextGrowth({ ...unified, freeSystemRamBytes: 64 * GB });
+      expect(roomy.perTurnCtxTokens).toBeGreaterThan(tight.perTurnCtxTokens);
+    });
+
+    it('never grows past the target and reports a full-native grant exactly', () => {
+      // SWA-class linearization: ~2 KB/token makes the whole native window cheap.
+      const result = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        weightsResidentBytes: 5.9 * GB,
+        kvBytesPerToken: 2 * 1024,
+      });
+      expect(result).toMatchObject({ grown: true, perTurnCtxTokens: 262_144 });
+    });
+
+    it('never returns below the base grant when weights exceed the fast pool', () => {
+      const result = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        weightsResidentBytes: 30 * GB,
+      });
+      expect(result).toMatchObject({ grown: false, perTurnCtxTokens: 65_536, reason: null });
+    });
+
+    it('refuses MoE growth on a discrete card but allows it on unified hosts', () => {
+      expect(planAdaptiveContextGrowth({ ...DENSE_ON_CARD, isMoE: true }).grown).toBe(false);
+      expect(
+        planAdaptiveContextGrowth({
+          ...DENSE_ON_CARD,
+          isMoE: true,
+          budgetKind: 'unified',
+          vramBytes: 0,
+          weightsResidentBytes: 8.6 * GB,
+          fastBudgetBytes: 44.8 * GB,
+        }).grown,
+      ).toBe(true);
+    });
+
+    it('shrinks growth by other models’ committed reservations', () => {
+      const alone = planAdaptiveContextGrowth(DENSE_ON_CARD);
+      const shared = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        committedOtherBytes: 2 * GB,
+      });
+      expect(shared.perTurnCtxTokens).toBeLessThan(alone.perTurnCtxTokens);
     });
   });
 });

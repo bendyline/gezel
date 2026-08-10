@@ -1304,13 +1304,13 @@ export const ChatModelLlamaCppSourceSchema = z
 export type ChatModelLlamaCppSource = z.infer<typeof ChatModelLlamaCppSourceSchema>;
 
 /**
- * Per-entry ds4 (DwarfStar) source. ds4 loads antirez's DeepSeek-V4 GGUFs
- * (single-file or sharded), so the shape mirrors
+ * Per-entry ds4 (DwarfStar) source. ds4 loads supported routed-MoE GGUFs
+ * (including DeepSeek V4 and GLM 5.2, single-file or sharded), so the shape mirrors
  * {@link ChatModelLlamaCppSourceSchema} — HF repo + revision + filename/shards
  * + sha256 + residentBytes + quantization — plus two ds4-specific SSD-
- * streaming hints. ds4 is NOT a general GGUF loader, so this block must only
- * appear on DeepSeek-V4 entries; the runtime prefers it over `llamaCpp` for
- * those (stock llama.cpp can't load these quants).
+ * streaming hints. ds4 is NOT a general GGUF loader: use this block only for
+ * architectures/quants the engine explicitly supports. Stock llama.cpp cannot
+ * load the routed ds4-only quants.
  */
 export const ChatModelDs4SourceSchema = z
   .object({

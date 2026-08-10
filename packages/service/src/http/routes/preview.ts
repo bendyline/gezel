@@ -211,13 +211,15 @@ function unbuiltSourceModuleShim(sources: string[]): string {
   if (sources.length === 0) return '';
   const names = sources.join(', ');
   const message = `Preview cannot run unbuilt TypeScript/JSX module${sources.length > 1 ? 's' : ''}: ${names}. Build the app and preview its generated dist/index.html, or run its development server.`;
+  // The preview owns its color palette, so derive a quiet translucent alert
+  // from its current text color instead of forcing a bright light-theme card.
   return `<script>(function(){
 var message=${JSON.stringify(message)};
 console.error(message);
 addEventListener('DOMContentLoaded',function(){
 var box=document.createElement('div');
 box.setAttribute('role','alert');
-box.style.cssText='box-sizing:border-box;max-width:720px;margin:48px auto;padding:24px;border:1px solid #b58b63;border-radius:12px;background:#f7f1e7;color:#342a22;font:16px/1.5 system-ui,sans-serif;white-space:pre-wrap';
+box.style.cssText='box-sizing:border-box;width:calc(100% - clamp(48px,12vw,96px));max-width:720px;margin:clamp(40px,8vh,64px) auto;padding:clamp(28px,5vw,36px);border:1px solid color-mix(in srgb,currentColor 24%,transparent);border-radius:10px;background:color-mix(in srgb,currentColor 7%,transparent);color:inherit;font:16px/1.6 system-ui,sans-serif;white-space:pre-wrap';
 box.textContent=message;
 if(document.body)document.body.replaceChildren(box);
 },{once:true});

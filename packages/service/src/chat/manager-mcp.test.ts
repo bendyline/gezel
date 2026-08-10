@@ -637,6 +637,22 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
   }, 30_000);
 
   it('continues an untasked PowerPoint request from suggest_craftbook through invoke_craftbook', async () => {
+    // This test owns the suggest -> invoke conversation contract, not the
+    // package installer. Seed an exact roster-only dependency so invoking
+    // the PowerPoint craftbook cannot turn into a live registry fetch.
+    const docblocks = await svc.context.catalog.get('toolset', 'docblocks');
+    if (!docblocks || docblocks.manifest.kind !== 'toolset') {
+      throw new Error('DocBlocks catalog fixture missing');
+    }
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+      {
+        toolsetId: 'docblocks',
+        sourceId: docblocks.sourceId,
+        version: docblocks.manifest.version,
+        installedAt: '2026-08-10T00:00:00.000Z',
+        runtime: docblocks.manifest.runtime,
+      },
+    ]);
     const session = await manager.createSession({ gezelId: 'ada' });
 
     mock.scriptToolCalls([

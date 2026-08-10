@@ -137,6 +137,11 @@ export async function buildDs4Provider(opts: {
   // This is the path validated against a locally-run `ds4-server` while the
   // bundled-binary vendoring (M2) lands.
   const externalBaseUrl = process.env.GEZEL_DS4_SERVER_URL ?? config.ds4BaseUrl;
+  // Per-model context override (Settings → Local models → Context size…),
+  // more specific than the machine-wide ds4NumCtx.
+  const perModelCtxOverride = defaultModelId
+    ? config.modelContextOverrides?.[`ds4:${defaultModelId}`]
+    : undefined;
   if (externalBaseUrl) {
     return new Ds4Provider({
       inner: new LlamaCppProvider({
@@ -144,7 +149,7 @@ export async function buildDs4Provider(opts: {
         disableThinkingRequestShape: 'deepseek',
         // The external server owns its own `--ctx`; we only need a window to
         // reason about pressure with, so the catalog cap can't apply here.
-        numCtx: config.ds4NumCtx ?? ramTieredCtx,
+        numCtx: perModelCtxOverride ?? config.ds4NumCtx ?? ramTieredCtx,
         ...baseProviderOpts,
       }),
     });
@@ -204,13 +209,25 @@ export async function buildDs4Provider(opts: {
       .catch(() => undefined);
   }
 
+  // The supervised launch may resolve its model by scanning installed models
+  // (resolveDefaultModel above), so re-read the override against the id that
+  // actually launches when the config carried none.
+  const launchCtxOverride =
+    perModelCtxOverride ??
+    (effectiveModelId ? config.modelContextOverrides?.[`ds4:${effectiveModelId}`] : undefined);
+  // An override below the host floor is deliberate user intent — lower the
+  // floor to the override instead of raising the request back to 64K.
+  const ds4Floor =
+    launchCtxOverride !== undefined
+      ? Math.min(minViableLocalContextTokens(), launchCtxOverride)
+      : minViableLocalContextTokens();
   const numCtx = resolveDs4LaunchCtx({
-    configured: config.ds4NumCtx,
+    configured: launchCtxOverride ?? config.ds4NumCtx,
     ramTieredCtx,
     catalogMaxCtx: ds4Source?.maxLaunchCtx,
-    minViableContextTokens: minViableLocalContextTokens(),
+    minViableContextTokens: ds4Floor,
   });
-  if (numCtx !== (config.ds4NumCtx ?? ramTieredCtx)) {
+  if (numCtx !== (launchCtxOverride ?? config.ds4NumCtx ?? ramTieredCtx)) {
     log.info(
       `[ds4] ${effectiveModelId ?? basename(modelPath)} caps launch context at ${numCtx} ` +
         `(device tier would allow ${ramTieredCtx})`,

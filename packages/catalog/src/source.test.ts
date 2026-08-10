@@ -318,10 +318,42 @@ describe('BundledSource — versioned layout', () => {
       version: '1.0.0',
       releasedAt: '2026-04-22T00:00:00Z',
       approxSizeBytes: 100,
-      // no ollama / llamaCpp / mlx
+      // no ollama / llamaCpp / mlx / ds4
     });
     const src = new BundledSource(root);
     expect(await src.get('chat-model', 'jj-model')).toBeNull();
+  });
+
+  it('loads a chat-model version whose only source is ds4', async () => {
+    const dir = await writeIdentity(root, 'chat-model', 'ds4-only', {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id: 'ds4-only',
+      name: 'ds4 only',
+      description: 'fixture',
+      tags: [],
+      maintainer: { name: 'Test' },
+      yankedVersions: [],
+      parameterSize: '1B',
+      supportsTools: false,
+    });
+    await writeVersion(dir, '1.0.0', {
+      schemaVersion: 1,
+      version: '1.0.0',
+      releasedAt: '2026-04-22T00:00:00Z',
+      approxSizeBytes: 100,
+      ds4: {
+        huggingfaceRepo: 'example/ds4-model',
+        filename: 'model.gguf',
+        sha256: 'a'.repeat(64),
+        approxSizeBytes: 100,
+      },
+    });
+    const src = new BundledSource(root);
+    const found = await src.get('chat-model', 'ds4-only');
+    expect(found?.manifest.kind).toBe('chat-model');
+    if (found?.manifest.kind !== 'chat-model') throw new Error('expected chat-model fixture');
+    expect(found.manifest.ds4?.filename).toBe('model.gguf');
   });
 });
 

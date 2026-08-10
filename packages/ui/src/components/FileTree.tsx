@@ -14,6 +14,12 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
+export interface FileTreeAction {
+  label: string;
+  onSelect: (entry: FileEntry) => void | Promise<void>;
+  disabled?: boolean;
+}
+
 export interface FileTreeProps {
   entries: FileEntry[];
   selectedPath?: string;
@@ -22,6 +28,8 @@ export interface FileTreeProps {
   onRename?: (entry: FileEntry) => void;
   /** Optional per-row delete action, exposed through ⋯ and right-click menus. */
   onDelete?: (entry: FileEntry) => void;
+  /** Optional host-defined actions, exposed through both row menus. */
+  actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
   /** Depth at which child nodes are initially collapsed. Default 2. */
   defaultExpandedDepth?: number;
   /** Custom icon override. Receives the entry and returns a ReactNode
@@ -97,6 +105,7 @@ export function FileTree({
   onSelect,
   onRename,
   onDelete,
+  actionsForEntry,
   defaultExpandedDepth = 2,
   iconFor = defaultIconFor,
   labelFor = defaultLabelFor,
@@ -114,6 +123,7 @@ export function FileTree({
           onSelect={onSelect}
           onRename={onRename}
           onDelete={onDelete}
+          actionsForEntry={actionsForEntry}
           defaultExpandedDepth={defaultExpandedDepth}
           iconFor={iconFor}
           labelFor={labelFor}
@@ -131,6 +141,7 @@ interface TreeItemProps {
   onSelect: (entry: FileEntry) => void;
   onRename?: (entry: FileEntry) => void;
   onDelete?: (entry: FileEntry) => void;
+  actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
   defaultExpandedDepth: number;
   iconFor: (entry: FileEntry) => ReactNode;
   labelFor: (entry: FileEntry) => string;
@@ -144,6 +155,7 @@ function TreeItem({
   onSelect,
   onRename,
   onDelete,
+  actionsForEntry,
   defaultExpandedDepth,
   iconFor,
   labelFor,
@@ -156,7 +168,8 @@ function TreeItem({
     isDirectory: node.isDirectory,
   };
   const label = labelFor(entry);
-  const hasActions = Boolean(onRename || onDelete);
+  const customActions = actionsForEntry?.(entry) ?? [];
+  const hasActions = Boolean(onRename || onDelete || customActions.length > 0);
 
   const row = (
     <div
@@ -238,6 +251,19 @@ function TreeItem({
                   Delete…
                 </DropdownMenu.Item>
               )}
+              {customActions.length > 0 && (onRename || onDelete) && (
+                <DropdownMenu.Separator className="app-nav-menu-separator" />
+              )}
+              {customActions.map((action) => (
+                <DropdownMenu.Item
+                  key={action.label}
+                  className="app-nav-menu-item"
+                  disabled={action.disabled}
+                  onSelect={() => void action.onSelect(entry)}
+                >
+                  {action.label}
+                </DropdownMenu.Item>
+              ))}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -265,6 +291,19 @@ function TreeItem({
                   Delete…
                 </ContextMenu.Item>
               )}
+              {customActions.length > 0 && (onRename || onDelete) && (
+                <ContextMenu.Separator className="app-nav-menu-separator" />
+              )}
+              {customActions.map((action) => (
+                <ContextMenu.Item
+                  key={action.label}
+                  className="app-nav-menu-item"
+                  disabled={action.disabled}
+                  onSelect={() => void action.onSelect(entry)}
+                >
+                  {action.label}
+                </ContextMenu.Item>
+              ))}
             </ContextMenu.Content>
           </ContextMenu.Portal>
         </ContextMenu.Root>
@@ -282,6 +321,7 @@ function TreeItem({
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
+              actionsForEntry={actionsForEntry}
               defaultExpandedDepth={defaultExpandedDepth}
               iconFor={iconFor}
               labelFor={labelFor}

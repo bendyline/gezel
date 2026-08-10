@@ -936,8 +936,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     const buf = Buffer.from(await c.req.arrayBuffer());
-    const written = await ctx.store.writeProjectArtifactBinary(id, filePath, buf);
-    return c.json({ ok: true, path: written });
+    try {
+      const written = await ctx.store.writeProjectArtifactBinary(id, filePath, buf, {
+        createOnly: c.req.query('create') === '1',
+      });
+      return c.json({ ok: true, path: written });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        return c.json({ error: 'backup already exists' }, 409);
+      }
+      throw err;
+    }
   });
 
   app.delete('/:id/artifacts/delete', async (c) => {
@@ -1778,9 +1787,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         id,
         filePath,
         Buffer.from(await c.req.arrayBuffer()),
+        undefined,
+        { createOnly: c.req.query('create') === '1' },
       );
       return c.json({ ok: true, path: filePath });
     } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        return c.json({ error: 'backup already exists' }, 409);
+      }
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);
     }

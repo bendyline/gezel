@@ -43,10 +43,12 @@ import {
   createProjectContentContainer,
   importOutsideInDocument,
   isOutsideInInternalPath,
+  isOutsideInMarkdownEditingEnabled,
   relativePath,
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
+  withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
@@ -157,6 +159,10 @@ type FileTab = 'workspace' | 'artifacts';
 interface OutsideInOpenFile {
   layout: OutsideInLayout;
   sourcePath: string;
+  editingEnabled: boolean;
+}
+interface PreparedOutsideInDocument extends OutsideInOpenFile {
+  content: string;
 }
 type ProjectTab =
   | 'settings'
@@ -1174,71 +1180,89 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
+  const prepareOutsideInDocument = useCallback(
+    async (entry: FileEntry, source: FileTab): Promise<PreparedOutsideInDocument> => {
+      if (!selected) throw new Error('Open a project before viewing this document.');
+      const layout = resolveOutsideInLayout(entry.path);
+      if (!layout) throw new Error('This file does not support a Markdown companion.');
+      const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
+      let sourcePath = chooseOutsideInSource(
+        layout,
+        entries.filter((candidate) => !candidate.isDirectory).map((candidate) => candidate.path),
+      );
+      let content: string;
+      if (sourcePath) {
+        const response =
+          source === 'workspace'
+            ? await api.readProjectWorkspaceFile(selected.id, sourcePath)
+            : await api.readProjectArtifact(selected.id, sourcePath);
+        content = response.content;
+      } else {
+        if (!canWriteProjectFiles(source)) {
+          throw new Error(
+            'Enable workspace writes for this external project before importing its Markdown companion.',
+          );
+        }
+        const blob =
+          source === 'workspace'
+            ? await api.fetchProjectWorkspaceBlob(selected.id, entry.path)
+            : await api.fetchProjectArtifactBlob(selected.id, entry.path);
+        const imported = await importOutsideInDocument(await blob.arrayBuffer(), layout);
+        const container = createProjectContentContainer({
+          projectId: selected.id,
+          root: layout.companionDirectory,
+          client: api,
+          primaryDocumentFilename: layout.markdownFilename,
+          source,
+        });
+        for (const importedEntry of await imported.container.listFiles()) {
+          if (/\.md$/i.test(importedEntry.path)) continue;
+          const data = await imported.container.readFile(importedEntry.path);
+          if (!data) continue;
+          await container.writeFile(importedEntry.path, data, importedEntry.mimeType);
+        }
+        await container.writeDocument(imported.markdown, layout.markdownFilename);
+        sourcePath = layout.markdownPath;
+        content = imported.markdown;
+        await refreshFiles(selected.id);
+      }
+      const linkedContent = withOutsideInMetadata(content, layout);
+      if (linkedContent !== content && canWriteProjectFiles(source)) {
+        if (source === 'workspace') {
+          await api.writeProjectWorkspaceFile(selected.id, {
+            path: sourcePath,
+            content: linkedContent,
+          });
+        } else {
+          await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
+        }
+      }
+      return {
+        layout: { ...layout, markdownPath: sourcePath },
+        sourcePath,
+        content: linkedContent,
+        editingEnabled: isOutsideInMarkdownEditingEnabled(linkedContent),
+      };
+    },
+    [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
+  );
+
   const openFileEntry = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
       const layout = resolveOutsideInLayout(entry.path);
       if (layout) {
         try {
-          const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
-          let sourcePath = chooseOutsideInSource(
-            layout,
-            entries
-              .filter((candidate) => !candidate.isDirectory)
-              .map((candidate) => candidate.path),
-          );
-          let content: string;
-          if (sourcePath) {
-            const response =
-              source === 'workspace'
-                ? await api.readProjectWorkspaceFile(selected.id, sourcePath)
-                : await api.readProjectArtifact(selected.id, sourcePath);
-            content = response.content;
-          } else {
-            if (!canWriteProjectFiles(source)) {
-              throw new Error(
-                'Enable workspace writes for this external project before importing its editable companion.',
-              );
-            }
-            const blob =
-              source === 'workspace'
-                ? await api.fetchProjectWorkspaceBlob(selected.id, entry.path)
-                : await api.fetchProjectArtifactBlob(selected.id, entry.path);
-            const imported = await importOutsideInDocument(await blob.arrayBuffer(), layout);
-            const container = createProjectContentContainer({
-              projectId: selected.id,
-              root: layout.companionDirectory,
-              client: api,
-              primaryDocumentFilename: layout.markdownFilename,
-              source,
-            });
-            for (const importedEntry of await imported.container.listFiles()) {
-              if (/\.md$/i.test(importedEntry.path)) continue;
-              const data = await imported.container.readFile(importedEntry.path);
-              if (!data) continue;
-              await container.writeFile(importedEntry.path, data, importedEntry.mimeType);
-            }
-            await container.writeDocument(imported.markdown, layout.markdownFilename);
-            sourcePath = layout.markdownPath;
-            content = imported.markdown;
-            await refreshFiles(selected.id);
-          }
-          const linkedContent = withOutsideInMetadata(content, layout);
-          if (linkedContent !== content && canWriteProjectFiles(source)) {
-            if (source === 'workspace') {
-              await api.writeProjectWorkspaceFile(selected.id, {
-                path: sourcePath,
-                content: linkedContent,
-              });
-            } else {
-              await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
-            }
-          }
+          const prepared = await prepareOutsideInDocument(entry, source);
           setOpenFile({
             path: entry.path,
-            content: linkedContent,
+            content: prepared.content,
             source,
-            outsideIn: { layout: { ...layout, markdownPath: sourcePath }, sourcePath },
+            outsideIn: {
+              layout: prepared.layout,
+              sourcePath: prepared.sourcePath,
+              editingEnabled: prepared.editingEnabled,
+            },
           });
           setError(null);
         } catch (err) {
@@ -1263,7 +1287,69 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setOpenFile({ ...res, content, source });
       }
     },
-    [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
+    [selected, prepareOutsideInDocument],
+  );
+
+  const allowOutsideInMarkdownEditing = useCallback(
+    async (entry: FileEntry, source: FileTab) => {
+      if (!selected || entry.isDirectory) return;
+      if (!canWriteProjectFiles(source)) {
+        setError('Enable workspace writes before allowing Markdown editing.');
+        return;
+      }
+      try {
+        const prepared = await prepareOutsideInDocument(entry, source);
+        const original =
+          source === 'workspace'
+            ? await api.fetchProjectWorkspaceBlob(selected.id, prepared.layout.targetPath)
+            : await api.fetchProjectArtifactBlob(selected.id, prepared.layout.targetPath);
+        try {
+          if (source === 'workspace') {
+            await api.writeProjectWorkspaceBinary(
+              selected.id,
+              prepared.layout.backupPath,
+              original,
+              original.type || 'application/octet-stream',
+              { createOnly: true },
+            );
+          } else {
+            await api.writeProjectArtifactBinary(
+              selected.id,
+              prepared.layout.backupPath,
+              original,
+              original.type || 'application/octet-stream',
+              { createOnly: true },
+            );
+          }
+        } catch (err) {
+          if (!(err instanceof Error) || !err.message.includes('already exists')) throw err;
+        }
+        const editableContent = withOutsideInMarkdownEditing(prepared.content, prepared.layout);
+        if (source === 'workspace') {
+          await api.writeProjectWorkspaceFile(selected.id, {
+            path: prepared.sourcePath,
+            content: editableContent,
+          });
+        } else {
+          await api.writeProjectArtifact(selected.id, prepared.sourcePath, editableContent);
+        }
+        setOpenFile({
+          path: entry.path,
+          content: editableContent,
+          source,
+          outsideIn: {
+            layout: prepared.layout,
+            sourcePath: prepared.sourcePath,
+            editingEnabled: true,
+          },
+        });
+        setError(null);
+        await refreshFiles(selected.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not enable Markdown editing.');
+      }
+    },
+    [selected, canWriteProjectFiles, prepareOutsideInDocument, refreshFiles],
   );
 
   // Stable identity + functional setState. Inline arrow + stale closure here
@@ -1273,88 +1359,96 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     setOpenFile((prev) => (prev ? { ...prev, content: source } : prev));
   }, []);
 
-  const saveArtifact = useCallback(async () => {
-    if (!selected || !openFile || NON_TEXT_CONTENT.has(openFile.content)) return;
-    if (openFile.outsideIn) {
-      if (!canWriteProjectFiles(openFile.source)) return;
-      const { layout, sourcePath } = openFile.outsideIn;
-      const container = createProjectContentContainer({
-        projectId: selected.id,
-        root: layout.companionDirectory,
-        client: api,
-        primaryDocumentFilename: basenameOf(sourcePath),
-        source: openFile.source,
-      });
-      const allEntries = openFile.source === 'workspace' ? workspaceFiles : artifactFiles;
-      const runtimePath =
-        layout.format === 'html'
-          ? runtimePathForTarget(
-              layout.targetPath,
-              new Set(
-                allEntries
-                  .filter((entry) => entry.isDirectory)
-                  .map((entry) => entry.path.replace(/^\/+/, '')),
-              ),
-            )
-          : undefined;
-      const linkedContent = withOutsideInMetadata(openFile.content, layout);
-      const rendered = await renderOutsideInDocument(
-        linkedContent,
-        layout,
-        container,
-        runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
-      );
-
-      if (openFile.source === 'workspace') {
-        await api.writeProjectWorkspaceFile(selected.id, {
-          path: sourcePath,
-          content: linkedContent,
+  const saveArtifact = useCallback(
+    async (contentOverride?: string) => {
+      if (!selected || !openFile || NON_TEXT_CONTENT.has(openFile.content)) return;
+      const content = contentOverride ?? openFile.content;
+      if (openFile.outsideIn) {
+        if (!canWriteProjectFiles(openFile.source) || !openFile.outsideIn.editingEnabled) return;
+        const { layout, sourcePath } = openFile.outsideIn;
+        const container = createProjectContentContainer({
+          projectId: selected.id,
+          root: layout.companionDirectory,
+          client: api,
+          primaryDocumentFilename: basenameOf(sourcePath),
+          source: openFile.source,
         });
-      } else {
-        await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
-      }
-      if (runtimePath) {
-        const { PLAYER_BUNDLE } = await import('@bendyline/squisq-react/standalone-source');
+        const allEntries = openFile.source === 'workspace' ? workspaceFiles : artifactFiles;
+        const runtimePath =
+          layout.format === 'html'
+            ? runtimePathForTarget(
+                layout.targetPath,
+                new Set(
+                  allEntries
+                    .filter((entry) => entry.isDirectory)
+                    .map((entry) => entry.path.replace(/^\/+/, '')),
+                ),
+              )
+            : undefined;
+        const linkedContent = withOutsideInMetadata(content, layout);
+        const rendered = await renderOutsideInDocument(
+          linkedContent,
+          layout,
+          container,
+          runtimePath ? relativePath(layout.parentDirectory, runtimePath) : undefined,
+        );
+
         if (openFile.source === 'workspace') {
           await api.writeProjectWorkspaceFile(selected.id, {
-            path: runtimePath,
-            content: PLAYER_BUNDLE,
+            path: sourcePath,
+            content: linkedContent,
           });
         } else {
-          await api.writeProjectArtifact(selected.id, runtimePath, PLAYER_BUNDLE);
+          await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
         }
-      }
-      if (openFile.source === 'workspace') {
-        await api.writeProjectWorkspaceBinary(
-          selected.id,
-          layout.targetPath,
-          rendered.bytes,
-          rendered.mimeType,
+        if (runtimePath) {
+          const { PLAYER_BUNDLE } = await import('@bendyline/squisq-react/standalone-source');
+          if (openFile.source === 'workspace') {
+            await api.writeProjectWorkspaceFile(selected.id, {
+              path: runtimePath,
+              content: PLAYER_BUNDLE,
+            });
+          } else {
+            await api.writeProjectArtifact(selected.id, runtimePath, PLAYER_BUNDLE);
+          }
+        }
+        if (openFile.source === 'workspace') {
+          await api.writeProjectWorkspaceBinary(
+            selected.id,
+            layout.targetPath,
+            rendered.bytes,
+            rendered.mimeType,
+          );
+        } else {
+          await api.writeProjectArtifactBinary(
+            selected.id,
+            layout.targetPath,
+            rendered.bytes,
+            rendered.mimeType,
+          );
+        }
+        setOpenFile((current) =>
+          current?.path === openFile.path && current.source === openFile.source
+            ? { ...current, content: linkedContent }
+            : current,
         );
-      } else {
-        await api.writeProjectArtifactBinary(
-          selected.id,
-          layout.targetPath,
-          rendered.bytes,
-          rendered.mimeType,
-        );
+        await refreshProjectFiles(selected.id);
+        return;
       }
-      setOpenFile((current) => (current ? { ...current, content: linkedContent } : current));
-      await refreshProjectFiles(selected.id);
-      return;
-    }
-    if (openFile.source !== 'artifacts') return;
-    await api.writeProjectArtifact(selected.id, openFile.path, openFile.content);
-    await refreshFiles(selected.id);
-  }, [
-    selected,
-    openFile,
-    canWriteProjectFiles,
-    workspaceFiles,
-    artifactFiles,
-    refreshProjectFiles,
-    refreshFiles,
-  ]);
+      if (openFile.source !== 'artifacts') return;
+      await api.writeProjectArtifact(selected.id, openFile.path, openFile.content);
+      await refreshFiles(selected.id);
+    },
+    [
+      selected,
+      openFile,
+      canWriteProjectFiles,
+      workspaceFiles,
+      artifactFiles,
+      refreshProjectFiles,
+      refreshFiles,
+    ],
+  );
 
   const createArtifact = useCallback(async () => {
     if (!selected || !newFileName.trim()) return;
@@ -1394,7 +1488,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     (entry) => !isOutsideInInternalPath(entry.path),
   );
   const isReadOnly = openFile?.outsideIn
-    ? !canWriteProjectFiles(openFile.source)
+    ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
     : fileTab === 'workspace';
 
   // Output pane: the set of previewable workspace HTML files, whether a
@@ -2544,6 +2638,24 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             selectedPath={openFile?.path}
                             onSelect={(e) => void openFileEntry(e, fileTab)}
                             onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
+                            actionsForEntry={(entry) => {
+                              if (
+                                entry.isDirectory ||
+                                !resolveOutsideInLayout(entry.path) ||
+                                (openFile?.path === entry.path &&
+                                  openFile.source === fileTab &&
+                                  openFile.outsideIn?.editingEnabled)
+                              ) {
+                                return [];
+                              }
+                              return [
+                                {
+                                  label: 'Allow editing via markdown',
+                                  disabled: !canWriteProjectFiles(fileTab),
+                                  onSelect: () => allowOutsideInMarkdownEditing(entry, fileTab),
+                                },
+                              ];
+                            }}
                           />
                           {(fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) && (
                             <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
@@ -2648,7 +2760,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   !isReadOnly ? (
                                     <button
                                       type="button"
-                                      onClick={saveArtifact}
+                                      onClick={() => void saveArtifact()}
                                       style={{ marginLeft: '0.5rem' }}
                                     >
                                       Save
@@ -2759,9 +2871,23 @@ function ProjectOutsideInEditor({
   isReadOnly: boolean;
   editorTheme: 'light' | 'dark';
   onChange: (source: string) => void;
-  onSave: () => void | Promise<void>;
+  onSave: (content?: string) => void | Promise<void>;
 }) {
   const { layout, sourcePath } = outsideIn;
+  const autosave = useSerializedAutosave({
+    resourceKey: `outside-in:${projectId}:${file.source}:${sourcePath}`,
+    initialValue: normalizeMarkdownBaseline(file.content),
+    save: async (content) => {
+      await onSave(content);
+    },
+  });
+  const handleChange = useCallback(
+    (content: string) => {
+      onChange(content);
+      autosave.update(content);
+    },
+    [autosave.update, onChange],
+  );
   const container = useMemo(
     () =>
       createProjectContentContainer({
@@ -2788,9 +2914,10 @@ function ProjectOutsideInEditor({
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
-        initialMarkdown={file.content}
+        initialMarkdown={autosave.desiredValue()}
         fileName={file.path}
-        onChange={isReadOnly ? undefined : onChange}
+        readOnly={isReadOnly}
+        onChange={isReadOnly ? undefined : handleChange}
         height="100%"
         colorScheme={editorTheme}
         fullWidth
@@ -2804,8 +2931,13 @@ function ProjectOutsideInEditor({
         }
         toolbarSlotRight={
           <>
+            {!isReadOnly && <AutosaveStatus autosave={autosave} />}
             {!isReadOnly && (
-              <button type="button" onClick={() => void onSave()} style={{ marginLeft: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => void autosave.flush()}
+                style={{ marginLeft: '0.5rem' }}
+              >
                 Save {layout.format.toUpperCase()}
               </button>
             )}

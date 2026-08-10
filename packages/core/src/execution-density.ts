@@ -18,7 +18,7 @@ export type ExecutionDensitySetting = 'auto' | ExecutionDensity;
  * outer crew + per-step loop is largely redundant overhead. A finer cut
  * than "is this a cloud provider": `copilot` is cloud-backed but DOES
  * self-orchestrate, whereas raw cloud APIs (`anthropic`, `openai`) and
- * local engines (`llama-cpp`, `mlx`) do not — gezel drives their loop
+ * local engines (`llama-cpp`, `mlx`, `ds4`) do not — gezel drives their loop
  * one turn per step.
  *
  * Mirrors `evals/src/providers.ts` `isSelfOrchestratingProvider`. Takes a

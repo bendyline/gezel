@@ -1611,6 +1611,22 @@ html.embedded-chat #root {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.machine-memory-release-state {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+button.machine-memory-unload-button {
+  padding: 0.1rem 0.32rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.64rem;
+  line-height: 1.2;
+}
+.machine-memory-unload-error {
+  margin-top: 0.12rem;
+  white-space: normal;
+}
 .machine-memory-segment {
   display: block;
   height: 100%;
@@ -16635,10 +16651,21 @@ button.timeline-session-divider-continuing::before {
   font-size: 0.85rem;
 }
 
+.ollama-model-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ollama-model-table .model-name-column {
+  width: 36%;
+}
+
 .ollama-model-table th,
 .ollama-model-table td {
   padding: 0.35rem 0.5rem;
   text-align: left;
+  vertical-align: top;
   border-bottom: 1px solid var(--border);
 }
 
@@ -16650,18 +16677,60 @@ button.timeline-session-divider-continuing::before {
   letter-spacing: 0.04em;
 }
 
-/* The fitness status and its action form one compact row. Nudge the row a
-   couple of pixels left so the bordered badge aligns optically with the
-   plain FITNESS heading, then let flexbox own the inter-control spacing. */
+/* Installed-model rows use two deliberate lines instead of wrapping based on
+   incidental space. The model id stays intact on line one; any status marks
+   occupy line two. */
+.ollama-model-table td.model-name-table-cell {
+  min-width: 10.5rem;
+}
+
+.model-name-cell,
+.model-fitness-cell,
+.model-actions-cell {
+  display: grid;
+  grid-template-rows: auto minmax(1.15rem, auto);
+  row-gap: 0.2rem;
+  align-items: start;
+  justify-items: start;
+}
+
+.model-name-cell > code {
+  width: fit-content;
+  white-space: nowrap;
+}
+
+.model-name-meta,
+.model-action-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-sm);
+  min-height: 1.15rem;
+  white-space: nowrap;
+}
+
+.model-memory-headline {
+  display: block;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+
+/* Nudge the fitness stack a couple of pixels left so the bordered badge
+   aligns optically with the plain FITNESS heading. */
 .ollama-model-table td.model-fitness-table-cell {
   padding-left: 0.35rem;
 }
 
 .model-fitness-cell {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
   white-space: nowrap;
+}
+
+.model-actions-table-cell {
+  white-space: nowrap;
+}
+
+.model-action-status {
+  min-height: 1.15rem;
 }
 
 .model-fitness-badge {
@@ -19064,7 +19133,7 @@ a.license-button:hover {
 }
 
 /* The mode buttons are gz-keys (see the keys-in-trays block at the end of
-   this file). "Off" is the emergency stop — its latched key goes danger-red. */
+   this file). "Off" is the hard stop — its latched key goes danger-red. */
 .engagement-mode-off .gz-key-active {
   background: linear-gradient(to bottom, #a83326, #c0392b);
   border-color: #7f2820;
@@ -24672,10 +24741,11 @@ button.linklike {
  * thumb marks the auto-derived value so operators can see how far their
  * override drifts from what gezel recommends for this machine.
  *
- * Two users today: the per-engine prompt-cache budget (CacheControlsPanel)
- * and the total resident-engine budget (EngineMemoryBudgetPanel). Keep the
- * shape shared — they sit on the same settings pages, one above the other,
- * and any divergence reads as a bug. */
+ * Three users today: the per-engine prompt-cache budget (CacheControlsPanel),
+ * the total resident-engine budget (EngineMemoryBudgetPanel), and the
+ * per-model context-size editor (ModelContextSliderPanel). Keep the shape
+ * shared — they sit on the same settings pages, and any divergence reads
+ * as a bug. */
 .gz-budget-slider {
   margin-top: 0.75rem;
   max-width: 26rem;
@@ -24742,6 +24812,61 @@ button.linklike {
   display: flex;
   justify-content: space-between;
   margin-top: 1.9rem;
+}
+
+/* Per-model "…" actions trigger on the Local models lists. Unlike the
+ * sidebar's project trigger, it stays visible — a table row has no hover
+ * affordance culture, and a control that only appears on hover is
+ * undiscoverable on touchpads scrolling past it. */
+.model-actions-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+}
+.model-actions-trigger:hover,
+.model-actions-trigger[data-state="open"] {
+  color: var(--fg, inherit);
+  background: rgba(127, 127, 127, 0.14);
+}
+
+/* Context-size editor — the expanded row beneath a model in the Local
+ * models lists. Carries the shared gz-budget-slider; only the framing is
+ * its own. */
+.model-context-editor-row > td {
+  padding: 0.1rem 0.5rem 0.85rem;
+}
+.model-context-editor {
+  padding: 0.25rem 0.25rem 0;
+}
+.model-context-editor .gz-budget-slider {
+  margin-top: 0.25rem;
+}
+.model-context-editor-estimate {
+  margin-left: auto;
+}
+.model-context-editor-warning {
+  display: block;
+  margin-top: 0.5rem;
+}
+.model-context-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.model-context-editor-message {
+  margin-top: 0.5rem;
+}
+.model-context-custom-tag {
+  margin-left: 0.4rem;
 }
 
 /* Total on-device model memory dial, inside the engine budget strip. */

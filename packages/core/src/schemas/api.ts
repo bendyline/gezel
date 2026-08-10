@@ -323,6 +323,19 @@ export const MachineMemoryUsageSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * Whether co-resident models may use the system-RAM share of a discrete
+   * GPU host's combined budget. Optional for compatibility with older engine
+   * owners; when false, additional models serialize at coResidencyBytes.
+   */
+  engineRamSpillover: z
+    .object({
+      allowed: z.boolean(),
+      auto: z.boolean(),
+      overridden: z.boolean(),
+      coResidencyBytes: z.number().nonnegative(),
+    })
+    .optional(),
   /** The resident models behind `engineReservedBytes`. */
   residentModels: z.array(ResidentEngineModelSchema),
   /** Running supervised replicas and their next policy deadline. */
@@ -665,6 +678,28 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
 /**
+ * Wire shapes for the per-model context override surface
+ * (`/api/engines/:engine/model-context`). The response map is keyed by the
+ * installed model id (engine is already in the route); values are per-turn
+ * tokens.
+ */
+export const ModelContextOverridesResponseSchema = z.object({
+  overrides: z.record(z.string(), z.number().int().positive()),
+});
+export type ModelContextOverridesResponse = z.infer<typeof ModelContextOverridesResponseSchema>;
+
+/**
+ * `contextTokens: null` returns the model to automatic sizing. The lower
+ * bound matches the smallest window Gezel serves its tool surface with
+ * (the constrained-host floor); the upper bound is a sanity cap of 4M —
+ * launch-time resolution clamps to the model's native window regardless.
+ */
+export const ModelContextOverrideUpdateSchema = z.object({
+  contextTokens: z.number().int().min(32_768).max(4_194_304).nullable(),
+});
+export type ModelContextOverrideUpdate = z.infer<typeof ModelContextOverrideUpdateSchema>;
+
+/**
  * Remote model execution — serving a device's models to paired client devices
  * over the LAN. Named schema (not inline in {@link GezelConfigSchema}) because
  * the machine-engine broker's manage surface parses it standalone: the broker
@@ -738,8 +773,8 @@ export const GezelConfigSchema = z.object({
   service: z.object({ url: z.string(), token: z.string() }).optional(),
   /**
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
-   * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`
-   * instances; the freeze stage fires at half this value when set. Default
+   * (llama-cpp, mlx, ds4) to free accelerator memory. Applied to local native
+   * supervisors; the freeze stage fires at half this value when set. Default
    * 5 min. This clock measures time since the engine's last native request,
    * not the duration of the surrounding tool loop, so long generations remain
    * protected while turns parked on tools or a person can release VRAM. Floor
@@ -1205,6 +1240,17 @@ export const GezelConfigSchema = z.object({
    * machine-engine broker and an in-process/dev engine use identical policy.
    */
   llamaCppContextSizing: LlamaCppContextSizingSchema.optional(),
+  /**
+   * Per-model per-turn context override (tokens), keyed
+   * `"<engine>:<modelId>"` for the machine engines (llama-cpp, mlx, ds4) —
+   * the same key convention as `modelFitness`. Engine-owner state written
+   * only through `PUT /api/engines/:engine/model-context/:modelId` (the
+   * machine broker in packaged installs), never through `/api/config`. An
+   * override wins over the engine-wide numCtx setting and the sizing policy
+   * for that model; launch resolution still clamps it to the model's native
+   * window, and memory admission may grant less.
+   */
+  modelContextOverrides: z.record(z.string(), z.number().int().positive()).optional(),
   /**
    * ds4-only: base URL of an already-running `ds4-server` to talk to
    * instead of supervising the bundled binary. Mirrors `llamaCppBaseUrl`
