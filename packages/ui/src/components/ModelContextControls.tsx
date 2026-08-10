@@ -183,7 +183,10 @@ export function ModelContextSliderPanel({
   }, [model.overrideContextTokens]);
 
   // One snapshot for the over-fit warning; the models list itself re-prices
-  // the row after a save, so this doesn't need to poll.
+  // the row after a save, so this doesn't need to poll. THIS model's own
+  // resident reservation must not count against the pool it would occupy —
+  // a loaded model otherwise makes its own slider report "bigger than what
+  // fits" at the automatic position.
   useEffect(() => {
     let cancelled = false;
     void api
@@ -192,14 +195,20 @@ export function ModelContextSliderPanel({
         if (cancelled) return;
         const fastBytes = status.pools?.fastBytes;
         if (fastBytes && fastBytes > 0) {
-          setFastPool({ fastBytes, committedBytes: status.committedBytes ?? 0 });
+          const ownResidentBytes = (status.entries ?? [])
+            .filter((entry) => entry.provider === engine && entry.modelId === model.id)
+            .reduce((sum, entry) => sum + entry.residentBytes, 0);
+          setFastPool({
+            fastBytes,
+            committedBytes: Math.max(0, (status.committedBytes ?? 0) - ownResidentBytes),
+          });
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [engine, model.id]);
 
   const save = useCallback(
     async (tokens: number | null) => {

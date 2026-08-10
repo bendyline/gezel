@@ -142,6 +142,41 @@ describe('ModelContextSliderPanel', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
+  it("does not count the model's own resident reservation against its pool", async () => {
+    // The loaded model IS the committed bytes: without the own-reservation
+    // subtraction, its slider warned "bigger than what fits" while sitting
+    // at the automatic position it was admitted at.
+    vi.mocked(api.getEngineStatus).mockResolvedValue({
+      enforced: true,
+      budgetBytes: 60 * GiB,
+      committedBytes: 21.5 * GiB,
+      entries: [
+        {
+          key: `llama-cpp:${MODEL.id}:0`,
+          provider: 'llama-cpp',
+          modelId: MODEL.id,
+          replicaIdx: 0,
+          residentBytes: 21.5 * GiB,
+          lastUsedAt: 0,
+          createdAt: 0,
+        },
+      ],
+      pools: {
+        kind: 'discrete-gpu',
+        vramBytes: 24 * GiB,
+        ramShareBytes: 38 * GiB,
+        fastBytes: 22.8 * GiB,
+      },
+    } as never);
+
+    render(<ModelContextSliderPanel engine="llama-cpp" model={MODEL} />);
+    const slider = screen.getByRole('slider', { name: `Context size for ${MODEL.id}` });
+    fireEvent.change(slider, { target: { value: String(81_920) } });
+    // Give the status fetch a tick to land, then confirm no false warning.
+    await waitFor(() => expect(api.getEngineStatus).toHaveBeenCalled());
+    expect(screen.queryByText(/Bigger than what fits right now/)).not.toBeInTheDocument();
+  });
+
   it('explains ds4 instead of pretending a memory estimate', () => {
     render(
       <ModelContextSliderPanel

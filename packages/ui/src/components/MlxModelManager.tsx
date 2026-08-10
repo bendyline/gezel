@@ -578,183 +578,183 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           {models.length > 0 && (
             <div className="ollama-model-table-wrap">
               <table className="ollama-model-table">
-              <colgroup>
-                <col className="model-name-column" />
-                <col />
-                <col />
-                <col />
-                <col />
-                <col />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th>Quant</th>
-                  <th title="Effective per-turn context size after Gezel's configured limit">
-                    Context size
-                  </th>
-                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
-                    Fitness
-                  </th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => {
-                  const latest = catalogVersionById.get(m.id);
-                  const outOfDate = Boolean(
-                    latest && m.catalogVersion && m.catalogVersion !== latest,
-                  );
-                  const reinstalling = Boolean(installs.get(m.id));
-                  const fitnessKey = `mlx:${m.id}`;
-                  const entry = fitness.get(fitnessKey);
-                  const badge = composeFitnessBadge({
-                    ...(entry
-                      ? {
-                          fitness: {
-                            record: entry.record,
-                            stale: entry.stale,
-                            hardwareChanged: entry.hardwareChanged,
-                          },
-                        }
-                      : {}),
-                    probing: probing.includes(fitnessKey),
-                  });
-                  return (
-                    <Fragment key={m.id}>
-                      <tr>
-                        <td className="model-name-table-cell">
-                          <div className="model-name-cell">
-                            <code>{m.id}</code>
-                            <div className="model-name-meta">
-                              {outOfDate && (
-                                <span
-                                  className="home-status-pill home-status-warn"
-                                  title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
-                                >
-                                  out of date
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td title={modelSizeTitle(m)}>
-                          {formatBytes(m.approxSizeBytes)}
-                          {modelMemoryHeadline(m) ? (
-                            <span className="muted small model-memory-headline">
-                              {modelMemoryHeadline(m)}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td title={quantizationTitle(m.quantization)}>
-                          {approximateQuantizationLabel(m.quantization)}
-                        </td>
-                        <td
-                          title={
-                            m.effectiveContextWindow
-                              ? m.overrideContextTokens !== undefined
-                                ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
-                                : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
-                              : m.contextSizingStatus === 'restart-required'
-                                ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
-                                : m.contextSizingStatus === 'insufficient-memory'
-                                  ? 'The requested context window does not fit in memory safely. Unload another model or free memory before trying again.'
-                                  : 'The effective context size is unavailable.'
+                <colgroup>
+                  <col className="model-name-column" />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Quant</th>
+                    <th title="Effective per-turn context size after Gezel's configured limit">
+                      Context size
+                    </th>
+                    <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                      Fitness
+                    </th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {models.map((m) => {
+                    const latest = catalogVersionById.get(m.id);
+                    const outOfDate = Boolean(
+                      latest && m.catalogVersion && m.catalogVersion !== latest,
+                    );
+                    const reinstalling = Boolean(installs.get(m.id));
+                    const fitnessKey = `mlx:${m.id}`;
+                    const entry = fitness.get(fitnessKey);
+                    const badge = composeFitnessBadge({
+                      ...(entry
+                        ? {
+                            fitness: {
+                              record: entry.record,
+                              stale: entry.stale,
+                              hardwareChanged: entry.hardwareChanged,
+                            },
                           }
-                        >
-                          {m.contextSizingStatus === 'restart-required' ? (
-                            'Restart needed'
-                          ) : m.contextSizingStatus === 'insufficient-memory' ? (
-                            "Won't fit"
-                          ) : (
-                            <>
-                              {formatContextWindow(m.effectiveContextWindow)}
-                              {m.overrideContextTokens !== undefined && (
-                                <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
-                                  custom
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </td>
-                        <td className="model-fitness-table-cell">
-                          <div className="model-fitness-cell">
-                            <span
-                              className={`home-status-pill model-fitness-badge${
-                                badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
-                              }${
-                                badge.tier === 'ok'
-                                  ? ' home-status-ok'
-                                  : badge.tier === 'warn'
-                                    ? ' home-status-warn'
-                                    : ''
-                              }`}
-                              title={badge.detail}
-                            >
-                              {badge.label}
-                            </span>
-                            <button
-                              type="button"
-                              className="home-link"
-                              disabled={badge.tier === 'probing'}
-                              title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
-                              onClick={() => {
-                                void api
-                                  .runModelFitnessProbe('mlx', m.id)
-                                  .then(() => refreshFitness())
-                                  .catch(() => {});
-                              }}
-                            >
-                              {badge.tier === 'probing'
-                                ? 'Checking…'
-                                : entry && !entry.stale && entry.record.status !== 'blocked'
-                                  ? 'Re-run'
-                                  : 'Run fitness check'}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="model-actions-table-cell">
-                          <div className="model-actions-cell">
-                            <div className="model-action-status">
-                              {m.readOnly && (
-                                <span
-                                  className="muted small"
-                                  title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
-                                >
-                                  Machine model
-                                </span>
-                              )}
+                        : {}),
+                      probing: probing.includes(fitnessKey),
+                    });
+                    return (
+                      <Fragment key={m.id}>
+                        <tr>
+                          <td className="model-name-table-cell">
+                            <div className="model-name-cell">
+                              <code>{m.id}</code>
+                              <div className="model-name-meta">
+                                {outOfDate && (
+                                  <span
+                                    className="home-status-pill home-status-warn"
+                                    title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
+                                  >
+                                    out of date
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="model-action-links">
-                              <ModelActionsMenu
-                                engine="mlx"
-                                model={{ ...m, updateAvailable: outOfDate }}
-                                updating={reinstalling}
-                                contextSupported={contextOverridesSupported}
-                                contextEditorOpen={contextEditorFor === m.id}
-                                onToggleContextEditor={() =>
-                                  setContextEditorFor((prev) => (prev === m.id ? null : m.id))
-                                }
-                                onUpdate={() => startInstall(m.id)}
-                                updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
-                                onDelete={() => setToDelete(m.id)}
-                              />
+                          </td>
+                          <td title={modelSizeTitle(m)}>
+                            {formatBytes(m.approxSizeBytes)}
+                            {modelMemoryHeadline(m) ? (
+                              <span className="muted small model-memory-headline">
+                                {modelMemoryHeadline(m)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td title={quantizationTitle(m.quantization)}>
+                            {approximateQuantizationLabel(m.quantization)}
+                          </td>
+                          <td
+                            title={
+                              m.effectiveContextWindow
+                                ? m.overrideContextTokens !== undefined
+                                  ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
+                                  : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
+                                : m.contextSizingStatus === 'restart-required'
+                                  ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                                  : m.contextSizingStatus === 'insufficient-memory'
+                                    ? 'The requested context window does not fit in memory safely. Unload another model or free memory before trying again.'
+                                    : 'The effective context size is unavailable.'
+                            }
+                          >
+                            {m.contextSizingStatus === 'restart-required' ? (
+                              'Restart needed'
+                            ) : m.contextSizingStatus === 'insufficient-memory' ? (
+                              "Won't fit"
+                            ) : (
+                              <>
+                                {formatContextWindow(m.effectiveContextWindow)}
+                                {m.overrideContextTokens !== undefined && (
+                                  <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                                    custom
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </td>
+                          <td className="model-fitness-table-cell">
+                            <div className="model-fitness-cell">
+                              <span
+                                className={`home-status-pill model-fitness-badge${
+                                  badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
+                                }${
+                                  badge.tier === 'ok'
+                                    ? ' home-status-ok'
+                                    : badge.tier === 'warn'
+                                      ? ' home-status-warn'
+                                      : ''
+                                }`}
+                                title={badge.detail}
+                              >
+                                {badge.label}
+                              </span>
+                              <button
+                                type="button"
+                                className="home-link"
+                                disabled={badge.tier === 'probing'}
+                                title="Run the fitness check (proeve): startup and decode speed with representative context, tool round-trip, reasoning budget, and context fit."
+                                onClick={() => {
+                                  void api
+                                    .runModelFitnessProbe('mlx', m.id)
+                                    .then(() => refreshFitness())
+                                    .catch(() => {});
+                                }}
+                              >
+                                {badge.tier === 'probing'
+                                  ? 'Checking…'
+                                  : entry && !entry.stale && entry.record.status !== 'blocked'
+                                    ? 'Re-run'
+                                    : 'Run fitness check'}
+                              </button>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                      {contextEditorFor === m.id && (
-                        <tr className="model-context-editor-row">
-                          <td colSpan={6}>
-                            <ModelContextSliderPanel engine="mlx" model={m} onSaved={refresh} />
+                          </td>
+                          <td className="model-actions-table-cell">
+                            <div className="model-actions-cell">
+                              <div className="model-action-status">
+                                {m.readOnly && (
+                                  <span
+                                    className="muted small"
+                                    title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                                  >
+                                    Machine model
+                                  </span>
+                                )}
+                              </div>
+                              <div className="model-action-links">
+                                <ModelActionsMenu
+                                  engine="mlx"
+                                  model={{ ...m, updateAvailable: outOfDate }}
+                                  updating={reinstalling}
+                                  contextSupported={contextOverridesSupported}
+                                  contextEditorOpen={contextEditorFor === m.id}
+                                  onToggleContextEditor={() =>
+                                    setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                                  }
+                                  onUpdate={() => startInstall(m.id)}
+                                  updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
+                                  onDelete={() => setToDelete(m.id)}
+                                />
+                              </div>
+                            </div>
                           </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
+                        {contextEditorFor === m.id && (
+                          <tr className="model-context-editor-row">
+                            <td colSpan={6}>
+                              <ModelContextSliderPanel engine="mlx" model={m} onSaved={refresh} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
           )}
