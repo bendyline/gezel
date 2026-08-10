@@ -5,6 +5,7 @@ import {
   pickAutoAnswerChoice,
   projectContextAutoAnswerText,
   repoSourceAutoAnswerText,
+  toolPermissionAutoChoice,
   workspaceFixtureAutoAnswerText,
 } from './auto-answer.ts';
 
@@ -169,6 +170,16 @@ describe('pickAutoAnswerChoice', () => {
         packages: [{ package: 'image-generator-cli', version: 'latest' }],
       }),
     ).toEqual([{ package: 'image-generator-cli', version: 'latest', decision: 'decline' }]);
+  });
+
+  it('denies craftbook-hook tool permission cards in unattended trials', () => {
+    expect(
+      toolPermissionAutoChoice(
+        { kind: 'tool-permission', toolName: 'rm', toolInput: { path: 'src' } },
+        ['Allow', 'Deny'],
+      ),
+    ).toBe(1);
+    expect(toolPermissionAutoChoice({ kind: 'ordinary-question' }, ['Allow', 'Deny'])).toBeNull();
   });
 
   it('turns a redundant handoff permission card into an operational answer', () => {

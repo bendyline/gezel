@@ -3872,7 +3872,7 @@ export class Store {
       const flexible = findFlexibleMatch(oldContent, args.find);
       if (flexible.kind === 'ambiguous') {
         throw new WorkspaceEditError(
-          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replaceLines\`.`,
+          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replace_lines\`.`,
           'ambiguous-match',
         );
       }
@@ -3883,7 +3883,7 @@ export class Store {
 
     if (newContent === oldContent) {
       throw new WorkspaceEditError(
-        `replaceInFile is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
+        `replace_in_file is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
         'identity-edit',
       );
     }
@@ -3938,7 +3938,7 @@ export class Store {
 
     if (args.startLine > total) {
       throw new WorkspaceEditError(
-        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`appendToFile\` to add to the end.`,
+        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`append_to_file\` to add to the end.`,
         'line-out-of-range',
       );
     }
@@ -3951,7 +3951,7 @@ export class Store {
 
     if (newContent === oldContent) {
       throw new WorkspaceEditError(
-        `replaceLines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
+        `replace_lines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
         'identity-edit',
       );
     }
@@ -4002,7 +4002,7 @@ export class Store {
     }
     if (parsed.length > 1) {
       throw new WorkspaceEditError(
-        `applyPatch is one-file-per-call but the diff describes ${parsed.length} files; split into ${parsed.length} separate calls.`,
+        `apply_patch is one-file-per-call but the diff describes ${parsed.length} files; split into ${parsed.length} separate calls.`,
         'patch-multi-file',
       );
     }
@@ -4019,7 +4019,7 @@ export class Store {
     }
     if (applied === oldContent) {
       throw new WorkspaceEditError(
-        `applyPatch is a no-op on ${args.path} — the diff would not change file content.`,
+        `apply_patch is a no-op on ${args.path} — the diff would not change file content.`,
         'identity-edit',
       );
     }

@@ -169,6 +169,14 @@ describe('resolveModelTarget', () => {
     });
   });
 
+  it('routes a DS4 model id emitted by the Codex Responses catalog', () => {
+    expect(resolveModelTarget('ds4:deepseek-v4-flash')).toEqual({
+      provider: 'ds4',
+      model: 'deepseek-v4-flash',
+      echoModel: 'ds4:deepseek-v4-flash',
+    });
+  });
+
   it('accepts a slash separator as a convenience for OpenAI clients', () => {
     expect(resolveModelTarget('ollama/llama3.1:8b')?.provider).toBe('ollama');
     // The colon AFTER the slash is preserved as part of the model name.

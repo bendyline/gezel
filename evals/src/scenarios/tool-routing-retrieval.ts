@@ -6,7 +6,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  *
  * Focused probe for the Tier-3 retrieval-first steering: given a seeded
  * multi-file repo and a "where is X and what's wrong with it" question,
- * does the team LOCATE the code with a retrieval tool (`search_files`,
+ * does the team LOCATE the code with a retrieval tool (`grep_files`,
  * `search_code`, `find_symbol`, `map_repo`, `find_references`) instead of
  * read_file-walking the listing? File-walking is the classic local-model
  * failure this measures: each read burns a turn and floods the context.
@@ -22,7 +22,8 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
 
 const PROJECT_NAME = 'winkelwagen';
 
-const RETRIEVAL_TOOL_RE = /\b(search_files|search_code|find_symbol|map_repo|find_references)\b/i;
+const RETRIEVAL_TOOL_RE =
+  /\b(grep_files|search_files|search_code|find_symbol|map_repo|find_references)\b/i;
 const READ_FILE_RE = /\bread_file\b/;
 const MAX_READS_BEFORE_SEARCH = 3;
 const WALK_FAIL_THRESHOLD = 8;
@@ -101,7 +102,7 @@ async function setup({ client, log }: EvalContext): Promise<void> {
 export const toolRoutingRetrievalScenario: EvalScenario = {
   id: 'tool-routing-retrieval',
   description:
-    'Tests whether the team locates code with retrieval tools (search_files/search_code/find_symbol/map_repo) instead of read_file-walking the workspace listing. Probe for the Tier-3 retrieval-first steering.',
+    'Tests whether the team locates code with retrieval tools (grep_files/search_code/find_symbol/map_repo) instead of read_file-walking the workspace listing. Probe for the Tier-3 retrieval-first steering.',
   prompt: `In the "${PROJECT_NAME}" project there is a bug: gift-voucher discounts come out one cent too high. Find where gift-voucher discounts are applied and reply IN CHAT with the file path, the line, and what is wrong. Do not fix anything — just locate and explain it.`,
   timeoutMs: 15 * 60_000,
   setup,

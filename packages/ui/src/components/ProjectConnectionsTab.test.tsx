@@ -117,4 +117,41 @@ describe('ProjectConnectionsTab connector picker', () => {
       });
     });
   });
+
+  it('preserves JSON-schema boolean defaults and numeric config values', async () => {
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({
+      items: [
+        connectorItem('github-releases', 'GitHub Releases', {
+          configSchema: {
+            type: 'object',
+            properties: {
+              maxReleases: {
+                type: 'integer',
+                title: 'Latest releases',
+                minimum: 1,
+                maximum: 10_000,
+              },
+              includeDrafts: { type: 'boolean', title: 'Include drafts', default: true },
+            },
+          },
+        }),
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Releases' }));
+    expect(screen.getByLabelText('Include drafts')).toBeChecked();
+    await user.type(screen.getByLabelText('Latest releases'), '12');
+    await user.click(screen.getByLabelText('Include drafts'));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(api.bindConnector).toHaveBeenCalledWith('project-alpha', {
+        type: 'github-releases',
+        config: { maxReleases: 12, includeDrafts: false },
+      });
+    });
+  });
 });

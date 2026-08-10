@@ -123,6 +123,16 @@ describe('machine-engine service boundary', () => {
     expect(body.error.code).toBe('gezel_machine_engine_not_product_api');
     expect(body.error.message).toContain('runtime/port');
 
+    const responses = await httpFetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', input: 'hi' }),
+    });
+    expect(responses.status).toBe(404);
+    await expect(responses.json()).resolves.toMatchObject({
+      error: { code: 'gezel_machine_engine_not_product_api' },
+    });
+
     // The hint does not vary with auth.
     const authed = await machineFetch('/v1/models');
     expect(authed.status).toBe(404);

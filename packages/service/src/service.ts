@@ -30,10 +30,13 @@ import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
+import { createCodexSetupManager } from './codex-setup/manager.js';
+import { createCodexSetupModelSource } from './codex-setup/model-source.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
+import { registerGitHubReleasesAdapters } from './connectors/natives/github-releases.js';
 import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
@@ -58,6 +61,8 @@ import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
+import { codexBridgePortForHome } from './http/codex-bridge-port.js';
+import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
 import {
   buildOllamaEmulationApp,
@@ -230,6 +235,10 @@ export interface StartServiceOptions {
    * the point.
    */
   ollamaEmulationPort?: number;
+  /** Test seam for the managed Codex profile root (defaults to `$CODEX_HOME` / `~/.codex`). */
+  codexHome?: string;
+  /** Exact Codex bridge port override (`0` = ephemeral); production derives one from `home`. */
+  codexBridgePort?: number;
 }
 
 export interface RunningService {
@@ -1789,6 +1798,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // stack (MailManager + its routes) was retired in the connector overhaul.
   registerMailAdapters();
   registerCalendarAdapters();
+  registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
   const connectorLocks = new ProjectLocks();
   const connectors = new ConnectorManager({
@@ -1899,6 +1909,43 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
   });
 
+  // Codex needs a stable plain-HTTP origin because the product daemon's port
+  // and self-signed certificate rotate. Unlike Ollama emulation this listener
+  // remains bearer-authenticated and exposes only inference. Its profile/file
+  // manager decides whether it should be running.
+  const codexBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const codexBridge = createCodexBridgeController({
+    fetch: () => {
+      if (!codexBridgeFetchRef.value) {
+        throw new Error('Codex bridge cannot start before the HTTP app is ready');
+      }
+      return codexBridgeFetchRef.value;
+    },
+    port: opts.codexBridgePort ?? codexBridgePortForHome(home),
+  });
+  const listCodexSetupModels = createCodexSetupModelSource({
+    catalog,
+    listModels: (provider, signal) => chat.listModelsForProvider(provider, signal),
+    resolveNativeContextWindow: async (provider, modelId, signal) => {
+      if (resolveMachineEngineRemoteId()) {
+        const remoteProvider = await chat.getProviderForModel(provider, modelId);
+        return (
+          (await remoteProvider.prepareContextWindow?.(modelId, signal)) ??
+          remoteProvider.getContextWindow?.()
+        );
+      }
+      return chat.previewContextWindowForModel(provider, modelId);
+    },
+  });
+  const codexSetup = createCodexSetupManager({
+    home,
+    ...(opts.codexHome !== undefined ? { codexHome: opts.codexHome } : {}),
+    tokenStore,
+    bridge: codexBridge,
+    readConfig: () => store.readConfig(),
+    listModels: listCodexSetupModels,
+  });
+
   // The meester's occasional status report — dynamic Home greeting +
   // dashboard + follow-up draft tasks. Constructed before the context
   // literal so the run-now HTTP route can reach it; started with the
@@ -1984,6 +2031,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remoteServing,
     remoteTenantLimits,
     ollamaEmulation,
+    codexSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2015,6 +2063,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
   const ollamaEmulationApp = buildOllamaEmulationApp(context);
   ollamaEmulationFetchRef.value = ollamaEmulationApp.fetch.bind(ollamaEmulationApp);
+  const codexBridgeApp = buildCodexBridgeApp(context, {
+    models: () => codexSetup.codexModelCatalog(),
+  });
+  codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2274,6 +2326,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await codexSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2515,6 +2572,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await channels.stop();
       await remoteServing.stop();
       await ollamaEmulation.stop();
+      await codexSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

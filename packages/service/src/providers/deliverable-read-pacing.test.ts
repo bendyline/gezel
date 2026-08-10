@@ -35,6 +35,36 @@ describe('DeliverableReadPaceTracker', () => {
     expect(tracker.buildAbortMessage('llama.cpp')).toContain('`review.md`');
   });
 
+  it('counts both the canonical grep_files name and its search_files compatibility alias', () => {
+    const tracker = new DeliverableReadPaceTracker({
+      targetPath: 'review.md',
+      softWarningAt: 2,
+      hardAbortAt: 3,
+    });
+
+    expect(tracker.recordCall('grep_files', 'first').readCount).toBe(1);
+    expect(tracker.recordCall('search_files', 'second')).toMatchObject({
+      readCount: 2,
+      shouldAbort: false,
+    });
+    expect(tracker.recordCall('search_files', 'third').shouldAbort).toBe(true);
+  });
+
+  it('counts both read_files and its read_multiple_files compatibility alias', () => {
+    const tracker = new DeliverableReadPaceTracker({
+      targetPath: 'review.md',
+      softWarningAt: 2,
+      hardAbortAt: 3,
+    });
+
+    expect(tracker.recordCall('read_files', 'first').readCount).toBe(1);
+    expect(tracker.recordCall('read_multiple_files', 'second')).toMatchObject({
+      readCount: 2,
+      shouldAbort: false,
+    });
+    expect(tracker.recordCall('read_multiple_files', 'third').shouldAbort).toBe(true);
+  });
+
   it('defaults to warning on the fifth read and aborting on the sixth', () => {
     const tracker = DeliverableReadPaceTracker.fromUserText(
       '[Deliverable expected as a FILE at `review.md`. Read source, then write_file.]',

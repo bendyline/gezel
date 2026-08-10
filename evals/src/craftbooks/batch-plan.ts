@@ -1,4 +1,8 @@
-import type { CraftbookAuditResult, CraftbookTemplateSummary } from './types.ts';
+import type {
+  CraftbookAuditResult,
+  CraftbookEvalValidationScope,
+  CraftbookTemplateSummary,
+} from './types.ts';
 
 export type CraftbookHarnessKind =
   | 'generic-file-gate'
@@ -9,13 +13,15 @@ export type CraftbookHarnessKind =
   | 'fake-http'
   | 'fake-mcp'
   | 'fake-cli'
-  | 'media-stub';
+  | 'media-stub'
+  | 'hook-runtime';
 
 export interface CraftbookBatchPlanItem {
   craftbookId: string;
   name: string;
   score: number;
   evalStatus: string;
+  validationScope: CraftbookEvalValidationScope;
   priority: number;
   harness: CraftbookHarnessKind[];
   simulatorIds: string[];
@@ -39,6 +45,7 @@ const HARNESS_KINDS: CraftbookHarnessKind[] = [
   'fake-mcp',
   'fake-cli',
   'media-stub',
+  'hook-runtime',
 ];
 
 export function buildCraftbookBatchPlan(args: {
@@ -91,17 +98,28 @@ function planItem(
   ]
     .join(' ')
     .toLowerCase();
-  const harness = harnessFromTags(declaredTags) ?? inferHarness(text);
+  const harnessKinds = new Set(harnessFromTags(declaredTags) ?? inferHarness(text));
+  // Hooks are a structural runtime surface, not a keyword. Keep this
+  // classification available even when callers have not separately loaded
+  // test.json tags (the unit/API path that wild-caught a zero hook plan).
+  if ((template.hooks?.length ?? 0) > 0) harnessKinds.add('hook-runtime');
+  const harness = [...harnessKinds].sort();
   const simulatorIds = inferSimulators(harness, template.id);
   const missingEval = audit.evalStatus === 'missing' ? 35 : audit.evalStatus === 'planned' ? 20 : 0;
+  const validationGap =
+    audit.evalStatus === 'implemented' ? 20 : audit.validationScope === 'artifact-only' ? 10 : 0;
   const qualityGap = Math.max(0, 110 - audit.score);
   const simulatorBoost = harness.some((kind) => kind.startsWith('fake-')) ? 10 : 0;
-  const priority = missingEval + qualityGap + simulatorBoost;
+  // A hook is executable policy, so keep at least one hook-backed workflow in
+  // the representative batch even when its static quality score is high.
+  const hookBoost = harness.includes('hook-runtime') ? 10 : 0;
+  const priority = missingEval + validationGap + qualityGap + simulatorBoost + hookBoost;
   return {
     craftbookId: template.id,
     name: template.name,
     score: audit.score,
     evalStatus: audit.evalStatus,
+    validationScope: audit.validationScope,
     priority,
     harness,
     simulatorIds,
@@ -138,6 +156,9 @@ function harnessFromTags(tags?: readonly string[]): CraftbookHarnessKind[] | nul
       case 'external':
         kinds.add('fake-http');
         kinds.add('fake-cli');
+        break;
+      case 'guardrail':
+        kinds.add('hook-runtime');
         break;
       default:
         break;
@@ -201,7 +222,11 @@ function inferSimulators(kinds: CraftbookHarnessKind[], id: string): string[] {
 }
 
 function reasonFor(kinds: CraftbookHarnessKind[], audit: CraftbookAuditResult): string {
-  const parts = [`${audit.evalStatus} eval`, `${audit.score}/110 quality`];
+  const parts = [
+    `${audit.evalStatus} eval`,
+    `${audit.validationScope} workflow evidence`,
+    `${audit.score}/110 quality`,
+  ];
   if (kinds.includes('html-playwright')) parts.push('needs browser/runtime assertions');
   if (kinds.includes('seeded-codebase')) parts.push('needs seeded codebase plus executable gate');
   if (kinds.includes('seeded-data')) parts.push('needs fixture data plus property checks');
@@ -209,5 +234,7 @@ function reasonFor(kinds: CraftbookHarnessKind[], audit: CraftbookAuditResult): 
   if (kinds.some((kind) => kind.startsWith('fake-')))
     parts.push('needs fake external tool/service');
   if (kinds.includes('media-stub')) parts.push('needs deterministic media fixtures or stubs');
+  if (kinds.includes('hook-runtime'))
+    parts.push('needs task attribution plus hook History evidence');
   return parts.join('; ');
 }

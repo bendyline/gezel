@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,37 @@ describe('writeRecord refresh-in-place', () => {
     );
     const att = await readdir(join(ws, 'data', 'c', 'attachments', '001'));
     expect(att).toEqual(['new.txt']);
+  });
+
+  it('refreshes when only attachment bytes change', async () => {
+    await write(
+      record({ attachments: [{ filename: 'asset.bin', content: new Uint8Array([1, 2, 3]) }] }),
+    );
+    const changed = await write(
+      record({ attachments: [{ filename: 'asset.bin', content: new Uint8Array([3, 2, 1]) }] }),
+    );
+    expect(changed.status).toBe('refreshed');
+    await expect(
+      readFile(join(ws, 'data', 'c', 'attachments', '001', 'asset.bin')),
+    ).resolves.toEqual(Buffer.from([3, 2, 1]));
+  });
+
+  it('publishes a file-backed attachment without loading it into the record', async () => {
+    const sourcePath = join(ws, 'staged-installer.bin');
+    const bytes = Buffer.from('large release payload');
+    await writeFile(sourcePath, bytes);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+    const result = await write(
+      record({
+        attachments: [{ filename: 'installer.bin', sourcePath, size: bytes.length, sha256 }],
+      }),
+    );
+
+    expect(result.status).toBe('written');
+    await expect(
+      readFile(join(ws, 'data', 'c', 'attachments', '001', 'installer.bin')),
+    ).resolves.toEqual(bytes);
   });
 
   it('allocates ordinals from the max, so pruned gaps are never reused', async () => {

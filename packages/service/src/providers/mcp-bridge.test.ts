@@ -170,14 +170,27 @@ describe('McpBridge', () => {
     expect(advertised.has('read_file')).toBe(true);
     expect(advertised.has('readFile')).toBe(false);
     expect(advertised.has('readdir')).toBe(false);
+    expect(advertised.has('grep_files')).toBe(true);
+    expect(advertised.has('search_files')).toBe(false);
 
     expect(bridge.hasTool('readFile')).toBe(true);
     expect(bridge.hasTool('read-file')).toBe(true);
+    expect(bridge.hasTool('search_files')).toBe(true);
 
     const viaLegacy = await bridge.callTool('readdir', { path: '.' });
     expect(viaLegacy).not.toContain('not found');
     const viaCanonical = await bridge.callTool('list_dir', { path: '.' });
     expect(viaLegacy).toBe(viaCanonical);
+
+    const viaLegacySearch = await bridge.callTool('search_files', {
+      pattern: 'definitely-absent',
+      literal: true,
+    });
+    const viaCanonicalGrep = await bridge.callTool('grep_files', {
+      pattern: 'definitely-absent',
+      literal: true,
+    });
+    expect(viaLegacySearch).toBe(viaCanonicalGrep);
   });
 
   // Static-decision hooks (the shape `buildAutoAllowHook` produces for

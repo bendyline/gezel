@@ -1,5 +1,9 @@
-import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
-import { CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import {
+  CANONICAL_TOOL_NAMES,
+  RENAMED_TOOLS,
+  TOOL_NAME_TOMBSTONES,
+  TOOL_REGISTRY,
+} from '@bendyline/gezel-mcp';
 
 export type PromptToolContractSeverity = 'error' | 'warning';
 
@@ -9,6 +13,10 @@ export interface PromptToolContractFinding {
     | 'hard-directive-missing-tool'
     | 'directive-missing-tool'
     | 'false-capability-denial'
+    | 'legacy-tool-name'
+    | 'removed-tool-name'
+    | 'non-model-facing-tool-name'
+    | 'unknown-tool-name'
     | 'tool-example-argument-shape'
     | 'tool-example-schema-mismatch';
   tool?: string;
@@ -22,14 +30,34 @@ export interface PromptToolContractReport {
   warnings: PromptToolContractFinding[];
 }
 
-const BUILTIN_TOOL_NAMES = Array.from(
-  new Set([
-    ...BUILTIN_TOOLSETS.flatMap((group) => group.tools),
-    ...Object.keys(CONDITIONALLY_REGISTERED_TOOLS),
-  ]),
-).sort((a, b) => b.length - a.length);
+const LEGACY_TOOL_REPLACEMENTS = RENAMED_TOOLS as Readonly<Record<string, string>>;
+const REMOVED_TOOL_NAMES = TOOL_NAME_TOMBSTONES as Readonly<
+  Record<string, { replacement: string | undefined; reason: string }>
+>;
+const BUILTIN_TOOL_NAMES = [
+  ...CANONICAL_TOOL_NAMES,
+  ...Object.keys(RENAMED_TOOLS),
+  ...Object.keys(TOOL_NAME_TOMBSTONES),
+].sort((a, b) => b.length - a.length);
+const BUILTIN_TOOL_NAME_SET = new Set(BUILTIN_TOOL_NAMES);
+const NORMALIZED_BUILTIN_TOOL_NAME_SET = new Set(
+  BUILTIN_TOOL_NAMES.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, '')),
+);
+const CANONICAL_TOOL_NAME_SET = new Set<string>(CANONICAL_TOOL_NAMES);
+const NON_MODEL_FACING_TOOL_NAMES = new Set<string>(
+  Object.values(TOOL_REGISTRY)
+    .filter((entry) => !entry.modelFacing)
+    .map((entry) => entry.canonicalName),
+);
 
-const FILE_READ_TOOLS = new Set(['read_file', 'list_dir', 'stat', 'search_code', 'search_files']);
+const FILE_READ_TOOLS = new Set([
+  'read_file',
+  'read_files',
+  'list_dir',
+  'stat',
+  'search_code',
+  'grep_files',
+]);
 const FILE_WRITE_TOOLS = new Set([
   'write_file',
   'append_to_file',
@@ -48,7 +76,7 @@ const HARD_DIRECTIVE =
 const SOFT_DIRECTIVE =
   /\b(?:call|invoke|use|run|write (?:it|the .{0,40}) (?:with|via)|read (?:it|the .{0,40}) (?:with|via))\b/i;
 const NEGATIVE_CONTEXT =
-  /\b(?:do not|don't|never|cannot|can't|isn't|aren't|not available|unavailable|removed|no access|not on (?:your|the) (?:roster|tool list)|lack(?:s|ing)?|without)\b/i;
+  /\b(?:do not|don't|never|cannot|can't|isn't|aren't|is not|are not|not available|unavailable|removed|no access|not on (?:your|the) (?:roster|tool list)|lack(?:s|ing)?|without)\b/i;
 const CONDITIONAL_CONTEXT =
   /\b(?:if|when|unless)\b.{0,100}\b(?:available|wired|present|on (?:your|the) (?:roster|tool list))\b/i;
 
@@ -62,19 +90,122 @@ interface ToolMention {
   index: number;
 }
 
-function toolMentions(line: string): ToolMention[] {
-  const mentions: ToolMention[] = [];
-  for (const tool of BUILTIN_TOOL_NAMES) {
-    const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Backticks are the standing prompt convention. Also recognize a bare
-    // function-call spelling, but not a bare English word such as "validate"
-    // or "stat" that happens to share a tool name.
-    const matcher = new RegExp(`(?:\`${escaped}\`|(?<![A-Za-z0-9_])${escaped}\\s*\\()`, 'g');
-    for (const match of line.matchAll(matcher)) {
-      if (match.index !== undefined) mentions.push({ tool, index: match.index });
+interface ExplicitToolCandidate extends ToolMention {
+  syntax: 'backtick' | 'call' | 'bare-directive' | 'named-tool';
+}
+
+const AMBIGUOUS_TOMBSTONES = new Set(['Grep', 'Read', 'Edit', 'Agent', 'Bash']);
+
+/**
+ * Find explicit tool-shaped spellings that are not already in the registry.
+ * This intentionally does not treat every identifier as a tool: unknown names
+ * must appear as a standalone backtick token, a function-style call, or a
+ * snake_case name in a clause that explicitly tells the model to call/use a
+ * tool. That catches stale UI/client methods without interpreting ordinary
+ * prose and argument keys such as `startLine` as MCP tools.
+ */
+function explicitToolCandidates(line: string): ExplicitToolCandidate[] {
+  const candidates: ExplicitToolCandidate[] = [];
+  const reservedWords = new Set([
+    'call',
+    'function',
+    'function_calls',
+    'tool',
+    'tool_call',
+    'tool_use',
+    'tools',
+  ]);
+  const add = (tool: string, index: number, syntax: ExplicitToolCandidate['syntax']) => {
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(tool)) return;
+    if (reservedWords.has(tool.toLowerCase())) return;
+    const knownName = BUILTIN_TOOL_NAME_SET.has(tool);
+    if (syntax === 'named-tool' && !knownName && !tool.includes('_')) return;
+    const toolShaped =
+      tool.includes('_') ||
+      /[a-z][A-Z]/.test(tool) ||
+      (tool.includes('-') &&
+        NORMALIZED_BUILTIN_TOOL_NAME_SET.has(tool.toLowerCase().replace(/[^a-z0-9]/g, '')));
+    if (!toolShaped && !knownName) return;
+    candidates.push({ tool, index, syntax });
+  };
+
+  for (const match of line.matchAll(/`([A-Za-z][A-Za-z0-9_-]*)(?:\s*\([^`]*\))?`/g)) {
+    if (match.index !== undefined && match[1]) add(match[1], match.index, 'backtick');
+  }
+  for (const match of line.matchAll(/(?<![A-Za-z0-9_.`])([A-Za-z][A-Za-z0-9_]*)\(/g)) {
+    if (match.index !== undefined && match[1]) add(match[1], match.index, 'call');
+  }
+
+  // Models are commonly instructed with plain prose rather than function
+  // syntax: "Call missing_project_tool now" / "Use draft_email to reply".
+  // Keep this deliberately narrow (an imperative verb followed immediately
+  // by one identifier) so ordinary prose and schema-property names do not
+  // become tool candidates.
+  for (const match of line.matchAll(
+    /\b(?:call|invoke|use|run)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_-]*)\b/gi,
+  )) {
+    if (match.index !== undefined && match[1]) {
+      const tokenOffset = match.index + match[0].lastIndexOf(match[1]);
+      const after = line.slice(tokenOffset + match[1].length);
+      const knownName = BUILTIN_TOOL_NAMES.includes(match[1]) || match[1] in TOOL_NAME_TOMBSTONES;
+      // `localStorage.setItem`, `price_tracker.py`, and `account_name column`
+      // are code/data references, not tool invocations. Unknown camelCase
+      // words are likewise too ambiguous unless explicit tool syntax names
+      // them elsewhere.
+      if (/^\s*[./]/.test(after)) continue;
+      if (!knownName && !/[_-]/.test(match[1])) continue;
+      if (
+        !knownName &&
+        /^\s+(?:column|field|property|key|value|path|file|script|class|method|function|variable|parameter)\b/i.test(
+          after,
+        )
+      ) {
+        continue;
+      }
+      if (
+        AMBIGUOUS_TOMBSTONES.has(match[1]) &&
+        /^\s+[A-Z][A-Za-z0-9_-]*\b/.test(after) &&
+        !/^\s+(?:MCP\s+)?Tool\b/.test(after)
+      ) {
+        continue;
+      }
+      add(match[1], tokenOffset, 'bare-directive');
     }
   }
-  return mentions.sort((a, b) => a.index - b.index);
+
+  // Known removed/foreign names are part of the canonical registry contract,
+  // not a second ad-hoc vocabulary in this linter. Ambiguous English words
+  // such as Read/Edit/Agent require an explicit "tool" suffix; distinctive
+  // coding-agent names can be recognized directly.
+  for (const tool of Object.keys(TOOL_NAME_TOMBSTONES)) {
+    const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matcher = AMBIGUOUS_TOMBSTONES.has(tool)
+      ? new RegExp(`\\b${escaped}(?=\\s+(?:MCP\\s+)?tool\\b)`, 'g')
+      : new RegExp(`\\b${escaped}\\b`, 'g');
+    for (const match of line.matchAll(matcher)) {
+      if (match.index !== undefined) add(tool, match.index, 'named-tool');
+    }
+  }
+
+  // Plain prose like "via run_script tool" is common in small-model prompt
+  // material. One generic matcher is both more complete (it also catches an
+  // unknown named tool) and much cheaper than compiling one regex per known
+  // tool for every rendered-prompt line.
+  for (const match of line.matchAll(
+    /(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_-]*)(?=\s+(?:MCP\s+)?tool\b)/g,
+  )) {
+    if (match.index !== undefined && match[1]) add(match[1], match.index, 'named-tool');
+  }
+
+  const seen = new Set<string>();
+  return candidates
+    .sort((a, b) => a.index - b.index)
+    .filter((candidate) => {
+      const key = `${candidate.tool}:${candidate.index}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function clauseAround(line: string, index: number): string {
@@ -111,6 +242,8 @@ function addFinding(
 export function lintPromptToolContract(args: {
   prompt: string;
   availableTools: ReadonlySet<string> | ReadonlyArray<string>;
+  /** Tool descriptions already establish that explicit call-shaped names are tools. */
+  toolDescription?: boolean;
 }): PromptToolContractReport {
   const available =
     args.availableTools instanceof Set ? args.availableTools : new Set(args.availableTools);
@@ -121,11 +254,131 @@ export function lintPromptToolContract(args: {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
     const lineNumber = index + 1;
-    const mentions = toolMentions(line);
-    if (mentions.length === 0) continue;
+    const candidates = explicitToolCandidates(line);
+    const mentions = candidates.filter(
+      (candidate) =>
+        BUILTIN_TOOL_NAME_SET.has(candidate.tool) &&
+        (candidate.syntax === 'backtick' || candidate.syntax === 'call'),
+    );
+
+    for (const candidate of candidates) {
+      const legacyReplacement = LEGACY_TOOL_REPLACEMENTS[candidate.tool];
+      if (legacyReplacement) {
+        addFinding(
+          findings,
+          {
+            severity: 'error',
+            rule: 'legacy-tool-name',
+            tool: candidate.tool,
+            line: lineNumber,
+            detail: `Model-facing text uses hidden alias \`${candidate.tool}\`; use canonical \`${legacyReplacement}\`.`,
+            excerpt: excerpt(clauseAround(line, candidate.index)),
+          },
+          seen,
+        );
+        continue;
+      }
+      const tombstone = REMOVED_TOOL_NAMES[candidate.tool];
+      if (tombstone) {
+        const clause = clauseAround(line, candidate.index);
+        // "Bash" is also the proper name of a shell. A negative prose phrase
+        // such as "Do not use Bash" does not teach a callable tool unless it
+        // uses explicit tool syntax. Positive "Call Bash" still fails.
+        if (
+          candidate.tool === 'Bash' &&
+          candidate.syntax === 'bare-directive' &&
+          NEGATIVE_CONTEXT.test(clause) &&
+          !/\bBash\s+(?:MCP\s+)?tool\b/.test(clause)
+        ) {
+          continue;
+        }
+        const replacement = tombstone.replacement
+          ? ` Use canonical \`${tombstone.replacement}\`.`
+          : '';
+        addFinding(
+          findings,
+          {
+            severity: 'error',
+            rule: 'removed-tool-name',
+            tool: candidate.tool,
+            line: lineNumber,
+            detail: `Model-facing text names non-callable \`${candidate.tool}\` (${tombstone.reason}).${replacement}`,
+            excerpt: excerpt(clause),
+          },
+          seen,
+        );
+        continue;
+      }
+      if (NON_MODEL_FACING_TOOL_NAMES.has(candidate.tool)) {
+        addFinding(
+          findings,
+          {
+            severity: 'error',
+            rule: 'non-model-facing-tool-name',
+            tool: candidate.tool,
+            line: lineNumber,
+            detail: `Model-facing text names compatibility-only tool \`${candidate.tool}\`, which is never exposed to models.`,
+            excerpt: excerpt(clauseAround(line, candidate.index)),
+          },
+          seen,
+        );
+        continue;
+      }
+      if (available.has(candidate.tool)) {
+        continue;
+      }
+      const clause = clauseAround(line, candidate.index);
+      if (NEGATIVE_CONTEXT.test(clause)) continue;
+      if (CANONICAL_TOOL_NAME_SET.has(candidate.tool)) {
+        // Backtick/function spellings are also handled by toolMentions below,
+        // which preserves the established hard-vs-soft directive policy.
+        // A bare imperative is unambiguously executable guidance, so absence
+        // from the final roster is always build-blocking.
+        if (candidate.syntax === 'bare-directive' || candidate.syntax === 'named-tool') {
+          addFinding(
+            findings,
+            {
+              severity: 'error',
+              rule: 'hard-directive-missing-tool',
+              tool: candidate.tool,
+              line: lineNumber,
+              detail: `Prompt directly instructs the unavailable tool \`${candidate.tool}\`.`,
+              excerpt: excerpt(clause),
+            },
+            seen,
+          );
+        }
+        continue;
+      }
+      const before = line.slice(Math.max(0, candidate.index - 120), candidate.index);
+      const after = line.slice(candidate.index + candidate.tool.length, candidate.index + 80);
+      const associated =
+        candidate.syntax === 'named-tool' ||
+        candidate.syntax === 'bare-directive' ||
+        /\b(?:call|invoke)(?:\s+(?:the|named))?\s*$/i.test(before) ||
+        /^\s*(?:MCP\s+)?(?:tool|call)\b/i.test(after);
+      if (!associated) continue;
+      addFinding(
+        findings,
+        {
+          severity: 'error',
+          rule: 'unknown-tool-name',
+          tool: candidate.tool,
+          line: lineNumber,
+          detail: `Model-facing text names \`${candidate.tool}\`, which is absent from the canonical registry and final tool roster.`,
+          excerpt: excerpt(clause),
+        },
+        seen,
+      );
+    }
 
     for (const mention of mentions) {
       const { tool } = mention;
+      // Alias/tombstone/non-model-facing errors were classified above from
+      // the same explicit syntax. This loop only compares canonical calls
+      // with the final post-filter roster.
+      if (LEGACY_TOOL_REPLACEMENTS[tool] || REMOVED_TOOL_NAMES[tool]) continue;
+      if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
       if (available.has(tool)) continue;
       const mentionPrefix = line.slice(Math.max(0, mention.index - 48), mention.index);
       // A tool can be named as provenance or contrast inside a directive

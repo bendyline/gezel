@@ -20,8 +20,22 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
 
+// Capture the props: `data-section` and `data-stageable` are what stop the
+// rail silently regaining commands/craftbooks or the terminal-staging hook.
 vi.mock('./CommandsPanel.js', () => ({
-  CommandsPanel: () => <div data-testid="commands-panel" />,
+  CommandsPanel: ({
+    section,
+    onStageCommand,
+  }: {
+    section?: string;
+    onStageCommand?: unknown;
+  }) => (
+    <div
+      data-testid="commands-panel"
+      data-section={section}
+      data-stageable={String(Boolean(onStageCommand))}
+    />
+  ),
 }));
 
 let activeWidth = 0;
@@ -80,7 +94,7 @@ afterEach(() => {
 
 function renderProjectRail() {
   return render(
-    <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+    <ChatReferences chatKey="project-1" projectId="project-1" skillsProjectId="project-1">
       {() => <div data-testid="chat-main" />}
     </ChatReferences>,
   );
@@ -122,12 +136,15 @@ describe('ChatReferences responsive split', () => {
     });
     expect(container.querySelector('aside')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Commands' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Skills' })).toBeInTheDocument();
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('tab', { name: 'Commands' }));
+    await user.click(screen.getByRole('tab', { name: 'Skills' }));
 
-    expect(screen.getByTestId('commands-panel')).toBeVisible();
+    const panel = screen.getByTestId('commands-panel');
+    expect(panel).toBeVisible();
+    expect(panel).toHaveAttribute('data-section', 'skills');
+    expect(panel).toHaveAttribute('data-stageable', 'false');
     expect(screen.getByTestId('chat-main').closest('.gz-tabs-content')).toHaveAttribute(
       'data-state',
       'inactive',
@@ -142,16 +159,33 @@ describe('ChatReferences responsive split', () => {
       expect(container.querySelector('.chat-rail-body-split')).not.toBeNull();
     });
     expect(container.querySelector('aside')).not.toBeNull();
-    expect(screen.getByTestId('commands-panel')).toBeInTheDocument();
+    const panel = screen.getByTestId('commands-panel');
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveAttribute('data-section', 'skills');
+    expect(panel).toHaveAttribute('data-stageable', 'false');
   });
 
-  it('offers Chat, Task, and Commands as peer tabs when a narrow chat has a task', async () => {
+  it('still splits at the width the output pane leaves on a laptop window', async () => {
+    // 1512 px window − ~242 px Home sidebar − ~220 px output pane ≈ 1035 px
+    // of rail. The threshold used to sit at 1100, so the split was
+    // unreachable whenever the output pane was open, no matter how wide the
+    // window. Pinned as a literal: a future bump past this fails here.
+    activeWidth = 1035;
+    const { container } = renderProjectRail();
+
+    await waitFor(() => {
+      expect(container.querySelector('.chat-rail-body-split')).not.toBeNull();
+    });
+    expect(container.querySelector('.chat-rail-body-compact')).toBeNull();
+  });
+
+  it('offers Chat, Task, and Skills as peer tabs when a narrow chat has a task', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
     const user = userEvent.setup();
     apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
 
     render(
-      <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+      <ChatReferences chatKey="project-1" projectId="project-1" skillsProjectId="project-1">
         {({ onTaskReference }) => (
           <button type="button" onClick={() => onTaskReference('project-1/1', { scoped: true })}>
             Add task reference
@@ -166,13 +200,49 @@ describe('ChatReferences responsive split', () => {
       expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
         'Chat',
         'Task',
-        'Commands',
+        'Skills',
       ]);
     });
 
     await user.click(screen.getByRole('tab', { name: 'Task' }));
 
     expect(await screen.findByRole('heading', { name: 'First task' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Task' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('pulls the rail onto a task with `focus`, even while a reference is open', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/2', 'Second task'));
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1" skillsProjectId="project-1">
+        {({ onArtifactReference, onTaskReference }) => (
+          <>
+            <button type="button" onClick={() => onArtifactReference('notes.md')}>
+              Add artifact
+            </button>
+            <button type="button" onClick={() => onTaskReference('project-1/2', { focus: true })}>
+              Focus task
+            </button>
+          </>
+        )}
+      </ChatReferences>,
+    );
+
+    // A live reference normally wins the rail — the rising-edge effect
+    // switches to References and the task effect holds back.
+    await user.click(screen.getByRole('button', { name: 'Add artifact' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'References' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Focus task' }));
+
+    expect(await screen.findByRole('heading', { name: 'Second task' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Task' })).toHaveAttribute('aria-selected', 'true');
   });
 });
@@ -394,7 +464,7 @@ describe('ChatReferences reference picker', () => {
     apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in picker test'));
 
     const { container } = render(
-      <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+      <ChatReferences chatKey="project-1" projectId="project-1" skillsProjectId="project-1">
         {({ onToolActivity }) => (
           <button
             type="button"
@@ -434,6 +504,40 @@ describe('ChatReferences reference picker', () => {
         path: 'design.md',
       });
     });
+  });
+
+  it('adds every successful path from a batched workspace read', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockRejectedValue(
+      new Error('Preview unavailable in batch-reference test'),
+    );
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() =>
+              onToolActivity({
+                name: 'read_files',
+                paths: ['src/alpha.ts', 'src/beta.ts'],
+                success: true,
+                durationMs: 1,
+              })
+            }
+          >
+            Read batch
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Read batch' }));
+    const referencesTab = await screen.findByRole('tab', { name: 'References' });
+    await user.click(referencesTab);
+    expect(await screen.findByRole('menuitem', { name: 'alpha.ts' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'beta.ts' })).toBeVisible();
   });
 
   it.each([

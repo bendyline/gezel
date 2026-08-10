@@ -13,7 +13,11 @@ import {
 } from '../../grants/manager.js';
 import { bearerAuth, requireFirstParty } from '../auth.js';
 import type { ServiceContext } from '../context.js';
-import { APP_GRANTABLE_SCOPES } from '../token-store.js';
+import {
+  APP_GRANTABLE_SCOPES,
+  ReservedPublicGrantAppIdError,
+  isReservedPublicGrantAppId,
+} from '../token-store.js';
 
 /**
  * `/v1/apps` — third-party app registration + consent flow.
@@ -152,6 +156,16 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
         );
       }
 
+      if (isReservedPublicGrantAppId(body.appId)) {
+        return c.json(
+          {
+            error: 'reserved_app_id',
+            hint: 'This appId is reserved for a Gezel-managed integration.',
+          },
+          400,
+        );
+      }
+
       // The Connected Apps switch disables only the public OpenAI facade.
       // Registration is also the consent waist for CLI/product/device
       // clients, so gating the whole route makes those unrelated clients
@@ -201,6 +215,15 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
         grant = created.grant;
         verificationCode = created.verificationCode;
       } catch (error) {
+        if (error instanceof ReservedPublicGrantAppIdError) {
+          return c.json(
+            {
+              error: 'reserved_app_id',
+              hint: 'This appId is reserved for a Gezel-managed integration.',
+            },
+            400,
+          );
+        }
         if (error instanceof PendingGrantExistsError) {
           return c.json({ error: 'grant_already_pending' }, 409);
         }
@@ -396,6 +419,9 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
       const grant = await ctx.grants.approve(id, body.verificationCode);
       return c.json({ ok: true, grant: toPollResponse(grant) });
     } catch (err) {
+      if (err instanceof ReservedPublicGrantAppIdError) {
+        return c.json({ error: 'reserved_app_id' }, 409);
+      }
       if (err instanceof GrantExpiredError) {
         return c.json({ error: 'grant_expired' }, 410);
       }

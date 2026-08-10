@@ -73,6 +73,12 @@ describe('GET /api/history', () => {
       about: 'A project used by the history-route tests to exercise filter shapes.',
       missionObjectives: 'Project-scoped events appear under ?project=histproj.',
     });
+    await svc.context.history.log({
+      kind: 'tool.gated',
+      projectId: 'histproj',
+      summary: '[PreToolUse] rm: ask',
+      details: { craftbookId: 'careful-mode', decision: 'ask', tool: 'rm' },
+    });
   });
 
   it('returns the events stream with include=events', async () => {
@@ -110,6 +116,16 @@ describe('GET /api/history', () => {
     const events = await listEvents('kind=gezel.created');
     expect(events.length).toBeGreaterThan(0);
     expect(events.every((e) => e.kind === 'gezel.created')).toBe(true);
+  });
+
+  it('filters newly-added canonical kinds without a route-local allowlist update', async () => {
+    const events = await listEvents('kind=tool.gated');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'tool.gated',
+      projectId: 'histproj',
+      summary: '[PreToolUse] rm: ask',
+    });
   });
 
   it('filters by kind (comma-separated)', async () => {

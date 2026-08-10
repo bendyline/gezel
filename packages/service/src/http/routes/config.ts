@@ -364,6 +364,15 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+      // A configured Codex profile follows the same master switch. Its
+      // authenticated bridge is best-effort here: a port collision should
+      // surface as "Update needed" on the dedicated card, not roll back the
+      // master setting for every other connected app.
+      await ctx.codexSetup.reconcile().catch((err) => {
+        log.warn(
+          `[codex-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
     // Live gilde updates: enabling kicks a background check; disabling
     // reverts to bundled content immediately and prunes the cache. Never

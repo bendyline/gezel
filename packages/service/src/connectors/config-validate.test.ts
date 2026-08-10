@@ -56,6 +56,24 @@ describe('validateConnectorConfig', () => {
     ]);
   });
 
+  it('validates integer and number bounds used by connector filters', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        maxReleases: { type: 'integer', minimum: 1, maximum: 10_000 },
+        maxAssetSizeMb: { type: 'number', exclusiveMinimum: 0 },
+      },
+    };
+    expect(validateConnectorConfig(schema, { maxReleases: 20, maxAssetSizeMb: 512.5 })).toEqual([]);
+    expect(validateConnectorConfig(schema, { maxReleases: 0, maxAssetSizeMb: 0 })).toEqual([
+      'maxReleases: must be at least 1',
+      'maxAssetSizeMb: must be greater than 0',
+    ]);
+    expect(validateConnectorConfig(schema, { maxReleases: 10_001 })).toEqual([
+      'maxReleases: must be at most 10000',
+    ]);
+  });
+
   it('ignores unknown keywords and missing schemas entirely', () => {
     expect(validateConnectorConfig(undefined, { anything: true })).toEqual([]);
     expect(

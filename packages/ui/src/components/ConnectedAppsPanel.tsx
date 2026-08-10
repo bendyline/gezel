@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import {
   approvalErrorMessage,
@@ -93,6 +94,7 @@ export function ConnectedAppsPanel() {
   }>({});
   const [gezels, setGezels] = useState<GezelOption[]>([]);
   const [endpointsStatus, setEndpointsStatus] = useState<string | null>(null);
+  const [codexSetupRefreshKey, setCodexSetupRefreshKey] = useState(0);
   const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>();
 
@@ -152,6 +154,7 @@ export function ConnectedAppsPanel() {
       try {
         const res = await api.updateConfig({ openaiEndpoints: next });
         setEndpoints(res.openaiEndpoints ?? {});
+        setCodexSetupRefreshKey((current) => current + 1);
         setEndpointsStatus(null);
       } catch (err) {
         setEndpoints(previous);
@@ -234,6 +237,7 @@ export function ConnectedAppsPanel() {
       }
       setRevokeTarget(null);
       await refresh();
+      setCodexSetupRefreshKey((current) => current + 1);
     } finally {
       setBusy(null);
     }
@@ -366,6 +370,12 @@ export function ConnectedAppsPanel() {
         </p>
         {endpointsStatus && <output className="muted small">{endpointsStatus}</output>}
       </div>
+
+      <CodexSetupCard
+        key={codexSetupRefreshKey}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
 
       {pending.length > 0 && (
         <div className="settings-subsection">

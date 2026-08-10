@@ -165,6 +165,62 @@ describe('RemoteSession', () => {
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
+  it('captures every call when caller tools are advertised, even if no returned name matches', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let bridgeCalls = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return sseResponse([
+        { type: 'delta', text: 'I will inspect it.' },
+        {
+          type: 'tool_call',
+          calls: [
+            { id: 'read-1', name: 'read_file', arguments: '{"path":"README.md"}' },
+            { id: 'unknown-1', name: 'hallucinated_tool', arguments: '{}' },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://broker',
+      token: 'broker-token',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        read_file: async () => {
+          bridgeCalls += 1;
+          return 'must not run';
+        },
+      }),
+      externalTools: [
+        {
+          name: 'shell',
+          description: 'Run a shell command',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      ],
+      systemMessage: 'system',
+      model: 'llama-cpp:qwen',
+      priorMessages: [],
+      numCtx: 65_536,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('inspect the repository')).resolves.toBe('I will inspect it.');
+
+    expect(requests).toHaveLength(1);
+    expect((requests[0]!.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual([
+      'read_file',
+      'shell',
+    ]);
+    expect(bridgeCalls).toBe(0);
+    expect(session.capturedToolCalls()).toEqual([
+      { id: 'read-1', name: 'read_file', arguments: '{"path":"README.md"}' },
+      { id: 'unknown-1', name: 'hallucinated_tool', arguments: '{}' },
+    ]);
+  });
+
   it('forwards native-engine liveness, TTFT phases, and performance telemetry', async () => {
     const fetchImpl = (async () =>
       sseResponse([

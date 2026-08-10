@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "run": "tsx src/bin/run.ts",
     "batch": "tsx src/bin/batch.ts",
     "ab-grammar": "tsx src/bin/ab-grammar.ts",

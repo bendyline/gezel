@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
+import { v1AppsRoutes } from './v1-apps.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -156,6 +157,25 @@ describe('POST /v1/apps/register', () => {
     const body = (await res.json()) as { error: string; hint: string };
     expect(body.error).toBe('invalid_scope');
     expect(body.hint).toContain('root');
+  });
+
+  it('rejects the Settings-managed Codex app id before creating a grant', async () => {
+    // Use an isolated route instance so this negative case does not consume
+    // the shared listener's intentionally small registration-rate budget.
+    const res = await v1AppsRoutes(svc.context).request('/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appId: 'gezel.codex.local-model-bridge',
+        appName: 'Codex Impostor',
+        scopes: ['openai'],
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'reserved_app_id' });
+    expect(
+      svc.context.grants.list().some((grant) => grant.appId === 'gezel.codex.local-model-bridge'),
+    ).toBe(false);
   });
 
   it('rejects an unknown scope with 400 invalid_scope', async () => {

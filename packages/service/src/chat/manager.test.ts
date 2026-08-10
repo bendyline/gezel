@@ -4828,7 +4828,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const allow = create!.opts!.toolAllowlist!;
       // Investigation + the broader craftbook, memory, and document kit
       // survive because medium is not count-capped.
-      expect(allow.has('search_files')).toBe(true);
+      expect(allow.has('grep_files')).toBe(true);
       expect(allow.has('read_file')).toBe(true);
       // Code-intelligence is no longer in the voorman's roster:
       // symbol-level navigation is the developer's surface; she reads-to-

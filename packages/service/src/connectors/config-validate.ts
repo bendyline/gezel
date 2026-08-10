@@ -1,7 +1,7 @@
 /**
  * Minimal JSON-Schema-subset validation for connector binding config. Covers
  * exactly what the bundled connector-type `configSchema`s use — `type`,
- * `properties`, `required`, `const`, `enum`, `items` — and deliberately
+ * `properties`, `required`, `const`, `enum`, numeric bounds, `items` — and deliberately
  * ignores every other keyword rather than failing on it: the gate exists to
  * catch a missing repository or a mistyped field at bind time (a clear 400)
  * instead of a sync-time `lastError` days later, not to be a full validator.
@@ -15,6 +15,10 @@ export interface ConfigSchema {
   enum?: unknown[];
   items?: ConfigSchema;
   title?: string;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
 }
 
 function typeOf(value: unknown): string {
@@ -41,6 +45,20 @@ function validateValue(schema: ConfigSchema, value: unknown, path: string, error
   if (schema.type && !typeMatches(schema.type, typeOf(value))) {
     errors.push(`${path}: expected ${schema.type}, got ${typeOf(value)}`);
     return;
+  }
+  if (typeof value === 'number') {
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      errors.push(`${path}: must be at least ${schema.minimum}`);
+    }
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      errors.push(`${path}: must be at most ${schema.maximum}`);
+    }
+    if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) {
+      errors.push(`${path}: must be greater than ${schema.exclusiveMinimum}`);
+    }
+    if (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) {
+      errors.push(`${path}: must be less than ${schema.exclusiveMaximum}`);
+    }
   }
   if (schema.type === 'object' || schema.properties) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return;

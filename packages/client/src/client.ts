@@ -47,8 +47,10 @@ import type {
   ChatSession,
   ChatSessionSummary,
   CodeReviewResponse,
+  CodexSetupStatusResponse,
   CompleteStepRequest,
   CompleteStepResponse,
+  ConfigureCodexRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -228,6 +230,8 @@ import type {
   ReadImageBase64Response,
   ReadSymbolRequest,
   ReadSymbolResponse,
+  ReadWorkspaceFilesRequest,
+  ReadWorkspaceFilesResponse,
   ReferenceFileLocationRequest,
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
@@ -2019,6 +2023,20 @@ export class GezelClient {
 
   updateConfig(body: UpdateConfigRequest): Promise<ConfigResponse> {
     return this.request('PUT', '/api/config', body);
+  }
+
+  // ---------- Codex local-model setup ----------
+
+  getCodexSetupStatus(): Promise<CodexSetupStatusResponse> {
+    return this.request('GET', '/api/codex-setup');
+  }
+
+  configureCodex(body: ConfigureCodexRequest): Promise<CodexSetupStatusResponse> {
+    return this.request('PUT', '/api/codex-setup', body);
+  }
+
+  removeCodexSetup(): Promise<CodexSetupStatusResponse> {
+    return this.request('DELETE', '/api/codex-setup');
   }
 
   // ---------- live gilde content updates ----------
@@ -5074,6 +5092,13 @@ export class GezelClient {
 
   toolSearchFiles(id: string, body: SearchFilesRequest): Promise<SearchFilesResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-files`, body);
+  }
+
+  toolReadWorkspaceFiles(
+    id: string,
+    body: ReadWorkspaceFilesRequest,
+  ): Promise<ReadWorkspaceFilesResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/read-files`, body);
   }
 
   toolFindFiles(id: string, body: FindFilesRequest): Promise<FindFilesResponse> {

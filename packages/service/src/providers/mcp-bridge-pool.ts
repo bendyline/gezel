@@ -1,6 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
-import { BUILTIN_TOOL_TO_GROUP } from '@bendyline/gezel-catalog';
-import { canonicalToolName } from '@bendyline/gezel-mcp';
+import { TOOL_REGISTRY, canonicalToolName } from '@bendyline/gezel-mcp';
 import { type AnthropicTool, McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
 import type { SessionOpts } from './types.js';
 
@@ -30,7 +29,7 @@ export class McpBridgePool {
    * salvage freeform text into a tool call by name, so hiding the
    * schema is not enough to prevent an out-of-role built-in call.
    *
-   * **Third-party MCP tools (anything not in `BUILTIN_TOOL_TO_GROUP`)
+   * **Third-party MCP tools (anything absent from `TOOL_REGISTRY`)
    * pass through this pool-level filter.** A server-specific bridge wrapper
    * may still prune its own advertised/callable surface (the managed
    * local-preview Playwright profile does this). Ordinary user-installed
@@ -165,13 +164,15 @@ export class McpBridgePool {
   }
 
   // Allowlist + group membership run in CANONICAL name space: the sets
-  // hold canonical names, but the advertised name can be a legacy
-  // spelling in the naming-A/B legacy arm. Without canonicalization a
-  // legacy-advertised `writeFile` misses `BUILTIN_TOOL_TO_GROUP` and
-  // sails past the role filter as if it were third-party (fails open).
+  // hold canonical names, but the advertised name can be a legacy spelling
+  // in the naming-A/B legacy arm. Registry membership, rather than catalog
+  // grouping, also covers contextual built-ins such as draft_email.
   private allowsBuiltin(allow: ReadonlySet<string>, name: string): boolean {
     const canonical = canonicalToolName(name);
-    if (!BUILTIN_TOOL_TO_GROUP.has(canonical)) return true;
+    const builtin = canonical in TOOL_REGISTRY;
+    if (!builtin) return true;
+    const entry = TOOL_REGISTRY[canonical as keyof typeof TOOL_REGISTRY];
+    if (!entry.modelFacing) return false;
     return allow.has(canonical);
   }
 
@@ -206,8 +207,8 @@ export class McpBridgePool {
   }
 
   hasTool(name: string): boolean {
-    if (!this.isCallableByModel(name)) return false;
-    return this.bridges.some((b) => b.bridge.hasTool(name));
+    const resolved = this.resolveBridgeTool(name);
+    return resolved !== null && this.isCallableByModel(resolved.name);
   }
 
   /**
@@ -228,12 +229,11 @@ export class McpBridgePool {
     args: Record<string, unknown>,
     opts?: { budgetChars?: number; numCtxTokens?: number },
   ): Promise<string> {
-    if (!this.isCallableByModel(name)) {
+    const resolved = this.resolveBridgeTool(name);
+    if (resolved && !this.isCallableByModel(resolved.name)) {
       throw new Error(`[mcp-bridge-pool] tool "${name}" is not available in this session`);
     }
-    for (const { bridge } of this.bridges) {
-      if (bridge.hasTool(name)) return bridge.callTool(name, args, opts);
-    }
+    if (resolved) return resolved.bridge.callTool(resolved.name, args, opts);
     throw new Error(`[mcp-bridge-pool] no bridge has tool "${name}"`);
   }
 
@@ -246,13 +246,26 @@ export class McpBridgePool {
     images: Array<{ base64: string; mimeType: string }>;
     isError: boolean;
   }> {
-    if (!this.isCallableByModel(name)) {
+    const resolved = this.resolveBridgeTool(name);
+    if (resolved && !this.isCallableByModel(resolved.name)) {
       throw new Error(`[mcp-bridge-pool] tool "${name}" is not available in this session`);
     }
-    for (const { bridge } of this.bridges) {
-      if (bridge.hasTool(name)) return bridge.callToolRich(name, args, opts);
-    }
+    if (resolved) return resolved.bridge.callToolRich(resolved.name, args, opts);
     throw new Error(`[mcp-bridge-pool] no bridge has tool "${name}"`);
+  }
+
+  /**
+   * First-bridge-wins lookup in each bridge's final advertised namespace.
+   * Authorization deliberately happens only after this resolution: otherwise
+   * a spelling such as `write-file` looks third-party to the allowlist and is
+   * then normalized to the forbidden built-in by `McpBridge` at dispatch.
+   */
+  private resolveBridgeTool(name: string): { bridge: McpBridge; name: string } | null {
+    for (const { bridge } of this.bridges) {
+      const resolved = bridge.resolveToolName(name);
+      if (resolved !== null) return { bridge, name: resolved };
+    }
+    return null;
   }
 
   private isCallableByModel(name: string): boolean {

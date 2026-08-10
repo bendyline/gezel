@@ -121,10 +121,13 @@ export const SUITES: Record<string, EvalSuite> = {
   'extended-retrieval': {
     id: 'extended-retrieval',
     description:
-      'Tool-routing + retrieval deep-dive: image-gen routing, retrieval-before-file-walking, ' +
-      'codebase Q&A, and the wide mechanical rename on the pinned squisq corpus.',
+      'Tool-routing + retrieval deep-dive: image-gen routing, browser primitive choreography, ' +
+      'direct HTTP fetch routing, retrieval-before-file-walking, codebase Q&A, and the wide ' +
+      'mechanical rename on the pinned squisq corpus.',
     scenarios: [
       'tool-routing-image',
+      'tool-routing-browser',
+      'tool-routing-fetch-url',
       'tool-routing-retrieval',
       'tool-routing-craftbook',
       'squisq-codebase-qa',

@@ -1,7 +1,9 @@
 # Catalog scripts
 
 Authoring- and import-time tools for the gilde catalog. None of this code
-ships in the runtime catalog package.
+ships in the runtime catalog package. Content-bearing generator inputs live
+under the gilde checkout's `authoring/` tree so the content repository owns
+both its source and expanded release payloads.
 
 **All content writes target the sibling
 [bendyline/gilde](https://github.com/bendyline/gilde) checkout** (default
@@ -24,6 +26,35 @@ Durable importer state (`.import-state/import-watermark.json` and
 The slug map is content-coupled and moves only if the importer itself ever
 relocates. Per-run diagnostics and the recomputable `.import-cache/` remain
 local and untracked.
+
+## `import-gstack-skills.ts`
+
+Compiles the maintained gstack-derived source family in
+`../gilde/authoring/gstack/` into immutable craftbook versions under
+`../gilde/data/craftbook-templates/`. Gilde owns the frozen upstream
+snapshots, Gezel-native overlays, eval definitions, persona drafts, and
+`wave.json` release mapping; this repository retains the compiler because it
+uses Gezel's unpublished skill parser and craftbook validation APIs.
+
+```sh
+# validate the whole wave without writing
+pnpm --filter @bendyline/gezel-catalog exec tsx scripts/import-gstack-skills.ts --dry-run
+
+# generate the configured append-only version, then rebuild its index
+pnpm --filter @bendyline/gezel-catalog exec tsx scripts/import-gstack-skills.ts
+pnpm --filter @bendyline/gezel-catalog run build-index --kind=craftbook-template
+```
+
+The regeneration-fidelity test resolves both authoring inputs and generated
+payloads from one Gilde root: `GILDE_DIR` when explicitly set, otherwise the
+exact-pinned (or `pnpm link:gilde`-linked) `@bendyline/gilde` package. It does
+not implicitly prefer a sibling checkout, so local state cannot mask a stale
+registry pin in clean CI.
+
+Cross-repo landing order is deliberate: publish the Gilde authoring change
+first, then bump the exact `@bendyline/gilde` pin and lockfile here. Until that
+pin moves, clean Gezel CI will reject the missing authoring tree instead of
+silently testing unrelated sibling content.
 
 ## `import-mcp-registry.ts`
 

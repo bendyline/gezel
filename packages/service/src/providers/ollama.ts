@@ -201,10 +201,10 @@ export class OllamaProvider implements LLMProvider {
     });
   }
 
-  async initialize(): Promise<void> {
+  async initialize(signal?: AbortSignal): Promise<void> {
     // Probe /api/tags so a misconfigured URL surfaces early with a usable
     // error instead of on the first chat turn.
-    await this.fetchTags();
+    await this.fetchTags(signal);
   }
 
   async shutdown(): Promise<void> {
@@ -323,8 +323,8 @@ export class OllamaProvider implements LLMProvider {
     return this.defaultModel;
   }
 
-  async listModels(): Promise<ModelInfo[]> {
-    const tags = await this.fetchTags();
+  async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const tags = await this.fetchTags(signal);
     const models: ModelInfo[] = tags.models.map((m) => ({
       id: m.name,
       name: m.name,
@@ -337,8 +337,8 @@ export class OllamaProvider implements LLMProvider {
   }
 
   /** Exposed so the HTTP routes can reuse the same base URL + parsing. */
-  async fetchTags(): Promise<OllamaTagsResponse> {
-    const res = await fetch(`${this.baseUrl}/api/tags`);
+  async fetchTags(signal?: AbortSignal): Promise<OllamaTagsResponse> {
+    const res = await fetch(`${this.baseUrl}/api/tags`, signal ? { signal } : undefined);
     if (!res.ok) {
       throw new Error(`[ollama] ${this.baseUrl}/api/tags returned ${res.status} ${res.statusText}`);
     }
@@ -1471,7 +1471,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           (fn.name === 'start_project' || fn.name === 'start_job') &&
           startedProjectOrJobThisTurn
         ) {
-          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call \`start_project\` or \`start_job\` again to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
+          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
         } else if (this.deps.bridges.hasTool(fn.name)) {
           try {
             // Adaptive cap — compute how many chars of tool output

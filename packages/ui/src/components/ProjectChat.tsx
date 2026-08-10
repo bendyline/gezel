@@ -1,13 +1,15 @@
-import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
+import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
 import { displayName, pronounFormsForGender } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
 import { ChatComposer } from './ChatComposer.js';
+import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
 import { FolderTreeSwitcher } from './FolderTreeSwitcher.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
-import { TerminalComposer, queueTerminalCommand } from './TerminalComposer.js';
+import { TerminalComposer } from './TerminalComposer.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -150,6 +152,15 @@ function ProjectChatBody({
   // it for the (selectedGezel, project) pair; the timeline highlights it
   // as the active session; the composer posts into it.
   const [sessionId, setSessionId] = useState<string>('');
+  // The task the pill row (or the rail) last focused. It scopes BOTH the
+  // SessionSwitcher's thread list and the composer's next send: without it
+  // the switcher lists only non-task threads, decides the focused task
+  // thread is out of scope, and auto-picks the gezel's lobby thread over
+  // it — silently posting the user's next message to the wrong place.
+  const [activeTask, setActiveTask] = useState<{ ref: string; stepId?: string } | null>(null);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  // Bumped after a write the pill row should re-read (a created task).
+  const [pillRefreshKey, setPillRefreshKey] = useState(0);
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const selectedName = displayName(
     { name: selectedGezel.name, roleBasedName: selectedGezel.roleBasedName },
@@ -215,12 +226,6 @@ function ProjectChatBody({
     }
   }, [composeMode, terminalInitialInput]);
 
-  // Bumping this key remounts the TerminalComposer, which re-reads its
-  // initial input from the module-level command queue. Lets the command
-  // launcher stage a command even when terminal mode is ALREADY active
-  // (the `initialInput` prop is read only at mount, so a prop change
-  // wouldn't reach a live composer).
-  const [terminalMountKey, setTerminalMountKey] = useState(0);
   // Reconcile the persisted terminal row after each acknowledged POST.
   // Live SSE normally paints it first; this key closes the narrow gap where
   // a stream frame is lost while the command itself was safely stored.
@@ -231,20 +236,6 @@ function ProjectChatBody({
     input: string;
   } | null>(null);
 
-  // Stage a command into the terminal for the user to review + run.
-  // Called by the CommandsPanel craftbook launcher (threaded through
-  // ChatReferences). Switches to terminal mode if needed, then remounts
-  // the composer so the queued command becomes its input. Does NOT
-  // auto-submit — the user presses Enter to run it.
-  const stageTerminalCommand = useCallback(
-    (command: string) => {
-      queueTerminalCommand(project.id, command);
-      setComposeMode('terminal');
-      setTerminalMountKey((k) => k + 1);
-    },
-    [project.id],
-  );
-
   // A session the timeline asked us to focus while ALSO switching gezel
   // (clicking a session divider, or the sidebar's failed-turn indicator
   // landing on another gezel's chat). The reset effect below fires right
@@ -252,6 +243,59 @@ function ProjectChatBody({
   // we were just asked to open, quietly starting a fresh conversation
   // instead of resuming the one the user navigated to.
   const focusedSessionRef = useRef<string | null>(null);
+  // Companion to `focusedSessionRef` for the task scope: a task pill whose
+  // thread belongs to another gezel must carry its ref through the same
+  // reset, or the switcher loses the scope one tick after gaining it.
+  const focusedTaskRef = useRef<{ ref: string; stepId?: string } | null>(null);
+
+  /**
+   * Point the composer at `sessionId`, switching gezel first when the
+   * thread belongs to someone else. `task` rides along so a task-scoped
+   * thread keeps its scope across the gezel-switch reset.
+   */
+  const focusThread = useCallback(
+    (nextSessionId: string, gezelId: string, task: { ref: string; stepId?: string } | null) => {
+      if (gezelId !== selectedGezel.id) {
+        focusedSessionRef.current = nextSessionId || null;
+        focusedTaskRef.current = task;
+        onSelectGezel(gezelId);
+      } else {
+        setActiveTask(task);
+      }
+      setSessionId(nextSessionId);
+    },
+    [selectedGezel.id, onSelectGezel],
+  );
+
+  /**
+   * A task pill was clicked. Two things happen: the rail opens that task's
+   * card, and the composer moves to the task's own thread. When the task
+   * has no thread yet we deliberately do NOT mint one — we point the
+   * composer at the assignee with the scope set and let `ChatComposer`
+   * lazy-create on first send, so a glance-click doesn't litter the
+   * session list with empty threads.
+   */
+  const focusTask = useCallback(
+    async (task: Task) => {
+      const scope = { ref: task.ref, ...(task.activeStepId ? { stepId: task.activeStepId } : {}) };
+      try {
+        const { sessions } = await api.listTaskSessions(task.projectId, task.num);
+        const target = sessions.find((s) => !s.archived);
+        if (target) {
+          focusThread(target.id, target.gezelId, scope);
+          return;
+        }
+      } catch {
+        // Fall through to the no-thread path — the rail card still opened.
+      }
+      if (task.assignee.kind === 'gezel' && task.assignee.gezelId) {
+        focusThread('', task.assignee.gezelId, scope);
+      } else {
+        setActiveTask(scope);
+      }
+    },
+    [focusThread],
+  );
 
   // Reset session selection when the user switches gezel OR project. The
   // session id is scoped to a (gezel, project) pair; keeping it stable
@@ -263,6 +307,10 @@ function ProjectChatBody({
     const focused = focusedSessionRef.current;
     focusedSessionRef.current = null;
     setSessionId(focused ?? '');
+    // The task scope belongs to the thread we're leaving. A pill click that
+    // switches gezel re-sets it right after, via `focusedTaskRef`.
+    setActiveTask(focusedTaskRef.current);
+    focusedTaskRef.current = null;
   }, [selectedGezel.id, project.id]);
 
   // Pick a role-aware empty-composer prompt once per (gezel, project)
@@ -292,25 +340,33 @@ function ProjectChatBody({
   return (
     <ChatReferences
       projectId={project.id}
-      // Compact mode turns Commands into a full-width peer of Chat rather
+      // Compact mode turns Skills into a full-width peer of Chat rather
       // than removing it, so keep the project scope available at every size.
-      commandsProjectId={project.id}
+      skillsProjectId={project.id}
       compact={compact}
       chatKey={`${project.id}:timeline`}
-      onStageTerminalCommand={stageTerminalCommand}
     >
       {({ onToolActivity, onArtifactReference, onWorkspaceReference, onTaskReference }) => (
         <>
+          <ChatPillRow
+            projectId={project.id}
+            gezels={recipientGezels}
+            activeSessionId={sessionId || undefined}
+            activeTaskRef={activeTask?.ref ?? null}
+            refreshKey={pillRefreshKey}
+            onFocusThread={(pill) =>
+              focusThread(pill.sessionId, pill.gezelId, pill.taskRef ? { ref: pill.taskRef } : null)
+            }
+            onFocusTask={(task) => {
+              onTaskReference(task.ref, { focus: true });
+              void focusTask(task);
+            }}
+            onNewTask={() => setNewTaskOpen(true)}
+          />
           <ProjectTimeline
             projectId={project.id}
             activeSessionId={sessionId || undefined}
-            onFocusSession={(sid, gid) => {
-              if (gid !== selectedGezel.id) {
-                focusedSessionRef.current = sid;
-                onSelectGezel(gid);
-              }
-              setSessionId(sid);
-            }}
+            onFocusSession={(sid, gid) => focusThread(sid, gid, null)}
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
             onWorkspaceReference={onWorkspaceReference}
@@ -347,6 +403,8 @@ function ProjectChatBody({
                   focusRequestKey={chatFocusRequestKey}
                   projectId={project.id}
                   sessionId={sessionId || undefined}
+                  {...(activeTask ? { taskRef: activeTask.ref } : {})}
+                  {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
                   onSessionCreated={(sid) => {
                     setSessionId(sid);
                     setSessionRefreshKey((k) => k + 1);
@@ -389,6 +447,8 @@ function ProjectChatBody({
                       projectId={project.id}
                       sessionId={sessionId || undefined}
                       gezelName={selectedName}
+                      {...(activeTask ? { taskRef: activeTask.ref } : {})}
+                      {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
                       onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
@@ -397,7 +457,7 @@ function ProjectChatBody({
                 />
               ) : (
                 <TerminalComposer
-                  key={`terminal:${project.id}:${terminalMountKey}`}
+                  key={`terminal:${project.id}`}
                   projectId={project.id}
                   workingDir={terminalThreadDir}
                   contextRow={
@@ -447,6 +507,21 @@ function ProjectChatBody({
               </div>
             </div>
           </div>
+          {/* Portals, so its position in the tree is cosmetic. `projects` is
+              only read when the project picker shows, which `projectLocked`
+              suppresses — we're scoped to one project by construction. */}
+          <NewTaskDialog
+            open={newTaskOpen}
+            defaultProjectId={project.id}
+            projects={[project]}
+            gezels={recipientGezels}
+            projectLocked
+            onClose={() => setNewTaskOpen(false)}
+            onCreated={() => {
+              setNewTaskOpen(false);
+              setPillRefreshKey((k) => k + 1);
+            }}
+          />
         </>
       )}
     </ChatReferences>

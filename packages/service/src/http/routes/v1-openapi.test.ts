@@ -45,12 +45,15 @@ describe('GET /v1/openapi.json', () => {
     expect(body.info.title).toBe('Gezel Public API');
     expect(typeof body.info.version).toBe('string');
     expect(body.paths['/v1/chat/completions']).toBeTruthy();
+    expect(body.paths['/v1/responses']).toBeTruthy();
     expect(body.paths['/v1/embeddings']).toBeTruthy();
     expect(body.paths['/v1/models']).toBeTruthy();
     expect(body.paths['/v1/models/ensure']).toBeTruthy();
     expect(body.paths['/v1/apps/register']).toBeTruthy();
     expect(body.paths['/v1/apps/grant/{grantId}/approve']).toBeTruthy();
     expect(body.components.schemas.GrantApprovalRequest).toBeTruthy();
+    expect(body.components.schemas.ResponsesRequest).toBeTruthy();
+    expect(body.components.schemas.ResponsesResponse).toBeTruthy();
     expect(body.components.securitySchemes.bearerAuth).toBeTruthy();
   });
 });

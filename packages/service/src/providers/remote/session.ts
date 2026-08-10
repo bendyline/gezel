@@ -25,6 +25,7 @@ import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   ExternalToolCall,
+  ExternalToolSpec,
   ImageAttachment,
   LLMSession,
   ProviderSessionState,
@@ -79,6 +80,8 @@ export interface RemoteSessionDeps {
   volatileContext?: string;
   reasoningEffort?: string;
   tuning?: Record<string, unknown>;
+  /** Caller-owned tools advertised in capture-and-return mode. */
+  externalTools?: ExternalToolSpec[];
   priorMessages: PriorMessageWire[];
   /** Broker-reported post-admission context window. */
   numCtx: number;
@@ -89,6 +92,8 @@ export interface RemoteSessionDeps {
 
 export class RemoteSession extends StreamingSessionBase implements LLMSession {
   private lastReasoning: string | undefined;
+  private readonly capturesCallerTools: boolean;
+  private capturedCalls: ExternalToolCall[] = [];
   private systemMessage: string;
   /** Full A-owned transcript; B deliberately remains stateless. */
   private transcript: PriorMessageWire[];
@@ -101,6 +106,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
   constructor(private readonly deps: RemoteSessionDeps) {
     super();
+    this.capturesCallerTools = (deps.externalTools?.length ?? 0) > 0;
     this.systemMessage = deps.systemMessage;
     this.transcript = [...deps.priorMessages];
     this.numCtx = deps.numCtx;
@@ -118,6 +124,10 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnReasoning(): string | undefined {
     return this.lastReasoning;
+  }
+
+  capturedToolCalls(): ExternalToolCall[] {
+    return [...this.capturedCalls];
   }
 
   getRegisteredToolNames(): string[] {
@@ -142,11 +152,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
    */
   async prewarm(sessionId: string): Promise<void> {
     const connection = this.deps.resolveConnection?.() ?? this.deps;
-    const tools = this.deps.bridges.isEmpty()
-      ? undefined
-      : this.deps.bridges
-          .getOpenAITools()
-          .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const tools = this.advertisedTools();
     const body: RemoteCacheWarmRequest = {
       protocolVersion: PROTOCOL_VERSION,
       model: this.deps.model,
@@ -185,6 +191,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     if (!this.deps.bridges.isEmpty()) {
       for (const tool of this.deps.bridges.getOpenAITools()) total += JSON.stringify(tool).length;
     }
+    for (const tool of this.deps.externalTools ?? []) total += JSON.stringify(tool).length;
     return total;
   }
 
@@ -194,6 +201,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     this.lastReasoning = undefined;
+    this.capturedCalls = [];
     this.compactedThisTurn = false;
     let deadline = Date.now() + (opts?.timeoutMs ?? this.deps.timeoutMs);
     const priorMessages: PriorMessageWire[] = [...this.transcript];
@@ -252,6 +260,20 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           userMessageAdded = true;
         }
         this.pendingPrompt = '';
+
+        // External-tool mode belongs to the caller (Codex / another Responses
+        // client), not Gezel's local MCP loop. Match the in-process providers:
+        // when any caller-owned tools were advertised, capture every call from
+        // this model turn and execute none of them. Classification by returned
+        // name is unsafe: a hallucinated or bridge-name call must not fall into
+        // Gezel's internal execution loop. The caller validates/executes calls
+        // and supplies results on its next request through priorMessages.
+        if (toolCalls.length > 0 && this.capturesCallerTools) {
+          this.capturedCalls = toolCalls.map((call) => ({ ...call }));
+          priorMessages.push({ role: 'assistant', content: text, toolCalls });
+          this.transcript = [...priorMessages];
+          return fullText;
+        }
 
         if (toolCalls.length === 0) {
           priorMessages.push({ role: 'assistant', content: text });
@@ -408,11 +430,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     opts?: SendAndWaitOpts,
     includeAttachments = true,
   ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
-    const tools = this.deps.bridges.isEmpty()
-      ? undefined
-      : this.deps.bridges
-          .getOpenAITools()
-          .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const tools = this.advertisedTools();
 
     const body: RemoteInferRequest = {
       protocolVersion: PROTOCOL_VERSION,
@@ -597,6 +615,18 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       );
     }
     return { text, toolCalls, queueWaitMs };
+  }
+
+  private advertisedTools(): ExternalToolSpec[] | undefined {
+    const bridgeTools = this.deps.bridges.isEmpty()
+      ? []
+      : this.deps.bridges.getOpenAITools().map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        }));
+    const tools = [...bridgeTools, ...(this.deps.externalTools ?? [])];
+    return tools.length > 0 ? tools : undefined;
   }
 }
 

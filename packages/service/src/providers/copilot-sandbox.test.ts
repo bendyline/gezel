@@ -165,7 +165,7 @@ describe('Copilot provider sandbox default', () => {
 
 describe('non-sandbox overlap hiding', () => {
   it('hides our MCP tools that duplicate a Copilot built-in', () => {
-    for (const name of ['fetch_url', 'search_files', 'find_files', 'read_image_as_base64']) {
+    for (const name of ['fetch_url', 'grep_files', 'find_files', 'read_image_as_base64']) {
       expect(NON_SANDBOX_EXCLUDED_MCP_TOOLS).toContain(name);
     }
   });

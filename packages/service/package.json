@@ -58,7 +58,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "postinstall": "node ./postinstall.mjs",
     "clean": "rm -rf dist .turbo"
   },

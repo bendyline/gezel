@@ -452,6 +452,8 @@ export const ChatMessageToolCallSchema = z.object({
   errorMessage: z.string().optional(),
   /** File path the tool touched, for the References pane. */
   path: z.string().optional(),
+  /** Ordered file paths touched by a batched filesystem tool. */
+  paths: z.array(z.string()).optional(),
   /** Compact, human-readable one-liner ("→ Freja: update the game loop · file: workspace/index.html"). */
   argsSummary: z.string().optional(),
   /**
@@ -766,6 +768,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
      * without guessing.
      */
     path: z.string().optional(),
+    /** Ordered file paths touched by a batched filesystem tool. */
+    paths: z.array(z.string()).optional(),
     /**
      * Compact human-readable preview of the non-bulky arguments. Example:
      * `gezel: "Maya", message: "what's the status of..."`. Values are

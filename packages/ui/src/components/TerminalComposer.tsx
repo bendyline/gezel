@@ -17,20 +17,6 @@ const TERMINAL_PLACEHOLDER =
   'build, test, git status, … — Enter runs, Shift+Enter for newline, ↑/↓ recalls history';
 
 /**
- * Module-level queue for staging a command into the terminal from
- * elsewhere (the CommandsPanel craftbook launcher). `stageTerminalCommand`
- * in `ProjectChat` calls `queueTerminalCommand(projectId, cmd)` then
- * ensures terminal mode + remounts this composer; the next mount for that
- * project consumes the entry as its initial input. Keyed by projectId so
- * a stage for project A doesn't clobber B. Mirrors `queueComposerPrefill`
- * in ChatComposer — a `window` event would race the listener's mount.
- */
-const pendingTerminalCommands = new Map<string, string>();
-export function queueTerminalCommand(projectId: string, command: string): void {
-  pendingTerminalCommands.set(projectId, command);
-}
-
-/**
  * The toolbar's three galleries. Splitting one "Commands" button into three
  * separates three genuinely different questions — how do I use a terminal at
  * all, what does this repo already know how to run, and what work can a gezel
@@ -164,18 +150,10 @@ export function TerminalComposer({
    */
   onChatEscape?: () => void;
 }) {
-  // Initial value: a queued launcher command for this project wins (and
-  // is consumed); otherwise the chat→terminal escape seed. Read once at
-  // mount (standard useState init) — the parent remounts via a `key`
-  // bump to re-seed an already-mounted composer.
-  const [seed] = useState(() => {
-    const queued = pendingTerminalCommands.get(projectId);
-    if (queued !== undefined) {
-      pendingTerminalCommands.delete(projectId);
-      return queued;
-    }
-    return initialInput ?? '';
-  });
+  // The chat→terminal escape seed, read once at mount (standard useState
+  // init). Toolbar-gallery staging doesn't come through here — it writes
+  // straight into the live editor via `stageFromGallery`.
+  const [seed] = useState(() => initialInput ?? '');
   const [error, setError] = useState<string | null>(null);
   // Which of the toolbar's three gallery popovers is open (null = none). One
   // slot rather than three booleans, so opening one closes the others. Each

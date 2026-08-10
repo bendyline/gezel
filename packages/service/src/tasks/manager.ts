@@ -2517,13 +2517,18 @@ export class TaskManager {
             if (details.taskRef !== task.ref || details.stepId !== step.id) continue;
             const tool = typeof details.name === 'string' ? details.name : '';
             const path = typeof details.path === 'string' ? details.path : undefined;
+            const paths = Array.isArray(details.paths)
+              ? details.paths.filter((value): value is string => typeof value === 'string')
+              : [];
             const target =
               typeof details.researchTarget === 'string' ? details.researchTarget : undefined;
             const exactLocalRead =
               expectedPath.length > 0 &&
-              tool === 'read_file' &&
-              path !== undefined &&
-              normalizePath(path) === expectedPath;
+              ((tool === 'read_file' &&
+                path !== undefined &&
+                normalizePath(path) === expectedPath) ||
+                (tool === 'read_files' &&
+                  paths.some((value) => normalizePath(value) === expectedPath)));
             let externalAcquisition = allowed.has(tool) && target !== undefined;
             if (externalAcquisition && tool === 'run_playwright_script') {
               const scriptPath = target?.startsWith('script:')

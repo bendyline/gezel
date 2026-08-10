@@ -28,10 +28,10 @@
 
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { projectLocalQuarantineDir } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { copyFileAtomic, writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import { withFrontmatter } from '../index-store/frontmatter.js';
 import { contentScanner } from '../safety/index.js';
@@ -88,7 +88,14 @@ export function contentHash(record: NormalizedRecord): string {
   const sortedFrontmatter = Object.fromEntries(
     Object.entries(record.frontmatter).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
-  return sha8(`${JSON.stringify(sortedFrontmatter)}\n${record.bodyMarkdown}`);
+  const attachments = (record.attachments ?? []).map((attachment) => ({
+    filename: attachment.filename,
+    size: attachment.size ?? attachment.content?.byteLength ?? 0,
+    sha256: attachment.sha256 ?? createHash('sha256').update(attachment.content!).digest('hex'),
+  }));
+  return sha8(
+    `${JSON.stringify(sortedFrontmatter)}\n${record.bodyMarkdown}\n${JSON.stringify(attachments)}`,
+  );
 }
 
 /** Existing ordinal-prefixed record files in a dir, by record hash. */
@@ -198,7 +205,20 @@ async function writeAttachments(
     const rel = `attachments/${ordinal}/${safeFilename(att.filename)}`;
     const abs = await resolveInside(dirAbs, rel);
     await mkdir(join(abs, '..'), { recursive: true });
-    await writeFileAtomic(abs, att.content);
+    if (att.sourcePath !== undefined) {
+      const info = await stat(att.sourcePath);
+      if (!info.isFile())
+        throw new Error(`connector attachment source is not a file: ${att.filename}`);
+      if (info.size !== att.size) {
+        throw new Error(
+          `connector attachment size changed before publish: ${att.filename} ` +
+            `(expected ${att.size}, found ${info.size})`,
+        );
+      }
+      await copyFileAtomic(att.sourcePath, abs);
+    } else {
+      await writeFileAtomic(abs, att.content);
+    }
   }
 }
 

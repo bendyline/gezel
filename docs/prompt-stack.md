@@ -41,7 +41,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
 | 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large) AND the deep pass has produced summaries | ≤ ~300 tok |
-| 7 | `### Workspace files` listing (cap 200); with `prompt.retrieval-first` on the profile (tier-default tiny/small/medium) a one-line "locate with `search_code`/`search_files`" steer is appended when those tools are in the session surface | project has files | varies |
+| 7 | `### Workspace files` listing (cap 200); with `prompt.retrieval-first` on the profile (tier-default tiny/small/medium) a one-line "locate with `search_code`/`grep_files`" steer is appended when those tools are in the session surface | project has files | varies |
 | 8 | Shared documents library listing | documents exist, not executor-trimmed | varies |
 | 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
@@ -339,36 +339,38 @@ they compete with text for context and prefill. Measured accounting:
 The prompt stack has an executable contract, not just prose review. Run
 `pnpm test:extended` (or its focused alias, `pnpm lint:prompts`) to render the bundled
 matrix and compare every rendered instruction against the post-role, post-security,
-post-tier-cap, post-message-clamp built-in tool roster for that turn. This exhaustive
-matrix is intentionally excluded from root `pnpm test`, `pnpm lint`, `pnpm validate`,
-`pnpm all`, and the default CI workflows; run it explicitly when changing prompt or tool
-surface contracts.
+post-tier-cap, post-message-clamp built-in tool roster for that turn. The static
+tool-name scan and this exhaustive rendered matrix run in the dedicated
+`model-tool-contracts` quality job and as part of root `pnpm validate` / `pnpm all`.
+They remain outside the faster standalone `pnpm test` and `pnpm lint` commands.
 
 The matrix calls the production `buildInstructions`, `resolveProfile`, and
-`resolveSessionToolSurface` functions. It does not maintain a parallel approximation of
-the prompt or allowlist. As of 2026-07-17 it covers:
+`resolveSessionToolSurface` functions. It materializes the roster from a live in-memory
+MCP `tools/list`, then applies the same platform, contextual-gate, role, and dynamic
+project-script projection as production. As of 2026-08-10 it covers:
 
-- 12 standard, non-fixed-function role templates;
-- 28 tool-capable bundled chat models exposed through 68 model/backend profiles;
-- 12 representative session shapes: generic project chat, existing-file review,
+- 31 standard, non-fixed-function role templates;
+- 36 tool-capable bundled chat models exposed through 81 model/backend profiles;
+- 16 representative session shapes: generic project chat, existing-file review,
   super-lockdown file request, assigned-task overview, fresh build, task-scoped build,
   file consultation, delegation task, plus the Meester crew-build and three craftbook
-  prelude branches (library lookup, authoring, data transform), applied only where the
-  role can legitimately perform that shape;
+  prelude branches (library lookup, authoring, data transform) and explicit craftbook,
+  mail, and generic-connector gated surfaces, applied only where the role can
+  legitimately perform that shape;
 - two tool-surface strategies: the default production caps plus the env-gated coordinator
   diet for medium/large coordinator roles;
-- **6,678 concrete prompt/tool comparisons**, collapsing to **2,665 distinct rendered
-  prompts** and **36 distinct resolved tool rosters**;
-- **168 live MCP input schemas** plus **32 model-facing MCP source strings** containing
+- **24,082 concrete prompt/tool comparisons**, collapsing to **6,994 distinct rendered
+  prompts** and **134 distinct resolved tool rosters**;
+- **170 live MCP input schemas** plus **40 model-facing MCP source strings** containing
   tool-call examples.
 
 Tiny, small, and medium tier coverage is a build invariant: the matrix throws before
 reporting if any of those tiers has no cases. The resolver is called with each manifest's
 real parameter size, so the production tier cap/filter path is what the comparison sees.
 It also requires at least one **actual cap trim** in each of those tiers. The current sweep
-contains 1,008 tiny cases (768 trimmed), 1,176 small cases (322 trimmed), and 3,103
-medium cases (667 trimmed, through the explicit coordinator-diet strategy), plus 1,391
-large cases (299 trimmed through that strategy). This distinguishes merely classifying a model from
+contains 3,402 tiny cases (2,954 trimmed), 3,402 small cases (1,162 trimmed), and 10,106
+medium cases (2,573 trimmed, through the explicit coordinator-diet strategy), plus 7,172
+large cases (1,826 trimmed through that strategy). This distinguishes merely classifying a model from
 actually exercising its count-cap branch. Small's coordinator cap and medium's optional
 diet retain every curated orchestration tool; role/security gates, schema compaction, and
 message/step clamps still apply afterward.

@@ -109,8 +109,8 @@ attachments/<NNN>/<safe-filename>        original bytes, filename sanitized to o
 ```
 
 - `recordHash8` is `sha256(record.recordId).slice(0,8)` — the record's **identity**. A
-  separate **content hash** (key-sorted domain frontmatter + body, stored in the
-  `_flags.json` sidecar) decides idempotency.
+  separate **content hash** (key-sorted domain frontmatter + body + ordered attachment
+  filename/size/SHA-256 identities, stored in the `_flags.json` sidecar) decides idempotency.
 - The corpus tracks the **current state of upstream** (refresh-in-place). A re-synced
   record whose content hash matches is skipped; one whose content changed **replaces its
   file in place** — same ordinal (so the attachment dir stays stable), new stem/hash in the
@@ -122,6 +122,11 @@ attachments/<NNN>/<safe-filename>        original bytes, filename sanitized to o
 - Every path component that came from the source — record id, title, filename, scope name,
   group — is `slug()`ed by whoever produces it and joined through `resolveInside`. Both, not
   either.
+- Small attachments may arrive as in-memory bytes. Large binaries use the file-backed
+  attachment variant: the adapter streams to a private temporary file, calculates SHA-256
+  (and checks provider-supplied size/digest metadata), then the writer atomically copies it
+  into the record's attachment directory. The adapter retains the staging directory until
+  `close()`, so multi-gigabyte release assets never need to exist as one heap allocation.
 - Consequence for adapters: pick a `recordId` that is **stable across edits** (the GitHub
   wiki adapter uses the page path, not `path:blobSha`) and keep repo-global volatile fields
   (HEAD commit sha/date) out of the frontmatter, or every upstream commit churns every

@@ -497,6 +497,7 @@ describe('computeToolAllowlist', () => {
       // …code execution gone…
       expect(allow!.has('run_nodejs_script')).toBe(false);
       expect(allow!.has('npm_install')).toBe(false);
+      expect(allow!.has('run_playwright_script')).toBe(false);
       // …model git gone…
       expect(allow!.has('run_git')).toBe(false);
       // …external services gone…
@@ -504,6 +505,20 @@ describe('computeToolAllowlist', () => {
       // …and read + artifacts survive (the sandbox escape hatch).
       expect(allow!.has('read_file')).toBe(true);
       expect(allow!.has('write_artifact')).toBe(true);
+    });
+
+    it('strips scripted Playwright from a browser-capable role when scripts are disabled', () => {
+      const allow = computeToolAllowlist({
+        role: 'researcher',
+        mode: 'always',
+        provider: 'mlx',
+        modelId: 'meta-llama/Llama-3-70B',
+        securityPolicy: resolveSecurityPolicy({
+          securityPolicy: securityPolicyForLevel('super-lockdown'),
+        }),
+      });
+      expect(roleToolAllowlist('researcher').has('run_playwright_script')).toBe(true);
+      expect(allow!.has('run_playwright_script')).toBe(false);
     });
 
     it('strips workspace-write when the project is not writable, regardless of policy', () => {
@@ -950,7 +965,7 @@ describe('computeToolAllowlist', () => {
       'ask_gezel',
       'message_gezel',
       'search_code',
-      'search_files',
+      'grep_files',
       'find_symbol',
       'find_references',
       'map_repo',
@@ -983,7 +998,7 @@ describe('computeToolAllowlist', () => {
       'ask_gezel',
       'message_gezel',
       'search_code',
-      'search_files',
+      'grep_files',
       'find_symbol',
       'find_references',
       'map_repo',
@@ -1049,6 +1064,7 @@ describe('computeToolAllowlist', () => {
       true,
     );
     expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('read_files')).toBe(true);
     expect(constrained!.has('replace_in_file')).toBe(true);
     expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
@@ -1087,6 +1103,7 @@ describe('computeToolAllowlist', () => {
     );
     expect([...constrained!]).toEqual([
       'read_file',
+      'read_files',
       'list_dir',
       'stat',
       'validate',
@@ -1327,6 +1344,7 @@ describe('computeToolAllowlist', () => {
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
     expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('read_files')).toBe(true);
     expect(constrained!.has('replace_in_file')).toBe(true);
     expect(constrained!.has('write_file')).toBe(true);
     expect([...constrained!]).not.toEqual(['write_file']);
@@ -1363,6 +1381,7 @@ describe('computeToolAllowlist', () => {
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
     expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('read_files')).toBe(true);
     expect(constrained!.has('replace_in_file')).toBe(true);
     expect(constrained!.has('replace_lines')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);

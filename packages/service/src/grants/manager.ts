@@ -2,7 +2,11 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { chmod } from 'node:fs/promises';
 import { pendingGrantsFile as defaultPendingGrantsFile } from '@bendyline/gezel/paths';
 import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
-import { type TokenStore, assertGrantableAppToken } from '../http/token-store.js';
+import {
+  type TokenStore,
+  assertGrantableAppToken,
+  assertPublicGrantableAppToken,
+} from '../http/token-store.js';
 
 export const PENDING_GRANT_TTL_MS = 10 * 60_000;
 export const APPROVED_GRANT_DELIVERY_TTL_MS = 5 * 60_000;
@@ -306,7 +310,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
   };
 
   const approveGrant = async (grant: GrantRequest): Promise<GrantRequest> => {
-    assertGrantableAppToken(grant);
+    assertPublicGrantableAppToken(grant);
     const verificationState = {
       salt: grant.verificationCodeSalt,
       hash: grant.verificationCodeHash,
@@ -367,7 +371,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
   return {
     async request(input: GrantRequestInput): Promise<GrantRequestCreated> {
       return mutate(async () => {
-        assertGrantableAppToken(input);
+        assertPublicGrantableAppToken(input);
         if (
           Array.from(byId.values()).some(
             (grant) => grant.appId === input.appId && grant.status === 'pending',

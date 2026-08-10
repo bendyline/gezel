@@ -496,8 +496,9 @@ export async function buildLlamaCppProvider(opts: {
   // Captures raw stdout/stderr so users (and bug reports) have a
   // durable record of what the engine was doing. Tee with the
   // default console.log path so dev iteration still sees output live.
-  const { LlamaCppLogFile } = await import('./log.js');
+  const { LlamaCppLogFile, LlamaProgressLogThrottle } = await import('./log.js');
   const logFile = new LlamaCppLogFile(gezelPaths(home).logs);
+  const progressLogThrottle = new LlamaProgressLogThrottle();
 
   // ── Slot-cache persistence (Phase 1.2) ──
   // Per-model directory passed to llama-server's --slot-save-path.
@@ -1014,8 +1015,10 @@ export async function buildLlamaCppProvider(opts: {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },
     onLog: (line) => {
-      log.info(line);
-      logFile.write(line);
+      for (const retainedLine of progressLogThrottle.accept(line)) {
+        log.info(retainedLine);
+        logFile.write(retainedLine);
+      }
     },
     onExit: (snapshot) => {
       if (snapshot.expected) return;

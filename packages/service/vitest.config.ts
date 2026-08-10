@@ -32,20 +32,30 @@ const NATIVE_MEMORY_SUITES = [
 ];
 
 const INTEGRATION_SUITES = [
+  // Naming is the primary contract: new integration suites should enter the
+  // serialized pool automatically instead of relying on this list being
+  // updated by hand.
+  'src/**/*.integration.test.ts',
   // Full embedded-service / HTTPS boots.
   'src/integration.test.ts',
   'src/https-integration.test.ts',
   'src/legacy-full-ui.integration.test.ts',
   'src/sessions-integration.test.ts',
+  'src/service-runtime.test.ts',
+  'src/web-ui-mode.test.ts',
   // ChatManager-driven suites (mock provider + MCP bridge subprocess).
   'src/chat/keurmeester-intervention.test.ts',
   'src/chat/manager*.test.ts',
   'src/chat/prefix-layering.test.ts',
   'src/chat/questions.test.ts',
+  'src/chat/session-token-rotation.test.ts',
+  // Service boots that sit outside the route directory.
+  'src/http/machine-engine*.test.ts',
+  'src/http/ollama-emulation.test.ts',
   // HTTP route suites stand up a Hono app + service context.
   'src/http/routes/**/*.test.ts',
   // Real git subprocesses, shared clones, and worktrees.
-  'src/github/manager*.test.ts',
+  'src/git/*.test.ts',
   // Node MCP subprocesses / external runtimes.
   'src/providers/mcp-bridge.test.ts',
   'src/providers/llama-cpp/provider.test.ts',

@@ -33,6 +33,14 @@ export const COMPACT_LAYOUT_THRESHOLD_PX = 480;
  * doesn't flash-of-compact-content on first paint while the
  * observer wires up.
  *
+ * `hysteresisPx` widens the *exit* boundary only: compact engages
+ * below `threshold` but doesn't release until `threshold +
+ * hysteresisPx`, leaving a dead band where the last decision sticks.
+ * Pass a non-zero band whenever the width is under continuous user
+ * control — dragging a split grip across a bare threshold otherwise
+ * tears the layout down and rebuilds it on every pixel of jitter.
+ * Defaults to 0 (bare threshold) for window-driven surfaces.
+ *
  * Caller responsibility: attach the returned ref's `.current` to a
  * stable DOM element (usually the surface's outermost wrapper). The
  * hook auto-disconnects on unmount.
@@ -44,6 +52,7 @@ export const COMPACT_LAYOUT_THRESHOLD_PX = 480;
 export function useCompactLayout(
   ref: RefObject<HTMLElement | null>,
   threshold: number = COMPACT_LAYOUT_THRESHOLD_PX,
+  hysteresisPx = 0,
 ): boolean {
   const [compact, setCompact] = useState(false);
 
@@ -59,7 +68,14 @@ export function useCompactLayout(
     const measure = () => {
       const w = el.clientWidth;
       setCompact((prev) => {
-        const next = w > 0 && w < threshold;
+        // Width 0 means "not laid out / not rendered" (a hidden tab, a
+        // detaching subtree), not "infinitely narrow" — hold the last
+        // decision rather than reading a collapse into it.
+        if (w <= 0) return prev;
+        // Asymmetric boundaries: enter compact below `threshold`, leave
+        // it only once past `threshold + hysteresisPx`. Inside the band
+        // `prev` wins, which is what makes a grip drag stable.
+        const next = prev ? w < threshold + hysteresisPx : w < threshold;
         // Skip the state update when the boolean didn't actually
         // change. Without this guard the ResizeObserver callback
         // would still re-render the subtree on every observed
@@ -76,7 +92,7 @@ export function useCompactLayout(
     const ro = new ResizeObserver(() => measure());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ref, threshold]);
+  }, [ref, threshold, hysteresisPx]);
 
   return compact;
 }

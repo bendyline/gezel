@@ -28,6 +28,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   // Workspace (read-write project files)
   'list_dir',
   'read_file',
+  'read_files',
   'stat',
   'write_file',
   'append_to_file',
@@ -165,7 +166,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'wikipedia_search',
 
   // Search / files
-  'search_files',
+  'grep_files',
   'find_files',
   'diff_files',
   'read_image_as_base64',
@@ -251,21 +252,52 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   // Compatibility aliases consolidated into smaller primary tools. Hidden
   // from model sessions by default; direct MCP clients can opt in while they
   // migrate by setting GEZEL_MCP_LEGACY_TOOLS=1.
-  create_gezel_from_gilde: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
-  start_job: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
-  list_project_local_gezels: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
-  craftbook_create: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
-  craftbook_replace: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  create_gezel_from_gilde: {
+    envVar: 'GEZEL_MCP_LEGACY_TOOLS',
+    envValue: '1',
+    modelFacing: false,
+  },
+  start_job: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1', modelFacing: false },
+  list_project_local_gezels: {
+    envVar: 'GEZEL_MCP_LEGACY_TOOLS',
+    envValue: '1',
+    modelFacing: false,
+  },
+  craftbook_create: {
+    envVar: 'GEZEL_MCP_LEGACY_TOOLS',
+    envValue: '1',
+    modelFacing: false,
+  },
+  craftbook_replace: {
+    envVar: 'GEZEL_MCP_LEGACY_TOOLS',
+    envValue: '1',
+    modelFacing: false,
+  },
   // The large surgical-step schema is useful in the explicit craftbook
   // editor, but wasteful on every ordinary coordinator turn. `*` means any
   // non-empty GEZEL_CRAFTBOOK_ID enables it.
-  craftbook_update_step: { envVar: 'GEZEL_CRAFTBOOK_ID', envValue: '*' },
-  request_tool_permission: { envVar: 'GEZEL_PERMISSION_PROMPT', envValue: '1' },
+  craftbook_update_step: {
+    envVar: 'GEZEL_CRAFTBOOK_ID',
+    envValue: '*',
+    modelFacing: true,
+  },
+  request_tool_permission: {
+    envVar: 'GEZEL_PERMISSION_PROMPT',
+    envValue: '1',
+    modelFacing: false,
+  },
   // Email write tools — registered only for mail-enabled projects (the chat
   // manager sets GEZEL_MAIL_ENABLED when project.mail is configured).
-  draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
-  queue_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
-  send_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
+  draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
+  queue_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
+  send_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
+  // Generic connector writes are draft-only and appear only for projects
+  // with at least one connector binding.
+  draft_connector_action: {
+    envVar: 'GEZEL_CONNECTORS_ENABLED',
+    envValue: '1',
+    modelFacing: true,
+  },
 } as const;
 
 export type AlwaysRegisteredToolName = (typeof ALWAYS_REGISTERED_TOOLS)[number];
@@ -286,6 +318,7 @@ export type ConditionallyRegisteredToolName = keyof typeof CONDITIONALLY_REGISTE
 export const RENAMED_TOOLS = {
   readdir: 'list_dir',
   readFile: 'read_file',
+  read_multiple_files: 'read_files',
   writeFile: 'write_file',
   appendToFile: 'append_to_file',
   replaceInFile: 'replace_in_file',
@@ -297,6 +330,9 @@ export const RENAMED_TOOLS = {
   draftEmail: 'draft_email',
   queueEmail: 'queue_email',
   sendEmail: 'send_email',
+  // Familiar coding-agent vocabulary improves tool selection for local
+  // models. The old semantic name remains a hidden dispatch alias.
+  search_files: 'grep_files',
   // Not part of the snake_case sweep — a later, semantic rename. `run_script`
   // read as "run a script", so models that had just written `derive.mjs`
   // called it with a file path and got a "script not found" dead end; the
@@ -311,10 +347,147 @@ export const RENAMED_TOOLS = {
 
 export type LegacyToolName = keyof typeof RENAMED_TOOLS;
 
+/**
+ * Removed, foreign-agent, or UI/client spellings that must never be taught as
+ * model-callable MCP tools. Unlike RENAMED_TOOLS these are not dispatch
+ * aliases; the registry keeps them only so every model-facing linter shares
+ * the same tombstones and replacement guidance.
+ */
+export const TOOL_NAME_TOMBSTONES = {
+  update_task_step: { replacement: undefined, reason: 'no such MCP tool' },
+  commitProjectGit: { replacement: undefined, reason: 'UI/client method, not an MCP tool' },
+  pushProjectGit: { replacement: undefined, reason: 'UI/client method, not an MCP tool' },
+  listAudioVoices: { replacement: undefined, reason: 'UI/client method, not an MCP tool' },
+  create_project: { replacement: 'start_project', reason: 'removed project-creation tool' },
+  inspect_git_workdir: { replacement: 'run_git', reason: 'foreign coding-agent tool' },
+  ensureGezel: { replacement: 'ensure_gezel', reason: 'client method, not an MCP tool' },
+  pushProjectGithub: { replacement: undefined, reason: 'client method, not an MCP tool' },
+  AskUserQuestion: { replacement: 'ask_user_question', reason: 'foreign coding-agent tool' },
+  WebSearch: { replacement: 'web_search', reason: 'foreign coding-agent tool' },
+  Grep: { replacement: 'grep_files', reason: 'foreign coding-agent tool' },
+  Read: { replacement: 'read_file', reason: 'foreign coding-agent tool' },
+  Edit: { replacement: 'replace_in_file', reason: 'foreign coding-agent tool' },
+  Agent: { replacement: 'message_gezel', reason: 'foreign coding-agent tool' },
+  Bash: { replacement: undefined, reason: 'foreign shell tool; no unrestricted shell is exposed' },
+  ExitPlanMode: { replacement: undefined, reason: 'foreign coding-agent control tool' },
+} as const satisfies Readonly<
+  Record<string, { readonly replacement: CanonicalToolName | undefined; readonly reason: string }>
+>;
+
+export type ToolNameTombstone = keyof typeof TOOL_NAME_TOMBSTONES;
+
+export type CanonicalToolName = AlwaysRegisteredToolName | ConditionallyRegisteredToolName;
+
+export interface ToolRegistrationGate {
+  readonly envVar: string;
+  /** `*` means any non-empty value enables the registration. */
+  readonly envValue: string;
+}
+
+/**
+ * Linter- and registration-friendly metadata for one canonical built-in.
+ *
+ * `aliases` are hidden callable spellings: they normally do not appear in
+ * `tools/list`, though the legacy naming experiment may advertise one in
+ * place of the canonical name. `advertisedByDefault` describes the ordinary
+ * environment before platform/provider/role filters are applied.
+ */
+export interface CanonicalToolRegistryEntry {
+  readonly canonicalName: CanonicalToolName;
+  readonly registration: 'always' | 'conditional';
+  readonly gate?: ToolRegistrationGate;
+  readonly aliases: readonly LegacyToolName[];
+  readonly advertisedByDefault: boolean;
+  readonly modelFacing: boolean;
+}
+
+/** Canonical built-in names, with conditional names included exactly once. */
+export const CANONICAL_TOOL_NAMES = Object.freeze([
+  ...ALWAYS_REGISTERED_TOOLS,
+  ...(Object.keys(CONDITIONALLY_REGISTERED_TOOLS) as ConditionallyRegisteredToolName[]),
+]) as readonly CanonicalToolName[];
+
+/** Hidden callable compatibility spellings, never canonical names. */
+export const LEGACY_TOOL_NAMES = Object.freeze(
+  Object.keys(RENAMED_TOOLS) as LegacyToolName[],
+) as readonly LegacyToolName[];
+
+const aliasesByCanonical = new Map<CanonicalToolName, LegacyToolName[]>();
+for (const [alias, canonical] of Object.entries(RENAMED_TOOLS) as Array<
+  [LegacyToolName, CanonicalToolName]
+>) {
+  const aliases = aliasesByCanonical.get(canonical) ?? [];
+  aliases.push(alias);
+  aliasesByCanonical.set(canonical, aliases);
+}
+
+/**
+ * Single canonical registry for built-in tool-name consumers such as prompt
+ * linters. It unifies ordinary and contextual registrations with every
+ * hidden alias, so consumers do not need to recreate joins between the
+ * compatibility exports above.
+ */
+export const TOOL_REGISTRY = Object.freeze(
+  Object.fromEntries(
+    CANONICAL_TOOL_NAMES.map((canonicalName): [CanonicalToolName, CanonicalToolRegistryEntry] => {
+      const conditional = (
+        CONDITIONALLY_REGISTERED_TOOLS as Partial<
+          Record<CanonicalToolName, ToolRegistrationGate & { readonly modelFacing: boolean }>
+        >
+      )[canonicalName];
+      const aliases = Object.freeze([
+        ...(aliasesByCanonical.get(canonicalName) ?? []),
+      ]) as readonly LegacyToolName[];
+      const entry: CanonicalToolRegistryEntry = conditional
+        ? {
+            canonicalName,
+            registration: 'conditional',
+            gate: { envVar: conditional.envVar, envValue: conditional.envValue },
+            aliases,
+            advertisedByDefault: false,
+            modelFacing: conditional.modelFacing,
+          }
+        : {
+            canonicalName,
+            registration: 'always',
+            aliases,
+            advertisedByDefault: true,
+            modelFacing: true,
+          };
+      return [canonicalName, Object.freeze(entry)];
+    }),
+  ),
+) as Readonly<Record<CanonicalToolName, CanonicalToolRegistryEntry>>;
+
+/**
+ * Every name reserved by a built-in, including hidden aliases. Dynamic
+ * project script tools must not claim any of these spellings because alias
+ * dispatch could otherwise route a call to the wrong handler.
+ */
+export const BUILTIN_TOOL_NAMES = Object.freeze([
+  ...CANONICAL_TOOL_NAMES,
+  ...LEGACY_TOOL_NAMES,
+]) as readonly (CanonicalToolName | LegacyToolName)[];
+
+/**
+ * Every spelling a dynamic tool must not claim. Tombstones are not callable,
+ * but reserving their namespace prevents a project script from reintroducing
+ * a removed/foreign name that model-facing prompts are required to reject.
+ */
+export const RESERVED_TOOL_NAMES = Object.freeze([
+  ...BUILTIN_TOOL_NAMES,
+  ...(Object.keys(TOOL_NAME_TOMBSTONES) as ToolNameTombstone[]),
+]) as readonly (CanonicalToolName | LegacyToolName | ToolNameTombstone)[];
+
 /** Canonical name → legacy spelling (inverse of {@link RENAMED_TOOLS}). */
 export const LEGACY_SPELLING_BY_CANONICAL: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(RENAMED_TOOLS).map(([legacy, canonical]) => [canonical, legacy]),
 );
+
+/** Normalized key used by forgiving dispatch and dynamic-name reservation. */
+export function normalizeToolNameSpelling(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
 /**
  * Resolve any spelling of a built-in tool name to its canonical form.
@@ -345,19 +518,23 @@ export function resolveToolNameSpelling(
   knownNames: ReadonlySet<string>,
 ): string {
   if (knownNames.has(requested)) return requested;
+  // Explicit tombstones are intentionally not compatibility aliases. Without
+  // this guard the generic case/punctuation normalizer would accidentally
+  // make foreign names such as AskUserQuestion and WebSearch callable because
+  // they normalize to the same spelling as ask_user_question / web_search.
+  if (requested in TOOL_NAME_TOMBSTONES) return requested;
   const viaRename = (RENAMED_TOOLS as Record<string, string>)[requested];
   if (viaRename && knownNames.has(viaRename)) return viaRename;
   const viaLegacy = LEGACY_SPELLING_BY_CANONICAL[requested];
   if (viaLegacy && knownNames.has(viaLegacy)) return viaLegacy;
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const wanted = normalize(requested);
+  const wanted = normalizeToolNameSpelling(requested);
   if (!wanted) return requested;
   for (const candidate of knownNames) {
-    if (normalize(candidate) === wanted) return candidate;
+    if (normalizeToolNameSpelling(candidate) === wanted) return candidate;
   }
   for (const [legacy, canonical] of Object.entries(RENAMED_TOOLS)) {
-    if (normalize(legacy) === wanted && knownNames.has(canonical)) return canonical;
-    if (normalize(canonical) === wanted && knownNames.has(legacy)) return legacy;
+    if (normalizeToolNameSpelling(legacy) === wanted && knownNames.has(canonical)) return canonical;
+    if (normalizeToolNameSpelling(canonical) === wanted && knownNames.has(legacy)) return legacy;
   }
   return requested;
 }

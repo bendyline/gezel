@@ -989,7 +989,7 @@ export interface BatchCapability {
 export interface LLMProvider {
   readonly name: ProviderName;
   /** Boot the underlying client / authenticate. Called lazily. */
-  initialize(): Promise<void>;
+  initialize(signal?: AbortSignal): Promise<void>;
   /** Tear down everything owned by this provider. */
   shutdown(): Promise<void>;
   createSession(opts: SessionOpts): Promise<LLMSession>;
@@ -1000,7 +1000,7 @@ export interface LLMProvider {
    */
   resumeSession?(sessionId: string, opts: SessionOpts): Promise<LLMSession>;
   /** Enumerate models this provider currently offers. May hit the network. */
-  listModels(): Promise<ModelInfo[]>;
+  listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
   /**
    * The model id this provider would use right now if a session
    * doesn't override it. For local providers this is the
@@ -1040,7 +1040,7 @@ export interface LLMProvider {
    * but must not retain it across later starts where policy or pressure may
    * have changed.
    */
-  prepareContextWindow?(model?: string): Promise<number | undefined>;
+  prepareContextWindow?(model?: string, signal?: AbortSignal): Promise<number | undefined>;
   /**
    * Launch provenance of the provider's LIVE engine process — pid, start
    * time, and the request-independent launch facts (granted context

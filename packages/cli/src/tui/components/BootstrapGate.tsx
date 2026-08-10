@@ -94,9 +94,16 @@ export function BootstrapGate(props: {
     message: 'Checking this device…',
   });
 
-  useInput((input, key) => {
-    if (key.ctrl && input.toLowerCase() === 'c') exit();
-  });
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input.toLowerCase() === 'c') exit();
+    },
+    // Once setup hands control to App, App owns Ctrl+C's interrupt/exit
+    // contract. Leaving this handler active made the first Ctrl+C exit the
+    // entire TUI before App could interrupt an in-flight turn or arm its
+    // deliberate second-press exit.
+    { isActive: screen.kind !== 'ready' },
+  );
 
   const prepareModels = useCallback(
     async (context: BootstrapContext) => {

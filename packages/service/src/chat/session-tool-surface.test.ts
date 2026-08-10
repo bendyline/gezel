@@ -1,6 +1,10 @@
 import type { ChatSession } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveSessionToolSurface, toolCapForTierAndRole } from './session-tool-surface.js';
+import {
+  availableBuiltinToolsForAllowlist,
+  resolveSessionToolSurface,
+  toolCapForTierAndRole,
+} from './session-tool-surface.js';
 
 /**
  * Pins the tier x role cap table. History that makes this worth a direct
@@ -285,6 +289,38 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(editor.allowlist?.has('set_step_deliverable')).toBe(true);
   });
 
+  it('admits and predicts only conditionals enabled for this session', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+      contextualBuiltinTools: ['draft_email', 'draft_connector_action'],
+    });
+
+    expect(allowlist?.has('draft_email')).toBe(true);
+    expect(allowlist?.has('draft_connector_action')).toBe(true);
+    expect(allowlist?.has('send_email')).toBe(false);
+    expect(
+      availableBuiltinToolsForAllowlist(allowlist, [
+        'draft_email',
+        'draft_connector_action',
+        'request_tool_permission',
+      ]).map((tool) => tool.name),
+    ).toEqual(expect.arrayContaining(['draft_email', 'draft_connector_action']));
+    expect(
+      availableBuiltinToolsForAllowlist(allowlist, ['request_tool_permission']).map(
+        (tool) => tool.name,
+      ),
+    ).not.toContain('request_tool_permission');
+    expect(
+      availableBuiltinToolsForAllowlist(
+        allowlist,
+        ['draft_email', 'draft_connector_action'],
+        new Set(['draft_connector_action']),
+      ).map((tool) => tool.name),
+    ).toEqual(['draft_connector_action']);
+  });
+
   it('grants write_task_note/advance_task_step to a Meester assigned a step', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -312,6 +348,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_files')).toBe(true);
     expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('replace_in_file')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
@@ -562,7 +599,7 @@ describe('resolveSessionToolSurface — project retrieval-first route', () => {
     expect(allowlist!.has('ask_gezel')).toBe(true);
     expect(allowlist!.has('message_gezel')).toBe(true);
     expect(allowlist!.has('search_code')).toBe(false);
-    expect(allowlist!.has('search_files')).toBe(false);
+    expect(allowlist!.has('grep_files')).toBe(false);
     expect(allowlist!.has('find_symbol')).toBe(false);
     expect(allowlist!.has('fetch_repo')).toBe(false);
     expect(allowlist!.has('start_project')).toBe(false);
@@ -604,6 +641,7 @@ describe('resolveSessionToolSurface — direct file-work retention', () => {
 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_files')).toBe(true);
     expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('run_nodejs_script')).toBe(true);
     expect(allowlist!.has('message_gezel')).toBe(false);
@@ -627,6 +665,7 @@ describe('resolveSessionToolSurface — direct file-work retention', () => {
 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_files')).toBe(true);
     expect(allowlist!.has('replace_in_file')).toBe(true);
     expect(allowlist!.has('replace_lines')).toBe(true);
     expect(allowlist!.has('write_file')).toBe(true);

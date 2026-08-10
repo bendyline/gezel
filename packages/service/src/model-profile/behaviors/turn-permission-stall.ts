@@ -29,7 +29,12 @@ const ACTION_TOOL_NAMES = new Set([
 function usedActionOrInvestigationTool(ctx: TurnCtx): boolean {
   return ctx.drained.some((call) => {
     if (call.name === 'ask_user_question') return false;
-    if (call.name === 'read_file' || call.name === 'list_dir' || call.name === 'search_code') {
+    if (
+      call.name === 'read_file' ||
+      call.name === 'read_files' ||
+      call.name === 'list_dir' ||
+      call.name === 'search_code'
+    ) {
       return true;
     }
     if (ACTION_TOOL_NAMES.has(call.name)) return true;

@@ -77,6 +77,26 @@ describe('OllamaProvider.listModels', () => {
     // phi3 isn't on the tool-capable allowlist.
     expect(byId.get('phi3:mini')?.supportsTools).toBe(false);
   });
+
+  it('forwards cancellation to the lazy /api/tags initialization probe', async () => {
+    const requestSignal: { value: AbortSignal | undefined } = { value: undefined };
+    globalThis.fetch = (async (_input, init) => {
+      requestSignal.value = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        const onAbort = () => reject(requestSignal.value?.reason);
+        requestSignal.value?.addEventListener('abort', onAbort, { once: true });
+      });
+    }) as typeof fetch;
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const controller = new AbortController();
+
+    const pending = provider.initialize(controller.signal);
+    expect(requestSignal.value).toBe(controller.signal);
+    controller.abort(new DOMException('setup discovery timed out', 'AbortError'));
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requestSignal.value?.aborted).toBe(true);
+  });
 });
 
 describe('OllamaProvider chat turn', () => {

@@ -114,11 +114,11 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`)\s+(?:(?:the|a|an|our|your)\s+)?(?:new\s+)?[*"'\x60_]*voorman\b[*"'\x60_]*`,
       'i',
     ),
-    requiredTools: ['create_gezel', 'ensure_gezel', 'create_gezel_from_gilde', 'start_project'],
+    requiredTools: ['create_gezel', 'ensure_gezel', 'start_project'],
     claim: 'recruited a voorman',
     nudge:
       'You told the user you recruited a voorman, but you did not call `create_gezel`, `ensure_gezel`, ' +
-      '`create_gezel_from_gilde`, or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
+      'or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
   },
   {
     pattern: new RegExp(
@@ -147,7 +147,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`project\b`,
       'i',
     ),
-    requiredTools: ['create_project', 'start_project', 'start_job'],
+    requiredTools: ['start_project'],
     claim: 'created a project',
     nudge:
       'You told the user you created the project, but you did not call `start_project` this turn. ' +
@@ -160,13 +160,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`)\s+(?:the|a|an)\s+(?:new\s+)?gezel\b`,
       'i',
     ),
-    requiredTools: [
-      'create_gezel',
-      'ensure_gezel',
-      'create_gezel_from_gilde',
-      'start_project',
-      'start_job',
-    ],
+    requiredTools: ['create_gezel', 'ensure_gezel', 'start_project'],
     claim: 'created a gezel',
     nudge:
       'You told the user you created a gezel, but you did not call `create_gezel`, `ensure_gezel`, ' +

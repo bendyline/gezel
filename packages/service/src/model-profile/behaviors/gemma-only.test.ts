@@ -608,6 +608,18 @@ describe('TurnPermissionStall', () => {
     expect(out).not.toBeNull();
   });
 
+  it('treats a batched filesystem read as investigation', () => {
+    const out = detect(
+      turnCtx({
+        userText: 'What did you find?',
+        drained: [call('read_files')],
+        assistantContent: 'I compared the sources. Would you like me to proceed with the fix?',
+      }),
+      undefined as never,
+    );
+    expect(out).not.toBeNull();
+  });
+
   it('does not fire when the model used the structured question tool', () => {
     const out = detect(
       turnCtx({

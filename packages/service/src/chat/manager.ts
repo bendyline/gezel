@@ -1527,10 +1527,10 @@ export class ChatManager {
    * (`remote:<remoteId>/<model>`). Used by the model picker. Returns [] if the
    * server is unpaired or unreachable.
    */
-  async listRemoteModels(remoteId: string): Promise<ModelInfo[]> {
+  async listRemoteModels(remoteId: string, signal?: AbortSignal): Promise<ModelInfo[]> {
     try {
       const provider = this.getRemoteProvider(makeRemoteModelId(remoteId, '_'));
-      return await provider.listModels();
+      return await provider.listModels(signal);
     } catch {
       return [];
     }
@@ -8853,11 +8853,11 @@ export class ChatManager {
   }
 
   /** List the models available on the given provider (for the UI dropdown). */
-  async listModelsForProvider(name: ProviderName): Promise<ModelInfo[]> {
+  async listModelsForProvider(name: ProviderName, signal?: AbortSignal): Promise<ModelInfo[]> {
     const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
     if (machineRemoteId && (name === 'llama-cpp' || name === 'mlx' || name === 'ds4')) {
       const prefix = `${name}:`;
-      const remoteModels = await this.listRemoteModels(machineRemoteId);
+      const remoteModels = await this.listRemoteModels(machineRemoteId, signal);
       return remoteModels.flatMap((model) => {
         const parsed = parseRemoteModelId(model.id);
         if (!parsed?.modelId.startsWith(prefix)) return [];
@@ -8899,8 +8899,8 @@ export class ChatManager {
         // installed-model manifest itself is unreadable.
       }
     }
-    const provider = await this.ensureProvider(name);
-    const models = await provider.listModels();
+    const provider = await this.ensureProvider(name, signal);
+    const models = await provider.listModels(signal);
     if (name !== 'ollama') return models;
 
     // Ollama's provider-level list reports Gezel's parameter-size heuristic.
@@ -10930,7 +10930,7 @@ export class ChatManager {
     return provider;
   }
 
-  private async ensureProvider(name: ProviderName): Promise<LLMProvider> {
+  private async ensureProvider(name: ProviderName, signal?: AbortSignal): Promise<LLMProvider> {
     if (name === 'remote') {
       // Remote providers are keyed per-server and need a model id to resolve
       // which server; they must be reached via getProviderForModel /
@@ -11151,7 +11151,7 @@ export class ChatManager {
       });
     }
     try {
-      await provider.initialize();
+      await provider.initialize(signal);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const actionable =
@@ -11867,7 +11867,7 @@ export class ChatManager {
         this.events.publish(scope, {
           type: 'warning',
           message:
-            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
+            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
         });
         return;
       }
@@ -12517,6 +12517,14 @@ export class ChatManager {
       );
       return existingSubstantialFileForImmediate;
     };
+    const contextualBuiltinTools = [
+      ...(record.craftbookRef ? ['craftbook_update_step'] : []),
+      ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
+      securityPolicy.allowMail
+        ? ['draft_email', 'queue_email', 'send_email']
+        : []),
+      ...(project?.connectors?.length ? ['draft_connector_action'] : []),
+    ];
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,
@@ -12536,6 +12544,7 @@ export class ChatManager {
       isGitRepo,
       securityPolicy,
       workspaceWritable,
+      contextualBuiltinTools,
       tier: localModelTier,
       ...(runtime?.effectiveContextWindow !== undefined
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
@@ -12585,7 +12594,10 @@ export class ChatManager {
       // `list_tasks`, `get_task`, `read_task_notes`" under Task
       // Visibility on Meester sessions. First-group-wins matches the
       // live `getOpenAITools()` dedupe in `McpBridgePool`.
-      availableBuiltinTools = availableBuiltinToolsForAllowlist(promptToolAllowlist);
+      availableBuiltinTools = availableBuiltinToolsForAllowlist(
+        promptToolAllowlist,
+        contextualBuiltinTools,
+      );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
 
@@ -13050,8 +13062,25 @@ export class ChatManager {
       // file path from well-known file tools so the References panel can
       // surface the touched files. Derive a compact args preview the UI
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
+      const sc = info.structuredContent;
+      const batchedWorkspaceRead =
+        info.name === 'read_files' || info.name === 'read_multiple_files';
+      const structuredReadPaths =
+        batchedWorkspaceRead && Array.isArray(sc?.results)
+          ? sc.results
+              .filter((result): result is { path: string; status: 'ok' } =>
+                Boolean(
+                  result &&
+                    typeof result === 'object' &&
+                    (result as { status?: unknown }).status === 'ok' &&
+                    typeof (result as { path?: unknown }).path === 'string',
+                ),
+              )
+              .map((result) => result.path)
+          : [];
+      const paths = [...new Set(structuredReadPaths)];
       const rawPath = info.args?.path;
-      const path = typeof rawPath === 'string' ? rawPath : undefined;
+      const path = typeof rawPath === 'string' ? rawPath : paths[0];
       const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
@@ -13064,16 +13093,22 @@ export class ChatManager {
       // onto the persisted ChatMessageToolCall so the inline diff
       // viewer has something to render. Unknown fields stay on info
       // but don't leak into the schema — keeps the wire shape stable.
-      const sc = info.structuredContent;
-      const diff = typeof sc?.diff === 'string' ? sc.diff : undefined;
-      const addedLines = typeof sc?.addedLines === 'number' ? sc.addedLines : undefined;
-      const removedLines = typeof sc?.removedLines === 'number' ? sc.removedLines : undefined;
+      const trustedDiffTool =
+        info.name === 'replace_in_file' ||
+        info.name === 'replace_lines' ||
+        info.name === 'apply_patch' ||
+        info.name === 'insert_at_marker';
+      const diff = trustedDiffTool && typeof sc?.diff === 'string' ? sc.diff : undefined;
+      const addedLines =
+        trustedDiffTool && typeof sc?.addedLines === 'number' ? sc.addedLines : undefined;
+      const removedLines =
+        trustedDiffTool && typeof sc?.removedLines === 'number' ? sc.removedLines : undefined;
       // `generate_video` reports its mp4 by artifact path via
       // structuredContent.gezelVideo (the bytes are never base64'd into
       // the result). Map it to the persisted `videos[]` the chat UI
       // plays inline. Same pattern as the surgical-edit `diff` above.
       const gv =
-        sc && typeof sc === 'object'
+        info.name === 'generate_video' && sc && typeof sc === 'object'
           ? (sc as { gezelVideo?: { artifactPath?: unknown; mimeType?: unknown } }).gezelVideo
           : undefined;
       const videos: ChatMessageToolCall['videos'] =
@@ -13094,6 +13129,7 @@ export class ChatManager {
         success: info.success,
         ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
         ...(path ? { path } : {}),
+        ...(paths.length > 0 ? { paths } : {}),
         ...(argsSummary ? { argsSummary } : {}),
         ...(argsFull ? { argsFull } : {}),
         ...(result ? { resultText: result.text } : {}),
@@ -13119,6 +13155,7 @@ export class ChatManager {
           success: info.success,
           ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
           ...(path ? { path } : {}),
+          ...(paths.length > 0 ? { paths } : {}),
           ...(argsSummary ? { argsSummary } : {}),
           ...(argsFull ? { argsFull } : {}),
           ...(result ? { resultText: result.text } : {}),
@@ -13148,6 +13185,7 @@ export class ChatManager {
             durationMs: info.durationMs,
             success: info.success,
             ...(path ? { path } : {}),
+            ...(paths.length > 0 ? { paths } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
@@ -13265,7 +13303,7 @@ export class ChatManager {
         // Only projects with a mail-type connector binding expose the email
         // write tools, so a non-mail project's agent never sees
         // draft_email/queue_email/send_email.
-        ...(project?.connectors?.some((b) => b.type.startsWith('mail-'))
+        ...(securityPolicy.allowMail && project?.connectors?.some((b) => b.type.startsWith('mail-'))
           ? { GEZEL_MAIL_ENABLED: '1' }
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
@@ -13700,6 +13738,7 @@ export class ChatManager {
       isGitRepo,
       securityPolicy,
       workspaceWritable,
+      contextualBuiltinTools,
       tier: localModelTier,
       ...(runtime?.effectiveContextWindow !== undefined
         ? { effectiveContextWindow: runtime.effectiveContextWindow }

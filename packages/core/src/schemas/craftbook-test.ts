@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DeliverableKindSchema } from './craftbook.js';
 import { GateCheckSchema } from './gate.js';
+import { HistoryEventKindSchema } from './history.js';
 
 /**
  * ─ Craftbook test spec (`test.json`) ─────────────────────────────────
@@ -119,6 +120,15 @@ const MockServiceIdSchema = z
   .min(1)
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'mock service ids are lowercase kebab-case');
 
+/** Catalog toolset id, including scoped npm-style ids such as `@playwright/mcp`. */
+const MockToolsetIdSchema = z
+  .string()
+  .min(1)
+  .regex(
+    /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/,
+    'mock toolset ids are lowercase catalog ids or scoped npm-style ids',
+  );
+
 export const MockHttpRouteSchema = z
   .object({
     method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
@@ -180,7 +190,7 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
       id: MockServiceIdSchema,
       description: z.string().min(1),
       /** Override the local-catalog id when the mock replaces a real dependency. */
-      toolsetId: MockServiceIdSchema.optional(),
+      toolsetId: MockToolsetIdSchema.optional(),
       /**
        * Served live by the eval mock rail: each declared tool becomes a
        * real tool on a per-trial Streamable-HTTP MCP endpoint, installed
@@ -195,6 +205,8 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
               name: z.string().min(1),
               description: z.string().min(1),
               resultTemplate: z.unknown().optional(),
+              /** Deterministic stateful responses, consumed in call order; the last repeats. */
+              resultSequence: z.array(z.unknown()).min(1).optional(),
               /**
                * Deterministic eval-only file materialization after this
                * tool call. The fixture must match the container the
@@ -206,7 +218,7 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
                 .object({
                   surface: z.enum(['workspace', 'artifact']),
                   pathArgument: z.string().min(1),
-                  fixture: z.enum(['minimal-pptx', 'minimal-docx', 'minimal-pdf']),
+                  fixture: z.enum(['minimal-pptx', 'minimal-docx', 'minimal-pdf', 'minimal-png']),
                 })
                 .strict()
                 .optional(),
@@ -225,8 +237,13 @@ export const CraftbookTestFixtureFileSchema = z
   .object({
     path: z.string().min(1),
     content: z.string(),
-    /** Defaults to `workspace`. */
-    surface: z.enum(['workspace', 'artifact']).optional(),
+    /** Defaults to `workspace`; `harness` never enters the model-visible project. */
+    surface: z.enum(['workspace', 'artifact', 'harness']).optional(),
+    /**
+     * Whether the fixture is presented to the model as source material.
+     * Defaults to true; false still seeds the file for browsers and graders.
+     */
+    modelInput: z.boolean().optional(),
   })
   .strict();
 export type CraftbookTestFixtureFile = z.infer<typeof CraftbookTestFixtureFileSchema>;
@@ -247,6 +264,8 @@ export const CraftbookTestSetupSchema = z
     about: z.string().optional(),
     missionObjectives: z.string().optional(),
     files: z.array(CraftbookTestFixtureFileSchema).default([]),
+    /** Exact values supplied to the catalog craftbook's `paramSchema`. */
+    craftbookParams: z.record(z.string(), z.string()).optional(),
     /**
      * Direct execution target. When present the harness seeds this gezel
      * and sends the kickoff straight to it (measuring whether the book
@@ -283,9 +302,44 @@ export const CraftbookTestMockExpectationSchema = z
      * declared `tools[]` at parse time.
      */
     requiredTools: z.array(z.string().min(1)).optional(),
+    /** Per-MCP-tool call budgets for repeated journeys or retries. */
+    toolCalls: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            minCalls: z.number().int().nonnegative().default(1),
+            maxCalls: z.number().int().nonnegative().optional(),
+          })
+          .strict()
+          .refine(
+            (value) => value.maxCalls === undefined || value.minCalls <= value.maxCalls,
+            'minCalls must be less than or equal to maxCalls',
+          ),
+      )
+      .optional(),
   })
   .strict();
 export type CraftbookTestMockExpectation = z.infer<typeof CraftbookTestMockExpectationSchema>;
+
+/**
+ * Require auditable runtime evidence in addition to output files. This is
+ * essential for hook/guardrail craftbooks: an unchanged sentinel file alone
+ * cannot prove that the hook actually intercepted a tool call.
+ */
+export const CraftbookTestHistoryExpectationSchema = z
+  .object({
+    kind: HistoryEventKindSchema,
+    minEntries: z.number().int().nonnegative().default(1),
+    maxEntries: z.number().int().nonnegative().optional(),
+    summaryPattern: z.string().min(1).optional(),
+    flags: z.string().optional(),
+    details: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+      .optional(),
+  })
+  .strict();
+export type CraftbookTestHistoryExpectation = z.infer<typeof CraftbookTestHistoryExpectationSchema>;
 
 export const CraftbookTestSuccessSchema = z
   .object({
@@ -304,6 +358,8 @@ export const CraftbookTestSuccessSchema = z
       .object({
         checks: z.array(CraftbookTestCheckSchema).optional(),
         requireCraftbookTask: z.boolean().optional(),
+        /** Require the matching task to reach a terminal step (or complete). */
+        requireTerminalStep: z.boolean().optional(),
         requireDraftRef: z.boolean().optional(),
         draft: z
           .object({
@@ -321,6 +377,10 @@ export const CraftbookTestSuccessSchema = z
       .optional(),
     /** Assertions evaluated against the live mock server's request log. */
     mocks: z.array(CraftbookTestMockExpectationSchema).optional(),
+    /** Assertions evaluated against the project's append-only History log. */
+    history: z.array(CraftbookTestHistoryExpectationSchema).optional(),
+    /** Workspace fixtures whose final content must equal the seeded bytes exactly. */
+    unchangedFixtures: z.array(z.string().min(1)).optional(),
   })
   .strict();
 export type CraftbookTestSuccess = z.infer<typeof CraftbookTestSuccessSchema>;
@@ -403,6 +463,27 @@ export const CraftbookTestSpecSchema = z
           }
         }
       }
+      if (expectation.toolCalls && Object.keys(expectation.toolCalls).length > 0) {
+        const target = mockById.get(expectation.service);
+        if (target && target.kind !== 'mcp') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['success', 'mocks', i, 'toolCalls'],
+            message: `success.mocks[${i}].toolCalls requires an mcp service; "${expectation.service}" is kind "${target.kind}"`,
+          });
+        } else if (target?.kind === 'mcp') {
+          const declared = new Set(target.tools.map((tool) => tool.name));
+          for (const name of Object.keys(expectation.toolCalls)) {
+            if (!declared.has(name)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['success', 'mocks', i, 'toolCalls', name],
+                message: `success.mocks[${i}].toolCalls names undeclared tool "${name}" on mcp service "${expectation.service}"`,
+              });
+            }
+          }
+        }
+      }
     }
     for (const [i, mock] of spec.mocks.entries()) {
       if (mock.kind === 'http' && mock.credential.name !== `mock.${mock.id}`) {
@@ -410,6 +491,29 @@ export const CraftbookTestSpecSchema = z
           code: z.ZodIssueCode.custom,
           path: ['mocks', i, 'credential', 'name'],
           message: `http mock "${mock.id}" must use credential name "mock.${mock.id}"`,
+        });
+      }
+    }
+    const workspaceFixtures = new Set(
+      spec.setup.files
+        .filter((file) => file.surface === undefined || file.surface === 'workspace')
+        .map((file) => file.path),
+    );
+    for (const [i, path] of (spec.success.unchangedFixtures ?? []).entries()) {
+      if (!workspaceFixtures.has(path)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['success', 'unchangedFixtures', i],
+          message: `unchanged fixture "${path}" is not a seeded workspace file`,
+        });
+      }
+    }
+    for (const [i, expectation] of (spec.success.history ?? []).entries()) {
+      if (expectation.maxEntries !== undefined && expectation.minEntries > expectation.maxEntries) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['success', 'history', i],
+          message: 'minEntries must be less than or equal to maxEntries',
         });
       }
     }

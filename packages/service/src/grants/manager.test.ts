@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTokenStore } from '../http/token-store.js';
+import { CODEX_SETUP_RESERVED_APP_ID, createTokenStore } from '../http/token-store.js';
 import { type GrantEvent, createGrantManager, parseAutoApproveAppIds } from './manager.js';
 
 let home: string;
@@ -63,6 +63,32 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
     ).rejects.toThrow(/invalid app scopes/);
     expect(grants.list()).toEqual([]);
     expect(tokenStore.list().map((record) => record.appId)).toEqual(['root']);
+  });
+
+  it('reserves the Settings-managed Codex app id only from the public grant flow', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({
+      home,
+      tokenStore,
+      autoApproveAppIds: [CODEX_SETUP_RESERVED_APP_ID],
+    });
+
+    await expect(
+      grants.request({
+        appId: CODEX_SETUP_RESERVED_APP_ID,
+        appName: 'Codex Impostor',
+        scopes: ['openai'],
+      }),
+    ).rejects.toThrow(/reserved for a first-party integration/);
+    expect(grants.list()).toEqual([]);
+    expect(tokenStore.list().map((record) => record.appId)).toEqual(['root']);
+
+    const internal = await tokenStore.issue({
+      appId: CODEX_SETUP_RESERVED_APP_ID,
+      appName: 'Codex local models',
+      scopes: ['openai'],
+    });
+    expect(internal.appId).toBe(CODEX_SETUP_RESERVED_APP_ID);
   });
 
   it('approve issues a per-app token, persists, and emits grant_decided', async () => {

@@ -120,6 +120,73 @@ describe('SessionSwitcher', () => {
     expect(screen.queryByText(/Night-shift oversight/)).not.toBeInTheDocument();
   });
 
+  it('does not auto-pick from the previous scope while the new scope loads', async () => {
+    // The regression: a scope change (here, gaining a taskRef) used to let
+    // the auto-pick run against the OLD scope's list, because clearing
+    // `sessions` and reading it happen in the same effect flush. It would
+    // stomp the caller's just-focused task thread with the lobby thread.
+    mockSessions([
+      {
+        id: 'lobby',
+        gezelId: 'g1',
+        title: 'Lobby chat',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    let resolveTaskSessions: (v: unknown) => void = () => {};
+    vi.mocked(api.listTaskSessions).mockReturnValue(
+      new Promise((resolve) => {
+        resolveTaskSessions = resolve;
+      }) as never,
+    );
+
+    const onSessionIdChange = vi.fn();
+    const { rerender } = render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        onSessionIdChange={onSessionIdChange}
+      />,
+    );
+    await waitFor(() => expect(onSessionIdChange).toHaveBeenCalledWith('lobby'));
+    onSessionIdChange.mockClear();
+
+    // Focus a task thread: the parent sets both the session and the scope.
+    rerender(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="task-thread"
+        taskRef="p1/4"
+        onSessionIdChange={onSessionIdChange}
+      />,
+    );
+
+    // While the task list is still in flight, nothing may be picked.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+
+    resolveTaskSessions({
+      sessions: [
+        {
+          id: 'task-thread',
+          gezelId: 'g1',
+          title: 'Task thread',
+          taskRef: 'p1/4',
+          lastActivityAt: new Date().toISOString(),
+          providerName: 'mock',
+          archived: false,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText(/Task thread/)).toBeInTheDocument());
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+  });
+
   it('requests composer focus after creating and selecting a fresh thread', async () => {
     mockSessions([]);
     vi.mocked(api.createChatSession).mockResolvedValue({ id: 's-new' } as never);

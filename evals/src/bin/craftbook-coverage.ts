@@ -27,12 +27,14 @@ async function main(): Promise<void> {
     console.log(`  eval specs:       ${summary.evalSpecs}`);
     console.log(`  implemented:      ${summary.implementedSpecs}`);
     console.log(`  validated:        ${summary.validatedSpecs}`);
+    console.log(`    workflow:       ${summary.workflowValidatedSpecs}`);
+    console.log(`    artifact-only:  ${summary.artifactOnlyValidatedSpecs}`);
     console.log(`  avg quality:      ${summary.averageQualityScore}/110`);
     console.log(
       `  bands:            strong=${summary.byBand.strong} needs-work=${summary.byBand['needs-work']} weak=${summary.byBand.weak}`,
     );
     console.log(
-      `  eval status:      implemented=${summary.byEvalStatus.implemented} planned=${summary.byEvalStatus.planned} missing=${summary.byEvalStatus.missing}`,
+      `  eval status:      validated=${summary.byEvalStatus.validated} implemented=${summary.byEvalStatus.implemented} planned=${summary.byEvalStatus.planned} missing=${summary.byEvalStatus.missing}`,
     );
     if (specErrors.length > 0) {
       console.log('\nSpec errors');
@@ -47,7 +49,7 @@ async function main(): Promise<void> {
     for (const audit of prioritized) {
       const lead = audit.issues.find((issue) => issue.severity !== 'info');
       console.log(
-        `  ${audit.craftbookId.padEnd(28)} ${String(audit.score).padStart(3)}/110 ${audit.band.padEnd(10)} eval=${audit.evalStatus}${lead ? `  ${lead.code}: ${lead.message}` : ''}`,
+        `  ${audit.craftbookId.padEnd(28)} ${String(audit.score).padStart(3)}/110 ${audit.band.padEnd(10)} eval=${audit.evalStatus}/${audit.validationScope}${lead ? `  ${lead.code}: ${lead.message}` : ''}`,
       );
     }
   }

@@ -59,9 +59,10 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: [
       'list_dir',
       'read_file',
+      'read_files',
       'stat',
       'validate',
-      'search_files',
+      'grep_files',
       'find_files',
       'diff_files',
     ],

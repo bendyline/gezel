@@ -171,7 +171,7 @@ describe('ChatManager.listModelsForProvider — installed local models', () => {
     await store.ensureLayout();
     await store.writeConfig({ ollamaNumCtx: 49_152 });
     const provider = new MockProvider({ name: 'ollama' });
-    vi.spyOn(provider, 'listModels').mockResolvedValue([
+    const providerList = vi.spyOn(provider, 'listModels').mockResolvedValue([
       {
         id: 'qwen:14b',
         name: 'qwen:14b',
@@ -195,8 +195,10 @@ describe('ChatManager.listModelsForProvider — installed local models', () => {
       await rm(home, { recursive: true, force: true });
     });
 
-    const models = await manager.listModelsForProvider('ollama');
+    const controller = new AbortController();
+    const models = await manager.listModelsForProvider('ollama', controller.signal);
 
+    expect(providerList).toHaveBeenCalledWith(controller.signal);
     expect(models).toEqual([
       {
         id: 'qwen:14b',

@@ -2,6 +2,13 @@ export interface BuiltinToolContract {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
 }
 
 let builtinToolContractsPromise: Promise<BuiltinToolContract[]> | undefined;
@@ -24,6 +31,8 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
     'GEZEL_MCP_ALLOW',
     'GEZEL_MCP_EXCLUDE',
     'GEZEL_MCP_LEGACY_TOOLS',
+    'GEZEL_MCP_TOOL_NAMING',
+    'GEZEL_SCRIPT_TOOLS',
     'GEZEL_CRAFTBOOK_ID',
     'GEZEL_MAIL_ENABLED',
     'GEZEL_CONNECTORS_ENABLED',
@@ -35,6 +44,8 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
   delete process.env.GEZEL_MCP_ALLOW;
   delete process.env.GEZEL_MCP_EXCLUDE;
   delete process.env.GEZEL_MCP_LEGACY_TOOLS;
+  delete process.env.GEZEL_MCP_TOOL_NAMING;
+  delete process.env.GEZEL_SCRIPT_TOOLS;
   // Include the contextual surgical schema in the contract corpus even
   // though ordinary sessions do not advertise it.
   process.env.GEZEL_CRAFTBOOK_ID = 'schema-lint-craftbook';
@@ -61,6 +72,10 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
         name: tool.name,
         description: tool.description ?? '',
         inputSchema: tool.inputSchema as Record<string, unknown>,
+        ...(tool.outputSchema
+          ? { outputSchema: tool.outputSchema as Record<string, unknown> }
+          : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
       }));
     } finally {
       await client.close().catch(() => undefined);

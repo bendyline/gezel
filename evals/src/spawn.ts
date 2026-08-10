@@ -1,6 +1,6 @@
-import { createWriteStream } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { type FileHandle, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { Writable } from 'node:stream';
 import {
   type DiscoverOrSpawnResult,
   discoverOrSpawn,
@@ -46,7 +46,191 @@ export interface SpawnTrialDaemonOptions {
 
 export type TrialDaemon = DiscoverOrSpawnResult & {
   home: string;
+  /** Resolves after the bounded daemon-log sink has flushed and closed. */
+  daemonLogDrain?: Promise<void>;
 };
+
+/**
+ * Normal daemon logs are well under 1 MiB. Keep a generous ceiling so a
+ * native-engine log loop cannot consume the host disk while an unattended
+ * matrix is running. The compacted form retains the service/engine launch at
+ * the beginning and several MiB of the latest diagnostics at the end.
+ */
+export const TRIAL_DAEMON_LOG_MAX_BYTES = 32 * 1024 * 1024;
+const TRIAL_DAEMON_LOG_HEAD_BYTES = 2 * 1024 * 1024;
+const TRIAL_DAEMON_LOG_TAIL_BYTES = 8 * 1024 * 1024;
+
+export interface BoundedDaemonLogOptions {
+  maxBytes?: number;
+  headBytes?: number;
+  tailBytes?: number;
+}
+
+/**
+ * A live, bounded daemon-log sink.
+ *
+ * Once the file reaches its ceiling, it is atomically compacted to its fixed
+ * startup prefix plus a recent tail, leaving room for new output. This is
+ * deliberately not a rotate-to-more-files scheme: per-trial disk usage stays
+ * bounded, while readers that poll `daemon.log` continue to see the latest
+ * engine progress at the end of the same path.
+ */
+export class BoundedDaemonLogSink extends Writable {
+  private readonly maxBytes: number;
+  private readonly headBytes: number;
+  private readonly tailBytes: number;
+  private readonly marker: Buffer;
+  private readonly ready: Promise<void>;
+  private handle: FileHandle | null = null;
+  private closePromise: Promise<void> | null = null;
+  private bytesWritten = 0;
+  private head = Buffer.alloc(0);
+
+  constructor(
+    private readonly path: string,
+    options: BoundedDaemonLogOptions = {},
+  ) {
+    super();
+    this.maxBytes = options.maxBytes ?? TRIAL_DAEMON_LOG_MAX_BYTES;
+    this.headBytes = options.headBytes ?? TRIAL_DAEMON_LOG_HEAD_BYTES;
+    this.tailBytes = options.tailBytes ?? TRIAL_DAEMON_LOG_TAIL_BYTES;
+    this.marker = Buffer.from(
+      `\n[eval-log] middle daemon output omitted after reaching the ${this.maxBytes}-byte trial log limit; startup and latest tail retained\n`,
+      'utf8',
+    );
+    if (
+      this.maxBytes <= 0 ||
+      this.headBytes < 0 ||
+      this.tailBytes < 0 ||
+      this.headBytes + this.tailBytes + this.marker.length >= this.maxBytes
+    ) {
+      throw new Error('bounded daemon log requires head + tail + marker to fit below maxBytes');
+    }
+    this.ready = this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
+    await mkdir(dirname(this.path), { recursive: true });
+    this.handle = await open(this.path, 'a+');
+    const size = (await this.handle.stat()).size;
+    this.bytesWritten = size;
+    const initialHeadBytes = Math.min(size, this.headBytes);
+    if (initialHeadBytes > 0) {
+      const buf = Buffer.alloc(initialHeadBytes);
+      const { bytesRead } = await this.handle.read({
+        buffer: buf,
+        position: 0,
+        length: initialHeadBytes,
+      });
+      this.head = buf.subarray(0, bytesRead);
+    }
+    if (this.bytesWritten > this.maxBytes) await this.compact();
+  }
+
+  override _write(
+    chunk: Buffer | string,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+    void this.append(data).then(() => callback(), callback);
+  }
+
+  override _final(callback: (error?: Error | null) => void): void {
+    void this.closeHandle().then(() => callback(), callback);
+  }
+
+  override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+    void this.closeHandle().then(
+      () => callback(error),
+      (closeError: Error) => callback(error ?? closeError),
+    );
+  }
+
+  private async append(data: Buffer): Promise<void> {
+    await this.ready;
+    if (data.length === 0) return;
+    if (this.head.length < this.headBytes) {
+      const take = Math.min(this.headBytes - this.head.length, data.length);
+      this.head = Buffer.concat([this.head, data.subarray(0, take)]);
+    }
+
+    let offset = 0;
+    while (offset < data.length) {
+      if (this.bytesWritten >= this.maxBytes) await this.compact();
+      const length = Math.min(data.length - offset, this.maxBytes - this.bytesWritten);
+      if (length <= 0) throw new Error('bounded daemon log compaction made no write room');
+      const handle = this.handle;
+      if (!handle) throw new Error('bounded daemon log is closed');
+      const slice = data.subarray(offset, offset + length);
+      let sliceOffset = 0;
+      while (sliceOffset < slice.length) {
+        const { bytesWritten } = await handle.write(
+          slice,
+          sliceOffset,
+          slice.length - sliceOffset,
+          null,
+        );
+        if (bytesWritten <= 0) throw new Error('bounded daemon log write made no progress');
+        sliceOffset += bytesWritten;
+        this.bytesWritten += bytesWritten;
+      }
+      offset += slice.length;
+    }
+  }
+
+  private async compact(): Promise<void> {
+    const handle = this.handle;
+    if (!handle) throw new Error('bounded daemon log is closed');
+
+    const tailLength = Math.min(this.tailBytes, Math.max(0, this.bytesWritten - this.head.length));
+    let tailBuffer = Buffer.alloc(tailLength);
+    if (tailLength > 0) {
+      const { bytesRead } = await handle.read({
+        buffer: tailBuffer,
+        position: this.bytesWritten - tailLength,
+        length: tailLength,
+      });
+      tailBuffer = tailBuffer.subarray(0, bytesRead);
+    }
+    // The tail starts at an arbitrary byte offset. Drop its first partial line
+    // so downstream regex readers never mistake a torn record for evidence.
+    const firstNewline = tailBuffer.indexOf(0x0a);
+    const tail = firstNewline >= 0 ? tailBuffer.subarray(firstNewline + 1) : Buffer.alloc(0);
+    const snapshot = Buffer.concat([this.head, this.marker, tail]);
+    if (snapshot.length >= this.maxBytes) {
+      throw new Error('bounded daemon log snapshot does not leave append capacity');
+    }
+
+    await handle.close();
+    this.handle = null;
+    const tempPath = `${this.path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    try {
+      await writeFile(tempPath, snapshot, { flag: 'wx' });
+      await rename(tempPath, this.path);
+      this.handle = await open(this.path, 'a+');
+      this.bytesWritten = snapshot.length;
+    } catch (error) {
+      await unlink(tempPath).catch(() => {});
+      // The atomic rename leaves the old path intact on failure. Reopen it so
+      // destroy/fallback can close cleanly and the caller can keep draining.
+      this.handle = await open(this.path, 'a+').catch(() => null);
+      if (this.handle) this.bytesWritten = (await this.handle.stat()).size;
+      throw error;
+    }
+  }
+
+  private closeHandle(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = (async () => {
+      await this.ready.catch(() => {});
+      const handle = this.handle;
+      this.handle = null;
+      if (handle) await handle.close();
+    })();
+    return this.closePromise;
+  }
+}
 
 /**
  * Spawn a fresh `gezeld` against a custom GEZEL_HOME with the bundled
@@ -115,8 +299,9 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
   // first-run `pnpm install` for `@playwright/mcp` whose multi-MB
   // progress output was the original cause of the pipe-buffer
   // back-pressure deadlock. Without bootstrap, the only stdout/stderr
-  // is the daemon's structured logger — manageable volume that drains
-  // continuously into the run dir's `daemon.log` for postmortem.
+  // is the daemon's structured logger. It drains continuously into the run
+  // dir's `daemon.log` for postmortem, with a hard head+tail bound below in
+  // case a native engine enters a log loop.
   //
   // Daemon logs are critical for debugging eval failures: the
   // chat-manager's "stalled session" / "model produced no visible
@@ -137,12 +322,29 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
   // Sink BOTH stdout and stderr into a single chronological log file
   // alongside the trial's other captures. The historical caller's
   // `stderrLogPath` becomes a `daemon.log` path — both streams
-  // interleave into it.
+  // interleave into it. The bounded sink preserves startup provenance and the
+  // latest diagnostics without allowing an unattended trial to exhaust disk.
+  let daemonLogDrain: Promise<void> | undefined;
   if (opts.stderrLogPath && result.child) {
-    await mkdir(dirname(opts.stderrLogPath), { recursive: true });
-    const sink = createWriteStream(opts.stderrLogPath, { flags: 'a' });
-    if (result.child.stdout) result.child.stdout.pipe(sink, { end: false });
-    if (result.child.stderr) result.child.stderr.pipe(sink, { end: false });
+    const sink = new BoundedDaemonLogSink(opts.stderrLogPath);
+    daemonLogDrain = new Promise((resolve) => sink.once('close', resolve));
+    const streams = [result.child.stdout, result.child.stderr].filter(
+      (stream): stream is NonNullable<typeof stream> => stream !== null,
+    );
+    for (const stream of streams) stream.pipe(sink, { end: false });
+    result.child.once('close', () => sink.end());
+    sink.once('error', (error) => {
+      // Logging must never back-pressure the daemon after a filesystem error.
+      // Unpipe and explicitly resume both streams so the trial can still end
+      // and report the log failure instead of deadlocking on a full OS pipe.
+      console.warn(
+        `[spawn] daemon log disabled after write failure (${error instanceof Error ? error.message : error})`,
+      );
+      for (const stream of streams) {
+        stream.unpipe(sink);
+        stream.resume();
+      }
+    });
   } else {
     // No log path provided — drain to /dev/null equivalent so the
     // child doesn't block on a full pipe buffer.
@@ -150,7 +352,7 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
     result.child?.stderr?.resume();
   }
 
-  return { ...result, home: opts.home };
+  return { ...result, home: opts.home, ...(daemonLogDrain ? { daemonLogDrain } : {}) };
 }
 
 /**
@@ -168,6 +370,7 @@ export async function shutdownTrialDaemon(
     graceMs: gracefulMs,
     forceMs: Math.min(gracefulMs, 3_000),
   });
+  await spawned.daemonLogDrain;
   await reapTrialNativeChildren(spawned.home);
 }
 

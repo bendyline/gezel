@@ -122,6 +122,15 @@ export function isHttpSpec(spec: McpServerSpec): spec is HttpMcpServerSpec {
 export const MAX_TOOL_OUTPUT_CHARS = 80_000;
 
 /**
+ * Maximum UTF-8 JSON size copied from an MCP result's `structuredContent`
+ * into a durable tool-call event. This intentionally sits above the 100 KB
+ * surgical-edit diff ceiling so normal diff/read/video envelopes survive,
+ * while an untrusted MCP server cannot bypass the text-output cap with a
+ * giant structured payload.
+ */
+export const MAX_TOOL_EVENT_STRUCTURED_CONTENT_BYTES = 128 * 1024;
+
+/**
  * "Useful slice" floor — when the adaptive budget is at least this
  * many chars, callers get a normal truncation footer ("re-run with
  * a more specific request if you need the rest"). Below this, the
@@ -785,11 +794,22 @@ export class McpBridge {
     }));
   }
 
+  /**
+   * Resolve a caller-provided spelling against this bridge's final advertised
+   * roster. The roster is populated after every tool decorator has run, so a
+   * pool-level authorization decision can use the same concrete name that the
+   * bridge will dispatch instead of authorizing an unresolved alias first.
+   */
+  resolveToolName(name: string): string | null {
+    const resolved = resolveToolNameSpelling(name, this.toolNameSet);
+    return this.toolNameSet.has(resolved) ? resolved : null;
+  }
+
   hasTool(name: string): boolean {
     // Alternate spellings count as "has" — `callToolRich` resolves them to
     // the advertised name at dispatch, so a caller probing with a legacy
     // or miscased spelling must get the same answer the call itself would.
-    return this.toolNameSet.has(name) || resolveToolNameSpelling(name, this.toolNameSet) !== name;
+    return this.resolveToolName(name) !== null;
   }
 
   /**
@@ -961,7 +981,7 @@ export class McpBridge {
     // anything keys off it — hooks, wrappers, timeouts, the tool-call
     // event, and the wire dispatch all see one spelling. Unknown names
     // pass through so the server's "tool not found" error stays honest.
-    const toolName = resolveToolNameSpelling(name, this.toolNameSet);
+    const toolName = this.resolveToolName(name) ?? name;
     if (toolName !== name) {
       log.debug(`call_tool alias ${name} -> ${toolName}`);
     }
@@ -1170,6 +1190,14 @@ export class McpBridge {
           const redactedResult = combined
             ? redactString(combined, this.knownSecretValues)
             : undefined;
+          const eventStructuredContent = structuredContent
+            ? sanitizeStructuredContentForEvent(structuredContent, this.knownSecretValues)
+            : undefined;
+          if (structuredContent && !eventStructuredContent) {
+            log.warn(
+              `structuredContent omitted from ${toolName} tool event: not serializable or exceeds ${MAX_TOOL_EVENT_STRUCTURED_CONTENT_BYTES} bytes`,
+            );
+          }
           await this.onToolCall({
             name: toolName,
             argKeys: Object.keys(args),
@@ -1180,7 +1208,7 @@ export class McpBridge {
             ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
             ...(persistedAudios.length > 0 ? { audios: persistedAudios } : {}),
-            ...(structuredContent ? { structuredContent } : {}),
+            ...(eventStructuredContent ? { structuredContent: eventStructuredContent } : {}),
           });
         } catch (err) {
           log.warn('onToolCall threw:', err);
@@ -1363,4 +1391,27 @@ export function redactObject<T>(value: T, secrets: Set<string>): T {
     return out as T;
   }
   return value;
+}
+
+/**
+ * Prepare MCP structured output for the event/history boundary. The wire
+ * result remains untouched for SDK validation; only the event copy is
+ * recursively secret-redacted, normalized to JSON data, and size-bounded.
+ */
+export function sanitizeStructuredContentForEvent(
+  value: Record<string, unknown>,
+  secrets: Set<string>,
+  maxBytes = MAX_TOOL_EVENT_STRUCTURED_CONTENT_BYTES,
+): Record<string, unknown> | undefined {
+  try {
+    const redacted = redactObject(value, secrets);
+    const serialized = JSON.stringify(redacted);
+    if (Buffer.byteLength(serialized, 'utf8') > maxBytes) return undefined;
+    const normalized = JSON.parse(serialized) as unknown;
+    if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized))
+      return undefined;
+    return normalized as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
 }

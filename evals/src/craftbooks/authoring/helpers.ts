@@ -32,7 +32,7 @@ import { findProjectIdByName } from '../shared.ts';
  * then authored a perfectly good book the eval couldn't credit.
  */
 export const AUTHORING_PROJECT_PIN =
-  'Do ALL work inside THIS project — never create another project for this job (no start_project / create_project). ' +
+  'Do ALL work inside THIS project — never create another project for this job (do not call start_project). ' +
   "The seeded input files and the graded outputs live in THIS project's workspace; work done in any other project is invisible to the evaluation.";
 
 /**

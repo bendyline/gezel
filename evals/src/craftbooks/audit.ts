@@ -5,6 +5,8 @@ import type {
   CraftbookAuditResult,
   CraftbookCoverageSummary,
   CraftbookEvalCoverageStatus,
+  CraftbookEvalSpec,
+  CraftbookEvalValidationScope,
   CraftbookTemplateStepSummary,
   CraftbookTemplateSummary,
 } from './types.ts';
@@ -45,6 +47,9 @@ function evaluateStep(
 export function auditCraftbookTemplate(
   template: CraftbookTemplateSummary,
   evalStatus: CraftbookEvalCoverageStatus = 'missing',
+  validationScope: CraftbookEvalValidationScope = evalStatus === 'validated'
+    ? 'artifact-only'
+    : 'none',
 ): CraftbookAuditResult {
   const issues: CraftbookAuditIssue[] = [];
   const steps = template.steps;
@@ -55,6 +60,7 @@ export function auditCraftbookTemplate(
     .filter((entry) => entry.gate);
   const malformedGateSteps = steps.filter((step) => step.gate && !parseGate(step));
   const advanceWhenSteps = steps.filter((step) => !!step.advanceWhen);
+  const hookDriven = (template.hooks?.length ?? 0) > 0;
 
   if (evalStatus === 'missing') {
     issues.push(
@@ -62,6 +68,15 @@ export function auditCraftbookTemplate(
         'warn',
         'eval.missing',
         'No craftbook eval spec exists yet; add one before calling this template measured.',
+      ),
+    );
+  }
+  if (validationScope === 'artifact-only') {
+    issues.push(
+      issue(
+        'info',
+        'eval.artifact-only',
+        'The local-model result validates deliverables but does not prove this craftbook drove the task.',
       ),
     );
   }
@@ -95,6 +110,18 @@ export function auditCraftbookTemplate(
     issues.push(
       issue('fail', 'gate.malformed', 'Step gate does not parse as a known gate shape.', step.id),
     );
+  }
+  for (const hook of template.hooks ?? []) {
+    const scriptName = hook.script?.name;
+    if (scriptName && !template.scripts?.[scriptName]) {
+      issues.push(
+        issue(
+          'fail',
+          'hook.missing-script',
+          `Hook references craftbook script "${scriptName}", but that script is not bundled.`,
+        ),
+      );
+    }
   }
   // A fan-out parent is exempt: its job is to SPAWN, and the deliverable
   // the warning wants gated is produced by the children it spawns. Gating
@@ -144,13 +171,15 @@ export function auditCraftbookTemplate(
 
   const evaluator = evaluateStep(template);
   if (!evaluator) {
-    issues.push(
-      issue(
-        'info',
-        'reviewer.no-evaluate-step',
-        'No evaluate step found; confirm another gate or branch does the final judgment.',
-      ),
-    );
+    if (!hookDriven) {
+      issues.push(
+        issue(
+          'info',
+          'reviewer.no-evaluate-step',
+          'No evaluate step found; confirm another gate or branch does the final judgment.',
+        ),
+      );
+    }
   } else {
     const prompt = evaluator.prompt ?? '';
     if (!/review|qa|verify|evaluate/i.test(evaluator.suggestedRole ?? '')) {
@@ -205,7 +234,9 @@ export function auditCraftbookTemplate(
       : Math.round((steps.filter(hasSubstantivePrompt).length / steps.length) * 15);
   const gateScore =
     gates.length === 0
-      ? 0
+      ? hookDriven
+        ? 25
+        : 0
       : Math.round(
           (gates.filter((entry) => entry.gate !== null).length / gates.length) * 5 +
             (gates.filter((entry) => {
@@ -232,7 +263,9 @@ export function auditCraftbookTemplate(
       (evaluator.next && evaluator.next !== 'finish' ? 4 : 0) +
       (/advance_task_step/.test(evaluator.prompt ?? '') ? 4 : 0) +
       (/finish/.test(evaluator.prompt ?? '') ? 3 : 0)
-    : 3;
+    : hookDriven
+      ? 15
+      : 3;
   const invocabilityScore =
     (template.description ? 3 : 0) + ((template.triggers ?? []).length > 0 ? 4 : 0) + 3;
   const evalScore =
@@ -263,6 +296,7 @@ export function auditCraftbookTemplate(
     band,
     hasEvalSpec: evalStatus !== 'missing',
     evalStatus,
+    validationScope,
     issues,
   };
 }
@@ -289,6 +323,9 @@ export function summarizeCraftbookAudits(audits: CraftbookAuditResult[]): Craftb
     evalSpecs: audits.filter((audit) => audit.hasEvalSpec).length,
     implementedSpecs: audits.filter((audit) => audit.evalStatus === 'implemented').length,
     validatedSpecs: audits.filter((audit) => audit.evalStatus === 'validated').length,
+    artifactOnlyValidatedSpecs: audits.filter((audit) => audit.validationScope === 'artifact-only')
+      .length,
+    workflowValidatedSpecs: audits.filter((audit) => audit.validationScope === 'workflow').length,
     averageQualityScore: audits.length === 0 ? 0 : Number((totalScore / audits.length).toFixed(1)),
     byBand,
     byEvalStatus,
@@ -301,10 +338,29 @@ export function auditCraftbookTemplates(templates: CraftbookTemplateSummary[]): 
 } {
   const specMap = craftbookEvalSpecMap();
   const audits = templates.map((template) => {
-    const status = specMap.get(template.id)?.coverage.status ?? 'missing';
-    return auditCraftbookTemplate(template, status);
+    const spec = specMap.get(template.id);
+    const status = spec?.coverage.status ?? 'missing';
+    return auditCraftbookTemplate(template, status, validationScopeForSpec(spec));
   });
   return { audits, summary: summarizeCraftbookAudits(audits) };
+}
+
+export function validationScopeForSpec(
+  spec: CraftbookEvalSpec | undefined,
+): CraftbookEvalValidationScope {
+  if (!spec || spec.coverage.status !== 'validated') return 'none';
+  const hasRuntimeHistory = (spec.success.history ?? []).some((expectation) =>
+    ['tool.gated', 'task.step.gated', 'task.step.activated', 'task.entry.dispatched'].includes(
+      expectation.kind,
+    ),
+  );
+  const hasTerminalProof = spec.success.taskGraph?.requireTerminalStep === true;
+  const hasDraftWorkflowProof =
+    spec.success.taskGraph?.requireDraftRef === true && spec.success.taskGraph.draft !== undefined;
+  if (hasRuntimeHistory || hasTerminalProof || hasDraftWorkflowProof) {
+    return 'workflow';
+  }
+  return 'artifact-only';
 }
 
 export function validateCraftbookEvalSpecs(templates: CraftbookTemplateSummary[]): string[] {

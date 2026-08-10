@@ -18,6 +18,8 @@ describe('stepToolKit', () => {
     const kit = stepToolKit(expandedStep('report.md', 'markdown-report'));
     expect(kit?.kind).toBe('markdown-doc');
     expect(kit?.path).toBe('report.md');
+    expect(kit?.tools.has('read_file')).toBe(true);
+    expect(kit?.tools.has('read_files')).toBe(true);
     expect(kit?.tools.has('write_file')).toBe(true);
     expect(kit?.tools.has('replace_in_file')).toBe(true);
     expect(kit?.tools.has('run_nodejs_script')).toBe(false);
@@ -52,7 +54,7 @@ describe('stepToolKit', () => {
         ],
       },
     });
-    expect(kit?.tools.has('search_files')).toBe(true);
+    expect(kit?.tools.has('grep_files')).toBe(true);
     expect(kit?.tools.has('find_files')).toBe(true);
   });
 
@@ -144,4 +146,12 @@ describe('capPriorityPrefixForKind', () => {
     expect(capPriorityPrefixForKind('data-file')[0]).toBe('derive_file');
     expect(capPriorityPrefixForKind(null)).toEqual([]);
   });
+
+  it.each(['data-file', 'code-module', 'markdown-report'] as const)(
+    'keeps read_files beside read_file in the %s cap prefix',
+    (kind) => {
+      const priority = capPriorityPrefixForKind(kind);
+      expect(priority.indexOf('read_files')).toBe(priority.indexOf('read_file') + 1);
+    },
+  );
 });

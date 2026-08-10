@@ -141,10 +141,12 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
 - **`native` — bespoke code.** The escape hatch, for **cornerstone corpora** the user lives in
   that resist declarative expression. Email is the exemplar (MIME, threading, quote-stripping,
   HTML→markdown, high-fidelity IMAP/Gmail/Graph cursors — none of which an MCP tool hands you
-  clean); Google Calendar is the second. Decision rule: **own the sources users live in; rent the
-  long tail** through `mcp` / `spectral` / `script`.
+  clean); Google Calendar is the second. GitHub Releases is native because its uploaded assets
+  can be multi-gigabyte binaries that must stream through a digest-verifying, file-backed
+  attachment path rather than a JSON/prose driver. Decision rule: **own the sources users live
+  in; rent the long tail** through `mcp` / `spectral` / `script`.
 
-  > **Git/GitHub is NOT a connector.** Git's value is its *structure* — the commit DAG, diffs,
+  > **The Git substrate is NOT a connector.** Git's value is its *structure* — the commit DAG, diffs,
   > branches, and an AI-*editable* working copy — which is the inverse of the connector shape
   > (mirror an external source into a read-first normalized corpus). Git stays a **core concept**
   > of gezel (native in `git/manager.ts` + `ProjectGitHubView`); the connector framework never
@@ -153,6 +155,9 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   > exemplar), but the git substrate itself is not. GitHub wikis are connector-eligible page
   > content too: the native wiki adapter uses the separate `.wiki.git` repository only as a
   > read-only transport and exposes normalized pages, never its history or an editable working copy.
+  > GitHub releases are connector-eligible as well: the release record is read-first metadata and
+  > its uploaded assets are immutable-ish inbound files, not an editable working tree. The native
+  > releases adapter mirrors both and can reuse the user's existing GitHub sign-in to see drafts.
 
 All four implement one `ConnectorAdapter`. What gezel provides across all of them is the
 part users never want to rebuild per source: the connect UX, credential management, the sync

@@ -14,26 +14,42 @@ describe('mock MCP advertises the arguments its fixtures need', () => {
     // Wild-caught twice on live runs: with no inputSchema the model first
     // guessed a different spelling, then called with no arguments at all.
     // Both times the call logged as made and no file was ever written.
-    runtime = await startMockServices([
+    runtime = await startMockServices(
+      [
+        {
+          kind: 'mcp',
+          id: 'docblocks',
+          description: 'fake',
+          tools: [
+            {
+              name: 'save_artifact',
+              description: 'Save the converted document.',
+              resultTemplate: { ok: true },
+              writeFixture: {
+                surface: 'artifact',
+                pathArgument: 'destination.path',
+                fixture: 'minimal-docx',
+              },
+            },
+            { name: 'list_roots', description: 'List roots.', resultTemplate: { roots: [] } },
+            {
+              name: 'browser_navigate',
+              description: 'Navigate to a URL.',
+              resultTemplate: { loaded: true },
+            },
+          ],
+        },
+      ] as never,
       {
-        kind: 'mcp',
-        id: 'docblocks',
-        description: 'fake',
-        tools: [
-          {
-            name: 'save_artifact',
-            description: 'Save the converted document.',
-            resultTemplate: { ok: true },
-            writeFixture: {
-              surface: 'artifact',
-              pathArgument: 'destination.path',
-              fixture: 'minimal-docx',
+        mcpToolArgumentSchemas: {
+          docblocks: {
+            browser_navigate: {
+              url: { description: 'Full URL to navigate to.' },
             },
           },
-          { name: 'list_roots', description: 'List roots.', resultTemplate: { roots: [] } },
-        ],
+        },
       },
-    ] as never);
+    );
     expect(runtime).toBeTruthy();
 
     const baseUrl = runtime!.services.get('docblocks')!.baseUrl;
@@ -53,6 +69,18 @@ describe('mock MCP advertises the arguments its fixtures need', () => {
       const roots = tools.find((t) => t.name === 'list_roots');
       const rootProps = (roots?.inputSchema as { properties?: object } | undefined)?.properties;
       expect(rootProps === undefined || Object.keys(rootProps).length === 0).toBe(true);
+
+      const navigate = tools.find((t) => t.name === 'browser_navigate');
+      expect(navigate?.inputSchema).toMatchObject({
+        type: 'object',
+        required: ['url'],
+        properties: {
+          url: expect.objectContaining({
+            type: 'string',
+            description: 'Full URL to navigate to.',
+          }),
+        },
+      });
       await client.close();
     } finally {
       if (prevTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;

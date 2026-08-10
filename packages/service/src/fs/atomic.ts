@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type FileHandle, open, rename, rm, writeFile } from 'node:fs/promises';
+import { type FileHandle, copyFile, open, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -64,6 +64,28 @@ export async function writeFileAtomic(
     if (opts?.durable) await fsyncPath(tmp);
     await renameWithWindowsRetry(tmp, absPath);
     if (opts?.durable) await fsyncDirectoryIfSupported(dirname(absPath));
+  } catch (err) {
+    try {
+      await rm(tmp, { force: true });
+    } catch {
+      // ignore — leftover tmp is harmless
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically publish an existing file without first loading it into memory.
+ * This is the file-backed twin of {@link writeFileAtomic}: large connector
+ * attachments (release installers, disk images, archives) are streamed to a
+ * private staging file by their adapter, then copied to a sibling temporary
+ * path and renamed into place.
+ */
+export async function copyFileAtomic(sourcePath: string, absPath: string): Promise<void> {
+  const tmp = `${absPath}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await copyFile(sourcePath, tmp);
+    await renameWithWindowsRetry(tmp, absPath);
   } catch (err) {
     try {
       await rm(tmp, { force: true });

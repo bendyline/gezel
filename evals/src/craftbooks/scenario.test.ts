@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockServicesRuntime } from '../mock/mock-server.ts';
 import type { EvalContext } from '../types.ts';
-import { craftbookScenarioFromSpec, prioritizeRepairFailures } from './scenario.ts';
+import {
+  craftbookScenarioFromSpec,
+  evaluateHistoryExpectations,
+  prioritizeRepairFailures,
+} from './scenario.ts';
 import type { CraftbookEvalSpec } from './types.ts';
 
 function directWorkerSpec(): CraftbookEvalSpec {
@@ -123,6 +127,7 @@ describe('craftbook generic scenario adapter', () => {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
       createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
       createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      installToolset: vi.fn().mockResolvedValue({ ok: true }),
       listGezels: vi.fn(),
       addGezelToProject: vi.fn().mockResolvedValue({
         projectId: 'project-1',
@@ -133,7 +138,18 @@ describe('craftbook generic scenario adapter', () => {
       sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
     };
     const logs: string[] = [];
-    const spec: CraftbookEvalSpec = { ...directWorkerSpec(), runAsCraftbookTask: true };
+    const spec: CraftbookEvalSpec = {
+      ...directWorkerSpec(),
+      runAsCraftbookTask: true,
+      setup: {
+        ...directWorkerSpec().setup!,
+        craftbookParams: { language: 'Nederlands' },
+      },
+      success: {
+        summary: 'The parameterized craftbook reaches its output.',
+        deliverables: [{ path: 'translations/Nederlands/out.md', kind: 'markdown-doc' }],
+      },
+    };
     const scenario = craftbookScenarioFromSpec(spec);
 
     await scenario.setup?.({
@@ -147,14 +163,71 @@ describe('craftbook generic scenario adapter', () => {
       title: spec.title,
       description: expect.stringContaining('Run this craftbook end to end'),
       craftbookId: 'sample-book',
+      craftbookParams: {
+        language: 'Nederlands',
+        outputPath: 'translations/Nederlands/out.md',
+      },
       assignee: { kind: 'gezel', gezelId: 'gezel-1' },
       dispatchEntry: true,
+    });
+    expect(client.installToolset).toHaveBeenCalledWith('builtin.artifacts', {
+      scope: { kind: 'gezel', gezelId: 'gezel-1' },
+    });
+    expect(client.installToolset).toHaveBeenCalledWith('builtin.tasks', {
+      scope: { kind: 'gezel', gezelId: 'gezel-1' },
     });
     // The runtime drives the steps — no freehand worker kickoff.
     expect(client.sendChatMessage).not.toHaveBeenCalled();
     expect(logs.some((line) => line.includes('created + dispatched fanout craftbook task'))).toBe(
       true,
     );
+  });
+
+  it('creates a default operator when task-mode coverage omits an explicit worker', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      installToolset: vi.fn().mockResolvedValue({ ok: true }),
+      listGezels: vi.fn(),
+      addGezelToProject: vi.fn().mockResolvedValue({
+        projectId: 'project-1',
+        gezelIds: ['gezel-1'],
+        added: true,
+      }),
+      createTask: vi.fn().mockResolvedValue({ ref: 'project-1/1' }),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const spec: CraftbookEvalSpec = {
+      ...directWorkerSpec(),
+      runAsCraftbookTask: true,
+      setup: { projectName: 'Sample Project' },
+    };
+    const scenario = craftbookScenarioFromSpec(spec);
+
+    expect(scenario.skipInitialPrompt).toBe(true);
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    expect(client.createGezel).toHaveBeenCalledWith({
+      name: 'Craftbook Runner',
+      role: 'Workflow Operator',
+      description: 'Executes the assigned craftbook task end to end.',
+      about: expect.stringContaining('real steps and gates'),
+    });
+    expect(client.createTask).toHaveBeenCalledWith(
+      'project-1',
+      expect.objectContaining({
+        craftbookId: 'sample-book',
+        assignee: { kind: 'gezel', gezelId: 'gezel-1' },
+        dispatchEntry: true,
+      }),
+    );
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
 
   it('does not mirror workspace source fixtures into artifacts', async () => {
@@ -213,6 +286,123 @@ describe('craftbook generic scenario adapter', () => {
     expect(client.installToolset).toHaveBeenCalledWith('builtin.workspace-fs-write', {
       scope: { kind: 'gezel', gezelId: 'gezel-1' },
     });
+  });
+
+  it('keeps executable grader scripts outside the model-visible workspace and still runs them', async () => {
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValueOnce({ projects: [] })
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      writeProjectWorkspaceFile: vi.fn().mockResolvedValue({ ok: true }),
+      fetchProjectWorkspaceBlob: vi.fn().mockImplementation((_projectId, path) => {
+        if (path === 'output.json') return Promise.resolve(new Blob(['{"ok":true}']));
+        return Promise.reject(new Error('not found'));
+      }),
+      listProjectWorkspace: vi.fn().mockResolvedValue({
+        files: [{ path: 'output.json', isDirectory: false }],
+      }),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      installToolset: vi.fn().mockResolvedValue({ ok: true }),
+      listGezels: vi.fn(),
+      addGezelToProject: vi.fn().mockResolvedValue({
+        projectId: 'project-1',
+        gezelIds: ['gezel-1'],
+        added: true,
+      }),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      setup: {
+        ...directWorkerSpec().setup!,
+        files: [
+          {
+            path: 'tests/verify.mjs',
+            content:
+              "import fs from 'node:fs'; JSON.parse(fs.readFileSync('output.json', 'utf8')); console.log('OK');\n",
+            surface: 'harness',
+          },
+        ],
+      },
+      success: {
+        summary: 'workspace/output.json passes the seeded oracle.',
+        deliverables: [{ path: 'output.json', kind: 'json', minBytes: 2 }],
+        checks: [{ kind: 'nodeScriptPasses', script: 'tests/verify.mjs' }],
+      },
+    });
+
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    expect(client.writeProjectWorkspaceFile).not.toHaveBeenCalled();
+    const project = client.createProject.mock.calls[0]![0];
+    expect(project.about).not.toContain('tests/verify.mjs');
+    const kickoff = client.sendChatMessage.mock.calls[0]![1].message as string;
+    expect(kickoff).not.toContain('read_file({ path: "tests/verify.mjs" })');
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext),
+    ).resolves.toMatchObject({ done: true, success: true });
+  });
+
+  it('seeds modelInput:false fixtures without exposing them as model source inputs', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
+      writeProjectWorkspaceFile: vi.fn().mockResolvedValue({ ok: true }),
+      createGezel: vi.fn().mockResolvedValue({ id: 'gezel-1' }),
+      installToolset: vi.fn().mockResolvedValue({ ok: true }),
+      listGezels: vi.fn(),
+      addGezelToProject: vi.fn().mockResolvedValue({
+        projectId: 'project-1',
+        gezelIds: ['gezel-1'],
+        added: true,
+      }),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      setup: {
+        ...directWorkerSpec().setup!,
+        files: [
+          { path: 'source/brief.md', content: '# Acceptance brief\n' },
+          {
+            path: 'fixtures/black-box.html',
+            content: '<main>Browser-visible implementation</main>',
+            modelInput: false,
+          },
+        ],
+      },
+    });
+
+    await scenario.setup?.({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext);
+
+    expect(client.writeProjectWorkspaceFile).toHaveBeenCalledTimes(2);
+    expect(client.writeProjectWorkspaceFile).toHaveBeenCalledWith('project-1', {
+      path: 'fixtures/black-box.html',
+      content: '<main>Browser-visible implementation</main>',
+    });
+    const project = client.createProject.mock.calls[0]![0];
+    expect(project.about).toContain('source/brief.md');
+    expect(project.about).not.toContain('fixtures/black-box.html');
+    const kickoff = client.sendChatMessage.mock.calls[0]![1].message as string;
+    expect(kickoff).toContain('read_file({ path: "source/brief.md" })');
+    expect(kickoff).not.toContain('fixtures/black-box.html');
   });
 
   it('installs the images toolset for the direct worker when success needs raster images', async () => {
@@ -287,7 +477,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(installedIds).not.toContain('builtin.images');
   });
 
-  it('installs mock-mcp toolsets for the project when mcp mocks are declared', async () => {
+  it('uses a pre-seeded system mock for a scoped required toolset id', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
       createProject: vi.fn().mockResolvedValue({ id: 'project-1' }),
@@ -321,6 +511,7 @@ describe('craftbook generic scenario adapter', () => {
           kind: 'mcp',
           id: 'alerts',
           description: 'Fake alerting MCP',
+          toolsetId: '@playwright/mcp',
           tools: [{ name: 'list_alerts', description: 'List the currently firing alerts' }],
         },
       ],
@@ -335,9 +526,7 @@ describe('craftbook generic scenario adapter', () => {
     } as unknown as EvalContext);
 
     expect(mocksRuntime.bindProject).toHaveBeenCalledWith('project-1');
-    expect(client.installToolset).toHaveBeenCalledWith('mock-mcp-alerts', {
-      scope: { kind: 'project', projectId: 'project-1' },
-    });
+    expect(client.installToolset).not.toHaveBeenCalledWith('@playwright/mcp', expect.anything());
   });
 
   it('requires seeded workspace inputs to be read before accepting a deliverable', async () => {
@@ -513,7 +702,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({
       done: true,
       success: true,
-      reason: 'craftbook-sample-book passed 3 deterministic craftbook checks',
+      reason: 'craftbook-sample-book passed 4 deterministic craftbook checks',
     });
     expect(client.listTaskNotes).toHaveBeenCalledWith('project-1', 1);
   });
@@ -704,9 +893,93 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({
       done: true,
       success: true,
-      reason: 'craftbook-sample-book passed 2 deterministic craftbook checks',
+      reason: 'craftbook-sample-book passed 10 deterministic craftbook checks',
     });
     expect(client.getTaskByRef).toHaveBeenCalledWith('T-2');
+  });
+
+  it('requires a matching craftbook task to reach its terminal step', async () => {
+    const task = {
+      projectId: 'project-1',
+      num: 1,
+      ref: 'T-1',
+      title: 'Run workflow',
+      description: 'Run the sample workflow through its finish step.',
+      status: 'active',
+      activeStepId: 'finish',
+      craftbook: {
+        id: 'sample-book',
+        steps: [
+          { id: 'build', name: 'Build' },
+          { id: 'finish', name: 'Finish', terminal: true },
+        ],
+      },
+      sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+    };
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({ tasks: [task] }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      success: {
+        summary: 'The real workflow reaches its terminal step.',
+        taskGraph: { requireCraftbookTask: true, requireTerminalStep: true },
+      },
+    });
+
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext),
+    ).resolves.toEqual({
+      done: true,
+      success: true,
+      reason: 'craftbook-sample-book passed 3 deterministic craftbook checks',
+    });
+  });
+
+  it('rejects a seeded workspace fixture whose bytes changed', async () => {
+    const recordSniff = vi.fn();
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      fetchProjectWorkspaceBlob: vi.fn().mockResolvedValue(new Blob(['changed bytes'])),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      listInflightTurns: vi.fn().mockResolvedValue({ inflight: [] }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      setup: {
+        ...directWorkerSpec().setup!,
+        files: [{ path: 'source/original.md', content: 'original bytes' }],
+      },
+      success: {
+        summary: 'The source remains unchanged.',
+        unchangedFixtures: ['source/original.md'],
+      },
+    });
+
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+        recordSniff,
+      } as unknown as EvalContext),
+    ).resolves.toEqual({ done: false });
+    expect(recordSniff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failReason: 'unchanged fixture source/original.md differs from its seeded content',
+      }),
+    );
   });
 
   it('pins task-graph repair feedback to the authoring task assignee', async () => {
@@ -1790,5 +2063,58 @@ describe('prioritizeRepairFailures — structural totals outrank per-record trea
     const ordered = prioritizeRepairFailures(failures);
     expect(ordered[0]).toContain('did not pass when run with node');
     expect(ordered[1]).toContain('8 record(s), need ≥ 10');
+  });
+});
+
+describe('craftbook runtime history expectations', () => {
+  it('matches event kind and exact detail fields', async () => {
+    const client = {
+      listHistory: vi.fn().mockResolvedValue({
+        entries: [
+          {
+            entryType: 'event',
+            id: 'h1',
+            at: '2026-08-09T00:00:00Z',
+            kind: 'tool.gated',
+            projectId: 'project-1',
+            summary: '[PreToolUse] rm: ask',
+            details: {
+              craftbookId: 'careful-mode',
+              decision: 'ask',
+              tool: 'delete_path',
+            },
+          },
+        ],
+      }),
+    };
+
+    await expect(
+      evaluateHistoryExpectations(client as never, 'project-1', [
+        {
+          kind: 'tool.gated',
+          details: { craftbookId: 'careful-mode', decision: 'ask', tool: 'delete_path' },
+        },
+      ]),
+    ).resolves.toEqual([]);
+    await expect(
+      evaluateHistoryExpectations(client as never, 'project-1', [
+        {
+          kind: 'tool.gated',
+          details: { craftbookId: 'careful-mode', decision: 'deny', tool: 'delete_path' },
+        },
+      ]),
+    ).resolves.toEqual([
+      'history tool.gated matched 0/1 (craftbookId="careful-mode", decision="deny", tool="delete_path")',
+    ]);
+    await expect(
+      evaluateHistoryExpectations(client as never, 'project-1', [
+        {
+          kind: 'tool.gated',
+          minEntries: 0,
+          maxEntries: 0,
+          details: { craftbookId: 'careful-mode', decision: 'ask' },
+        },
+      ]),
+    ).resolves.toEqual(['history tool.gated matched 1; expected at most 0']);
   });
 });

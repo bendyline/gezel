@@ -40,6 +40,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
+      - name: Install Chromium for runtime validation
+        # The default tictactoe scenario has browser checks. Without a browser
+        # the eval degrades to static sniffing, so a green weekly smoke can
+        # otherwise promote HTML whose interactions never ran.
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
       - name: Require the selected provider credential
         shell: bash
         run: |

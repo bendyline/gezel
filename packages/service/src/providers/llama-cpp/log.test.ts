@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LlamaCppLogFile, tailLatestEngineLog } from './log.js';
+import { LlamaCppLogFile, LlamaProgressLogThrottle, tailLatestEngineLog } from './log.js';
 
 const dirs: string[] = [];
 
@@ -11,6 +11,42 @@ afterEach(async () => {
 });
 
 describe('native engine logs', () => {
+  it('throttles semantic duplicates of stuck llama prompt progress', () => {
+    let now = 1_000;
+    const throttle = new LlamaProgressLogThrottle(5_000, () => now);
+    const line = (uptime: string, tokens = 2048, progress = '3.02') =>
+      `[llama-server] ${uptime} I slot print_timing: id  0 | task 13787 | prompt processing, n_tokens = ${tokens}, progress = ${progress}, t = 630.23 s / 3.25 tokens per second`;
+
+    expect(throttle.accept(line('13.44.290.696'))).toEqual([line('13.44.290.696')]);
+    expect(throttle.accept(line('13.44.290.738'))).toEqual([]);
+    expect(throttle.accept(line('13.44.290.778'))).toEqual([]);
+
+    now += 5_000;
+    expect(throttle.accept(line('13.49.290.696'))).toEqual([
+      '[llama-server] suppressed 2 duplicate prompt-progress log lines with no token/progress change',
+      line('13.49.290.696'),
+    ]);
+
+    // A changed token/progress state is real activity and never waits for the
+    // throttle interval.
+    expect(throttle.accept(line('13.49.300.000', 4096, '0.50'))).toEqual([
+      line('13.49.300.000', 4096, '0.50'),
+    ]);
+  });
+
+  it('flushes the duplicate count before a non-progress diagnostic', () => {
+    const throttle = new LlamaProgressLogThrottle(5_000, () => 1_000);
+    const progress =
+      '[llama-server] 1.0 I slot print_timing: id 0 | task 7 | prompt processing, n_tokens = 2048, progress = 3.02';
+    expect(throttle.accept(progress)).toEqual([progress]);
+    expect(throttle.accept(progress)).toEqual([]);
+
+    expect(throttle.accept('[llama-server] CUDA error: out of memory')).toEqual([
+      '[llama-server] suppressed 1 duplicate prompt-progress log lines with no token/progress change',
+      '[llama-server] CUDA error: out of memory',
+    ]);
+  });
+
   it('persists a redacted structured crash without the stdout tail', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gezel-llama-log-'));
     dirs.push(dir);

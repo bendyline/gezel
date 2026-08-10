@@ -1,14 +1,22 @@
 import { type GateCheck, type Task, completionGate } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { isBinaryDocumentDeliverablePath } from '../handoff.ts';
-import { evaluateMockExpectations, mockMcpToolsetId } from '../mock/mock-server.ts';
+import {
+  evaluateMockExpectations,
+  mockMcpToolsetId,
+  mockMcpUsesSystemSeed,
+} from '../mock/mock-server.ts';
 import {
   type MissingDeliverableNearMiss,
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
-import { evaluateCraftbookGateChecks, isEvalOnlyCheck } from './gates.ts';
+import {
+  type CraftbookEvalWorkspace,
+  evaluateCraftbookGateChecks,
+  isEvalOnlyCheck,
+} from './gates.ts';
 import { findProjectIdByName as findProjectId, workspaceFromClient } from './shared.ts';
 import type {
   CraftbookEvalDeliverable,
@@ -21,9 +29,37 @@ const WORKSPACE_EVAL_TOOLSET_IDS = [
   'builtin.workspace-fs-write',
 ] as const;
 
+const CRAFTBOOK_TASK_EVAL_TOOLSET_IDS = ['builtin.artifacts', 'builtin.tasks'] as const;
+
 function workspaceFixturePaths(spec: CraftbookEvalSpec): string[] {
   return (spec.setup?.files ?? [])
-    .filter((file) => file.surface !== 'artifact')
+    .filter((file) => file.surface === undefined || file.surface === 'workspace')
+    .map((file) => file.path);
+}
+
+/**
+ * Harness-only fixtures still get seeded and remain available to browsers or
+ * graders, but never appear in project context, kickoff reads, or source-read
+ * enforcement. Executable grader scripts are implicitly harness-only; other
+ * black-box fixtures opt out explicitly with `modelInput: false`.
+ */
+function sourceWorkspaceFixturePaths(spec: CraftbookEvalSpec): string[] {
+  const checks: CraftbookEvalGateCheck[] = [
+    ...(spec.success.checks ?? []),
+    ...(spec.success.deliverables ?? []).flatMap((deliverable) => deliverable.checks ?? []),
+    ...(spec.success.taskNotes?.checks ?? []),
+    ...(spec.success.taskGraph?.checks ?? []),
+  ];
+  const graderScripts = new Set(
+    checks.filter((check) => check.kind === 'nodeScriptPasses').map((check) => check.script),
+  );
+  return (spec.setup?.files ?? [])
+    .filter(
+      (file) =>
+        (file.surface === undefined || file.surface === 'workspace') &&
+        file.modelInput !== false &&
+        !graderScripts.has(file.path),
+    )
     .map((file) => file.path);
 }
 
@@ -99,7 +135,7 @@ interface ChatSessionLike {
 }
 
 function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
-  const seededPaths = workspaceFixturePaths(spec);
+  const seededPaths = sourceWorkspaceFixturePaths(spec);
   const outputs = deliverablePaths(spec);
   const lines = [
     '### Eval harness rules',
@@ -137,7 +173,7 @@ function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
 }
 
 function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
-  const seededPaths = workspaceFixturePaths(spec);
+  const seededPaths = sourceWorkspaceFixturePaths(spec);
   const splitOutputs = splitDeliverablePaths(spec);
   const readCalls = seededPaths.map((path) => `read_file({ path: "${path}" })`);
   const harnessLines = [
@@ -160,7 +196,7 @@ function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
 }
 
 function craftbookMissingDeliverableRepairDirective(spec: CraftbookEvalSpec): string {
-  const seededPaths = workspaceFixturePaths(spec);
+  const seededPaths = sourceWorkspaceFixturePaths(spec);
   const outputs = splitDeliverablePaths(spec);
   const lines = [
     '[craftbook eval repair]',
@@ -228,7 +264,7 @@ async function missingSeededReads(
   projectId: string,
   spec: CraftbookEvalSpec,
 ): Promise<string[]> {
-  const seededPaths = workspaceFixturePaths(spec);
+  const seededPaths = sourceWorkspaceFixturePaths(spec);
   if (seededPaths.length === 0) return [];
   const maybeClient = client as unknown as {
     listChatSessions?: (filter?: { projectId?: string }) => Promise<{
@@ -277,6 +313,9 @@ async function writeFixtureFiles(
     // Fixture text may reference {{mock:*}} placeholders (ports are
     // per-trial); substitute when the live runtime is present.
     const content = ctx.mocks ? ctx.mocks.substitute(file.content) : file.content;
+    if (file.surface === 'harness') {
+      continue;
+    }
     if (file.surface === 'artifact') {
       await ctx.client.writeProjectArtifact(projectId, file.path, content);
     } else {
@@ -345,6 +384,12 @@ async function installMockMcpToolsets(
   for (const mock of spec.mocks ?? []) {
     if (mock.kind !== 'mcp') continue;
     const toolsetId = mockMcpToolsetId(mock.id, mock.toolsetId);
+    if (mockMcpUsesSystemSeed(mock.id, mock.toolsetId)) {
+      ctx.log(
+        `[craftbook:${spec.craftbookId}] using pre-seeded system mock ${toolsetId} for ${projectId}`,
+      );
+      continue;
+    }
     await ctx.client.installToolset(toolsetId, {
       scope: { kind: 'project', projectId },
     });
@@ -353,7 +398,17 @@ async function installMockMcpToolsets(
 }
 
 async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<string | null> {
-  const worker = spec.setup?.worker;
+  const worker =
+    spec.setup?.worker ??
+    (spec.runAsCraftbookTask
+      ? {
+          name: 'Craftbook Runner',
+          role: 'Workflow Operator',
+          description: 'Executes the assigned craftbook task end to end.',
+          about:
+            'Follow the assigned craftbook task through its real steps and gates. Use task notes for phase handoffs, advance only after satisfying the active gate, and continue until a terminal step is active or the task is complete.',
+        }
+      : undefined);
   if (!worker) return null;
 
   try {
@@ -397,13 +452,17 @@ async function dispatchCraftbookTask(
   projectId: string,
   workerId: string,
 ): Promise<void> {
+  const craftbookParams: Record<string, string> = {
+    ...(spec.setup?.craftbookParams ?? {}),
+  };
+  if (spec.success.deliverables?.[0]?.path && craftbookParams.outputPath === undefined) {
+    craftbookParams.outputPath = spec.success.deliverables[0].path;
+  }
   const task = await ctx.client.createTask(projectId, {
     title: spec.title,
     description: craftbookTaskDescription(spec),
     craftbookId: spec.craftbookId,
-    ...(spec.success.deliverables?.[0]?.path
-      ? { craftbookParams: { outputPath: spec.success.deliverables[0].path } }
-      : {}),
+    ...(Object.keys(craftbookParams).length > 0 ? { craftbookParams } : {}),
     assignee: { kind: 'gezel', gezelId: workerId },
     dispatchEntry: true,
   });
@@ -417,6 +476,17 @@ async function ensureWorkspaceToolsetsForWorker(
   workerId: string,
 ): Promise<void> {
   for (const id of WORKSPACE_EVAL_TOOLSET_IDS) {
+    await client.installToolset(id, {
+      scope: { kind: 'gezel', gezelId: workerId },
+    });
+  }
+}
+
+async function ensureCraftbookTaskToolsetsForWorker(
+  client: GezelClient,
+  workerId: string,
+): Promise<void> {
+  for (const id of CRAFTBOOK_TASK_EVAL_TOOLSET_IDS) {
     await client.installToolset(id, {
       scope: { kind: 'gezel', gezelId: workerId },
     });
@@ -572,6 +642,18 @@ async function taskGraphTextForSpec(
       `no task sourced from craftbook ${spec.craftbookId}; saw ${listed.tasks.length} task(s)`,
     );
   }
+  if (spec.success.taskGraph?.requireTerminalStep && matching.length > 0) {
+    const reachedTerminal = matching.some((task) => {
+      if (task.status === 'complete') return true;
+      const active = task.craftbook.steps.find((step) => step.id === task.activeStepId);
+      return active?.terminal === true;
+    });
+    if (!reachedTerminal) {
+      failures.push(
+        `task sourced from craftbook ${spec.craftbookId} has not reached a terminal step`,
+      );
+    }
+  }
 
   const authoringTask = matching[0];
   let draftTask: Task | null = null;
@@ -704,6 +786,76 @@ function successChecksForSpec(spec: CraftbookEvalSpec) {
     checks.push(...(spec.success.taskGraph.checks ?? []));
   }
   return checks;
+}
+
+export async function evaluateHistoryExpectations(
+  client: GezelClient,
+  projectId: string,
+  expectations: NonNullable<CraftbookEvalSpec['success']['history']>,
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const expectation of expectations) {
+    const { entries } = await client.listHistory({
+      projectId,
+      kind: expectation.kind,
+      limit: 1_000,
+    });
+    const matching = entries.filter((entry) => {
+      if (entry.entryType !== 'event' || entry.kind !== expectation.kind) return false;
+      if (expectation.summaryPattern) {
+        let pattern: RegExp;
+        try {
+          pattern = new RegExp(expectation.summaryPattern, expectation.flags);
+        } catch {
+          return false;
+        }
+        if (!pattern.test(entry.summary)) return false;
+      }
+      return Object.entries(expectation.details ?? {}).every(
+        ([key, value]) => entry.details?.[key] === value,
+      );
+    });
+    const required = expectation.minEntries ?? 1;
+    if (matching.length < required) {
+      const detailText = Object.entries(expectation.details ?? {})
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+        .join(', ');
+      failures.push(
+        `history ${expectation.kind} matched ${matching.length}/${required}${detailText ? ` (${detailText})` : ''}`,
+      );
+    }
+    if (expectation.maxEntries !== undefined && matching.length > expectation.maxEntries) {
+      failures.push(
+        `history ${expectation.kind} matched ${matching.length}; expected at most ${expectation.maxEntries}`,
+      );
+    }
+  }
+  return failures;
+}
+
+async function evaluateUnchangedFixtures(
+  workspace: CraftbookEvalWorkspace,
+  spec: CraftbookEvalSpec,
+  substitute: (value: string) => string,
+): Promise<string[]> {
+  const failures: string[] = [];
+  const fixtures = new Map(
+    (spec.setup?.files ?? [])
+      .filter((file) => file.surface === undefined || file.surface === 'workspace')
+      .map((file) => [file.path, substitute(file.content)]),
+  );
+  for (const path of spec.success.unchangedFixtures ?? []) {
+    const expected = fixtures.get(path);
+    const actual = await workspace.read(path);
+    if (expected === undefined) {
+      failures.push(`unchanged fixture ${path} is not defined in setup.files`);
+    } else if (actual === null) {
+      failures.push(`unchanged fixture ${path} was deleted`);
+    } else if (actual !== expected) {
+      failures.push(`unchanged fixture ${path} differs from its seeded content`);
+    }
+  }
+  return failures;
 }
 
 function failureMentionsPath(failure: string, path: string): boolean {
@@ -1145,19 +1297,30 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     // and the trial runs unwinnable-by-design while the failure books as
     // "model" (wild-caught: page-spread, tileset-batch, 2026-07-24 matrix).
     ...(directWorkerNeedsImageToolset(spec) ? { defaultImageModelId: 'sdxl-lightning-4step' } : {}),
-    skipInitialPrompt: !!spec.setup?.worker,
+    skipInitialPrompt: !!spec.setup?.worker || !!spec.runAsCraftbookTask,
     async setup(ctx) {
       const projectId = await ensureProject(ctx, spec);
       if (projectId) await writeFixtureFiles(ctx, projectId, spec);
       if (projectId && ctx.mocks) await setupMockServices(ctx, projectId, spec);
       if (projectId && ctx.mocks) await installMockMcpToolsets(ctx, spec, projectId);
-      if (projectId && spec.setup?.worker) {
+      if (projectId && (spec.setup?.worker || spec.runAsCraftbookTask)) {
         const workerId = await ensureWorker(ctx, spec);
         if (!workerId) return;
         if (directWorkerNeedsWorkspaceToolsets(spec)) {
           await ensureWorkspaceToolsetsForWorker(ctx.client, workerId);
           ctx.log(
             `[craftbook:${spec.craftbookId}] installed workspace eval toolsets for ${workerId}`,
+          );
+        }
+        // Installing any per-gezel builtin group creates an explicit group
+        // override, so a worker outfitted with workspace tools no longer
+        // inherits its role's tasks/artifacts groups. A real craftbook task
+        // needs both surfaces: task notes/advancement plus intermediate
+        // artifact handoffs between specialist phases.
+        if (spec.runAsCraftbookTask) {
+          await ensureCraftbookTaskToolsetsForWorker(ctx.client, workerId);
+          ctx.log(
+            `[craftbook:${spec.craftbookId}] installed task + artifact eval toolsets for ${workerId}`,
           );
         }
         // A cli-shim mock is USED via `run_script` — that tool lives in
@@ -1205,7 +1368,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
               : {}),
           });
           ctx.log(
-            `[craftbook:${spec.craftbookId}] sent kickoff to ${spec.setup.worker.name} in project ${projectId}`,
+            `[craftbook:${spec.craftbookId}] sent kickoff to ${spec.setup?.worker?.name ?? 'Craftbook Runner'} in project ${projectId}`,
           );
         }
       }
@@ -1233,17 +1396,25 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           }
         | undefined;
       let gateWorkspace = workspace;
-      if (spec.success.taskNotes || spec.success.taskGraph) {
-        const virtualFiles = new Map<string, string>();
-        if (spec.success.taskNotes) {
-          taskNotes = await taskNotesTextForSpec(ctx.client, projectId, spec);
-          virtualFiles.set('task-notes.md', taskNotes.text);
-        }
-        if (spec.success.taskGraph) {
-          taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec);
-          virtualFiles.set('task-graph.md', taskGraph.text);
-        }
+      const virtualFiles = new Map<string, string>(
+        (spec.setup?.files ?? [])
+          .filter((file) => file.surface === 'harness')
+          .map((file) => [
+            file.path,
+            ctx.mocks ? ctx.mocks.substitute(file.content) : file.content,
+          ]),
+      );
+      if (spec.success.taskNotes) {
+        taskNotes = await taskNotesTextForSpec(ctx.client, projectId, spec);
+        virtualFiles.set('task-notes.md', taskNotes.text);
+      }
+      if (spec.success.taskGraph) {
+        taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec);
+        virtualFiles.set('task-graph.md', taskGraph.text);
+      }
+      if (virtualFiles.size > 0) {
         gateWorkspace = {
+          ...workspace,
           async read(file: string): Promise<string | null> {
             if (virtualFiles.has(file)) return virtualFiles.get(file) ?? '';
             return workspace.read(file);
@@ -1267,6 +1438,18 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       if (spec.success.mocks && spec.success.mocks.length > 0 && ctx.mocks) {
         failures.push(...evaluateMockExpectations(spec.success.mocks, ctx.mocks));
       }
+      if (spec.success.history && spec.success.history.length > 0) {
+        failures.push(
+          ...(await evaluateHistoryExpectations(ctx.client, projectId, spec.success.history)),
+        );
+      }
+      failures.push(
+        ...(await evaluateUnchangedFixtures(
+          workspace,
+          spec,
+          ctx.mocks ? (value) => ctx.mocks!.substitute(value) : (value) => value,
+        )),
+      );
       const unreadSeededPaths = await missingSeededReads(ctx.client, projectId, spec);
       if (unreadSeededPaths.length > 0) {
         failures.unshift(
@@ -1274,7 +1457,19 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         );
       }
       const repairFailures = prioritizeRepairFailures(failures);
-      const passed = Math.max(0, checks.length - failures.length);
+      const taskGraphRequirementCount =
+        Number(spec.success.taskGraph?.requireCraftbookTask === true) +
+        Number(spec.success.taskGraph?.requireTerminalStep === true) +
+        Number(spec.success.taskGraph?.requireDraftRef === true) +
+        Object.values(spec.success.taskGraph?.draft ?? {}).filter((value) => value !== undefined)
+          .length;
+      const checkCount =
+        checks.length +
+        (spec.success.history?.length ?? 0) +
+        (spec.success.unchangedFixtures?.length ?? 0) +
+        Number(spec.success.taskNotes?.requireCraftbookTask === true) +
+        taskGraphRequirementCount;
+      const passed = Math.max(0, checkCount - failures.length);
       const sniffBytes =
         primaryDeliverable !== undefined
           ? (primaryText?.length ?? 0)
@@ -1287,7 +1482,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       });
       ctx.logChanged(
         `craftbook:${spec.scenarioId}`,
-        `[scenario] ${spec.scenarioId} bytes=${sniffBytes} checks=${passed}/${checks.length} failures=${failures.join(' | ') || 'none'}`,
+        `[scenario] ${spec.scenarioId} bytes=${sniffBytes} checks=${passed}/${checkCount} failures=${failures.join(' | ') || 'none'}`,
       );
 
       if (failures.length === 0) {
@@ -1295,7 +1490,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         return {
           done: true,
           success: true,
-          reason: `${spec.scenarioId} passed ${checks.length} deterministic craftbook checks`,
+          reason: `${spec.scenarioId} passed ${checkCount} deterministic craftbook checks`,
         };
       }
 

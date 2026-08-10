@@ -96,7 +96,7 @@ export interface DaemonActivityCounters {
    * (write_file / write_artifact / replace_in_file / append_to_file /
    * insert_at_marker / copy_artifact_to_workspace). Distinct from the
    * total `toolCalls`, which is dominated by read-only research
-   * (read_file / list_dir / search_files). The retry-loop FAST path
+   * (read_file / list_dir / grep_files, including legacy search_files calls). The retry-loop FAST path
    * ("stubborn rewriter") must gate on THIS, not the total: a team
    * holding the sniff key while emitting 19 read_file calls is
    * researching toward its next write, not re-emitting the same

@@ -32,6 +32,12 @@ import {
   validateGlobals,
 } from '../connection.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
+import {
+  formatNativeList,
+  formatNativeStatus,
+  installNativeToolkit,
+  parseNativeVariant,
+} from '../native-command.js';
 
 const program = new Command();
 program
@@ -826,6 +832,40 @@ program
     console.error(
       `  voice=${m.voice} model=${m.model} ${m.durationSeconds.toFixed(1)}s @ ${m.sampleRate}Hz`,
     );
+  });
+
+// ── Native engine binaries ──────────────────────────────────────────
+const native = program.command('native').description('Manage native engine binaries');
+
+native
+  .command('install')
+  .description('Download, verify, and activate the native inference toolkit')
+  .option('--variant <backend>', 'llama.cpp backend: cuda | vulkan | metal | cpu')
+  .action(async (opts: { variant?: string }) => {
+    // Validate before connecting so a typo never starts a daemon.
+    const variant = parseNativeVariant(opts.variant);
+    const client = await connectOwned(cliGlobals());
+    const installed = await installNativeToolkit(client, {
+      ...(variant ? { variant } : {}),
+      output: { writeProgress: (text) => process.stderr.write(text) },
+    });
+    console.log(`native toolkit ready\n${formatNativeStatus(installed)}`);
+  });
+
+native
+  .command('list')
+  .description('List native executables and their install state')
+  .action(async () => {
+    const client = await connectOwned(cliGlobals());
+    console.log(formatNativeList(await client.getNativeEngineStatus()));
+  });
+
+native
+  .command('status')
+  .description('Show native release, platform, backend, and toolkit status')
+  .action(async () => {
+    const client = await connectOwned(cliGlobals());
+    console.log(formatNativeStatus(await client.getNativeEngineStatus()));
   });
 
 // ── Image model management (pull/list for the create-image engine) ──

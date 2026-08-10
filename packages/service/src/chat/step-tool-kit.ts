@@ -39,6 +39,7 @@ export const RESEARCH_STEP_TOOLS: readonly string[] = [
 /** Read/inspect/write/edit — the core of every file-producing step. */
 const FILE_CORE: readonly string[] = [
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -83,7 +84,7 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
       case 'citationsResolve':
       case 'valueGrounding':
       case 'unsupportedClaims':
-        out.add('search_files');
+        out.add('grep_files');
         out.add('find_files');
         break;
       case 'researchEvidence':
@@ -173,10 +174,24 @@ export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySe
 export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly string[] {
   if (!kind) return [];
   if (kind === 'data-file' || kind === 'json') {
-    return ['derive_file', 'run_nodejs_script', 'read_file', 'write_file', 'validate'];
+    return [
+      'derive_file',
+      'run_nodejs_script',
+      'read_file',
+      'read_files',
+      'write_file',
+      'validate',
+    ];
   }
   if (kind === 'code-module' || kind === 'code-with-tests') {
-    return ['read_file', 'write_file', 'replace_in_file', 'run_nodejs_script', 'validate'];
+    return [
+      'read_file',
+      'read_files',
+      'write_file',
+      'replace_in_file',
+      'run_nodejs_script',
+      'validate',
+    ];
   }
   if (kind === 'image-set') {
     return ['generate_image', 'render_image', 'list_dir', 'write_file'];
@@ -185,6 +200,7 @@ export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly
     'write_file',
     'write_artifact',
     'read_file',
+    'read_files',
     'append_to_file',
     'replace_in_file',
     'validate',

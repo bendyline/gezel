@@ -676,6 +676,7 @@ export function ChatComposer({
                 success: event.success,
                 ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
                 ...(event.path ? { path: event.path } : {}),
+                ...(event.paths && event.paths.length > 0 ? { paths: event.paths } : {}),
                 ...(event.argsSummary ? { argsSummary: event.argsSummary } : {}),
                 ...(event.argsFull ? { argsFull: event.argsFull } : {}),
                 ...(event.resultText ? { resultText: event.resultText } : {}),

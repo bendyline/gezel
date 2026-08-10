@@ -3006,7 +3006,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // tool result makes the success unambiguous; the STOP
             // instruction is the closing emphasis, not the framing.
             projectMacroInterceptCount++;
-            output = `✓ The project was successfully created on your earlier \`${startedProjectOrJobThisTurn.tool}\` call this turn — kickoff is complete and the lead is on it.\n\nOriginal result:\n${startedProjectOrJobThisTurn.firstResult}\n\nSTOP — do NOT emit any more tool calls this turn. Each \`start_project\` / \`start_job\` call creates a real project, lead, and kickoff task; repeating the macro would create duplicates. END YOUR TURN NOW with a one-sentence summary to the user (e.g. "Project is on it — the voorman is leading"). The lead handles the work from here.`;
+            output = `✓ The project was successfully created on your earlier \`${startedProjectOrJobThisTurn.tool}\` call this turn — kickoff is complete and the lead is on it.\n\nOriginal result:\n${startedProjectOrJobThisTurn.firstResult}\n\nSTOP — do NOT emit any more tool calls this turn. Each project-start call creates a real project, lead, and kickoff task; repeating the macro would create duplicates. END YOUR TURN NOW with a one-sentence summary to the user (e.g. "Project is on it — the voorman is leading"). The lead handles the work from here.`;
             if (projectMacroInterceptCount >= PROJECT_MACRO_INTERCEPT_CAP) {
               forceProjectMacroBail = {
                 closingText: deriveProjectMacroClosing(startedProjectOrJobThisTurn.firstResult),

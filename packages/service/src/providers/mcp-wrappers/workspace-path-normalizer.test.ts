@@ -43,6 +43,42 @@ describe('WorkspacePathNormalizer', () => {
     });
   });
 
+  it('normalizes every nested path in a read_files batch', async () => {
+    const args = {
+      files: [
+        { path: 'workspace/src/a.ts', startLine: 10, endLine: 20 },
+        { path: 'src/workspace/b.ts' },
+        { path: 'workspace/README.md' },
+      ],
+    };
+
+    await expect(
+      WorkspacePathNormalizer.preProcess!('read_files', args, {} as never),
+    ).resolves.toEqual({
+      kind: 'allow',
+      args: {
+        files: [
+          { path: 'src/a.ts', startLine: 10, endLine: 20 },
+          { path: 'src/workspace/b.ts' },
+          { path: 'README.md' },
+        ],
+      },
+    });
+    expect(args.files[0]?.path).toBe('workspace/src/a.ts');
+  });
+
+  it('normalizes the simple paths form of a read_files batch', async () => {
+    const args = { paths: ['workspace/src/a.ts', 'src/workspace/b.ts', './workspace/README.md'] };
+
+    await expect(
+      WorkspacePathNormalizer.preProcess!('read_files', args, {} as never),
+    ).resolves.toEqual({
+      kind: 'allow',
+      args: { paths: ['src/a.ts', 'src/workspace/b.ts', 'README.md'] },
+    });
+    expect(args.paths[0]).toBe('workspace/src/a.ts');
+  });
+
   it('does not reinterpret artifact validation paths as workspace paths', async () => {
     await expect(
       WorkspacePathNormalizer.preProcess!(

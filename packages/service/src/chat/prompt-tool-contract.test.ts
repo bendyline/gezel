@@ -23,16 +23,92 @@ describe('lintPromptToolContract', () => {
     expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool' }]);
   });
 
-  it('continues to flag directives for compatibility-only tools', () => {
+  it('rejects directives for compatibility-only tools', () => {
     const report = lintPromptToolContract({
       prompt: 'Use `start_job({ name })` for a small build.',
       availableTools: ['start_project'],
     });
 
-    expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool', tool: 'start_job' }]);
+    expect(report.errors).toMatchObject([
+      { rule: 'non-model-facing-tool-name', tool: 'start_job' },
+    ]);
   });
 
-  it('ignores negative and conditional references', () => {
+  it('rejects hidden aliases even when compatibility dispatch still accepts them', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call `run_script({ name: "verify" })` after writing the file.',
+        'Do not call `search_files`; prefer deterministic retrieval.',
+      ].join('\n'),
+      availableTools: ['run_installed_script', 'grep_files'],
+    });
+
+    expect(report.errors).toMatchObject([
+      { rule: 'legacy-tool-name', tool: 'run_script' },
+      { rule: 'legacy-tool-name', tool: 'search_files' },
+    ]);
+  });
+
+  it('rejects explicit unknown tool spellings but ignores argument keys', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call `listAudioVoices` via the UI, then use `synthesize_speech`.',
+        'This tool does not edit the graph; modify steps via add_task_step / advance_task_step / update_task_step.',
+        'Call `read_file({ path, startLine, endLine })` for the returned range.',
+      ].join('\n'),
+      availableTools: ['synthesize_speech', 'add_task_step', 'advance_task_step', 'read_file'],
+    });
+
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'listAudioVoices' }),
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'update_task_step' }),
+      ]),
+    );
+    expect(report.errors.some((finding) => finding.tool === 'startLine')).toBe(false);
+    expect(report.errors.some((finding) => finding.tool === 'endLine')).toBe(false);
+  });
+
+  it('rejects bare imperative unknown and unavailable tool names', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call missing_project_tool now.',
+        'Use another_missing_tool to continue.',
+        'Call write-file now.',
+        'Use draft_email tool now.',
+      ].join('\n'),
+      availableTools: [],
+    });
+
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'missing_project_tool' }),
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'another_missing_tool' }),
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'write-file' }),
+        expect.objectContaining({ rule: 'hard-directive-missing-tool', tool: 'draft_email' }),
+      ]),
+    );
+  });
+
+  it('distinguishes the Bash shell from an explicitly named Bash tool', () => {
+    const ordinary = lintPromptToolContract({
+      prompt: 'The Bash shell is widely installed. Do not use Bash for this workflow.',
+      availableTools: [],
+    });
+    const explicit = lintPromptToolContract({
+      prompt: 'Call Bash now, then invoke the Bash tool again.',
+      availableTools: [],
+    });
+
+    expect(ordinary).toEqual({ errors: [], warnings: [] });
+    expect(explicit.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'Bash' }),
+      ]),
+    );
+  });
+
+  it('ignores negative and conditional references to canonical tools', () => {
     const report = lintPromptToolContract({
       prompt: [
         'Do not call `write_file`; it is not on your tool list.',

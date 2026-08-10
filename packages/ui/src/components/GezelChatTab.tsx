@@ -213,7 +213,7 @@ function GezelChatBody({
   return (
     <ChatReferences
       projectId={project.projectId}
-      commandsProjectId={project.projectId === 'default' ? undefined : project.projectId}
+      skillsProjectId={project.projectId === 'default' ? undefined : project.projectId}
       chatKey={`${project.projectId}:${gezel.id}`}
     >
       {({ onToolActivity, onArtifactReference, onTaskReference }) => (
@@ -298,7 +298,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
   return (
     <ChatReferences
       projectId={composerProjectId}
-      commandsProjectId={composerProjectId === 'default' ? undefined : composerProjectId}
+      skillsProjectId={composerProjectId === 'default' ? undefined : composerProjectId}
       chatKey={`all:${gezel.id}`}
     >
       {({ onToolActivity, onArtifactReference, onTaskReference }) => (

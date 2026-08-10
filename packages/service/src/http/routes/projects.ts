@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ApplyPatchToProjectWorkspaceFileRequestSchema,
@@ -23,6 +24,7 @@ import {
   createLogger,
   getProjectType,
   resolveProjectTypeId,
+  resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
@@ -48,6 +50,10 @@ import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
+import {
+  MANAGED_TOOLSET_IMPORT_HOOK_URL,
+  nodeOptionsWithManagedToolsetImport,
+} from '../../packages/toolset-import-hook.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
@@ -948,12 +954,30 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   // paths (or `mode: 'test'`) run through Playwright's test runner;
   // anything else runs as a bare script via `node --experimental-strip-types`.
   // Both paths execute with cwd = the installed @playwright/mcp package
-  // directory so Playwright's imports resolve from there — the gezel
+  // directory and register a loader hook so Node resolves Playwright imports
+  // from that managed toolset rather than from the artifact file's directory.
+  // Test mode propagates the hook to workers through NODE_OPTIONS. The
   // system-toolset bootstrap is a hard prereq.
   app.post('/:id/run-playwright', async (c) => {
     const id = c.req.param('id');
     const body = (await c.req.json()) as { path: string; mode?: 'test' | 'script' };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
+
+    // Defense in depth: hiding the MCP tool is not a sufficient execution
+    // boundary. A stale session or direct API caller can still reach this
+    // route, and a Playwright script is arbitrary user-authored Node code.
+    const securityPolicy = resolveSecurityPolicy(await ctx.store.readConfig());
+    if (!securityPolicy.allowScriptExecution) {
+      return c.json(
+        {
+          ok: false,
+          log: '',
+          error:
+            'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to run Playwright scripts.',
+        },
+        403,
+      );
+    }
 
     // Anticipated business-logic failures below return HTTP 200 with
     // `{ok: false, error, log}` so the MCP tool layer can surface the
@@ -1068,56 +1092,79 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const isTest =
       body.mode === 'test' || /\.(spec|test)\.(mts|mjs|ts|js|cjs|cts)$/.test(scriptRel);
-    const args = isTest
-      ? [
+    let testConfigDir: string | undefined;
+    try {
+      let args: string[];
+      if (isTest) {
+        // Playwright only discovers tests under its configured testDir. The
+        // artifact lives outside the managed toolset cwd, so passing its
+        // absolute path as a positional filter produces "No tests found".
+        // Point a one-shot config at the artifact directory and match only
+        // the requested file; leave the user's artifacts untouched.
+        testConfigDir = await mkdtemp(join(tmpdir(), 'gezel-playwright-test-'));
+        const configPath = join(testConfigDir, 'playwright.config.mjs');
+        await writeFileAtomic(configPath, playwrightTestConfigSource(scriptAbs));
+        args = [
           PNPM_HOISTED_NODE_LINKER,
           '--dir',
           playwright.installPath,
           'exec',
           'playwright',
           'test',
-          scriptAbs,
-        ]
-      : [
+          '--config',
+          configPath,
+        ];
+      } else {
+        args = [
           PNPM_HOISTED_NODE_LINKER,
           '--dir',
           playwright.installPath,
           'exec',
           'node',
           '--experimental-strip-types',
+          '--import',
+          MANAGED_TOOLSET_IMPORT_HOOK_URL,
           scriptAbs,
         ];
-    const pnpm = resolvePnpmCommand(args);
+      }
+      const pnpm = resolvePnpmCommand(args);
 
-    const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
-      (resolve) => {
-        const child = spawnPnpm(pnpm, {
-          cwd: playwright.installPath,
-          env: {
-            ...process.env,
-            PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        let log = '';
-        const cap = (chunk: Buffer) => {
-          log += chunk.toString('utf8');
-          if (log.length > 200_000) log = log.slice(-200_000); // cap to 200KB
-        };
-        child.stdout?.on('data', cap);
-        child.stderr?.on('data', cap);
-        child.on('error', (err) =>
-          resolve({ ok: false, code: null, log: `${log}\n${err.message}` }),
-        );
-        child.on('close', (code) => resolve({ ok: code === 0, code, log }));
-      },
-    );
+      const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
+        (resolve) => {
+          const child = spawnPnpm(pnpm, {
+            cwd: playwright.installPath,
+            env: {
+              ...process.env,
+              GEZEL_MANAGED_TOOLSET_ROOT: playwright.installPath,
+              PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
+              ...(isTest
+                ? { NODE_OPTIONS: nodeOptionsWithManagedToolsetImport(process.env.NODE_OPTIONS) }
+                : {}),
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let log = '';
+          const cap = (chunk: Buffer) => {
+            log += chunk.toString('utf8');
+            if (log.length > 200_000) log = log.slice(-200_000); // cap to 200KB
+          };
+          child.stdout?.on('data', cap);
+          child.stderr?.on('data', cap);
+          child.on('error', (err) =>
+            resolve({ ok: false, code: null, log: `${log}\n${err.message}` }),
+          );
+          child.on('close', (code) => resolve({ ok: code === 0, code, log }));
+        },
+      );
 
-    return c.json({
-      ok: result.ok,
-      log: result.log,
-      ...(result.ok ? {} : { error: `exit code ${result.code}` }),
-    });
+      return c.json({
+        ok: result.ok,
+        log: result.log,
+        ...(result.ok ? {} : { error: `exit code ${result.code}` }),
+      });
+    } finally {
+      if (testConfigDir) await rm(testConfigDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   // ── workspace (read-only, external or internal) ──
@@ -2121,6 +2168,22 @@ function formatPlaywrightNotReadyError(
     default:
       return `${base} ${guidance}`;
   }
+}
+
+/** A one-file Playwright config for a spec stored outside the toolset cwd. */
+function playwrightTestConfigSource(scriptAbs: string): string {
+  // Playwright retries RegExp matchers with slash-normalized paths on
+  // Windows. Normalize our exact path up front so the same expression works
+  // on both passes/platforms without turning a basename into a broad glob.
+  const normalizedPath = scriptAbs.replaceAll('\\', '/');
+  const exactPath = `^${normalizedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
+  return [
+    'export default {',
+    `  testDir: ${JSON.stringify(dirname(scriptAbs))},`,
+    `  testMatch: new RegExp(${JSON.stringify(exactPath)}),`,
+    '};',
+    '',
+  ].join('\n');
 }
 
 async function serveRawFile(c: import('hono').Context, base: string, filePath: string) {

@@ -68,6 +68,37 @@ describe('buildInstructions coordinator routing', () => {
       'Manage projects and tasks with the tools actually wired this turn (none wired)',
     );
   });
+
+  it('uses the advertised grep spelling in retrieval-first guidance', () => {
+    const prompt = buildInstructions({
+      name: 'Tomas',
+      role: 'Meester',
+      about: 'Route work to the right specialist.',
+      executionDensity: 'flat',
+      project: { id: 'default', name: 'Default' } as ProjectDetail,
+      workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+      retrievalFirstHint: true,
+      availableTools: [{ name: 'grep_files', description: 'grep workspace files' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(prompt).toContain('call `grep_files` — do not read files one by one');
+  });
+
+  it('emits search_files in the legacy naming A/B arm while resolving it canonically', () => {
+    const prompt = buildInstructions({
+      name: 'Tomas',
+      role: 'Meester',
+      about: 'Route work to the right specialist.',
+      executionDensity: 'flat',
+      project: { id: 'default', name: 'Default' } as ProjectDetail,
+      workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+      retrievalFirstHint: true,
+      availableTools: [{ name: 'search_files', description: 'search workspace files' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(prompt).toContain('call `search_files` — do not read files one by one');
+    expect(prompt).not.toContain('call `grep_files` — do not read files one by one');
+  });
 });
 
 describe('buildInstructions never advertises a tool the role lacks', () => {
@@ -161,6 +192,30 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(none).not.toContain('`message_gezel`');
     expect(none).not.toContain('`create_task`');
     expect(none).not.toContain('`assign_task`');
+  });
+
+  it('teaches ranged and batched reads only when those tools are wired', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const render = (names: string[]) =>
+      buildInstructions({
+        name: 'Ada',
+        role: 'Developer',
+        about: 'Work on the project.',
+        project,
+        executionDensity: 'flat',
+        workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+        availableTools: names.map((name) => ({ name, description: `${name} tool` })),
+      } as unknown as BuildInstructionsOptions).full;
+
+    const full = render(['read_file', 'read_files', 'grep_files', 'write_file']);
+    expect(full).toContain('use `read_file` with `{ path, startLine, endLine }`');
+    expect(full).toContain('and `read_files` for several independent known paths/ranges');
+    expect(full).toContain('use `grep_files` first when the location is unknown');
+
+    const singular = render(['read_file', 'write_file']);
+    expect(singular).toContain('use `read_file` with `{ path, startLine, endLine }`');
+    expect(singular).not.toContain('and `read_files` for several independent known paths/ranges');
+    expect(singular).not.toContain('use `grep_files` first when the location is unknown');
   });
 
   it('does not advertise unavailable shared-document tools', () => {

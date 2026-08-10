@@ -145,11 +145,14 @@ Catalog **content** is not in this repo. It lives across three repos:
   pipeline) and the content *authoring* scripts
   (`packages/catalog/scripts/`: `build-manifest`, `generate-craftbooks`,
   `pin-revisions`, `import-mcp-registry`), which stay here because they
-  import unpublished core Zod schemas.
+  import unpublished core Zod schemas. Content-bearing inputs for generated
+  families live in gilde's `authoring/` tree; Gezel keeps only the
+  schema-aware compiler code.
 - **[`bendyline/gilde`](https://github.com/bendyline/gilde)** — the
   content: `data/` (chat/image/video models, toolsets, connector types,
   project types, gezel role templates, craftbooks + `test.json` eval
-  sidecars, and the bot-managed `data/community/` MCP-registry tier).
+  sidecars, and the bot-managed `data/community/` MCP-registry tier), plus
+  `authoring/` source material for generated catalog families.
   Repo root **is** the npm package root of `@bendyline/gilde`, so the
   published package and the checkout are interchangeable. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation

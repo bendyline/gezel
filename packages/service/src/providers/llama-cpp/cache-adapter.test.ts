@@ -284,6 +284,32 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     expect(restoreCall).toBeDefined();
   });
 
+  it('reserves distinct slots when two sessions prepare concurrently', async () => {
+    await writeFile(join(tmp, 'sess-alpha.bin'), 'fake');
+    await writeFile(join(tmp, 'sess-beta.bin'), 'fake');
+    let activeRestores = 0;
+    let maxActiveRestores = 0;
+    const fetchImpl = (async () => {
+      activeRestores++;
+      maxActiveRestores = Math.max(maxActiveRestores, activeRestores);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeRestores--;
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotCount: 2,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+
+    await Promise.all([a.prepareForSend('alpha'), a.prepareForSend('beta')]);
+
+    expect(a.buildRequestExtras('alpha').id_slot).toBe(0);
+    expect(a.buildRequestExtras('beta').id_slot).toBe(1);
+    expect(maxActiveRestores).toBe(1);
+  });
+
   it('on first session save for a gezel, also seeds the prefix-*.bin file', async () => {
     const { fetchImpl } = makeFetchSpy();
     const a = new LlamaCppCacheAdapter({

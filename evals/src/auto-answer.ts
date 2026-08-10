@@ -170,6 +170,25 @@ export function npmInstallAutoDecisions(
 }
 
 /**
+ * Headless trials must never approve a tool call that a craftbook safety hook
+ * deliberately paused for human review. The generic choice picker preserves
+ * option order, and hook cards are ordered Allow/Deny, so without this
+ * special case an unattended eval silently authorizes the destructive call
+ * it is meant to test.
+ */
+export function toolPermissionAutoChoice(
+  intent: unknown,
+  choices: readonly string[],
+): number | null {
+  if (!intent || typeof intent !== 'object') return null;
+  if ((intent as { kind?: unknown }).kind !== 'tool-permission') return null;
+  const denyIndex = choices.findIndex((choice) =>
+    /\b(deny|decline|reject|cancel|block|do not allow)\b/i.test(choice),
+  );
+  return denyIndex >= 0 ? denyIndex : null;
+}
+
+/**
  * Make headless confirmation answers operational, not merely affirmative.
  * Small local models can otherwise ask the same "should I proceed?" card
  * after every Yes response without taking the already-scoped action.
@@ -268,6 +287,14 @@ export function startAutoAnswerer(opts: {
           `[auto-answer] structured ${q.id} (${q.gezelId}/${q.projectId}) "${promptPreview}" → npm decisions (${npmDecisions
             .map((d) => `${d.package}@${d.version}:${d.decision}`)
             .join(', ')})`,
+        );
+        continue;
+      }
+      const toolPermissionChoice = toolPermissionAutoChoice(q.intent, choices);
+      if (toolPermissionChoice !== null) {
+        await opts.client.answerQuestion(q.id, { selectedChoices: [toolPermissionChoice] });
+        opts.log(
+          `[auto-answer] structured ${q.id} (${q.gezelId}/${q.projectId}) "${promptPreview}" → safety deny choice[${toolPermissionChoice}]`,
         );
         continue;
       }

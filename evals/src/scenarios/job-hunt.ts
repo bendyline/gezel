@@ -134,7 +134,7 @@ export const jobHuntScenario: EvalScenario = {
   id: 'job-hunt-track',
   description:
     'Bundled Job Hunt type rails: typed create seeds the crew + pipeline, then the coach must ' +
-    'record a mentioned application through the named store tools (or run_script) so it lands ' +
+    'record a mentioned application through the named store tools (or run_installed_script) so it lands ' +
     'in workspace pipeline.json.',
   prompt: [
     `Heads up: the "${PROJECT_NAME}" project's coach is tracking a new application.`,

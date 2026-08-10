@@ -200,6 +200,7 @@ const KNOWN_PROVIDERS: readonly ProviderName[] = [
   'ollama',
   'llama-cpp',
   'mlx',
+  'ds4',
 ];
 
 /**
