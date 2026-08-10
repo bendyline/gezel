@@ -325,6 +325,226 @@ describe('BundledSource — versioned layout', () => {
   });
 });
 
+describe('BundledSource — minGezelVersion gating', () => {
+  let root: string;
+  // A stamped date-based build (2026 day-200) — floors above/below it
+  // exercise both sides of the gate.
+  const APP = '1.26200.3';
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'catalog-mingezel-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('an identity-level floor above this build hides the item from list, get, and listVersions', async () => {
+    const dir = await writeIdentity(
+      root,
+      'toolset',
+      'ga-tool',
+      baseToolsetIdentity('ga-tool', { minGezelVersion: '1.26290' }),
+    );
+    await writeVersion(dir, '1.0.0', baseToolsetVersion('1.0.0'));
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    expect(await src.list('toolset')).toEqual([]);
+    expect(await src.get('toolset', 'ga-tool')).toBeNull();
+    expect(await src.listVersions('toolset', 'ga-tool')).toEqual([]);
+  });
+
+  it('an identity-level floor at or below this build leaves the item visible and stamps the resolved floor', async () => {
+    const dir = await writeIdentity(
+      root,
+      'toolset',
+      'gb-tool',
+      baseToolsetIdentity('gb-tool', { minGezelVersion: '1.26100' }),
+    );
+    await writeVersion(dir, '1.0.0', baseToolsetVersion('1.0.0'));
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    const items = await src.list('toolset');
+    expect(items.map((i) => i.manifest.id)).toEqual(['gb-tool']);
+    expect(items[0]?.manifest.minGezelVersion).toBe('1.26100');
+  });
+
+  it('a gated newest version falls back to the older eligible version', async () => {
+    const dir = await writeIdentity(root, 'toolset', 'gc-tool', baseToolsetIdentity('gc-tool'));
+    await writeVersion(dir, '1.0.0', baseToolsetVersion('1.0.0'));
+    await writeVersion(dir, '1.1.0', {
+      ...baseToolsetVersion('1.1.0'),
+      minGezelVersion: '1.26290',
+    });
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    const detail = await src.get('toolset', 'gc-tool');
+    expect(detail?.manifest.version).toBe('1.0.0');
+    expect(detail?.manifest.availableVersions).toEqual(['1.0.0']);
+    const versions = await src.listVersions('toolset', 'gc-tool');
+    expect(versions.map((v) => v.version)).toEqual(['1.0.0']);
+  });
+
+  it('an item whose every version is gated drops out of list and get, quietly', async () => {
+    const dir = await writeIdentity(root, 'toolset', 'gd-tool', baseToolsetIdentity('gd-tool'));
+    await writeVersion(dir, '1.0.0', {
+      ...baseToolsetVersion('1.0.0'),
+      minGezelVersion: '1.26290',
+    });
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    expect(await src.list('toolset')).toEqual([]);
+    expect(await src.get('toolset', 'gd-tool')).toBeNull();
+  });
+
+  it('an explicit version pin bypasses the version-level gate (like yanked versions)', async () => {
+    const dir = await writeIdentity(root, 'toolset', 'ge-tool', baseToolsetIdentity('ge-tool'));
+    await writeVersion(dir, '1.1.0', {
+      ...baseToolsetVersion('1.1.0'),
+      minGezelVersion: '1.26290',
+    });
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    const detail = await src.get('toolset', 'ge-tool', '1.1.0');
+    expect(detail?.manifest.version).toBe('1.1.0');
+  });
+
+  it('an unstamped dev build (0.0.0, the default) never filters', async () => {
+    const dir = await writeIdentity(
+      root,
+      'toolset',
+      'gf-tool',
+      baseToolsetIdentity('gf-tool', { minGezelVersion: '1.99999' }),
+    );
+    await writeVersion(dir, '1.0.0', {
+      ...baseToolsetVersion('1.0.0'),
+      minGezelVersion: '1.99999',
+    });
+    const src = new BundledSource({ dataDir: root, noIndex: true });
+    const items = await src.list('toolset');
+    expect(items.map((i) => i.manifest.id)).toEqual(['gf-tool']);
+  });
+
+  it('the resolved manifest carries the effective floor — the stricter of identity and version', async () => {
+    const dir = await writeIdentity(
+      root,
+      'toolset',
+      'gg2-tool',
+      baseToolsetIdentity('gg2-tool', { minGezelVersion: '1.26100' }),
+    );
+    await writeVersion(dir, '1.0.0', {
+      ...baseToolsetVersion('1.0.0'),
+      minGezelVersion: '1.26150',
+    });
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    const detail = await src.get('toolset', 'gg2-tool');
+    expect(detail?.manifest.minGezelVersion).toBe('1.26150');
+  });
+
+  it('the craftbook.json doc path gates and stamps the effective floor too', async () => {
+    const dir = await writeIdentity(root, 'craftbook-template', 'gh-book', {
+      schemaVersion: 1,
+      kind: 'craftbook-template',
+      id: 'gh-book',
+      name: 'gh book',
+      description: 'fixture',
+      role: 'general',
+      tags: [],
+      maintainer: { name: 'Test' },
+      yankedVersions: [],
+    });
+    const writeDoc = async (version: string, floor?: string) => {
+      const vdir = join(dir, 'versions', version);
+      await mkdir(vdir, { recursive: true });
+      await writeFile(
+        join(vdir, 'craftbook.json'),
+        JSON.stringify({
+          id: 'gh-book',
+          name: 'gh book',
+          steps: [{ id: 'go', name: 'Go' }],
+          version,
+          releasedAt: '2026-04-22T00:00:00Z',
+          ...(floor ? { minGezelVersion: floor } : {}),
+        }),
+      );
+    };
+    await writeDoc('1.0.0');
+    await writeDoc('1.1.0', '1.26290');
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: APP });
+    const detail = await src.get('craftbook-template', 'gh-book');
+    expect(detail?.manifest.version).toBe('1.0.0');
+    expect(detail?.manifest.minGezelVersion).toBeUndefined();
+
+    const dev = new BundledSource({ dataDir: root, noIndex: true });
+    const devDetail = await dev.get('craftbook-template', 'gh-book');
+    expect(devDetail?.manifest.version).toBe('1.1.0');
+    expect(devDetail?.manifest.minGezelVersion).toBe('1.26290');
+  });
+
+  it('a gated index entry falls back to disk resolution of an older eligible version', async () => {
+    const dir = await writeIdentity(root, 'toolset', 'gi-tool', baseToolsetIdentity('gi-tool'));
+    await writeVersion(dir, '1.0.0', baseToolsetVersion('1.0.0'));
+    await writeVersion(dir, '1.1.0', {
+      ...baseToolsetVersion('1.1.0'),
+      minGezelVersion: '1.26290',
+    });
+    // The index embeds the newest resolved version (the index builder has
+    // no app-version context) — exactly what a gilde build-index produces.
+    await writeFile(
+      join(root, 'toolsets', 'index.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: 'toolset',
+        count: 2,
+        entries: [
+          {
+            manifest: {
+              schemaVersion: 1,
+              kind: 'toolset',
+              id: 'gi-tool',
+              name: 'gi-tool',
+              description: 'gi-tool fixture',
+              tags: [],
+              maintainer: { name: 'Test' },
+              minGezelVersion: '1.26290',
+              version: '1.1.0',
+              releasedAt: '2026-04-22T00:00:00Z',
+              runtime: { kind: 'http-mcp', url: 'https://example.com/mcp' },
+              tools: [],
+              config: [],
+              availableVersions: ['1.1.0', '1.0.0'],
+            },
+          },
+          {
+            manifest: {
+              schemaVersion: 1,
+              kind: 'toolset',
+              id: 'phantom-gated',
+              name: 'Phantom Gated',
+              description: 'index-only, gated, no disk folder to fall back to',
+              tags: [],
+              maintainer: { name: 'Test' },
+              minGezelVersion: '1.26290',
+              version: '1.0.0',
+              releasedAt: '2026-04-22T00:00:00Z',
+              runtime: { kind: 'http-mcp', url: 'https://example.com/p' },
+              tools: [],
+              config: [],
+              availableVersions: ['1.0.0'],
+            },
+          },
+        ],
+      }),
+    );
+    const src = new BundledSource({ dataDir: root, gezelVersion: APP });
+    const items = await src.list('toolset');
+    // gi-tool re-resolves from disk to 1.0.0; the fully-gated phantom drops.
+    expect(items.map((i) => i.manifest.id)).toEqual(['gi-tool']);
+    expect(items[0]?.manifest.version).toBe('1.0.0');
+
+    // A dev build serves the index entries untouched.
+    const dev = new BundledSource({ dataDir: root });
+    const devItems = await dev.list('toolset');
+    expect(devItems.map((i) => i.manifest.id).sort()).toEqual(['gi-tool', 'phantom-gated']);
+    expect(devItems.find((i) => i.manifest.id === 'gi-tool')?.manifest.version).toBe('1.1.0');
+  });
+});
+
 describe('BundledSource — craftbook template layouts', () => {
   let root: string;
 

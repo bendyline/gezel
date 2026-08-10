@@ -14,6 +14,7 @@ import {
   type CraftbookDoc,
   CraftbookTemplateVersionManifestSchema,
   type CraftbookTestSpec,
+  GEZEL_VERSION,
   GezelTemplateVersionManifestSchema,
   ImageModelVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
@@ -23,8 +24,10 @@ import {
   expandStepDeliverables,
   formatCraftbookDocErrors,
   isSemver,
+  maxMinGezelVersion,
   parseCraftbookDoc,
   parseCraftbookTestSpec,
+  satisfiesMinGezelVersion,
 } from '@bendyline/gezel';
 import { gildeDataDir } from './gilde-data.js';
 
@@ -164,6 +167,13 @@ export interface BundledSourceOptions {
    * back into itself, and by tests that want deterministic disk reads.
    */
   noIndex?: boolean;
+  /**
+   * The running app's version, compared against content `minGezelVersion`
+   * floors. Defaults to `GEZEL_VERSION`; injectable so tests can exercise
+   * gating against a stamped version (`GEZEL_VERSION` is `0.0.0` in dev
+   * checkouts, which bypasses all filtering).
+   */
+  gezelVersion?: string;
 }
 
 export class BundledSource implements CatalogSource {
@@ -171,6 +181,7 @@ export class BundledSource implements CatalogSource {
   readonly label: string;
   private readonly rootProvider: () => string;
   private readonly useIndex: boolean;
+  private readonly gezelVersion: string;
 
   constructor(options: BundledSourceOptions | string = {}) {
     // Back-compat: old positional `root: string` signature.
@@ -185,10 +196,16 @@ export class BundledSource implements CatalogSource {
     this.id = opts.id ?? 'bundled';
     this.label = opts.label ?? 'Bundled';
     this.useIndex = !opts.noIndex;
+    this.gezelVersion = opts.gezelVersion ?? GEZEL_VERSION;
   }
 
   private get root(): string {
     return this.rootProvider();
+  }
+
+  /** True when this build satisfies a content `minGezelVersion` floor. */
+  private floorSatisfied(floor: string | undefined): boolean {
+    return satisfiesMinGezelVersion(floor, this.gezelVersion);
   }
 
   async listKinds(): Promise<CatalogKind[]> {
@@ -237,7 +254,17 @@ export class BundledSource implements CatalogSource {
     for (const raw of obj.entries) {
       const e = raw as { manifest?: unknown; iconSvg?: unknown };
       if (!e.manifest || typeof e.manifest !== 'object') continue;
-      const manifest = e.manifest as CatalogItemManifest;
+      let manifest = e.manifest as CatalogItemManifest;
+      // The index is built without app-version context (gilde's
+      // build-index.mjs always embeds the newest resolved version). When
+      // that version's effective `minGezelVersion` floor is above this
+      // build, re-resolve from disk — an older, floor-free version may
+      // still be eligible — and drop the item when nothing is.
+      if (!this.floorSatisfied(manifest.minGezelVersion)) {
+        const reResolved = await this.loadResolvedManifest(kind, manifest.id);
+        if (!reResolved) continue;
+        manifest = reResolved;
+      }
       // Re-stamp source id + logo URL — the index is source-agnostic so
       // multiple sources can share one on-disk index file with each
       // applying its own routing.
@@ -336,6 +363,7 @@ export class BundledSource implements CatalogSource {
     const out: CatalogItemVersionInfo[] = [];
     for (const v of versions) {
       if (minSupported && safeCompare(v.version, minSupported) < 0) continue;
+      if (!this.floorSatisfied(v.minGezelVersion)) continue;
       out.push({
         version: v.version,
         releasedAt: v.releasedAt,
@@ -488,6 +516,11 @@ export class BundledSource implements CatalogSource {
         );
         return null;
       }
+      // An identity-level floor gates the whole item on older builds.
+      // Silent by design — like tombstoned identities, this is an expected
+      // steady state (content authored ahead of the next app release), not
+      // an error worth spamming every listing with.
+      if (!this.floorSatisfied(parsed.minGezelVersion)) return null;
       return parsed;
     } catch (err) {
       console.warn(`[catalog] invalid identity manifest ${file}:`, err);
@@ -499,7 +532,7 @@ export class BundledSource implements CatalogSource {
   private async discoverVersionFolders(
     kind: CatalogKind,
     id: string,
-  ): Promise<Array<{ version: string; releasedAt: string }>> {
+  ): Promise<Array<{ version: string; releasedAt: string; minGezelVersion?: string }>> {
     const versionsDir = join(this.itemDir(kind, id), 'versions');
     let names: string[];
     try {
@@ -507,7 +540,7 @@ export class BundledSource implements CatalogSource {
     } catch {
       return [];
     }
-    const out: Array<{ version: string; releasedAt: string }> = [];
+    const out: Array<{ version: string; releasedAt: string; minGezelVersion?: string }> = [];
     for (const name of names) {
       if (!isSemver(name)) continue;
       // Craftbook templates carry a single-document `craftbook.json`
@@ -526,7 +559,11 @@ export class BundledSource implements CatalogSource {
           continue;
         }
         try {
-          const json = JSON.parse(raw) as { version?: unknown; releasedAt?: unknown };
+          const json = JSON.parse(raw) as {
+            version?: unknown;
+            releasedAt?: unknown;
+            minGezelVersion?: unknown;
+          };
           const version = typeof json.version === 'string' ? json.version : null;
           const releasedAt = typeof json.releasedAt === 'string' ? json.releasedAt : null;
           if (!version || !releasedAt) continue;
@@ -536,7 +573,13 @@ export class BundledSource implements CatalogSource {
             );
             continue;
           }
-          out.push({ version, releasedAt });
+          out.push({
+            version,
+            releasedAt,
+            ...(typeof json.minGezelVersion === 'string'
+              ? { minGezelVersion: json.minGezelVersion }
+              : {}),
+          });
         } catch {
           continue;
         }
@@ -547,9 +590,12 @@ export class BundledSource implements CatalogSource {
   }
 
   /**
-   * Pick a target version. When `requested` is set, validate it exists.
+   * Pick a target version. When `requested` is set, validate it exists —
+   * an explicit pin deliberately bypasses the yank / `minSupportedVersion`
+   * / `minGezelVersion` filters so installed content keeps resolving.
    * Otherwise resolve the highest non-yanked semver above
-   * `minSupportedVersion`. Returns null when nothing satisfies.
+   * `minSupportedVersion` whose `minGezelVersion` floor this build
+   * satisfies. Returns null when nothing satisfies.
    */
   private async pickVersion(
     kind: CatalogKind,
@@ -559,17 +605,19 @@ export class BundledSource implements CatalogSource {
   ): Promise<string | null> {
     const folders = await this.discoverVersionFolders(kind, id);
     if (folders.length === 0) return null;
-    const all = folders.map((f) => f.version);
     if (requested) {
-      return all.includes(requested) ? requested : null;
+      return folders.some((f) => f.version === requested) ? requested : null;
     }
     const yanked = new Set(identity.yankedVersions);
     const minSupported = identity.minSupportedVersion;
-    const eligible = all.filter((v) => {
-      if (yanked.has(v)) return false;
-      if (minSupported && safeCompare(v, minSupported) < 0) return false;
-      return true;
-    });
+    const eligible = folders
+      .filter((f) => {
+        if (yanked.has(f.version)) return false;
+        if (minSupported && safeCompare(f.version, minSupported) < 0) return false;
+        if (!this.floorSatisfied(f.minGezelVersion)) return false;
+        return true;
+      })
+      .map((f) => f.version);
     if (eligible.length === 0) return null;
     eligible.sort((a, b) => safeCompare(b, a));
     return eligible[0] ?? null;
@@ -597,10 +645,15 @@ export class BundledSource implements CatalogSource {
         // the importer has marked fully deprecated upstream. The
         // directory is preserved so the next importer run unions the
         // yank list forward; warning on it just spams build output.
+        // Likewise for items whose every version carries a
+        // `minGezelVersion` floor above this build — content authored
+        // ahead of the next app release, not an error.
         const folders = await this.discoverVersionFolders(kind, id);
         const yanked = new Set(identity.yankedVersions);
-        const everythingYanked = folders.length > 0 && folders.every((f) => yanked.has(f.version));
-        if (!everythingYanked) {
+        const everythingIneligible =
+          folders.length > 0 &&
+          folders.every((f) => yanked.has(f.version) || !this.floorSatisfied(f.minGezelVersion));
+        if (!everythingIneligible) {
           console.warn(`[catalog] ${kind}/${id}: no eligible versions on disk`);
         }
       }
@@ -611,12 +664,13 @@ export class BundledSource implements CatalogSource {
     const minSupportedVersion = identity.minSupportedVersion;
     const allFolders = await this.discoverVersionFolders(kind, id);
     const availableVersions = allFolders
-      .map((f) => f.version)
-      .filter((v) => {
-        if (yankedSet.has(v)) return false;
-        if (minSupportedVersion && safeCompare(v, minSupportedVersion) < 0) return false;
+      .filter((f) => {
+        if (yankedSet.has(f.version)) return false;
+        if (minSupportedVersion && safeCompare(f.version, minSupportedVersion) < 0) return false;
+        if (!this.floorSatisfied(f.minGezelVersion)) return false;
         return true;
       })
+      .map((f) => f.version)
       .sort((a, b) => safeCompare(b, a));
     // Craftbook templates: the single-document `craftbook.json` payload is
     // canonical (Craftbooks V2). A present-but-invalid document is a hard
@@ -714,6 +768,7 @@ function craftbookManifestFromDoc(
   const steps = expandStepDeliverables(doc.steps);
   const entryStepId = doc.entryStepId ?? steps[0]!.id;
   const scriptNames = Object.keys(doc.scripts ?? {});
+  const minGezelVersion = maxMinGezelVersion(identity.minGezelVersion, doc.minGezelVersion);
   return {
     schemaVersion: 1,
     kind: 'craftbook-template',
@@ -724,6 +779,7 @@ function craftbookManifestFromDoc(
     maintainer: identity.maintainer,
     ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
     ...(identity.license !== undefined ? { license: identity.license } : {}),
+    ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
     version,
     releasedAt: doc.releasedAt,
     role: identity.role,
@@ -818,6 +874,12 @@ function mergeIdentityAndVersion(
   version: AnyVersionPayload,
   availableVersions: string[],
 ): CatalogItemManifest | null {
+  // Effective app-version floor: the stricter of the identity-level and
+  // version-level `minGezelVersion`. Forwarded explicitly in every branch
+  // below — this merge builds resolved manifests from fixed field lists
+  // (see the KV-geometry note in the chat-model branch), so a field left
+  // out of a branch is silently dropped for that kind.
+  const minGezelVersion = maxMinGezelVersion(identity.minGezelVersion, version.minGezelVersion);
   // The identity's discriminator must match the directory's kind, which
   // we already verified upstream; this branch is for type narrowing.
   if (kind === 'toolset' && identity.kind === 'toolset' && version.__kind === 'toolset') {
@@ -831,6 +893,7 @@ function mergeIdentityAndVersion(
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       runtime: version.runtime,
@@ -857,6 +920,7 @@ function mergeIdentityAndVersion(
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       role: identity.role,
@@ -895,6 +959,7 @@ function mergeIdentityAndVersion(
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       ...(version.extends !== undefined ? { extends: version.extends } : {}),
@@ -940,6 +1005,7 @@ function mergeIdentityAndVersion(
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       driver: version.driver,
@@ -968,6 +1034,7 @@ function mergeIdentityAndVersion(
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       role: identity.role,
@@ -1000,6 +1067,7 @@ function mergeIdentityAndVersion(
         : {}),
       ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
       ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       parameterSize: identity.parameterSize,
@@ -1051,6 +1119,7 @@ function mergeIdentityAndVersion(
         : {}),
       ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
       ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       downloadUrl: version.downloadUrl,
@@ -1095,6 +1164,7 @@ function mergeIdentityAndVersion(
         : {}),
       ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
       ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
       version: version.version,
       releasedAt: version.releasedAt,
       family: identity.family,

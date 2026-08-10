@@ -68,8 +68,16 @@ export const BASE_FIELDS = [
  * Manifest-authoritative tuning/behaviour fields, in canonical key order.
  * These are the ones eval runs evolve in place — a rebuild must preserve
  * them, never silently drop or downgrade them to a stale config value.
+ * `minGezelVersion` (an app-version floor authored directly on the
+ * manifest) rides along for the same reason.
  */
-export const EDITORIAL_FIELDS = ['style', 'behaviors', 'tuning', 'evalHints'] as const;
+export const EDITORIAL_FIELDS = [
+  'style',
+  'behaviors',
+  'tuning',
+  'evalHints',
+  'minGezelVersion',
+] as const;
 
 /** Provider blocks, in canonical manifest key order. */
 export const PROVIDER_FIELDS = ['ollama', 'llamaCpp', 'mlx', 'ds4'] as const;

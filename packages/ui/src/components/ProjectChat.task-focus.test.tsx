@@ -229,7 +229,7 @@ describe('ProjectChat task pill focus', () => {
       expect(screen.getByTestId('composer')).toHaveAttribute('data-task', 'p1/4');
     });
 
-    await user.click(screen.getByRole('button', { name: /^Esra: Thread lobby-g1$/ }));
+    await user.click(screen.getByRole('button', { name: /^Esra: Thread lobby-g1\./ }));
     await waitFor(() => {
       const composer = screen.getByTestId('composer');
       expect(composer).toHaveAttribute('data-task', '');

@@ -4,6 +4,7 @@ import {
   type ModelToolNameCorpusEntry,
   extractModelFacingStringCorpus,
   lintModelToolNameEntries,
+  normalizeModelToolCorpusSource,
 } from './model-tool-name-contract.js';
 
 function promptEntry(source: string, text: string, line = 1): ModelToolNameCorpusEntry {
@@ -11,6 +12,16 @@ function promptEntry(source: string, text: string, line = 1): ModelToolNameCorpu
 }
 
 describe('model-facing tool-name contract', () => {
+  it('normalizes Windows corpus paths for source policies and pinned-debt matching', () => {
+    expect(
+      normalizeModelToolCorpusSource(
+        'node_modules\\.pnpm\\@bendyline+gilde@0.1.18\\node_modules\\@bendyline\\gilde\\data\\craftbook-templates\\example.json',
+      ),
+    ).toBe(
+      'node_modules/.pnpm/@bendyline+gilde@0.1.18/node_modules/@bendyline/gilde/data/craftbook-templates/example.json',
+    );
+  });
+
   it('extracts runtime strings while ignoring source comments and identifiers', () => {
     const entries = extractModelFacingStringCorpus({
       source: 'fixture.ts',

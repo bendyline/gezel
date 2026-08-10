@@ -116,7 +116,27 @@ export const RecoMetaShape = {
 // Stable across versions. Changing identity ("the github toolset is now
 // called gh") is a "different thing" signal, not a version bump.
 
+/**
+ * Oldest gezel build that can meaningfully use this content. Authored as
+ * `1.YYDDD` (the date-based app version's major.minor — see
+ * scripts/stamp-version.mjs); an optional third component is compared too.
+ * Comparison is numeric per component with missing components as 0
+ * (`satisfiesMinGezelVersion` in packages/core/src/gezel-version.ts).
+ *
+ * On an identity manifest it gates the whole item; on a version manifest it
+ * gates that version only, so older builds fall back to older eligible
+ * versions. The resolved manifest carries the effective floor — the stricter
+ * of identity and chosen version. Unstamped dev builds (`0.0.0`) never
+ * filter. Authoring rule: add floors on new item versions, never retro-add
+ * them to existing ones — older versions are the compatibility path for
+ * older gezel builds.
+ */
+export const MinGezelVersionShape = {
+  minGezelVersion: z.string().optional(),
+} as const;
+
 const IdentityCommonSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   id: z.string().regex(IdRegex),
   name: z.string().min(1),
@@ -400,6 +420,7 @@ export type ToolsetIdentity = z.infer<typeof ToolsetIdentitySchema>;
  * `versions/{version}/manifest.json`.
  */
 export const ToolsetVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   /** Must equal the parent folder name. Validated at load time. */
   version: z.string().regex(SemverRegex),
@@ -431,6 +452,7 @@ export type ToolsetVersionManifest = z.infer<typeof ToolsetVersionManifestSchema
  * UI + HTTP consumers work with this shape.
  */
 export const ToolsetManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('toolset'),
   id: z.string().regex(IdRegex),
@@ -498,6 +520,7 @@ export const SuggestedCraftbookSchema = z
 export type SuggestedCraftbook = z.infer<typeof SuggestedCraftbookSchema>;
 
 export const GezelTemplateVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -545,6 +568,7 @@ export const GezelTemplateVersionManifestSchema = z.object({
 export type GezelTemplateVersionManifest = z.infer<typeof GezelTemplateVersionManifestSchema>;
 
 export const GezelTemplateManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('gezel-template'),
   id: z.string().regex(IdRegex),
@@ -635,6 +659,7 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
 export type CraftbookTemplateIdentity = z.infer<typeof CraftbookTemplateIdentitySchema>;
 
 export const CraftbookTemplateVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -698,6 +723,7 @@ export type CraftbookTemplateVersionManifest = z.infer<
 >;
 
 export const CraftbookTemplateManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('craftbook-template'),
   id: z.string().regex(IdRegex),
@@ -1024,6 +1050,7 @@ export type ProjectTypeIdentity = z.infer<typeof ProjectTypeIdentitySchema>;
 
 /** Per-version project-type payload. Lives in `versions/{version}/manifest.json`. */
 export const ProjectTypeVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1033,6 +1060,7 @@ export type ProjectTypeVersionManifest = z.infer<typeof ProjectTypeVersionManife
 
 /** Resolved view returned from the catalog: identity + chosen version, flattened. */
 export const ProjectTypeManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('project-type'),
   id: z.string().regex(IdRegex),
@@ -1103,6 +1131,7 @@ export type ConnectorTypeIdentity = z.infer<typeof ConnectorTypeIdentitySchema>;
 
 /** Per-version connector-type payload. Lives in `versions/{version}/manifest.json`. */
 export const ConnectorTypeVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1112,6 +1141,7 @@ export type ConnectorTypeVersionManifest = z.infer<typeof ConnectorTypeVersionMa
 
 /** Resolved view returned from the catalog: identity + chosen version, flattened. */
 export const ConnectorTypeManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('connector-type'),
   id: z.string().regex(IdRegex),
@@ -1471,6 +1501,7 @@ export const ChatModelIdentitySchema = IdentityCommonSchema.extend({
 export type ChatModelIdentity = z.infer<typeof ChatModelIdentitySchema>;
 
 export const ChatModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1534,6 +1565,7 @@ export const EvalHintsSchema = z.object({
 export type EvalHints = z.infer<typeof EvalHintsSchema>;
 
 export const ChatModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('chat-model'),
   id: z.string().regex(IdRegex),
@@ -1679,6 +1711,7 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
 export type ImageModelIdentity = z.infer<typeof ImageModelIdentitySchema>;
 
 export const ImageModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1700,6 +1733,7 @@ export const ImageModelVersionManifestSchema = z.object({
 export type ImageModelVersionManifest = z.infer<typeof ImageModelVersionManifestSchema>;
 
 export const ImageModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('image-model'),
   id: z.string().regex(IdRegex),
@@ -1909,6 +1943,7 @@ export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
 export type VideoModelIdentity = z.infer<typeof VideoModelIdentitySchema>;
 
 export const VideoModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1918,6 +1953,7 @@ export const VideoModelVersionManifestSchema = z.object({
 export type VideoModelVersionManifest = z.infer<typeof VideoModelVersionManifestSchema>;
 
 export const VideoModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('video-model'),
   id: z.string().regex(IdRegex),

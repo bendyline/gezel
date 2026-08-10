@@ -65,6 +65,12 @@ export const CraftbookDocSchema = zod.object({
   /** Catalog provenance — carried by bundled/local books, optional for ad-hoc docs. */
   version: zod.string().optional(),
   releasedAt: zod.string().optional(),
+  /**
+   * Oldest gezel build that can meaningfully run this craftbook version.
+   * See {@link MinGezelVersionShape} in `schemas/catalog.ts` for format and
+   * gating semantics.
+   */
+  minGezelVersion: zod.string().optional(),
 });
 export type CraftbookDoc = z.infer<typeof CraftbookDocSchema>;
 

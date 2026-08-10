@@ -62,6 +62,15 @@ interface SourcePatternGroup {
   patterns: string[];
 }
 
+/** Keep corpus identities stable across POSIX and Windows checkouts. */
+export function normalizeModelToolCorpusSource(source: string): string {
+  return source.replaceAll('\\', '/');
+}
+
+function relativeCorpusSource(rootDir: string, path: string): string {
+  return normalizeModelToolCorpusSource(relative(rootDir, path));
+}
+
 const SOURCE_PATTERN_GROUPS: SourcePatternGroup[] = [
   {
     category: 'prompt-source',
@@ -313,12 +322,13 @@ function partitionPinnedGildeDebt(args: {
   const candidates: Array<{ finding: ModelToolNameContractFinding; signature: string }> = [];
   for (const finding of args.findings) {
     const marker = '/@bendyline/gilde/data/';
-    const markerIndex = finding.source.indexOf(marker);
+    const normalizedSource = normalizeModelToolCorpusSource(finding.source);
+    const markerIndex = normalizedSource.indexOf(marker);
     if (markerIndex < 0) {
       errors.push(finding);
       continue;
     }
-    const relativeSource = finding.source.slice(markerIndex + marker.length);
+    const relativeSource = normalizedSource.slice(markerIndex + marker.length);
     candidates.push({
       finding,
       signature: `${relativeSource}|${finding.line}|${finding.jsonPointer ?? ''}|${finding.rule}|${finding.tool ?? ''}`,
@@ -365,7 +375,7 @@ async function sourceEntries(
       ignore: SOURCE_IGNORES,
     });
     for (const path of paths.sort()) {
-      const source = relative(rootDir, path);
+      const source = relativeCorpusSource(rootDir, path);
       const text = await readFile(path, 'utf8');
       files.add(source);
       const declaredTools = new Set<string>();
@@ -435,7 +445,7 @@ async function generatedCatalogEntries(
     path: string,
     declaredTools: readonly string[] = [],
   ): Promise<void> => {
-    const source = relative(rootDir, path);
+    const source = relativeCorpusSource(rootDir, path);
     entries.push({
       category: 'generated-catalog',
       source,
@@ -450,7 +460,7 @@ async function generatedCatalogEntries(
     declaredForEntry: readonly string[] = [],
     optional = false,
   ): Promise<unknown | undefined> => {
-    const source = relative(rootDir, path);
+    const source = relativeCorpusSource(rootDir, path);
     let raw: string;
     try {
       raw = await readFile(path, 'utf8');
@@ -521,13 +531,13 @@ async function generatedCatalogEntries(
           );
           entries.push(
             ...extractModelFacingJsonStrings({
-              source: relative(rootDir, craftbookPath),
+              source: relativeCorpusSource(rootDir, craftbookPath),
               sourceText: raw,
               value: craftbook,
               declaredTools: craftbookTools,
             }),
           );
-          files.add(relative(rootDir, craftbookPath));
+          files.add(relativeCorpusSource(rootDir, craftbookPath));
           await addJson(resolve(versionDir, 'test.json'), craftbookTools, true);
         } else if (kind === 'gezel-templates') {
           const roleTools = [...(roleProjectTools.get(id) ?? [])];
@@ -547,13 +557,13 @@ async function generatedCatalogEntries(
           for (const tool of projectTools) declaredTools.add(tool);
           entries.push(
             ...extractModelFacingJsonStrings({
-              source: relative(rootDir, manifestPath),
+              source: relativeCorpusSource(rootDir, manifestPath),
               sourceText: raw,
               value: manifest,
               declaredTools: projectTools,
             }),
           );
-          files.add(relative(rootDir, manifestPath));
+          files.add(relativeCorpusSource(rootDir, manifestPath));
           for (const referenced of [manifest.aboutTemplate, manifest.missionTemplate]) {
             if (referenced) await addMarkdown(resolve(versionDir, referenced), projectTools);
           }
@@ -564,7 +574,7 @@ async function generatedCatalogEntries(
           const versionTools = (manifest?.tools ?? [])
             .map((tool) => tool.name)
             .filter((name): name is string => Boolean(name));
-          const source = relative(rootDir, manifestPath);
+          const source = relativeCorpusSource(rootDir, manifestPath);
           entries.push(
             ...extractModelFacingJsonStrings({
               source,
