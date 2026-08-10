@@ -1745,6 +1745,68 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     });
   });
 
+  it('downgrades a manifest-declared reasoning depth dial on constrained turns, for templates that have no enable_thinking to honor', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    type: 'function',
+                    function: {
+                      name: 'write_file',
+                      arguments: '{"path":"index.html","content":"<!doctype html>"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://glimmer.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'muse-glimmer-30b-q4',
+      tuning: {
+        sampling: {},
+        reasoning: { templateKwargs: { reasoning_strength: 'high' } },
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+      externalTools: [
+        {
+          name: 'write_file',
+          description: 'Write a file.',
+          parameters: { type: 'object', additionalProperties: true },
+        },
+      ],
+    });
+
+    await session.sendAndWait(
+      'First move: create the workspace deliverable at workspace/index.html',
+    );
+
+    expect(bodies).toHaveLength(1);
+    // `high` here is what tripped the immediate-write guard in the wild.
+    expect(bodies[0]?.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+      reasoning_strength: 'low',
+    });
+  });
+
   it('uses concise direct-edit mode for existing source edit turns and stops after mutation', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     let patched = false;
@@ -9793,5 +9855,16 @@ describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
     // still engage — the fence and the mode compose.
     const clamped = ['read_file', 'validate', 'replace_in_file', 'write_file'].map(tool);
     expect(isGateSurgicalEditTurn(gateNudge, clamped)).toBe(true);
+  });
+});
+
+describe('constrained-turn reasoning allowance', () => {
+  it('gives Muse Glimmer the expanded allowance — its template has no no-think mode, so even reasoning_strength=low overruns the strict budget on whole-file deliverables', () => {
+    expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-q4')).toBe(3072);
+    expect(constrainedToolNoSignalMsForModel('muse-glimmer-30b-q4')).toBe(90_000);
+    // Sibling quants inherit it.
+    expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-dynamic')).toBe(3072);
+    // Models that honor no-think keep the tight guard.
+    expect(constrainedToolReasoningCharLimitForModel('qwen3.6-27b-q4')).toBe(1024);
   });
 });

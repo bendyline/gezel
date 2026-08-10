@@ -273,8 +273,20 @@ function isGptOss20bModel(model: string | undefined): boolean {
   return model === 'gpt-oss-20b-q4';
 }
 
+// Muse Glimmer's template has no no-think mode at all — only a
+// `reasoning_strength` dial, which constrained turns already pull down to
+// `low` (see disableThinkingForConstrainedTurn). Even there it plans past the
+// tight budget on a whole-file deliverable: measured 2026-08-10 on the
+// tictactoe eval, the turn aborted at 1025 reasoning chars against the 1024
+// limit. Same shape as the GPT-OSS note above — a native depth control that
+// still wants the bounded allowance rather than the strict one. Prefix-matched
+// so sibling quants (dynamic / q8) inherit it.
+function isMuseGlimmerModel(model: string | undefined): boolean {
+  return model?.startsWith('muse-glimmer') === true;
+}
+
 function needsExpandedConstrainedToolReasoning(model: string | undefined): boolean {
-  return isDeepSeekR1Model(model) || isGptOss20bModel(model);
+  return isDeepSeekR1Model(model) || isGptOss20bModel(model) || isMuseGlimmerModel(model);
 }
 
 export function constrainedToolReasoningCharLimitForModel(model: string): number {
@@ -1488,15 +1500,41 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 
 type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
 
+/**
+ * Chat-template variables that name a model's reasoning DEPTH rather than an
+ * on/off switch. `applyTuning` has already written the manifest's declared
+ * `reasoning.templateKwargs` onto the body by the time the constrained-turn
+ * paths run, so we downgrade whichever dial this model actually reads instead
+ * of keeping a per-model branch here.
+ *
+ * Load-bearing for templates that have no `enable_thinking` at all: Muse
+ * Glimmer reads only `reasoning_strength`, so the disable below is a silent
+ * no-op there and the model keeps reasoning at its manifest default until the
+ * immediate-write guard kills the turn. Measured 2026-08-10 on the tictactoe
+ * eval — 1027 reasoning chars against the 1024 limit, two aborted turns and a
+ * poisoned-session recovery on a run that otherwise passed.
+ */
+const REASONING_DEPTH_TEMPLATE_KWARGS = new Set(['reasoning_effort', 'reasoning_strength']);
+
 function disableThinkingForConstrainedTurn(
   body: Record<string, unknown>,
   shape: DisableThinkingRequestShape,
   model: string | undefined,
 ): void {
   setChatTemplateKwarg(body, 'enable_thinking', false);
+  const declared = body.chat_template_kwargs;
+  if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
+    for (const key of Object.keys(declared as Record<string, unknown>)) {
+      if (REASONING_DEPTH_TEMPLATE_KWARGS.has(key)) {
+        setChatTemplateKwarg(body, key, 'low');
+      }
+    }
+  }
   // llama.cpp's bundled GPT-OSS template ignores enable_thinking and defaults
   // reasoning_effort to "medium". Set the template's actual control for terse,
   // tool-constrained turns so the model can reach the required call promptly.
+  // Kept explicit because that manifest predates `reasoning.templateKwargs`
+  // and so declares no dial for the loop above to find.
   if (isGptOss20bModel(model)) {
     setChatTemplateKwarg(body, 'reasoning_effort', 'low');
   }
