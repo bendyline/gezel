@@ -26,6 +26,7 @@ import { vi } from 'vitest';
 export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>>>;
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
+  getEngineRetention: { idleTimeoutMs: 300_000 },
   listGezels: { gezels: [] },
   listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },

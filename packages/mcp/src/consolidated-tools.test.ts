@@ -78,6 +78,32 @@ describe('consolidated MCP tools', () => {
     };
   });
 
+  it('advertises compact handoff hints instead of the internal completion-gate union', async () => {
+    const { tools } = await client.listTools();
+    for (const name of [
+      'message_gezel',
+      'delegate_developer',
+      'delegate_designer',
+      'delegate_reviewer',
+      'delegate_planner',
+      'delegate_researcher',
+      'delegate_builder',
+      'delegate_writer',
+    ]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect(tool, name).toBeDefined();
+      const schema = tool?.inputSchema as {
+        properties?: Record<string, { properties?: Record<string, unknown> }>;
+      };
+      const handoff = schema.properties?.expectedDeliverable;
+      expect(handoff, name).toBeDefined();
+      expect(Object.keys(handoff?.properties ?? {}).sort(), name).toEqual(['filePath', 'kind']);
+      expect(JSON.stringify(handoff), name).not.toContain('checks');
+      expect(JSON.stringify(handoff), name).not.toContain('scripts');
+      expect(JSON.stringify(handoff).length, name).toBeLessThan(1_000);
+    }
+  });
+
   afterAll(async () => {
     await client.close();
     await new Promise<void>((resolve, reject) =>

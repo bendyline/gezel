@@ -22,7 +22,7 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 
 The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference.
 
-For Codex, use **Use Gezel models in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
+For Codex, use **Use a gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
 
 Keep Gezel running while Codex uses the local model. If you want the model bridge available without keeping the desktop window open, turn on Gezel's daemon autostart setting.
 
@@ -32,7 +32,9 @@ One-click setup is available only when the desktop and the Gezel service are on 
 
 Codex custom providers use `wire_api = "responses"`. The managed profile also sets the top-level `web_search = "disabled"`: Codex otherwise advertises a provider-hosted search tool that a local inference server cannot truthfully execute. Do not combine the Gezel profile with Codex's `--search` flag, which explicitly turns that hosted tool back on. Ordinary Codex tools such as shell commands, patching, and helper-agent namespaces remain available because Codex executes those itself.
 
-The setup card offers only installed inference models that can participate in Codex's caller-executed tool loop. The facade does not silently route unknown aliases through the fallback gezel, and it refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
+The setup card puts eligible gezels first. Choosing one gives Codex that gezel's character (`about.md`), effective local model, and tuning while Codex keeps its own tools, sandbox, approvals, and conversation loop. The profile stores the stable gezel id, so renaming the gezel does not break the connection. Raw installed models remain available in a separate fallback group for users who want inference without a gezel persona.
+
+A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
 
 ## Who answers: gezel choices and the fallback
 

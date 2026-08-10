@@ -1,5 +1,9 @@
 import { delimiter, dirname, join } from 'node:path';
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  type GezelConfig,
+  createLogger,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
@@ -96,9 +100,6 @@ export async function buildLlamaCppProvider(opts: {
   config: GezelConfig;
   affinity: boolean | undefined;
   home: string;
-  /** Busy predicate for the supervisor's idle timer — true while any turn is
-   *  in-flight, so an idle-stop can't strand an active session. */
-  isBusy?: () => boolean;
   llamaCppModels?: import('./index.js').LlamaCppModelManager;
   arbiter?: import('../gpu-arbiter.js').GpuArbiter;
   /**
@@ -975,13 +976,10 @@ export async function buildLlamaCppProvider(opts: {
   // Two-stage idle (Phase 2.5): freeze at half the idle budget,
   // SIGTERM at the full budget. The freeze hook flushes slot caches
   // to disk while the engine is still healthy — so a SIGKILL during
-  // the freeze→stop window doesn't lose them. Default 30 min, matching
-  // `OLLAMA_TURN_TIMEOUT_MS` so the supervisor never kills the engine
-  // before the chat layer would have timed the turn out. Operators on
-  // tight memory who want faster reclaim can drop `localEngineIdleTimeoutMs`
-  // in config. The 10-min default that preceded this killed mid-stream
-  // on long Builder generations (tankcombat regression).
-  const llamaIdleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
+  // the freeze→stop window doesn't lose them. The busy guard below is the
+  // provider's physical request gate, so a long generation is protected while
+  // a tool loop parked between requests can release the GPU normally.
+  const llamaIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const llamaFreezeMs = Math.floor(llamaIdleMs / 2);
   // Per-model native-vision opt-in. Absent means off — see the `--mmproj`
   // block below for why this isn't simply "the projector is on disk".
@@ -1005,9 +1003,8 @@ export async function buildLlamaCppProvider(opts: {
     startupTimeoutMs: llamaStartupTimeoutMs,
     idleTimeoutMs: llamaIdleMs,
     freezeTimeoutMs: llamaFreezeMs,
-    // Don't idle-unload while a turn is in-flight (a parked question / long
-    // tool call leaves lastUsedAt stale — see the supervisor's isBusy doc).
-    ...(opts.isBusy ? { isBusy: opts.isBusy } : {}),
+    isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
+    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
     onFreeze: async () => {
       // flushAll is best-effort and handles its own try/catch — but
       // we await so the supervisor's freeze log line aligns with

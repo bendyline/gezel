@@ -31,6 +31,7 @@ import {
   scenarioRepairTextAbortThreshold,
   shouldPreferScriptedDataFileWork,
   shouldStartScriptedDataFileWork,
+  simplifyJsonSchemaForLlamaCpp,
   stripJsonSchemaPatternsForLlamaCpp,
   tryParseContextOverflow,
   tryParseStrictAlternationTemplateError,
@@ -156,6 +157,142 @@ describe('llama.cpp JSON Schema compatibility', () => {
     expect(stripJsonSchemaPatternsForLlamaCpp({ pattern: '^x$', type: 'string' })).toEqual({
       type: 'string',
     });
+  });
+
+  it('reduces grammar-hostile unions and validation constraints while preserving argument guidance', () => {
+    const schema = {
+      type: 'object',
+      description: 'A useful tool.',
+      properties: {
+        deliverable: {
+          description: 'What to produce.',
+          oneOf: [
+            { type: 'object', properties: { kind: { const: 'file' } } },
+            { type: 'object', properties: { kind: { const: 'chat' } } },
+          ],
+        },
+        count: { type: 'integer', exclusiveMinimum: 0, maximum: 10 },
+        mode: { type: 'string', enum: ['fast', 'careful'], format: 'custom-mode' },
+        metadata: {
+          type: 'object',
+          propertyNames: { type: 'string' },
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['deliverable', 'count', 'missing'],
+      additionalProperties: false,
+    };
+
+    expect(simplifyJsonSchemaForLlamaCpp(schema)).toEqual({
+      type: 'object',
+      description: 'A useful tool.',
+      properties: {
+        deliverable: { description: 'What to produce.' },
+        count: { type: 'integer' },
+        mode: { type: 'string', enum: ['fast', 'careful'] },
+        metadata: { type: 'object' },
+      },
+      required: ['deliverable', 'count'],
+    });
+  });
+
+  it('skips a no-op pattern retry and recovers with structural tool schemas', async () => {
+    const bodies: Array<{
+      tools?: Array<{ function: { parameters: Record<string, unknown> } }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'recovered' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const parameters = {
+      type: 'object',
+      properties: {
+        expectedDeliverable: {
+          oneOf: [
+            { type: 'object', properties: { kind: { const: 'file' } } },
+            { type: 'object', properties: { kind: { const: 'chat' } } },
+          ],
+        },
+        count: { type: 'integer', exclusiveMinimum: 0 },
+      },
+      required: ['expectedDeliverable'],
+    };
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [{ name: 'message_gezel', parameters }],
+    });
+
+    await expect(session.sendAndWait('delegate it')).resolves.toBe('recovered');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.tools?.[0]?.function.parameters).toEqual(parameters);
+    expect(bodies[1]?.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: {
+        expectedDeliverable: {},
+        count: { type: 'integer' },
+      },
+      required: ['expectedDeliverable'],
+    });
+  });
+
+  it('uses permissive object parameters only after structural schemas are also rejected', async () => {
+    const bodies: Array<{
+      tools?: Array<{ function: { parameters: Record<string, unknown> } }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      if (bodies.length < 3) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'recovered' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [
+        {
+          name: 'message_gezel',
+          parameters: {
+            type: 'object',
+            properties: { value: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+          },
+        },
+      ],
+    });
+
+    await expect(session.sendAndWait('delegate it')).resolves.toBe('recovered');
+    expect(bodies).toHaveLength(3);
+    expect(bodies[1]?.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: { value: {} },
+    });
+    expect(bodies[2]?.tools?.[0]?.function.parameters).toEqual({ type: 'object' });
   });
 });
 
@@ -429,6 +566,7 @@ describe('LlamaCppProvider physical request gate', () => {
       queue: { lane: 'interactive', sessionId: 'foreground-session' },
     });
     await firstFetchEntered;
+    expect(provider.isEngineBusy()).toBe(true);
 
     const second = background.sendAndWait('second', {
       queue: { lane: 'background', sessionId: 'background-session' },
@@ -448,6 +586,7 @@ describe('LlamaCppProvider physical request gate', () => {
     expect(ensureRunningCalls).toBe(2);
     expect(prepared).toEqual(['foreground-session', 'background-session']);
     expect(maxActiveFetches).toBe(1);
+    expect(provider.isEngineBusy()).toBe(false);
   });
 
   it('releases the physical slot when an in-flight request is aborted', async () => {
@@ -535,6 +674,7 @@ describe('LlamaCppProvider physical request gate', () => {
       }) as typeof fetch,
     });
     const releaseHeldSlot = await provider.acquireExclusiveEngineRequest('held-by-first-turn');
+    expect(provider.isEngineBusy()).toBe(true);
     const waitingSession = await provider.createSession({ systemMessage: 'waiting' });
 
     await expect(
@@ -549,6 +689,7 @@ describe('LlamaCppProvider physical request gate', () => {
     // claimant should acquire and release immediately.
     const releaseFreshSlot = await provider.acquireExclusiveEngineRequest('fresh-claimant');
     releaseFreshSlot();
+    expect(provider.isEngineBusy()).toBe(false);
   });
 });
 

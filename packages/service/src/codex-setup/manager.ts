@@ -8,6 +8,7 @@ import type {
   CodexSetupStatusResponse,
   ConfigureCodexRequest,
   GezelConfig,
+  GezelSummary,
   ProviderName,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '../fs/atomic.js';
@@ -37,6 +38,7 @@ const LOCAL_PROVIDERS = [
   'ds4',
   'ollama',
 ] as const satisfies readonly ProviderName[];
+const LOCAL_PROVIDER_SET = new Set<ProviderName>(LOCAL_PROVIDERS);
 const MINIMUM_CODEX_VERSION = [0, 147, 0] as const;
 
 interface SetupState {
@@ -81,6 +83,8 @@ export interface CreateCodexSetupManagerOptions {
   tokenStore: TokenStore;
   bridge: CodexBridgeController;
   readConfig: () => Promise<GezelConfig>;
+  listGezels: () => Promise<GezelSummary[]>;
+  providerForGezel: (gezelId: string) => Promise<ProviderName>;
   listModels: (provider: ProviderName) => Promise<ModelInfo[]>;
   detectCodex?: () => Promise<CodexBinaryDetection>;
   now?: () => Date;
@@ -117,7 +121,10 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     return result;
   };
 
-  const listEligibleModels = async (): Promise<CodexSetupModelOption[]> => {
+  const listEligibleModels = async (
+    suppliedConfig?: GezelConfig,
+  ): Promise<CodexSetupModelOption[]> => {
+    const config = suppliedConfig ?? (await opts.readConfig());
     const groups = await Promise.all(
       LOCAL_PROVIDERS.map(async (provider) => {
         try {
@@ -129,6 +136,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
                 id: `${provider}:${model.id}`,
                 label: model.name || model.id,
                 description: `Local ${provider} model`,
+                kind: 'model',
                 provider,
                 ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
                 ...(model.supportsReasoning !== undefined
@@ -142,7 +150,45 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         }
       }),
     );
-    return groups.flat().sort((a, b) => a.label.localeCompare(b.label));
+    const rawModels = groups.flat().sort((a, b) => a.label.localeCompare(b.label));
+    const rawModelsByTarget = new Map(rawModels.map((model) => [model.id, model]));
+    const gezels = await opts.listGezels().catch(() => []);
+    const gezelModels = (
+      await Promise.all(
+        gezels.map(async (gezel): Promise<CodexSetupModelOption | null> => {
+          if (gezel.fixedFunction) return null;
+          const provider = await opts.providerForGezel(gezel.id).catch(() => null);
+          if (!provider || !LOCAL_PROVIDER_SET.has(provider)) return null;
+
+          const modelId = gezel.model ?? config.defaultModel?.[provider];
+          if (!modelId) return null;
+          const backingModel = rawModelsByTarget.get(`${provider}:${modelId}`);
+          if (!backingModel) return null;
+
+          return {
+            id: `gezel:${gezel.id}`,
+            label: gezel.name,
+            description: [gezel.role, backingModel.label].filter(Boolean).join(' · '),
+            kind: 'gezel',
+            provider,
+            gezelId: gezel.id,
+            ...(gezel.role ? { role: gezel.role } : {}),
+            modelLabel: backingModel.label,
+            ...(backingModel.contextWindow ? { contextWindow: backingModel.contextWindow } : {}),
+            ...(backingModel.supportsReasoning !== undefined
+              ? { supportsReasoning: backingModel.supportsReasoning }
+              : {}),
+            supportsTools: true,
+          };
+        }),
+      )
+    )
+      .filter((model): model is CodexSetupModelOption => model !== null)
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    // Gezels are the first-class choice. Raw models remain available for
+    // callers that deliberately want Codex without a Gezel persona.
+    return [...gezelModels, ...rawModels];
   };
 
   const codexModelCatalog = async (): Promise<CodexCatalogModel[]> =>
@@ -168,10 +214,11 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     models: CodexSetupModelOption[];
     detection: CodexBinaryDetection;
   }> => {
+    const configPromise = opts.readConfig();
     const [config, models, detection, stateResult, profile, tokenFile, catalog] = await Promise.all(
       [
-        opts.readConfig(),
-        listEligibleModels(),
+        configPromise,
+        configPromise.then((config) => listEligibleModels(config)),
         detect(),
         readState().then(
           (value) => ({ value, error: null as Error | null }),
@@ -185,7 +232,11 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     const state = stateResult.value;
     const endpointsEnabled = config.openaiEndpoints?.enabled !== false;
     const versionSupported = detection.installed && isSupportedCodexVersion(detection.version);
-    const recommendedModel = models[0]?.id;
+    const recommendedModel =
+      models.find((model) => model.kind === 'gezel' && model.gezelId === config.meesterGezelId)
+        ?.id ??
+      models.find((model) => model.kind === 'gezel')?.id ??
+      models[0]?.id;
     const tokenRecord = setupTokenRecord(opts.tokenStore);
     const tokenOwnedBySetup = tokenRecord?.appName === CODEX_SETUP_APP_NAME;
     const canRemove = Boolean(
@@ -216,7 +267,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!versionSupported) reasons.push(codexVersionReason(detection));
       if (!models.some((model) => model.id === state.model)) {
-        reasons.push('The configured local model is no longer available.');
+        reasons.push('The configured gezel or local model is no longer available.');
       }
       if (profile === null) reasons.push('The managed Codex profile is missing.');
       if (!tokenRecord || !isExactSetupToken(tokenRecord)) {
@@ -315,7 +366,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!selected) {
         throw new CodexSetupError(
           'model_not_available',
-          `The selected local model is not available for Codex: ${input.model}`,
+          `The selected gezel or local model is not available for Codex: ${input.model}`,
           404,
         );
       }
@@ -447,7 +498,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         await opts.bridge.stop();
         return;
       }
-      const models = await listEligibleModels();
+      const models = await listEligibleModels(config);
       const selected = models.find((model) => model.id === state.model);
       if (!selected) {
         await opts.bridge.stop();

@@ -207,6 +207,35 @@ describe('POST /v1/responses — Codex facade', () => {
     expect(body.usage.total_tokens).toBe(body.usage.input_tokens + body.usage.output_tokens);
   });
 
+  it('resolves a stable gezel id and layers its persona ahead of Codex instructions', async () => {
+    const summary = (await service.context.store.listGezels()).find(
+      (gezel) => !gezel.fixedFunction,
+    );
+    expect(summary).toBeDefined();
+    const gezel = await service.context.store.getGezel(summary!.id);
+    expect(gezel?.about.trim()).toBeTruthy();
+    const callsBefore = mockCopilot.calls.length;
+
+    const response = await postResponses(
+      {
+        model: `gezel:${summary!.id}`,
+        instructions: 'Codex keeps ownership of the coding loop.',
+        input: 'Introduce yourself briefly.',
+        store: false,
+      },
+      rootToken,
+    );
+
+    expect(response.status).toBe(200);
+    const create = mockCopilot.calls.slice(callsBefore).find((call) => call.kind === 'create');
+    const systemMessage = create?.opts?.systemMessage ?? '';
+    expect(systemMessage).toContain(gezel!.about.trim());
+    expect(systemMessage).toContain('Codex keeps ownership of the coding loop.');
+    expect(systemMessage.indexOf(gezel!.about.trim())).toBeLessThan(
+      systemMessage.indexOf('Codex keeps ownership of the coding loop.'),
+    );
+  });
+
   it('aborts in-flight provider work when a streaming Codex client disconnects', async () => {
     const callsBefore = mockCopilot.calls.length;
     mockCopilot.scriptStreamThenHang('partial');

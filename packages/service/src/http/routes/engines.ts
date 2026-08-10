@@ -1,8 +1,13 @@
 import { existsSync } from 'node:fs';
-import { LlamaCppContextSizingResponseSchema, type NativeEngineName } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  LlamaCppContextSizingResponseSchema,
+  type NativeEngineName,
+} from '@bendyline/gezel';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
+import { z } from 'zod';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import type { ServiceContext } from '../context.js';
@@ -111,6 +116,34 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       });
     }
     return c.json(snap);
+  });
+
+  /** Engine-owner retention policy; proxied to the machine broker in production. */
+  app.get('/retention', async (c) => {
+    const config = await ctx.store.readConfig();
+    return c.json({
+      idleTimeoutMs: config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+    });
+  });
+
+  app.put('/retention', async (c) => {
+    const body = z
+      .object({
+        idleTimeoutMs: z
+          .number()
+          .int()
+          .min(60_000)
+          .max(24 * 60 * 60_000),
+      })
+      .parse(await c.req.json());
+    const previous =
+      (await ctx.store.readConfig()).localEngineIdleTimeoutMs ??
+      DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
+    await ctx.store.writeConfig({ localEngineIdleTimeoutMs: body.idleTimeoutMs });
+    if (body.idleTimeoutMs !== previous) {
+      await ctx.chat.resetClient({ deferBusy: true });
+    }
+    return c.json({ idleTimeoutMs: body.idleTimeoutMs });
   });
 
   /**

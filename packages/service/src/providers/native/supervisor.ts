@@ -137,6 +137,16 @@ export interface NativeProcessSnapshot {
   command: string;
 }
 
+export interface NativeEngineLifecycleSnapshot {
+  running: boolean;
+  active: boolean;
+  pid?: number;
+  lastUsedAt: number | null;
+  unloadAt: number | null;
+  idleTimeoutMs: number;
+  releaseReason: 'idle' | 'memory-pressure' | null;
+}
+
 export interface NativeEngineSupervisorOptions {
   /**
    * Resolves to the launch spec on demand. Called each time the
@@ -173,12 +183,20 @@ export interface NativeEngineSupervisorOptions {
    * timer for another full window. Prevents idle-unloading an engine that a
    * turn still needs (the "engine idle-stopped mid-turn → next request fails
    * with `unreachable / fetch failed`" bug). The idle timer resets on every
-   * request via `markUsed`, so this only matters when a turn is in-flight but
-   * BETWEEN engine requests (a long tool call, a parked question) — exactly
-   * the window `lastUsedAt` alone misses. Wired to the ChatManager's
-   * `isAnyActive()`.
+   * request via `markUsed`. This must describe the supervised engine's
+   * physical request gate, not a whole logical chat turn: tool calls and
+   * questions parked on a person do not touch the GPU and should not pin it.
    */
   isBusy?: () => boolean;
+  /**
+   * Optional low-free-accelerator signal. A pressured engine that has been
+   * physically idle for `pressureIdleTimeoutMs` flushes its cache and stops,
+   * even when the ordinary warm-retention window is longer.
+   */
+  memoryPressure?: () =>
+    | Promise<{ pressured: boolean; detail?: string }>
+    | { pressured: boolean; detail?: string };
+  pressureIdleTimeoutMs?: number;
   healthIntervalMs?: number;
   /** Poll budget for the post-spawn readiness probe. Defaults to 60s. */
   startupTimeoutMs?: number;
@@ -319,6 +337,10 @@ export class NativeEngineSupervisor {
   private readonly freezeTimeoutMs: number;
   private readonly onFreeze?: () => void | Promise<void>;
   private readonly isBusy?: () => boolean;
+  private readonly memoryPressure?: NativeEngineSupervisorOptions['memoryPressure'];
+  private readonly pressureIdleTimeoutMs: number;
+  private pressureCheckInFlight = false;
+  private pressureDeadlineAt?: number;
   private freezeTimer?: NodeJS.Timeout;
   /** True once the current idle window has fired its Stage-1 freeze.
    *  Reset on next `markUsed` so subsequent idle windows re-fire. */
@@ -401,6 +423,8 @@ export class NativeEngineSupervisor {
     }
     if (opts.onFreeze) this.onFreeze = opts.onFreeze;
     if (opts.isBusy) this.isBusy = opts.isBusy;
+    if (opts.memoryPressure) this.memoryPressure = opts.memoryPressure;
+    this.pressureIdleTimeoutMs = opts.pressureIdleTimeoutMs ?? 60_000;
     this.healthIntervalMs = opts.healthIntervalMs ?? 15_000;
     this.startupTimeoutMs = opts.startupTimeoutMs ?? 60_000;
     this.spawn = opts.spawn ?? nodeSpawn;
@@ -437,6 +461,29 @@ export class NativeEngineSupervisor {
       return this.state.child.pid ?? undefined;
     }
     return undefined;
+  }
+
+  /** Stable status shape for the engine pool and once-a-second memory UI. */
+  lifecycleSnapshot(): NativeEngineLifecycleSnapshot {
+    const running = this.state.kind === 'running' || this.state.kind === 'starting';
+    const active = running && this.engineBusy();
+    const idleDeadline =
+      running && !active && this.lastUsedAt > 0 && this.idleTimeoutMs > 0
+        ? this.lastUsedAt + this.idleTimeoutMs
+        : null;
+    const pressureDeadline = running && !active ? (this.pressureDeadlineAt ?? null) : null;
+    const usePressure =
+      pressureDeadline !== null && (idleDeadline === null || pressureDeadline < idleDeadline);
+    const pid = this.currentChildPid();
+    return {
+      running,
+      active,
+      ...(pid !== undefined ? { pid } : {}),
+      lastUsedAt: this.lastUsedAt > 0 ? this.lastUsedAt : null,
+      unloadAt: usePressure ? pressureDeadline : idleDeadline,
+      idleTimeoutMs: this.idleTimeoutMs,
+      releaseReason: usePressure ? 'memory-pressure' : idleDeadline !== null ? 'idle' : null,
+    };
   }
 
   /** Most recently sealed child exit, including expected idle/shutdown exits. */
@@ -507,6 +554,7 @@ export class NativeEngineSupervisor {
    */
   async ensureRunning(): Promise<NativeEngineLaunch> {
     this.lastUsedAt = Date.now();
+    this.pressureDeadlineAt = undefined;
     if (this.state.kind === 'running') {
       this.resetIdleTimer();
       return this.state.launch;
@@ -554,16 +602,18 @@ export class NativeEngineSupervisor {
   /** Update the last-used clock without triggering a start. */
   markUsed(): void {
     this.lastUsedAt = Date.now();
+    this.pressureDeadlineAt = undefined;
     this.resetIdleTimer();
   }
 
-  async stop(): Promise<void> {
+  async stop(reason: 'stop' | 'idle' | 'memory-pressure' = 'stop'): Promise<void> {
     this.clearIdleTimer();
     this.clearFreezeTimer();
     this.clearHealthTimer();
     if (this.state.kind === 'stopped' || this.state.kind === 'restart-budget-exhausted') return;
     const { child } = this.state;
-    this.expectedExitReason = 'stop';
+    this.pressureDeadlineAt = undefined;
+    this.expectedExitReason = reason;
     this.state = { kind: 'stopped' };
     await killGracefully(child);
   }
@@ -1126,8 +1176,45 @@ export class NativeEngineSupervisor {
     this.clearHealthTimer();
     this.healthTimer = setInterval(() => {
       void this.healthProbe();
+      void this.pressureProbe();
     }, this.healthIntervalMs);
     this.healthTimer.unref?.();
+  }
+
+  private engineBusy(): boolean {
+    try {
+      return this.isBusy?.() === true;
+    } catch (error) {
+      this.onLog(
+        `${this.logPrefix} busy predicate failed: ${error instanceof Error ? error.message : error}`,
+      );
+      return true;
+    }
+  }
+
+  private async pressureProbe(): Promise<void> {
+    if (!this.memoryPressure || this.pressureCheckInFlight || this.state.kind !== 'running') return;
+    this.pressureCheckInFlight = true;
+    try {
+      const pressure = await this.memoryPressure();
+      if (!pressure.pressured || this.state.kind !== 'running') {
+        this.pressureDeadlineAt = undefined;
+        return;
+      }
+      this.pressureDeadlineAt = this.lastUsedAt + this.pressureIdleTimeoutMs;
+      if (Date.now() < this.pressureDeadlineAt || this.engineBusy()) return;
+      this.onLog(
+        `${this.logPrefix} memory pressure${pressure.detail ? ` (${pressure.detail})` : ''} — flushing and stopping idle engine`,
+      );
+      await this.runFreeze();
+      await this.stop('memory-pressure');
+    } catch (error) {
+      this.onLog(
+        `${this.logPrefix} memory-pressure check failed: ${error instanceof Error ? error.message : error}`,
+      );
+    } finally {
+      this.pressureCheckInFlight = false;
+    }
   }
 
   private async healthProbe(): Promise<void> {
@@ -1181,20 +1268,18 @@ export class NativeEngineSupervisor {
     this.idleTimer = setTimeout(() => {
       const since = Date.now() - this.lastUsedAt;
       if (since < this.idleTimeoutMs) return;
-      // Don't strand an in-flight turn. A turn parked between engine requests
-      // (long tool call, a `ask_user_question` awaiting the human) leaves
-      // `lastUsedAt` stale, so without this the idle timer would SIGTERM an
-      // engine the turn is about to use again — the next request then dies
-      // with `unreachable / fetch failed`. Defer a full window and re-check.
-      if (this.isBusy?.()) {
+      // Don't interrupt an actual native request. Logical turns parked on a
+      // tool or a person are intentionally not busy here; a later iteration
+      // can lazy-start the engine again from its flushed disk cache.
+      if (this.engineBusy()) {
         this.onLog(
-          `${this.logPrefix} idle deadline reached but a turn is active — deferring VRAM stop`,
+          `${this.logPrefix} idle deadline reached but an engine request is active — deferring VRAM stop`,
         );
         this.resetIdleTimer();
         return;
       }
       this.onLog(`${this.logPrefix} idle timeout — stopping to free VRAM`);
-      void this.stop();
+      void this.stop('idle');
     }, this.idleTimeoutMs + 50);
     this.idleTimer.unref?.();
   }
@@ -1207,6 +1292,10 @@ export class NativeEngineSupervisor {
    */
   private async runFreeze(): Promise<void> {
     if (this.freezeFired) return;
+    // Cache endpoints share the native server with inference; do not flush a
+    // slot while that engine is actively reading or writing it. The next idle
+    // deadline (or pressure probe) gets another chance.
+    if (this.engineBusy()) return;
     this.freezeFired = true;
     if (!this.onFreeze) return;
     this.onLog(`${this.logPrefix} idle freeze — flushing caches to disk (model stays resident)`);

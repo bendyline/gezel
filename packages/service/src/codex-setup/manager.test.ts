@@ -1,7 +1,11 @@
 import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexSetupStatusResponseSchema } from '@bendyline/gezel';
+import {
+  CodexSetupStatusResponseSchema,
+  type GezelSummary,
+  type ProviderName,
+} from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CodexBridgeController } from '../http/codex-bridge.js';
 import { createTokenStore } from '../http/token-store.js';
@@ -25,6 +29,10 @@ async function fixture(
     bridgePort?: number;
     beforeBridgeListen?: () => Promise<void>;
     codexHome?: string;
+    gezels?: GezelSummary[];
+    defaultProvider?: ProviderName;
+    defaultModel?: Partial<Record<ProviderName, string>>;
+    meesterGezelId?: string;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-codex-setup-'));
@@ -56,7 +64,15 @@ async function fixture(
     bridge,
     readConfig: async () => ({
       openaiEndpoints: endpointsEnabled ? {} : { enabled: false },
+      ...(opts.defaultProvider ? { provider: opts.defaultProvider } : {}),
+      ...(opts.defaultModel ? { defaultModel: opts.defaultModel } : {}),
+      ...(opts.meesterGezelId ? { meesterGezelId: opts.meesterGezelId } : {}),
     }),
+    listGezels: async () => opts.gezels ?? [],
+    providerForGezel: async (gezelId) => {
+      const gezel = opts.gezels?.find((candidate) => candidate.id === gezelId);
+      return gezel?.provider ?? opts.defaultProvider ?? 'llama-cpp';
+    },
     listModels: async (provider) =>
       provider === 'llama-cpp'
         ? [
@@ -91,6 +107,68 @@ async function fixture(
 }
 
 describe('CodexSetupManager', () => {
+  it('recommends an eligible gezel and publishes its stable id ahead of raw models', async () => {
+    const maya: GezelSummary = {
+      id: 'maya-stable-id',
+      name: 'Maya',
+      role: 'Developer',
+      provider: 'llama-cpp',
+      model: 'coder.gguf',
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    };
+    const f = await fixture({ gezels: [maya], meesterGezelId: maya.id });
+
+    const before = await f.manager.status();
+    expect(before.recommendedModel).toBe(`gezel:${maya.id}`);
+    expect(before.models.map((model) => model.id)).toEqual([
+      `gezel:${maya.id}`,
+      'llama-cpp:coder.gguf',
+    ]);
+    expect(before.models[0]).toMatchObject({
+      kind: 'gezel',
+      label: 'Maya',
+      role: 'Developer',
+      modelLabel: 'Local Coder',
+      provider: 'llama-cpp',
+      contextWindow: 16_384,
+    });
+
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    const profile = await readFile(
+      join(f.codexHome, `${CODEX_SETUP_PROFILE_NAME}.config.toml`),
+      'utf8',
+    );
+    expect(profile).toContain(`model = "gezel:${maya.id}"`);
+
+    const catalog = JSON.parse(
+      await readFile(join(f.home, 'integrations', 'codex', 'models.json'), 'utf8'),
+    ) as { models: Array<Record<string, unknown>> };
+    expect(catalog.models[0]).toMatchObject({
+      slug: `gezel:${maya.id}`,
+      display_name: 'Maya',
+      context_window: 16_384,
+    });
+  });
+
+  it('keeps raw models available when a gezel is not backed by eligible local inference', async () => {
+    const cloudGezel: GezelSummary = {
+      id: 'cloud-gezel',
+      name: 'Cloudy',
+      provider: 'openai',
+      model: 'gpt-5.6',
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    };
+    const f = await fixture({ gezels: [cloudGezel] });
+
+    const status = await f.manager.status();
+    expect(status.models).toHaveLength(1);
+    expect(status.models[0]).toMatchObject({
+      id: 'llama-cpp:coder.gguf',
+      kind: 'model',
+    });
+    expect(status.recommendedModel).toBe('llama-cpp:coder.gguf');
+  });
+
   it('creates an isolated authenticated profile without touching config.toml', async () => {
     const f = await fixture();
     await mkdir(f.codexHome, { recursive: true });
@@ -102,7 +180,9 @@ describe('CodexSetupManager', () => {
     expect(status.state).toBe('configured');
     expect(status.canRemove).toBe(true);
     expect(status.launchCommand).toBe(
-      `CODEX_HOME=${f.codexHome} /usr/local/bin/codex --profile gezel-local`,
+      process.platform === 'win32'
+        ? `$env:CODEX_HOME = '${f.codexHome.replace(/'/g, "''")}'; & '/usr/local/bin/codex' --profile 'gezel-local'`
+        : `CODEX_HOME=${f.codexHome} /usr/local/bin/codex --profile gezel-local`,
     );
     expect(status.bridge).toEqual({
       baseUrl: 'http://127.0.0.1:11435/v1',

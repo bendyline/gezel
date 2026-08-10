@@ -5,7 +5,7 @@
      body: the chat's pill row and, beside it, the output pane's launch
      toolbar. Both consume this so the two read as one continuous bar
      across the split and can't drift apart. */
-  --chat-toolbar-band-height: 41px;
+  --chat-toolbar-band-height: 66px;
 
   /* Typography tokens.
      `--font-ui` (Hanken Grotesk) is the default everywhere: UI chrome,
@@ -1586,6 +1586,31 @@ html.embedded-chat #root {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.machine-memory-detail-list {
+  display: grid;
+  gap: 0.12rem;
+  margin-top: 0.08rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.3;
+}
+.machine-memory-detail-heading {
+  color: var(--text);
+  font-weight: 600;
+}
+.machine-memory-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.machine-memory-detail-row > :first-child {
+  overflow-wrap: anywhere;
+}
+.machine-memory-detail-row > :last-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .machine-memory-segment {
   display: block;
   height: 100%;
@@ -1676,6 +1701,50 @@ html.embedded-chat #root {
   align-items: flex-start;
   gap: 0.3rem;
 }
+.engine-pill-retention-policy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.engine-pill-retention-mode {
+  min-inline-size: 0;
+  margin: 0;
+}
+.engine-pill-retention-mode .gz-key {
+  position: relative;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.engine-pill-retention-radio {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.engine-pill-retention-mode .gz-key:has(.engine-pill-retention-radio:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.engine-pill-retention-mode .gz-key:has(.engine-pill-retention-radio:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.engine-pill-retention-radio:disabled {
+  cursor: not-allowed;
+}
+.engine-pill-retention-note {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
 .engine-pill-health-mode .gz-key {
   padding: 0.25rem 0.55rem;
   font-size: 0.72rem;
@@ -1693,6 +1762,44 @@ html.embedded-chat #root {
   color: var(--text-muted);
 }
 .engine-pill-health-policy-error {
+  color: var(--danger);
+}
+.engine-pill-emergency-stop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.engine-pill-emergency-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.engine-pill-emergency-copy span {
+  color: var(--text-muted);
+}
+.engine-pill-emergency-button {
+  min-width: 8.5rem;
+  white-space: nowrap;
+}
+.engine-pill-emergency-notice,
+.engine-pill-emergency-error {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.engine-pill-emergency-notice {
+  grid-column: 1 / -1;
+  color: var(--success);
+}
+.engine-pill-emergency-error {
   color: var(--danger);
 }
 .engine-pill-empty {
@@ -13126,6 +13233,7 @@ button.bench-step-foot:disabled {
   margin-top: 0.5rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
+  font-family: var(--font-ui);
   color: var(--accent-hover, #996142);
   background: rgba(176, 114, 76, 0.1);
   border: 1px solid rgba(176, 114, 76, 0.28);
@@ -13138,6 +13246,7 @@ button.bench-step-foot:disabled {
   margin-top: 0.5rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
+  font-family: var(--font-ui);
   color: var(--warning);
   background: var(--warning-bg);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
@@ -14562,11 +14671,9 @@ body.chat-rail-resizing webview {
    streaming / failed / recently active, the project's active tasks, and
    a "+" that starts a new task.
 
-   Two non-negotiables, both about height. It sits in the `.chat-rail-main`
-   flex column above the timeline, so it must not shrink (the timeline's
-   `flex: 1` would otherwise crush it), and it must never wrap to a second
-   line — it would steal timeline height at exactly the widths where
-   height is scarcest. Overflowing pills scroll sideways instead. */
+   It sits in the `.chat-rail-main` flex column above the timeline, so it
+   must not shrink (the timeline's `flex: 1` would otherwise crush it), and
+   the cards must never wrap into a second row. Overflow scrolls sideways. */
 .chat-pill-row {
   display: flex;
   align-items: center;
@@ -14600,13 +14707,14 @@ body.chat-rail-resizing webview {
   gap: 0.3rem;
   flex: 0 0 auto;
   max-width: 14rem;
-  padding: 0.15rem 0.5rem;
+  min-height: 3rem;
+  padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--fg);
   font-size: 0.72rem;
-  line-height: 1.5;
+  line-height: 1.2;
   cursor: pointer;
 }
 .chat-pill:hover {
@@ -14615,6 +14723,60 @@ body.chat-rail-resizing webview {
 .chat-pill.is-active {
   border-color: var(--accent, var(--fg));
   background: color-mix(in srgb, var(--accent, var(--fg)) 12%, var(--panel));
+}
+.chat-pill-thread {
+  width: 17rem;
+  max-width: 17rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.12rem;
+  text-align: left;
+}
+.chat-pill-thread-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+.chat-pill-thread-title {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.chat-pill-thread-context,
+.chat-pill-thread-update {
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.chat-pill-thread-context .poppetje,
+.chat-pill-thread-context svg {
+  flex: 0 0 auto;
+}
+.chat-pill-participants {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.chat-pill-message-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill-separator {
+  flex: 0 0 auto;
+  color: var(--border-strong, var(--muted));
+}
+.chat-pill-thread-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 .chat-pill-label {
   overflow: hidden;
@@ -14634,6 +14796,9 @@ body.chat-rail-resizing webview {
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+.chat-pill-idle .chat-pill-dot {
+  background: var(--muted);
 }
 .chat-pill-inflight .chat-pill-dot {
   background: var(--accent, #7faa76);
@@ -14659,12 +14824,8 @@ body.chat-rail-resizing webview {
   flex-direction: column;
   gap: 0.1rem;
   align-items: flex-start;
-}
-.chat-pill-overflow-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 18rem;
+  width: 18rem;
+  max-width: 100%;
 }
 
 /* Pinned right so "start a new task" stays put while the pills scroll
@@ -14692,11 +14853,14 @@ body.chat-rail-resizing webview {
   border-color: var(--accent, var(--fg));
 }
 
-/* Narrow chat rail: drop to names-only. Container query, not a viewport
-   media query — see the `.chat-rail-main` note above. */
+/* Narrow chat rail: keep the three-line summary, but tighten its card.
+   Container query, not a viewport media query — see the rail note above. */
 @container chat-rail (max-width: 560px) {
   .chat-pill {
-    max-width: 9rem;
+    max-width: 13rem;
+  }
+  .chat-pill-thread {
+    width: 13rem;
   }
   .chat-pill-thread .poppetje,
   .chat-pill-thread svg {
@@ -17877,6 +18041,21 @@ a.license-button:hover {
 
 .gz-select-viewport {
   padding: 0.25rem;
+}
+
+.gz-select-label {
+  padding: 0.35rem 0.6rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gz-select-separator {
+  height: 1px;
+  margin: 0.25rem 0.35rem;
+  background: var(--border);
 }
 
 .gz-select-item {

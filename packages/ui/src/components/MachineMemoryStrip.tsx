@@ -27,6 +27,24 @@ function percent(bytes: number, totalBytes: number): number {
   return Math.max(0, Math.min(100, (bytes / totalBytes) * 100));
 }
 
+function formatCountdown(unloadAt: number): string {
+  const remainingSeconds = Math.max(0, Math.ceil((unloadAt - Date.now()) / 1_000));
+  if (remainingSeconds <= 0) return 'Unloading now';
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return `Unloads in ${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function gpuOwnerLabel(
+  owner: NonNullable<MachineMemoryUsage['gpuProcesses']>[number]['owner'],
+): string {
+  if (owner === 'machine-engine') return 'Gezel machine engine';
+  if (owner === 'development-engine') return 'Gezel development engine';
+  if (owner === 'app-engine') return 'Gezel app engine';
+  if (owner === 'gezel-engine') return 'Gezel engine';
+  return 'Other app';
+}
+
 /**
  * The broker reservation is not a quantity of this pool: on a discrete card
  * its budget is the card's memory PLUS a share of system RAM, so it routinely
@@ -60,7 +78,8 @@ function describeCapacityPools(usage: MachineMemoryUsage): string | null {
  * Stacked live view of the physical memory pool backing local inference.
  *
  * macOS reports Gezel's observed physical footprint (including Metal-backed
- * allocations) separately from the engine broker's capacity reservation.
+ * allocations); Windows reports dedicated bytes by process through the OS GPU
+ * counters. Both stay separate from the engine broker's capacity reservation.
  * Aggregate used/free figures come from the OS on UMA/CPU hosts and the GPU
  * driver on discrete cards. macOS file cache stays separate because it is
  * reclaimable capacity, not "Other" app use.
@@ -128,11 +147,10 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
   const cachedBytes = typeof usage.cachedBytes === 'number' ? usage.cachedBytes : null;
   const cachedPercent = cachedBytes === null ? 0 : percent(cachedBytes, usage.totalBytes);
-  // macOS gives us a trustworthy total physical footprint, but not a
-  // trustworthy per-model split. The broker can retain capacity for a cold
-  // provider whose process is not running, so applying its weights/cache
-  // estimate to the observed footprint invents detail. Keep the measured
-  // total whole; only show the estimated split on fallback/driver paths.
+  // Observed process accounting gives a trustworthy Gezel total, but not a
+  // trustworthy per-model weights/cache split. The broker can retain capacity
+  // for a cold provider whose process is not running, so applying that estimate
+  // to the observed footprint invents detail. Keep the measured total whole.
   const gezelSegments = observed
     ? [
         {
@@ -212,6 +230,10 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
         .filter(Boolean)
         .join(', ')
     : '';
+  const gpuProcesses = (usage.gpuProcesses ?? [])
+    .filter((process) => process.dedicatedBytes >= 16 * 1024 ** 2)
+    .slice(0, 8);
+  const engineLifecycles = usage.engineLifecycles ?? [];
   const ariaSummary = [
     `${hasMeasuredUsage ? measuredUsageLabel : label}: ${usedSummary}`,
     !attributed
@@ -307,6 +329,44 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
           )}
         </div>
       )}
+      {gpuProcesses.length > 0 && (
+        <div className="machine-memory-detail-list" aria-label="Dedicated VRAM owners">
+          <div className="machine-memory-detail-heading">Dedicated VRAM owners</div>
+          {gpuProcesses.map((process) => (
+            <div className="machine-memory-detail-row" key={`${process.pid}:${process.owner}`}>
+              <span>
+                {gpuOwnerLabel(process.owner)}
+                {process.name ? ` · ${process.name}` : ''}
+              </span>
+              <span>{formatBytes(process.dedicatedBytes)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {engineLifecycles.length > 0 && (
+        <div className="machine-memory-detail-list" aria-label="Local model release schedule">
+          <div className="machine-memory-detail-heading">Model release</div>
+          {engineLifecycles.map((engine) => {
+            const engineLabel = modelNames?.get(engine.modelId) ?? engine.modelId;
+            const releaseText = !engine.running
+              ? 'Released'
+              : engine.active
+                ? 'In use'
+                : engine.unloadAt !== null
+                  ? `${engine.releaseReason === 'memory-pressure' ? 'VRAM pressure · ' : ''}${formatCountdown(engine.unloadAt)}`
+                  : 'Resident';
+            return (
+              <div
+                className="machine-memory-detail-row"
+                key={`${engine.provider}:${engine.modelId}:${engine.replicaIdx}`}
+              >
+                <span>{engineLabel}</span>
+                <span>{releaseText}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {hasReservationMeter && (
         <div className="machine-memory-reservation">
           <div className="machine-memory-reservation-heading">
@@ -364,9 +424,6 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
               ))}
             </div>
           )}
-          <div className="machine-memory-note">
-            Capacity planning only; includes models that are not currently running.
-          </div>
         </div>
       )}
       {reservationNote && <div className="machine-memory-note">{reservationNote}</div>}

@@ -47,8 +47,8 @@ function ds4Entry(m: CatalogItemSummary['manifest']): Ds4ChatModel | null {
   return m as Ds4ChatModel;
 }
 
-function fmtGib(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(0)} GiB`;
+function fmtGb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(0)} GB`;
 }
 
 export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => void }) {
@@ -315,16 +315,16 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
           fitsRecommendedCache ? (
             <span
               className="home-status-pill home-status-ok"
-              title={`Uses SSD streaming with a target memory working set of about ${fmtGib(resident)}.`}
+              title={`Uses SSD streaming with a target memory working set of about ${fmtGb(resident)}.`}
             >
               {isLightest ? 'recommended on this device' : 'fits with SSD streaming'}
             </span>
           ) : canRunSafely ? (
             <span
               className="home-status-pill home-status-warn"
-              title={`Gezel will reduce this model's expert cache below its ${fmtGib(
+              title={`Gezel will reduce this model's expert cache below its ${fmtGb(
                 resident,
-              )} target to preserve 32 GiB for the system and other apps. It should run, but will read from SSD more often.`}
+              )} target to preserve 32 GB for the system and other apps. It should run, but will read from SSD more often.`}
             >
               reduced cache · slower
             </span>
@@ -350,11 +350,11 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
             <div style={{ flex: 1, minWidth: '14rem' }}>
               <strong>{displayName}</strong>{' '}
               <span className="muted small">
-                {m.parameterSize} · download {fmtGib(m.ds4.approxSizeBytes)}
+                {m.parameterSize} · download {fmtGb(m.ds4.approxSizeBytes)}
               </span>
               {resident ? (
                 <div className="muted small">
-                  memory target ≈ {fmtGib(resident)} with SSD streaming
+                  memory target ≈ {fmtGb(resident)} with SSD streaming
                 </div>
               ) : null}
             </div>

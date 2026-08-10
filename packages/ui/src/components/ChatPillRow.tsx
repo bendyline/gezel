@@ -3,7 +3,6 @@ import { displayName } from '@bendyline/gezel';
 import { useMemo } from 'react';
 import { DropdownMenu } from '../primitives/index.js';
 import { GezelIcon } from './GezelIcon.js';
-import { formatRelativeTime } from './session-labels.js';
 import { type ThreadPill, useChatThreadPills } from './useChatThreadPills.js';
 import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -60,6 +59,8 @@ export function ChatPillRow({
     if (!g) return 'someone';
     return displayName({ name: g.name, roleBasedName: g.roleBasedName }, roleBasedNameOnlyMode);
   };
+  const namesFor = (pill: ThreadPill): string =>
+    [...new Set(pill.involvedGezelIds.map(nameFor))].join(', ');
 
   const liveCount = pills.filter((p) => p.state === 'inflight').length;
   const errorCount = pills.filter((p) => p.state === 'errored').length;
@@ -85,7 +86,7 @@ export function ChatPillRow({
             key={pill.sessionId}
             pill={pill}
             gezels={gezels}
-            gezelName={nameFor(pill.gezelId)}
+            gezelNames={namesFor(pill)}
             active={pill.sessionId === activeSessionId}
             onFocus={onFocusThread}
           />
@@ -106,12 +107,9 @@ export function ChatPillRow({
                   <DropdownMenu.Item
                     key={pill.sessionId}
                     onSelect={() => onFocusThread(pill)}
-                    className="chat-pill-overflow-item"
+                    className={`chat-pill-overflow-item chat-pill-${pill.state}`}
                   >
-                    <span className="chat-pill-overflow-title">{pill.title}</span>
-                    <span className="muted small">
-                      {nameFor(pill.gezelId)} · {formatRelativeTime(pill.lastActivityAt)}
-                    </span>
+                    <ThreadSummaryLines pill={pill} gezelNames={namesFor(pill)} />
                   </DropdownMenu.Item>
                 ))}
               </DropdownMenu.Content>
@@ -147,46 +145,130 @@ export function ChatPillRow({
 function ThreadPillButton({
   pill,
   gezels,
-  gezelName,
+  gezelNames,
   active,
   onFocus,
 }: {
   pill: ThreadPill;
   gezels: GezelSummary[];
-  gezelName: string;
+  gezelNames: string;
   active: boolean;
   onFocus: (pill: ThreadPill) => void;
 }) {
   const gezel = gezels.find((g) => g.id === pill.gezelId);
   // The dot carries state visually; the accessible name carries it in
   // words, so the decorative element never has to be read out.
-  const stateWord =
-    pill.state === 'inflight' ? ' — working' : pill.state === 'errored' ? ' — failed' : '';
-  const title =
-    pill.state === 'errored' && pill.error
-      ? `${gezelName} · ${pill.title} · last turn failed: ${pill.error}`
-      : `${gezelName} · ${pill.title} · ${formatRelativeTime(pill.lastActivityAt)}`;
+  const updated = formatLongRelativeTime(pill.lastActivityAt);
+  const status = threadStatusLabel(pill.state);
+  const message = messagePreviewFor(pill);
+  const title = `${gezelNames} · ${pill.title} · updated ${updated} · ${status}${
+    pill.error ? `: ${pill.error}` : ''
+  }`;
 
   return (
     <button
       type="button"
       className={`chat-pill chat-pill-thread chat-pill-${pill.state}${active ? ' is-active' : ''}`}
       aria-pressed={active}
-      aria-label={`${gezelName}: ${pill.title}${stateWord}`}
+      aria-label={`${gezelNames}: ${pill.title}. ${message}. Updated ${updated}. ${status}`}
       title={title}
       onClick={() => onFocus(pill)}
     >
-      <GezelIcon
-        svg={gezel?.icon ?? null}
-        poppetje={gezel?.poppetje}
-        iconOverride={gezel?.iconOverride}
-        name={gezelName}
-        size={14}
-      />
-      <span className="chat-pill-label">{gezelName}</span>
-      {pill.state !== 'idle' && <span className="chat-pill-dot" aria-hidden="true" />}
+      <ThreadSummaryLines pill={pill} gezelNames={gezelNames} gezel={gezel} />
     </button>
   );
+}
+
+function ThreadSummaryLines({
+  pill,
+  gezelNames,
+  gezel,
+}: {
+  pill: ThreadPill;
+  gezelNames: string;
+  gezel?: GezelSummary | undefined;
+}) {
+  const message = messagePreviewFor(pill);
+  return (
+    <>
+      <span className="chat-pill-thread-line chat-pill-thread-title">
+        {truncatePreview(pill.title, 40)}
+      </span>
+      <span className="chat-pill-thread-line chat-pill-thread-context">
+        {gezel && (
+          <GezelIcon
+            svg={gezel.icon ?? null}
+            poppetje={gezel.poppetje}
+            iconOverride={gezel.iconOverride}
+            name={gezelNames}
+            size={14}
+          />
+        )}
+        <span className="chat-pill-participants">{gezelNames}</span>
+        <span className="chat-pill-separator" aria-hidden="true">
+          ·
+        </span>
+        <span className="chat-pill-message-preview">{message}</span>
+      </span>
+      <span className="chat-pill-thread-line chat-pill-thread-update">
+        <span>Updated {formatLongRelativeTime(pill.lastActivityAt)}</span>
+        <span className="chat-pill-separator" aria-hidden="true">
+          ·
+        </span>
+        <span className="chat-pill-thread-status">
+          <span className="chat-pill-dot" aria-hidden="true" />
+          {threadStatusLabel(pill.state)}
+        </span>
+      </span>
+    </>
+  );
+}
+
+function messagePreviewFor(pill: ThreadPill): string {
+  return pill.lastMessagePreview
+    ? truncatePreview(plainMessagePreview(pill.lastMessagePreview), 30)
+    : 'No messages yet';
+}
+
+function truncatePreview(value: string, maxCharacters: number): string {
+  const characters = Array.from(value.trim());
+  if (characters.length <= maxCharacters) return characters.join('');
+  return `${characters.slice(0, maxCharacters - 1).join('')}…`;
+}
+
+function plainMessagePreview(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_~`#>]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function threadStatusLabel(state: ThreadPill['state']): string {
+  if (state === 'inflight') return 'Working';
+  if (state === 'errored') return 'Needs attention';
+  return 'Ready';
+}
+
+function formatLongRelativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return iso;
+  const minutes = Math.floor(Math.max(0, Date.now() - then) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} ${years === 1 ? 'year' : 'years'} ago`;
 }
 
 function TaskPillButton({

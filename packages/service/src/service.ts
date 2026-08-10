@@ -184,6 +184,12 @@ export interface StartServiceOptions {
   role?: ServiceRole;
   /** Test seam for a split-service pair; production discovers the OS path. */
   machineEngineHome?: string;
+  /**
+   * Whether a user daemon should discover and adopt the installed machine
+   * engine. Defaults to true in production; the desktop dev supervisor turns
+   * it off so `pnpm app` exercises workspace-built native-provider code.
+   */
+  machineEngineDiscovery?: boolean;
   home?: string;
   /**
    * Bind to this exact port and FAIL if it's already in use (no
@@ -1206,8 +1212,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Start discovery only after every native provider manager is wired. The
   // bridge publishes the verified remote before invoking this single drain,
   // so new work routes machine-wide while existing local work finishes.
+  const machineEngineDiscovery =
+    opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1';
+  if (serviceRole === 'user' && !machineEngineDiscovery) {
+    log.info('[machine-engine] discovery disabled; native inference stays in this user daemon');
+  }
   const machineEngine =
-    serviceRole === 'user'
+    serviceRole === 'user' && machineEngineDiscovery
       ? await startMachineEngineBridge({
           home,
           remotes,
@@ -1943,6 +1954,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     tokenStore,
     bridge: codexBridge,
     readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
     listModels: listCodexSetupModels,
   });
 

@@ -48,14 +48,38 @@ const { CodexSetupCard } = await import('./CodexSetupCard.js');
 
 const MODELS = [
   {
+    id: 'gezel:maya-id',
+    label: 'Maya',
+    description: 'Developer · Qwen 3 8B',
+    kind: 'gezel' as const,
+    provider: 'llama-cpp',
+    gezelId: 'maya-id',
+    role: 'Developer',
+    modelLabel: 'Qwen 3 8B',
+    supportsTools: true,
+  },
+  {
+    id: 'gezel:theo-id',
+    label: 'Theo',
+    description: 'Reviewer · Qwen 3 14B',
+    kind: 'gezel' as const,
+    provider: 'mlx',
+    gezelId: 'theo-id',
+    role: 'Reviewer',
+    modelLabel: 'Qwen 3 14B',
+    supportsTools: true,
+  },
+  {
     id: 'llama-cpp:qwen3-8b',
     label: 'Qwen 3 8B',
+    kind: 'model' as const,
     provider: 'llama-cpp',
     supportsTools: true,
   },
   {
     id: 'mlx:qwen3-14b',
     label: 'Qwen 3 14B',
+    kind: 'model' as const,
     provider: 'mlx',
     supportsTools: true,
   },
@@ -108,7 +132,7 @@ describe('CodexSetupCard', () => {
     writeClipboard.mockResolvedValue(undefined);
   });
 
-  it('requires confirmation before configuring the selected model', async () => {
+  it('requires confirmation before configuring the selected gezel', async () => {
     getCodexSetupStatus.mockResolvedValue(setupStatus());
     configureCodex.mockResolvedValue(
       setupStatus({
@@ -128,7 +152,8 @@ describe('CodexSetupCard', () => {
     expect(configureCodex).not.toHaveBeenCalled();
 
     const dialog = screen.getByRole('alertdialog', { name: 'Set up Codex with Gezel?' });
-    expect(within(dialog).getByText(/Qwen 3 14B/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Theo/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/character, Qwen 3 14B, and tuning/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Set up Codex' }));
 
     await waitFor(() => {
@@ -136,6 +161,20 @@ describe('CodexSetupCard', () => {
       expect(onChanged).toHaveBeenCalledOnce();
     });
     expect(await screen.findByText('Configured')).toBeInTheDocument();
+  });
+
+  it('groups gezels first while retaining raw models as a fallback', async () => {
+    getCodexSetupStatus.mockResolvedValue(setupStatus());
+
+    render(<CodexSetupCard endpointsEnabled />);
+
+    const select = await screen.findByTestId('mock-select');
+    expect(select).toHaveValue('gezel:maya-id');
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.getAttribute('value')),
+    ).toEqual(['gezel:maya-id', 'gezel:theo-id', 'llama-cpp:qwen3-8b', 'mlx:qwen3-14b']);
   });
 
   it('shows an update failure inline beside the card', async () => {

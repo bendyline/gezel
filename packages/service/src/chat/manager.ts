@@ -2422,6 +2422,53 @@ export class ChatManager {
   }
 
   /**
+   * Install-wide panic stop for chat work. The engagement-mode cache flips
+   * synchronously before any teardown awaits, so task runners and autonomous
+   * follow-ups cannot admit replacement turns while the current ones unwind.
+   * Pending user messages and after-idle handoffs are deliberately discarded:
+   * leaving either queue intact would make an "emergency stop" immediately
+   * restart work as soon as the cancelled provider call releases its slot.
+   *
+   * The HTTP route persists the matching `reactive` config value. Keeping the
+   * runtime transition here makes the stop ordering atomic from ChatManager's
+   * point of view and leaves the manager independently testable.
+   */
+  async emergencyStop(): Promise<{
+    cancelledTurns: number;
+    clearedQueuedMessages: number;
+    clearedDeferredActions: number;
+  }> {
+    this.engagementMode = 'reactive';
+
+    const clearedQueuedMessages = Array.from(this.pendingSends.values()).reduce(
+      (total, queue) => total + queue.length,
+      0,
+    );
+    const clearedDeferredActions = Array.from(this.afterSessionIdle.values()).reduce(
+      (total, actions) => total + actions.length,
+      0,
+    );
+
+    // Clear deferred callbacks before cancelling live turns. A cancel frees
+    // the session slot synchronously, and the unwind path may otherwise drain
+    // one of these callbacks before all cancellations have settled.
+    this.afterSessionIdle.clear();
+    for (const sessionId of Array.from(this.pendingSends.keys())) {
+      this.rejectQueuedForSession(sessionId, 'emergency stop');
+    }
+
+    const results = await Promise.allSettled(
+      Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
+    );
+    const cancelledTurns = results.reduce(
+      (total, result) => total + (result.status === 'fulfilled' && result.value.cancelled ? 1 : 0),
+      0,
+    );
+
+    return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
+  }
+
+  /**
    * Interrupt: cancel the in-flight turn (identical salvage path to
    * {@link cancelInflight} — the partial reply persists as a
    * `turn-aborted` bubble) and send `userText` immediately, AHEAD of
@@ -9654,7 +9701,6 @@ export class ChatManager {
         config: cfg,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.llamaCppModels ? { llamaCppModels: this.llamaCppModels } : {}),
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         ...(eb ? { ensureEngine: () => ensureLlamaEngineStatus(eb, cfg) } : {}),
@@ -9692,6 +9738,7 @@ export class ChatManager {
         ...(this.mlxModels ? { mlxModels: this.mlxModels } : {}),
         ...(this.uvRuntime ? { uvRuntime: this.uvRuntime } : {}),
         ...(this.mlxRuntimeStatus ? { mlxRuntimeStatus: this.mlxRuntimeStatus } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         modelOverride: { modelId, replicaIdx },
         broker,
       });
@@ -9718,8 +9765,8 @@ export class ChatManager {
         config: cfg,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.ds4Models ? { ds4Models: this.ds4Models } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
         modelOverride: { modelId, replicaIdx },
         broker,
@@ -11108,7 +11155,6 @@ export class ChatManager {
         config,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.llamaCppModels ? { llamaCppModels: this.llamaCppModels } : {}),
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
@@ -11122,14 +11168,15 @@ export class ChatManager {
         ...(this.mlxModels ? { mlxModels: this.mlxModels } : {}),
         ...(this.uvRuntime ? { uvRuntime: this.uvRuntime } : {}),
         ...(this.mlxRuntimeStatus ? { mlxRuntimeStatus: this.mlxRuntimeStatus } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
       });
     } else if (name === 'ds4') {
       provider = await buildDs4Provider({
         config,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.ds4Models ? { ds4Models: this.ds4Models } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
       });
     } else {

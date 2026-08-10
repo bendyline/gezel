@@ -76,7 +76,10 @@ import {
 } from '../local-tool-call-salvage.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import type {
+  NativeEngineLifecycleSnapshot,
+  NativeEngineSupervisor,
+} from '../native/supervisor.js';
 import { readSseEvents } from '../openai-compatible/sse.js';
 import {
   PROJECT_MACRO_INTERCEPT_CAP,
@@ -493,6 +496,15 @@ export class MlxProvider implements LLMProvider {
   currentBaseUrl(): string | null {
     if (this.externalBaseUrl) return this.externalBaseUrl;
     return this.supervisor?.currentBaseUrl() ?? null;
+  }
+
+  /** True only while this sidecar is serving or queuing a physical request. */
+  isEngineBusy(): boolean {
+    return this.engineGateActive > 0 || this.engineGateWaiters.length > 0;
+  }
+
+  engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
+    return this.supervisor?.lifecycleSnapshot();
   }
 
   async acquireExclusiveEngineRequest(label: string): Promise<() => void> {

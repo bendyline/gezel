@@ -172,7 +172,16 @@ const fetchImpl: typeof fetch = certPath
   : createPatientFetch();
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
-const ExpectedDeliverableArgSchema = coerceJsonObject(ExpectedDeliverableSchema);
+// Keep the model-facing handoff hint deliberately small. The persisted/API
+// ExpectedDeliverableSchema also carries the full 24-variant gate contract
+// (`checks` + `scripts`). Advertising that internal completion machinery on
+// every message/delegate tool duplicated tens of thousands of JSON-Schema
+// characters in local-model requests and could make llama.cpp's aggregate
+// tool grammar fail before inference began. Gate defaults are resolved by the
+// receiving service; callers only need to identify the reply shape and path.
+const ExpectedDeliverableArgSchema = coerceJsonObject(
+  ExpectedDeliverableSchema.pick({ kind: true, filePath: true }),
+);
 const sessionExpectedDeliverable = parseSessionExpectedDeliverable(
   process.env.GEZEL_EXPECTED_DELIVERABLE,
 );

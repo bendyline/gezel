@@ -1,5 +1,9 @@
 import { join } from 'node:path';
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  type GezelConfig,
+  createLogger,
+} from '@bendyline/gezel';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { Store } from '../../fs/store.js';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
@@ -85,6 +89,7 @@ export async function buildMlxProvider(opts: {
    * on the singleton path → full budget, committedOther = 0.
    */
   broker?: import('../native/capacity-broker.js').CapacityBroker;
+  arbiter?: import('../gpu-arbiter.js').GpuArbiter;
 }): Promise<MlxProvider> {
   const { config, affinity, store } = opts;
   const externalBaseUrl = opts.modelOverride
@@ -503,8 +508,7 @@ export async function buildMlxProvider(opts: {
   // resident, so the SIGKILL window between Stage 1 and Stage 2
   // can't lose them. MLX cold-start is ~1–3 min so the staged
   // approach is especially valuable here vs llama.cpp.
-  // Same 30-min default as llama-cpp — see `llamaIdleMs` note above.
-  const mlxIdleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
+  const mlxIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const mlxFreezeMs = Math.floor(mlxIdleMs / 2);
   // Python+MLX cold-start (PyTorch imports, MLX metal shaders JIT) is
   // slower than llama.cpp's Metal compile. 300s headroom covers the
@@ -527,6 +531,8 @@ export async function buildMlxProvider(opts: {
     startupTimeoutMs: mlxStartupTimeoutMs,
     idleTimeoutMs: mlxIdleMs,
     freezeTimeoutMs: mlxFreezeMs,
+    isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
+    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
     onFreeze: async () => {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },

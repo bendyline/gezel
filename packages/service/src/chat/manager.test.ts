@@ -1652,6 +1652,59 @@ describe('ChatManager — inflight visibility + cancel', () => {
     expect(res.cancelled).toBe(false);
   });
 
+  it('emergencyStop flips to reactive before cancelling turns and clears restart queues', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const queuedReject = vi.fn();
+    let parkedRan = false;
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+      pendingSends: Map<
+        string,
+        Array<{
+          id: string;
+          userText: string;
+          enqueuedAt: number;
+          waiters: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }>;
+        }>
+      >;
+      afterSessionIdle: Map<string, Array<() => void>>;
+    };
+    internals.inflight.set(session.id, {
+      userText: 'keep working until stopped',
+      startedAt: Date.now(),
+    });
+    internals.pendingSends.set(session.id, [
+      {
+        id: 'queued-after-current',
+        userText: 'run this next',
+        enqueuedAt: Date.now(),
+        waiters: [{ resolve: vi.fn(), reject: queuedReject }],
+      },
+    ]);
+    internals.afterSessionIdle.set(session.id, [
+      () => {
+        parkedRan = true;
+      },
+    ]);
+    manager.setEngagementMode('proactive');
+
+    const result = await manager.emergencyStop();
+
+    expect(result).toEqual({
+      cancelledTurns: 1,
+      clearedQueuedMessages: 1,
+      clearedDeferredActions: 1,
+    });
+    expect(manager.getEngagementMode()).toBe('reactive');
+    expect(manager.inflightInfo(session.id)).toBeNull();
+    expect(manager.listQueued()).toHaveLength(0);
+    expect(internals.afterSessionIdle.size).toBe(0);
+    expect(queuedReject).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.any(String) }),
+    );
+    expect(parkedRan).toBe(false);
+  });
+
   it('beginShutdown cancels live turns, drops parked handoffs, and rejects new sends', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     let parkedRan = false;

@@ -579,6 +579,70 @@ describe('RemoteSession', () => {
     ).rejects.toThrow(/model_not_loaded/);
   });
 
+  it('simplifies rejected llama.cpp tool grammars across an older remote broker', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let attempt = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      attempt += 1;
+      if (attempt <= 2) {
+        return sseResponse([
+          {
+            type: 'error',
+            code: 'inference_failed',
+            message:
+              '[llama-cpp] /v1/chat/completions returned 400 Bad Request: Failed to initialize samplers: failed to parse grammar',
+          },
+        ]);
+      }
+      return sseResponse([{ type: 'delta', text: 'Recovered.' }, { type: 'done' }]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      externalTools: [
+        {
+          name: 'handoff',
+          description: 'Delegate work',
+          parameters: {
+            type: 'object',
+            properties: {
+              target: {
+                oneOf: [{ type: 'string', pattern: '^developer$' }, { type: 'number' }],
+              },
+            },
+            required: ['target'],
+          },
+        },
+      ],
+      systemMessage: 's',
+      model: 'llama-cpp:qwen',
+      priorMessages: [],
+      numCtx: 65_536,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('hi')).resolves.toBe('Recovered.');
+
+    expect(requests).toHaveLength(3);
+    const parameters = requests.map(
+      (request) => (request.tools as Array<{ parameters: Record<string, unknown> }>)[0]!.parameters,
+    );
+    expect(parameters[0]).toMatchObject({
+      properties: { target: { oneOf: expect.any(Array) } },
+      required: ['target'],
+    });
+    expect(parameters[1]).toEqual({
+      type: 'object',
+      properties: { target: {} },
+      required: ['target'],
+    });
+    expect(parameters[2]).toEqual({ type: 'object' });
+  });
+
   it('returns immediately when B streams no tool calls', async () => {
     const fetchImpl = (async () =>
       sseResponse([

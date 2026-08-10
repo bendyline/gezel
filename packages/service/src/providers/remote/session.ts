@@ -12,6 +12,10 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import {
+  isLlamaCppGrammarParseError,
+  simplifyJsonSchemaForLlamaCpp,
+} from '../llama-cpp/tool-grammar.js';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
 import {
@@ -52,6 +56,8 @@ const log = createLogger('remote-session');
 const MAX_TOOL_LOOPS = 24;
 const MID_LOOP_COMPACT_RATIO = 0.7;
 const MID_LOOP_COMPACT_MIN_PRIOR = 2;
+
+type RemoteToolGrammarFallback = 'none' | 'simplified' | 'permissive';
 
 function nativeProviderFromModel(model: string): 'llama-cpp' | 'mlx' | 'ds4' | null {
   const separator = model.indexOf(':');
@@ -101,6 +107,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
   private activePriorMessages: PriorMessageWire[] | null = null;
   private pendingPrompt = '';
   private compactedThisTurn = false;
+  /**
+   * User-side compatibility level for an older llama.cpp machine broker.
+   * Persist it across forward passes so one tool loop does not pay the same
+   * rejected rich-schema request after every locally executed tool call.
+   */
+  private toolGrammarFallback: RemoteToolGrammarFallback = 'none';
   numCtx: number;
   readonly model: string;
 
@@ -430,7 +442,51 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     opts?: SendAndWaitOpts,
     includeAttachments = true,
   ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
-    const tools = this.advertisedTools();
+    for (;;) {
+      try {
+        return await this.postInferOnce(
+          prompt,
+          priorMessages,
+          opts,
+          includeAttachments,
+          this.toolGrammarFallback,
+        );
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (
+          nativeProviderFromModel(this.deps.model) !== 'llama-cpp' ||
+          !isLlamaCppGrammarParseError(detail) ||
+          !this.advertisedTools()
+        ) {
+          throw err;
+        }
+        if (this.toolGrammarFallback === 'none') {
+          this.toolGrammarFallback = 'simplified';
+          log.warn(
+            '[remote] older llama.cpp broker rejected tool grammar; retrying with structural tool schemas',
+          );
+          continue;
+        }
+        if (this.toolGrammarFallback === 'simplified') {
+          this.toolGrammarFallback = 'permissive';
+          log.warn(
+            '[remote] structural tool grammar still rejected; retrying with permissive object parameters',
+          );
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  private async postInferOnce(
+    prompt: string,
+    priorMessages: PriorMessageWire[],
+    opts: SendAndWaitOpts | undefined,
+    includeAttachments: boolean,
+    grammarFallback: RemoteToolGrammarFallback,
+  ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
+    const tools = this.advertisedTools(grammarFallback);
 
     const body: RemoteInferRequest = {
       protocolVersion: PROTOCOL_VERSION,
@@ -617,7 +673,9 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     return { text, toolCalls, queueWaitMs };
   }
 
-  private advertisedTools(): ExternalToolSpec[] | undefined {
+  private advertisedTools(
+    grammarFallback: RemoteToolGrammarFallback = 'none',
+  ): ExternalToolSpec[] | undefined {
     const bridgeTools = this.deps.bridges.isEmpty()
       ? []
       : this.deps.bridges.getOpenAITools().map((tool) => ({
@@ -626,7 +684,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           parameters: tool.parameters,
         }));
     const tools = [...bridgeTools, ...(this.deps.externalTools ?? [])];
-    return tools.length > 0 ? tools : undefined;
+    if (tools.length === 0) return undefined;
+    if (grammarFallback === 'none') return tools;
+    return tools.map((tool) => ({
+      ...tool,
+      parameters:
+        grammarFallback === 'simplified'
+          ? (simplifyJsonSchemaForLlamaCpp(tool.parameters) as Record<string, unknown>)
+          : { type: 'object' },
+    }));
   }
 }
 

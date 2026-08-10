@@ -10,6 +10,8 @@ import {
   reportCursorOffset,
 } from './error-report.js';
 
+const GB = 1024 ** 3;
+
 const DIAGNOSTICS: SystemDiagnostics = {
   version: '1.26212.4',
   sampledAt: '2026-07-31T18:32:00Z',
@@ -21,9 +23,9 @@ const DIAGNOSTICS: SystemDiagnostics = {
     platformKey: 'linux-x64',
   },
   hardware: {
-    totalRamBytes: 64_000_000_000,
-    gpuVramBytes: 24_000_000_000,
-    usableBytes: 22_800_000_000,
+    totalRamBytes: 64 * GB,
+    gpuVramBytes: 24 * GB,
+    usableBytes: 22.8 * GB,
     source: 'gpu-vulkan',
     gpuVendor: 'amd',
     description: 'AMD GPU: 24.0 GB VRAM …',

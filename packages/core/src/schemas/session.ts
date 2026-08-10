@@ -342,6 +342,16 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
    * alive forever.
    */
   lastHumanActivityAt: z.string().optional(),
+  /**
+   * Bounded, single-line text from the newest message. Session-list surfaces
+   * use this for a glanceable preview without loading the full transcript.
+   */
+  lastMessagePreview: z.string().max(200).optional(),
+  /**
+   * Gezels that have spoken in this thread, primary session owner first.
+   * Optional for compatibility with older daemons and cached responses.
+   */
+  involvedGezelIds: z.array(z.string()).optional(),
 });
 export type ChatSessionSummary = z.infer<typeof ChatSessionSummarySchema>;
 

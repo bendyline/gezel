@@ -315,12 +315,27 @@ describe('Store session CRUD', () => {
     await store.writeSession(
       sessionFixture({
         id: 'has-msgs',
-        messages: [{ role: 'user', content: 'x', at: '2026-04-14T10:00:00Z' }],
+        messages: [
+          { role: 'user', content: 'x', at: '2026-04-14T10:00:00Z' },
+          {
+            role: 'user',
+            content: 'Can you review this?',
+            at: '2026-04-14T10:01:00Z',
+            from: { gezelId: 'reviewer', gezelName: 'Reviewer' },
+          },
+          {
+            role: 'assistant',
+            content: 'The latest\nreply is ready.',
+            at: '2026-04-14T10:02:00Z',
+          },
+        ],
       }),
     );
     const list = await store.listSessions({ gezelId: 'ada' });
     const summary = list.find((s) => s.id === 'has-msgs');
     expect(summary).toBeDefined();
+    expect(summary?.lastMessagePreview).toBe('The latest reply is ready.');
+    expect(summary?.involvedGezelIds).toEqual(['ada', 'reviewer']);
     expect((summary as Record<string, unknown>).messages).toBeUndefined();
   });
 });

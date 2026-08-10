@@ -219,6 +219,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       copilotCliInstallDir,
       cacheBudgetMb: config.cacheBudgetMb,
       providerConcurrency: config.providerConcurrency,
+      localEngineIdleTimeoutMs: config.localEngineIdleTimeoutMs,
       // Install-wide per-model tuning. Hand-pick into the whitelist or the
       // Settings preset/fine-tuning controls "lose" their value on the
       // next GET — the resolver still reads them from config.json so the
@@ -486,7 +487,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
       invalidateModelsCache();
     } else if (
       modelPrefFields.some((f) => body[f] !== undefined) ||
-      nightShiftModelPreferenceChanged
+      nightShiftModelPreferenceChanged ||
+      body.localEngineIdleTimeoutMs !== undefined
     ) {
       await ctx.chat.resetClient({ deferBusy: true });
       invalidateModelsCache();
@@ -634,6 +636,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       fetchUrl: updated.fetchUrl,
       webSearch: updated.webSearch,
       playwrightHeadless: updated.playwrightHeadless !== false,
+      localEngineIdleTimeoutMs: updated.localEngineIdleTimeoutMs,
       // Echo llama-cpp fields for parity with the GET handler. Without
       // these the UI's Settings → On-device → Advanced controls would
       // appear to "lose" their value the instant the user hits Save —

@@ -132,6 +132,41 @@ describe('engines routes', () => {
     expect(body.entries).toEqual([]);
   });
 
+  it('reads and persists idle retention on the engine owner', async () => {
+    let config: { localEngineIdleTimeoutMs?: number } = {};
+    const resetCalls: Array<{ deferBusy?: boolean }> = [];
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+        resetClient: async (opts: { deferBusy?: boolean }) => {
+          resetCalls.push(opts);
+        },
+      } as Parameters<typeof makeApp>[0],
+      {
+        store: {
+          readConfig: async () => config,
+          writeConfig: async (patch: { localEngineIdleTimeoutMs: number }) => {
+            config = { localEngineIdleTimeoutMs: patch.localEngineIdleTimeoutMs };
+            return config;
+          },
+        },
+      },
+    );
+
+    const initial = await app.request('/api/engines/retention');
+    await expect(initial.json()).resolves.toEqual({ idleTimeoutMs: 300_000 });
+
+    const update = await app.request('/api/engines/retention', {
+      method: 'PUT',
+      body: JSON.stringify({ idleTimeoutMs: 60_000 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(update.json()).resolves.toEqual({ idleTimeoutMs: 60_000 });
+    expect(config).toEqual({ localEngineIdleTimeoutMs: 60_000 });
+    expect(resetCalls).toEqual([{ deferBusy: true }]);
+  });
+
   it('reads and persists the machine-owned llama.cpp context policy, resetting engines on change', async () => {
     let config: { llamaCppContextSizing?: 'adaptive' | 'model-max' } = {};
     const resetCalls: Array<{ deferBusy?: boolean }> = [];

@@ -1,5 +1,9 @@
 import { basename, dirname, join } from 'node:path';
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  type GezelConfig,
+  createLogger,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../llama-cpp/index.js';
@@ -62,8 +66,6 @@ export async function buildDs4Provider(opts: {
   config: GezelConfig;
   affinity: boolean | undefined;
   home: string;
-  /** Prevent the idle supervisor from stopping DS4 between requests in an active tool loop. */
-  isBusy?: () => boolean;
   /**
    * ds4 GGUF store (a `LlamaCppModelManager` with engine:'ds4'). When set, the
    * supervised path resolves the catalog modelId to an installed weights file
@@ -74,6 +76,7 @@ export async function buildDs4Provider(opts: {
   catalog?: CatalogService;
   modelOverride?: { modelId: string; replicaIdx: number };
   broker?: import('../native/capacity-broker.js').CapacityBroker;
+  arbiter?: import('../gpu-arbiter.js').GpuArbiter;
 }): Promise<Ds4Provider> {
   const { config, affinity, home } = opts;
   const defaultModelId = opts.modelOverride?.modelId ?? config.defaultModel?.ds4;
@@ -274,7 +277,7 @@ export async function buildDs4Provider(opts: {
     }
     return 600_000;
   })();
-  const idleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
+  const idleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
 
   // Persist DS4 stdout/stderr independently from llama.cpp. Dev embedded mode
   // has no service-*.log capture, so without this file a force-quit erases the
@@ -296,7 +299,8 @@ export async function buildDs4Provider(opts: {
     logPrefix: '[ds4-server]',
     startupTimeoutMs,
     idleTimeoutMs: idleMs,
-    ...(opts.isBusy ? { isBusy: opts.isBusy } : {}),
+    isBusy: () => ds4ProviderHolder.current?.isEngineBusy() ?? false,
+    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
     // ds4 exposes no /health — a 200 on /v1/models is the readiness signal.
     readinessPath: '/v1/models',
     onLog: (line) => {

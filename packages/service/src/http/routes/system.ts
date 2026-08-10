@@ -597,6 +597,18 @@ export function systemMemoryRoutes(ctx: ServiceContext): Hono {
         sum + Math.min(entry.modelWeightsBytes ?? entry.residentBytes, entry.residentBytes),
       0,
     );
+    const engineLifecycles = (engineSnapshot?.entries ?? []).flatMap((entry) =>
+      entry.lifecycle
+        ? [
+            {
+              provider: entry.provider,
+              modelId: entry.modelId,
+              replicaIdx: entry.replicaIdx,
+              ...entry.lifecycle,
+            },
+          ]
+        : [],
+    );
     const snapshot = {
       ...sampleMachineMemoryUsage({
         profile,
@@ -604,6 +616,7 @@ export function systemMemoryRoutes(ctx: ServiceContext): Hono {
         engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
         engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
         residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
+        engineLifecycles,
         engineModelWeightsBytes,
         gezelProcessMemory,
         darwinSystemMemory,

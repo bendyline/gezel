@@ -24,7 +24,11 @@
  */
 
 import type { ChatEventEnvelope, ProviderName, SessionGpuTask } from '@bendyline/gezel';
-import { CANONICAL_PROFILES, isKnownProfileId } from '@bendyline/gezel';
+import {
+  CANONICAL_PROFILES,
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  isKnownProfileId,
+} from '@bendyline/gezel';
 import type {
   ConfigResponse,
   ProviderQueueState,
@@ -33,6 +37,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
@@ -50,6 +55,7 @@ type LiveTurn = LiveTurnState;
 type TurnStats = TurnStatsEntry;
 type OnDeviceProvider = 'llama-cpp' | 'mlx' | 'ds4';
 type UserDeviceSafetyMode = 'observe' | 'guard';
+type EngineRetentionMs = 60_000 | 300_000 | 1_800_000;
 type InflightTurn = {
   sessionId: string;
   gezelId: string;
@@ -68,6 +74,14 @@ const ON_DEVICE_PROVIDER_ORDER: readonly OnDeviceProvider[] = ['llama-cpp', 'mlx
 const STATS_WINDOW_MS = 60_000;
 /** Absolute cap so a very chatty session doesn't grow state unbounded. */
 const STATS_MAX_ENTRIES = 40;
+const ENGINE_RETENTION_PRESETS: ReadonlyArray<{
+  value: EngineRetentionMs;
+  label: string;
+}> = [
+  { value: 60_000, label: 'Fast' },
+  { value: 300_000, label: 'Balanced' },
+  { value: 1_800_000, label: 'Keep warm' },
+];
 
 export function EngineStatusPill() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
@@ -75,6 +89,12 @@ export function EngineStatusPill() {
   const [inflightTurns, setInflightTurns] = useState<InflightTurn[]>([]);
   const [deviceSafetySaving, setDeviceSafetySaving] = useState(false);
   const [deviceSafetyError, setDeviceSafetyError] = useState<string | null>(null);
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [emergencyStopOpen, setEmergencyStopOpen] = useState(false);
+  const [emergencyStopping, setEmergencyStopping] = useState(false);
+  const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
+  const [emergencyStopNotice, setEmergencyStopNotice] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -85,10 +105,15 @@ export function EngineStatusPill() {
   }, []);
 
   const refreshConfig = useCallback(() => {
-    api
+    void api
       .getConfig()
-      .then((next) => {
-        if (mountedRef.current) setConfig(next);
+      .then(async (next) => {
+        const retention = await api.getEngineRetention().catch(() => ({
+          idleTimeoutMs: next.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+        }));
+        if (mountedRef.current) {
+          setConfig({ ...next, localEngineIdleTimeoutMs: retention.idleTimeoutMs });
+        }
       })
       .catch(() => {});
   }, []);
@@ -141,6 +166,67 @@ export function EngineStatusPill() {
     [config?.deviceSafety, deviceSafetySaving, refreshActivity, refreshConfig],
   );
 
+  const updateRetention = useCallback(
+    async (localEngineIdleTimeoutMs: EngineRetentionMs) => {
+      if (
+        retentionSaving ||
+        (config?.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS) ===
+          localEngineIdleTimeoutMs
+      ) {
+        return;
+      }
+      setRetentionSaving(true);
+      setRetentionError(null);
+      try {
+        const next = await api.updateEngineRetention(localEngineIdleTimeoutMs);
+        if (!mountedRef.current) return;
+        setConfig((current) =>
+          current ? { ...current, localEngineIdleTimeoutMs: next.idleTimeoutMs } : current,
+        );
+        refreshActivity();
+      } catch (error) {
+        if (!mountedRef.current) return;
+        setRetentionError(error instanceof Error ? error.message : String(error));
+        refreshConfig();
+      } finally {
+        if (mountedRef.current) setRetentionSaving(false);
+      }
+    },
+    [config?.localEngineIdleTimeoutMs, refreshActivity, refreshConfig, retentionSaving],
+  );
+
+  const emergencyStop = useCallback(async () => {
+    if (emergencyStopping) return;
+    setEmergencyStopping(true);
+    setEmergencyStopError(null);
+    setEmergencyStopNotice(null);
+    try {
+      const result = await api.emergencyStopChats();
+      if (!mountedRef.current) return;
+      setConfig((current) => (current ? { ...current, aiEngagementMode: 'reactive' } : current));
+      setInflightTurns([]);
+      setEmergencyStopNotice(
+        `Stopped ${result.cancelledTurns} ${result.cancelledTurns === 1 ? 'chat' : 'chats'}${
+          result.clearedQueuedMessages > 0
+            ? ` and discarded ${result.clearedQueuedMessages} queued ${result.clearedQueuedMessages === 1 ? 'message' : 'messages'}`
+            : ''
+        }. Gezel is Reactive.`,
+      );
+      setEmergencyStopOpen(false);
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', {
+          detail: { aiEngagementMode: 'reactive' },
+        }),
+      );
+      refreshActivity();
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setEmergencyStopError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (mountedRef.current) setEmergencyStopping(false);
+    }
+  }, [emergencyStopping, refreshActivity]);
+
   // Provider overrides can invoke a different local engine than the
   // install-wide default. Keep one shared subscription open so a cold
   // secondary engine is visible before its provider queue registers.
@@ -168,6 +254,15 @@ export function EngineStatusPill() {
         deviceSafetySaving={deviceSafetySaving}
         deviceSafetyError={deviceSafetyError}
         onDeviceSafetyModeChange={updateDeviceSafetyMode}
+        retentionSaving={retentionSaving}
+        retentionError={retentionError}
+        onRetentionChange={updateRetention}
+        emergencyStopping={emergencyStopping}
+        emergencyStopNotice={emergencyStopNotice}
+        onEmergencyStopRequest={() => {
+          setEmergencyStopError(null);
+          setEmergencyStopOpen(true);
+        }}
       />
       {visibleProviders
         .filter((provider) => provider !== defaultProvider)
@@ -184,8 +279,38 @@ export function EngineStatusPill() {
             deviceSafetySaving={deviceSafetySaving}
             deviceSafetyError={deviceSafetyError}
             onDeviceSafetyModeChange={updateDeviceSafetyMode}
+            retentionSaving={retentionSaving}
+            retentionError={retentionError}
+            onRetentionChange={updateRetention}
+            emergencyStopping={emergencyStopping}
+            emergencyStopNotice={emergencyStopNotice}
+            onEmergencyStopRequest={() => {
+              setEmergencyStopError(null);
+              setEmergencyStopOpen(true);
+            }}
           />
         ))}
+      <ConfirmDialog
+        open={emergencyStopOpen}
+        title="Emergency stop all chats?"
+        message={
+          <>
+            Every chat in progress will stop, queued chat messages will be discarded, and Gezel will
+            switch to Reactive. It will only respond when you initiate a chat.
+            {emergencyStopError && (
+              <span className="engine-pill-emergency-error" role="alert">
+                {emergencyStopError}
+              </span>
+            )}
+          </>
+        }
+        confirmLabel="Emergency stop"
+        danger
+        onConfirm={emergencyStop}
+        onCancel={() => {
+          if (!emergencyStopping) setEmergencyStopOpen(false);
+        }}
+      />
     </>
   );
 }
@@ -201,6 +326,12 @@ function EngineStatusPillForProvider({
   deviceSafetySaving,
   deviceSafetyError,
   onDeviceSafetyModeChange,
+  retentionSaving,
+  retentionError,
+  onRetentionChange,
+  emergencyStopping,
+  emergencyStopNotice,
+  onEmergencyStopRequest,
 }: {
   provider: OnDeviceProvider | null;
   defaultProvider: OnDeviceProvider | null;
@@ -212,6 +343,12 @@ function EngineStatusPillForProvider({
   deviceSafetySaving: boolean;
   deviceSafetyError: string | null;
   onDeviceSafetyModeChange: (mode: UserDeviceSafetyMode) => Promise<void>;
+  retentionSaving: boolean;
+  retentionError: string | null;
+  onRetentionChange: (retention: EngineRetentionMs) => Promise<void>;
+  emergencyStopping: boolean;
+  emergencyStopNotice: string | null;
+  onEmergencyStopRequest: () => void;
 }) {
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
@@ -267,6 +404,7 @@ function EngineStatusPillForProvider({
     : null;
   const deviceHealth: DeviceHealth | null = queueStatus?.deviceHealth ?? null;
   const deviceSafetyMode = config?.deviceSafety?.mode ?? deviceHealth?.mode ?? 'observe';
+  const retentionMs = config?.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const providerInflightTurns = useMemo(
     () =>
       onDeviceProvider
@@ -758,6 +896,49 @@ function EngineStatusPillForProvider({
             </dd>
             <dt>Status</dt>
             <dd>{statusText}</dd>
+            {!activeMedia && (
+              <>
+                <dt>Idle models</dt>
+                <dd className="engine-pill-retention-policy">
+                  <fieldset className="gz-tray engine-pill-retention-mode">
+                    <legend className="sr-only">Idle model retention</legend>
+                    {ENGINE_RETENTION_PRESETS.map((preset) => (
+                      <label
+                        key={preset.value}
+                        className={`gz-key${retentionMs === preset.value ? ' gz-key-active' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          className="engine-pill-retention-radio"
+                          name="engine-idle-retention"
+                          value={preset.value}
+                          checked={retentionMs === preset.value}
+                          disabled={retentionSaving}
+                          onChange={() => void onRetentionChange(preset.value)}
+                        />
+                        {preset.label}
+                      </label>
+                    ))}
+                  </fieldset>
+                  <span className="engine-pill-retention-note">
+                    {retentionSaving
+                      ? 'Saving\u2026'
+                      : retentionMs === 60_000
+                        ? 'Unload one minute after the last engine request.'
+                        : retentionMs === 1_800_000
+                          ? 'Keep models warm for 30 minutes.'
+                          : retentionMs === 300_000
+                            ? 'Unload five minutes after the last engine request.'
+                            : `Custom retention: ${Math.round(retentionMs / 60_000)} minutes.`}
+                  </span>
+                  {retentionError && (
+                    <span className="engine-pill-health-policy-error" role="alert">
+                      {retentionError}
+                    </span>
+                  )}
+                </dd>
+              </>
+            )}
             {healthPresentation && (
               <>
                 <dt>Machine health</dt>
@@ -860,6 +1041,25 @@ function EngineStatusPillForProvider({
               </>
             )}
           </dl>
+          {includeMedia && (
+            <div className="engine-pill-emergency-stop">
+              <div className="engine-pill-emergency-copy">
+                <strong>Need everything to pause?</strong>
+                <span>Stop every chat and switch Gezel to Reactive.</span>
+              </div>
+              <button
+                type="button"
+                className="danger engine-pill-emergency-button"
+                disabled={emergencyStopping}
+                onClick={onEmergencyStopRequest}
+              >
+                {emergencyStopping ? 'Stopping…' : 'Emergency Stop'}
+              </button>
+              {emergencyStopNotice && (
+                <output className="engine-pill-emergency-notice">{emergencyStopNotice}</output>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

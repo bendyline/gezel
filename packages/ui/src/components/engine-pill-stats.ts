@@ -47,9 +47,12 @@ export function formatTokensPerSec(rate: number): string {
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KiB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MiB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
+  // RAM and VRAM are sold as e.g. "24 GB" and "128 GB" even though their
+  // capacities are binary-sized. Use the same familiar labels while keeping
+  // binary math so every engine figure compares directly with that hardware.
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /**

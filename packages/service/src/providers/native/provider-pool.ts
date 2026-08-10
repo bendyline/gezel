@@ -32,6 +32,7 @@ import {
   parseEngineKey,
 } from './engine-key.js';
 import type { GpuSpawnGuard } from './gpu-panic-guard.js';
+import type { NativeEngineLifecycleSnapshot } from './supervisor.js';
 
 const log = createLogger('provider-pool');
 
@@ -121,6 +122,8 @@ export interface PoolEntrySnapshot {
   createdAt: number;
   /** True while a non-forced eviction is waiting for in-flight turns to finish. */
   draining: boolean;
+  /** Native process state; absent for external/non-supervised providers. */
+  lifecycle?: NativeEngineLifecycleSnapshot;
 }
 
 export interface PoolSnapshot {
@@ -829,6 +832,11 @@ export class ProviderPool {
     const committed = this.broker.committed();
     const entries: PoolEntrySnapshot[] = [];
     for (const [key, e] of this.entries) {
+      const lifecycle = (
+        e.provider as LLMProvider & {
+          engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
+        }
+      ).engineLifecycleSnapshot?.();
       entries.push({
         key,
         provider: e.parsed.provider,
@@ -839,6 +847,7 @@ export class ProviderPool {
         lastUsedAt: e.lastUsedAt,
         createdAt: e.createdAt,
         draining: e.draining,
+        ...(lifecycle ? { lifecycle } : {}),
       });
     }
     return {

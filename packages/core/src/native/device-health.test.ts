@@ -88,6 +88,14 @@ describe('device health telemetry parsers', () => {
             thermalSlowdown: false,
           },
         ],
+        processes: [
+          {
+            pid: 4242,
+            name: 'gezel-llama-server.exe',
+            dedicatedBytes: 12_884_901_888,
+            owner: 'machine-engine',
+          },
+        ],
         errors: [],
         diagnostics: ['nvml: driver library not found'],
       }),
@@ -103,6 +111,14 @@ describe('device health telemetry parsers', () => {
             utilizationPercent: 93,
             memoryTotalMb: 32768,
             thermalSlowdown: false,
+          },
+        ],
+        processes: [
+          {
+            pid: 4242,
+            name: 'gezel-llama-server.exe',
+            dedicatedBytes: 12_884_901_888,
+            owner: 'machine-engine',
           },
         ],
       },

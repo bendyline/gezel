@@ -184,6 +184,7 @@ describe('ConnectedAppsPanel', () => {
           {
             id: 'llama-cpp:coder.gguf',
             label: 'Local Coder',
+            kind: 'model',
             provider: 'llama-cpp',
             supportsTools: true,
           },
@@ -206,6 +207,7 @@ describe('ConnectedAppsPanel', () => {
           {
             id: 'llama-cpp:coder.gguf',
             label: 'Local Coder',
+            kind: 'model',
             provider: 'llama-cpp',
             supportsTools: true,
           },

@@ -4523,12 +4523,21 @@ export class Store {
         // scheduler keys its backoff reset off this; see the field's doc
         // on ChatSessionSummarySchema.
         let lastHumanActivityAt: string | undefined;
+        const involvedGezelIds = new Set<string>([session.gezelId]);
         for (let i = session.messages.length - 1; i >= 0; i--) {
           const m = session.messages[i];
-          if (m && m.role === 'user' && !m.from) {
+          if (!m) continue;
+          if (m.from) involvedGezelIds.add(m.from.gezelId);
+          if (!lastHumanActivityAt && m.role === 'user' && !m.from) {
             lastHumanActivityAt = m.at;
-            break;
           }
+        }
+        const lastMessage = session.messages.at(-1);
+        const normalizedLastMessage = lastMessage?.content.replace(/\s+/g, ' ').trim() ?? '';
+        let lastMessagePreview = '';
+        for (const character of normalizedLastMessage) {
+          if (lastMessagePreview.length + character.length > 200) break;
+          lastMessagePreview += character;
         }
         summaries.push({
           id: session.id,
@@ -4544,6 +4553,8 @@ export class Store {
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
+          ...(lastMessagePreview ? { lastMessagePreview } : {}),
+          involvedGezelIds: [...involvedGezelIds],
         });
       }
     }

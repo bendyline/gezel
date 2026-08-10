@@ -117,11 +117,11 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
-    const memory = await screen.findByText(/~18\.0 GB in memory/);
-    expect(screen.queryByText(/30\.0 GB in memory/)).not.toBeInTheDocument();
+    const memory = await screen.findByText(/~16\.8 GB in memory/);
+    expect(screen.queryByText(/27\.9 GB in memory/)).not.toBeInTheDocument();
     const title = memory.closest('td')?.getAttribute('title') ?? '';
-    expect(title).toMatch(/about 18\.0 GB of memory to serve one chat/);
-    expect(title).toMatch(/Serving 2 chats at once reserves about 30\.0 GB/);
+    expect(title).toMatch(/about 16\.8 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 2 chats at once reserves about 27\.9 GB/);
   });
 
   it('shows a live pill while a probe is running', async () => {

@@ -92,5 +92,5 @@ async function freeBytesFor(dir: string, statfsImpl: StatfsImpl): Promise<number
 export function describeDiskShortfall(check: DiskSpaceCheck, what: string): string {
   const need = (check.requiredBytes / GIB).toFixed(1);
   const have = (check.freeBytes / GIB).toFixed(1);
-  return `Not enough disk space for ${what}: needs about ${need} GiB free (including working headroom), but this disk has ${have} GiB. Free up space or choose a smaller model.`;
+  return `Not enough disk space for ${what}: needs about ${need} GB free (including working headroom), but this disk has ${have} GB. Free up space or choose a smaller model.`;
 }

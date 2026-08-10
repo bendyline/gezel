@@ -71,7 +71,7 @@ describe('classifyDs4Line', () => {
       '[ds4-server] ds4: metal prepared model tensor mappings 12.50 GiB',
     );
     expect(phase?.phase).toBe('loading_model');
-    expect(phase?.detail).toBe('Mapping model tensors (12.50 GiB)');
+    expect(phase?.detail).toBe('Mapping model tensors (12.50 GB)');
     // Cumulative ticker — accumulating each tick would inflate the RAM
     // total, so no bufferBytes on this pattern.
     expect(phase?.bufferBytes).toBeUndefined();
@@ -80,7 +80,7 @@ describe('classifyDs4Line', () => {
   it('recognizes page warming with a one-shot bufferBytes figure', () => {
     const phase = classifyDs4Line('[ds4-server] ds4: warming mapped tensor pages: 81.20 GiB');
     expect(phase?.phase).toBe('loading_model');
-    expect(phase?.detail).toBe('Warming model pages (81.20 GiB)');
+    expect(phase?.detail).toBe('Warming model pages (81.20 GB)');
     expect(phase?.bufferBytes).toBe(Math.round(81.2 * 1024 * 1024 * 1024));
   });
 

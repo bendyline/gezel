@@ -10,6 +10,9 @@ Adapters:
 - AMD on Windows: dynamically loads the driver-provided AMD Display Library
   (ADL), queries its performance log, and reads the driver's dedicated-VRAM
   usage counter.
+- Windows process attribution: reads the built-in GPU Process Memory PDH
+  counter, aggregates dedicated bytes by PID, and classifies Gezel machine,
+  app, and development engine ancestry without exposing command lines.
 - AMD and Intel on Linux: reads the kernel's DRM/hwmon sysfs telemetry.
 
 No vendor library is redistributed. An unavailable driver/API is reported in

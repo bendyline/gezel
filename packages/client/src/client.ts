@@ -791,6 +791,8 @@ export interface ConfigResponse {
   ollamaTurnTimeoutMin?: number;
   /** Copilot-only hard per-turn cap, in minutes. Default 3. */
   copilotTurnTimeoutMin?: number;
+  /** Idle local models unload after this many milliseconds. Default 5 minutes. */
+  localEngineIdleTimeoutMs?: number;
   /**
    * llama-cpp: absolute path to a single GGUF file the supervised
    * llama-server should load. Phase 1 MVP; replaced by a model
@@ -3181,6 +3183,16 @@ export class GezelClient {
     return this.request('GET', '/api/engines/status');
   }
 
+  /** Effective idle-model retention owned by the process that owns the engines. */
+  getEngineRetention(): Promise<{ idleTimeoutMs: number }> {
+    return this.request('GET', '/api/engines/retention');
+  }
+
+  /** Persist idle-model retention on the local daemon or adopted machine broker. */
+  updateEngineRetention(idleTimeoutMs: number): Promise<{ idleTimeoutMs: number }> {
+    return this.request('PUT', '/api/engines/retention', { idleTimeoutMs });
+  }
+
   /** Effective context-sizing policy owned by the managed llama.cpp engine. */
   getLlamaCppContextSizing(): Promise<LlamaCppContextSizingResponse> {
     return this.request('GET', '/api/engines/llama-cpp/context-sizing');
@@ -4010,6 +4022,23 @@ export class GezelClient {
   /** Forcibly end a wedged turn. Safe to call when nothing's running. */
   cancelChatSessionTurn(sessionId: string): Promise<{ cancelled: boolean }> {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`);
+  }
+
+  /**
+   * Stop every in-progress chat, discard queued chat messages, and persist
+   * install-wide Reactive engagement mode. This is a product-daemon action,
+   * not an engine-broker action: the broker never owns chats or user config.
+   */
+  emergencyStopChats(): Promise<{
+    ok: boolean;
+    engagementMode: 'reactive';
+    persisted: boolean;
+    cancelledTurns: number;
+    clearedQueuedMessages: number;
+    clearedDeferredActions: number;
+    error?: string;
+  }> {
+    return this.request('POST', '/api/sessions/emergency-stop');
   }
 
   /**

@@ -1,5 +1,6 @@
 import type { LlamaCppProvider } from '../llama-cpp/index.js';
 import type { LlamaCppLogFile } from '../llama-cpp/log.js';
+import type { NativeEngineLifecycleSnapshot } from '../native/supervisor.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import type { Ds4CacheAdapter } from './cache-adapter.js';
 
@@ -56,6 +57,14 @@ export class Ds4Provider implements LLMProvider {
    * `buildDs4Provider` can reach the same instance this provider drives. */
   get llamaCpp(): LlamaCppProvider {
     return this.inner;
+  }
+
+  isEngineBusy(): boolean {
+    return this.inner.isEngineBusy();
+  }
+
+  engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
+    return this.inner.engineLifecycleSnapshot();
   }
 
   initialize(): Promise<void> {

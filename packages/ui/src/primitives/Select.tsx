@@ -6,8 +6,26 @@ export const Root = RadixSelect.Root;
 export const Value = RadixSelect.Value;
 export const Portal = RadixSelect.Portal;
 export const Group = RadixSelect.Group;
-export const Label = RadixSelect.Label;
-export const Separator = RadixSelect.Separator;
+
+export function Label(props: RadixSelect.SelectLabelProps) {
+  const { className, ...rest } = props;
+  return (
+    <RadixSelect.Label
+      {...rest}
+      className={className ? `gz-select-label ${className}` : 'gz-select-label'}
+    />
+  );
+}
+
+export function Separator(props: RadixSelect.SelectSeparatorProps) {
+  const { className, ...rest } = props;
+  return (
+    <RadixSelect.Separator
+      {...rest}
+      className={className ? `gz-select-separator ${className}` : 'gz-select-separator'}
+    />
+  );
+}
 
 export function Trigger(props: RadixSelect.SelectTriggerProps) {
   const { className, children, ...rest } = props;

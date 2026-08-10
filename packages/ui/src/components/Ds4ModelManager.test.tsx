@@ -94,8 +94,8 @@ describe('Ds4ModelManager', () => {
     expect(screen.getByText('fits with SSD streaming')).toBeInTheDocument();
     expect(screen.getByText('recommended on this device')).toBeInTheDocument();
     expect(screen.queryByText('runs on this device')).not.toBeInTheDocument();
-    expect(screen.getByText(/download 153 GiB/)).toBeInTheDocument();
-    expect(screen.getByText(/memory target ≈ 80 GiB/)).toBeInTheDocument();
+    expect(screen.getByText(/download 153 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/memory target ≈ 80 GB/)).toBeInTheDocument();
   });
 
   it('labels a non-DeepSeek ds4 model by its own catalog name', async () => {
@@ -127,7 +127,7 @@ describe('Ds4ModelManager', () => {
 
     expect(await screen.findByText('GLM 5.2 (IQ2_XXS)')).toBeInTheDocument();
     expect(screen.queryByText(/DeepSeek/)).not.toBeInTheDocument();
-    expect(screen.getByText(/754B · download 197 GiB/)).toBeInTheDocument();
+    expect(screen.getByText(/754B · download 197 GB/)).toBeInTheDocument();
   });
 
   it('does not offer installation when fixed model state cannot preserve system headroom', async () => {

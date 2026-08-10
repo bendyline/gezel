@@ -132,7 +132,7 @@ function mergeTimelineMessages(
  * Human labels for the llama-cpp `engine_phase` event. Used by the
  * streaming bubble's status line — the detail string from the
  * stdout classifier gets used verbatim when available (e.g.
- * "Loading model weights (2356.44 MiB)"), otherwise we fall back
+ * "Loading model weights (2.3 GB)"), otherwise we fall back
  * to the base label.
  *
  * `prefill` is technically "engine is reading the prompt and

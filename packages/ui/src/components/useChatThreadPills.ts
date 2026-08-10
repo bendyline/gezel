@@ -1,4 +1,4 @@
-import type { ChatEventEnvelope, ChatSessionSummary } from '@bendyline/gezel';
+import type { ChatEventEnvelope, ChatMessage, ChatSessionSummary } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
@@ -41,6 +41,10 @@ export interface ThreadPill {
   title: string;
   lastActivityAt: string;
   state: ThreadPillState;
+  /** Bounded latest-message text supplied by the session summary. */
+  lastMessagePreview?: string;
+  /** Primary session gezel first, followed by any gezels that spoke into it. */
+  involvedGezelIds: string[];
   taskRef?: string;
   /** `lastTurnError`, or the optimistic error from a live `error` event. */
   error?: string;
@@ -51,6 +55,38 @@ const STATE_RANK: Record<ThreadPillState, number> = { inflight: 0, errored: 1, i
 function activityMs(iso: string): number {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? 0 : t;
+}
+
+function messagePreview(content: string): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  let preview = '';
+  for (const character of normalized) {
+    if (preview.length + character.length > 200) break;
+    preview += character;
+  }
+  return preview;
+}
+
+function applyLatestMessage(
+  sessions: ChatSessionSummary[],
+  sessionId: string,
+  message: ChatMessage,
+): ChatSessionSummary[] | null {
+  let found = false;
+  const next = sessions.map((session) => {
+    if (session.id !== sessionId) return session;
+    found = true;
+    const involvedGezelIds = new Set(session.involvedGezelIds ?? [session.gezelId]);
+    if (message.from) involvedGezelIds.add(message.from.gezelId);
+    const preview = messagePreview(message.content);
+    return {
+      ...session,
+      lastActivityAt: message.at,
+      involvedGezelIds: [...involvedGezelIds],
+      ...(preview ? { lastMessagePreview: preview } : {}),
+    };
+  });
+  return found ? next : null;
 }
 
 /**
@@ -101,6 +137,9 @@ export function selectThreadPills(input: {
       title: plainTitle(displayThreadTitle(s.title)),
       lastActivityAt: s.lastActivityAt,
       state,
+      involvedGezelIds:
+        s.involvedGezelIds && s.involvedGezelIds.length > 0 ? s.involvedGezelIds : [s.gezelId],
+      ...(s.lastMessagePreview ? { lastMessagePreview: s.lastMessagePreview } : {}),
       ...(s.taskRef ? { taskRef: s.taskRef } : {}),
       ...(error ? { error } : {}),
     });
@@ -154,6 +193,7 @@ export function useChatThreadPills({
   refreshKey?: number | undefined;
 }): { pills: ThreadPill[]; overflow: ThreadPill[]; loading: boolean } {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const sessionsRef = useRef<ChatSessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [inflight, setInflight] = useState<ReadonlySet<string>>(() => new Set());
   const [errored, setErrored] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -167,6 +207,7 @@ export function useChatThreadPills({
         projectId,
         ...(gezelId ? { gezelId } : {}),
       });
+      sessionsRef.current = res.sessions;
       setSessions(res.sessions);
     } catch {
       // Leave the last good list up — a transient list failure shouldn't
@@ -188,12 +229,12 @@ export function useChatThreadPills({
     }
   }, [projectId, gezelId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a bump counter — incrementing it is the re-fetch trigger.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a bump counter, while pinnedSessionId forces a re-read when a freshly-created session becomes active.
   useEffect(() => {
     setLoading(true);
     void loadSessions();
     void reconcileInflight();
-  }, [loadSessions, reconcileInflight, refreshKey]);
+  }, [loadSessions, reconcileInflight, refreshKey, pinnedSessionId]);
 
   useEffect(() => {
     const t = window.setInterval(() => void reconcileInflight(), INFLIGHT_RECONCILE_MS);
@@ -245,6 +286,16 @@ export function useChatThreadPills({
               next.add(sessionId);
               return next;
             });
+            const updated = applyLatestMessage(sessionsRef.current, sessionId, ev.message);
+            if (updated) {
+              sessionsRef.current = updated;
+              setSessions(updated);
+            } else {
+              // The session list may predate this session. In-flight state
+              // alone cannot create a pill because selection is anchored on
+              // durable summaries, so reconcile before the turn finishes.
+              void loadSessions();
+            }
           } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
             setInflight((prev) => {
               if (!prev.has(sessionId)) return prev;
@@ -263,6 +314,11 @@ export function useChatThreadPills({
               return next;
             });
           } else if (ev.type === 'complete') {
+            const updated = applyLatestMessage(sessionsRef.current, sessionId, ev.message);
+            if (updated) {
+              sessionsRef.current = updated;
+              setSessions(updated);
+            }
             setErrored((prev) => {
               if (!prev.has(sessionId)) return prev;
               const next = new Map(prev);

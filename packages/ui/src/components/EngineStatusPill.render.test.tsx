@@ -192,6 +192,66 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
   });
 
+  it('persists the engine-owner idle retention preset', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getEngineRetention).mockResolvedValue({ idleTimeoutMs: 300_000 });
+    vi.mocked(api.updateEngineRetention).mockResolvedValue({ idleTimeoutMs: 60_000 });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+    const retention = screen.getByRole('group', { name: 'Idle model retention' });
+    expect(within(retention).getByRole('radio', { name: 'Balanced' })).toBeChecked();
+
+    await user.click(within(retention).getByRole('radio', { name: 'Fast' }));
+    await waitFor(() => {
+      expect(api.updateEngineRetention).toHaveBeenCalledWith(60_000);
+      expect(within(retention).getByRole('radio', { name: 'Fast' })).toBeChecked();
+    });
+  });
+
+  it('confirms an Emergency Stop, cancels all chats, and broadcasts Reactive mode', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.emergencyStopChats).mockResolvedValue({
+      ok: true,
+      engagementMode: 'reactive',
+      persisted: true,
+      cancelledTurns: 2,
+      clearedQueuedMessages: 1,
+      clearedDeferredActions: 0,
+    });
+    const configUpdated = vi.fn();
+    window.addEventListener('gezel:config-updated', configUpdated);
+
+    try {
+      render(<EngineStatusPill />);
+      await user.click(
+        await screen.findByRole('button', {
+          name: /DwarfStar.*DeepSeek V4 Flash/i,
+        }),
+      );
+      await user.click(screen.getByRole('button', { name: 'Emergency Stop' }));
+
+      const dialog = screen.getByRole('alertdialog');
+      expect(within(dialog).getByText('Emergency stop all chats?')).toBeInTheDocument();
+      expect(within(dialog).getByText(/switch to Reactive/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Emergency stop' }));
+
+      await waitFor(() => {
+        expect(api.emergencyStopChats).toHaveBeenCalledTimes(1);
+        expect(configUpdated).toHaveBeenCalledWith(
+          expect.objectContaining({ detail: { aiEngagementMode: 'reactive' } }),
+        );
+      });
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener('gezel:config-updated', configUpdated);
+    }
+  });
+
   it('shows the live inference-memory pool while the dropdown is open', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
@@ -225,24 +285,87 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
 
     const strip = await screen.findByRole('img', {
-      name: /Current VRAM use: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
+      name: /Current VRAM use: 9\.0 GB of 24\.0 GB used, Gezel estimated 5\.0 GB/i,
     });
     expect(screen.getByText('Current VRAM use')).toBeInTheDocument();
     expect(strip).toBeInTheDocument();
-    expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Gezel ~5.0 GB')).toBeInTheDocument();
     // Zero-byte pieces of the breakdown stay out of the announcement.
     expect(strip).not.toHaveAccessibleName(/Core Gezel infra/i);
-    expect(strip).toHaveAccessibleName(/Model weights about 4\.0 GiB/i);
-    expect(strip).toHaveAccessibleName(/Model cache about 1\.0 GiB/i);
-    expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
+    expect(strip).toHaveAccessibleName(/Model weights about 4\.0 GB/i);
+    expect(strip).toHaveAccessibleName(/Model cache about 1\.0 GB/i);
+    expect(screen.getByText('Other 4.0 GB')).toBeInTheDocument();
     expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
 
     const weightsSegment = strip.querySelector('.machine-memory-segment-gezel-weights');
     expect(weightsSegment).toBeInstanceOf(HTMLElement);
     await user.hover(weightsSegment as HTMLElement);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      'Model weights · ~4.0 GiB (resident model parameters)',
+      'Model weights · ~4.0 GB (resident model parameters)',
     );
+  });
+
+  it('names Windows VRAM owners and shows the model unload countdown', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'vram',
+      totalBytes: 32 * GiB,
+      usedBytes: 31 * GiB,
+      gezelBytesEstimated: 0,
+      gezelBytesObserved: 26 * GiB,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 26 * GiB,
+      engineReservedBytes: 21 * GiB,
+      engineBudgetBytes: 64 * GiB,
+      residentModels: [],
+      engineLifecycles: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'talkie-1930-13b-q4',
+          replicaIdx: 0,
+          running: true,
+          active: false,
+          pid: 202,
+          lastUsedAt: Date.now(),
+          unloadAt: Date.now() + 5 * 60_000,
+          idleTimeoutMs: 5 * 60_000,
+          releaseReason: 'idle',
+        },
+      ],
+      gpuProcesses: [
+        {
+          pid: 101,
+          name: 'gezel-llama-server.exe',
+          dedicatedBytes: 13 * GiB,
+          owner: 'machine-engine',
+        },
+        {
+          pid: 202,
+          name: 'gezel-llama-server.exe',
+          dedicatedBytes: 13 * GiB,
+          owner: 'development-engine',
+        },
+      ],
+      gezelEngineProcessCount: 2,
+      orphanedGezelEngineProcessCount: 0,
+      otherBytes: 5 * GiB,
+      cachedBytes: null,
+      freeBytes: 1 * GiB,
+      sampledAt: '2026-08-10T12:00:00.000Z',
+      source: 'device-health',
+      deviceNames: ['Radeon'],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    expect(
+      await screen.findByText(/Gezel machine engine · gezel-llama-server\.exe/i),
+    ).toBeVisible();
+    expect(screen.getByText(/Gezel development engine · gezel-llama-server\.exe/i)).toBeVisible();
+    expect(screen.getByText(/Unloads in 5:00|Unloads in 4:59/i)).toBeVisible();
   });
 
   it('states the reservation and its models instead of filling the bar the driver cannot measure', async () => {
@@ -295,26 +418,24 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     // The pool is unmeasured, so its unactionable meter is omitted — the old
     // behaviour clamped the reservation to the card and drew a full bar.
     expect(screen.getByText('VRAM')).toBeInTheDocument();
-    expect(screen.getByText('31.9 GiB total')).toBeInTheDocument();
+    expect(screen.getByText('31.9 GB total')).toBeInTheDocument();
     expect(document.querySelector('.machine-memory-bar')).toBeNull();
     expect(document.querySelector('.machine-memory-swatch-gezel')).toBeNull();
 
     const capacityMeter = screen.getByRole('img', {
-      name: /Model capacity: about 50\.0 GiB of 68\.4 GiB reserved/i,
+      name: /Model capacity: about 50\.0 GB of 68\.4 GB reserved/i,
     });
-    expect(capacityMeter).toHaveAccessibleName(/30\.4 GiB VRAM \+ ~38\.0 GiB system RAM/i);
+    expect(capacityMeter).toHaveAccessibleName(/30\.4 GB VRAM \+ ~38\.0 GB system RAM/i);
     expect(capacityMeter.querySelectorAll('.machine-memory-reservation-segment')).toHaveLength(2);
     expect(screen.getByText('Reserved model capacity')).toBeInTheDocument();
-    expect(screen.getByText('Capacity: ~30.4 GiB VRAM + ~38.0 GiB system RAM')).toBeInTheDocument();
-    expect(
-      screen.getByText('Capacity planning only; includes models that are not currently running.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Capacity: ~30.4 GB VRAM + ~38.0 GB system RAM')).toBeInTheDocument();
+    expect(screen.queryByText(/Capacity planning only/)).not.toBeInTheDocument();
     // Capacity holders are visible as well as accessible. Known ids take
     // their catalog name; the rest fall back to the id.
     expect(screen.getByText('Talkie 1930 13B ×2')).toBeInTheDocument();
-    expect(screen.getByText('~30.9 GiB')).toBeInTheDocument();
+    expect(screen.getByText('~30.9 GB')).toBeInTheDocument();
     expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
-    expect(screen.getByText('~19.1 GiB')).toBeInTheDocument();
+    expect(screen.getByText('~19.1 GB')).toBeInTheDocument();
     expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
   });
@@ -352,24 +473,24 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
 
     const strip = await screen.findByRole('img', {
-      name: /Gezel observed footprint 76\.0 GiB/i,
+      name: /Gezel observed footprint 76\.0 GB/i,
     });
-    expect(strip).toHaveAccessibleName(/Gezel about 76\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/Gezel about 76\.0 GB/i);
     expect(strip).not.toHaveAccessibleName(/Core Gezel infra/i);
     expect(strip).not.toHaveAccessibleName(/Model weights/i);
     expect(strip).not.toHaveAccessibleName(/Model cache/i);
     expect(strip).toHaveAccessibleName(
-      /Models reserve ~36\.0 GiB for capacity planning; this can include models that are not running/i,
+      /Models reserve ~36\.0 GB for capacity planning; this can include models that are not running/i,
     );
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
-    expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
-    expect(screen.getByText('Borrowed for cache 20.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Gezel 76.0 GB')).toBeInTheDocument();
+    expect(screen.getByText('Borrowed for cache 20.0 GB')).toBeInTheDocument();
     expect(strip).toHaveAccessibleName(
-      /borrowed for cache 20\.0 GiB, reclaimable by the operating system/i,
+      /borrowed for cache 20\.0 GB, reclaimable by the operating system/i,
     );
     expect(
       screen.getByText(
-        'Models reserve ~36.0 GiB for capacity planning; this can include models that are not running',
+        'Models reserve ~36.0 GB for capacity planning; this can include models that are not running',
       ),
     ).toBeInTheDocument();
     expect(

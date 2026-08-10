@@ -53,7 +53,7 @@ export function isUserCancelledTurnError(message: string | null | undefined): bo
 
 function gb(bytes: number | null | undefined): string | null {
   if (bytes == null || bytes <= 0) return null;
-  return `${Math.round(bytes / 1_000_000_000)} GB`;
+  return `${Math.round(bytes / 1024 ** 3)} GB`;
 }
 
 function fence(body: string, lang = ''): string {

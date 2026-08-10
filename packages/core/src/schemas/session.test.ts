@@ -86,8 +86,12 @@ describe('ChatSessionSummarySchema', () => {
       title: 'T',
       createdAt: '2026-04-14T10:00:00Z',
       lastActivityAt: '2026-04-14T10:00:00Z',
+      lastMessagePreview: 'The latest reply',
+      involvedGezelIds: ['g', 'reviewer'],
     });
     expect(out.id).toBe('x');
+    expect(out.lastMessagePreview).toBe('The latest reply');
+    expect(out.involvedGezelIds).toEqual(['g', 'reviewer']);
     expect((out as Record<string, unknown>).messages).toBeUndefined();
     expect((out as Record<string, unknown>).providerState).toBeUndefined();
   });

@@ -81,6 +81,13 @@ function envelope(sessionId: string, event: ChatEventEnvelope['event']): ChatEve
   return { sessionId, gezelId: 'g1', projectId: 'p1', event };
 }
 
+function userMessage(content: string): ChatEventEnvelope['event'] {
+  return {
+    type: 'user_message',
+    message: { role: 'user', content, at: new Date().toISOString() },
+  };
+}
+
 function task(ref: string, title: string): Task {
   const [projectId, num] = ref.split('/');
   return {
@@ -130,33 +137,116 @@ describe('ChatPillRow', () => {
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
   });
 
+  it('shows a rounded three-line summary with bounded title and message previews', async () => {
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [
+        session('s1', 'g1', {
+          title: '1234567890123456789012345678901234567890more',
+          lastMessagePreview: 'abcdefghijklmnopqrstuvwxyz1234567890',
+          involvedGezelIds: ['g1', 'g2'],
+          lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+        }),
+      ],
+    });
+    renderRow();
+
+    const pill = await screen.findByRole('button', {
+      name: /^Esra, Wren: .*Updated 2 minutes ago\. Ready$/,
+    });
+    expect(pill.querySelector('.chat-pill-thread-title')).toHaveTextContent(
+      '123456789012345678901234567890123456789…',
+    );
+    expect(pill.querySelector('.chat-pill-participants')).toHaveTextContent('Esra, Wren');
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+      'abcdefghijklmnopqrstuvwxyz123…',
+    );
+    expect(pill.querySelector('.chat-pill-thread-update')).toHaveTextContent(
+      'Updated 2 minutes ago',
+    );
+    expect(pill.querySelector('.chat-pill-thread-status')).toHaveTextContent('Ready');
+  });
+
   it('flips a pill to streaming from a live event with no refetch, then clears it', async () => {
     vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
     renderRow();
 
-    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1$/ });
+    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1\..*Ready$/ });
     expect(pill).toBeVisible();
     const callsAfterMount = vi.mocked(api.listChatSessions).mock.calls.length;
 
-    stream.push(envelope('s1', { type: 'user_message', text: 'go' } as never));
+    stream.push(envelope('s1', userMessage('go')));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Esra: Thread s1 — working' })).toBeVisible();
+      expect(screen.getByRole('button', { name: /^Esra: Thread s1\..*Working$/ })).toBeVisible();
     });
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent('go');
     expect(vi.mocked(api.listChatSessions).mock.calls.length).toBe(callsAfterMount);
+
+    stream.push(
+      envelope('s1', {
+        type: 'complete',
+        message: {
+          role: 'assistant',
+          content: 'Finished the latest reply.',
+          at: new Date().toISOString(),
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+        'Finished the latest reply.',
+      );
+    });
 
     stream.push(envelope('s1', { type: 'done' } as never));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Esra: Thread s1$/ })).toBeVisible();
+      expect(screen.getByRole('button', { name: /^Esra: Thread s1\..*Ready$/ })).toBeVisible();
     });
+  });
+
+  it('reconciles a newly-created thread when its first live event arrives', async () => {
+    renderRow();
+    await screen.findByText('No recent threads');
+    const callsAfterMount = vi.mocked(api.listChatSessions).mock.calls.length;
+
+    vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s-new', 'g1')] });
+    stream.push(envelope('s-new', userMessage('go')));
+
+    expect(
+      await screen.findByRole('button', { name: /^Esra: Thread s-new\..*Working$/ }),
+    ).toBeVisible();
+    expect(vi.mocked(api.listChatSessions).mock.calls.length).toBeGreaterThan(callsAfterMount);
+  });
+
+  it('re-reads sessions when a just-created thread becomes active', async () => {
+    const row = renderRow();
+    await screen.findByText('No recent threads');
+
+    vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s-new', 'g1')] });
+    row.rerender(
+      <ChatPillRow
+        projectId="p1"
+        gezels={GEZELS}
+        activeSessionId="s-new"
+        onFocusThread={row.onFocusThread}
+        onFocusTask={row.onFocusTask}
+        onNewTask={row.onNewTask}
+      />,
+    );
+
+    const pill = await screen.findByRole('button', { name: /^Esra: Thread s-new\..*Ready$/ });
+    expect(pill).toBeVisible();
+    expect(pill).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('marks a pill errored optimistically on a live error event', async () => {
     vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
     renderRow();
-    await screen.findByRole('button', { name: /^Esra: Thread s1$/ });
+    await screen.findByRole('button', { name: /^Esra: Thread s1\..*Ready$/ });
 
     stream.push(envelope('s1', { type: 'error', error: 'provider timeout' } as never));
-    const failed = await screen.findByRole('button', { name: 'Esra: Thread s1 — failed' });
+    const failed = await screen.findByRole('button', {
+      name: /^Esra: Thread s1\..*Needs attention$/,
+    });
     expect(failed).toHaveAttribute('title', expect.stringContaining('provider timeout'));
   });
 
@@ -166,7 +256,9 @@ describe('ChatPillRow', () => {
       inflight: [{ sessionId: 's1' }],
     } as never);
     renderRow();
-    expect(await screen.findByRole('button', { name: 'Esra: Thread s1 — working' })).toBeVisible();
+    expect(
+      await screen.findByRole('button', { name: /^Esra: Thread s1\..*Working$/ }),
+    ).toBeVisible();
   });
 
   it('focuses a thread on click and marks the active one pressed', async () => {
@@ -176,9 +268,9 @@ describe('ChatPillRow', () => {
     const user = userEvent.setup();
     const { onFocusThread } = renderRow({ activeSessionId: 's2' });
 
-    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1$/ });
+    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1\..*Ready$/ });
     expect(pill).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: /^Wren: Thread s2$/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /^Wren: Thread s2\..*Ready$/ })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -228,7 +320,7 @@ describe('ChatPillRow', () => {
     renderRow();
 
     await screen.findByRole('button', { name: 'Task p1/4: Ship the game' });
-    expect(screen.queryByRole('button', { name: /^Esra: Thread s1$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Esra: Thread s1\./ })).toBeNull();
   });
 
   it('re-reads tasks when a task_event lands on the stream', async () => {

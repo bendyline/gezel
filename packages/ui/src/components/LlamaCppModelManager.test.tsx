@@ -101,12 +101,12 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager />);
 
-    const memory = await screen.findByText(/~7\.0 GB in memory/);
+    const memory = await screen.findByText(/~6\.5 GB in memory/);
     expect(memory.closest('td')).toHaveAttribute(
       'title',
       expect.stringMatching(/weights plus the KV cache/),
     );
-    expect(memory.closest('td')?.textContent).toContain('2.6 GB');
+    expect(memory.closest('td')?.textContent).toContain('2.4 GB');
   });
 
   it('headlines the single-chat cost and keeps the slot reservation in the tooltip', async () => {
@@ -134,11 +134,11 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager />);
 
-    const memory = await screen.findByText(/~30\.1 GB in memory/);
-    expect(screen.queryByText(/49\.3 GB in memory/)).not.toBeInTheDocument();
+    const memory = await screen.findByText(/~28\.0 GB in memory/);
+    expect(screen.queryByText(/45\.9 GB in memory/)).not.toBeInTheDocument();
     const title = memory.closest('td')?.getAttribute('title') ?? '';
-    expect(title).toMatch(/about 30\.1 GB of memory to serve one chat/);
-    expect(title).toMatch(/Serving 3 chats at once reserves about 49\.3 GB/);
+    expect(title).toMatch(/about 28\.0 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 3 chats at once reserves about 45\.9 GB/);
   });
 
   it('omits the concurrency sentence on a single-slot host', async () => {
@@ -163,7 +163,7 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager />);
 
-    const memory = await screen.findByText(/~9\.0 GB in memory/);
+    const memory = await screen.findByText(/~8\.4 GB in memory/);
     const title = memory.closest('td')?.getAttribute('title') ?? '';
     expect(title).toMatch(/serve one chat/);
     expect(title).not.toMatch(/at once reserves/);

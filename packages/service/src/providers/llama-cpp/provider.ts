@@ -74,6 +74,7 @@ import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
 import type {
   NativeEngineExitSnapshot,
   NativeEngineLaunch,
+  NativeEngineLifecycleSnapshot,
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
@@ -99,6 +100,12 @@ import type {
 import { buildTurnUsage } from '../usage-builder.js';
 import type { LlamaCppLogFile } from './log.js';
 import { type StartupPhase, classifyStartupLine } from './stdout-parser.js';
+import {
+  isLlamaCppGrammarParseError,
+  normalizeJsonSchemaForLlamaCpp,
+  simplifyJsonSchemaForLlamaCpp,
+  stripJsonSchemaPatternsForLlamaCpp,
+} from './tool-grammar.js';
 
 const log = createLogger('llama-cpp');
 
@@ -476,82 +483,44 @@ function withWireMessages(body: Record<string, unknown>): Record<string, unknown
   return { ...body, messages: toWireMessages(messages) };
 }
 
+export {
+  isLlamaCppGrammarParseError,
+  normalizeJsonSchemaForLlamaCpp,
+  simplifyJsonSchemaForLlamaCpp,
+  stripJsonSchemaPatternsForLlamaCpp,
+} from './tool-grammar.js';
+
 interface ChatCompletionTool {
   type: 'function';
   function: { name: string; description: string; parameters: unknown };
 }
 
-/**
- * Normalize JSON Schema regexes before llama-server turns tool definitions
- * into a GBNF grammar.
- *
- * JavaScript's `RegExp#source` escapes forward slashes so the source can be
- * embedded in a `/.../` literal (`https:\/\/...`). That escape is
- * semantically identical to a plain `/` in an ECMA-262 pattern, but
- * llama.cpp's JSON-Schema-to-GBNF converter used to copy it into a quoted
- * GBNF terminal where `\/` is not a recognized escape. One otherwise-unused
- * tool could therefore reject the entire request with "failed to parse
- * grammar" before inference began.
- *
- * Keep this compatibility transform local to llama.cpp: cloud providers can
- * consume the original schema, and callers retain ownership of their object.
- */
-export function normalizeJsonSchemaForLlamaCpp(schema: unknown): unknown {
-  if (Array.isArray(schema)) {
-    let changed = false;
-    const normalized = schema.map((entry) => {
-      const next = normalizeJsonSchemaForLlamaCpp(entry);
-      if (next !== entry) changed = true;
-      return next;
-    });
-    return changed ? normalized : schema;
-  }
-  if (!schema || typeof schema !== 'object') return schema;
-
-  const record = schema as Record<string, unknown>;
-  let changed = false;
-  const normalized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    const next =
-      key === 'pattern' && typeof value === 'string'
-        ? value.replace(/\\\//g, '/')
-        : normalizeJsonSchemaForLlamaCpp(value);
-    normalized[key] = next;
-    if (next !== value) changed = true;
-  }
-  return changed ? normalized : schema;
+function hasJsonSchemaPatternsForLlamaCpp(tools: ChatCompletionTool[]): boolean {
+  return tools.some(
+    (tool) =>
+      stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters) !== tool.function.parameters,
+  );
 }
 
-/** Last-resort recovery for a server build that still rejects a tool grammar. */
-export function stripJsonSchemaPatternsForLlamaCpp(schema: unknown): unknown {
-  if (Array.isArray(schema)) {
-    let changed = false;
-    const stripped = schema.map((entry) => {
-      const next = stripJsonSchemaPatternsForLlamaCpp(entry);
-      if (next !== entry) changed = true;
-      return next;
-    });
-    return changed ? stripped : schema;
-  }
-  if (!schema || typeof schema !== 'object') return schema;
+type ToolGrammarFallback = 'none' | 'strip-patterns' | 'simplified' | 'permissive';
 
-  const record = schema as Record<string, unknown>;
-  let changed = false;
-  const stripped: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (key === 'pattern' && typeof value === 'string') {
-      changed = true;
-      continue;
-    }
-    const next = stripJsonSchemaPatternsForLlamaCpp(value);
-    stripped[key] = next;
-    if (next !== value) changed = true;
-  }
-  return changed ? stripped : schema;
-}
-
-export function isLlamaCppGrammarParseError(text: string): boolean {
-  return /failed to (?:initialize samplers:[^\r\n]*failed to )?parse grammar/i.test(text);
+function applyToolGrammarFallback(
+  tools: ChatCompletionTool[],
+  fallback: ToolGrammarFallback,
+): ChatCompletionTool[] {
+  if (fallback === 'none') return tools;
+  return tools.map((tool) => ({
+    ...tool,
+    function: {
+      ...tool.function,
+      parameters:
+        fallback === 'strip-patterns'
+          ? stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters)
+          : fallback === 'simplified'
+            ? simplifyJsonSchemaForLlamaCpp(tool.function.parameters)
+            : { type: 'object' },
+    },
+  }));
 }
 
 function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
@@ -2209,6 +2178,15 @@ export class LlamaCppProvider implements LLMProvider {
     return this.supervisor?.currentBaseUrl() ?? null;
   }
 
+  /** True only while this native engine is serving or queuing a physical request. */
+  isEngineBusy(): boolean {
+    return this.engineRequestsActive > 0 || this.engineRequestWaiters.length > 0;
+  }
+
+  engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
+    return this.supervisor?.lifecycleSnapshot();
+  }
+
   async initialize(): Promise<void> {
     // No client object to construct. The supervisor starts the child
     // lazily on the first `sendAndWait` — keeping initialize() a
@@ -3237,10 +3215,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // drives `foldPostActionRumination` on later reply-only iterations
     // (the wrap-up wall a verbose model emits after its tool ran).
     let actionFiredEarlierThisTurn = false;
-    // Some llama.cpp builds reject otherwise-valid JSON Schema regexes while
-    // compiling the aggregate tool grammar. A single retry strips only
-    // `pattern` constraints; MCP/Zod still validates the eventual arguments.
-    let grammarPatternFallback = false;
+    // llama.cpp builds vary in which JSON-Schema constructs their aggregate
+    // tool-grammar converter accepts. Recover in stages while MCP/Zod remains
+    // the authority at execution: patterns first (only when that changes the
+    // request), then a useful structural schema, finally a permissive object.
+    let toolGrammarFallback: ToolGrammarFallback = 'none';
     // The GPU lease is acquired per loop iteration and normally released by
     // that iteration's `cleanupTurn`. The loop body is thousands of lines with
     // many `throw` sites (bounded-repair guardrails, deadline checks, grammar
@@ -4042,14 +4021,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
-        if (grammarPatternFallback && Array.isArray(body.tools)) {
-          body.tools = (body.tools as ChatCompletionTool[]).map((tool) => ({
-            ...tool,
-            function: {
-              ...tool.function,
-              parameters: stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters),
-            },
-          }));
+        if (toolGrammarFallback !== 'none' && Array.isArray(body.tools)) {
+          body.tools = applyToolGrammarFallback(
+            body.tools as ChatCompletionTool[],
+            toolGrammarFallback,
+          );
         }
         // llama-server accepts the string choices `auto`, `none`, and
         // `required`. Its OpenAI-compatible endpoint currently rejects the
@@ -4525,17 +4501,38 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           cleanupTurn();
           this.deps.markUsed();
           const txt = await res.text().catch(() => '');
-          if (
-            tools &&
-            tools.length > 0 &&
-            isLlamaCppGrammarParseError(txt) &&
-            !grammarPatternFallback
-          ) {
-            grammarPatternFallback = true;
-            log.warn(
-              '[llama-cpp] tool grammar rejected by server; retrying once without JSON Schema pattern constraints',
-            );
-            continue;
+          const failedGrammarTools = Array.isArray(body.tools)
+            ? (body.tools as ChatCompletionTool[])
+            : [];
+          if (failedGrammarTools.length > 0 && isLlamaCppGrammarParseError(txt)) {
+            if (toolGrammarFallback === 'none') {
+              if (hasJsonSchemaPatternsForLlamaCpp(failedGrammarTools)) {
+                toolGrammarFallback = 'strip-patterns';
+                log.warn(
+                  '[llama-cpp] tool grammar rejected by server; retrying without JSON Schema pattern constraints',
+                );
+              } else {
+                toolGrammarFallback = 'simplified';
+                log.warn(
+                  '[llama-cpp] tool grammar rejected by server; no pattern constraints to remove, retrying with structural tool schemas',
+                );
+              }
+              continue;
+            }
+            if (toolGrammarFallback === 'strip-patterns') {
+              toolGrammarFallback = 'simplified';
+              log.warn(
+                '[llama-cpp] pattern-free tool grammar still rejected; retrying with structural tool schemas',
+              );
+              continue;
+            }
+            if (toolGrammarFallback === 'simplified') {
+              toolGrammarFallback = 'permissive';
+              log.warn(
+                '[llama-cpp] structural tool grammar still rejected; retrying with permissive object parameters',
+              );
+              continue;
+            }
           }
           if (
             tryParseStrictAlternationTemplateError(txt) &&

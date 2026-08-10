@@ -238,14 +238,46 @@ export const ResidentEngineModelSchema = z.object({
 });
 export type ResidentEngineModel = z.infer<typeof ResidentEngineModelSchema>;
 
+export const GpuProcessOwnerSchema = z.enum([
+  'machine-engine',
+  'app-engine',
+  'development-engine',
+  'gezel-engine',
+  'external',
+]);
+export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
+
+/** Windows driver accounting for one process holding dedicated GPU memory. */
+export const GpuProcessMemorySchema = z.object({
+  pid: z.number().int().positive(),
+  name: z.string().optional(),
+  dedicatedBytes: z.number().nonnegative(),
+  owner: GpuProcessOwnerSchema,
+});
+export type GpuProcessMemory = z.infer<typeof GpuProcessMemorySchema>;
+
+/** Live unload policy for one supervised local-model replica. */
+export const LocalEngineLifecycleSchema = z.object({
+  provider: z.string(),
+  modelId: z.string(),
+  replicaIdx: z.number().int().nonnegative(),
+  running: z.boolean(),
+  active: z.boolean(),
+  pid: z.number().int().positive().optional(),
+  lastUsedAt: z.number().nonnegative().nullable(),
+  unloadAt: z.number().nonnegative().nullable(),
+  idleTimeoutMs: z.number().nonnegative(),
+  releaseReason: z.enum(['idle', 'memory-pressure']).nullable(),
+});
+export type LocalEngineLifecycle = z.infer<typeof LocalEngineLifecycleSchema>;
+
 /**
  * Lightweight, authenticated machine-memory telemetry for status surfaces.
  *
  * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
  * and same-home engine processes — the metric Activity Monitor uses, including
- * Metal-backed allocations. Other platforms expose no consistent per-process
- * accelerator accounting, so the Gezel attribution stays zero there unless the
- * driver reports pool-wide use.
+ * Metal-backed allocations. On Windows, the bundled device-health helper uses
+ * the OS GPU Process Memory counters to attribute dedicated VRAM to processes.
  *
  * `engineReservedBytes` stays separate: it is capacity planning, not observed
  * use, and it is NOT a quantity of this pool. Attributing it to the pool once
@@ -258,7 +290,7 @@ export const MachineMemoryUsageSchema = z.object({
   usedBytes: z.number().nonnegative().nullable(),
   /** Portable reservation + daemon-RSS fallback estimate. */
   gezelBytesEstimated: z.number().nonnegative(),
-  /** Observed same-home process footprint when the platform exposes it. */
+  /** Observed Gezel process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
   /** Gezel daemon + local-engine runtime overhead within the attributed total. */
   gezelInfraBytes: z.number().nonnegative(),
@@ -293,6 +325,10 @@ export const MachineMemoryUsageSchema = z.object({
     .optional(),
   /** The resident models behind `engineReservedBytes`. */
   residentModels: z.array(ResidentEngineModelSchema),
+  /** Running supervised replicas and their next policy deadline. */
+  engineLifecycles: z.array(LocalEngineLifecycleSchema).optional(),
+  /** Actual dedicated-VRAM owners, when the OS exposes them. */
+  gpuProcesses: z.array(GpuProcessMemorySchema).optional(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
@@ -668,6 +704,9 @@ export const RemoteServingConfigSchema = z.object({
 });
 export type RemoteServingConfig = z.infer<typeof RemoteServingConfigSchema>;
 
+/** Balanced local-model retention: warm enough for follow-ups, short enough to return VRAM. */
+export const DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS = 5 * 60_000;
+
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
@@ -701,11 +740,10 @@ export const GezelConfigSchema = z.object({
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
    * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`
    * instances; the freeze stage fires at half this value when set. Default
-   * 30 min — matches `OLLAMA_TURN_TIMEOUT_MS`, the accepted ceiling for a
-   * single local-engine turn. Users running on 27B+ models who legitimately
-   * generate for longer (e.g. one-shot large-artifact Builder turns) can
-   * raise the cap; users on tight memory who prefer aggressive reclaim can
-   * drop it. Floor is 60s — anything lower starts thrashing the engine.
+   * 5 min. This clock measures time since the engine's last native request,
+   * not the duration of the surrounding tool loop, so long generations remain
+   * protected while turns parked on tools or a person can release VRAM. Floor
+   * is 60s — anything lower starts thrashing the engine.
    */
   localEngineIdleTimeoutMs: z.number().int().min(60_000).optional(),
   /**

@@ -1,4 +1,8 @@
-import type { CodexSetupState, CodexSetupStatusResponse } from '@bendyline/gezel';
+import type {
+  CodexSetupModelOption,
+  CodexSetupState,
+  CodexSetupStatusResponse,
+} from '@bendyline/gezel';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
@@ -133,6 +137,8 @@ export function CodexSetupCard({
     (candidate) => candidate.id === status.configuredModel,
   );
   const selectedOption = status?.models.find((candidate) => candidate.id === model);
+  const gezelOptions = status?.models.filter(isGezelOption) ?? [];
+  const rawModelOptions = status?.models.filter((candidate) => !isGezelOption(candidate)) ?? [];
 
   return (
     <section
@@ -140,7 +146,7 @@ export function CodexSetupCard({
       aria-labelledby="codex-setup-heading"
     >
       <div className="settings-card-header">
-        <h3 id="codex-setup-heading">Use Gezel models in Codex</h3>
+        <h3 id="codex-setup-heading">Use a gezel in Codex</h3>
         <span
           className={`codex-setup-state codex-setup-state--${status?.state ?? 'checking'}`}
           aria-live="polite"
@@ -150,8 +156,9 @@ export function CodexSetupCard({
       </div>
 
       <p className="muted small codex-setup-intro">
-        Codex keeps its coding tools, sandbox, approvals, and conversation loop while a model served
-        by Gezel supplies the inference.
+        Codex keeps its coding tools, sandbox, approvals, and conversation loop while your selected
+        gezel supplies the character, model, and tuning. Raw local models remain available when you
+        want inference without a gezel persona.
       </p>
 
       {!status && !error && <p className="muted small">Checking the Codex setup…</p>}
@@ -211,7 +218,8 @@ export function CodexSetupCard({
 
           {configured && configuredOption && !modelChanged && (
             <p className="muted small">
-              Codex is configured to use <strong>{configuredOption.label}</strong>.
+              Codex is configured to {isGezelOption(configuredOption) ? 'work with' : 'use'}{' '}
+              <strong>{configuredOption.label}</strong>.
               {status.codexVersion ? ` Codex ${status.codexVersion} was found.` : ''}
             </p>
           )}
@@ -234,18 +242,35 @@ export function CodexSetupCard({
 
           {status.models.length > 0 && status.state !== 'conflict' && (
             <div className="codex-setup-model-row">
-              <span id={modelLabelId}>Model</span>
+              <span id={modelLabelId}>Gezel</span>
               <Select.Root value={model} onValueChange={setModel} disabled={selectionDisabled}>
                 <Select.Trigger aria-labelledby={modelLabelId}>
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
-                  {status.models.map((candidate) => (
-                    <Select.Item key={candidate.id} value={candidate.id}>
-                      {candidate.label}
-                      {candidate.description ? ` — ${candidate.description}` : ''}
-                    </Select.Item>
-                  ))}
+                  {gezelOptions.length > 0 && (
+                    <Select.Group>
+                      <Select.Label>Gezels</Select.Label>
+                      {gezelOptions.map((candidate) => (
+                        <Select.Item key={candidate.id} value={candidate.id}>
+                          {candidate.label}
+                          {candidate.description ? ` — ${candidate.description}` : ''}
+                        </Select.Item>
+                      ))}
+                    </Select.Group>
+                  )}
+                  {gezelOptions.length > 0 && rawModelOptions.length > 0 && <Select.Separator />}
+                  {rawModelOptions.length > 0 && (
+                    <Select.Group>
+                      <Select.Label>Raw models</Select.Label>
+                      {rawModelOptions.map((candidate) => (
+                        <Select.Item key={candidate.id} value={candidate.id}>
+                          {candidate.label}
+                          {candidate.description ? ` — ${candidate.description}` : ''}
+                        </Select.Item>
+                      ))}
+                    </Select.Group>
+                  )}
                 </Select.Content>
               </Select.Root>
             </div>
@@ -253,7 +278,7 @@ export function CodexSetupCard({
 
           {status.models.length === 0 && status.state !== 'conflict' && (
             <p className="codex-setup-caution small">
-              No inference models compatible with the Codex tool loop are available yet.
+              No gezels or inference models compatible with the Codex tool loop are available yet.
             </p>
           )}
 
@@ -313,8 +338,16 @@ export function CodexSetupCard({
         message={
           <>
             Gezel will {status?.state === 'not-configured' ? 'create' : 'update'} its managed Codex
-            profile for <strong>{selectedOption?.label ?? model}</strong>, including the local
-            connection and app-scoped credential
+            profile for <strong>{selectedOption?.label ?? model}</strong>.{' '}
+            {selectedOption && isGezelOption(selectedOption) ? (
+              <>
+                This gezel&apos;s character, {selectedOption.modelLabel ?? 'model'}, and tuning will
+                guide Codex.{' '}
+              </>
+            ) : (
+              <>Codex will use it as a raw inference model without a gezel persona. </>
+            )}
+            The profile includes the local connection and app-scoped credential
             {status?.profilePath ? (
               <>
                 {' '}
@@ -352,6 +385,10 @@ export function CodexSetupCard({
       />
     </section>
   );
+}
+
+function isGezelOption(option: CodexSetupModelOption): boolean {
+  return option.kind === 'gezel' || option.id.startsWith('gezel:');
 }
 
 function codexStateLabel(state: CodexSetupState): string {

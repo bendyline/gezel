@@ -1,11 +1,17 @@
 import { z } from 'zod';
 
-/** A local inference model that can safely sit behind Codex's tool loop. */
+/** A gezel or raw local model that can safely sit behind Codex's tool loop. */
 export const CodexSetupModelOptionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   description: z.string().optional(),
+  kind: z.enum(['gezel', 'model']).default('model'),
   provider: z.string().min(1),
+  /** Stable gezel id for persona-backed entries. Absent on raw-model entries. */
+  gezelId: z.string().min(1).optional(),
+  role: z.string().min(1).optional(),
+  /** Human-readable name of the effective inference model behind a gezel. */
+  modelLabel: z.string().min(1).optional(),
   contextWindow: z.number().int().positive().optional(),
   supportsReasoning: z.boolean().optional(),
   supportsTools: z.boolean().optional(),
