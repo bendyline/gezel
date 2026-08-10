@@ -812,8 +812,9 @@ describe('McpBridge', () => {
       expect(repaired).toContain('set_step_deliverable');
       expect(repaired).toContain('remains a draft plan');
 
-      const taskJson = await bridge.callTool('get_task', { ref });
-      const task = JSON.parse(taskJson);
+      const taskText = await bridge.callTool('get_task', { ref });
+      expect(taskText).toContain(`Loaded task ${ref}.`);
+      const task = JSON.parse(taskText.slice(taskText.indexOf('\n') + 1));
       const implement = task.craftbook.steps.find(
         (step: { id: string }) => step.id === 'implement',
       );

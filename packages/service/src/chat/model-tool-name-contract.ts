@@ -124,13 +124,14 @@ const SOURCE_IGNORES = [
 ];
 
 /**
- * The exact 0.1.17 catalog pin predates canonical tool naming. Its content is
+ * The exact 0.1.18 catalog pin retains historical versions that predate
+ * canonical tool naming. Its content is
  * published from the separate gilde repo, so Gezel cannot edit it in place.
- * Keep a narrow occurrence budget while the corrected authoring inputs make
- * their way through a gilde patch release: a new file/name occurrence still
- * fails CI, and changing the pin disables this waiver completely.
+ * Keep a narrow occurrence budget for those immutable versions: newer 0.1.18
+ * versions are clean, a new file/name occurrence still fails CI, and changing
+ * the pin disables this waiver completely.
  */
-const PINNED_GILDE_0_1_17_DEBT = {
+const PINNED_GILDE_0_1_18_DEBT = {
   count: 153,
   // SHA-256 of sorted `relative-source|line|json-pointer|rule|tool`
   // occurrences. This makes the waiver exact without checking a 150-line
@@ -307,7 +308,7 @@ function partitionPinnedGildeDebt(args: {
   pinnedDebt: ModelToolNameContractFinding[];
   fingerprint?: ModelToolNameContractReport['pinnedDebtFingerprint'];
 } {
-  if (args.gildeVersion !== '0.1.17') return { errors: args.findings, pinnedDebt: [] };
+  if (args.gildeVersion !== '0.1.18') return { errors: args.findings, pinnedDebt: [] };
   const errors: ModelToolNameContractFinding[] = [];
   const candidates: Array<{ finding: ModelToolNameContractFinding; signature: string }> = [];
   for (const finding of args.findings) {
@@ -332,8 +333,8 @@ function partitionPinnedGildeDebt(args: {
     )
     .digest('hex');
   const matchesWaiver =
-    candidates.length === PINNED_GILDE_0_1_17_DEBT.count &&
-    digest === PINNED_GILDE_0_1_17_DEBT.sha256;
+    candidates.length === PINNED_GILDE_0_1_18_DEBT.count &&
+    digest === PINNED_GILDE_0_1_18_DEBT.sha256;
   const fingerprint = {
     version: args.gildeVersion,
     count: candidates.length,

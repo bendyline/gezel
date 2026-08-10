@@ -163,6 +163,12 @@ export const ReasoningBlockSchema = z
       .describe(
         'Chat-template toggle for dual-mode models (Qwen3+, Nemotron Nano/Super). Implicit on cloud thinking models.',
       ),
+    templateKwargs: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+      .optional()
+      .describe(
+        'Chat-template variables that drive this model\'s reasoning depth, forwarded verbatim as `chat_template_kwargs` on local engines. The names are the model\'s own — GPT-OSS reads `reasoning_effort`, Muse Glimmer reads `reasoning_strength` (low|medium|high|xhigh) — so the manifest declares them rather than the runtime guessing. Lives under `reasoning` (not `engine`) because depth is a per-request choice a tuning profile overrides: `thinking-coding` can ask for xhigh while `instruct` asks for low. Cloud providers ignore it; use `reasoning.effort` there.',
+      ),
   })
   .describe('Reasoning controls.');
 export type ReasoningBlock = z.infer<typeof ReasoningBlockSchema>;

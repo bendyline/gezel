@@ -6,7 +6,7 @@
  * among them. The wild-caught case: Cosima firing
  * a gezel-creation tool + `update_project` then claiming "I have
  * created the 'Space Invaders' project" — without ever calling
- * `create_project`. The plain past-tense detector exits early when
+ * `start_project`. The plain past-tense detector exits early when
  * any tool succeeded; this one looks at *which* tools succeeded.
  *
  * Each rule pairs a concrete user-visible claim, the tools that
@@ -15,8 +15,9 @@
  * with the nudge so it can self-recover within the same user-visible
  * turn.
  *
- * Migrated verbatim from `chat/hallucination-detector.ts`'s
- * `detectFabricatedToolClaim`.
+ * Migrated from `chat/hallucination-detector.ts`'s
+ * `detectFabricatedToolClaim` and kept aligned with the current
+ * model-facing tool inventory.
  */
 
 import type { Behavior, NudgeVerdict, TurnCtx } from '../types.js';
@@ -173,7 +174,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`)\s+(?:the|a|an)\s+(?:new\s+|first\s+)?task\b`,
       'i',
     ),
-    requiredTools: ['create_task', 'start_project', 'start_job'],
+    requiredTools: ['create_task', 'start_project'],
     claim: 'created a task',
     nudge:
       'You told the user you created a task, but you did not call `create_task` or `start_project` this turn. Call the right one now.',
@@ -194,7 +195,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`(?:the\s+|this\s+|that\s+|it\s+|the\s+new\s+|the\s+first\s+)?(?:task\s+)?(?:over\s+)?to\b`,
       'i',
     ),
-    requiredTools: ['assign_task', 'update_task', 'create_task', 'start_project', 'start_job'],
+    requiredTools: ['assign_task', 'update_task', 'create_task', 'start_project'],
     claim: 'assigned a task',
     nudge:
       'You told the user you assigned the task to someone, but you did not call `assign_task` ' +
