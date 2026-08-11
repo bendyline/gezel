@@ -63,7 +63,10 @@ jobs:
   verify:
     name: Verify release
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # `pnpm validate` deliberately serializes three test passes plus the full
+    # Electron/browser E2E suites. It was still progressing at the old 60 min
+    # ceiling on 2026-08-11; 90 min leaves headroom for normal runner variance.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
