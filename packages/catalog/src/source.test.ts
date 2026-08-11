@@ -362,6 +362,10 @@ describe('BundledSource — minGezelVersion gating', () => {
   // A stamped date-based build (2026 day-200) — floors above/below it
   // exercise both sides of the gate.
   const APP = '1.26200.3';
+  // Inject the dev sentinel explicitly. Release CI stamps GEZEL_VERSION in
+  // core before running this suite, so relying on the imported default makes
+  // these tests change meaning according to the workflow that invoked them.
+  const DEV = '0.0.0';
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'catalog-mingezel-'));
@@ -436,7 +440,7 @@ describe('BundledSource — minGezelVersion gating', () => {
     expect(detail?.manifest.version).toBe('1.1.0');
   });
 
-  it('an unstamped dev build (0.0.0, the default) never filters', async () => {
+  it('an unstamped dev build (0.0.0) never filters', async () => {
     const dir = await writeIdentity(
       root,
       'toolset',
@@ -447,7 +451,7 @@ describe('BundledSource — minGezelVersion gating', () => {
       ...baseToolsetVersion('1.0.0'),
       minGezelVersion: '1.99999',
     });
-    const src = new BundledSource({ dataDir: root, noIndex: true });
+    const src = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: DEV });
     const items = await src.list('toolset');
     expect(items.map((i) => i.manifest.id)).toEqual(['gf-tool']);
   });
@@ -502,7 +506,7 @@ describe('BundledSource — minGezelVersion gating', () => {
     expect(detail?.manifest.version).toBe('1.0.0');
     expect(detail?.manifest.minGezelVersion).toBeUndefined();
 
-    const dev = new BundledSource({ dataDir: root, noIndex: true });
+    const dev = new BundledSource({ dataDir: root, noIndex: true, gezelVersion: DEV });
     const devDetail = await dev.get('craftbook-template', 'gh-book');
     expect(devDetail?.manifest.version).toBe('1.1.0');
     expect(devDetail?.manifest.minGezelVersion).toBe('1.26290');
@@ -570,7 +574,7 @@ describe('BundledSource — minGezelVersion gating', () => {
     expect(items[0]?.manifest.version).toBe('1.0.0');
 
     // A dev build serves the index entries untouched.
-    const dev = new BundledSource({ dataDir: root });
+    const dev = new BundledSource({ dataDir: root, gezelVersion: DEV });
     const devItems = await dev.list('toolset');
     expect(devItems.map((i) => i.manifest.id).sort()).toEqual(['gi-tool', 'phantom-gated']);
     expect(devItems.find((i) => i.manifest.id === 'gi-tool')?.manifest.version).toBe('1.1.0');

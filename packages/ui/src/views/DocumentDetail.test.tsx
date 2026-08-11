@@ -59,6 +59,14 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
     root: p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '',
     primaryDocumentFilename: p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p,
   }),
+  resolveOutsideInLayout: (path: string) =>
+    path.endsWith('.docx') ? { targetPath: path, format: 'docx' } : null,
+}));
+
+vi.mock('./OutsideInDocumentDetail.js', () => ({
+  OutsideInDocumentDetail: ({ path }: { path: string }) => (
+    <div data-testid="outside-in-document-detail">{path}</div>
+  ),
 }));
 
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
@@ -237,6 +245,12 @@ describe('DocumentDetail', () => {
     });
     expect(screen.queryByTestId('ai-toolbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('export-toolbar')).not.toBeInTheDocument();
+  });
+
+  it('routes rendered Office files through the outside-in editor', async () => {
+    render(<DocumentDetail path="brief.docx" />);
+    expect(await screen.findByTestId('outside-in-document-detail')).toHaveTextContent('brief.docx');
+    expect(api.readDocument).not.toHaveBeenCalled();
   });
 
   it('treats extensionless library documents as markdown and shows Export in the toolbar', async () => {

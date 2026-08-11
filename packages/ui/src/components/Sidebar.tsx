@@ -5,7 +5,7 @@ import type {
   RecentTab,
   RecentTabArea,
 } from '@bendyline/gezel';
-import { displayName } from '@bendyline/gezel';
+import { displayName, isOutsideInInternalPath } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -30,6 +30,7 @@ import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
+import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
@@ -71,6 +72,12 @@ function roleDescription(role?: string, roleBasedName?: string): string {
     }
   }
   return '';
+}
+
+async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
+  if (!/\.(?:html?|docx|pdf|pptx|xlsx)$/i.test(path)) return null;
+  const { resolveOutsideInLayout } = await import('./SquisqIntegration/outside-in.js');
+  return resolveOutsideInLayout(path);
 }
 
 interface SidebarProps {
@@ -282,7 +289,7 @@ export function Sidebar({
   const refreshDocs = useCallback(() => {
     api
       .listDocuments('', true)
-      .then((r) => setDocs(r.files))
+      .then((r) => setDocs(r.files.filter((entry) => !isOutsideInInternalPath(entry.path))))
       .catch(() => {});
   }, []);
 
@@ -523,14 +530,47 @@ export function Sidebar({
       }
 
       try {
+        const oldLayout = entry.isDirectory ? null : await outsideInLayout(entry.path);
+        const nextLayout = entry.isDirectory ? null : await outsideInLayout(toPath);
+        if (oldLayout && nextLayout?.format !== oldLayout.format) {
+          setRenameDocError(`Keep the .${oldLayout.format} extension when renaming this document.`);
+          return;
+        }
+        const outsideInListing = oldLayout ? await api.listDocuments('', true) : null;
+        if (
+          oldLayout &&
+          nextLayout &&
+          outsideInListing?.files.some(
+            (candidate) =>
+              candidate.path === toPath ||
+              candidate.path === nextLayout.companionDirectory ||
+              candidate.path.startsWith(`${nextLayout.companionDirectory}/`),
+          )
+        ) {
+          setRenameDocError('A document or companion folder with that name already exists.');
+          return;
+        }
         const selectedPath = selection?.kind === 'document' ? selection.path : null;
         if (
           selectedPath &&
           (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
         ) {
           await flushSerializedAutosave(`document:${selectedPath}`);
+          if (oldLayout) {
+            await flushSerializedAutosave(`outside-in:documents:${oldLayout.markdownPath}`);
+          }
         }
         await api.renameDocument(entry.path, toPath);
+        if (oldLayout && nextLayout) {
+          const hasCompanion = outsideInListing?.files.some(
+            (candidate) =>
+              candidate.path === oldLayout.companionDirectory ||
+              candidate.path.startsWith(`${oldLayout.companionDirectory}/`),
+          );
+          if (hasCompanion) {
+            await api.renameDocument(oldLayout.companionDirectory, nextLayout.companionDirectory);
+          }
+        }
         window.dispatchEvent(
           new CustomEvent('gezel:document-renamed', {
             detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
@@ -555,13 +595,18 @@ export function Sidebar({
     if (!entry) return;
     try {
       const selectedPath = selection?.kind === 'document' ? selection.path : null;
+      const layout = entry.isDirectory ? null : await outsideInLayout(entry.path);
       if (
         selectedPath &&
         (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
       ) {
         await flushSerializedAutosave(`document:${selectedPath}`);
+        if (layout) {
+          await flushSerializedAutosave(`outside-in:documents:${layout.markdownPath}`);
+        }
       }
       await api.deleteDocument(entry.path);
+      if (layout) await api.deleteDocument(layout.companionDirectory);
       window.dispatchEvent(
         new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
       );

@@ -170,6 +170,64 @@ describe('DocumentsView', () => {
     expect(screen.getByText('mission.md')).toBeInTheDocument();
   });
 
+  it('hides managed outside-in companion folders from the document tree', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        { path: 'brief.docx', name: 'brief.docx', isDirectory: false },
+        { path: 'brief_files', name: 'brief_files', isDirectory: true },
+        { path: 'brief_files/brief.md', name: 'brief.md', isDirectory: false },
+      ],
+    } as never);
+    render(<DocumentsView />);
+
+    await screen.findByTestId('file-tree');
+    expect(screen.getAllByText('brief.docx').length).toBeGreaterThan(0);
+    expect(screen.queryByText('brief_files')).not.toBeInTheDocument();
+    expect(screen.queryByText('brief_files/brief.md')).not.toBeInTheDocument();
+  });
+
+  it('imports a dropped Markdown file from the left tree without overwriting an existing name', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [{ path: 'notes.md', name: 'notes.md', isDirectory: false }],
+    } as never);
+    const { container } = render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+    const treePane = container.querySelector('.documents-tree');
+    expect(treePane).not.toBeNull();
+    const file = new File(['# Dropped'], 'notes.md', { type: 'text/markdown' });
+    Object.defineProperty(file, 'text', { value: vi.fn(async () => '# Dropped') });
+    const dataTransfer = { types: ['Files'], files: [file], dropEffect: 'none' };
+
+    fireEvent.dragEnter(treePane!, { dataTransfer });
+    expect(screen.getByText('Drop to add to Documents')).toBeInTheDocument();
+    fireEvent.drop(treePane!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith('notes 2.md', '# Dropped');
+    });
+    expect(window.localStorage.getItem('gezel:documents:selectedPath')).toBe('notes 2.md');
+  });
+
+  it('drops into the selected folder when a file lands in the main pane', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    window.localStorage.setItem('gezel:documents:selectedPath', 'guidelines');
+    const { container } = render(<DocumentsView />);
+    await screen.findByTestId('folder-view');
+    const detailPane = container.querySelector('.documents-detail');
+    expect(detailPane).not.toBeNull();
+    const file = new File(['# Brief'], 'brief.md', { type: 'text/markdown' });
+    Object.defineProperty(file, 'text', { value: vi.fn(async () => '# Brief') });
+    const dataTransfer = { types: ['Files'], files: [file], dropEffect: 'none' };
+
+    fireEvent.dragEnter(detailPane!, { dataTransfer });
+    expect(screen.getByText('Drop to add to guidelines')).toBeInTheDocument();
+    fireEvent.drop(detailPane!, { dataTransfer });
+
+    await waitFor(() => {
+      expect(api.writeDocument).toHaveBeenCalledWith('guidelines/brief.md', '# Brief');
+    });
+  });
+
   it('selecting a document populates the detail pane and persists in localStorage', async () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
     render(<DocumentsView />);

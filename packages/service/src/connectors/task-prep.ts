@@ -38,6 +38,32 @@ export interface ConnectorTaskPrepResult {
 
 export type ConnectorTaskPrep = (ctx: ConnectorTaskPrepContext) => Promise<ConnectorTaskPrepResult>;
 
+/**
+ * A task must never start against a corpus that only partially arrived.
+ * Connector syncs reserve `error` for whole-pass failures; individual
+ * fetch/write failures are reported only through `errors`, and rate limiting
+ * can also end an otherwise clean pass early. Ambient sync may retry either
+ * case later, but launch-time prep has no such luxury because craftbook paths
+ * are interpolated exactly once.
+ */
+export function assertConnectorTaskSync(
+  result: BindingSyncResult,
+  subject: string,
+): asserts result is BindingSyncResult & { errors: 0; error?: undefined; rateLimited?: false } {
+  const hardError = result.error?.trim();
+  if (hardError) throw new Error(`Could not pull down ${subject}: ${hardError}`);
+  if (result.errors > 0) {
+    throw new Error(
+      `Could not pull down ${subject}: ${result.errors} record${result.errors === 1 ? '' : 's'} failed to sync`,
+    );
+  }
+  if (result.rateLimited) {
+    throw new Error(
+      `Could not pull down ${subject}: the source rate-limited the sync before it completed`,
+    );
+  }
+}
+
 const PREPS = new Map<string, ConnectorTaskPrep>();
 
 /** Register the launch-time prep for one connector type. */
@@ -108,7 +134,8 @@ export async function runConnectorTaskPrep(
     if (!prep) {
       // No type-specific prep: an ordinary full sync still makes the
       // corpus current, which is all a non-parameterized connector needs.
-      await deps.sync(project, binding.id);
+      const result = await deps.sync(project, binding.id);
+      assertConnectorTaskSync(result, `${need.typeId} connector data`);
       log.info(`[connectors] task prep synced ${need.typeId} for ${input.craftbookId}`);
       continue;
     }

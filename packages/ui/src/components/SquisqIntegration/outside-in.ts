@@ -298,9 +298,3 @@ export function relativePath(fromDirectory: string, targetPath: string): string 
     shared++;
   return [...from.slice(shared).map(() => '..'), ...target.slice(shared)].join('/') || '.';
 }
-
-export function isOutsideInInternalPath(path: string): boolean {
-  return normalizePath(path)
-    .split('/')
-    .some((part) => part === '_squisq' || part.toLocaleLowerCase('en-US').endsWith('_files'));
-}

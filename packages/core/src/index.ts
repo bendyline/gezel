@@ -38,6 +38,7 @@ export * from './mentions.js';
 export * from './pnpm-invocation.js';
 export * from './net-retry.js';
 export * from './gezel-version.js';
+export * from './outside-in-paths.js';
 
 /**
  * The package version is embedded into health responses and logs so clients

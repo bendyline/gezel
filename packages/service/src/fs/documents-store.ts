@@ -1,7 +1,7 @@
 import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
-import type { ProjectFileEntry } from '@bendyline/gezel';
+import { type ProjectFileEntry, isOutsideInInternalPath } from '@bendyline/gezel';
 import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
 import { writeFileAtomic } from './atomic.js';
@@ -84,7 +84,7 @@ export class DocumentsStore {
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content);
     this.notifyChange('write', filePath);
-    if (!existed) {
+    if (!existed && !isOutsideInInternalPath(filePath)) {
       await this.history?.log({
         kind: 'document.created',
         summary: `Created document ${filePath}`,
@@ -99,7 +99,7 @@ export class DocumentsStore {
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data);
     this.notifyChange('write', filePath);
-    if (!existed) {
+    if (!existed && !isOutsideInInternalPath(filePath)) {
       await this.history?.log({
         kind: 'document.created',
         summary: `Created document ${filePath}`,
@@ -112,11 +112,13 @@ export class DocumentsStore {
     const full = this.resolveWritePath(filePath);
     await rm(full, { recursive: true, force: true });
     this.notifyChange('delete', filePath);
-    await this.history?.log({
-      kind: 'document.deleted',
-      summary: `Deleted document ${filePath}`,
-      details: { path: filePath },
-    });
+    if (!isOutsideInInternalPath(filePath)) {
+      await this.history?.log({
+        kind: 'document.deleted',
+        summary: `Deleted document ${filePath}`,
+        details: { path: filePath },
+      });
+    }
   }
 
   async createDocumentFolder(folderPath: string): Promise<void> {
@@ -164,11 +166,13 @@ export class DocumentsStore {
       this.notifyChange('write', toPath);
     }
 
-    await this.history?.log({
-      kind: 'document.renamed',
-      summary: `Renamed ${fromPath} → ${toPath}`,
-      details: { fromPath, toPath, isDirectory: sourceStat.isDirectory() },
-    });
+    if (!isOutsideInInternalPath(fromPath) && !isOutsideInInternalPath(toPath)) {
+      await this.history?.log({
+        kind: 'document.renamed',
+        summary: `Renamed ${fromPath} → ${toPath}`,
+        details: { fromPath, toPath, isDirectory: sourceStat.isDirectory() },
+      });
+    }
   }
 
   private resolveWritePath(filePath: string): string {

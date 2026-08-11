@@ -223,6 +223,26 @@ describe('launch prep', () => {
       }),
     ).rejects.toThrow(/Could not pull down PR #52: rate limited/);
   });
+
+  it('fails the launch when one targeted record did not sync', async () => {
+    registerGitHubPullsAdapters(runtime());
+    const prep = connectorTaskPrepFor('github-pulls');
+    await expect(
+      prep!({
+        project: project(),
+        binding: { id: 'pulls-binding', type: 'github-pulls', corpusDir: 'data/github-pulls' },
+        params: {},
+        sync: async () => ({
+          written: 1,
+          quarantined: 0,
+          skipped: 0,
+          pruned: 0,
+          errors: 1,
+          cursor: undefined,
+        }),
+      }),
+    ).rejects.toThrow(/Could not pull down PR #52: 1 record failed to sync/);
+  });
 });
 
 describe('resolveLaunchPullNumber', () => {

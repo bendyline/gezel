@@ -4,6 +4,7 @@ import {
   type ChatSession,
   type HistoryEvent,
   createLogger,
+  isOutsideInInternalPath,
   nowIso,
 } from '@bendyline/gezel';
 import type { DocumentChangeEvent, SessionChangeEvent, Store } from '../fs/store.js';
@@ -339,6 +340,10 @@ export class GlobalIndexManager {
   }
 
   private async indexDocument(index: IndexStore, path: string): Promise<void> {
+    if (isOutsideInInternalPath(path)) {
+      index.deleteFile(path);
+      return;
+    }
     const cls = classifyFile(path, 0);
     if (cls.modality === 'doc' && isConvertibleDoc(path.split('.').pop() ?? '')) {
       await this.indexConvertibleDocument(index, path);
@@ -415,7 +420,11 @@ export class GlobalIndexManager {
         for (const f of index.allFiles()) index.deleteFile(f.path);
         index.setMeta(DOCUMENTS_ROOT_META_KEY, root);
       }
-      const wanted = new Set(entries.filter((e) => !e.isDirectory).map((e) => e.path));
+      const wanted = new Set(
+        entries
+          .filter((entry) => !entry.isDirectory && !isOutsideInInternalPath(entry.path))
+          .map((entry) => entry.path),
+      );
       for (const f of index.allFiles()) {
         if (!wanted.has(f.path)) index.deleteFile(f.path);
       }

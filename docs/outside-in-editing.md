@@ -38,6 +38,16 @@ save a companion. Backups use an atomic create-only raw-byte write, so a later
 opt-in cannot replace the restorable original. Rendered output is never UTF-8
 round-tripped.
 
+The shared **Documents** library uses the same companion layout. Dropping a
+DOCX, PDF, PPTX, XLSX, or HTML file into either half of the Documents screen is
+an import, not an editing opt-in: Gezel first stores the rendered file
+byte-for-byte, keeps that filename selected, and creates a read-only Markdown
+companion when it opens the preview. **Enable outside-in editing** then writes
+the byte-exact recovery copy and opts the companion into regenerating the
+rendered file. Markdown and other supported text-document drops are stored
+directly. A colliding filename receives a numbered suffix rather than replacing
+the existing document.
+
 The portable path/frontmatter contract is owned by Squisq's
 `@bendyline/squisq-formats/outside-in` entry. Gezel's UI adapter is intentionally
 implemented over the currently pinned registry primitives and mirrors that

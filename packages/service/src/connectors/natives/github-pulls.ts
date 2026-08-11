@@ -22,7 +22,7 @@ import type { ProjectDetail } from '@bendyline/gezel';
 import { prioritizePullsForCurrentBranch } from '@bendyline/gezel-mcp';
 import type { GitHubPrs } from '../../github/prs.js';
 import { registerNativeAdapter } from '../registry.js';
-import { registerConnectorTaskPrep } from '../task-prep.js';
+import { assertConnectorTaskSync, registerConnectorTaskPrep } from '../task-prep.js';
 import type {
   AdapterDeps,
   ChangeBatch,
@@ -337,9 +337,7 @@ export function registerGitHubPullsAdapters(runtime: GitHubPullsRuntime): void {
     const num = await resolveLaunchPullNumber(runtime, ctx.project, ctx.params);
     const scope = pullScope(num);
     const result = await ctx.sync(ctx.binding.id, { scopes: [scope] });
-    if (result.error) {
-      throw new Error(`Could not pull down PR #${num}: ${result.error}`);
-    }
+    assertConnectorTaskSync(result, `PR #${num}`);
     // `corpusScope` is the path the craftbook's step prompts and gate
     // checks interpolate, so a recipe never hard-codes the corpus name.
     // `corpusDir` already carries the `data/` prefix (resolveCorpusDir).

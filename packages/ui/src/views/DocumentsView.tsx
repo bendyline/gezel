@@ -1,9 +1,23 @@
 import { FolderView } from '@bendyline/squisq-editor-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { NewPathDialog } from '../components/NewPathDialog.js';
+import {
+  chooseOutsideInSource,
+  importDroppedDocumentFiles,
+  isOutsideInInternalPath,
+  resolveOutsideInLayout,
+  withOutsideInMetadata,
+} from '../components/SquisqIntegration/index.js';
 import { documentLabel } from '../components/document-label.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -33,6 +47,15 @@ function persistSelectedPath(path: string | null) {
   }
 }
 
+function parentDirectory(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash < 0 ? '' : path.slice(0, slash);
+}
+
+function isFileDrag(event: ReactDragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files');
+}
+
 export function DocumentsView() {
   const editorTheme = useEffectiveTheme();
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -50,6 +73,7 @@ export function DocumentsView() {
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
   const [renameTarget, setRenameTarget] = useState<FileEntry | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [activeDropZone, setActiveDropZone] = useState<'tree' | 'detail' | null>(null);
   // Selected document for the right pane. Persisted in localStorage so the
   // selection survives switching to another tab and back (TabContent
   // remounts on key change) and across app restarts.
@@ -74,6 +98,14 @@ export function DocumentsView() {
     void refresh();
   }, [refresh]);
 
+  // Outside-in companion folders contain editable Markdown, media, versions,
+  // and the recovery copy for a visible Office/PDF/HTML document. They travel
+  // with that document but are implementation detail, not extra library rows.
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => !isOutsideInInternalPath(entry.path)),
+    [entries],
+  );
+
   const selectDocument = useCallback(
     (entry: FileEntry) => {
       // Folders are selectable too (FileTree's `selectableFolders`): selecting
@@ -88,19 +120,19 @@ export function DocumentsView() {
   // Uses the transient setter: an auto-pick shouldn't overwrite the
   // persisted selection slot.
   useEffect(() => {
-    if (entries.length === 0) return;
-    const firstFile = entries.find((e) => !e.isDirectory) ?? entries[0];
+    if (visibleEntries.length === 0) return;
+    const firstFile = visibleEntries.find((e) => !e.isDirectory) ?? visibleEntries[0];
     if (!firstFile) return;
     setSelectedPathState((currentPath) => {
       // This effect may have been queued before a user selection. Resolve
       // against the latest state so the initial auto-pick cannot overwrite
       // a click that happened while the document list was settling.
-      if (currentPath && entries.some((entry) => entry.path === currentPath)) {
+      if (currentPath && visibleEntries.some((entry) => entry.path === currentPath)) {
         return currentPath;
       }
       return firstFile.path;
     });
-  }, [entries]);
+  }, [visibleEntries]);
 
   const deleteDocument = useCallback((entry: FileEntry) => {
     setDeleteTarget(entry);
@@ -120,8 +152,14 @@ export function DocumentsView() {
         (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
       ) {
         await flushSerializedAutosave(`document:${selectedPath}`);
+        const layout = resolveOutsideInLayout(selectedPath);
+        if (layout) {
+          await flushSerializedAutosave(`outside-in:documents:${layout.markdownPath}`);
+        }
       }
       await api.deleteDocument(entry.path);
+      const layout = entry.isDirectory ? null : resolveOutsideInLayout(entry.path);
+      if (layout) await api.deleteDocument(layout.companionDirectory);
       window.dispatchEvent(
         new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
       );
@@ -158,6 +196,25 @@ export function DocumentsView() {
         setRenameError(null);
         return;
       }
+      const oldLayout = entry.isDirectory ? null : resolveOutsideInLayout(entry.path);
+      const nextLayout = entry.isDirectory ? null : resolveOutsideInLayout(toPath);
+      if (oldLayout && nextLayout?.format !== oldLayout.format) {
+        setRenameError(`Keep the .${oldLayout.format} extension when renaming this document.`);
+        return;
+      }
+      if (
+        oldLayout &&
+        nextLayout &&
+        entries.some(
+          (candidate) =>
+            candidate.path === toPath ||
+            candidate.path === nextLayout.companionDirectory ||
+            candidate.path.startsWith(`${nextLayout.companionDirectory}/`),
+        )
+      ) {
+        setRenameError('A document or companion folder with that name already exists.');
+        return;
+      }
 
       try {
         if (
@@ -165,8 +222,38 @@ export function DocumentsView() {
           (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
         ) {
           await flushSerializedAutosave(`document:${selectedPath}`);
+          if (oldLayout) {
+            await flushSerializedAutosave(`outside-in:documents:${oldLayout.markdownPath}`);
+          }
         }
         await api.renameDocument(entry.path, toPath);
+        if (oldLayout && nextLayout) {
+          const filePaths = entries
+            .filter((candidate) => !candidate.isDirectory)
+            .map((candidate) => candidate.path);
+          const oldSourcePath = chooseOutsideInSource(oldLayout, filePaths);
+          const hasCompanion = entries.some(
+            (candidate) =>
+              candidate.path === oldLayout.companionDirectory ||
+              candidate.path.startsWith(`${oldLayout.companionDirectory}/`),
+          );
+          if (hasCompanion) {
+            await api.renameDocument(oldLayout.companionDirectory, nextLayout.companionDirectory);
+            if (oldSourcePath) {
+              let sourcePath = `${nextLayout.companionDirectory}${oldSourcePath.slice(oldLayout.companionDirectory.length)}`;
+              if (
+                oldSourcePath === oldLayout.markdownPath &&
+                sourcePath !== nextLayout.markdownPath
+              ) {
+                await api.renameDocument(sourcePath, nextLayout.markdownPath);
+                sourcePath = nextLayout.markdownPath;
+              }
+              const response = await api.readDocument(sourcePath);
+              const linked = withOutsideInMetadata(response.content, nextLayout);
+              if (linked !== response.content) await api.writeDocument(sourcePath, linked);
+            }
+          }
+        }
         await refresh();
 
         if (
@@ -187,7 +274,7 @@ export function DocumentsView() {
         setRenameError((err as Error).message || 'Rename failed.');
       }
     },
-    [refresh, renameTarget, selectedPath, setSelectedPath],
+    [entries, refresh, renameTarget, selectedPath, setSelectedPath],
   );
 
   const openNewDoc = useCallback((prefix = '') => {
@@ -244,8 +331,8 @@ export function DocumentsView() {
   // Resolve the current selection against the loaded entries to decide which
   // right-pane surface to show (folder browser vs. document editor).
   const selectedEntry = useMemo(
-    () => (selectedPath ? (entries.find((e) => e.path === selectedPath) ?? null) : null),
-    [entries, selectedPath],
+    () => (selectedPath ? (visibleEntries.find((e) => e.path === selectedPath) ?? null) : null),
+    [visibleEntries, selectedPath],
   );
   const selectedIsDir = selectedEntry?.isDirectory ?? false;
   const selectedName = selectedPath ? selectedPath.slice(selectedPath.lastIndexOf('/') + 1) : '';
@@ -253,10 +340,90 @@ export function DocumentsView() {
   const folderChildren = useMemo(() => {
     if (!selectedPath || !selectedIsDir) return [];
     const prefix = `${selectedPath}/`;
-    return entries.filter(
+    return visibleEntries.filter(
       (e) => e.path.startsWith(prefix) && !e.path.slice(prefix.length).includes('/'),
     );
-  }, [entries, selectedPath, selectedIsDir]);
+  }, [visibleEntries, selectedPath, selectedIsDir]);
+
+  const detailDropDestination = selectedIsDir
+    ? (selectedPath ?? '')
+    : selectedPath
+      ? parentDirectory(selectedPath)
+      : '';
+  const detailDropLabel = detailDropDestination
+    ? detailDropDestination.slice(detailDropDestination.lastIndexOf('/') + 1)
+    : 'Documents';
+
+  const handleDragEnter = useCallback(
+    (event: ReactDragEvent<HTMLElement>, zone: 'tree' | 'detail') => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'copy';
+      setActiveDropZone(zone);
+    },
+    [],
+  );
+
+  const handleDragOver = useCallback(
+    (event: ReactDragEvent<HTMLElement>, zone: 'tree' | 'detail') => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'copy';
+      if (activeDropZone !== zone) setActiveDropZone(zone);
+    },
+    [activeDropZone],
+  );
+
+  const handleDragLeave = useCallback((event: ReactDragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setActiveDropZone(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    async (event: ReactDragEvent<HTMLElement>, destination: string) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveDropZone(null);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length === 0) return;
+      setStatus(`Adding ${files.length === 1 ? files[0]?.name : `${files.length} files`}…`);
+      setError(null);
+
+      const result = await importDroppedDocumentFiles({
+        client: api,
+        files,
+        destination,
+        existingPaths: entries.map((entry) => entry.path),
+      });
+      if (result.importedPaths.length > 0) {
+        await refresh();
+        const lastPath = result.importedPaths.at(-1)!;
+        setSelectedPath(lastPath);
+        window.dispatchEvent(
+          new CustomEvent('gezel:document-created', {
+            detail: { path: lastPath, paths: result.importedPaths },
+          }),
+        );
+      }
+
+      const added = result.importedPaths.length;
+      const rejected = result.rejected.length;
+      if (rejected > 0) {
+        const first = result.rejected[0]!;
+        setStatus(
+          `${added > 0 ? `Added ${added}; ` : ''}couldn't add ${first.name}: ${first.reason}${rejected > 1 ? ` (+${rejected - 1} more)` : ''}`,
+        );
+      } else {
+        setStatus(`Added ${added} ${added === 1 ? 'document' : 'documents'}.`);
+      }
+    },
+    [entries, refresh, setSelectedPath],
+  );
 
   let rightPane: ReactNode;
   if (!selectedPath) {
@@ -319,9 +486,15 @@ export function DocumentsView() {
         }}
       />
       <div className="documents-split">
-        <aside className="documents-tree">
+        <aside
+          className={`documents-tree document-drop-zone${activeDropZone === 'tree' ? ' document-drop-zone-active' : ''}`}
+          onDragEnterCapture={(event) => handleDragEnter(event, 'tree')}
+          onDragOverCapture={(event) => handleDragOver(event, 'tree')}
+          onDragLeaveCapture={handleDragLeave}
+          onDropCapture={(event) => void handleDrop(event, '')}
+        >
           <div className="area-toolbar">
-            {status && <span className="area-toolbar-status">{status}</span>}
+            {status && <output className="area-toolbar-status">{status}</output>}
             <div className="area-toolbar-actions">
               <button
                 type="button"
@@ -346,14 +519,14 @@ export function DocumentsView() {
             </div>
           </div>
           <div className="documents-tree-list">
-            {entries.length === 0 ? (
+            {visibleEntries.length === 0 ? (
               <p className="muted" style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
                 No documents yet. Create a mission statement, coding guidelines, or any shared
                 reference.
               </p>
             ) : (
               <FileTree
-                entries={entries}
+                entries={visibleEntries}
                 labelFor={(e) => documentLabel(e.name)}
                 onSelect={(e) => selectDocument(e)}
                 onRename={(e) => renameDocument(e)}
@@ -363,8 +536,28 @@ export function DocumentsView() {
               />
             )}
           </div>
+          {activeDropZone === 'tree' && (
+            <div className="document-drop-overlay" aria-hidden="true">
+              <i className="fa-solid fa-file-arrow-down" />
+              <span>Drop to add to Documents</span>
+            </div>
+          )}
         </aside>
-        <section className="documents-detail">{rightPane}</section>
+        <section
+          className={`documents-detail document-drop-zone${activeDropZone === 'detail' ? ' document-drop-zone-active' : ''}`}
+          onDragEnterCapture={(event) => handleDragEnter(event, 'detail')}
+          onDragOverCapture={(event) => handleDragOver(event, 'detail')}
+          onDragLeaveCapture={handleDragLeave}
+          onDropCapture={(event) => void handleDrop(event, detailDropDestination)}
+        >
+          {rightPane}
+          {activeDropZone === 'detail' && (
+            <div className="document-drop-overlay" aria-hidden="true">
+              <i className="fa-solid fa-file-arrow-down" />
+              <span>Drop to add to {detailDropLabel}</span>
+            </div>
+          )}
+        </section>
       </div>
       {error && <p className="error">{error}</p>}
 

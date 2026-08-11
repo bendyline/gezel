@@ -9,11 +9,13 @@ import {
   createDocumentLinkProvider,
   createDocumentsContentContainer,
   deriveContainerScope,
+  resolveOutsideInLayout,
 } from '../components/SquisqIntegration/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
+import { OutsideInDocumentDetail } from './OutsideInDocumentDetail.js';
 
 function isMarkdown(name: string): boolean {
   const basename = name.slice(name.lastIndexOf('/') + 1);
@@ -48,6 +50,14 @@ interface DocumentDetailProps {
  * Versions ride along under the same directory's `.versions/` sidecar.
  */
 export function DocumentDetail({ path, standalone = false }: DocumentDetailProps) {
+  const outsideInLayout = useMemo(() => resolveOutsideInLayout(path), [path]);
+  if (outsideInLayout) {
+    return <OutsideInDocumentDetail path={path} layout={outsideInLayout} standalone={standalone} />;
+  }
+  return <TextDocumentDetail path={path} standalone={standalone} />;
+}
+
+function TextDocumentDetail({ path, standalone = false }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
   const [content, setContent] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);

@@ -196,6 +196,29 @@ describe('GlobalIndexManager documents', () => {
     expect((await globalIndex.status()).documents).toBe(1);
   });
 
+  it('keeps outside-in companions out of search and document counts', async () => {
+    if (!ftsAvailable) return;
+    await store.writeDocument('brief.md', '# Visible\nGuild ledger.');
+    await store.writeDocument(
+      'report_files/report.md',
+      '# Managed companion\nHidden zwaluw duplicate.',
+    );
+    await manager.flush();
+
+    expect(await globalIndex.searchDocuments('zwaluw')).toHaveLength(0);
+    expect((await globalIndex.status()).documents).toBe(1);
+  });
+
+  it('does not add managed companion operations to user-facing history', async () => {
+    await store.writeDocument('brief.md', '# Visible');
+    await store.writeDocument('brief_files/brief.md', '# Companion');
+    await store.renameDocument('brief_files/brief.md', 'brief_files/source.md');
+    await store.deleteDocument('brief_files');
+
+    const events = await history.listEvents();
+    expect(events.map((event) => event.summary)).toEqual(['Created document brief.md']);
+  });
+
   it('reconcile indexes pre-existing documents and prunes stale rows', async () => {
     if (!ftsAvailable) return;
     await mkdir(join(home, 'documents'), { recursive: true });

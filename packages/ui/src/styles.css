@@ -2310,6 +2310,7 @@ button.machine-memory-unload-button {
 .documents-tree {
   display: flex;
   flex-direction: column;
+  position: relative;
   min-height: 0;
   border-right: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   /* Match the Projects / Gezels list panes (.side inherits --bg) so the
@@ -2460,10 +2461,49 @@ button.machine-memory-unload-button {
 }
 
 .documents-detail {
+  position: relative;
   overflow: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* OS file-drop affordance shared by both halves of Documents. The overlay is
+   intentionally quiet until a real Files drag crosses the pane, then rests on
+   the parchment like a marked receiving sheet rather than a modal wall. */
+.document-drop-zone {
+  transition: background-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+.document-drop-zone-active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 72%, transparent);
+}
+.document-drop-overlay {
+  position: absolute;
+  inset: 0.6rem;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--accent) 78%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 90%, var(--accent));
+  color: var(--text);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-align: center;
+}
+.document-drop-overlay i {
+  color: var(--accent);
+  font-size: 1.35rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .document-drop-zone {
+    transition: none;
+  }
 }
 .documents-detail .placeholder {
   color: var(--text-muted);
@@ -2485,6 +2525,56 @@ button.machine-memory-unload-button {
 .document-detail .editor-wrap {
   flex: 1;
   min-height: 0;
+}
+
+/* A rendered document is previewable before it is editable. Keep that
+   boundary visible above the editor—the Write tab alone cannot communicate
+   that the Markdown companion is currently read-only. */
+.outside-in-readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.7rem;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, var(--warning));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.outside-in-readonly-banner > span:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.outside-in-readonly-banner strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.outside-in-readonly-banner button {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--text);
+  padding: 0.32rem 0.55rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.outside-in-readonly-banner button:hover:not(:disabled) {
+  background: var(--key-bg-hover);
+}
+.outside-in-readonly-banner button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+@media (max-width: 760px) {
+  .outside-in-readonly-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .outside-in-readonly-banner button {
+    align-self: flex-start;
+  }
 }
 /* Standalone document tab: TabContent mounts `.document-detail` directly
    inside `.app-main`, so its `1rem 1.25rem` padding shows as a margin
