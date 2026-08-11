@@ -308,14 +308,24 @@ test('lets ordinary-height output flow while preserving a horizontal scrollbar',
   world,
 }) => {
   await openTerminal(page, world!.projectId);
-  const fixtureRows = Array.from(
-    { length: 30 },
-    (_, index) =>
-      `terminal-output-fixture-${String(index + 1).padStart(2, '0')}${' '.repeat(49)}7/29/2026  3:47 PM${' '.repeat(20)}${30357 + index}`,
+  // Keep the synthetic directory listing comfortably wider than the desktop
+  // chat bubble. The previous 136-character separator landed at exactly the
+  // viewport width under one font metric, so there was no overflow for the
+  // scrollbar assertion to exercise.
+  const nameColumnWidth = 160;
+  const timeColumnWidth = 60;
+  const formatFixtureRow = (name: string, lastWriteTime: string, length: string) =>
+    `${name.padEnd(nameColumnWidth)}${lastWriteTime.padEnd(timeColumnWidth)}${length}`;
+  const fixtureRows = Array.from({ length: 30 }, (_, index) =>
+    formatFixtureRow(
+      `terminal-output-fixture-${String(index + 1).padStart(2, '0')}`,
+      '7/29/2026  3:47 PM',
+      String(30357 + index),
+    ),
   );
   const fixtureOutput = [
-    `Name${' '.repeat(76)}LastWriteTime${' '.repeat(28)}Length`,
-    `${'-'.repeat(80)}  ${'-'.repeat(40)}  ${'-'.repeat(12)}`,
+    formatFixtureRow('Name', 'LastWriteTime', 'Length'),
+    `${'-'.repeat(nameColumnWidth - 2)}  ${'-'.repeat(timeColumnWidth - 2)}  ${'-'.repeat(12)}`,
     ...fixtureRows,
   ].join('\n');
   await page.getByTestId('chat-timeline').evaluate((timeline, text) => {

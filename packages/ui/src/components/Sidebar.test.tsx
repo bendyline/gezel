@@ -72,6 +72,28 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-area-settings')).toBeInTheDocument();
   });
 
+  it('omits document folders that contain no visible files', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        { name: 'empty', path: 'empty', isDirectory: true },
+        { name: 'nested-empty', path: 'nested-empty', isDirectory: true },
+        { name: 'child', path: 'nested-empty/child', isDirectory: true },
+        { name: 'kept', path: 'kept', isDirectory: true },
+        { name: 'notes.md', path: 'kept/notes.md', isDirectory: false },
+      ],
+    } as never);
+
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toHaveTextContent('2 docs'));
+    expect(screen.queryByRole('button', { name: 'Rename empty' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename nested-empty' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename child' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rename kept' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rename notes.md' })).toBeInTheDocument();
+  });
+
   it('shows a per-row actions menu for each gezel', async () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     fireEvent.click(screen.getByTestId('sidebar-group-toggle-gezels'));

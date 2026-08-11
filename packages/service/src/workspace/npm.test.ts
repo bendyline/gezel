@@ -116,10 +116,31 @@ describe('requestNpmInstalls — approval question publishing', () => {
     // outcome is `installed` and the runner saw the resolved spec.
     expect(result.results[0]?.kind).toBe('installed');
     expect(vi.mocked(runPnpm)).toHaveBeenCalledWith(
-      ['add', 'zod@^3'],
+      ['add', '--', 'zod@^3'],
       expect.objectContaining({ cwd: expect.any(String) }),
     );
   });
+
+  it.each([
+    { package: '--global' },
+    { package: 'https://example.test/pkg.tgz' },
+    { package: 'zod', version: 'file:../outside' },
+  ])(
+    'rejects non-registry input before approval or install: $package@$version',
+    async (request) => {
+      await expect(
+        requestNpmInstalls({
+          store,
+          home,
+          projectId,
+          packages: [request],
+          gezelId: 'linnea',
+          sessionId: 'sess-abc',
+        }),
+      ).rejects.toBeDefined();
+      expect(vi.mocked(runPnpm)).not.toHaveBeenCalled();
+    },
+  );
 
   it('still works when chatEvents is omitted (legacy callers)', async () => {
     // Defensive check: the optional `chatEvents` shouldn't be required.

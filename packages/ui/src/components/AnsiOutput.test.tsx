@@ -71,6 +71,22 @@ describe('AnsiOutput', () => {
   it('silently drops non-SGR CSI sequences (cursor moves, erases)', () => {
     expect(renderToText('before\x1b[2Aafter')).toBe('beforeafter');
     expect(renderToText('before\x1b[Kafter')).toBe('beforeafter');
+    expect(renderToText('before\x1b[Hafter')).toBe('beforeafter');
+  });
+
+  it('preserves ConPTY line spacing between PowerShell directory and table headers', () => {
+    const output =
+      '    Directory: D:\\gh\\gezel\x1b[21;1H' +
+      'Mode                 LastWriteTime         Length Name\x1b[145X\n' +
+      '----                 -------------         ------ ----\x1b[145X\n' +
+      'd-----         7/23/2026   3:47 PM                .agents\x1b[128X\x1b[27;1H';
+
+    expect(renderToText(output)).toBe(
+      '    Directory: D:\\gh\\gezel\n\n' +
+        'Mode                 LastWriteTime         Length Name\n' +
+        '----                 -------------         ------ ----\n' +
+        'd-----         7/23/2026   3:47 PM                .agents',
+    );
   });
 
   it('silently drops OSC sequences (terminated by BEL)', () => {
@@ -152,5 +168,21 @@ describe('createAnsiRenderer (stateful)', () => {
     expect(container.textContent).toBe('red then blue');
     expect(container.querySelector('.ansi-fg-red')?.textContent).toBe('red');
     expect(container.querySelector('.ansi-fg-blue')?.textContent).toBe('blue');
+  });
+
+  it('defers a ConPTY line break when the following text arrives in another feed', () => {
+    const renderer = createAnsiRenderer();
+    const first = renderer.feed('    Directory: D:\\gh\\gezel\x1b[21;1H');
+    const second = renderer.feed('Mode                 LastWriteTime');
+    const { container } = render(
+      <div>
+        {first}
+        {second}
+      </div>,
+    );
+
+    expect(container.textContent).toBe(
+      '    Directory: D:\\gh\\gezel\n\nMode                 LastWriteTime',
+    );
   });
 });

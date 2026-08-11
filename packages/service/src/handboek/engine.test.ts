@@ -131,6 +131,11 @@ describe('handboek engine', () => {
       'craftbooks-index',
       'craftbook/status-report',
     ]);
+    expect(craftbooks.entries[1]?.subcategory).toEqual({
+      id: 'general',
+      title: 'General work',
+      order: 2,
+    });
   });
 
   it('serves a curated article with personalization in app mode', async () => {

@@ -9,6 +9,7 @@ import {
   machineSharedHome,
   machineSharedMarkerFile,
   projectDir,
+  projectPrivateDir,
   projectScriptFile,
   projectScriptRunFile,
   projectScriptRunsDir,
@@ -95,6 +96,14 @@ describe('projectDir', () => {
   it('returns projects/<id> under the root', () => {
     expect(projectDir(ROOT, 'default')).toBe(join(ROOT, 'projects', 'default'));
   });
+
+  it.each(['../outside', '..\\outside', '/absolute'])(
+    'rejects a traversal-shaped project id: %s',
+    (id) => {
+      expect(() => projectDir(ROOT, id)).toThrow(/project id/);
+      expect(() => projectPrivateDir(ROOT, id)).toThrow(/project id/);
+    },
+  );
 });
 
 describe('project task paths', () => {

@@ -99,6 +99,9 @@ export const TerminalThreadSummarySchema = TerminalThreadSchema.pick({
   createdAt: true,
   lastActivityAt: true,
   archived: true,
+}).extend({
+  /** Most recent shell-paste command actually executed in this thread. */
+  lastCommand: z.string().optional(),
 });
 export type TerminalThreadSummary = z.infer<typeof TerminalThreadSummarySchema>;
 

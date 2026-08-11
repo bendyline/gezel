@@ -232,8 +232,8 @@ export function ChatReferences({
   /**
    * Optional full-width band above both panes (the project chat's pill
    * row). It gets the same reference API as `children` because focusing a
-   * task pill also scopes the side rail. In compact mode there is no split
-   * to span, so it rides above the chat pane inside the Chat tab.
+   * task pill also scopes the side rail. In compact mode it stays above the
+   * pane tabs so thread and task context remains visible in every pane.
    */
   banner?: (api: ChatReferencesApi) => ReactNode;
   /**
@@ -614,6 +614,8 @@ export function ChatReferences({
   if (isCompact) {
     return (
       <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
+        {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
+
         <Tabs.Root
           className="chat-rail-compact-root"
           value={compactPane}
@@ -645,7 +647,6 @@ export function ChatReferences({
             className="chat-rail-compact-panel chat-rail-compact-chat"
             value="chat"
           >
-            {banner?.(referenceApi)}
             <div className="chat-rail-main">{children(referenceApi)}</div>
           </Tabs.Content>
 

@@ -21,6 +21,25 @@ const LLAMA_BACKEND_PRECEDENCE = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
 export type LlamaBackend = (typeof LLAMA_BACKEND_PRECEDENCE)[number];
 
 /**
+ * Windows shows a modal loader error before a CUDA executable can print
+ * anything when the NVIDIA driver DLL is absent. `windowsHide` suppresses a
+ * console window, but it does not suppress that hard-error dialog on every
+ * supported Node/Windows combination. Avoid launching an auto-discovered
+ * CUDA candidate when the driver cannot possibly load it. Explicit binary
+ * overrides still go through the normal probe because the caller chose that
+ * exact executable.
+ */
+export function shouldProbeLlamaBackend(
+  backend: LlamaBackend,
+  platform: NodeJS.Platform = process.platform,
+  windowsRoot: string | undefined = process.env.SystemRoot ?? process.env.WINDIR,
+): boolean {
+  if (platform !== 'win32' || backend !== 'cuda') return true;
+  if (!windowsRoot) return false;
+  return existsSync(join(windowsRoot, 'System32', 'nvcuda.dll'));
+}
+
+/**
  * Build identity of a resolved engine binary. A trial record that names only
  * the *path* cannot distinguish two different builds staged at the same
  * location, which is how a stale engine survives a re-fetch unnoticed.
@@ -170,6 +189,11 @@ export function resolveLlamaBinary(explicitPath?: string): ResolvedBinary {
         const path = join(root, `${platformKey()}-${variant}`, exe);
         tried.push(path);
         if (!existsSync(path)) continue;
+        if (!shouldProbeLlamaBackend(variant)) {
+          tried[tried.length - 1] = `${path} (exists but the NVIDIA driver is unavailable — skipped)`;
+          skipped.push(`${variant} (${path}; NVIDIA driver unavailable)`);
+          continue;
+        }
         const probe = probeBinary(path);
         if (probe.ok) return finish(path, variant, probe, skipped);
         tried[tried.length - 1] = `${path} (exists but failed to launch — skipped)`;
@@ -221,7 +245,7 @@ function finish(
   };
   if (skipped.length > 0) {
     resolved.warnings.push(
-      `resolved the ${variant ?? 'variant-less'} engine only after skipping ${skipped.join(', ')} — those binaries exist but failed --version, so this run is on a less capable backend than this machine carries.`,
+      `resolved the ${variant ?? 'variant-less'} engine only after skipping ${skipped.join(', ')} — those binaries exist but could not be used, so this run is on the first launchable backend.`,
     );
   }
   resolved.warnings.push(...pinWarnings(resolved, null));

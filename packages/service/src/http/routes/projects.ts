@@ -12,6 +12,7 @@ import {
   FetchRepoRequestSchema,
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
+  NpmInstallRequestSchema,
   PNPM_HOISTED_NODE_LINKER,
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
@@ -558,6 +559,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:id/install', async (c) => {
     const id = c.req.param('id');
+    const existingProject = await ctx.store.getProject(id);
+    if (!existingProject) return c.json({ error: 'project not found' }, 404);
     const body = InstallPackageRequestSchema.parse(await c.req.json());
     const result = await installPackage({
       home: ctx.home,
@@ -1993,30 +1996,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:id/npm-install', async (c) => {
     const id = c.req.param('id');
-    const body = (await c.req.json()) as {
-      packages?: Array<{ package?: string; version?: string }>;
-      package?: string;
-      version?: string;
-      gezelId?: string;
-      sessionId?: string;
-    };
-    const packages: NpmInstallPackageRequest[] = [];
-    if (Array.isArray(body.packages)) {
-      for (const p of body.packages) {
-        if (typeof p?.package === 'string' && p.package.trim()) {
-          packages.push({
-            package: p.package,
-            ...(typeof p.version === 'string' ? { version: p.version } : {}),
-          });
-        }
-      }
-    } else if (typeof body.package === 'string' && body.package.trim()) {
-      packages.push({
-        package: body.package,
-        ...(typeof body.version === 'string' ? { version: body.version } : {}),
-      });
-    }
-    if (packages.length === 0) return c.json({ error: 'missing packages' }, 400);
+    const body = NpmInstallRequestSchema.parse(await c.req.json());
+    const packages: NpmInstallPackageRequest[] = body.packages ?? [
+      {
+        package: body.package!,
+        ...(body.version !== undefined ? { version: body.version } : {}),
+      },
+    ];
     try {
       const outcome = await requestNpmInstalls({
         store: ctx.store,

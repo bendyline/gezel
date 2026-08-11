@@ -571,8 +571,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     void refresh();
   }, [refresh]);
 
-  // Archive/restore originates from either a rail menu or the open-project
-  // header. Keep both the grouped list and the loaded detail in sync from one
+  // Archive/restore originates from either a rail menu or Project Settings.
+  // Keep both the grouped list and the loaded detail in sync from one
   // event; the global sidebar listens to the same event and hides/reveals its
   // row immediately.
   useEffect(() => {
@@ -1965,33 +1965,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   Archived
                 </span>
               )}
-              {selected.id !== 'default' && (
-                <button
-                  type="button"
-                  className="project-archive-header-action"
-                  onClick={() => void toggleSelectedArchive()}
-                  disabled={changingArchive}
-                  title={selected.archived ? 'Restore project' : 'Archive project'}
-                  aria-label={selected.archived ? 'Restore project' : 'Archive project'}
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.35"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M2.5 5.2h11v8.1h-11z" />
-                    <path d="M1.8 2.7h12.4v2.5H1.8zM6 8h4" />
-                    {selected.archived && <path d="m5.5 11 2.5-2.5 2.5 2.5" />}
-                  </svg>
-                  <span>{selected.archived ? 'Restore' : 'Archive'}</span>
-                </button>
-              )}
             </div>
 
             <div
@@ -2319,6 +2292,35 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               project has a previewable page.
                             </small>
                           </fieldset>
+
+                          {selected.id !== 'default' && (
+                            <div className="project-archive-setting">
+                              <div className="project-archive-setting-copy">
+                                <span className="project-archive-setting-title">
+                                  {selected.archived ? 'Restore project' : 'Archive project'}
+                                </span>
+                                <small className="muted">
+                                  {selected.archived
+                                    ? 'Return this project to primary navigation. Its previous inactive status is preserved.'
+                                    : 'Hide this project from primary navigation and pause automatic project work. Its files and chats stay on disk.'}
+                                </small>
+                              </div>
+                              <button
+                                type="button"
+                                className="secondary project-archive-setting-action"
+                                onClick={() => void toggleSelectedArchive()}
+                                disabled={changingArchive}
+                              >
+                                {changingArchive
+                                  ? selected.archived
+                                    ? 'Restoring…'
+                                    : 'Archiving…'
+                                  : selected.archived
+                                    ? 'Restore project'
+                                    : 'Archive project'}
+                              </button>
+                            </div>
+                          )}
 
                           {configuredCredentials.length > 0 && (
                             <div className="project-credentials">

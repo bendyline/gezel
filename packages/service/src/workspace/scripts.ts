@@ -13,6 +13,7 @@ import {
   lookupApproval,
   readCommandApprovals,
 } from './command-approvals.js';
+import { fingerprintCommandInputs } from './command-inputs.js';
 import { type RunWorkspaceCommandResult, runWorkspaceCommand } from './command.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
 
@@ -78,6 +79,12 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
   }
 
   const approvals = await readCommandApprovals(opts.home, opts.projectId);
+  const inputFiles = await fingerprintCommandInputs({
+    workspaceDir: gate.workspaceDir,
+    body,
+    args: opts.args ?? [],
+    entryFiles: [join(gate.workspaceDir, 'package.json')],
+  });
   const gateOutcome = await checkApprovalGate({
     ...opts,
     approvals,
@@ -85,6 +92,7 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
     name: opts.script,
     body,
     args: opts.args ?? [],
+    inputFiles,
   });
   if (gateOutcome) return gateOutcome;
 
@@ -132,6 +140,12 @@ export async function runNpx(opts: RunNpxOptions): Promise<RunCommandOutcome> {
   }
 
   const approvals = await readCommandApprovals(opts.home, opts.projectId);
+  const inputFiles = await fingerprintCommandInputs({
+    workspaceDir: gate.workspaceDir,
+    body: resolvedBinPath,
+    args: opts.args ?? [],
+    entryFiles: [join(gate.workspaceDir, 'package.json'), resolvedBinPath],
+  });
   const gateOutcome = await checkApprovalGate({
     ...opts,
     approvals,
@@ -139,6 +153,7 @@ export async function runNpx(opts: RunNpxOptions): Promise<RunCommandOutcome> {
     name: bin,
     body: resolvedBinPath,
     args: opts.args ?? [],
+    inputFiles,
   });
   if (gateOutcome) return { ...gateOutcome, resolvedBinPath };
 
@@ -160,6 +175,7 @@ interface ApprovalGateInput extends RunScriptsOptions {
   name: string;
   body: string;
   args: string[];
+  inputFiles: import('@bendyline/gezel').CommandApprovalInputFile[];
 }
 
 async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOutcome | undefined> {
@@ -167,7 +183,7 @@ async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOu
     input.approvals,
     input.scope,
     input.name,
-    hashCommandInvocation(input.body, input.args),
+    hashCommandInvocation(input.body, input.args, input.inputFiles),
   );
   if (decision === 'approved') return undefined;
   if (decision === 'declined') {
@@ -230,6 +246,7 @@ async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOu
       name: input.name,
       body: input.body,
       ...(input.args.length > 0 ? { args: input.args } : {}),
+      ...(input.inputFiles.length > 0 ? { inputFiles: input.inputFiles } : {}),
     },
     createdAt: nowIso(),
   };
@@ -256,6 +273,7 @@ async function findPendingApproval(input: ApprovalGateInput): Promise<Question |
     if (q.intent.name !== input.name) continue;
     if (q.intent.body !== input.body) continue;
     if (JSON.stringify(q.intent.args ?? []) !== JSON.stringify(input.args)) continue;
+    if (JSON.stringify(q.intent.inputFiles ?? []) !== JSON.stringify(input.inputFiles)) continue;
     return q;
   }
   return undefined;
@@ -265,7 +283,12 @@ function buildApprovalPrompt(input: ApprovalGateInput): string {
   const verb = input.scope === 'script' ? `\`npm run ${input.name}\`` : `\`npx ${input.name}\``;
   const bodyBlock = input.body ? `\n\nCommand body:\n\n\`\`\`\n${input.body}\n\`\`\`` : '';
   const argsLine = input.args.length > 0 ? `\n\nExtra args: \`${input.args.join(' ')}\`` : '';
-  return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body and argument list. Different arguments will ask again.`;
+  const shownFiles = input.inputFiles.slice(0, 12);
+  const filesBlock =
+    shownFiles.length > 0
+      ? `\n\nIdentifiable files bound to this approval:\n${shownFiles.map((file) => `- \`${file.path}\` — \`${file.sha256.slice(0, 12)}…\``).join('\n')}${input.inputFiles.length > shownFiles.length ? `\n- …and ${input.inputFiles.length - shownFiles.length} more` : ''}`
+      : '';
+  return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}${filesBlock}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body, argument list, and the identifiable file contents above. Editing one of those files will ask again. Files outside the project, directory or glob contents, dynamically discovered files, implicit configuration, PATH-resolved programs, package imports, and network inputs may not be identifiable in advance.`;
 }
 
 // ── npx allowlist ──────────────────────────────────────────────────────────

@@ -1,8 +1,13 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { installedAppRoots, pinnedLlamaRevision, resolveLlamaBinary } from './native-bin.ts';
+import {
+  installedAppRoots,
+  pinnedLlamaRevision,
+  resolveLlamaBinary,
+  shouldProbeLlamaBackend,
+} from './native-bin.ts';
 
 /**
  * A stub binary plus the `gezel-llama-build.json` sidecar that `build.sh`
@@ -45,6 +50,25 @@ describe('installedAppRoots', () => {
     } else {
       expect(roots).toEqual([]);
     }
+  });
+});
+
+describe('shouldProbeLlamaBackend', () => {
+  it('skips automatic CUDA probes on Windows when nvcuda.dll is absent', () => {
+    const windowsRoot = mkdtempSync(join(tmpdir(), 'gezel-no-cuda-driver-'));
+    expect(shouldProbeLlamaBackend('cuda', 'win32', windowsRoot)).toBe(false);
+  });
+
+  it('allows CUDA probes on Windows when the NVIDIA driver DLL exists', () => {
+    const windowsRoot = mkdtempSync(join(tmpdir(), 'gezel-cuda-driver-'));
+    const system32 = join(windowsRoot, 'System32');
+    mkdirSync(system32);
+    writeFileSync(join(system32, 'nvcuda.dll'), 'fixture');
+    expect(shouldProbeLlamaBackend('cuda', 'win32', windowsRoot)).toBe(true);
+  });
+
+  it('does not gate CUDA discovery on non-Windows platforms', () => {
+    expect(shouldProbeLlamaBackend('cuda', 'linux', undefined)).toBe(true);
   });
 });
 

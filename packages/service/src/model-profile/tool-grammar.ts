@@ -5,9 +5,9 @@
  * *function name* to the advertised tools — see
  * [providers/mlx/python/tool_grammar.py](../providers/mlx/python/tool_grammar.py).
  *
- * Keyed on `style.family`, NOT `style.toolCallFormat`: Qwen's catalog
- * `toolCallFormat` is the coarse `function-call`, but on the MLX textual
- * path Qwen 3.5/3.6 emits the Hermes nesting
+ * Keyed on `style.family`, NOT `style.toolCallFormat`: Qwen and Nemotron's
+ * catalog `toolCallFormat` is the coarse `function-call`, but on the MLX
+ * textual path Qwen 3.5/3.6 and Nemotron 3.5 Lightning emit the Hermes nesting
  * `<tool_call>\n<function=NAME>\n<parameter=...>...</function>\n</tool_call>`
  * (verified against the installed Qwen 3.6 chat template) — so the grammar
  * format is `hermes`, NOT the legacy `<tool_call>{json}</tool_call>`.
@@ -46,6 +46,7 @@ export function familyToToolGrammarHint(style: ModelStyle | undefined): ToolGram
   switch (style?.family) {
     case 'qwen':
     case 'qwq': // Qwen 3.5/3.6 + QwQ emit the Hermes <function=NAME> nesting
+    case 'nemotron': // Nemotron 3.5 Lightning uses the same qwen3_coder XML template
       return { format: 'hermes', mode: 'name-and-params' };
     case 'gemma':
       // Gemma 4 emits `<|tool_call>call:NAME{...}<tool_call|>`. Name-only

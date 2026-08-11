@@ -6,10 +6,12 @@ import { type ReactNode, useMemo } from 'react';
  * Handles the slice of VT100/xterm escape sequences that actually
  * shows up in dev-tool output: CSI SGR (color + bold/italic/etc.),
  * with non-SGR CSI (cursor moves, line erases), OSC (title/clipboard),
- * and standalone ESC sequences silently consumed and dropped.
- * Cursor-positioning sequences make no sense in a static bubble,
- * and dropping them is friendlier than rendering the raw escape
- * codes (which is what we did before this component existed).
+ * and standalone ESC sequences silently consumed and dropped. One
+ * cursor-positioning shape is structural in a static bubble: ConPTY
+ * represents the blank row between an ordinary PowerShell directory
+ * heading and its table header as an absolute move to column 1. We
+ * preserve that move as a transcript line break; other cursor moves
+ * still make no sense outside a terminal grid and are dropped.
  *
  * 8-bit (256-color, `38;5;n`) and 24-bit (`38;2;r;g;b`) extended-
  * color sequences are RECOGNIZED in the SGR parameter stream
@@ -93,6 +95,8 @@ function stateClasses(state: AnsiState): string {
 interface ConsumedEscape {
   end: number;
   sgrParams?: number[];
+  /** ConPTY uses absolute column-1 placement for vertical table spacing. */
+  transcriptLineBreak?: boolean;
 }
 
 /**
@@ -139,6 +143,15 @@ function consumeEscape(input: string, start: number): ConsumedEscape | null {
               return Number.isFinite(n) ? n : 0;
             });
       return { end: i + 1, sgrParams: params };
+    }
+    if (input[i] === 'H' || input[i] === 'f') {
+      const params = input
+        .slice(start + 2, i)
+        .split(';')
+        .map((p) => Number.parseInt(p, 10));
+      const row = Number.isFinite(params[0]) && params[0]! > 0 ? params[0]! : 1;
+      const column = Number.isFinite(params[1]) && params[1]! > 0 ? params[1]! : 1;
+      return { end: i + 1, transcriptLineBreak: row > 1 && column === 1 };
     }
     // Non-SGR CSI (cursor moves, erases, etc.) — consume + drop.
     return { end: i + 1 };
@@ -218,6 +231,7 @@ export interface AnsiRenderer {
 export function createAnsiRenderer(renderText?: (text: string) => ReactNode): AnsiRenderer {
   let state = initialState();
   let partial = '';
+  let pendingTranscriptLineBreak = false;
   let key = 0;
 
   return {
@@ -232,6 +246,10 @@ export function createAnsiRenderer(renderText?: (text: string) => ReactNode): An
         if (end <= plainStart) return;
         const slice = input.slice(plainStart, end);
         if (slice === '') return;
+        if (pendingTranscriptLineBreak && /\S/.test(slice)) {
+          out.push('\n\n');
+          pendingTranscriptLineBreak = false;
+        }
         const content = renderText ? renderText(slice) : slice;
         const className = stateClasses(state);
         if (className === '') {
@@ -261,6 +279,17 @@ export function createAnsiRenderer(renderText?: (text: string) => ReactNode): An
         if (consumed.sgrParams) {
           state = applySGR(state, consumed.sgrParams);
         }
+        if (consumed.transcriptLineBreak && hasVisibleTextAfter(input, consumed.end)) {
+          // The absolute row is relative to ConPTY's whole screen, while this
+          // component receives only the command transcript. Preserve the
+          // semantic separator without reproducing a screenful of empty rows.
+          out.push('\n\n');
+          pendingTranscriptLineBreak = false;
+        } else if (consumed.transcriptLineBreak) {
+          // A feed-style caller may split immediately after the cursor
+          // sequence. Defer the separator until printable text arrives.
+          pendingTranscriptLineBreak = true;
+        }
         i = consumed.end;
         plainStart = i;
       }
@@ -268,6 +297,22 @@ export function createAnsiRenderer(renderText?: (text: string) => ReactNode): An
       return out;
     },
   };
+}
+
+/** True when an escape is followed by content rather than only terminal cleanup. */
+function hasVisibleTextAfter(input: string, start: number): boolean {
+  let i = start;
+  while (i < input.length) {
+    if (input.charCodeAt(i) === 0x1b) {
+      const consumed = consumeEscape(input, i);
+      if (consumed === null) return false;
+      i = consumed.end;
+      continue;
+    }
+    if (!/\s/.test(input[i]!)) return true;
+    i++;
+  }
+  return false;
 }
 
 /**

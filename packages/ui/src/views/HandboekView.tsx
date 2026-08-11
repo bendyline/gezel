@@ -1,4 +1,9 @@
-import type { HandboekArticle, HandboekToc } from '@bendyline/gezel';
+import type {
+  HandboekArticle,
+  HandboekToc,
+  HandboekTocArea,
+  HandboekTocEntry,
+} from '@bendyline/gezel';
 import { DocPlayer, LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
@@ -46,6 +51,8 @@ export function HandboekView() {
   const [listening, setListening] = useState(false);
   const [narration, setNarration] = useState<NarrationAudio | null>(null);
   const [narrationLoading, setNarrationLoading] = useState(false);
+  const [collapsedAreas, setCollapsedAreas] = useState<Set<string>>(() => new Set());
+  const [expandedSubcategories, setExpandedSubcategories] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let alive = true;
@@ -107,6 +114,31 @@ export function HandboekView() {
       alive = false;
     };
   }, [selectedId]);
+
+  // A restored selection or an article link can point inside a closed shelf.
+  // Reveal that destination without preventing the user from closing the
+  // currently selected area or shelf again afterward.
+  useEffect(() => {
+    if (!toc || !selectedId) return;
+    const area = toc.areas.find((candidate) =>
+      candidate.entries.some((entry) => entry.id === selectedId),
+    );
+    const entry = area?.entries.find((candidate) => candidate.id === selectedId);
+    if (!area || !entry) return;
+    setCollapsedAreas((current) => {
+      if (!current.has(area.area)) return current;
+      const next = new Set(current);
+      next.delete(area.area);
+      return next;
+    });
+    if (entry.subcategory) {
+      const key = subcategoryKey(area.area, entry.subcategory.id);
+      setExpandedSubcategories((current) => {
+        if (current.has(key)) return current;
+        return new Set(current).add(key);
+      });
+    }
+  }, [toc, selectedId]);
 
   const mediaProvider = useMemo(
     () => (article ? createHandboekMediaProvider(article.figures) : null),
@@ -240,6 +272,46 @@ export function HandboekView() {
     if (target) setSelectedId(target);
   };
 
+  const toggleArea = (area: string) => {
+    setCollapsedAreas((current) => {
+      const next = new Set(current);
+      if (next.has(area)) next.delete(area);
+      else next.add(area);
+      return next;
+    });
+  };
+
+  const toggleSubcategory = (key: string) => {
+    setExpandedSubcategories((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const renderEntries = (entries: HandboekTocEntry[], nested = false) => (
+    <ul className={nested ? 'handboek-toc-subcategory-entries' : undefined}>
+      {entries.map((entry) => (
+        <li key={entry.id}>
+          <button
+            type="button"
+            className={
+              entry.id === selectedId
+                ? 'handboek-toc-entry handboek-toc-entry-active'
+                : 'handboek-toc-entry'
+            }
+            aria-current={entry.id === selectedId ? 'page' : undefined}
+            title={entry.summary}
+            onClick={() => setSelectedId(entry.id)}
+          >
+            {entry.title}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+
   return (
     <div className="handboek-view" data-testid="handboek-view">
       <nav className="handboek-toc" aria-label="Handboek contents">
@@ -248,30 +320,62 @@ export function HandboekView() {
           <span>Handboek</span>
         </div>
         {!toc && !error && <div className="handboek-toc-loading">Loading contents…</div>}
-        {toc?.areas.map((area) => (
-          <section key={area.area} className="handboek-toc-area">
-            <h3 className="handboek-toc-area-title">{area.title}</h3>
-            <ul>
-              {area.entries.map((entry) => (
-                <li key={entry.id}>
-                  <button
-                    type="button"
-                    className={
-                      entry.id === selectedId
-                        ? 'handboek-toc-entry handboek-toc-entry-active'
-                        : 'handboek-toc-entry'
-                    }
-                    aria-current={entry.id === selectedId ? 'page' : undefined}
-                    title={entry.summary}
-                    onClick={() => setSelectedId(entry.id)}
-                  >
-                    {entry.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+        {toc?.areas.map((area) => {
+          const collapsed = collapsedAreas.has(area.area);
+          const panelId = `handboek-area-${area.area}`;
+          const { ungrouped, subcategories } = organizeTocArea(area);
+          return (
+            <section key={area.area} className="handboek-toc-area">
+              <h3 className="handboek-toc-area-title">
+                <button
+                  type="button"
+                  className="handboek-toc-disclosure handboek-toc-area-toggle"
+                  aria-expanded={!collapsed}
+                  aria-controls={panelId}
+                  onClick={() => toggleArea(area.area)}
+                >
+                  <span className="handboek-toc-caret" aria-hidden="true">
+                    &rsaquo;
+                  </span>
+                  <span>{area.title}</span>
+                </button>
+              </h3>
+              {!collapsed && (
+                <div id={panelId} className="handboek-toc-area-contents">
+                  {ungrouped.length > 0 && renderEntries(ungrouped)}
+                  {subcategories.map((subcategory) => {
+                    const key = subcategoryKey(area.area, subcategory.id);
+                    const expanded = expandedSubcategories.has(key);
+                    const subcategoryPanelId = `handboek-subcategory-${area.area}-${subcategory.id}`;
+                    return (
+                      <section key={subcategory.id} className="handboek-toc-subcategory">
+                        <h4 className="handboek-toc-subcategory-title">
+                          <button
+                            type="button"
+                            className="handboek-toc-disclosure handboek-toc-subcategory-toggle"
+                            aria-expanded={expanded}
+                            aria-controls={subcategoryPanelId}
+                            onClick={() => toggleSubcategory(key)}
+                          >
+                            <span className="handboek-toc-caret" aria-hidden="true">
+                              &rsaquo;
+                            </span>
+                            <span>{subcategory.title}</span>
+                          </button>
+                        </h4>
+                        {expanded && (
+                          <div id={subcategoryPanelId}>
+                            {renderEntries(subcategory.entries, true)}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
       </nav>
       <div className="handboek-pane">
         <header className="handboek-pane-header">
@@ -369,4 +473,41 @@ export function HandboekView() {
       </div>
     </div>
   );
+}
+
+interface TocSubcategoryGroup {
+  id: string;
+  title: string;
+  order: number;
+  entries: HandboekTocEntry[];
+}
+
+function organizeTocArea(area: HandboekTocArea): {
+  ungrouped: HandboekTocEntry[];
+  subcategories: TocSubcategoryGroup[];
+} {
+  const ungrouped: HandboekTocEntry[] = [];
+  const byId = new Map<string, TocSubcategoryGroup>();
+  for (const entry of area.entries) {
+    if (!entry.subcategory) {
+      ungrouped.push(entry);
+      continue;
+    }
+    const existing = byId.get(entry.subcategory.id);
+    if (existing) {
+      existing.entries.push(entry);
+    } else {
+      byId.set(entry.subcategory.id, { ...entry.subcategory, entries: [entry] });
+    }
+  }
+  return {
+    ungrouped,
+    subcategories: [...byId.values()].sort(
+      (a, b) => a.order - b.order || a.title.localeCompare(b.title),
+    ),
+  };
+}
+
+function subcategoryKey(area: string, subcategory: string): string {
+  return `${area}:${subcategory}`;
 }

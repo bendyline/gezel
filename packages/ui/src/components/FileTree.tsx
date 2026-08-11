@@ -170,13 +170,14 @@ function TreeItem({
   const label = labelFor(entry);
   const customActions = actionsForEntry?.(entry) ?? [];
   const hasActions = Boolean(onRename || onDelete || customActions.length > 0);
+  const canExpand = node.isDirectory && node.children.length > 0;
 
   const row = (
     <div
       className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
       style={{ paddingLeft: `${depth * 16 + 4}px` }}
     >
-      {node.isDirectory ? (
+      {canExpand ? (
         <button
           type="button"
           className="tree-toggle"
@@ -310,7 +311,7 @@ function TreeItem({
       ) : (
         row
       )}
-      {node.isDirectory && expanded && node.children.length > 0 && (
+      {canExpand && expanded && (
         <div>
           {node.children.map((child) => (
             <TreeItem

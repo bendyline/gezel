@@ -7,6 +7,7 @@ export * from './project-local-id.js';
 export * from './markdown/index.js';
 export * from './fonts.js';
 export * from './engagement.js';
+export * from './entity-id.js';
 export * from './night-shift.js';
 export * from './project-properties.js';
 export * from './growth-cosmetics.js';
@@ -39,6 +40,7 @@ export * from './pnpm-invocation.js';
 export * from './net-retry.js';
 export * from './gezel-version.js';
 export * from './outside-in-paths.js';
+export * from './thread-title.js';
 
 /**
  * The package version is embedded into health responses and logs so clients

@@ -297,17 +297,19 @@ describe('ChatPillRow', () => {
       workingDir: 'packages/ui',
       createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
       lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+      lastCommand: 'ls',
     };
     vi.mocked(api.listTerminalThreads).mockResolvedValue({ threads: [terminal] });
     const user = userEvent.setup();
     const { onFocusTerminal } = renderRow({ activeTerminalThreadId: terminal.id });
 
     const chip = await screen.findByRole('button', {
-      name: 'Terminal /packages/ui. Updated 2 minutes ago',
+      name: 'Terminal /packages/ui. Last command: ls. Updated 2 minutes ago',
     });
     expect(chip).toHaveAttribute('aria-pressed', 'true');
     expect(chip).toHaveTextContent('Terminal');
     expect(chip).toHaveTextContent('/packages/ui');
+    expect(chip).toHaveTextContent('ls');
 
     await user.click(chip);
     expect(onFocusTerminal).toHaveBeenCalledWith(terminal);

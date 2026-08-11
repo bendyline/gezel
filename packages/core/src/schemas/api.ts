@@ -110,6 +110,11 @@ import { GezelGrowthStateSchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { NativeEngineNameSchema } from './native-engines.js';
 import {
+  NpmPackageNameSchema,
+  NpmRegistryPackageRequestSchema,
+  NpmRegistryVersionSchema,
+} from './npm-package.js';
+import {
   HttpsOriginSchema,
   ProjectDetailSchema,
   ProjectGitHubSchema,
@@ -3871,10 +3876,41 @@ export type CreateTypedProjectResponse = z.infer<typeof CreateTypedProjectRespon
 
 export const ProjectResponseSchema = ProjectDetailSchema;
 
-export const InstallPackageRequestSchema = z.object({
-  name: z.string().min(1),
-  version: z.string().optional(),
-});
+export const InstallPackageRequestSchema = z
+  .object({
+    name: NpmPackageNameSchema,
+    version: NpmRegistryVersionSchema.optional(),
+  })
+  .strict();
+
+/** Batch model-facing npm install request, plus its legacy singular shape. */
+export const NpmInstallRequestSchema = z
+  .object({
+    packages: z.array(NpmRegistryPackageRequestSchema).min(1).max(50).optional(),
+    package: NpmPackageNameSchema.optional(),
+    version: NpmRegistryVersionSchema.optional(),
+    gezelId: z.string().optional(),
+    sessionId: z.string().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasBatch = value.packages !== undefined;
+    const hasSingle = value.package !== undefined;
+    if (hasBatch === hasSingle) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'provide exactly one of packages or package',
+      });
+    }
+    if (!hasSingle && value.version !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['version'],
+        message: 'version requires the singular package field',
+      });
+    }
+  });
+export type NpmInstallRequest = z.infer<typeof NpmInstallRequestSchema>;
 
 export const InstallPackageResponseSchema = z.object({
   project: ProjectDetailSchema,

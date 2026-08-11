@@ -7,6 +7,9 @@ describe('normalizeChatModelCatalogId', () => {
     expect(normalizeChatModelCatalogId('qwen3.5-122b-a10b')).toBe('qwen3.5-122b-a10b-q4');
     expect(normalizeChatModelCatalogId('gpt-oss')).toBe('gpt-oss-20b-q4');
     expect(normalizeChatModelCatalogId('deepseek-r1')).toBe('deepseek-r1-8b-q4');
+    expect(normalizeChatModelCatalogId('nemotron3.5-lightning-30b')).toBe(
+      'nemotron3.5-lightning-30b-q4',
+    );
   });
 
   // `gemma4-e2b`/`gemma4-e4b` named the Q8_0 weights the catalog shipped

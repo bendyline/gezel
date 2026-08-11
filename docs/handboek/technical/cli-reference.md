@@ -9,6 +9,15 @@ summary: Headless gezel — start the service, run one-shot work, export docs.
 
 The `gezel` command drives the same service the desktop app uses — handy on servers, in scripts, or when you just live in a terminal.
 
+Install the command-line package with Node.js 24 or newer:
+
+```bash
+npm install -g @bendyline/gezel-cli
+gezel
+```
+
+The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-packages.md) for the complete package map and the SDKs to use when a shell command is not the right integration boundary.
+
 ## Everyday commands
 
 ```
@@ -37,3 +46,5 @@ gezel handboek export --out ./site
 renders the Handboek — the same articles you're reading now — as a static website, for publishing or offline reading.
 
 Run `gezel --help` (or `--help` on any subcommand) for the full surface.
+
+To automate work *inside* a project, continue with [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md). To let another application use Gezel, see [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md).

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { GEZEL_VERSION, createLogger } from '@bendyline/gezel';
+import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
@@ -293,6 +293,20 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // A paired-device (`remote-inference`) token can ONLY run inference — confine
   // it to `/v1/remote/*` so it never reaches this host's projects/fs/sessions.
   app.use('/api/*', denyRemoteInferenceScope());
+  // Entity ids are opaque path segments, never path fragments. Validate at
+  // the shared HTTP boundary before any of the many project/gezel routers can
+  // decode and forward a traversal-shaped parameter into filesystem helpers.
+  const requireSafeEntityId: MiddlewareHandler = async (c, next) => {
+    const id = c.req.param('id');
+    if (!isSafeEntityId(id)) {
+      return c.json({ error: 'invalid entity id', code: 'invalid_entity_id' }, 400);
+    }
+    await next();
+  };
+  app.use('/api/projects/:id', requireSafeEntityId);
+  app.use('/api/projects/:id/*', requireSafeEntityId);
+  app.use('/api/gezels/:id', requireSafeEntityId);
+  app.use('/api/gezels/:id/*', requireSafeEntityId);
   app.use(
     '/events/*',
     bearerAuth(ctx.tokenStore, {

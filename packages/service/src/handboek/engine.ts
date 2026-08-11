@@ -105,6 +105,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
               summary: g.summary,
               generated: true,
               siteVisible: true,
+              subcategory: g.subcategory,
             })),
         ].sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
         return { area, title: HANDBOEK_AREA_TITLES[area], entries };

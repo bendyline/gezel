@@ -206,8 +206,13 @@ describe('ChatReferences responsive split', () => {
     const user = userEvent.setup();
     apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
 
-    render(
-      <ChatReferences chatKey="project-1" projectId="project-1" skillsProjectId="project-1">
+    const { container } = render(
+      <ChatReferences
+        chatKey="project-1"
+        projectId="project-1"
+        skillsProjectId="project-1"
+        banner={() => <div data-testid="thread-task-bar">Thread/task bar</div>}
+      >
         {({ onTaskReference }) => (
           <button type="button" onClick={() => onTaskReference('project-1/1', { scoped: true })}>
             Add task reference
@@ -226,10 +231,18 @@ describe('ChatReferences responsive split', () => {
       ]);
     });
 
+    expect(
+      Array.from(
+        container.querySelectorAll('.chat-rail-banner, .chat-rail-compact-tabs'),
+        (element) => (element.classList.contains('chat-rail-banner') ? 'banner' : 'tabs'),
+      ),
+    ).toEqual(['banner', 'tabs']);
+
     await user.click(screen.getByRole('tab', { name: 'Task' }));
 
     expect(await screen.findByRole('heading', { name: 'First task' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Task' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('thread-task-bar')).toBeVisible();
   });
 
   it('pulls the rail onto a task with `focus`, even while a reference is open', async () => {

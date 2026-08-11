@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { CommandApprovalScope } from '@bendyline/gezel';
+import type { CommandApprovalInputFile, CommandApprovalScope } from '@bendyline/gezel';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
 
@@ -15,11 +15,12 @@ import { writeFileAtomic } from '../fs/atomic.js';
  * Shape:
  *   { scripts: { build: 'approved' | 'declined', ... },
  *     npx:     { vitest: 'approved', ... },
- *     scriptHashes: { build: '<sha256 of the approved invocation>' },
+ *     scriptHashes: { build: '<sha256 of the approved invocation + input files>' },
  *     npxHashes:    { ... } }
  *
- * An `approved` decision is honored ONLY while the command body/path and
- * ordered argument vector match what the user saw. Otherwise a
+ * An `approved` decision is honored ONLY while the command body/path,
+ * ordered argument vector, and identifiable input-file contents match what
+ * the user saw. Otherwise a
  * prompt-injected model could approve a benign invocation and replay the
  * stored decision with shell metacharacters or materially different tool
  * arguments. A changed body, changed arguments, or a legacy body-only
@@ -35,12 +36,19 @@ export interface CommandApprovalsFile {
   npxHashes?: Record<string, string>;
 }
 
-/** sha256 of the exact body/path + ordered args the user approved. */
-export function hashCommandInvocation(body: string | undefined, args: readonly string[]): string {
+/** sha256 of the exact body/path + ordered args + input snapshot the user approved. */
+export function hashCommandInvocation(
+  body: string | undefined,
+  args: readonly string[],
+  inputFiles: readonly CommandApprovalInputFile[] = [],
+): string {
   // The versioned JSON envelope is unambiguous and deliberately differs
-  // from legacy sha256(body) values, so upgrades fail closed and prompt
-  // once under the new exact-invocation contract.
-  const payload = JSON.stringify({ version: 1, body: body ?? null, args });
+  // from legacy sha256(body) and v1 body+args values, so upgrades fail
+  // closed and prompt once under the new content-bound contract.
+  const files = [...inputFiles]
+    .map(({ path, sha256 }) => ({ path, sha256 }))
+    .sort((a, b) => a.path.localeCompare(b.path) || a.sha256.localeCompare(b.sha256));
+  const payload = JSON.stringify({ version: 2, body: body ?? null, args, files });
   return createHash('sha256').update('gezel-command-invocation\0').update(payload).digest('hex');
 }
 

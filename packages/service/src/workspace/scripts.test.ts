@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
+import { applyCommandApprovalAnswer } from './command-approval-answer.js';
 import { runNpx, runPackageScript } from './scripts.js';
 
 let home: string;
@@ -139,6 +140,48 @@ describe('runPackageScript', () => {
     );
   });
 
+  it('requires a fresh approval when a referenced script file changes', async () => {
+    const p = await store.createProject({ name: 'p' });
+    const workspace = await seedWorkspace(p.id, {
+      scripts: { greet: 'node tools/greet.mjs' },
+    });
+    await mkdir(join(workspace, 'tools'), { recursive: true });
+    const script = join(workspace, 'tools', 'greet.mjs');
+    await writeFile(script, `console.log('first');\n`);
+    const pending = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      script: 'greet',
+      gezelId: 'g',
+      sessionId: 's',
+    });
+    const question = (await store.listProjectQuestions(p.id)).find(
+      (candidate) => candidate.id === pending.questionId,
+    );
+    if (question?.intent?.kind !== 'command-approval') throw new Error('wrong intent kind');
+    expect(question.intent.inputFiles?.map((file) => file.path)).toContain('tools/greet.mjs');
+    await applyCommandApprovalAnswer({
+      home,
+      projectId: p.id,
+      intent: question.intent,
+      answer: { selectedChoices: [0], declined: false, at: new Date().toISOString() },
+    });
+
+    await writeFile(script, `console.log('changed');\n`);
+    const replay = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      script: 'greet',
+      gezelId: 'g',
+      sessionId: 's',
+    });
+
+    expect(replay.approvalPending).toBe(true);
+    expect(replay.questionId).not.toBe(pending.questionId);
+  });
+
   it('blocks with `declined` after a previously-declined decision', async () => {
     const p = await store.createProject({ name: 'p' });
     await seedWorkspace(p.id, { scripts: { build: 'echo ok' } });
@@ -196,6 +239,43 @@ describe('runNpx', () => {
     });
     expect(res.approvalPending).toBe(true);
     expect(res.questionId).toBeTruthy();
+  });
+
+  it('requires a fresh approval when an installed binary changes', async () => {
+    const p = await store.createProject({ name: 'p' });
+    const workspace = await seedWorkspace(p.id);
+    await seedBin(workspace, 'hello', `process.stdout.write('first');`);
+    const pending = await runNpx({
+      store,
+      home,
+      projectId: p.id,
+      bin: 'hello',
+      gezelId: 'g',
+      sessionId: 's',
+    });
+    const question = (await store.listProjectQuestions(p.id)).find(
+      (candidate) => candidate.id === pending.questionId,
+    );
+    if (question?.intent?.kind !== 'command-approval') throw new Error('wrong intent kind');
+    await applyCommandApprovalAnswer({
+      home,
+      projectId: p.id,
+      intent: question.intent,
+      answer: { selectedChoices: [0], declined: false, at: new Date().toISOString() },
+    });
+
+    await seedBin(workspace, 'hello', `process.stdout.write('changed');`);
+    const replay = await runNpx({
+      store,
+      home,
+      projectId: p.id,
+      bin: 'hello',
+      gezelId: 'g',
+      sessionId: 's',
+    });
+
+    expect(replay.approvalPending).toBe(true);
+    expect(replay.questionId).not.toBe(pending.questionId);
   });
 
   it('allows a bin that is a manifest dep even without .bin present', async () => {

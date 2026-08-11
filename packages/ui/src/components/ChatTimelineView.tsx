@@ -10,7 +10,12 @@ import type {
   TerminalTimelineEntry,
   TimelineMessage,
 } from '@bendyline/gezel';
-import { displayName, resolveGezelFontFamily, resolveGezelFontScale } from '@bendyline/gezel';
+import {
+  deriveThreadTitle,
+  displayName,
+  resolveGezelFontFamily,
+  resolveGezelFontScale,
+} from '@bendyline/gezel';
 import type { SseStreamOptions } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -1021,8 +1026,7 @@ export function ChatTimelineView({
         sessionId: input.sessionId,
         gezelId: input.gezelId,
         projectId: input.projectId,
-        sessionTitle:
-          lastForSession?.sessionTitle ?? (input.content.slice(0, 60).trim() || 'New thread'),
+        sessionTitle: lastForSession?.sessionTitle ?? deriveThreadTitle(input.content),
         sessionCreatedAt: lastForSession?.sessionCreatedAt ?? input.at,
         sessionLastActivityAt: input.at,
         sessionProviderName: lastForSession?.sessionProviderName ?? defaultProvider,
@@ -1497,7 +1501,7 @@ export function ChatTimelineView({
           anchorAt: bumpIso(message.at),
           ...(lastForSession
             ? { sessionTitle: lastForSession.sessionTitle }
-            : { sessionTitle: message.content.slice(0, 60).trim() || 'New thread' }),
+            : { sessionTitle: deriveThreadTitle(message.content) }),
           ...(lastForSession
             ? { sessionCreatedAt: lastForSession.sessionCreatedAt }
             : { sessionCreatedAt: message.at }),
@@ -1585,9 +1589,7 @@ export function ChatTimelineView({
           sessionId,
           gezelId,
           projectId,
-          sessionTitle:
-            lastForSession?.sessionTitle ??
-            (event.message.content.slice(0, 60).trim() || 'New thread'),
+          sessionTitle: lastForSession?.sessionTitle ?? deriveThreadTitle(event.message.content),
           sessionCreatedAt: lastForSession?.sessionCreatedAt ?? event.message.at,
           sessionLastActivityAt: event.message.at,
           // For a brand-new session with no loaded messages, we don't

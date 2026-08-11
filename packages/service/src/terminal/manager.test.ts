@@ -490,7 +490,7 @@ describe('TerminalManager', () => {
 
     await mgr.enqueueRun(projectId, '', 'pwd');
     await mgr.enqueueRun(projectId, 'packages/ui', 'pwd');
-    await mgr.enqueueRun(projectId, '', 'pwd');
+    await mgr.enqueueRun(projectId, '', 'clear');
 
     const threads = await store.listTerminalThreads(projectId);
     expect(threads).toHaveLength(2);
@@ -498,5 +498,7 @@ describe('TerminalManager', () => {
     const sub = threads.find((t) => t.workingDir === 'packages/ui');
     expect(root).toBeDefined();
     expect(sub).toBeDefined();
+    expect(root?.lastCommand).toBe('clear');
+    expect(sub?.lastCommand).toBe('pwd');
   });
 });

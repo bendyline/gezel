@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskSchema } from '@bendyline/gezel';
@@ -26,6 +26,26 @@ describe('ensureLayout', () => {
     expect(existsSync(join(home, 'runtime'))).toBe(true);
     expect(existsSync(join(home, 'logs'))).toBe(true);
   });
+
+  it.runIf(process.platform !== 'win32')('repairs an existing per-user home to 0700', async () => {
+    await chmod(home, 0o755);
+
+    await store.ensureLayout();
+
+    expect((await stat(home)).mode & 0o777).toBe(0o700);
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'leaves an explicitly non-private system home under installer policy',
+    async () => {
+      await chmod(home, 0o755);
+      const systemStore = new Store({ home, privateUserHome: false });
+
+      await systemStore.ensureLayout();
+
+      expect((await stat(home)).mode & 0o777).toBe(0o755);
+    },
+  );
 });
 
 describe('config', () => {

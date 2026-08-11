@@ -34,6 +34,14 @@ export type HandboekArea = z.infer<typeof HandboekAreaSchema>;
 export const HandboekRenderModeSchema = z.enum(['app', 'site', 'agent']);
 export type HandboekRenderMode = z.infer<typeof HandboekRenderModeSchema>;
 
+/** Optional nested shelf used to organize entries inside a TOC area. */
+export const HandboekTocSubcategorySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  order: z.number(),
+});
+export type HandboekTocSubcategory = z.infer<typeof HandboekTocSubcategorySchema>;
+
 export const HandboekTocEntrySchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -45,6 +53,8 @@ export const HandboekTocEntrySchema = z.object({
   generated: z.boolean(),
   /** False when the article is excluded from the static-site export. */
   siteVisible: z.boolean().optional(),
+  /** Optional collapsible shelf within the entry's broader area. */
+  subcategory: HandboekTocSubcategorySchema.optional(),
 });
 export type HandboekTocEntry = z.infer<typeof HandboekTocEntrySchema>;
 

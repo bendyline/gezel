@@ -1,7 +1,7 @@
 ---
 id: how-we-test-models
 title: "How we test models"
-order: 7
+order: 10
 summary: What the model scores mean, how they are measured, and what they don't tell you.
 ---
 # How we test models
