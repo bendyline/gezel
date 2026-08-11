@@ -122,6 +122,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
   const [findingRevision, setFindingRevision] = useState(0);
   const [review, setReview] = useState<FileReviewWire | null>(null);
   const [reviewPending, setReviewPending] = useState(false);
+  const [reviewIneligible, setReviewIneligible] = useState(false);
   const [connectedOpen, setConnectedOpen] = useState(false);
   const [codeContext, setCodeContext] = useState<{
     path: string;
@@ -229,17 +230,20 @@ export function FileMapView({ projectId }: { projectId: string }) {
     if (!selectedId) {
       setReview(null);
       setReviewPending(false);
+      setReviewIneligible(false);
       return;
     }
     let cancelled = false;
     setReview(null);
     setReviewPending(false);
+    setReviewIneligible(false);
     api
       .toolFileReview(projectId, { path: selectedId })
       .then((res) => {
         if (cancelled) return;
         setReview(res.review ?? null);
         setReviewPending(res.pending === true);
+        setReviewIneligible(res.eligible === false);
       })
       .catch((e: unknown) => {
         if (!cancelled) log.debug('file-review unavailable', e);
@@ -764,7 +768,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
                     {findingError && <p className="filemap-finding-error error">{findingError}</p>}
                   </section>
                 )}
-                {(review || reviewPending) && (
+                {(review || reviewPending || reviewIneligible) && (
                   <section className="filemap-review" aria-label="Boekwachter review">
                     {review ? (
                       <>
@@ -814,6 +818,8 @@ export function FileMapView({ projectId }: { projectId: string }) {
                           <p className="filemap-review-provenance">{reviewProvenance}</p>
                         )}
                       </>
+                    ) : reviewIneligible ? (
+                      <p className="filemap-review-pending">This file type isn’t reviewed.</p>
                     ) : (
                       <p className="filemap-review-pending">
                         Not reviewed yet — the boekwachter studies files when idle or during Night

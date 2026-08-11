@@ -9573,9 +9573,12 @@ server.tool(
     try {
       const res = await api.toolFileReview(projectId, args);
       if (!res.found || !res.review) {
-        const why = res.pending
-          ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
-          : 'file is not in the index';
+        const why =
+          res.eligible === false
+            ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
+            : res.pending
+              ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
+              : 'file is not in the index';
         return {
           content: [{ type: 'text' as const, text: `file_review: no review — ${why}.` }],
         };

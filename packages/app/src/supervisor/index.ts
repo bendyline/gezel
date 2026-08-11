@@ -66,6 +66,14 @@ interface LocalAdoptRuntime {
 
 export type ConnectionMode = Mode['kind'];
 
+export type ServiceConnectionState = 'ready' | 'restarting' | 'failed';
+
+export interface ServiceConnectionFailure {
+  code: 'restart-unrecoverable';
+  sourceMode: ConnectionMode;
+  message: string;
+}
+
 export type ServiceFallbackCode =
   | 'machine-service-not-installed'
   | 'machine-service-home-fresh'
@@ -160,6 +168,8 @@ export class SupervisedService extends EventEmitter {
    */
   private _cert: string | null;
   private _fallbackReason: ServiceFallbackReason | null;
+  private _state: ServiceConnectionState = 'ready';
+  private _failure: ServiceConnectionFailure | null = null;
   private child?: ChildProcess;
   private embeddedStop?: () => Promise<void>;
   /** Restores the original stdout/stderr writers after an embedded tee. */
@@ -204,6 +214,12 @@ export class SupervisedService extends EventEmitter {
   }
   get fallbackReason(): ServiceFallbackReason | null {
     return this._fallbackReason;
+  }
+  get state(): ServiceConnectionState {
+    return this._state;
+  }
+  get failure(): ServiceConnectionFailure | null {
+    return this._failure;
   }
 
   /**
@@ -294,6 +310,16 @@ export class SupervisedService extends EventEmitter {
   }
 
   /**
+   * The owned daemon and every supported replacement both failed. Main uses
+   * this to discard its API client/certificate pin and replace the renderer
+   * with a persistent reconnect page whose preload receives no bearer token.
+   */
+  onFatal(fn: (failure: ServiceConnectionFailure) => void): () => void {
+    this.on('fatal', fn);
+    return () => this.off('fatal', fn);
+  }
+
+  /**
    * Service has requested a restart (e.g. folders externalization
    * just swapped paths). Subscribers can surface it to the UI;
    * the actual restart waits until the user (or the same listener)
@@ -312,18 +338,18 @@ export class SupervisedService extends EventEmitter {
    */
   async restart(reason: string): Promise<void> {
     this.opts.logger?.info?.(`[supervisor] restart requested: ${reason}`);
-    await this.runTransition(() => this.restartForCurrentMode());
+    await this.runTransition(() => this.restartForCurrentMode(reason));
   }
 
-  private async restartForCurrentMode(): Promise<void> {
+  private async restartForCurrentMode(reason: string): Promise<void> {
     const mode = this._mode;
     switch (mode) {
       case 'embedded':
-        await this.restartEmbedded();
+        await this.restartOwnedWithFallback(mode, reason, () => this.restartEmbedded());
         return;
       case 'local-spawn-packaged':
       case 'local-spawn-dev':
-        await this.restartSpawn();
+        await this.restartOwnedWithFallback(mode, reason, () => this.restartSpawn());
         return;
       case 'remote':
         await this.reconnectRemote();
@@ -376,15 +402,156 @@ export class SupervisedService extends EventEmitter {
   }
 
   private async restartEmbedded(): Promise<void> {
+    this.beginDestructiveRestart();
     this.stopHealthWatch();
-    if (this.embeddedStop) await this.embeddedStop();
-    this.embeddedStop = undefined;
+    if (this.embeddedStop) {
+      try {
+        await this.embeddedStop();
+      } catch (error) {
+        await this.handleStopFailure('embedded service', error);
+        throw error;
+      }
+    }
+    this.detachResources();
     const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService);
+    await this.installEmbeddedCandidate(embedded);
+  }
+
+  /**
+   * Owned services cannot overlap because both would write the same home. Once
+   * shutdown has begun we therefore cannot roll back to the original process;
+   * recover by starting the supported in-process service instead. Failures
+   * before shutdown (for example bundle preparation) leave the old connection
+   * ready and are simply reported to the caller.
+   */
+  private async restartOwnedWithFallback(
+    sourceMode: ConnectionMode,
+    reason: string,
+    restart: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await restart();
+      return;
+    } catch (primaryError) {
+      if (this._state === 'ready' || this._state === 'failed') throw primaryError;
+      const fallbackReason: ServiceFallbackReason = {
+        code: 'restart-failed',
+        sourceMode,
+        message: `The background service could not restart (${reason}): ${errorMessage(primaryError)}`,
+      };
+      try {
+        await this.fallbackToEmbedded(fallbackReason);
+      } catch (fallbackError) {
+        const recoveryState: ServiceConnectionState = this.state;
+        if (recoveryState !== 'ready' && recoveryState !== 'failed') {
+          this.markRestartUnrecoverable(sourceMode, primaryError, fallbackError);
+        }
+        throw new AggregateError(
+          [primaryError, fallbackError],
+          `gezeld restart and embedded recovery both failed: ${errorMessage(fallbackError)}`,
+        );
+      }
+    }
+  }
+
+  private beginDestructiveRestart(): void {
+    this._state = 'restarting';
+    this._failure = null;
+  }
+
+  private markReady(): void {
+    this._state = 'ready';
+    this._failure = null;
+  }
+
+  private markRestartUnrecoverable(
+    sourceMode: ConnectionMode,
+    primaryError: unknown,
+    fallbackError?: unknown,
+    options: { preserveResources?: boolean } = {},
+  ): void {
+    this.stopHealthWatch();
+    if (!options.preserveResources) this.detachResources();
+    // A failed renderer reload must not receive credentials for the daemon we
+    // already stopped. Keep the old URL only as reconnect-page diagnostics.
+    this._token = '';
+    this._cert = null;
+    const recoveryDetail = fallbackError
+      ? `; embedded recovery also failed: ${errorMessage(fallbackError)}`
+      : '';
+    const failure: ServiceConnectionFailure = {
+      code: 'restart-unrecoverable',
+      sourceMode,
+      message: `The background service stopped but its replacement failed: ${errorMessage(primaryError)}${recoveryDetail}`,
+    };
+    this._state = 'failed';
+    this._failure = failure;
+    this.opts.logger?.error?.(`[supervisor] ${failure.message}`);
+    this.emit('fatal', failure);
+  }
+
+  /**
+   * A stop rejection is ambiguous: the service may have rejected before doing
+   * anything, or may have stopped and then failed cleanup. Re-probe the exact
+   * old credentials. A healthy response restores the prior connection; an
+   * unhealthy response is explicit fatal state because starting a second
+   * writer would risk corruption.
+   */
+  private async handleStopFailure(label: string, stopError: unknown): Promise<void> {
+    try {
+      await healthWithTimeout(buildHealthClient(this._baseUrl, this._token, this._cert));
+      this.markReady();
+      if (this.child) this.startHealthWatch();
+      this.opts.logger?.warn?.(
+        `[supervisor] ${label} rejected shutdown but remains healthy; retaining the existing connection`,
+      );
+    } catch (healthError) {
+      this.markRestartUnrecoverable(
+        this._mode,
+        new AggregateError(
+          [stopError, healthError],
+          `${label} shutdown could not be confirmed and its old endpoint is unhealthy`,
+        ),
+        undefined,
+        { preserveResources: true },
+      );
+    }
+  }
+
+  private async verifyReplacement(
+    candidate: Pick<LocalAdoptRuntime, 'baseUrl' | 'token' | 'cert'>,
+  ): Promise<void> {
+    await healthWithTimeout(buildHealthClient(candidate.baseUrl, candidate.token, candidate.cert));
+  }
+
+  private async installEmbeddedCandidate(
+    embedded: {
+      baseUrl: string;
+      token: string;
+      cert: string | null;
+      stop: () => Promise<void>;
+    },
+    emitRestart = true,
+  ): Promise<void> {
+    try {
+      await this.verifyReplacement(embedded);
+    } catch (error) {
+      try {
+        await embedded.stop();
+      } catch (stopError) {
+        this.embeddedStop = embedded.stop;
+        this.markRestartUnrecoverable(this._mode, error, stopError, {
+          preserveResources: true,
+        });
+      }
+      throw error;
+    }
     this._baseUrl = embedded.baseUrl;
     this._token = embedded.token;
     this._cert = embedded.cert;
     this.attachEmbedded(embedded.stop);
-    this.emit('restart');
+    this.markReady();
+    if (emitRestart) this.emit('restart');
   }
 
   /** Bound callback we hand to the embedded service so it can ask for
@@ -515,6 +682,10 @@ export class SupervisedService extends EventEmitter {
       await this.restartSpawn();
     } catch (err) {
       this.opts.logger?.error?.(`[supervisor] restart failed: ${(err as Error).message}`);
+      // Pre-stop preparation failure leaves the old watcher/connection intact;
+      // an unconfirmed stop has already entered fatal state. Only a failure
+      // after confirmed shutdown is allowed to start another writer.
+      if (this._state !== 'restarting') return;
       await this.fallbackToEmbedded({
         code: 'restart-failed',
         sourceMode: this._mode,
@@ -535,40 +706,77 @@ export class SupervisedService extends EventEmitter {
   }
 
   private async restartSpawn(): Promise<void> {
-    this.stopHealthWatch();
-    if (this.child) await gracefullyStop(this.child, this.opts.logger);
     const mode = this._mode;
+    // Extraction is safe to prepare transactionally while the old process is
+    // still serving. If it fails, restartOwnedWithFallback sees state=ready and
+    // leaves the healthy old daemon untouched instead of causing an outage.
+    if (mode === 'local-spawn-packaged') await preparePackagedInstall(this.opts);
+
+    this.beginDestructiveRestart();
+    this.stopHealthWatch();
+    if (this.child) {
+      try {
+        await gracefullyStop(this.child, this.opts.logger);
+      } catch (error) {
+        await this.handleStopFailure('spawned service', error);
+        throw error;
+      }
+    }
+    this.detachResources();
     const result =
       mode === 'local-spawn-packaged'
-        ? await spawnChildFromInstall(this.opts)
+        ? await spawnChildFromInstall(this.opts, { bundlePrepared: true })
         : mode === 'local-spawn-dev'
           ? await spawnChild(this.opts)
           : (() => {
               throw new Error(`Cannot spawn-restart unowned mode ${mode}`);
             })();
+    try {
+      await this.verifyReplacement(result);
+    } catch (error) {
+      try {
+        await gracefullyStop(result.child, this.opts.logger);
+      } catch (stopError) {
+        this.child = result.child;
+        this.markRestartUnrecoverable(mode, error, stopError, { preserveResources: true });
+      }
+      throw error;
+    }
     this._baseUrl = result.baseUrl;
     this._token = result.token;
     this._cert = result.cert;
     this.attachSpawned(result.child);
+    this.markReady();
     this.emit('restart');
   }
 
   private async fallbackToEmbedded(reason: ServiceFallbackReason): Promise<void> {
     this.opts.logger?.error?.(`[supervisor] falling back to embedded: ${reason.message}`);
+    const sourceMode = reason.sourceMode;
+    this.beginDestructiveRestart();
     this.stopHealthWatch();
-    if (this.child) {
-      await gracefullyStop(this.child, this.opts.logger);
-      this.child = undefined;
+    try {
+      if (this.child) {
+        try {
+          await gracefullyStop(this.child, this.opts.logger);
+        } catch (error) {
+          await this.handleStopFailure('spawned service', error);
+          throw error;
+        }
+        this.detachResources();
+      }
+      const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService);
+      this._fallbackReason = reason;
+      await this.installEmbeddedCandidate(embedded, false);
+      this._mode = 'embedded';
+      this.emit('fallback', reason);
+      this.emit('restart');
+    } catch (error) {
+      if (this._state !== 'ready' && this._state !== 'failed') {
+        this.markRestartUnrecoverable(sourceMode, reason.message, error);
+      }
+      throw error;
     }
-    const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService);
-    this._mode = 'embedded';
-    this._baseUrl = embedded.baseUrl;
-    this._token = embedded.token;
-    this._cert = embedded.cert;
-    this._fallbackReason = reason;
-    this.attachEmbedded(embedded.stop);
-    this.emit('fallback', reason);
-    this.emit('restart');
   }
 }
 
@@ -585,8 +793,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // every packaged platform launches it with this runtime. The sandbox
   // runner also prefers `GEZEL_NODE_PATH` over `node` on PATH so
   // `run_nodejs_script` works on machines without a global Node
-  // install. Absent bundle → supervisor logs "no-bundle" and the
-  // sandbox falls back to whatever `node` the shell resolves.
+  // install. Packaged mode fails closed when the release manifest is absent
+  // or invalid; only development may use an unauthenticated/PATH runtime.
+  if (opts.packaged) delete process.env.GEZEL_NODE_PATH;
   try {
     const nodeBundleDir = defaultNodeBundleDir(import.meta.url);
     const node = await installNodeIfNeeded({
@@ -594,12 +803,16 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
       bundleDir: nodeBundleDir,
       logger: opts.logger,
     });
-    if (node.binaryPath) {
+    if (node.binaryPath && (node.verified || !opts.packaged)) {
       process.env.GEZEL_NODE_PATH = node.binaryPath;
+    } else if (opts.packaged) {
+      opts.logger?.warn?.(
+        '[supervisor] verified bundled node is unavailable; packaged autostart and Node-backed tools remain disabled',
+      );
     }
   } catch (err) {
     opts.logger?.warn?.(
-      `[supervisor] node install step failed: ${(err as Error).message}; continuing without bundled node`,
+      `[supervisor] node install step failed: ${(err as Error).message}; continuing without a trusted bundled node`,
     );
   }
 
@@ -607,11 +820,16 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // `~/.gezel/bin/pnpm-runtime/` and point the service at its JS
   // entrypoint. Invocation resolution combines this with
   // `GEZEL_NODE_PATH`; dev mode still falls back to pnpm on PATH.
+  if (opts.packaged) delete process.env.GEZEL_PNPM_PATH;
   try {
     const bundleDir = defaultPnpmBundleDir(import.meta.url);
     const pnpm = await installPnpmIfNeeded({ home: opts.home, bundleDir, logger: opts.logger });
-    if (pnpm.entryPath) {
+    if (pnpm.entryPath && (pnpm.verified || !opts.packaged)) {
       process.env.GEZEL_PNPM_PATH = pnpm.entryPath;
+    } else if (opts.packaged) {
+      opts.logger?.warn?.(
+        '[supervisor] verified bundled pnpm is unavailable; packaged package workflows and autostart remain disabled',
+      );
     }
   } catch (err) {
     opts.logger?.warn?.(
@@ -1656,20 +1874,30 @@ async function probeRemote(baseUrl: string, token: string): Promise<void> {
   }
 }
 
-async function spawnChildFromInstall(opts: ConnectOptions): Promise<{
+async function preparePackagedInstall(opts: ConnectOptions): Promise<string> {
+  const installDir = gezelPaths(opts.home).install;
+  const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
+  await extractBundleIfNeeded({ installDir, tarballPath, metaPath, logger: opts.logger });
+  return installDir;
+}
+
+async function spawnChildFromInstall(
+  opts: ConnectOptions,
+  options: { bundlePrepared?: boolean } = {},
+): Promise<{
   child: ChildProcess;
   baseUrl: string;
   token: string;
   cert: string | null;
   pid: number;
 }> {
-  const installDir = gezelPaths(opts.home).install;
   // Bundle ships as a tarball + meta sidecar that electron-builder
   // asar-unpacks to `app.asar.unpacked/dist/service-bundle.tar.gz`.
   // Extract to the user's install dir if the shipped version is newer
   // (or missing). See extract-bundle.ts for the rationale on archiving.
-  const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
-  await extractBundleIfNeeded({ installDir, tarballPath, metaPath, logger: opts.logger });
+  const installDir = options.bundlePrepared
+    ? gezelPaths(opts.home).install
+    : await preparePackagedInstall(opts);
   const daemonEntry = join(installDir, 'dist', 'bin', 'gezeld.js');
   // The spawned daemon's own `findBundledUi` (in service/bin/gezeld.ts)
   // looks adjacent to itself for the UI, but at this point gezeld lives
@@ -1791,6 +2019,9 @@ export async function gracefullyStop(
     graceMs: GRACEFUL_STOP_MS,
     forceMs: GRACEFUL_STOP_MS,
   });
+  if (child.exitCode == null && child.signalCode == null) {
+    throw new Error('gezeld child did not confirm exit after the bounded stop ladder');
+  }
 }
 
 function assertNeverMode(mode: never): never {

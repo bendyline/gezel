@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,7 +22,8 @@ const fakeExec = async (_command: string, args: readonly string[]) => {
 };
 
 const opts = {
-  nodePath: '/usr/bin/node',
+  nodePath: '/home/tester/.gezel/bin/node',
+  pnpmPath: '/home/tester/.gezel/bin/pnpm-runtime/bin/pnpm.mjs',
   gezeldPath: '/opt/gezel/gezeld.js',
   gezelHome: '/home/tester/.gezel',
 };
@@ -45,6 +46,16 @@ describe('linux autostart unit', () => {
     // Every call is user-scope; the system unit of the legacy name is never
     // this module's business.
     for (const args of calls) expect(args[0]).toBe('--user');
+  });
+
+  it('persists the bundled runtime without relying on the login PATH', async () => {
+    await install(opts, { exec: fakeExec, configDir });
+    const unit = await readFile(join(configDir, 'gezeld-user.service'), 'utf8');
+    expect(unit).toContain('ExecStart="/home/tester/.gezel/bin/node" "/opt/gezel/gezeld.js"');
+    expect(unit).toContain('Environment="GEZEL_NODE_PATH=/home/tester/.gezel/bin/node"');
+    expect(unit).toContain(
+      'Environment="GEZEL_PNPM_PATH=/home/tester/.gezel/bin/pnpm-runtime/bin/pnpm.mjs"',
+    );
   });
 
   it('migrates a legacy user unit only after the replacement is enabled', async () => {

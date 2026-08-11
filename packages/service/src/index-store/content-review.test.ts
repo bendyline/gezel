@@ -172,6 +172,27 @@ describe('ContentIndex.review end-to-end', () => {
     expect((await ci.reviewCounts('c'))?.pending).toBe(0);
   });
 
+  it('reviews HTML as code and tells never-reviewed apart from not-yet-reviewed', async () => {
+    await writeFile(join(dir, 'index.html'), '<!doctype html>\n<title>Rambo Arcade</title>\n');
+    await writeFile(join(dir, 'scores.csv'), 'name,score\nrambo,9001\n');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+    // Before the sweep: the HTML file is an honest "not yet"; the CSV (kind
+    // 'data', no rubric) must NOT promise a review that never comes.
+    const htmlBefore = await ci.fileReview('c', 'index.html');
+    expect(htmlBefore).toMatchObject({ found: false, pending: true, eligible: true });
+    const csv = await ci.fileReview('c', 'scores.csv');
+    expect(csv).toMatchObject({ found: false, eligible: false });
+    expect(csv.pending).toBeUndefined();
+
+    const review = vi.fn(async (_prompt: string) => VALID_REPLY);
+    const result = await ci.review('c', deps(review), 10, await builtinRubrics());
+    // Only the HTML file is reviewable — the CSV never enters the queue.
+    expect(result).toEqual({ files: 1, reviewed: 1 });
+    expect(review.mock.calls[0]?.[0]).toContain('likely bugs');
+    expect((await ci.fileReview('c', 'index.html')).found).toBe(true);
+  });
+
   it('reviews plain-text documents with the text rubric', async () => {
     await writeFile(join(dir, 'notes.txt'), 'Some plane text with a typo.\n');
     await runWorkspaceContentIndex(dir, 'c', artifacts);

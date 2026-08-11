@@ -14,7 +14,7 @@ function plistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 }
 
-function buildPlist(opts: AutostartInstallOptions): string {
+export function buildPlist(opts: AutostartInstallOptions): string {
   // Plain XML — no external dep needed. Escape user-supplied strings
   // defensively; `home` paths have historically contained apostrophes.
   const escapeXml = (s: string) =>
@@ -34,6 +34,14 @@ function buildPlist(opts: AutostartInstallOptions): string {
   <dict>
     <key>GEZEL_HOME</key>
     <string>${escapeXml(opts.gezelHome)}</string>
+    <key>GEZEL_NODE_PATH</key>
+    <string>${escapeXml(opts.nodePath)}</string>
+    ${
+      opts.pnpmPath
+        ? `<key>GEZEL_PNPM_PATH</key>
+    <string>${escapeXml(opts.pnpmPath)}</string>`
+        : ''
+    }
   </dict>
   <key>WorkingDirectory</key>
   <string>${escapeXml(opts.gezelHome)}</string>

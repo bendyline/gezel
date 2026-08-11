@@ -42,8 +42,11 @@ const MAX_FILES = 50_000;
  * written only after a complete walk, so an interrupted pass redoes next tick
  * (idempotent: all per-file writes are replace-by-file).
  * v2: named import bindings on dependency edges.
+ * v3: html/css/vue/svelte classify as code — existing rows hold the old
+ *     'other' kind, and only this bump re-extracts them (the mtime/size gate
+ *     would otherwise keep an unchanged index.html unreviewable forever).
  */
-const EXTRACTOR_VERSION = 2;
+const EXTRACTOR_VERSION = 3;
 
 /**
  * PNG text keys worth putting in the search index, in priority order. Skips

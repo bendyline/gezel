@@ -10,10 +10,13 @@ const exec = promisify(execFile);
 
 const TASK_NAME = 'GezelService';
 
-function buildTaskXml(opts: AutostartInstallOptions, userId: string): string {
+export function buildTaskXml(opts: AutostartInstallOptions, userId: string): string {
   // Minimal Task Scheduler XML — on-logon trigger, Limited privilege so no
   // UAC prompt, runs as the installing user. Date field is informational.
   const now = new Date().toISOString();
+  const escapeXml = (value: string) =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const argumentsValue = `"${opts.gezeldPath}" "--gezel-autostart-home=${opts.gezelHome}"`;
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -24,12 +27,12 @@ function buildTaskXml(opts: AutostartInstallOptions, userId: string): string {
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <UserId>${userId}</UserId>
+      <UserId>${escapeXml(userId)}</UserId>
     </LogonTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
-      <UserId>${userId}</UserId>
+      <UserId>${escapeXml(userId)}</UserId>
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
@@ -55,9 +58,9 @@ function buildTaskXml(opts: AutostartInstallOptions, userId: string): string {
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>${opts.nodePath}</Command>
-      <Arguments>"${opts.gezeldPath}"</Arguments>
-      <WorkingDirectory>${opts.gezelHome}</WorkingDirectory>
+      <Command>${escapeXml(opts.nodePath)}</Command>
+      <Arguments>${escapeXml(argumentsValue).replace(/"/g, '&quot;')}</Arguments>
+      <WorkingDirectory>${escapeXml(opts.gezelHome)}</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>

@@ -195,6 +195,12 @@ export const FileReviewResponseSchema = z.object({
   /** True when the file is indexed but its current hash has no review yet. */
   pending: z.boolean().optional(),
   review: FileReviewWireSchema.optional(),
+  /**
+   * False when no rubric covers this file's kind — it will NEVER be reviewed,
+   * as opposed to `pending` ("not yet"). Absent on found responses and on
+   * older daemons.
+   */
+  eligible: z.boolean().optional(),
 });
 export type FileReviewResponse = z.infer<typeof FileReviewResponseSchema>;
 

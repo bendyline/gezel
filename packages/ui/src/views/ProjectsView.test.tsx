@@ -12,12 +12,15 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialMarkdown,
     onChange,
     statusBarSlotRight,
+    toolbarSlotRight,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
     statusBarSlotRight?: React.ReactNode;
+    toolbarSlotRight?: React.ReactNode;
   }) => (
     <div data-testid="editor" data-initial={initialMarkdown}>
+      <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
       {onChange && (
         <button type="button" data-testid="editor-emit" onClick={() => onChange('edited content')}>
           edit
@@ -77,7 +80,32 @@ vi.mock('../components/CatalogBrowser.js', () => ({
   CatalogBrowser: () => <div data-testid="catalog-browser" />,
 }));
 vi.mock('../components/ConfirmDialog.js', () => ({ ConfirmDialog: () => null }));
-vi.mock('../components/FileTree.js', () => ({ FileTree: () => null }));
+vi.mock('../components/FileTree.js', () => ({
+  FileTree: ({
+    entries,
+    onSelect,
+    trailingForEntry,
+  }: {
+    entries: Array<{ name: string; path: string; isDirectory: boolean }>;
+    onSelect: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    trailingForEntry?: (entry: {
+      name: string;
+      path: string;
+      isDirectory: boolean;
+    }) => React.ReactNode;
+  }) => (
+    <div data-testid="file-tree">
+      {entries.map((entry) => (
+        <div key={entry.path}>
+          <button type="button" onClick={() => onSelect(entry)}>
+            {entry.name}
+          </button>
+          {trailingForEntry?.(entry)}
+        </div>
+      ))}
+    </div>
+  ),
+}));
 vi.mock('../components/HtmlPreviewFrame.js', () => ({ HtmlPreviewFrame: () => null }));
 vi.mock('../components/ProjectChat.js', () => ({
   ProjectChat: ({ compact }: { compact?: boolean }) => (
@@ -816,6 +844,92 @@ describe('ProjectsView', () => {
       expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { indexingEnabled: true });
       expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-alpha');
     });
+  });
+
+  it('shows workspace indexing issues and toggles the Boekwachter results pane', async () => {
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [{ name: 'audit.md', path: 'notes/audit.md', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.readProjectWorkspaceFile).mockResolvedValue({
+      path: 'notes/audit.md',
+      content: '# Audit',
+    } as never);
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      enrichment: {
+        eligible: 1,
+        summarized: 1,
+        embedded: 1,
+        pending: 0,
+        reviews: { eligible: 1, reviewed: 1, stale: 0, pending: 0 },
+      },
+    } as never);
+    vi.mocked(api.toolListFileIssues).mockResolvedValue({
+      issues: [
+        {
+          path: 'notes/audit.md',
+          severity: 'minor',
+          category: 'clarity',
+          message: 'The conclusion does not identify an owner.',
+          line: 12,
+        },
+      ],
+      counts: { total: 1, bySeverity: { minor: 1 }, byCategory: { clarity: 1 } },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 1,
+      eligibleFiles: 1,
+    } as never);
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'notes/audit.md',
+      found: true,
+      review: {
+        notesMd: 'A concise audit with one unresolved ownership question.',
+        issues: [
+          {
+            severity: 'minor',
+            category: 'clarity',
+            message: 'The conclusion does not identify an owner.',
+            line: 12,
+          },
+        ],
+        health: 8,
+        healthReason: 'Clear and useful, with one actionable omission.',
+        model: 'qwen-test',
+        provider: 'mock',
+        gezelName: 'Boekwachter',
+        reviewedAt: '2026-08-11T12:00:00.000Z',
+      },
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    expect(await screen.findByText('Index ready')).toBeInTheDocument();
+    expect(screen.getByText('1 issue')).toBeInTheDocument();
+    expect(screen.getByLabelText('1 indexing issue')).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'audit.md' }));
+    const toggle = await screen.findByRole('button', {
+      name: 'Show Boekwachter index pane, 1 issue in this file',
+    });
+    expect(toggle.closest('[data-testid="editor-toolbar-right"]')).not.toBeNull();
+    fireEvent.click(toggle);
+
+    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    expect(within(pane).getByText('8')).toBeInTheDocument();
+    expect(
+      within(pane).getByText('Clear and useful, with one actionable omission.'),
+    ).toBeInTheDocument();
+    expect(
+      within(pane).getByText('The conclusion does not identify an owner.'),
+    ).toBeInTheDocument();
+    expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Close Boekwachter index pane' }));
+    expect(screen.queryByRole('complementary', { name: 'Boekwachter index results' })).toBeNull();
   });
 
   it('hides optional project tabs and lets Settings turn them back on', async () => {

@@ -30,6 +30,8 @@ export interface FileTreeProps {
   onDelete?: (entry: FileEntry) => void;
   /** Optional host-defined actions, exposed through both row menus. */
   actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
+  /** Optional read-only row status rendered after the label. */
+  trailingForEntry?: (entry: FileEntry) => ReactNode;
   /** Depth at which child nodes are initially collapsed. Default 2. */
   defaultExpandedDepth?: number;
   /** Custom icon override. Receives the entry and returns a ReactNode
@@ -106,6 +108,7 @@ export function FileTree({
   onRename,
   onDelete,
   actionsForEntry,
+  trailingForEntry,
   defaultExpandedDepth = 2,
   iconFor = defaultIconFor,
   labelFor = defaultLabelFor,
@@ -124,6 +127,7 @@ export function FileTree({
           onRename={onRename}
           onDelete={onDelete}
           actionsForEntry={actionsForEntry}
+          trailingForEntry={trailingForEntry}
           defaultExpandedDepth={defaultExpandedDepth}
           iconFor={iconFor}
           labelFor={labelFor}
@@ -142,6 +146,7 @@ interface TreeItemProps {
   onRename?: (entry: FileEntry) => void;
   onDelete?: (entry: FileEntry) => void;
   actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
+  trailingForEntry?: (entry: FileEntry) => ReactNode;
   defaultExpandedDepth: number;
   iconFor: (entry: FileEntry) => ReactNode;
   labelFor: (entry: FileEntry) => string;
@@ -156,6 +161,7 @@ function TreeItem({
   onRename,
   onDelete,
   actionsForEntry,
+  trailingForEntry,
   defaultExpandedDepth,
   iconFor,
   labelFor,
@@ -169,6 +175,7 @@ function TreeItem({
   };
   const label = labelFor(entry);
   const customActions = actionsForEntry?.(entry) ?? [];
+  const trailing = trailingForEntry?.(entry);
   const hasActions = Boolean(onRename || onDelete || customActions.length > 0);
   const canExpand = node.isDirectory && node.children.length > 0;
 
@@ -221,6 +228,7 @@ function TreeItem({
       >
         {iconFor(entry)} {label}
       </button>
+      {trailing && <span className="tree-row-trailing">{trailing}</span>}
       {hasActions && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -323,6 +331,7 @@ function TreeItem({
               onRename={onRename}
               onDelete={onDelete}
               actionsForEntry={actionsForEntry}
+              trailingForEntry={trailingForEntry}
               defaultExpandedDepth={defaultExpandedDepth}
               iconFor={iconFor}
               labelFor={labelFor}

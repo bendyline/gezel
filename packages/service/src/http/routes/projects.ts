@@ -687,6 +687,37 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         drained: false,
       });
     }
+    if (body.intensity) {
+      // Job mode: start the drive (static refresh + every AI tier to drain)
+      // and return immediately — a full-bore drain can outlive any HTTP
+      // timeout. Progress flows over `index_progress` + `/index/status`.
+      const { alreadyRunning } = ctx.indexEnrichment.drive(id, {
+        intensity: body.intensity,
+        reviews: body.reviews !== false,
+      });
+      const pending = await ctx.contentIndex.countNeedingEnrichment(id);
+      const reviewCounts = await ctx.contentIndex.reviewCounts(id).catch(() => null);
+      return c.json({
+        paused: false,
+        files: 0,
+        summarized: 0,
+        embedded: 0,
+        pending,
+        areasUpdated: 0,
+        architectureUpdated: false,
+        ...(body.reviews !== false
+          ? { reviewed: 0, reviewPending: reviewCounts?.pending ?? 0 }
+          : {}),
+        drained: false,
+        started: true,
+        alreadyRunning,
+        mode: body.intensity,
+      });
+    }
+    // Legacy bounded pass — but current-files first: enriching against a
+    // stale walk misses new files, so the AI budget clock starts AFTER the
+    // awaited static refresh.
+    await ctx.workspaceIndex.refreshAndWait(id).catch(() => {});
     const maxFiles = body.maxFiles ?? 10;
     const deadline = Date.now() + (body.budgetMs ?? 45_000);
     const deps = await buildEnrichDeps(ctx.store, ctx.chat, { boekwachter });

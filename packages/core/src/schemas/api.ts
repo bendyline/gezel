@@ -5388,9 +5388,15 @@ export const WorkspaceIndexStatusSchema = z.object({
 export type WorkspaceIndexStatus = z.infer<typeof WorkspaceIndexStatusSchema>;
 
 /**
- * On-demand enrichment drive ("study now"): one bounded pass per request —
- * the caller loops until `drained`. Complements the idle-gated background
- * loop; still respects the boekwachter task's pause.
+ * On-demand enrichment drive ("study now"). Two shapes:
+ *   - legacy (no `intensity`): one bounded synchronous pass per request — the
+ *     caller loops until `drained`.
+ *   - `intensity` set: starts a server-side drive job (static refresh first,
+ *     then every AI tier to drain) and returns immediately with
+ *     `started: true`; progress flows over `index_progress` events and
+ *     `/index/status` polling.
+ * Both ensure the static index is current before AI work and respect the
+ * boekwachter task's pause.
  */
 export const DriveIndexEnrichmentRequestSchema = z.object({
   maxFiles: z.number().int().positive().max(25).optional(),
@@ -5399,6 +5405,13 @@ export const DriveIndexEnrichmentRequestSchema = z.object({
   areas: z.boolean().optional(),
   /** Run the review pass (cliffs notes + issues + health) once drained. */
   reviews: z.boolean().optional(),
+  /**
+   * Start a drive JOB instead of one bounded pass. `background` = start now
+   * but stay polite (ambient one-shots the local engine holds behind live
+   * chat, small batches). `full` = occupy the engine (non-ambient, night-size
+   * batches, run to drain).
+   */
+  intensity: z.enum(['background', 'full']).optional(),
 });
 export type DriveIndexEnrichmentRequest = z.infer<typeof DriveIndexEnrichmentRequestSchema>;
 
@@ -5416,6 +5429,10 @@ export const DriveIndexEnrichmentResponseSchema = z.object({
   reviewPending: z.number().int().nonnegative().optional(),
   /** True when the file tier had no work left at the end of this pass. */
   drained: z.boolean(),
+  /** Job mode only: a drive was started (or was already running). */
+  started: z.boolean().optional(),
+  alreadyRunning: z.boolean().optional(),
+  mode: z.enum(['background', 'full']).optional(),
 });
 export type DriveIndexEnrichmentResponse = z.infer<typeof DriveIndexEnrichmentResponseSchema>;
 

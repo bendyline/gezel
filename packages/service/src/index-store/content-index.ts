@@ -89,6 +89,9 @@ import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from 
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 
+/** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
+const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
+
 // file-context caps — keep worst-case responses small and bounded.
 const CTX_MAX_SYMBOLS = 200;
 const CTX_MAX_IMPORTED_BY_PER_SYMBOL = 25;
@@ -1234,8 +1237,18 @@ export class ContentIndex {
       const fileRec = opened.index.getFile(relPath);
       if (!fileRec?.hash) return { path: relPath, found: false };
       const row = opened.index.getFileReview(fileRec.hash);
-      if (!row) return { path: relPath, found: false, pending: true };
-      return { path: relPath, found: true, review: toReviewWire(row) };
+      if (row) return { path: relPath, found: true, review: toReviewWire(row) };
+      // `pending` is a promise ("the boekwachter studies files when idle") —
+      // only make it for files a rubric will actually reach. Everything else
+      // (data/other kinds, images, trivial blobs, reviews disabled) reports
+      // eligible:false so surfaces stop implying a review that never comes.
+      const rubrics = await resolveRubrics(this.store);
+      const eligible =
+        !fileRec.trivial &&
+        REVIEWABLE_MODALITIES.has(fileRec.modality ?? '') &&
+        rubrics.has(fileRec.kind ?? '');
+      if (!eligible) return { path: relPath, found: false, eligible: false };
+      return { path: relPath, found: false, pending: true, eligible: true };
     } finally {
       opened.index.close();
     }

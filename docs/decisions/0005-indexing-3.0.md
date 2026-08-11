@@ -105,6 +105,29 @@ An absolute ~100MB ceiling refuses pathological blobs. Cost bound:
   pending→0 drain transition per content wave — never per file (the ~150-kind
   flat history log and the digest input would drown).
 
+### On-demand drives and the night-shift catch-up
+
+"Study now" is a job, not a bounded pass: `POST /:id/index/enrich` with
+`intensity` starts a server-side drive — awaited static refresh first
+(`WorkspaceIndexManager.refreshAndWait`), then every AI tier (shadows →
+summaries → areas → reviews) to drain — and returns immediately; progress
+flows over `index_progress` events. Two intensities: `background` starts now
+but stays polite (ambient one-shots the local engine holds behind live chat,
+day batches); `full` occupies the engine (non-ambient, night batches, no
+chat-yield — the user explicitly asked for the machine). Both honor the
+indexing job's pause switch between batches; the background loop stands down
+while a drive runs (one bulk consumer per engine). The legacy no-`intensity`
+call keeps its loop-until-`drained` contract but now awaits the static
+refresh before starting its AI budget clock.
+
+Night-shift activation applies the same rule fleet-wide: `catchUpAll()`
+sweeps every indexing-enabled project at full intensity, and the TaskRunner
+holds night-shift handoffs (`heldFor: 'night-shift'`) until the sweep
+finishes — batch work starts against a current index instead of racing the
+indexer for the engine. The catch-up flag is raised synchronously so the
+kick-then-wake activation sequence cannot race the first runner tick.
+Interactive work is never held.
+
 ## Regression surface
 
 - `content-docs.test.ts` / `content-docs-ooxml.test.ts` prove real conversions

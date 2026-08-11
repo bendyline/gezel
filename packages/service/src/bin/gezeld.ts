@@ -2,8 +2,10 @@ import { existsSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startService } from '../service.js';
+import { applyAutostartRuntimeArguments } from './runtime-args.js';
 
 async function main() {
+  applyAutostartRuntimeArguments(process.argv.slice(2));
   const portArg = process.env.GEZEL_PORT ? Number.parseInt(process.env.GEZEL_PORT, 10) : undefined;
   // Normalize because the env var may carry doubled separators when set by
   // installers (NSIS' nssm wiring on Windows historically wrote

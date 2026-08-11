@@ -77,3 +77,17 @@ describe('FileTree folder expansion', () => {
     expect(screen.getByRole('button', { name: 'Collapse drafts' })).toBeInTheDocument();
   });
 });
+
+describe('FileTree row status', () => {
+  it('renders a host-provided read-only trailing status', () => {
+    render(
+      <FileTree
+        entries={[NOTE]}
+        onSelect={vi.fn()}
+        trailingForEntry={(entry) => <span aria-label={`Status for ${entry.name}`}>2</span>}
+      />,
+    );
+
+    expect(screen.getByLabelText('Status for notes.md')).toHaveTextContent('2');
+  });
+});

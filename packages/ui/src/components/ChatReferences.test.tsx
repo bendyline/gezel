@@ -22,6 +22,30 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
 
+// The global-HTML preview test exercises the inert source-code branch, not
+// Squisq itself. Mounting the real EditorShell starts Monaco's uncancellable
+// dynamic import, which can outlive this jsdom environment and race teardown.
+vi.mock('@bendyline/squisq-editor-react', () => ({
+  EditorShell: ({
+    initialMarkdown,
+    fileName,
+    readOnly,
+  }: {
+    initialMarkdown: string;
+    fileName?: string;
+    readOnly?: boolean;
+  }) => (
+    <pre
+      data-testid="reference-code-preview"
+      data-file={fileName}
+      data-readonly={String(Boolean(readOnly))}
+    >
+      {initialMarkdown}
+    </pre>
+  ),
+}));
+vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
+
 // Capture the props: `data-section` and `data-stageable` are what stop the
 // rail silently regaining commands/craftbooks or the terminal-staging hook.
 vi.mock('./CommandsPanel.js', () => ({
@@ -439,6 +463,12 @@ describe('ChatReferences reference picker', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open global HTML' }));
     await waitFor(() => expect(container.querySelector('.chat-rail-viewer-code')).not.toBeNull());
+    const source = screen.getByTestId('reference-code-preview');
+    expect(source).toHaveAttribute('data-file', 'remote.html');
+    expect(source).toHaveAttribute('data-readonly', 'true');
+    expect(source).toHaveTextContent(
+      '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
+    );
     expect(container.querySelector('iframe')).toBeNull();
   });
 

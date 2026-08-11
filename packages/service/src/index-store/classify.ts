@@ -60,6 +60,16 @@ const CODE_LANGS: Record<string, string> = {
   zsh: 'bash',
   lua: 'lua',
   sql: 'sql',
+  // Web-source formats. Without these a project's index.html fell through to
+  // kind 'other' — no review rubric, no security scan, excluded from every
+  // coverage denominator — while the status popover read "complete". Symbol
+  // extraction still gates on GRAMMAR_FILE separately, so a lang here without
+  // a wired grammar degrades to zero symbols, not an error.
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  vue: 'vue',
+  svelte: 'svelte',
 };
 
 const MARKDOWN_EXTS = new Set(['md', 'mdx', 'markdown']);

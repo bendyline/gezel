@@ -305,6 +305,21 @@ export class WorkspaceIndexManager {
   }
 
   /**
+   * Like {@link refresh}, but awaits the whole scan (structural pass + the
+   * content-index refresh it drives). For callers that sequence work on a
+   * CURRENT index — the on-demand enrichment drive and the night-shift
+   * catch-up must not summarize/review against yesterday's file list.
+   */
+  async refreshAndWait(projectId: string): Promise<WorkspaceIndexStatus> {
+    const current = await this.status(projectId);
+    if (current.state === 'disabled') return current;
+    await this.indexOne(projectId).catch((err) => {
+      log.warn(`[index] awaited refresh failed for ${projectId}: ${describe(err)}`);
+    });
+    return this.status(projectId);
+  }
+
+  /**
    * Periodic tick: pick the highest-priority stale project and index
    * exactly one. One project per tick keeps the loop bounded; with a
    * 60s cadence we cover an MRU of 5 in 5 minutes.

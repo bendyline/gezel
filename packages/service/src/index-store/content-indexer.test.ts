@@ -35,6 +35,17 @@ describe('classifyFile', () => {
     expect(classifyFile('README.md', 100)).toMatchObject({ kind: 'markdown', modality: 'text' });
     expect(classifyFile('deck.pptx', 100)).toMatchObject({ modality: 'doc', trivial: false });
     expect(classifyFile('photo.jpg', 100)).toMatchObject({ modality: 'image', trivial: false });
+    // Web sources are code: without this a project's index.html fell to kind
+    // 'other' — never reviewed, never security-scanned, excluded from every
+    // coverage denominator while the status read "complete".
+    expect(classifyFile('index.html', 100)).toMatchObject({
+      lang: 'html',
+      kind: 'code',
+      modality: 'code',
+      trivial: false,
+    });
+    expect(classifyFile('styles.css', 100)).toMatchObject({ lang: 'css', kind: 'code' });
+    expect(classifyFile('App.vue', 100)).toMatchObject({ lang: 'vue', kind: 'code' });
     expect(classifyFile('pnpm-lock.yaml', 100).trivial).toBe(true);
     expect(classifyFile('app.min.js', 100).trivial).toBe(true);
     expect(classifyFile('huge.ts', 9_999_999).trivial).toBe(true);

@@ -75,6 +75,29 @@ export interface IndexEnrichmentManagerOptions {
   history?: {
     log: (event: Omit<HistoryEvent, 'id' | 'at'> & { at?: string; id?: string }) => Promise<void>;
   };
+  /**
+   * Awaitable structural refresh (WorkspaceIndexManager.refreshAndWait) run
+   * at the head of every drive so the AI tiers see current files. When
+   * absent (tests), the drive falls back to `contentIndex.refresh` directly.
+   */
+  refreshStatic?: (projectId: string) => Promise<unknown>;
+}
+
+/**
+ * On-demand drive intensity:
+ *   - `background` — start now (skip the idle wait) but stay polite: ambient
+ *     one-shots that the local engine holds behind live chat, day-size
+ *     batches.
+ *   - `full` — occupy the engine: non-ambient one-shots that compete like any
+ *     interactive work, night-size batches, run to drain without yielding.
+ * Both honor the indexing job's pause switch between batches.
+ */
+export type DriveIntensity = 'background' | 'full';
+
+export interface DriveOptions {
+  intensity: DriveIntensity;
+  /** Run the review tier after summaries drain (default true). */
+  reviews?: boolean;
 }
 
 export class IndexEnrichmentManager {
@@ -91,6 +114,11 @@ export class IndexEnrichmentManager {
   private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
   private readonly shadowProducers: AiShadowProducers | undefined;
   private readonly history: IndexEnrichmentManagerOptions['history'];
+  private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
+  /** In-flight on-demand drives, one per project (joiners get the same run). */
+  private readonly drives = new Map<string, Promise<void>>();
+  /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
+  private catchUpRuns = 0;
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -113,6 +141,7 @@ export class IndexEnrichmentManager {
       ((projectId) => resolveProjectBoekwachter(this.store, projectId).catch(() => null));
     this.shadowProducers = opts.shadowProducers;
     this.history = opts.history;
+    this.refreshStatic = opts.refreshStatic;
   }
 
   start(): void {
@@ -170,9 +199,171 @@ export class IndexEnrichmentManager {
       .catch(() => {});
   }
 
+  /**
+   * True while a night-shift catch-up sweep runs — the TaskRunner holds
+   * night-shift task dispatch on it so batch work starts against a current
+   * index, per the explicit "index first, then tasks" activation contract.
+   */
+  isCatchUpActive(): boolean {
+    return this.catchUpRuns > 0;
+  }
+
+  /** True while an on-demand drive is running (optionally for one project). */
+  isDriving(projectId?: string): boolean {
+    return projectId ? this.drives.has(projectId) : this.drives.size > 0;
+  }
+
+  /**
+   * Start an on-demand drive for one project: static refresh first, then the
+   * AI tiers (shadows → summaries → areas → reviews) to drain. Returns
+   * immediately; progress flows over the usual `index_progress` events and
+   * `/index/status` polling. One drive per project — a second request joins
+   * the running one.
+   */
+  drive(projectId: string, opts: DriveOptions): { started: boolean; alreadyRunning: boolean } {
+    if (this.drives.has(projectId)) return { started: false, alreadyRunning: true };
+    const run = this.runDrive(projectId, opts)
+      .catch((err) => log.warn(`[enrich] drive ${projectId} failed: ${describe(err)}`))
+      .finally(() => this.drives.delete(projectId));
+    this.drives.set(projectId, run);
+    return { started: true, alreadyRunning: false };
+  }
+
+  /**
+   * Bring every indexing-enabled project's static AND AI index up to date,
+   * sequentially at full intensity — the night-shift activation sweep. The
+   * catch-up flag is raised synchronously so a caller that kicks this (not
+   * awaited) and then wakes the TaskRunner still gets the dispatch hold.
+   */
+  async catchUpAll(): Promise<void> {
+    this.catchUpRuns++;
+    try {
+      const projects = await this.store.listProjects().catch(() => []);
+      for (const p of projects) {
+        if (p.indexingEnabled === false) continue;
+        const existing = this.drives.get(p.id);
+        if (existing) {
+          await existing.catch(() => {});
+          continue;
+        }
+        const run = this.runDrive(p.id, { intensity: 'full' }).finally(() =>
+          this.drives.delete(p.id),
+        );
+        this.drives.set(p.id, run);
+        await run.catch((err) => log.warn(`[enrich] catch-up ${p.id} failed: ${describe(err)}`));
+      }
+    } finally {
+      this.catchUpRuns--;
+    }
+  }
+
+  private async runDrive(projectId: string, opts: DriveOptions): Promise<void> {
+    const full = opts.intensity === 'full';
+    const reviews = opts.reviews !== false;
+    if (await this.isPaused()) return;
+    if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return;
+    const label = (state: 'started' | 'ended', detail: string) =>
+      this.events?.publishGlobalEvent({
+        type: 'index_progress',
+        phase: 'scan',
+        state,
+        projectId,
+        detail,
+      });
+    label('started', full ? 'Full index catch-up' : 'Index catch-up');
+    try {
+      // (a) static first — every AI tier below must see current files. The
+      // structural refresh drives ContentIndex.refresh itself; the direct
+      // call is the test-seam fallback.
+      if (this.refreshStatic) await this.refreshStatic(projectId).catch(() => {});
+      else await this.contentIndex.refresh(projectId).catch(() => {});
+
+      const boekwachter = await this.resolveBoekwachter(projectId);
+      if (!boekwachter) return; // static is current; AI needs the roster opt-in
+      const deps = await buildEnrichDeps(this.store, this.chat, {
+        nightShift: this.isNightShiftActive(),
+        // Full-bore competes like interactive work; background stays ambient
+        // so the local engine holds it behind live chat.
+        ambient: !full,
+        boekwachter,
+      });
+      const gezel = { gezelId: boekwachter.id, gezelName: boekwachter.name };
+      const batch = full ? NIGHT_BATCH : BATCH;
+      const rubrics: Map<string, ResolvedRubric> =
+        deps.model && reviews
+          ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
+          : new Map<string, ResolvedRubric>();
+
+      if (this.shadowProducers) {
+        for (;;) {
+          if (await this.isPaused()) return;
+          const sh = await this.contentIndex
+            .aiShadows(
+              projectId,
+              {
+                ...this.shadowProducers,
+                ...(deps.provenance ? { provenance: deps.provenance } : {}),
+              },
+              batch,
+            )
+            .catch(() => null);
+          if (!sh || sh.files === 0) break;
+          this.events?.publishGlobalEvent({
+            type: 'index_progress',
+            phase: 'shadow',
+            state: 'progress',
+            projectId,
+            detail: `${sh.produced} media files described`,
+            ...gezel,
+          });
+        }
+      }
+      for (;;) {
+        if (await this.isPaused()) return;
+        const r = await this.contentIndex.enrich(projectId, deps, batch).catch(() => null);
+        if (!r || r.files === 0) break;
+        this.events?.publishGlobalEvent({
+          type: 'index_progress',
+          phase: 'enrich',
+          state: 'progress',
+          projectId,
+          detail: `${r.files} files enriched`,
+          ...gezel,
+        });
+      }
+      await this.contentIndex.enrichAreas(projectId, deps).catch(() => null);
+      if (rubrics.size > 0) {
+        let stored = 0;
+        for (;;) {
+          if (await this.isPaused()) return;
+          const r = await this.contentIndex
+            .review(projectId, deps, batch, rubrics)
+            .catch(() => null);
+          stored += r?.reviewed ?? 0;
+          if (!r || r.files === 0) break;
+          this.events?.publishGlobalEvent({
+            type: 'index_progress',
+            phase: 'review',
+            state: 'progress',
+            projectId,
+            detail: `${r.files} files reviewed`,
+            ...gezel,
+          });
+        }
+        await this.logReviewDrain(projectId, boekwachter, deps, stored);
+      }
+      log.info(`[enrich] ${projectId}: ${opts.intensity} drive complete`);
+    } finally {
+      label('ended', full ? 'Full index catch-up finished' : 'Index catch-up finished');
+    }
+  }
+
   /** Exposed for tests: run one batch ignoring the timers (still idle-gated). */
   async tick(): Promise<void> {
     if (this.running) return;
+    // An on-demand drive is already the bulk consumer of the engine — the
+    // background loop stands down until it finishes.
+    if (this.drives.size > 0) return;
     if (await this.isPaused()) return;
     if (!this.isIdle()) return;
     this.running = true;

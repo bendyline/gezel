@@ -88,11 +88,11 @@ const ctx = vi.hoisted(() => ({
 
 vi.mock('./extract-pnpm.js', () => ({
   defaultPnpmBundleDir: () => '/fake/pnpm-bundle',
-  installPnpmIfNeeded: vi.fn().mockResolvedValue({ entryPath: null }),
+  installPnpmIfNeeded: vi.fn().mockResolvedValue({ entryPath: null, verified: false }),
 }));
 vi.mock('./extract-node.js', () => ({
   defaultNodeBundleDir: () => '/fake/node-bundle',
-  installNodeIfNeeded: vi.fn().mockResolvedValue({ binaryPath: null }),
+  installNodeIfNeeded: vi.fn().mockResolvedValue({ binaryPath: null, verified: false }),
 }));
 vi.mock('./extract-bundle.js', () => ({
   // `defaultBundlePaths` returns paths to a non-existent tarball + meta so:
@@ -210,7 +210,9 @@ vi.mock('@bendyline/gezel-client/node', () => ({
   isProcessAlive: vi.fn(() => ctx.processAlive),
   resolveDaemonEntry: () => '/fake/daemon-entry.js',
   stopProcessByPid: vi.fn().mockResolvedValue(true),
-  stopOwnedDaemon: vi.fn().mockResolvedValue(undefined),
+  stopOwnedDaemon: vi.fn(async (child?: ChildProcess) => {
+    if (child && child.exitCode == null && child.signalCode == null) child.kill('SIGTERM');
+  }),
   systemSharedAssetsDir: () => '/mock/shared-assets',
   electronNativeBinCandidates: () => ctx.installedNativeCandidates,
 }));
@@ -239,7 +241,10 @@ const {
   stopOwnedDaemon,
   stopProcessByPid: stopDaemonProcessByPid,
 } = await import('@bendyline/gezel-client/node');
-const { readBundleMeta } = await import('./extract-bundle.js');
+const { extractBundleIfNeeded, readBundleMeta } = await import('./extract-bundle.js');
+const { installNodeIfNeeded } = await import('./extract-node.js');
+const { installPnpmIfNeeded } = await import('./extract-pnpm.js');
+const { startService } = await import('@bendyline/gezel-service');
 
 // Env keys the supervisor's prelude mutates. We snapshot at the start
 // of each test and restore at the end so test order doesn't leak.
@@ -351,6 +356,52 @@ function baseOpts(overrides: Partial<Parameters<typeof connectOrStart>[0]> = {})
     ...overrides,
   };
 }
+
+describe('packaged runtime prelude', () => {
+  it('clears inherited runtime overrides when the bundles are not verified', async () => {
+    process.env.GEZEL_NODE_PATH = '/untrusted/global/node';
+    process.env.GEZEL_PNPM_PATH = '/untrusted/global/pnpm';
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(process.env.GEZEL_NODE_PATH).toBeUndefined();
+    expect(process.env.GEZEL_PNPM_PATH).toBeUndefined();
+    await svc.shutdown();
+  });
+
+  it('exposes only manifest-verified bundled script runtimes in packaged mode', async () => {
+    const bundledNode = join(testHome, 'bin', 'node');
+    const bundledPnpm = join(testHome, 'bin', 'pnpm-runtime', 'bin', 'pnpm.mjs');
+    vi.mocked(installNodeIfNeeded).mockResolvedValueOnce({
+      binaryPath: bundledNode,
+      version: '24.18.0',
+      action: 'up-to-date',
+      verified: true,
+    });
+    vi.mocked(installPnpmIfNeeded).mockResolvedValueOnce({
+      entryPath: bundledPnpm,
+      version: '11.15.1',
+      action: 'up-to-date',
+      verified: true,
+    });
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(process.env.GEZEL_NODE_PATH).toBe(bundledNode);
+    expect(process.env.GEZEL_PNPM_PATH).toBe(bundledPnpm);
+    await svc.shutdown();
+  });
+});
 
 // ── Branch 1: remote ────────────────────────────────────────────────
 
@@ -1268,6 +1319,200 @@ describe('mode-aware restart', () => {
 
     expect(discoverOrSpawn).toHaveBeenCalledOnce();
     expect(svc.baseUrl).toBe('http://127.0.0.1:2345');
+    await svc.shutdown();
+  });
+
+  it('keeps the old packaged daemon live when bundle preparation fails before shutdown', async () => {
+    const oldChild = makeFakeChild();
+    const svc = new SupervisedService(
+      'local-spawn-packaged',
+      'https://127.0.0.1:1234',
+      'old-token',
+      'OLD-CERT',
+      baseOpts({ packaged: true }),
+    );
+    svc.attachSpawned(oldChild);
+    vi.mocked(extractBundleIfNeeded).mockRejectedValueOnce(new Error('atomic extraction failed'));
+
+    await expect(svc.restart('apply folder move')).rejects.toThrow('atomic extraction failed');
+
+    expect(svc.state).toBe('ready');
+    expect(svc.token).toBe('old-token');
+    expect(oldChild.kill).not.toHaveBeenCalled();
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
+  it('retains a spawned daemon whose shutdown rejects but whose old endpoint is still healthy', async () => {
+    const oldChild = makeFakeChild();
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:1234',
+      'old-token',
+      'OLD-CERT',
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(oldChild);
+    vi.mocked(stopOwnedDaemon).mockRejectedValueOnce(new Error('shutdown channel failed'));
+
+    await expect(svc.restart('stop failure injection')).rejects.toThrow('shutdown channel failed');
+
+    expect(svc.state).toBe('ready');
+    expect(svc.token).toBe('old-token');
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    expect(startService).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
+  it('recovers an embedded restart through a second verified embedded start', async () => {
+    const oldStop = vi.fn().mockResolvedValue(undefined);
+    const svc = new SupervisedService(
+      'embedded',
+      'https://127.0.0.1:1234',
+      'old-token',
+      'OLD-CERT',
+      baseOpts({ forceEmbedded: true }),
+    );
+    svc.attachEmbedded(oldStop);
+    vi.mocked(startService).mockRejectedValueOnce(new Error('first embedded bind failed'));
+
+    await svc.restart('embedded failure injection');
+
+    expect(oldStop).toHaveBeenCalledOnce();
+    expect(startService).toHaveBeenCalledTimes(2);
+    expect(svc.state).toBe('ready');
+    expect(svc.mode).toBe('embedded');
+    expect(svc.token).toBe('embedded-token');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'restart-failed',
+      sourceMode: 'embedded',
+    });
+    await svc.shutdown();
+  });
+
+  it('falls back to verified embedded mode when spawning fails after the old daemon stops', async () => {
+    const oldChild = makeFakeChild();
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:1234',
+      'old-token',
+      'OLD-CERT',
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(oldChild);
+    vi.mocked(discoverOrSpawn).mockRejectedValueOnce(new Error('spawn failed after stop'));
+    const restarted = vi.fn();
+    svc.onRestart(restarted);
+
+    await svc.restart('apply folder move');
+
+    expect(oldChild.kill).toHaveBeenCalled();
+    expect(svc.state).toBe('ready');
+    expect(svc.mode).toBe('embedded');
+    expect(svc.token).toBe('embedded-token');
+    expect(svc.cert).toBe('EMBEDDED-CERT-PEM');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'restart-failed',
+      sourceMode: 'local-spawn-dev',
+    });
+    expect(restarted).toHaveBeenCalledOnce();
+    await svc.shutdown();
+  });
+
+  it('falls back when the spawned replacement exhausts its health-wait budget', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:1234',
+      'old-token',
+      null,
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(makeFakeChild());
+    vi.mocked(discoverOrSpawn).mockRejectedValueOnce(
+      new Error('Timed out after 5000ms waiting for gezeld to start'),
+    );
+
+    await svc.restart('health-wait injection');
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.state).toBe('ready');
+    expect(svc.fallbackReason?.message).toContain('Timed out after 5000ms');
+    await svc.shutdown();
+  });
+
+  it('rejects stale rotated credentials before publishing the replacement', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:1234',
+      'old-token',
+      null,
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(makeFakeChild());
+    const staleCandidate = makeFakeChild();
+    vi.mocked(discoverOrSpawn).mockResolvedValueOnce({
+      child: staleCandidate,
+      baseUrl: 'https://127.0.0.1:2345',
+      token: 'stale-rotated-token',
+      cert: 'ROTATED-CERT',
+      pid: 2345,
+      outcome: 'spawned',
+      client: {} as never,
+    });
+    ctx.health = (_signal, candidate) =>
+      candidate?.token === 'stale-rotated-token'
+        ? Promise.reject(new Error('401 invalid rotated token'))
+        : Promise.resolve({ ok: true, version: '1.0.0' });
+
+    await svc.restart('token-rotation injection');
+
+    expect(staleCandidate.kill).toHaveBeenCalled();
+    expect(svc.mode).toBe('embedded');
+    expect(svc.state).toBe('ready');
+    expect(svc.token).toBe('embedded-token');
+    expect(svc.token).not.toBe('stale-rotated-token');
+    await svc.shutdown();
+  });
+
+  it('enters a tokenless fatal state when replacement and embedded recovery both fail', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:1234',
+      'old-token',
+      'OLD-CERT',
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(makeFakeChild());
+    vi.mocked(discoverOrSpawn).mockRejectedValueOnce(new Error('replacement spawn failed'));
+    vi.mocked(startService).mockRejectedValueOnce(new Error('embedded bind failed'));
+    const fatal = vi.fn();
+    svc.onFatal(fatal);
+
+    await expect(svc.restart('fatal injection')).rejects.toThrow(/both failed/i);
+
+    expect(svc.state).toBe('failed');
+    expect(svc.token).toBe('');
+    expect(svc.cert).toBeNull();
+    expect(svc.failure).toMatchObject({
+      code: 'restart-unrecoverable',
+      sourceMode: 'local-spawn-dev',
+    });
+    expect(fatal).toHaveBeenCalledOnce();
+
+    const recoveredChild = makeFakeChild();
+    vi.mocked(discoverOrSpawn).mockResolvedValueOnce({
+      child: recoveredChild,
+      baseUrl: 'https://127.0.0.1:3456',
+      token: 'retry-token',
+      cert: 'RETRY-CERT',
+      pid: 3456,
+      outcome: 'spawned',
+      client: {} as never,
+    });
+    await svc.restart('retry from persistent error page');
+    expect(svc.state).toBe('ready');
+    expect(svc.token).toBe('retry-token');
+    expect(svc.failure).toBeNull();
     await svc.shutdown();
   });
 });

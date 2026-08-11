@@ -412,6 +412,19 @@ describe('FileMapView code context', () => {
     expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
   });
 
+  it('says a rubric-less file type is never reviewed, without the idle promise', async () => {
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'src/a.ts',
+      found: false,
+      eligible: false,
+    });
+    await openBlock('src/a.ts');
+
+    expect(await screen.findByText('This file type isn’t reviewed.')).toBeInTheDocument();
+    expect(screen.queryByText(/Not reviewed yet/)).toBeNull();
+    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+  });
+
   it('treats a failed review fetch as no review at all', async () => {
     vi.mocked(api.toolFileReview).mockRejectedValue(new Error('index offline'));
     await openBlock('src/a.ts');
