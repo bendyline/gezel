@@ -1,8 +1,16 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { HandboekArea } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
-import { findHandboekContent, loadCuratedArticles, parseCuratedArticle } from './content.js';
+import {
+  type CuratedArticle,
+  WHATS_NEW_INDEX_ID,
+  findHandboekContent,
+  listReleaseNotes,
+  loadCuratedArticles,
+  parseCuratedArticle,
+} from './content.js';
 
 describe('parseCuratedArticle', () => {
   it('reads frontmatter fields and keeps the body', () => {
@@ -90,5 +98,28 @@ describe('content tree resolution', () => {
     const articles = loadCuratedArticles(found!);
     expect(articles.some((a) => a.id === 'welcome')).toBe(true);
     expect(articles.some((a) => a.id === 'role/meester')).toBe(true);
+  });
+});
+
+describe('listReleaseNotes', () => {
+  const article = (id: string, area: HandboekArea, order: number): CuratedArticle => ({
+    id,
+    area,
+    title: id,
+    order,
+    body: 'x',
+    siteVisible: true,
+  });
+
+  it('drops the section index and orders newest first', () => {
+    // Release order is the negated calendar line, so ascending order is
+    // reverse chronological — the convention the whole section relies on.
+    const notes = listReleaseNotes([
+      article('technical-thing', 'technical', 1),
+      article('whats-new/1.26219', 'whats-new', -26219),
+      article(WHATS_NEW_INDEX_ID, 'whats-new', -999999),
+      article('whats-new/1.26223', 'whats-new', -26223),
+    ]);
+    expect(notes.map((n) => n.id)).toEqual(['whats-new/1.26223', 'whats-new/1.26219']);
   });
 });

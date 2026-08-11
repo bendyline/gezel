@@ -1,5 +1,6 @@
 import { poppetjeFromSeed, seedFromKey } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import type { ReleaseNoteEntry } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo } from './device.js';
 import { siteDeviceInfo } from './device.js';
 import { type HandboekCatalog, expandMacros, parseAttrs } from './macros.js';
@@ -81,8 +82,17 @@ const stubCatalog: HandboekCatalog = {
   },
 };
 
-function ctx(mode: 'app' | 'site' | 'agent', device: HandboekDeviceInfo = stubDevice([])) {
-  return { mode, catalog: stubCatalog, device } as const;
+const stubReleases: ReleaseNoteEntry[] = [
+  { id: 'whats-new/1.26223', title: '1.26223 — 11 August 2026', summary: 'Newer things.' },
+  { id: 'whats-new/1.26219', title: '1.26219 — 7 August 2026' },
+];
+
+function ctx(
+  mode: 'app' | 'site' | 'agent',
+  device: HandboekDeviceInfo = stubDevice([]),
+  releases: ReleaseNoteEntry[] = stubReleases,
+) {
+  return { mode, catalog: stubCatalog, device, releases } as const;
 }
 
 describe('parseAttrs', () => {
@@ -205,9 +215,7 @@ describe('data macros', () => {
 
   it('role-tools scope=device explains itself with no local models', async () => {
     const { markdown } = await expandMacros('::handboek-role-tools{role=developer scope=device}', {
-      mode: 'app',
-      catalog: stubCatalog,
-      device: { ...stubDevice([]), listInstalledModels: async () => [] },
+      ...ctx('app', { ...stubDevice([]), listInstalledModels: async () => [] }),
     });
     expect(markdown).toContain('No local models are installed');
   });
@@ -272,6 +280,39 @@ describe('data macros', () => {
   });
 });
 
+describe('whats-new-list macro', () => {
+  it('lists releases newest first, linking by article id', async () => {
+    const { markdown } = await expandMacros('::handboek-whats-new-list', { ...ctx('app') });
+    expect(markdown).toBe(
+      [
+        '- **[1.26223 — 11 August 2026](whats-new/1.26223)** — Newer things.',
+        '- **[1.26219 — 7 August 2026](whats-new/1.26219)**',
+      ].join('\n'),
+    );
+  });
+
+  it('renders the same on the site and for agents — a release history has no install facts', async () => {
+    const app = await expandMacros('::handboek-whats-new-list', { ...ctx('app') });
+    for (const mode of ['site', 'agent'] as const) {
+      const other = await expandMacros('::handboek-whats-new-list', { ...ctx(mode) });
+      expect(other.markdown, mode).toBe(app.markdown);
+    }
+  });
+
+  it('caps the inline list at the limit attribute', async () => {
+    const { markdown } = await expandMacros('::handboek-whats-new-list{limit=1}', { ...ctx('app') });
+    expect(markdown).toContain('1.26223');
+    expect(markdown).not.toContain('1.26219');
+  });
+
+  it('says so rather than rendering an empty list', async () => {
+    const { markdown } = await expandMacros('::handboek-whats-new-list', {
+      ...ctx('app', undefined, []),
+    });
+    expect(markdown).toBe('No releases have been written up yet.');
+  });
+});
+
 describe('expansion mechanics', () => {
   it('leaves unknown macros in place for the lint test to catch', async () => {
     const { markdown } = await expandMacros('::handboek-does-not-exist{x=1}', { ...ctx('app') });
@@ -292,9 +333,7 @@ describe('expansion mechanics', () => {
       },
     };
     const { markdown } = await expandMacros('a\n::handboek-gezel-roster\nb', {
-      mode: 'app',
-      catalog: stubCatalog,
-      device: throwingDevice,
+      ...ctx('app', throwingDevice),
     });
     expect(markdown).toBe('a b');
   });

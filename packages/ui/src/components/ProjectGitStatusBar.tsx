@@ -6,7 +6,7 @@ import type {
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { DropdownChevron, Popover, Select, Tooltip } from '../primitives/index.js';
+import { DropdownChevron, Popover, Select } from '../primitives/index.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 
@@ -288,6 +288,9 @@ export function ProjectGitStatusBar({
   const [newBranchDraft, setNewBranchDraft] = useState('');
   const [busy, setBusy] = useState<string>('');
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [indexPanelOpen, setIndexPanelOpen] = useState(false);
+  const [indexRefreshBusy, setIndexRefreshBusy] = useState(false);
+  const [indexRefreshError, setIndexRefreshError] = useState<string | null>(null);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   // Effective per-project writability — mirrors `projectWorkspaceWritable`
   // in core: explicit flag wins, else internal workspaces are writable and
@@ -333,8 +336,17 @@ export function ProjectGitStatusBar({
     return () => window.removeEventListener(GIT_CHANGED_EVENT, onChanged);
   }, [projectId, refresh]);
 
-  const onClickIndexDot = useCallback(async () => {
-    if (indexStatus?.state === 'disabled') return;
+  const onUpdateIndex = useCallback(async () => {
+    if (
+      indexRefreshBusy ||
+      indexStatus === null ||
+      indexStatus.state === 'disabled' ||
+      indexStatus.state === 'indexing'
+    ) {
+      return;
+    }
+    setIndexRefreshBusy(true);
+    setIndexRefreshError(null);
     try {
       await api.refreshProjectIndex(projectId);
       // Optimistic: flip the chip to "indexing" until the next poll
@@ -346,9 +358,11 @@ export function ProjectGitStatusBar({
       // Quick re-poll so the chip updates without waiting 30s.
       window.setTimeout(() => void refreshIndex(), 800);
     } catch {
-      /* swallow */
+      setIndexRefreshError('Couldn’t start the index update. Try again.');
+    } finally {
+      setIndexRefreshBusy(false);
     }
-  }, [indexStatus?.state, projectId, refreshIndex]);
+  }, [indexRefreshBusy, indexStatus, projectId, refreshIndex]);
 
   // Outside-click dismisses the branch dropdown.
   useEffect(() => {
@@ -474,17 +488,12 @@ export function ProjectGitStatusBar({
                   ? 'AI indexing is pending'
                   : `AI indexing ${aiCoverage}% complete`
                 : 'Workspace index is ready';
-  const indexTooltip = `${indexHeadline}. ${
-    indexState === 'disabled'
-      ? 'Turn it on in Project Settings.'
-      : indexState === 'indexing'
-        ? 'Scan in progress.'
-        : indexState === 'never' || indexState === 'stale'
-          ? 'Click to scan now.'
-          : aiScanPending
-            ? 'AI indexing continues while the app is idle.'
-            : 'Click to rescan.'
-  }`;
+  const indexTriggerLabel = `Indexing status: ${indexHeadline}`;
+  const indexUpdateDisabled =
+    indexStatus === null ||
+    indexState === 'disabled' ||
+    indexState === 'indexing' ||
+    indexRefreshBusy;
 
   const chipPhrase = status
     ? statusChipPhrase({
@@ -600,168 +609,192 @@ export function ProjectGitStatusBar({
             )}
           </>
         )}
-        <Tooltip.Provider delayDuration={150}>
-          <Tooltip.Root
-            onOpenChange={(open) => {
-              if (open) void refreshIndex();
-            }}
-          >
-            <Tooltip.Trigger asChild>
-              <button
-                type="button"
-                className={`project-index-chip project-index-chip-${indexDotState}`}
-                onClick={() => void onClickIndexDot()}
-                aria-disabled={indexState === 'disabled'}
-                aria-label={indexTooltip}
-              >
-                {/* Notebook glyph — stands in for "workspace index"; the dot to its
+        <Popover.Root
+          open={indexPanelOpen}
+          onOpenChange={(open) => {
+            setIndexPanelOpen(open);
+            if (open) {
+              setIndexRefreshError(null);
+              void refreshIndex();
+            }
+          }}
+        >
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              className={`project-index-chip project-index-chip-${indexDotState}`}
+              aria-label={indexTriggerLabel}
+              title="Open indexing status"
+            >
+              {/* Notebook glyph — stands in for "workspace index"; the dot to its
                     right carries the status colour. */}
-                <svg
-                  className="project-index-icon"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  aria-hidden="true"
-                  focusable="false"
-                >
-                  <rect
-                    x="3"
-                    y="2"
-                    width="10.5"
-                    height="12"
-                    rx="1.3"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                  />
-                  <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" strokeWidth="1.2" />
-                  <line
-                    x1="8"
-                    y1="5.5"
-                    x2="11.5"
-                    y2="5.5"
-                    stroke="currentColor"
-                    strokeWidth="1.1"
-                    strokeLinecap="round"
-                  />
-                  <line
-                    x1="8"
-                    y1="8"
-                    x2="11.5"
-                    y2="8"
-                    stroke="currentColor"
-                    strokeWidth="1.1"
-                    strokeLinecap="round"
-                  />
-                  <line
-                    x1="8"
-                    y1="10.5"
-                    x2="10.5"
-                    y2="10.5"
-                    stroke="currentColor"
-                    strokeWidth="1.1"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span className="project-index-dot" aria-hidden />
-              </button>
-            </Tooltip.Trigger>
-            <Tooltip.Content side="top">
-              <div className="project-index-tooltip">
-                <div className="project-index-tooltip-heading">
-                  <span
-                    className={`project-index-tooltip-dot project-index-tooltip-dot-${indexDotState}`}
-                    aria-hidden
-                  />
-                  <strong>{indexHeadline}</strong>
-                </div>
+              <svg
+                className="project-index-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <rect
+                  x="3"
+                  y="2"
+                  width="10.5"
+                  height="12"
+                  rx="1.3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" strokeWidth="1.2" />
+                <line
+                  x1="8"
+                  y1="5.5"
+                  x2="11.5"
+                  y2="5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.1"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="8"
+                  y1="8"
+                  x2="11.5"
+                  y2="8"
+                  stroke="currentColor"
+                  strokeWidth="1.1"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="8"
+                  y1="10.5"
+                  x2="10.5"
+                  y2="10.5"
+                  stroke="currentColor"
+                  strokeWidth="1.1"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="project-index-dot" aria-hidden />
+            </button>
+          </Popover.Trigger>
+          <Popover.Content
+            className="project-index-popover"
+            side="top"
+            align="center"
+            aria-label="Indexing status"
+          >
+            <div className="project-index-panel">
+              <div className="project-index-panel-heading">
+                <span
+                  className={`project-index-panel-dot project-index-panel-dot-${indexDotState}`}
+                  aria-hidden
+                />
+                <strong>{indexHeadline}</strong>
+              </div>
 
-                {enrichment && enrichment.eligible > 0 && aiCoverage !== null && (
-                  <div className="project-index-tooltip-progress">
-                    <div className="project-index-tooltip-progress-label">
-                      <span>AI search coverage</span>
-                      <strong>{aiCoverage}%</strong>
+              {enrichment && enrichment.eligible > 0 && aiCoverage !== null && (
+                <div className="project-index-panel-progress">
+                  <div className="project-index-panel-progress-label">
+                    <span>AI search coverage</span>
+                    <strong>{aiCoverage}%</strong>
+                  </div>
+                  <div
+                    className="project-index-panel-progress-track"
+                    role="progressbar"
+                    aria-label="AI search coverage"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={aiCoverage}
+                    tabIndex={-1}
+                  >
+                    <span style={{ width: `${aiCoverage}%` }} />
+                  </div>
+                  <span className="project-index-panel-caption">
+                    {enrichment.embedded} of {enrichment.eligible} files ready
+                    {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
+                  </span>
+                </div>
+              )}
+
+              <dl className="project-index-panel-details">
+                <div>
+                  <dt>File scan</dt>
+                  <dd>{indexStateLabel(indexState)}</dd>
+                </div>
+                {indexStatus?.meta && (
+                  <>
+                    <div>
+                      <dt>Indexed</dt>
+                      <dd>
+                        {indexStatus.meta.fileCount} file
+                        {indexStatus.meta.fileCount === 1 ? '' : 's'} ·{' '}
+                        {indexStatus.meta.commandCount} command
+                        {indexStatus.meta.commandCount === 1 ? '' : 's'}
+                      </dd>
                     </div>
-                    <div
-                      className="project-index-tooltip-progress-track"
-                      role="progressbar"
-                      aria-label="AI search coverage"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={aiCoverage}
-                      tabIndex={-1}
-                    >
-                      <span style={{ width: `${aiCoverage}%` }} />
+                    <div>
+                      <dt>Last scan</dt>
+                      <dd>
+                        {formatRelative(indexStatus.meta.scannedAt)} ·{' '}
+                        {formatDuration(indexStatus.meta.durationMs)}
+                      </dd>
                     </div>
-                    <span className="project-index-tooltip-caption">
-                      {enrichment.embedded} of {enrichment.eligible} files ready
-                      {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
-                    </span>
+                  </>
+                )}
+                {enrichment && enrichment.eligible > 0 && (
+                  <div>
+                    <dt>AI summaries</dt>
+                    <dd>
+                      {enrichment.summarized} of {enrichment.eligible} files
+                    </dd>
                   </div>
                 )}
-
-                <dl className="project-index-tooltip-details">
+                {enrichment?.reviews && enrichment.reviews.eligible > 0 && (
                   <div>
-                    <dt>File scan</dt>
-                    <dd>{indexStateLabel(indexState)}</dd>
+                    <dt>Quality review</dt>
+                    <dd>
+                      {enrichment.reviews.reviewed} of {enrichment.reviews.eligible}
+                      {enrichment.reviews.pending > 0
+                        ? ` · ${enrichment.reviews.pending} waiting`
+                        : ''}
+                      {enrichment.reviews.stale > 0
+                        ? ` · ${enrichment.reviews.stale} to refresh`
+                        : ''}
+                    </dd>
                   </div>
-                  {indexStatus?.meta && (
-                    <>
-                      <div>
-                        <dt>Indexed</dt>
-                        <dd>
-                          {indexStatus.meta.fileCount} file
-                          {indexStatus.meta.fileCount === 1 ? '' : 's'} ·{' '}
-                          {indexStatus.meta.commandCount} command
-                          {indexStatus.meta.commandCount === 1 ? '' : 's'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Last scan</dt>
-                        <dd>
-                          {formatRelative(indexStatus.meta.scannedAt)} ·{' '}
-                          {formatDuration(indexStatus.meta.durationMs)}
-                        </dd>
-                      </div>
-                    </>
-                  )}
-                  {enrichment && enrichment.eligible > 0 && (
-                    <div>
-                      <dt>AI summaries</dt>
-                      <dd>
-                        {enrichment.summarized} of {enrichment.eligible} files
-                      </dd>
-                    </div>
-                  )}
-                  {enrichment?.reviews && enrichment.reviews.eligible > 0 && (
-                    <div>
-                      <dt>Quality review</dt>
-                      <dd>
-                        {enrichment.reviews.reviewed} of {enrichment.reviews.eligible}
-                        {enrichment.reviews.pending > 0
-                          ? ` · ${enrichment.reviews.pending} waiting`
-                          : ''}
-                        {enrichment.reviews.stale > 0
-                          ? ` · ${enrichment.reviews.stale} to refresh`
-                          : ''}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
+                )}
+              </dl>
 
-                <div className="project-index-tooltip-footer">
+              <div className="project-index-panel-footer">
+                <span className="project-index-panel-note">
                   {indexState === 'disabled'
-                    ? 'Workspace files are not scanned or summarized for this project.'
+                    ? 'Workspace indexing is off. Turn it on in Project Settings.'
                     : indexState === 'indexing'
-                      ? 'The status updates automatically.'
+                      ? 'The status updates automatically while the scan runs.'
                       : aiScanPending
-                        ? 'AI indexing continues while the app is idle. Click to rescan files.'
-                        : 'Click to rescan the workspace.'}
-                </div>
+                        ? 'AI indexing continues while the app is idle.'
+                        : 'Refresh the index whenever you need the latest workspace state.'}
+                </span>
+                <button
+                  type="button"
+                  className="project-index-update-button"
+                  disabled={indexUpdateDisabled}
+                  onClick={() => void onUpdateIndex()}
+                >
+                  {indexState === 'indexing' || indexRefreshBusy
+                    ? 'Updating index…'
+                    : 'Update index now'}
+                </button>
+                {indexRefreshError && (
+                  <span className="project-index-panel-error" role="alert">
+                    {indexRefreshError}
+                  </span>
+                )}
               </div>
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
+            </div>
+          </Popover.Content>
+        </Popover.Root>
         <div className="project-controls-inline">
           {onStatusChange && (
             <Select.Root

@@ -10,14 +10,21 @@ import {
   HANDBOEK_AREAS,
   HANDBOEK_AREA_TITLES,
   findHandboekContent,
+  listReleaseNotes,
   loadCuratedArticles,
 } from './content.js';
 import type { HandboekDeviceInfo } from './device.js';
 import { type GeneratedSummary, buildGeneratedBody, listGeneratedSummaries } from './generated.js';
 import { type HandboekCatalog, expandMacros } from './macros.js';
 
-export type { CuratedArticle } from './content.js';
-export { HANDBOEK_AREAS, HANDBOEK_AREA_TITLES, findHandboekContent } from './content.js';
+export type { CuratedArticle, ReleaseNoteEntry } from './content.js';
+export {
+  HANDBOEK_AREAS,
+  HANDBOEK_AREA_TITLES,
+  WHATS_NEW_INDEX_ID,
+  findHandboekContent,
+  listReleaseNotes,
+} from './content.js';
 export { siteDeviceInfo } from './device.js';
 export type {
   HandboekDeviceInfo,
@@ -118,12 +125,14 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
       articleOpts?: HandboekArticleOptions,
     ): Promise<HandboekArticle | null> {
       const mode = articleOpts?.mode ?? 'app';
-      const curatedMatch = curated().find((a) => a.id === id);
+      const curatedArticles = curated();
+      const curatedMatch = curatedArticles.find((a) => a.id === id);
       if (curatedMatch) {
         const { markdown, figures } = await expandMacros(curatedMatch.body, {
           mode,
           catalog: opts.catalog,
           device: opts.device,
+          releases: listReleaseNotes(curatedArticles),
         });
         return {
           id,
@@ -151,6 +160,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
         mode,
         catalog: opts.catalog,
         device: opts.device,
+        releases: listReleaseNotes(curatedArticles),
       });
       return {
         id,

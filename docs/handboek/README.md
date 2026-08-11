@@ -16,8 +16,11 @@ gezel-roles/     Role articles (curated leads; generated bodies fill gaps)
 craftbooks/      Usually generated; curated overrides welcome
 project-types/   Usually generated; curated overrides welcome
 technical/       Architecture, files on disk, security, CLI
+whats-new/       Release notes — one article per release, newest first
 assets/          Images referenced by articles (incl. assets/poppetje/*.svg)
 ```
+
+`whats-new/` is written by the `release-note` skill (`.claude/skills/release-note/`), which reads the commit range since the previous tag and drafts the article. Read that skill before hand-writing one — the voice is deliberately different from the rest of the Handboek, and the ordering convention below is easy to get wrong.
 
 ## Article format
 
@@ -43,8 +46,26 @@ Body prose…
   (curated ids always win).
 
 - `title` — TOC + tab title. Falls back to the first `#` heading.
-- `order` — sort key within the area (generated articles sit at 10).
-- `summary` — one line for the TOC.
+- `order` — sort key within the area, ascending (generated articles sit at 10).
+
+  `whats-new/` inverts this to get newest-first: a release article's order is
+
+  the negated calendar line, so `1.26223` carries `order: -26223`, and the
+
+  section index sits at `-999999`. Nothing else needs touching when a release
+
+  lands — the next article simply sorts above the last one, and the index
+
+  picks it up through `::handboek-whats-new-list`.
+
+- `summary` — one line for the TOC. In `whats-new/` it is also the whole of
+
+  the release in the section's own list, so it is required there and capped
+
+  at 200 characters (enforced by the content lint in
+
+  `packages/service/src/handboek/engine.test.ts`).
+
 - `defaultDuration` — optional seconds-per-block override for the video
 
   playback mode's timing.
@@ -69,6 +90,7 @@ A macro is a leaf directive on its own line. The engine expands it into plain ma
 | `::handboek-craftbook-list{role=…}` | Table of craftbooks (optionally the role's defaults). |
 | `::handboek-installed-models` | Models installed on this device with engine and tier. |
 | `::handboek-project-type-composition{id=…}` | What a project type sets up: crew, craftbooks, toolsets, schedules. |
+| `::handboek-whats-new-list{limit=12}` | Every release in `whats-new/`, newest first, each with its one-line summary. Identical in all three modes. |
 
 ## Conventions
 

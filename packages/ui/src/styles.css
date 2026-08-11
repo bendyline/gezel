@@ -9531,7 +9531,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   box-shadow: 0 0 0 2px rgba(220, 170, 60, 0.18);
 }
 
-/* red — index is out of date (stale or never built); click to re-scan. */
+/* red — index is out of date (stale or never built). */
 .project-index-chip-stale .project-index-dot {
   background: rgba(214, 90, 80, 0.95);
   box-shadow: 0 0 0 2px rgba(214, 90, 80, 0.16);
@@ -9543,29 +9543,29 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-index-chip-disabled {
-  cursor: default;
   color: var(--text-muted);
 }
 
-.project-index-chip-disabled:hover {
-  border-color: var(--border);
+.gz-popover.project-index-popover {
+  width: 18rem;
 }
 
-.project-index-tooltip {
+.project-index-panel {
   width: 16.5rem;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
 }
 
-.project-index-tooltip-heading {
+.project-index-panel-heading {
   display: flex;
   align-items: center;
   gap: 0.45rem;
   font-size: var(--text-sm);
 }
 
-.project-index-tooltip-dot {
+.project-index-panel-dot {
   width: 0.55rem;
   height: 0.55rem;
   flex: 0 0 auto;
@@ -9573,47 +9573,47 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--text-muted);
 }
 
-.project-index-tooltip-dot-fresh {
+.project-index-panel-dot-fresh {
   background: var(--success);
 }
 
-.project-index-tooltip-dot-scan {
+.project-index-panel-dot-scan {
   background: var(--warning);
 }
 
-.project-index-tooltip-dot-stale {
+.project-index-panel-dot-stale {
   background: var(--danger);
 }
 
-.project-index-tooltip-dot-indexing {
+.project-index-panel-dot-indexing {
   background: var(--accent);
   animation: project-index-pulse 1.2s ease-in-out infinite;
 }
 
-.project-index-tooltip-dot-disabled {
+.project-index-panel-dot-disabled {
   background: var(--text-muted);
 }
 
-.project-index-tooltip-progress {
+.project-index-panel-progress {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 
-.project-index-tooltip-progress-label {
+.project-index-panel-progress-label {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
 }
 
-.project-index-tooltip-progress-track {
+.project-index-panel-progress-track {
   height: 0.32rem;
   overflow: hidden;
   border-radius: 3px;
   background: color-mix(in srgb, currentColor 18%, transparent);
 }
 
-.project-index-tooltip-progress-track > span {
+.project-index-panel-progress-track > span {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -9621,37 +9621,55 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   transition: width 0.15s ease-out;
 }
 
-.project-index-tooltip-caption,
-.project-index-tooltip-footer {
+.project-index-panel-caption,
+.project-index-panel-note {
   color: color-mix(in srgb, currentColor 72%, transparent);
   font-size: var(--text-xs);
 }
 
-.project-index-tooltip-details {
+.project-index-panel-details {
   display: flex;
   flex-direction: column;
   gap: 0.28rem;
   margin: 0;
 }
 
-.project-index-tooltip-details > div {
+.project-index-panel-details > div {
   display: grid;
   grid-template-columns: 5.7rem minmax(0, 1fr);
   gap: 0.7rem;
 }
 
-.project-index-tooltip-details dt {
+.project-index-panel-details dt {
   color: color-mix(in srgb, currentColor 72%, transparent);
 }
 
-.project-index-tooltip-details dd {
+.project-index-panel-details dd {
   margin: 0;
   text-align: right;
 }
 
-.project-index-tooltip-footer {
+.project-index-panel-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   padding-top: 0.5rem;
   border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.project-index-update-button {
+  width: 100%;
+  font-size: var(--text-sm);
+}
+
+.project-index-update-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.project-index-panel-error {
+  color: var(--danger);
+  font-size: var(--text-xs);
 }
 
 /* Always-visible project status dropdown — moved out of the project Settings tab into

@@ -72,7 +72,7 @@ describe('ProjectGitStatusBar', () => {
     });
   });
 
-  it('shows detailed AI indexing progress in a fast tooltip', async () => {
+  it('shows detailed AI indexing progress in a click-open status panel', async () => {
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
       state: 'fresh',
       aiScanPending: true,
@@ -102,15 +102,28 @@ describe('ProjectGitStatusBar', () => {
     const trigger = await screen.findByRole('button', {
       name: /AI indexing 75% complete/,
     });
-    await userEvent.hover(trigger);
+    await userEvent.click(trigger);
 
-    const tooltip = await screen.findByRole('tooltip');
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
     expect(api.getProjectIndexStatus).toHaveBeenCalledTimes(2);
-    expect(tooltip).toHaveTextContent('AI indexing 75% complete');
-    expect(tooltip).toHaveTextContent('15 of 20 files ready · 5 waiting');
-    expect(tooltip).toHaveTextContent('24 files · 3 commands');
-    expect(tooltip).toHaveTextContent('12 of 20 files');
-    expect(tooltip).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
+    expect(panel).toHaveTextContent('AI indexing 75% complete');
+    expect(panel).toHaveTextContent('15 of 20 files ready · 5 waiting');
+    expect(panel).toHaveTextContent('24 files · 3 commands');
+    expect(panel).toHaveTextContent('12 of 20 files');
+    expect(panel).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
+  });
+
+  it('waits for the panel action before updating the index', async () => {
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+
+    await userEvent.click(trigger);
+    expect(api.refreshProjectIndex).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Update index now' }));
+    await waitFor(() => {
+      expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-1');
+    });
   });
 
   it('shows an intentional opt-out without offering a rescan', async () => {
@@ -120,9 +133,9 @@ describe('ProjectGitStatusBar', () => {
     const trigger = await screen.findByRole('button', {
       name: /Workspace indexing is off/,
     });
-    expect(trigger).toHaveAttribute('aria-disabled', 'true');
 
     await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Update index now' })).toBeDisabled();
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
   });
 

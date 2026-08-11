@@ -23,6 +23,7 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
+import type { ReleaseNoteEntry } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
 import { unwrapSoftBreaks } from './unwrap.js';
 
@@ -38,6 +39,12 @@ export interface MacroContext {
   mode: HandboekRenderMode;
   catalog: HandboekCatalog;
   device: HandboekDeviceInfo;
+  /**
+   * Release-note articles, newest first. Supplied by the engine from the
+   * curated tree rather than read here, so the `whats-new-list` macro
+   * stays a pure renderer and the tests can stub a release history.
+   */
+  releases: ReleaseNoteEntry[];
   /** Figures referenced by expanded markdown accumulate here. */
   figures: HandboekFigure[];
 }
@@ -66,7 +73,11 @@ export const MACROS: Record<string, MacroFn> = {
   'model-scorecard': modelScorecard,
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
+  'whats-new-list': whatsNewList,
 };
+
+/** Releases listed inline before the rest stay reachable through the TOC. */
+const WHATS_NEW_LIST_DEFAULT_LIMIT = 12;
 
 const DIRECTIVE_RE = /^::handboek-([a-z0-9-]+)(?:\{([^}]*)\})?\s*$/;
 
@@ -482,6 +493,30 @@ async function craftbookList(attrs: Record<string, string>, ctx: MacroContext): 
     return `| [${b.name}](craftbook/${b.id}) | ${firstSentence}. |`;
   });
   return ['| Craftbook | What it does |', '| --- | --- |', ...rows].join('\n');
+}
+
+/**
+ * `::handboek-whats-new-list{limit=12}` — every release, newest first,
+ * each with its one-line summary. Renders identically in all three modes:
+ * a release history carries no install-specific facts, and it is exactly
+ * what a gezel asked "what changed recently?" should be able to read.
+ *
+ * Targets are article ids rather than relative `.md` paths because the
+ * list is generated — both the app's link handler and the site export
+ * resolve ids directly, and there is no source file for the repo link
+ * checker to walk.
+ */
+async function whatsNewList(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  const parsed = Number.parseInt(attrs.limit ?? '', 10);
+  const limit = Number.isFinite(parsed) && parsed > 0 ? parsed : WHATS_NEW_LIST_DEFAULT_LIMIT;
+  const releases = ctx.releases.slice(0, limit);
+  if (releases.length === 0) return 'No releases have been written up yet.';
+  return releases
+    .map((r) => {
+      const line = `- **[${r.title}](${r.id})**`;
+      return r.summary ? `${line} — ${r.summary}` : line;
+    })
+    .join('\n');
 }
 
 /** `::handboek-device-hardware` — this device's local-model capacity. */

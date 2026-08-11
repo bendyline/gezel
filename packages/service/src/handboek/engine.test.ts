@@ -114,6 +114,7 @@ describe('handboek engine', () => {
       'craftbooks',
       'project-types',
       'technical',
+      'whats-new',
     ]);
     const conceptual = toc.areas[0]!;
     expect(conceptual.entries[0]).toMatchObject({ id: 'welcome', generated: false });
@@ -158,6 +159,22 @@ describe('handboek engine', () => {
 
   it('returns null for unknown ids', async () => {
     expect(await makeEngine().article('no-such-article')).toBeNull();
+  });
+
+  it("fills the what's-new index from the shipped release articles", async () => {
+    const engine = makeEngine();
+    const toc = await engine.toc();
+    const releases = toc.areas
+      .find((a) => a.area === 'whats-new')!
+      .entries.filter((e) => e.id !== 'whats-new-index');
+    expect(releases.length).toBeGreaterThan(0);
+    // The list is generated, so a broken wiring shows up as an index with
+    // no releases in it rather than as a failure anywhere near the macro.
+    const index = await engine.article('whats-new-index', { mode: 'app' });
+    for (const release of releases) {
+      expect(index!.markdown).toContain(`[${release.title}](${release.id})`);
+      expect(index!.markdown).toContain(release.summary!);
+    }
   });
 });
 
@@ -208,5 +225,18 @@ describe('no surviving directives (content lint)', () => {
       }
     }
     expect(offenders, `hard-wrapped paragraphs:\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('every release note carries a tweet-sized summary', async () => {
+    // The summary is the whole of a release in the what's-new list and in
+    // the TOC — an author who leaves it off, or writes a paragraph into
+    // it, breaks the one screen the section exists to provide.
+    const releases = (await makeEngine().toc()).areas
+      .find((a) => a.area === 'whats-new')!
+      .entries.filter((e) => e.id !== 'whats-new-index');
+    const offenders = releases
+      .filter((e) => !e.summary || e.summary.length > 200)
+      .map((e) => `${e.id}: ${e.summary ? `${e.summary.length} chars` : 'no summary'}`);
+    expect(offenders, `release summaries:\n${offenders.join('\n')}`).toEqual([]);
   });
 });
