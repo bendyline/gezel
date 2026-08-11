@@ -71,6 +71,7 @@ const project = {
 function mgr(nightShift = false) {
   const store = {
     projectWorkspaceDir: async () => ws,
+    projectArtifactsDir: () => join(ws, 'artifacts'),
     getProject: async () => project,
   } as unknown as Store;
   const secrets = { get: async () => '{}' } as unknown as SecretStore;

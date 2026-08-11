@@ -39,6 +39,7 @@ import {
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
+import { ConnectorCorpusWriteDeniedError } from '../../fs/project-artifacts-store.js';
 import {
   PathSafetyError,
   intoWorkspaceRelative,
@@ -924,10 +925,24 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   app.put('/:id/artifacts/write', async (c) => {
     const id = c.req.param('id');
-    const body = (await c.req.json()) as { path: string; content: string };
+    const body = (await c.req.json()) as {
+      path: string;
+      content: string;
+      gezelId?: string;
+      sessionId?: string;
+    };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
-    await ctx.store.writeProjectArtifact(id, body.path, body.content);
-    return c.json({ ok: true, path: body.path });
+    try {
+      await ctx.store.writeProjectArtifact(id, body.path, body.content, {
+        initiatedByGezel: Boolean(body.gezelId || body.sessionId),
+      });
+      return c.json({ ok: true, path: body.path });
+    } catch (err) {
+      if (err instanceof ConnectorCorpusWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
+      throw err;
+    }
   });
 
   // Binary sibling of `/artifacts/write`. Body is the raw bytes, the

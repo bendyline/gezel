@@ -2591,9 +2591,6 @@ function explainWriteFailure(err: unknown): string {
   // HTTP status line, which is useless to the model.
   const detailsMessage = extractApiErrorMessage(err);
   const message = detailsMessage ?? (err instanceof Error ? err.message : String(err));
-  if (/data-subtree-readonly/i.test(message) || /mirrored connector corpora/i.test(message)) {
-    return 'The data/ directory holds mirrored connector corpora (synced email, calendar events, issues) and is read-only to you: editing or deleting a record there causes permanent, silent data loss, because the sync cursor has already advanced past it and it will never be re-fetched. Read these files freely, but write your analysis, summaries, or outputs to another location such as artifacts/ or a different workspace folder. To change something at the source, draft a connector action for the user to approve instead.';
-  }
   if (/workspace-write-denied/i.test(message) || /Gezel writes are disabled/i.test(message)) {
     return `This project's workspace is read-only to gezels. The user pointed the project at an external directory and hasn't enabled writes. Ask the user to open Project → Settings and toggle "Allow gezels to modify the workspace directory." Do not retry until they've done that.`;
   }
@@ -2727,6 +2724,21 @@ function normalizeArtifactPath(path: string): string {
   // and the pathological `artifacts/artifacts/` case).
   while (/^artifacts\/+/i.test(p)) p = p.replace(/^artifacts\/+/i, '');
   return p;
+}
+
+/** Connector-managed records under artifacts/data are read-only to gezels. */
+function isProtectedConnectorArtifactPath(path: string): boolean {
+  const segments = normalizeArtifactPath(path)
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.');
+  const collapsed: string[] = [];
+  for (const segment of segments) {
+    if (segment === '..') collapsed.pop();
+    else collapsed.push(segment);
+  }
+  if (collapsed[0]?.toLowerCase() !== 'data') return false;
+  return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
 }
 
 function normalizeExpectedWorkspacePath(path: string): string {
@@ -3435,6 +3447,17 @@ server.tool(
   },
   async ({ path, content, force }) => {
     const clean = normalizeArtifactPath(path);
+    if (isProtectedConnectorArtifactPath(clean)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
+          },
+        ],
+        isError: true,
+      };
+    }
     if (!force) {
       const redirected = await redirectExpectedDeliverableWriteToWorkspace(
         clean,
@@ -3507,7 +3530,10 @@ server.tool(
     // `// comment` would eat the next statement when collapsed onto one line
     // (observed corrupting inline JS in the tictactoe eval).
     const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-    await api.writeProjectArtifact(projectId, clean, stored);
+    await api.writeProjectArtifact(projectId, clean, stored, {
+      ...(gezelId ? { gezelId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}` }] };
   },
 );

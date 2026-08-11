@@ -325,6 +325,7 @@ export async function buildMlxProvider(opts: {
   // discount. An explicit `providerConcurrency.mlx` still wins verbatim
   // (documented opt-in to the risk), mirroring llama-cpp's configuredSlots.
   const {
+    computeCapacityBudget,
     defaultLocalEngineSlots,
     localEngineSlotCeiling,
     localEngineKvBudgetBytes,
@@ -352,15 +353,27 @@ export async function buildMlxProvider(opts: {
   const mlxExactPerSlotKvF16 = mlxGeometry
     ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
     : undefined;
-  const mlxSlotCeiling = localEngineSlotCeiling({
-    engine: 'mlx',
-    budgetBytes: mlxBudgetBytes,
-    weightsBytes: mlxWeightsBytes,
-    perTurnCtxTokens: effectiveNumCtx,
-    kvCacheType: mlxKvCacheType,
-    committedOtherBytes: mlxCommittedOther,
-    ...(mlxExactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: mlxExactPerSlotKvF16 } : {}),
-  });
+  // No readable geometry means no honest KV price: the weights-scaled
+  // heuristic under-prices a dense model's KV ~3x, and over-slotting MLX
+  // SIGABRTs the whole process rather than failing one request. Stay serial
+  // instead of guessing. (An inflated weights multiplier used to mask this
+  // by accident; now that the weights figure is the measured one, the guard
+  // has to be stated.) An explicit `providerConcurrency.mlx` still wins.
+  const mlxSlotCeiling =
+    mlxExactPerSlotKvF16 === undefined
+      ? 1
+      : localEngineSlotCeiling({
+          engine: 'mlx',
+          budgetBytes: mlxBudgetBytes,
+          sizingBudgetBytes: mlxBrokerSnap?.enforced
+            ? mlxBrokerSnap.pools.concurrencySizingBytes
+            : computeCapacityBudget().concurrencySizingBytes,
+          weightsBytes: mlxWeightsBytes,
+          perTurnCtxTokens: effectiveNumCtx,
+          kvCacheType: mlxKvCacheType,
+          committedOtherBytes: mlxCommittedOther,
+          exactPerSlotKvBytesF16: mlxExactPerSlotKvF16,
+        });
   const mlxRequestedSlots = concurrency ?? defaultLocalEngineSlots(mlxBudgetBytes);
   let mlxSlots = concurrency ?? Math.min(mlxRequestedSlots, mlxSlotCeiling);
   if (mlxSlots < mlxRequestedSlots) {
@@ -598,6 +611,20 @@ export async function buildMlxProvider(opts: {
           // committedOther = 0 → full budget.
           '--gpu-memory-limit-mb',
           String(Math.max(0, Math.floor((mlxBudgetBytes - mlxCommittedOther) / (1024 * 1024)))),
+          // What this engine may PIN, as distinct from what it may use. Wiring
+          // is not reclaimable by the OS, so the ceiling above is the wrong
+          // number to pass Metal: a 27B on a 128 GB Mac wired its whole 96 GiB
+          // share, held ~103 GB against a ~45 GB working set, and drove the
+          // machine to 155 MB free. The planned resident set (weights + the
+          // KV its slots will actually hold) is what steady-state inference
+          // needs kept out of the pager. Omitted when geometry was unreadable
+          // — the server then leaves the wired limit alone rather than guessing.
+          ...(mlxPlannedReservationBytes !== undefined
+            ? [
+                '--wired-limit-mb',
+                String(Math.max(1, Math.floor(mlxPlannedReservationBytes / (1024 * 1024)))),
+              ]
+            : []),
           ...kvQuantArgs,
         ],
         env: {

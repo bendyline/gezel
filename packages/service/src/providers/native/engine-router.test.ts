@@ -153,8 +153,8 @@ describe('EngineRouter', () => {
       resolveResidentBytes: () => undefined,
       fallbackApproxBytes: 10 * GB,
     });
-    // mlx multiplier is 1.30.
-    expect(router.resolveBytes('mlx', 'unknown')).toBe(Math.round(10 * GB * 1.3));
+    // mlx multiplier is the measured 1.05.
+    expect(router.resolveBytes('mlx', 'unknown')).toBe(Math.round(10 * GB * 1.05));
     expect(router.resolveBytes('llama-cpp', 'unknown')).toBe(Math.round(10 * GB * 1.2));
   });
 

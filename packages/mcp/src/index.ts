@@ -41,3 +41,8 @@ export {
   canUseLinuxSystemdDenyNet,
   unavailableToolsForPlatform,
 } from './platform-tool-availability.js';
+export {
+  prioritizePullsForCurrentBranch,
+  type BranchPrioritizedPulls,
+  type PullWithHeadRef,
+} from './github-pr-selection.js';

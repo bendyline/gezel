@@ -281,8 +281,10 @@ export function enginesRoutes(ctx: ServiceContext): Hono {
       // Same contract as the sizing policy above: overrides govern LAUNCH
       // arguments, so tear idle providers down now; a busy engine finishes
       // its turn first and the models list shows "Restart needed" until the
-      // relaunch picks the new window up.
+      // relaunch picks the new window up. ds4 prices its reservation at the
+      // launch window, so the cached resident bytes have to go with it.
       invalidateModelsCache();
+      ctx.chat.invalidateResidentBytesCache(engine, modelId);
       await ctx.chat.resetClient({ deferBusy: true });
     }
     return c.json({ modelId, contextTokens: body.contextTokens });

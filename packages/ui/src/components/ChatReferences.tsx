@@ -204,6 +204,7 @@ export function ChatReferences({
   chatKey,
   skillsProjectId,
   compact = false,
+  banner,
   children,
 }: {
   /** Project context used to resolve reference paths. Defaults to 'default'. */
@@ -228,6 +229,13 @@ export function ChatReferences({
    * Chat, Task, Skills, and References become full-width tabs instead.
    */
   compact?: boolean;
+  /**
+   * Optional full-width band above both panes (the project chat's pill
+   * row). It gets the same reference API as `children` because focusing a
+   * task pill also scopes the side rail. In compact mode there is no split
+   * to span, so it rides above the chat pane inside the Chat tab.
+   */
+  banner?: (api: ChatReferencesApi) => ReactNode;
   /**
    * Render prop: receives two callbacks the chat child threads into
    * the timeline and composer. `onToolActivity` is fed by MCP tool
@@ -637,6 +645,7 @@ export function ChatReferences({
             className="chat-rail-compact-panel chat-rail-compact-chat"
             value="chat"
           >
+            {banner?.(referenceApi)}
             <div className="chat-rail-main">{children(referenceApi)}</div>
           </Tabs.Content>
 
@@ -717,6 +726,8 @@ export function ChatReferences({
         ['--chat-rail-grip-track-width' as string]: `${CHAT_RAIL_GRIP_TRACK_PX}px`,
       }}
     >
+      {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
+
       <div className="chat-rail-main">{children(referenceApi)}</div>
 
       {hasSide && (

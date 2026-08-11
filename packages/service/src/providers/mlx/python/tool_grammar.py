@@ -119,12 +119,27 @@ _HERMES_HEAD = (
 )
 
 
-def _hermes_name_only(alts: str) -> str:
+def _hermes_name_only(alts: str, json_escape: bool = False) -> str:
     """Tier 1 — constrain only the function name (arguments fully free).
 
     `<tool_call>\\n<function=NAME>\\n…\\n</tool_call>` with NAME pinned to the
     known-tool enum; everything after the name is free.
+
+    Note that tier 1 still pins the `<function=` wrapper, so it does NOT
+    on its own let a model reach for the JSON envelope — dropping from
+    tier 2 to tier 1 is not a fix for unrepresentable nested arguments.
+    That is what `json_escape` is for.
     """
+    if json_escape:
+        return (
+            _HERMES_HEAD
+            + "tool_call: <tool_call> (hermes_call | JSONCALL) </tool_call>\n"
+            + "hermes_call: PRE NAME POST\n"
+            + f"NAME: /({alts})/\n"
+            + "PRE: /\\s*<function=/\n"
+            + "POST: /(.|\\n)*/\n"
+            + _HERMES_JSON_BRANCH
+        )
     return (
         _HERMES_HEAD
         + "tool_call: <tool_call> PRE NAME POST </tool_call>\n"
@@ -207,6 +222,71 @@ def _glm_name_only(alts: str) -> str:
     )
 
 
+def _schema_is_structural(schema: Any, depth: int = 0) -> bool:
+    """True if this property schema wants an object or array value.
+
+    Conservative on purpose: an unresolvable `$ref` counts as structural.
+    Guessing "structural" only widens the grammar (see
+    `_has_structural_params`); guessing "scalar" would keep the model
+    trapped in a shape that cannot express the value.
+    """
+    if not isinstance(schema, dict) or depth > 4:
+        return False
+    if "$ref" in schema:
+        return True
+    t = schema.get("type")
+    if isinstance(t, str) and t in ("object", "array"):
+        return True
+    if isinstance(t, list) and any(x in ("object", "array") for x in t):
+        return True
+    if "properties" in schema or "items" in schema:
+        return True
+    for key in ("anyOf", "oneOf", "allOf"):
+        branches = schema.get(key)
+        if isinstance(branches, list) and any(
+            _schema_is_structural(b, depth + 1) for b in branches
+        ):
+            return True
+    return False
+
+
+def _has_structural_params(tools: List[Dict[str, Any]]) -> bool:
+    """True if any wired tool declares a top-level object/array parameter.
+
+    The Hermes `<parameter=KEY>value</parameter>` shape is a flat KEY→text
+    map: it has no way to carry a nested object or array. When every tool
+    takes flat scalars that costs nothing, and tier-2 key pinning is pure
+    win. The moment one tool wants `{...}` or `[...]` — DocBlocks'
+    `convert_document.source` / `targets`, `save_artifact.destination` —
+    the grammar is pinning the model into a shape that CANNOT express a
+    valid call, and no amount of retrying gets it out. Wild-caught: 19
+    consecutive failed attempts on one craftbook step, the model emitting
+    correct JSON every time and the markup flattening it to a string every
+    time.
+
+    When this returns True the Hermes grammar additionally admits a raw
+    JSON body inside the `<tool_call>` envelope, so the model has a
+    representable way to make the call. Function-name pinning still
+    applies to the `<function=` branch.
+    """
+    for tool in tools:
+        fn = tool.get("function") if isinstance(tool, dict) else None
+        params = fn.get("parameters") if isinstance(fn, dict) else None
+        props = params.get("properties") if isinstance(params, dict) else None
+        if not isinstance(props, dict):
+            continue
+        if any(_schema_is_structural(v) for v in props.values()):
+            return True
+    return False
+
+
+# Escape-hatch branch: a bare JSON object body inside the `<tool_call>`
+# envelope — the canonical `<tool_call>{"name":…,"arguments":{…}}</tool_call>`
+# shape Qwen also knows. Disjoint from `FNOPEN` at the first non-whitespace
+# byte (`{` vs `<`), so the lexer can always tell the two branches apart.
+_HERMES_JSON_BRANCH = 'JSONCALL: /\\s*\\{(.|\\n)*/\n'
+
+
 def _param_keys_from_tool(tool: Dict[str, Any]) -> Optional[List[str]]:
     """Top-level parameter names for a tool, or None when the schema
     declares none we can constrain — caller then allows free keys so a
@@ -254,9 +334,19 @@ def _hermes_name_and_params(tools: List[Dict[str, Any]]) -> Optional[str]:
         idx += 1
     if not branches:
         return None
+    alt = " | ".join(branches)
+    json_escape = _has_structural_params(tools)
+    if json_escape:
+        head = (
+            "tool_call: <tool_call> (hermes_call | JSONCALL) </tool_call>\n"
+            + f"hermes_call: FNOPEN ({alt})\n"
+            + _HERMES_JSON_BRANCH
+        )
+    else:
+        head = f"tool_call: <tool_call> FNOPEN ({alt}) </tool_call>\n"
     return (
         _HERMES_HEAD
-        + f'tool_call: <tool_call> FNOPEN ({" | ".join(branches)}) </tool_call>\n'
+        + head
         + "FNOPEN: /\\s*<function=/\n"
         + "POPEN: /\\s*<parameter=/\n"
         + "PVALT: /(.|\\n)*/\n"
@@ -299,7 +389,9 @@ def build_grammar_string(
     if fmt == "hermes":
         if mode == "name-only":
             alts = tool_name_alternation(_tool_names_from_request(tool_list))
-            return _hermes_name_only(alts) if alts else None
+            if not alts:
+                return None
+            return _hermes_name_only(alts, json_escape=_has_structural_params(tool_list))
         return _hermes_name_and_params(tool_list)
     if fmt == "gemma":
         # Gemma is name-only (tier 1) regardless of requested mode: pinning the
@@ -383,9 +475,17 @@ def build_tool_grammar_processor(
         return None
 
     mode = str((hint or {}).get("mode") or "name-and-params").strip()
+    # `json-escape=on` means at least one wired tool declares an
+    # object/array parameter, so the grammar also admits a raw JSON body
+    # inside `<tool_call>`. Without it the model would be pinned into the
+    # flat `<parameter=KEY>` shape, which cannot express such an argument.
+    json_escape = fmt == "hermes" and _has_structural_params(
+        [t for t in (tools or []) if isinstance(t, dict)]
+    )
     print(
         f"[tool-grammar] active format={fmt} mode={mode} "
-        f"tools={len(_tool_names_from_request(tools))}",
+        f"tools={len(_tool_names_from_request(tools))} "
+        f"json-escape={'on' if json_escape else 'off'}",
         flush=True,
     )
     return SafeToolGrammarProcessor(proc)

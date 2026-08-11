@@ -37,7 +37,8 @@ function makeMessage(over: Partial<MailMessage> = {}): MailMessage {
 // the folder scope level; the record itself carries only the thread folder.
 const writer = (message: MailMessage) =>
   writeRecord({
-    workspaceDir: ws,
+    storageDir: ws,
+    quarantineWorkspaceDir: ws,
     corpusDir: 'data/work-mail/inbox',
     record: messageToRecord('imap:alice@example.com', message),
   });

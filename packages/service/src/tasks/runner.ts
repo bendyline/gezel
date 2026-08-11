@@ -76,6 +76,13 @@ export interface PendingHandoff {
   projectId: string;
   /** Display name of the previous step's gezel, if any — used in the seed prompt. */
   fromGezelName?: string;
+  /**
+   * Id of the previous step's gezel, if any. Carried alongside the name so
+   * the seed can tell a real handoff from a same-gezel step advance — a
+   * craftbook whose steps collapse onto one specialist would otherwise
+   * read "Koray has handed step report to you" to Koray.
+   */
+  fromGezelId?: string;
   /** `'entry'` for a fresh launch (no prior step); defaults to `'handoff'`. */
   kind?: 'handoff' | 'entry';
   /** Step activation timestamp captured when this handoff was enqueued. */
@@ -120,6 +127,7 @@ export interface TaskRunnerDispatcher {
     taskRef: string;
     stepId: string;
     fromGezelName?: string;
+    fromGezelId?: string;
     kind?: 'handoff' | 'entry';
     /**
      * Queue lane for the dispatched turn. Task handoffs travel
@@ -567,6 +575,7 @@ export class TaskRunner {
           taskRef: handoff.taskRef,
           stepId: handoff.stepId,
           ...(handoff.fromGezelName ? { fromGezelName: handoff.fromGezelName } : {}),
+          ...(handoff.fromGezelId ? { fromGezelId: handoff.fromGezelId } : {}),
           ...(handoff.kind ? { kind: handoff.kind } : {}),
           lane,
           ...(isNight ? { ambient: true } : {}),

@@ -622,6 +622,12 @@ describe('BundledSource — craftbook template layouts', () => {
         description: 'THE INLINE PROSE',
         basedOn: { name: 'Fixture upstream', url: 'https://example.com/fixture' },
         runModes: { scheduled: 'recommended', nightShift: 'supported' },
+        connectors: [
+          {
+            typeId: 'github-pulls',
+            reason: 'Mirror the pull request before review.',
+          },
+        ],
         entryStepId: 'go',
         steps: [{ id: 'go', name: 'Go' }],
         scripts: { hello: SCRIPT_SOURCE },
@@ -645,6 +651,12 @@ describe('BundledSource — craftbook template layouts', () => {
       scheduled: 'recommended',
       nightShift: 'supported',
     });
+    expect(detail.manifest.connectors).toEqual([
+      {
+        typeId: 'github-pulls',
+        reason: 'Mirror the pull request before review.',
+      },
+    ]);
     expect(detail.manifest.steps.map((s) => s.id)).toEqual(['go']);
     expect(detail.manifest.scripts).toEqual({ hello: SCRIPT_SOURCE });
     expect(detail.manifest.bundledScripts).toEqual(['hello.ts']);

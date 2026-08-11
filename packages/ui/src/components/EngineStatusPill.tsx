@@ -353,7 +353,9 @@ function EngineStatusPillForProvider({
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
   // install finishing (or being deleted) without needing a page reload.
-  const [installedModels, setInstalledModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [installedModels, setInstalledModels] = useState<
+    Array<{ id: string; name: string; plannedSlots?: number }>
+  >([]);
   // Rolling window of recent turn_stats events, newest-last.
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
   // Static RAM footprint (bytes) once llama-cpp finishes loading the model.
@@ -495,7 +497,13 @@ function EngineStatusPillForProvider({
               ? await api.listDs4Models()
               : await api.listLlamaCppModels();
         if (cancelled) return;
-        setInstalledModels(res.models.map((m) => ({ id: m.id, name: m.name })));
+        setInstalledModels(
+          res.models.map((m) => ({
+            id: m.id,
+            name: m.name,
+            ...(m.plannedSlots !== undefined ? { plannedSlots: m.plannedSlots } : {}),
+          })),
+        );
       } catch {
         /* non-fatal — pill just omits the model name */
       }
@@ -529,6 +537,17 @@ function EngineStatusPillForProvider({
   const installedModelNames = useMemo(
     () => new Map(installedModels.map((model) => [model.id, model.name])),
     [installedModels],
+  );
+  const installedModelConcurrentSlots = useMemo(
+    () =>
+      new Map(
+        installedModels.flatMap((model) =>
+          onDeviceProvider && model.plannedSlots !== undefined
+            ? [[`${onDeviceProvider}:${model.id}`, model.plannedSlots] as const]
+            : [],
+        ),
+      ),
+    [installedModels, onDeviceProvider],
   );
 
   // Pill-specific telemetry (per-turn stats + static RAM footprint).
@@ -892,7 +911,10 @@ function EngineStatusPillForProvider({
             )}
             <dt>Memory</dt>
             <dd className="engine-pill-memory">
-              <MachineMemoryStrip modelNames={installedModelNames} />
+              <MachineMemoryStrip
+                modelNames={installedModelNames}
+                modelConcurrentSlots={installedModelConcurrentSlots}
+              />
             </dd>
             <dt>Status</dt>
             <dd>{statusText}</dd>

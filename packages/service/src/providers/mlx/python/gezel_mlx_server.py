@@ -254,6 +254,20 @@ parser.add_argument(
         "0 (default) = unset → admit purely on --max-concurrency, as before."
     ),
 )
+parser.add_argument(
+    "--wired-limit-mb",
+    type=int,
+    default=0,
+    help=(
+        "How much this engine may PIN (MB) — the planned resident set: weights "
+        "plus the KV its slots will hold. Deliberately NOT the same number as "
+        "--gpu-memory-limit-mb: that is a ceiling on what may be USED, while "
+        "wired pages are unreclaimable by the OS, so wiring the whole share "
+        "starves the machine (a 27B wired 96 GiB for a ~45 GB working set and "
+        "left 155 MB free on a 128 GB Mac). 0 (default) = leave the wired "
+        "limit alone."
+    ),
+)
 ARGS = parser.parse_args()
 
 
@@ -379,34 +393,80 @@ def _metal_recommended_working_set() -> int:
         return 0
 
 
+def _safe_cache_memory() -> int:
+    """MLX's retained free-buffer pool in bytes, or 0 if unavailable.
+
+    Distinct from active memory and invisible to it: MLX holds freed buffers
+    for reuse rather than returning them, so a process can sit far above its
+    live allocation without `get_active_memory` moving. That gap is most of
+    the difference between a model's working set and its physical footprint.
+    """
+    try:
+        return int(mx.get_cache_memory())
+    except Exception:  # noqa: BLE001 — introspection is best-effort
+        return 0
+
+
+def _log_memory(phase: str) -> None:
+    """One line of memory truth per turn.
+
+    Nothing observed this engine between startup and the next restart, so a
+    footprint drifting toward the wired ceiling was only ever reconstructible
+    afterwards from `vm_stat`. `cache` is the number that made the difference
+    invisible: it does not move `active`, and no other layer measures it —
+    the in-engine prompt-cache budget tracks its own token-count estimate.
+    """
+    active = _safe_active_memory()
+    cached = _safe_cache_memory()
+    if active <= 0 and cached <= 0:
+        return
+    mb = 1024 * 1024
+    ceiling = f", ceiling={_MEM_LIMIT_BYTES // mb}MB" if _MEM_LIMIT_BYTES > 0 else ""
+    print(
+        f"[mem] {phase}: active={active // mb}MB cache={cached // mb}MB "
+        f"total={(active + cached) // mb}MB{ceiling}",
+        flush=True,
+    )
+
+
 def _setup_gpu_memory_ceiling() -> None:
-    """Resolve the effective memory ceiling and wire weights.
+    """Resolve the effective memory ceiling and the wired limit.
 
     The ceiling is the smaller of what the supervisor budgeted for this model
     (`--gpu-memory-limit-mb`, from the TS capacity broker) and what Metal
     recommends as a working set — whichever is tighter is the honest bound.
     Everything here is guarded: a version whose mlx lacks these calls must
     degrade to "no ceiling" (width-only admission), never crash startup.
+
+    The WIRED limit is a separate, smaller number (`--wired-limit-mb`): the
+    planned resident set. Wiring the whole ceiling is what let a 27B hold
+    ~103 GB for a ~45 GB working set — wired pages never come back under
+    pressure, so this must track what steady-state inference actually needs
+    resident, not what the engine is allowed to allocate. Falls back to the
+    ceiling only when the supervisor passed no plan (unreadable geometry).
     """
     global _MEM_LIMIT_BYTES
     recommended = _metal_recommended_working_set()
     arg_limit = max(0, int(getattr(ARGS, "gpu_memory_limit_mb", 0) or 0)) * 1024 * 1024
     candidates = [b for b in (recommended, arg_limit) if b > 0]
     _MEM_LIMIT_BYTES = min(candidates) if candidates else 0
-    # Wire weights up to the ceiling so they aren't paged out under pressure —
-    # Apple's recommended setting for steady-state inference. Guarded: harmless
-    # to skip if the call is missing or rejects the value.
-    if _MEM_LIMIT_BYTES > 0:
+    planned = max(0, int(getattr(ARGS, "wired_limit_mb", 0) or 0)) * 1024 * 1024
+    wired_target = min(planned, _MEM_LIMIT_BYTES) if planned > 0 else _MEM_LIMIT_BYTES
+    # Wire the resident set so it isn't paged out under pressure — Apple's
+    # recommended setting for steady-state inference. Guarded: harmless to
+    # skip if the call is missing or rejects the value.
+    if wired_target > 0:
         set_wired = getattr(mx, "set_wired_limit", None)
         if set_wired is not None:
             try:
-                set_wired(_MEM_LIMIT_BYTES)
+                set_wired(wired_target)
             except Exception as exc:  # noqa: BLE001
                 print(f"[mem] set_wired_limit skipped: {exc}", flush=True)
     print(
         f"[mem] gpu ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB "
         f"(budget={arg_limit // (1024 * 1024)}MB, "
         f"metal_recommended={recommended // (1024 * 1024)}MB, "
+        f"wired={wired_target // (1024 * 1024)}MB, "
         f"active={_safe_active_memory() // (1024 * 1024)}MB)",
         flush=True,
     )
@@ -2386,6 +2446,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             # above, so this turn's own _save_cache → _enforce_budget can't
             # evict the entry it just wrote.
             _unmark_inflight(pinned_cache_ids)
+            _log_memory("turn-end")
 
     return StreamingResponse(
         stream_iter(),

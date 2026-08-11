@@ -3,6 +3,7 @@ import { z as zod } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -45,6 +46,7 @@ export const CraftbookDocSchema = zod.object({
   /** Unattended launch modes this recipe is suitable for. */
   runModes: CraftbookRunModesSchema.optional(),
   toolsets: zod.array(CraftbookToolsetNeedSchema).optional(),
+  connectors: zod.array(CraftbookConnectorNeedSchema).optional(),
   paramSchema: zod.record(zod.string(), zod.unknown()).optional(),
   /**
    * Pre/PostToolUse hooks installed while a task runs this book. A hook's

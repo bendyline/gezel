@@ -233,6 +233,39 @@ function addFinding(
 }
 
 /**
+ * The canonical tools a procedure positively instructs the model to call.
+ * Shares the linter's directive classification, so negative ("do not call
+ * `github_pr_comment`"), conditional, and contrast ("read_file, not
+ * read_artifact") mentions are excluded rather than counted as mandates.
+ *
+ * Step-scoped tool narrowing consumes this to keep what a craftbook step
+ * actually demands: the deliverable-class kit is authored around file work
+ * and silently dropped the repo/API tools a step's own first-action
+ * directive named, which stranded the turn with no way to comply.
+ */
+export function promptMandatedTools(prompt: string): Set<string> {
+  const mandated = new Set<string>();
+  for (const line of prompt.split('\n')) {
+    for (const candidate of explicitToolCandidates(line)) {
+      const { tool } = candidate;
+      if (mandated.has(tool)) continue;
+      if (!CANONICAL_TOOL_NAME_SET.has(tool)) continue;
+      if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
+      const clause = clauseAround(line, candidate.index);
+      if (NEGATIVE_CONTEXT.test(clause) || CONDITIONAL_CONTEXT.test(clause)) continue;
+      const prefix = line.slice(Math.max(0, candidate.index - 48), candidate.index);
+      if (/\b(?:not|without|for|from|returned by)\s*`?\s*$/i.test(prefix)) continue;
+      if (candidate.syntax === 'bare-directive' || candidate.syntax === 'named-tool') {
+        mandated.add(tool);
+        continue;
+      }
+      if (HARD_DIRECTIVE.test(clause) || SOFT_DIRECTIVE.test(clause)) mandated.add(tool);
+    }
+  }
+  return mandated;
+}
+
+/**
  * Compare rendered system-prompt prose with the function tools actually
  * exposed to the model. This is deliberately lexical and conservative:
  * hard action-order directives gate CI, while broader imperative mentions
@@ -244,6 +277,14 @@ export function lintPromptToolContract(args: {
   availableTools: ReadonlySet<string> | ReadonlyArray<string>;
   /** Tool descriptions already establish that explicit call-shaped names are tools. */
   toolDescription?: boolean;
+  /**
+   * The roster is a PREDICTION covering first-party builtins only —
+   * third-party bridge tools have no names until the bridge spawns. Set
+   * this on the cold path so a truthful mention of an installed
+   * toolset's tool (`browser_navigate`) is not reported as unknown; the
+   * live-refresh pass lints the same prompt against the real roster.
+   */
+  partialRoster?: boolean;
 }): PromptToolContractReport {
   const available =
     args.availableTools instanceof Set ? args.availableTools : new Set(args.availableTools);
@@ -350,6 +391,7 @@ export function lintPromptToolContract(args: {
         }
         continue;
       }
+      if (args.partialRoster) continue;
       const before = line.slice(Math.max(0, candidate.index - 120), candidate.index);
       const after = line.slice(candidate.index + candidate.tool.length, candidate.index + 80);
       const associated =

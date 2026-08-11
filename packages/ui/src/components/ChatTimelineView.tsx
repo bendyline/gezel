@@ -480,6 +480,17 @@ export interface ChatTimelineViewProps {
    */
   terminalFocusRequest?: { threadId: string; requestKey: number };
   /**
+   * Requests navigation to a chat session's newest rendered row (its
+   * failed-turn banner when it has one). `requestKey` makes repeated
+   * clicks on the same task-bar chip distinct.
+   *
+   * Separate from `activeSessionId`: pointing the composer at a thread and
+   * moving the viewport to it are different intents — a session divider
+   * click already lands the user on the rows they clicked, and scrolling
+   * then would be a jump they didn't ask for.
+   */
+  sessionFocusRequest?: { sessionId: string; requestKey: number };
+  /**
    * Fired when the terminal SSE channel reports a `workingDirChanged`
    * event — i.e. the shell behind a thread cd'd to a new path. The
    * parent (ProjectChat) updates its `terminalWorkingDir` display
@@ -552,6 +563,7 @@ export function ChatTimelineView({
   terminalRefreshKey,
   terminalSubmission,
   terminalFocusRequest,
+  sessionFocusRequest,
   onTerminalWorkingDirChanged,
   showProjectName,
   inflightScope,
@@ -770,6 +782,7 @@ export function ChatTimelineView({
   >(null);
   const [alignedSubmissionKey, setAlignedSubmissionKey] = useState<string | null>(null);
   const consumedTerminalFocusKeyRef = useRef<number | null>(null);
+  const consumedSessionFocusKeyRef = useRef<number | null>(null);
   const paginatingRef = useRef(false);
   /**
    * Sticky context header — surfaces the user message + assistant
@@ -2373,9 +2386,13 @@ export function ChatTimelineView({
    * Unpins the timeline first: without that, the very next streaming
    * delta or SSE row would yank the viewport back to the bottom and
    * undo the jump the user just asked for.
+   *
+   * `notifyParent` is off for callers that already moved the composer
+   * themselves (the task-bar chips): re-notifying would hand the parent a
+   * null task scope one tick after a task chip set it.
    */
-  const focusSessionError = useCallback(
-    (sessionId: string): boolean => {
+  const focusSession = useCallback(
+    (sessionId: string, opts?: { notifyParent?: boolean }): boolean => {
       const el = scrollRef.current;
       if (!el) return false;
       const escaped = cssAttrValue(sessionId);
@@ -2392,8 +2409,10 @@ export function ChatTimelineView({
       // Point the composer at the failed session too, so the user's next
       // message (or the banner's Continue) resumes THAT conversation
       // rather than whichever one the roster happened to select.
-      const owner = messagesRef.current.find((m) => m.sessionId === sessionId);
-      if (owner) onFocusSession?.(sessionId, owner.gezelId, owner.projectId);
+      if (opts?.notifyParent !== false) {
+        const owner = messagesRef.current.find((m) => m.sessionId === sessionId);
+        if (owner) onFocusSession?.(sessionId, owner.gezelId, owner.projectId);
+      }
       return true;
     },
     [onFocusSession],
@@ -2405,12 +2424,23 @@ export function ChatTimelineView({
    * request arrives — we retry on each subsequent render until it is, or
    * until the deadline passes (session too old to be in the first page).
    */
-  const focusRequestRef = useRef<{ sessionId: string; until: number } | null>(null);
+  const focusRequestRef = useRef<{
+    sessionId: string;
+    until: number;
+    notifyParent: boolean;
+  } | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
-  const requestFocusSessionError = useCallback((sessionId: string) => {
-    focusRequestRef.current = { sessionId, until: Date.now() + FOCUS_RETRY_WINDOW_MS };
-    setFocusNonce((n) => n + 1);
-  }, []);
+  const requestFocusSession = useCallback(
+    (sessionId: string, opts?: { notifyParent?: boolean }) => {
+      focusRequestRef.current = {
+        sessionId,
+        until: Date.now() + FOCUS_RETRY_WINDOW_MS,
+        notifyParent: opts?.notifyParent !== false,
+      };
+      setFocusNonce((n) => n + 1);
+    },
+    [],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: rows/focusNonce are retry triggers — a fresh render is when the target may finally exist.
   useEffect(() => {
@@ -2420,8 +2450,10 @@ export function ChatTimelineView({
       focusRequestRef.current = null;
       return;
     }
-    if (focusSessionError(req.sessionId)) focusRequestRef.current = null;
-  }, [rows, focusNonce, focusSessionError]);
+    if (focusSession(req.sessionId, { notifyParent: req.notifyParent })) {
+      focusRequestRef.current = null;
+    }
+  }, [rows, focusNonce, focusSession]);
 
   // Live "jump to the failed turn" event — the already-open-project case.
   // Also drains the mailbox so the queued intent can't re-fire later.
@@ -2434,11 +2466,11 @@ export function ChatTimelineView({
       // was clicked in the sidebar.
       if (detail.projectId !== inflightProjectId) return;
       if (inflightProjectId) consumeFocusSessionError(inflightProjectId);
-      requestFocusSessionError(detail.sessionId);
+      requestFocusSession(detail.sessionId);
     };
     window.addEventListener('gezel:focus-session-error', onFocusError);
     return () => window.removeEventListener('gezel:focus-session-error', onFocusError);
-  }, [inflightProjectId, requestFocusSessionError]);
+  }, [inflightProjectId, requestFocusSession]);
 
   // Queued intent — the remount case (the sidebar indicator opened a
   // project whose timeline wasn't mounted yet to hear the live event).
@@ -2455,8 +2487,26 @@ export function ChatTimelineView({
     }
     if (!inflightProjectId) return;
     const intent = consumeFocusSessionError(inflightProjectId);
-    if (intent) requestFocusSessionError(intent.sessionId);
-  }, [inflightProjectId, requestFocusSessionError]);
+    if (intent) requestFocusSession(intent.sessionId);
+  }, [inflightProjectId, requestFocusSession]);
+
+  /**
+   * A task-bar chip click: the parent points the composer at the thread,
+   * and this lands the viewport on it. Routed through the retry-capable
+   * request rather than scrolling inline, because a chip for a session
+   * whose rows are still loading would otherwise silently do nothing.
+   *
+   * Must stay below the scope effect above — that one drops any pending
+   * request when the project changes, and on the first pass its scope ref
+   * is always "changed", so a request registered before it would be wiped
+   * on mount.
+   */
+  useEffect(() => {
+    if (!sessionFocusRequest) return;
+    if (consumedSessionFocusKeyRef.current === sessionFocusRequest.requestKey) return;
+    consumedSessionFocusKeyRef.current = sessionFocusRequest.requestKey;
+    requestFocusSession(sessionFocusRequest.sessionId, { notifyParent: false });
+  }, [sessionFocusRequest, requestFocusSession]);
 
   /**
    * Find which message bubble is currently scrolled past the top of
@@ -2823,7 +2873,7 @@ export function ChatTimelineView({
         key={`session-error:${sid}`}
         className="timeline-session-error-banner"
         // Scroll target for the sidebar's failed-turn indicator — see
-        // `focusSessionError` above.
+        // `focusSession` above.
         data-session-error={sid}
       >
         ✗ Last turn failed: {error}

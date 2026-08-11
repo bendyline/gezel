@@ -42,6 +42,7 @@ import {
   validateOAuthEndpoints,
 } from './oauth.js';
 import { NATIVE_ADAPTERS, connectorCredentialName, connectorSecretKey } from './registry.js';
+import { connectorCorpusStorage } from './storage.js';
 import type {
   AdapterDeps,
   ConnectorAdapter,
@@ -100,8 +101,11 @@ export function corpusDirFor(
 }
 
 export interface SyncBindingOptions<Cur = unknown> {
-  workspaceDir: string;
-  /** Top dir under the workspace where this connector's corpus lands. */
+  /** Project artifacts root where this connector's corpus lands. */
+  storageDir: string;
+  /** Resolved workspace root used only for quarantined raw bodies. */
+  quarantineWorkspaceDir: string;
+  /** Top dir under artifacts where this connector's corpus lands. */
   corpusDir: string;
   /**
    * When true (the default), the engine owns the scope directory level: each
@@ -123,13 +127,23 @@ export interface SyncBindingOptions<Cur = unknown> {
    * errors) before it prunes a scope.
    */
   allowPrune?: boolean;
+  /**
+   * Restrict this pass to specific scopes instead of everything
+   * `listScopes()` returns. A requested scope the adapter didn't list is
+   * still synced — the caller is naming something it knows about (a task
+   * launching against PR #123 the window has already scrolled past), and
+   * silently syncing nothing would leave the caller waiting on a corpus
+   * that never appears. Absent = every listed scope, the ambient pass.
+   */
+  scopes?: readonly string[];
   /** Newest-N cap per scope on each round. */
   backfillLimit: number;
   /** Starting cursor (opaque, adapter-shaped). */
   cursor: Cur | undefined;
   /** Injectable writer — defaults to the real `writeRecord` (tests pass a fake). */
   write?: (input: {
-    workspaceDir: string;
+    storageDir: string;
+    quarantineWorkspaceDir: string;
     corpusDir: string;
     record: NormalizedRecord;
   }) => Promise<WriteRecordResult>;
@@ -217,7 +231,11 @@ export async function syncWithAdapter<Cur = unknown>(
 
   try {
     await adapter.ensureAuth();
-    const scopes = await adapter.listScopes();
+    const listed = await adapter.listScopes();
+    const requested = opts.scopes;
+    const scopes = requested
+      ? [...new Set([...listed.filter((s) => requested.includes(s)), ...requested])]
+      : listed;
     result.scopes = scopes;
     outer: for (const scope of scopes) {
       const scopeCorpusDir =
@@ -257,7 +275,8 @@ export async function syncWithAdapter<Cur = unknown>(
             });
             seenHashes.add(sha8(record.recordId));
             const w = await write({
-              workspaceDir: opts.workspaceDir,
+              storageDir: opts.storageDir,
+              quarantineWorkspaceDir: opts.quarantineWorkspaceDir,
               corpusDir: scopeCorpusDir,
               record,
             });
@@ -287,7 +306,7 @@ export async function syncWithAdapter<Cur = unknown>(
           overflow === 0
         ) {
           const p = await prune({
-            workspaceDir: opts.workspaceDir,
+            storageDir: opts.storageDir,
             corpusDir: scopeCorpusDir,
             keepHashes: seenHashes,
           });
@@ -686,17 +705,22 @@ export class ConnectorManager {
     };
   }
 
-  /** Sync one binding (user-initiated or from the loop). */
-  async syncBinding(project: ProjectDetail, bindingId: string): Promise<BindingSyncResult> {
+  /**
+   * Sync one binding (user-initiated, from the loop, or from a task
+   * launch). `scopes` narrows the pass to what the caller needs on disk
+   * now — a craftbook launching against one pull request should not wait
+   * for the whole window to mirror.
+   */
+  async syncBinding(
+    project: ProjectDetail,
+    bindingId: string,
+    opts?: { scopes?: readonly string[] },
+  ): Promise<BindingSyncResult> {
     return this.withLock(project.id, async () => {
       const current = await this.reread(project);
       const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
       if (!binding) throw new Error(`no connector binding ${bindingId}`);
-      const r = await this.syncBindingInner(current, binding);
-      if (this.opts.contentIndex && r.written + r.quarantined > 0) {
-        await this.opts.contentIndex.refresh(project.id).catch(() => {});
-      }
-      return r;
+      return this.syncBindingInner(current, binding, opts);
     });
   }
 
@@ -713,9 +737,6 @@ export class ConnectorManager {
         results.push(await this.syncBindingInner(current, binding));
         current = await this.reread(project);
       }
-      if (this.opts.contentIndex && results.some((r) => r.written + r.quarantined > 0)) {
-        await this.opts.contentIndex.refresh(project.id).catch(() => {});
-      }
       return results;
     });
   }
@@ -724,6 +745,7 @@ export class ConnectorManager {
   private async syncBindingInner(
     project: ProjectDetail,
     binding: ProjectConnectorBinding,
+    opts?: { scopes?: readonly string[] },
   ): Promise<BindingSyncResult> {
     try {
       // Legacy bindings predate provenance pins and could otherwise be
@@ -740,14 +762,20 @@ export class ConnectorManager {
         ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
         projectId: project.id,
       });
-      const workspaceDir = await this.opts.store.projectWorkspaceDir(project.id);
       const corpusDir = await this.ensureCorpusDir(project, binding);
+      const { storageDir, quarantineWorkspaceDir, migrated } = await connectorCorpusStorage(
+        this.opts.store,
+        project.id,
+        corpusDir,
+      );
       const r = await syncWithAdapter(adapter, {
-        workspaceDir,
+        storageDir,
+        quarantineWorkspaceDir,
         corpusDir,
         allowPrune: resolved.manifest.completeness === 'mirror',
         backfillLimit: DEFAULT_BACKFILL_LIMIT,
         cursor: binding.cursor,
+        ...(opts?.scopes ? { scopes: opts.scopes } : {}),
       });
       if (r.rateLimited) this.noteRateLimit(binding.id);
       else if (!r.error) this.backoff.delete(binding.id);
@@ -763,10 +791,16 @@ export class ConnectorManager {
           lastSyncedAt,
         });
       }
-      await this.writeCorpusMeta(workspaceDir, corpusDir, binding, resolved.manifest, {
+      await this.writeCorpusMeta(storageDir, corpusDir, binding, resolved.manifest, {
         scopes: r.scopes ?? [],
         ...(r.error ? {} : { lastSyncedAt }),
       }).catch(() => {});
+      // The content index scans the workspace, not artifacts. A one-time
+      // refresh after migration removes the corpus's old workspace rows;
+      // ordinary artifact-only syncs do not trigger a needless code re-index.
+      if (migrated && this.opts.contentIndex) {
+        await this.opts.contentIndex.refresh(project.id).catch(() => {});
+      }
       return r;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -804,13 +838,13 @@ export class ConnectorManager {
 
   /** `_meta.json` at the corpus root — what this directory is, for humans + gezels. */
   private async writeCorpusMeta(
-    workspaceDir: string,
+    storageDir: string,
     corpusDir: string,
     binding: ProjectConnectorBinding,
     manifest: ConnectorTypeManifest,
     pass: { scopes: string[]; lastSyncedAt?: string },
   ): Promise<void> {
-    const abs = await resolveInside(workspaceDir, `${corpusDir}/_meta.json`);
+    const abs = await resolveInside(storageDir, `${corpusDir}/_meta.json`);
     await mkdir(dirname(abs), { recursive: true });
     const meta = {
       binding: binding.id,

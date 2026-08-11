@@ -59,6 +59,16 @@ export interface ProjectArtifactsStoreOptions {
   touchProject: (projectId: string) => Promise<void>;
 }
 
+export class ConnectorCorpusWriteDeniedError extends Error {
+  readonly code = 'connector-corpus-readonly' as const;
+  constructor() {
+    super(
+      'The artifacts/data directory contains read-only connector mirrors. Editing or deleting a synced record can cause permanent data loss because its cursor has already advanced.',
+    );
+    this.name = 'ConnectorCorpusWriteDeniedError';
+  }
+}
+
 /**
  * Owns the project-level artifacts tree.
  *
@@ -272,10 +282,18 @@ export class ProjectArtifactsStore {
     };
   }
 
-  async writeProjectArtifact(id: string, filePath: string, content: string): Promise<void> {
+  async writeProjectArtifact(
+    id: string,
+    filePath: string,
+    content: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<void> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
+    if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
+      throw new ConnectorCorpusWriteDeniedError();
+    }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -320,4 +338,18 @@ function normalizeArtifactPath(p: string): string {
   let out = p.replace(/^\.?\/+/, '').trim();
   while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
   return out;
+}
+
+function isProtectedConnectorCorpusPath(path: string): boolean {
+  const segments = path
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.');
+  const collapsed: string[] = [];
+  for (const segment of segments) {
+    if (segment === '..') collapsed.pop();
+    else collapsed.push(segment);
+  }
+  if (collapsed[0]?.toLowerCase() !== 'data') return false;
+  return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
 }

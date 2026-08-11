@@ -66,7 +66,12 @@ function fakeWriter(statusFor: (id: string) => WriteRecordResult['status'] = () 
   return { write, seen, dirs };
 }
 
-const base = { workspaceDir: '/ws', corpusDir: 'c', backfillLimit: 500 };
+const base = {
+  storageDir: '/artifacts',
+  quarantineWorkspaceDir: '/ws',
+  corpusDir: 'c',
+  backfillLimit: 500,
+};
 
 describe('syncWithAdapter', () => {
   it('fetches newest-first, bounded by backfillLimit; overflow is counted skipped', async () => {
@@ -351,6 +356,70 @@ describe('syncWithAdapter', () => {
     const r = await syncWithAdapter(adapter, { ...base, cursor: undefined, write });
     expect(dirs).toEqual(['c/inbox-sub', 'c']);
     expect(r.scopes).toEqual(['INBOX/Sub', '']);
+  });
+
+  describe('targeted scopes', () => {
+    it('syncs only the requested scopes', async () => {
+      const adapter = new FakeAdapter({
+        scopes: ['pr-1', 'pr-2', 'pr-3'],
+        changes: (scope) => ({ records: [{ id: `r-${scope}` }], cursor: undefined }),
+      });
+      const { write, seen } = fakeWriter();
+      const r = await syncWithAdapter(adapter, {
+        ...base,
+        cursor: undefined,
+        write,
+        scopes: ['pr-2'],
+      });
+      expect(seen).toEqual(['r-pr-2']);
+      expect(r.scopes).toEqual(['pr-2']);
+    });
+
+    it('syncs a requested scope the adapter did not list', async () => {
+      // A task launching against PR #123 knows the scope exists even when
+      // the window has scrolled past it. Syncing nothing would leave the
+      // caller waiting on a corpus that never appears.
+      const adapter = new FakeAdapter({
+        scopes: ['pr-9'],
+        changes: (scope) => ({ records: [{ id: `r-${scope}` }], cursor: undefined }),
+      });
+      const { write, seen } = fakeWriter();
+      await syncWithAdapter(adapter, {
+        ...base,
+        cursor: undefined,
+        write,
+        scopes: ['pr-123'],
+      });
+      expect(seen).toEqual(['r-pr-123']);
+    });
+
+    it('prunes only inside the targeted scope, never the untouched ones', async () => {
+      // Pruning is per-scope and keyed to that scope's own clean full
+      // enumeration, so a targeted pass may still prune within what it
+      // synced — but a scope it never looked at must be left alone.
+      const adapter = new FakeAdapter({
+        scopes: ['pr-1', 'pr-2'],
+        changes: (scope) => ({
+          records: [{ id: `r-${scope}` }],
+          cursor: undefined,
+          enumeratedAll: true,
+        }),
+      });
+      const { write } = fakeWriter();
+      const prunedDirs: string[] = [];
+      await syncWithAdapter(adapter, {
+        ...base,
+        cursor: undefined,
+        write,
+        allowPrune: true,
+        scopes: ['pr-1'],
+        prune: async ({ corpusDir }) => {
+          prunedDirs.push(corpusDir);
+          return { pruned: 0 };
+        },
+      });
+      expect(prunedDirs).toEqual(['c/pr-1']);
+    });
   });
 
   it('scopeAsDir: false keeps the legacy adapter-owned layout', async () => {

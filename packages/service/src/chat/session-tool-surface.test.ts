@@ -819,6 +819,87 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(neverMode.allowlist?.has('run_nodejs_script') ?? true).toBe(true);
   });
 
+  // Wild-caught (koray, gezel/2 "Pull Request Review", 2026-08-10): the
+  // `scope` step called github_pr_* successfully with 102 tools, then the
+  // `report` step dispatched with 38 and none of the tools its own first
+  // action mandated. The deliverable-class kit is authored around file
+  // work; it cannot know a review step must read the PR first.
+  const prReviewStep = {
+    prompt: [
+      'Use the PR number selected in the Scope note. Call `github_pr_diff` for the complete unified diff and `github_pr_files` for the per-file patches. Use `read_file` only when you need surrounding workspace context.',
+      '',
+      'Do not modify source and do not call `github_pr_comment`; the user asked for a review report, not a public side effect.',
+    ].join('\n'),
+    advanceWhen: { file: 'pr-review.md', minBytes: 500 },
+    gate: {
+      at: 'completion' as const,
+      checks: [
+        { kind: 'minBytes' as const, file: 'pr-review.md', bytes: 500 },
+        {
+          kind: 'tableShape' as const,
+          file: 'pr-review.md',
+          requiredColumns: ['Severity', 'File', 'Finding'],
+        },
+      ],
+      onReject: 'report',
+    },
+  };
+
+  it('a step keeps the repo tools its own procedure mandates', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      githubLinked: true,
+      isGitRepo: true,
+      session: baseSession({ taskRef: 'p1/2', stepId: 'report' }),
+      tier: 'medium',
+      activeStep: prReviewStep,
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('github_pr_diff')).toBe(true);
+    expect(allowlist!.has('github_pr_files')).toBe(true);
+    // The procedure explicitly forbids commenting — a negative mention is
+    // not a mandate, so the kit still drops it.
+    expect(allowlist!.has('github_pr_comment')).toBe(false);
+    // Everything the kit itself provides is untouched.
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('a mandate cannot resurrect what the security/workspace ceiling removed', async () => {
+    // Same procedure, writes-off project: `write_file` was stripped before
+    // the kit intersection and must stay stripped. The mandate widening is
+    // an intersection over an already-filtered surface, never a re-grant.
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      githubLinked: true,
+      isGitRepo: true,
+      workspaceWritable: false,
+      session: baseSession({ taskRef: 'p1/2', stepId: 'report' }),
+      tier: 'medium',
+      activeStep: prReviewStep,
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_file')).toBe(false);
+    expect(allowlist!.has('write_artifact')).toBe(true);
+  });
+
+  it('a github mandate stays stripped when the project has no repo linked', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      githubLinked: false,
+      session: baseSession({ taskRef: 'p1/2', stepId: 'report' }),
+      tier: 'medium',
+      activeStep: prReviewStep,
+    });
+    expect(allowlist!.has('github_pr_diff')).toBe(false);
+  });
+
   it('GEZEL_DISABLE_STEP_TOOL_KIT=1 leaves the full role surface', async () => {
     process.env.GEZEL_DISABLE_STEP_TOOL_KIT = '1';
     try {

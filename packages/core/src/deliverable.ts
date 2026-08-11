@@ -74,6 +74,11 @@ export function inferDeliverableKind(path: string): DeliverableKind {
   }
 }
 
+/** Prose document extensions — Markdown-family reports, notes, plain text. */
+export function isProseDocPath(path: string): boolean {
+  return /\.(md|markdown|mdx|txt)$/i.test(path.trim());
+}
+
 /**
  * Forgiving alias map for model-supplied kind strings — small models write
  * "html", "md", "csv", "code" and should not eat a validation loop for it.
@@ -563,9 +568,12 @@ export function deliverableKindForStep(
 
   if (step.advanceWhen?.sniff === 'data-table') return 'data-file';
   if (step.advanceWhen?.sniff === 'json-valid') return 'json';
-  if (checkKinds.some((k) => k === 'csvShape' || k === 'recordSchema' || k === 'tableShape')) {
-    return 'data-file';
-  }
+  if (checkKinds.some((k) => k === 'csvShape' || k === 'recordSchema')) return 'data-file';
+  // `tableShape` also passes over a Markdown table inside prose — a review
+  // report with a findings table is a report, not a data file. Reading it
+  // as data handed the step the transform-by-execution kit (`derive_file`
+  // first) and dropped every non-file tool its procedure mandated.
+  if (checkKinds.includes('tableShape') && !(path && isProseDocPath(path))) return 'data-file';
   if (checkKinds.includes('fileCount')) return 'image-set';
   if (path && /\.(test|spec)\.[a-z]+$/i.test(path)) return 'code-with-tests';
   if (

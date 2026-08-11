@@ -109,6 +109,12 @@ export interface CapacityCommitted {
     ramShareBytes: number;
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
+    /**
+     * {@link CapacityBudget.concurrencySizingBytes} — what slot COUNT is
+     * sized against. Lower than `fastBytes` on a big unified host, where
+     * admission capacity was raised without raising peak concurrency.
+     */
+    concurrencySizingBytes: number;
   };
   /** Whether co-resident models may spill into system RAM, and how that was decided. */
   ramSpillover: {
@@ -473,6 +479,7 @@ export class CapacityBroker {
         vramBytes: auto.vramBytes,
         ramShareBytes: auto.ramShareBytes,
         fastBytes: auto.fastBytes,
+        concurrencySizingBytes: auto.concurrencySizingBytes,
       },
       ramSpillover: {
         allowed: this.ramSpilloverAllowed(),
@@ -507,7 +514,17 @@ export class CapacityBroker {
       const DS4_STREAMING_RESIDENT_FALLBACK = 48 * 1024 ** 3;
       return Math.min(approxSizeBytes, DS4_STREAMING_RESIDENT_FALLBACK);
     }
-    const mult = engine === 'mlx' ? 1.3 : 1.2;
+    // MLX: measured, not assumed. `mx.get_active_memory()` immediately after
+    // `load()` and before any inference reads 27.47 GiB for a 27.50 GiB model
+    // — 0.999x. The old 1.3 came from a whole-footprint sample "at 8K ctx"
+    // and so folded KV into the weights term; every caller now prices KV
+    // explicitly on top, making it a double-count worth ~8.9 GB on a 27B.
+    // The 1.05 is allocator slack, not a KV allowance.
+    //
+    // llama.cpp's 1.2 is unmeasured and left alone deliberately: it mmaps
+    // GGUF rather than allocating through Metal, so it needs its own reading
+    // before anyone trims it on this one's authority.
+    const mult = engine === 'mlx' ? 1.05 : 1.2;
     return Math.round(approxSizeBytes * mult);
   }
 }
@@ -652,11 +669,25 @@ export function estimatePerSlotKvBytes(opts: {
  * activation buffers (prefill_step_size × batch × model dims), the framework's
  * own scratch, and estimator error. Without this reserve a model that "just
  * fits" N KV slots aborts the moment N concurrent prefills allocate their
- * compute buffers on top of resident KV — the qwen3.6-27b-q8 Metal OOM. A
- * flat 20% is deliberately blunt: the per-slot KV estimate is itself coarse,
- * so precision here buys nothing; a margin that survives a bad guess does.
+ * compute buffers on top of resident KV — the qwen3.6-27b-q8 Metal OOM. It is
+ * deliberately blunt: the per-slot KV estimate is itself coarse, so precision
+ * here buys nothing; a margin that survives a bad guess does.
+ *
+ * MLX reserves more, and holds it in the open. Its share of this margin used
+ * to hide inside a 1.3x weights multiplier that no measurement supported (see
+ * {@link CapacityBroker.estimateResidentBytes}); correcting that figure to the
+ * measured 1.0 would otherwise have bought every MLX model an extra slot,
+ * which is the one purchase this whole reserve exists to prevent. What the
+ * larger number actually covers is real and MLX-specific: prefill activation
+ * buffers plus the framework's retained free-buffer pool, which is unbounded,
+ * invisible to `get_active_memory`, and tracked by nothing else.
  */
 const LOCAL_ENGINE_COMPUTE_HEADROOM = 0.2;
+const MLX_COMPUTE_HEADROOM = 0.35;
+
+function computeHeadroomFor(engine: LocalProviderName): number {
+  return engine === 'mlx' ? MLX_COMPUTE_HEADROOM : LOCAL_ENGINE_COMPUTE_HEADROOM;
+}
 
 /**
  * Bytes left for KV + compute after resident weights and any co-resident
@@ -704,6 +735,14 @@ export function localEngineSlotCeiling(opts: {
    * the models that get multi-slot defaults) and over-prices MoE.
    */
   exactPerSlotKvBytesF16?: number;
+  /**
+   * {@link CapacityBudget.concurrencySizingBytes} — the ceiling slot COUNT is
+   * sized against when it is lower than the admission budget. Raising the
+   * budget must let more models fit, not silently hand one model more
+   * simultaneous KV slots. Omit to size against `budgetBytes` (the pre-split
+   * behavior, and correct for a discrete card where the two are the same).
+   */
+  sizingBudgetBytes?: number;
 }): number {
   const perSlotKv =
     opts.exactPerSlotKvBytesF16 !== undefined && opts.exactPerSlotKvBytesF16 > 0
@@ -714,8 +753,11 @@ export function localEngineSlotCeiling(opts: {
           ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
         });
   if (perSlotKv <= 0) return 1;
-  const freeForKv = localEngineKvBudgetBytes(opts);
-  const usableForKv = freeForKv * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
+  const freeForKv = localEngineKvBudgetBytes({
+    ...opts,
+    budgetBytes: Math.min(opts.budgetBytes, opts.sizingBudgetBytes ?? opts.budgetBytes),
+  });
+  const usableForKv = freeForKv * (1 - computeHeadroomFor(opts.engine));
   return Math.max(1, Math.floor(usableForKv / perSlotKv));
 }
 
@@ -731,6 +773,7 @@ export function llamaCppSlotCeiling(opts: {
   kvCacheType?: string;
   committedOtherBytes?: number;
   exactPerSlotKvBytesF16?: number;
+  sizingBudgetBytes?: number;
 }): number {
   return localEngineSlotCeiling({ engine: 'llama-cpp', ...opts });
 }
@@ -964,8 +1007,20 @@ export interface CtxMemoryClampInput {
   budgetBytes: number;
   /** Reservations other resident models already hold. */
   committedOtherBytes?: number;
-  /** Live free physical RAM (`os.freemem()`) at launch time. */
-  freeSystemRamBytes: number;
+  /**
+   * Live free physical RAM at launch time. Required for an actual launch —
+   * it is the half of the clamp that stops a spawn from paging the desktop.
+   *
+   * OMIT for a policy-only question ("what window would this model get?"),
+   * where live pressure is the wrong input and often a circular one: the
+   * models list asks it about every installed model while OUR OWN resident
+   * engine is what depressed free RAM, so a running model made every row —
+   * itself included — report "won't fit". Omitting evaluates against the
+   * capacity budget alone, which already accounts for co-resident models
+   * through `committedOtherBytes` and, unlike free RAM, knows that memory
+   * is reclaimable by eviction.
+   */
+  freeSystemRamBytes?: number;
   /**
    * Usable VRAM on a discrete card; MUST be 0 on unified/shared-pool
    * hosts, where the "VRAM" is the same physical RAM `freeSystemRamBytes`
@@ -1021,9 +1076,11 @@ export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryCl
   const committedOther = Math.max(0, input.committedOtherBytes ?? 0);
   const budgetCap = input.budgetBytes - committedOther;
   const liveCap =
-    Math.max(0, input.vramBytes) +
-    Math.max(0, input.freeSystemRamBytes - CTX_CLAMP_OS_RESERVE_BYTES);
-  const cap = Math.min(budgetCap, liveCap);
+    input.freeSystemRamBytes === undefined
+      ? null
+      : Math.max(0, input.vramBytes) +
+        Math.max(0, input.freeSystemRamBytes - CTX_CLAMP_OS_RESERVE_BYTES);
+  const cap = liveCap === null ? budgetCap : Math.min(budgetCap, liveCap);
   const kvAllowance = (cap - input.weightsResidentBytes) * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
   const maxTotalTokens = kvAllowance > 0 ? kvAllowance / input.kvBytesPerToken : 0;
   const maxPerTurn = Math.floor(maxTotalTokens / slots / 1024) * 1024;
@@ -1041,8 +1098,9 @@ export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryCl
       `context clamped ${requested} → ${clampedTo} tokens/turn (${slots} slot${slots === 1 ? '' : 's'}): ` +
       `weights ~${gb(input.weightsResidentBytes)} + KV at the requested context ~${gb(kvAtRequested)} ` +
       `exceeds available memory ~${gb(Math.max(0, cap))} ` +
-      `(budget ${gb(budgetCap)}, live free RAM ${gb(Math.max(0, input.freeSystemRamBytes))}` +
-      `${input.vramBytes > 0 ? ` + VRAM ${gb(input.vramBytes)}` : ''}` +
+      `(budget ${gb(budgetCap)}` +
+      `${liveCap === null ? '' : `, live free RAM ${gb(Math.max(0, input.freeSystemRamBytes ?? 0))}`}` +
+      `${liveCap !== null && input.vramBytes > 0 ? ` + VRAM ${gb(input.vramBytes)}` : ''}` +
       `${committedOther > 0 ? `, ${gb(committedOther)} held by other models` : ''}); ` +
       `KV now ~${gb(kvAtClamped)}. Sessions compact sooner instead of the machine paging.`,
   };
@@ -1133,8 +1191,11 @@ export interface AdaptiveCtxGrowthInput {
   budgetKind: CapacityBudget['kind'];
   /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
   vramBytes: number;
-  /** Live free RAM — consulted only on shared-pool hosts. */
-  freeSystemRamBytes: number;
+  /**
+   * Live free RAM — consulted only on shared-pool hosts. Omit for a
+   * policy-only preview; see {@link CtxMemoryClampInput.freeSystemRamBytes}.
+   */
+  freeSystemRamBytes?: number;
   /** Routed-expert model? Growth on a discrete card is disabled for these. */
   isMoE?: boolean;
   /**
@@ -1214,7 +1275,14 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
       ...(input.committedOtherBytes !== undefined
         ? { committedOtherBytes: input.committedOtherBytes }
         : {}),
-      freeSystemRamBytes: discrete ? 0 : input.freeSystemRamBytes,
+      // A discrete card pins the clamp to VRAM (0 free RAM) so grown KV never
+      // pages through system memory; a shared pool passes through, including
+      // the policy-only `undefined` a preview supplies.
+      ...(discrete
+        ? { freeSystemRamBytes: 0 }
+        : input.freeSystemRamBytes !== undefined
+          ? { freeSystemRamBytes: input.freeSystemRamBytes }
+          : {}),
       vramBytes: discrete ? input.vramBytes : 0,
       minPerTurnCtxTokens: 1,
     });

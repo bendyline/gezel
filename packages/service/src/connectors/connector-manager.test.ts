@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -78,6 +78,7 @@ function harness() {
       return project;
     },
     projectWorkspaceDir: async () => ws,
+    projectArtifactsDir: () => join(ws, 'artifacts'),
     get historyManager() {
       return undefined;
     },
@@ -131,6 +132,8 @@ describe('ConnectorManager', () => {
     const stored = h.getProject().connectors?.[0];
     expect(stored?.cursor).toEqual({ v: 2, scopes: { '': 'C1' } });
     expect(stored?.lastSyncedAt).toBeTruthy();
+    const corpus = await readdir(join(ws, 'artifacts', 'data', 'fake-conn', 'scope'));
+    expect(corpus.some((name) => name.endsWith('.md'))).toBe(true);
   });
 
   it('grants a script connector its binding credential even when no token is stored', async () => {
@@ -187,7 +190,9 @@ describe('ConnectorManager', () => {
     expect(r.written).toBe(1);
     const stored = h.getProject().connectors?.[0] as { corpusDir?: string };
     expect(stored?.corpusDir).toBe('data/fake-conn');
-    const meta = JSON.parse(await readFile(join(ws, 'data', 'fake-conn', '_meta.json'), 'utf8'));
+    const meta = JSON.parse(
+      await readFile(join(ws, 'artifacts', 'data', 'fake-conn', '_meta.json'), 'utf8'),
+    );
     expect(meta).toMatchObject({
       binding: binding.id,
       type: 'fake-conn',
@@ -195,6 +200,24 @@ describe('ConnectorManager', () => {
       scopes: [''],
     });
     expect(meta.lastSyncedAt).toBeTruthy();
+  });
+
+  it('moves a legacy workspace corpus into artifacts before syncing', async () => {
+    const h = harness();
+    const binding = await h.mgr.bind(h.getProject() as never, {
+      type: 'fake-conn',
+      credential: '{}',
+    });
+    const legacy = join(ws, 'data', 'fake-conn');
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, 'legacy.md'), 'already fetched');
+
+    await h.mgr.syncBinding(h.getProject() as never, binding.id);
+
+    await expect(
+      readFile(join(ws, 'artifacts', 'data', 'fake-conn', 'legacy.md'), 'utf8'),
+    ).resolves.toBe('already fetched');
+    await expect(readFile(join(legacy, 'legacy.md'), 'utf8')).rejects.toThrow();
   });
 
   it('rejects a bind whose config fails the configSchema', async () => {

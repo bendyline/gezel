@@ -1,5 +1,6 @@
 import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
 import type {
+  Ds4ContextPlan,
   IncompleteModelDownload,
   LlamaCppInstallEvent,
   LlamaCppInstalledModel,
@@ -13,9 +14,14 @@ import {
 } from '../model-inventory.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
-import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
+import {
+  ModelActionsMenu,
+  ModelContextSliderPanel,
+  contextSliderMax,
+} from './ModelContextControls.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { formatContextWindow } from './model-context.js';
+import { formatBytes } from './model-memory-copy.js';
 
 /**
  * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
@@ -24,11 +30,17 @@ import { formatContextWindow } from './model-context.js';
  * of the DeepSeek-V4 / GLM 5.2 builds its engine supports, so this list is
  * exactly the models carrying that block.
  *
- * ds4 streams MoE experts from SSD, so device guidance uses the catalog's
- * `residentBytes` (expert cache + fixed model state + runtime buffers), not the
- * much larger download size. The service now enforces the same headroom rule
- * at launch; this UI is guidance, not the only protection against memory
+ * ds4 streams MoE experts from SSD, so device guidance uses the working set
+ * (expert cache + fixed model state + KV at the launch window), not the much
+ * larger download size. The service now enforces the same headroom rule at
+ * launch; this UI is guidance, not the only protection against memory
  * pressure.
+ *
+ * Every row — downloaded or not — carries the window this device would launch
+ * it at and what that window costs, because a ds4 download runs to hundreds of
+ * GB and the fit decision happens before it starts. Those come from
+ * `/api/ds4/context-plans`, which prices catalog entries the same way
+ * `/api/ds4/models` prices installed ones.
  */
 interface Mem {
   totalRamBytes: number;
@@ -76,6 +88,11 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // these, so the row shows them as machine-provided rather than offering a
   // Delete that only 400s.
   const [readOnlyIds, setReadOnlyIds] = useState<Set<string>>(new Set());
+  // Launch plan per catalog id, downloaded or not — the window this device
+  // would run each model at and the memory that window costs. Empty on a
+  // daemon that predates the endpoint; rows then fall back to the catalog's
+  // flat footprint and show no window.
+  const [plans, setPlans] = useState<Map<string, Ds4ContextPlan>>(new Map());
   const [mem, setMem] = useState<Mem | null>(null);
   // Which installed row has the context-size editor expanded beneath it.
   const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
@@ -106,6 +123,13 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
       setReadOnlyIds(new Set(r.models.filter((m) => m.readOnly).map((m) => m.id)));
     } catch {
       /* the row's own error surfaces install failures */
+    }
+    try {
+      const r = await api.listDs4ContextPlans();
+      setPlans(new Map(Object.entries(r.plans ?? {})));
+    } catch {
+      // Older daemon (404) or a blip — rows quote the flat catalog footprint
+      // rather than the list failing.
     }
     void refreshIncomplete();
   }, [refreshIncomplete]);
@@ -304,8 +328,12 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     return <p className="muted small">No DwarfStar models in the catalog.</p>;
   }
 
+  // Rank by what each model would actually occupy at its planned window, so
+  // "recommended on this device" tracks the same number the rows quote.
+  const residentFor = (m: Ds4ChatModel): number | undefined =>
+    plans.get(m.id)?.projectedResidentBytes ?? m.ds4.residentBytes;
   const lightestResidentBytes = Math.min(
-    ...ds4Models.map(({ m }) => m.ds4.residentBytes ?? Number.POSITIVE_INFINITY),
+    ...ds4Models.map(({ m }) => residentFor(m) ?? Number.POSITIVE_INFINITY),
   );
 
   return (
@@ -317,7 +345,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         onDelete={(id) => void remove(id)}
       />
       {ds4Models.map(({ m }) => {
-        const resident = m.ds4.residentBytes;
+        const plan = plans.get(m.id);
+        // Fit is judged at the window this device would launch with, not at
+        // whatever window the catalog footprint was authored against.
+        const resident = residentFor(m);
         const cache = m.ds4.cacheExpertsBytes ?? 0;
         // Match the launcher's fixed system/runtime reserve. If the catalog
         // target exceeds the ceiling, the service reduces only the routed-
@@ -363,7 +394,44 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         // A hardcoded model family here silently mislabels every entry that
         // isn't the one it was written for.
         const displayName = m.name;
-        const installedRow = installedModels.get(m.id);
+        // Merge the plan into the installed row so the slider gets the launch
+        // ceiling and the KV slope even when /models predates them.
+        const baseRow = installedModels.get(m.id);
+        const installedRow: LlamaCppInstalledModel | undefined = baseRow
+          ? {
+              ...baseRow,
+              ...(plan?.effectiveContextWindow !== undefined && !baseRow.effectiveContextWindow
+                ? { effectiveContextWindow: plan.effectiveContextWindow }
+                : {}),
+              ...(plan?.contextCeilingTokens !== undefined &&
+              baseRow.contextCeilingTokens === undefined
+                ? { contextCeilingTokens: plan.contextCeilingTokens }
+                : {}),
+              ...(plan?.kvBytesPerToken !== undefined &&
+              baseRow.kvBytesPerTokenPerSlot === undefined
+                ? { kvBytesPerTokenPerSlot: plan.kvBytesPerToken, kvFixedBytesPerSlot: 0 }
+                : {}),
+              ...(plan?.contextFreeResidentBytes !== undefined &&
+              baseRow.weightsResidentBytes === undefined
+                ? { weightsResidentBytes: plan.contextFreeResidentBytes }
+                : {}),
+            }
+          : undefined;
+        // The launch window to quote: the daemon's per-install answer first,
+        // else the catalog projection for a model that isn't downloaded.
+        const launchCtx = installedRow?.effectiveContextWindow ?? plan?.effectiveContextWindow;
+        const overrideTokens = installedRow?.overrideContextTokens ?? plan?.overrideContextTokens;
+        const restartNeeded = installedRow?.contextSizingStatus === 'restart-required';
+        // Only claim the footprint moves with the window where a measured
+        // slope says it does; otherwise the number is a flat authored target.
+        const kvPerToken = plan?.kvBytesPerToken;
+        const ctxKvBytes =
+          kvPerToken !== undefined && launchCtx !== undefined ? kvPerToken * launchCtx : undefined;
+        const contextAdjustable =
+          isInstalled &&
+          contextOverridesSupported &&
+          installedRow !== undefined &&
+          contextSliderMax(installedRow) !== undefined;
         return (
           <Fragment key={m.id}>
             <div
@@ -376,23 +444,43 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   {m.parameterSize} · download {fmtGb(m.ds4.approxSizeBytes)}
                 </span>
                 {resident ? (
-                  <div className="muted small">
-                    memory target ≈ {fmtGb(resident)} with SSD streaming
+                  <div
+                    className="muted small"
+                    title={
+                      ctxKvBytes !== undefined
+                        ? `About ${formatBytes(ctxKvBytes)} of this is context (KV) at ${formatContextWindow(launchCtx)}; the rest is the routed-expert cache and resident model state. Changing the context size moves the total.`
+                        : `Target memory working set with SSD streaming. Routed experts stream from disk, so this is far below the ${fmtGb(m.ds4.approxSizeBytes)} download.`
+                    }
+                  >
+                    memory target ≈ {fmtGb(resident)}
+                    {ctxKvBytes !== undefined
+                      ? ` at ${formatContextWindow(launchCtx)} context,`
+                      : ''}{' '}
+                    with SSD streaming
                   </div>
                 ) : null}
-                {installedRow &&
-                (installedRow.effectiveContextWindow || installedRow.contextSizingStatus) ? (
+                {restartNeeded ? (
+                  <div className="muted small">context: restart needed to apply the new size</div>
+                ) : launchCtx ? (
                   <div className="muted small">
-                    {installedRow.contextSizingStatus === 'restart-required' ? (
-                      'context: restart needed to apply the new size'
-                    ) : (
+                    context {formatContextWindow(launchCtx)}
+                    {overrideTokens !== undefined && (
+                      <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                        custom
+                      </span>
+                    )}
+                    {contextAdjustable && (
                       <>
-                        context {formatContextWindow(installedRow.effectiveContextWindow)}
-                        {installedRow.overrideContextTokens !== undefined && (
-                          <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
-                            custom
-                          </span>
-                        )}
+                        {' · '}
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                          }
+                        >
+                          {contextEditorFor === m.id ? 'Done' : 'Adjust'}
+                        </button>
                       </>
                     )}
                   </div>

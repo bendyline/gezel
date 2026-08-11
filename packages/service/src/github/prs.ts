@@ -84,17 +84,32 @@ export class GitHubPrs {
     };
   }
 
-  async listFiles(project: ProjectDetail, num: number): Promise<GitHubPullFile[]> {
+  /**
+   * `patchLimit` exists for the connector, which mirrors patches to disk
+   * rather than into a tool result: a file the model will open must not be
+   * silently clipped mid-hunk. Tool callers keep the default budget.
+   */
+  async listFiles(
+    project: ProjectDetail,
+    num: number,
+    opts?: { patchLimit?: number },
+  ): Promise<GitHubPullFile[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
-    const res = await octo.pulls.listFiles({ owner, repo, pull_number: num, per_page: 100 });
-    return res.data.map((f) => ({
+    const limit = opts?.patchLimit ?? REVIEW_PATCH_LIMIT;
+    const res = await octo.paginate(octo.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number: num,
+      per_page: 100,
+    });
+    return res.map((f) => ({
       filename: f.filename,
       status: f.status,
       additions: f.additions,
       deletions: f.deletions,
       changes: f.changes,
-      ...(f.patch ? { patch: truncate(f.patch, REVIEW_PATCH_LIMIT) } : {}),
+      ...(f.patch ? { patch: truncate(f.patch, limit) } : {}),
       ...(f.previous_filename ? { previousFilename: f.previous_filename } : {}),
     }));
   }
@@ -134,7 +149,11 @@ export class GitHubPrs {
    * iterate per-file. Truncated at a generous limit so a 50K-line PR
    * doesn't blow out the context.
    */
-  async getPullRequestDiff(project: ProjectDetail, num: number): Promise<string> {
+  async getPullRequestDiff(
+    project: ProjectDetail,
+    num: number,
+    opts?: { limit?: number },
+  ): Promise<string> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
     const res = await octo.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
@@ -144,7 +163,7 @@ export class GitHubPrs {
       headers: { accept: 'application/vnd.github.v3.diff' },
     });
     const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-    return truncate(body, REVIEW_PATCH_LIMIT * 8);
+    return truncate(body, opts?.limit ?? REVIEW_PATCH_LIMIT * 8);
   }
 
   /**

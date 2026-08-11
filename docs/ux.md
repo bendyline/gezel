@@ -533,6 +533,19 @@ as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that
 fades, no-motion variant included) and remove it once it settles. Never
 leave a permanent highlight behind — the ring is a cue, not a selection.
 
+**Horizontal strips need their own overflow cue.** A row that scrolls
+sideways — the chat pill row is the reference — cannot lean on the native
+scrollbar: on macOS's default "Automatic" setting Chromium paints an
+overlay bar that is invisible exactly when the user needs it, at rest, and
+forcing the classic bar costs 8px of height in a band whose height is often
+shared with a neighbouring toolbar. Draw the affordance instead:
+`.chat-pill-row-bar` is a 4px absolutely-positioned track sitting in the
+row's bottom padding, level with its border, rendered only while the
+content actually overflows, with a draggable thumb sized to the visible
+fraction. Absolute positioning is the point — the band's height must not
+depend on how many cards are in it. Vertical scrollers keep the native bar;
+this is a horizontal-strip pattern, not a general replacement.
+
 **Figure lists in articles.** A Handboek list whose items lead with a
 poppetje — what `::handboek-gezel-roster` expands to — renders as a card
 per figure: portrait, name, role, and the role's one-line summary, in an

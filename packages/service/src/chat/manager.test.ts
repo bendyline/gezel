@@ -5805,9 +5805,21 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
     it('does not trim an orchestrator role even when the behavior is forced ON', async () => {
       // Role gate: isExecutorRole is false for a delegation role, so the
-      // trim never fires regardless of the flag.
+      // trim never fires regardless of the flag. Asserted on the shared
+      // documents listing rather than the GitHub sentence: that sentence
+      // now also requires the role to actually hold GitHub tools, which a
+      // pure delegation role does not, so it can no longer isolate the
+      // role gate from the roster.
+      await store.writeDocument('guidelines.md', 'House style.');
       const sys = await sysFor({ role: 'voorman', force: true, github: true });
-      expect(sys).toContain('Use the GitHub toolset');
+      expect(sys).toContain('Shared documents library');
+      expect(sys).toContain('guidelines.md');
+    });
+
+    it('trims the shared-documents listing for an executor under the behavior', async () => {
+      await store.writeDocument('guidelines.md', 'House style.');
+      const trimmed = await sysFor({ role: 'developer', force: true });
+      expect(trimmed).not.toContain('Shared documents library');
     });
   });
 });

@@ -140,11 +140,31 @@ describe('CapacityBroker', () => {
     // The 4 GB reserve binds at the small end where the fraction alone
     // would leave the OS too little.
     expect(autoDetectBudgetBytes(8 * GB, uma)).toBe(4 * GB);
-    // The fraction binds everywhere above it.
+    // The fraction binds in the middle, where its reserve is under 16 GiB.
     expect(autoDetectBudgetBytes(32 * GB, uma)).toBe(Math.floor(32 * GB * 0.7));
-    // Big Macs keep the workstation share they already had — no regression.
-    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(Math.floor(96 * GB * 0.8));
-    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(96 * GB);
+    // Above that the capped reserve binds instead: what macOS, the shell, and
+    // the user's apps need is absolute, so a bigger machine hands the extra
+    // to models rather than holding back a proportional share of it. The old
+    // curve stranded 19 GB on a 64 GB Mac and 32 GB on a 128 GB one.
+    expect(autoDetectBudgetBytes(64 * GB, uma)).toBe(64 * GB - 16 * GB);
+    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(96 * GB - 16 * GB);
+    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(112 * GB);
+    // The reserve is a ceiling, not a target — it never grows with the host.
+    expect(autoDetectBudgetBytes(512 * GB, uma)).toBe(512 * GB - 16 * GB);
+  });
+
+  it('raises admission capacity without raising peak concurrency', () => {
+    // The two must not move together: a bigger budget should let MORE MODELS
+    // fit, not give one model more simultaneous KV slots (that is the 27B-q8
+    // Metal abort below). Slot sizing keeps the pre-cap curve.
+    const uma = { unifiedMemory: true };
+    const big = computeCapacityBudget({ systemRamBytes: 128 * GB, ...uma });
+    expect(big.budgetBytes).toBe(112 * GB);
+    expect(big.concurrencySizingBytes).toBe(96 * GB);
+
+    // Where the reserve cap doesn't bind, the two agree.
+    const small = computeCapacityBudget({ systemRamBytes: 32 * GB, ...uma });
+    expect(small.concurrencySizingBytes).toBe(small.budgetBytes);
   });
 
   it('auto-detect kicks in when budgetBytes is omitted', () => {
@@ -311,6 +331,7 @@ describe('CapacityBroker', () => {
         vramBytes: 30 * GB,
         ramShareBytes: 38 * GB,
         fastBytes: 30 * GB,
+        concurrencySizingBytes: 30 * GB,
       },
     });
     expect(msg).toMatch(/keep models on the graphics card/);
@@ -356,7 +377,10 @@ describe('CapacityBroker', () => {
     expect(CapacityBroker.estimateResidentBytes('llama-cpp', 10 * GB)).toBe(
       Math.round(10 * GB * 1.2),
     );
-    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.3));
+    // Measured: `mx.get_active_memory()` after load(), before inference, on a
+    // 27.50 GiB model reads 27.47 GiB. The old 1.3 folded KV into the weights
+    // term; callers price KV explicitly, so it was a double-count.
+    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.05));
   });
 
   it('estimateResidentBytes caps ds4 at the streaming working set, not the weight size', () => {
@@ -511,12 +535,22 @@ describe('llamaCppSlotCeiling', () => {
 });
 
 describe('localEngineKvBudgetBytes', () => {
-  it('leaves less headroom for MLX than llama-cpp (heavier working set)', () => {
+  it('prices weights from measurement, and charges MLX its heavier working set as headroom', () => {
+    // This used to read "leaves less headroom for MLX than llama-cpp" and
+    // assert it through a 1.3x weights multiplier. That inverted the meaning
+    // of the number: MLX's weights are the LIGHTER of the two (0.999x
+    // measured, vs llama's unmeasured 1.2), and what is heavier is its
+    // per-wave compute working set. Both halves are now stated where they
+    // belong — weights here, working set in the slot ceiling's headroom — so
+    // the invariant that matters is still MLX <= llama in SLOTS.
     const base = { budgetBytes: 96 * GB, weightsBytes: 28 * GB };
-    const mlx = localEngineKvBudgetBytes({ engine: 'mlx', ...base });
-    const llama = localEngineKvBudgetBytes({ engine: 'llama-cpp', ...base });
-    expect(mlx).toBeLessThan(llama);
-    expect(mlx).toBe(96 * GB - Math.round(28 * GB * 1.3));
+    expect(localEngineKvBudgetBytes({ engine: 'mlx', ...base })).toBe(
+      96 * GB - Math.round(28 * GB * 1.05),
+    );
+    const slotInput = { ...base, perTurnCtxTokens: 32_768, kvCacheType: 'f16' as const };
+    expect(localEngineSlotCeiling({ engine: 'mlx', ...slotInput })).toBeLessThanOrEqual(
+      localEngineSlotCeiling({ engine: 'llama-cpp', ...slotInput }),
+    );
   });
 
   it('goes negative when the model overflows the budget', () => {
@@ -568,14 +602,45 @@ describe('localEngineSlotCeiling', () => {
     // the MLX slot ceiling this used defaultLocalEngineSlots()=4 → a width-4
     // engine gate → three co-resident sessions + a prefill aborted Metal
     // (SIGABRT — the "Python quit unexpectedly" crash). Must collapse to serial.
+    //
+    // Sized the way buildMlxProvider sizes it: against `concurrencySizingBytes`
+    // rather than the admission budget, and with the header-exact per-slot KV
+    // MLX reads from the model dir's config.json. Both matter — the raised
+    // reserve cap and the measured (1.0, not 1.3) weights multiplier each free
+    // memory that the weights-scaled KV heuristic, which under-prices a dense
+    // model ~3x, would happily spend on a second slot. buildMlxProvider pins
+    // the ceiling to 1 outright when geometry is unreadable, for that reason.
+    const budget = computeCapacityBudget({ systemRamBytes: 64 * GB, unifiedMemory: true });
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
+      budgetBytes: budget.fastBytes,
+      sizingBudgetBytes: budget.concurrencySizingBytes,
       weightsBytes: 28 * GB,
       perTurnCtxTokens: 32_768,
       kvCacheType: 'f16',
+      // 64 layers x 4 KV heads x 256 head_dim x 2 (K+V) x 2 B x 32K tokens.
+      exactPerSlotKvBytesF16: 64 * 4 * 256 * 2 * 2 * 32_768,
     });
     expect(n).toBe(1);
+  });
+
+  it('correcting the MLX weights multiplier does not buy a slot', () => {
+    // The trap in measuring 1.3x -> 1.0x: ~9 GB of phantom weights on a 27B
+    // was silently funding the compute-headroom margin, so an honest weights
+    // figure alone would have raised peak concurrency — the one outcome the
+    // margin exists to prevent. MLX carries its share of that margin openly
+    // instead, and the slot count is unchanged.
+    const budget = computeCapacityBudget({ systemRamBytes: 128 * GB, unifiedMemory: true });
+    const n = localEngineSlotCeiling({
+      engine: 'mlx',
+      budgetBytes: budget.fastBytes,
+      sizingBudgetBytes: budget.concurrencySizingBytes,
+      weightsBytes: 27.5 * GB,
+      perTurnCtxTokens: 65_536,
+      kvCacheType: 'f16',
+      exactPerSlotKvBytesF16: 64 * 4 * 256 * 2 * 2 * 65_536,
+    });
+    expect(n).toBe(2);
   });
 
   it('still allows real batching for a small model on a big machine', () => {
@@ -671,7 +736,8 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     const shared = computeCapacityBudget({ systemRamBytes: RAM, gpuVramBytes: 60 * GB });
     expect(shared.kind).toBe('unified');
     expect(shared.vramBytes).toBe(0);
-    expect(shared.budgetBytes).toBe(Math.floor(RAM * 0.7));
+    // Unified curve: the 16 GiB reserve cap, not the 0.7 fraction, at 64 GB.
+    expect(shared.budgetBytes).toBe(RAM - 16 * GB);
     expect(shared.fastBytes).toBe(shared.budgetBytes);
   });
 

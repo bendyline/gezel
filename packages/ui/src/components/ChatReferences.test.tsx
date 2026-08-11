@@ -181,7 +181,7 @@ describe('ChatReferences responsive split', () => {
       expect(container.querySelector('.chat-rail-body-split')).not.toBeNull();
     });
     expect(container.querySelector('aside')).not.toBeNull();
-    const panel = screen.getByTestId('commands-panel');
+    const panel = await screen.findByTestId('commands-panel');
     expect(panel).toBeInTheDocument();
     expect(panel).toHaveAttribute('data-section', 'skills');
     expect(panel).toHaveAttribute('data-stageable', 'false');

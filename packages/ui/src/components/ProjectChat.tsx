@@ -274,6 +274,25 @@ function ProjectChatBody({
   );
 
   /**
+   * Task-bar chip clicks move the composer AND the viewport. Pointing the
+   * composer at a thread does not scroll the timeline on its own — the
+   * timeline is project-wide and interleaved, so the clicked thread is
+   * usually somewhere above the fold. `requestKey` makes a second click on
+   * the same chip (after the user scrolled away again) a fresh request.
+   */
+  const [sessionFocusRequest, setSessionFocusRequest] = useState<{
+    sessionId: string;
+    requestKey: number;
+  } | null>(null);
+  const requestSessionFocus = useCallback((nextSessionId: string) => {
+    if (!nextSessionId) return;
+    setSessionFocusRequest((current) => ({
+      sessionId: nextSessionId,
+      requestKey: (current?.requestKey ?? 0) + 1,
+    }));
+  }, []);
+
+  /**
    * A task pill was clicked. Two things happen: the rail opens that task's
    * card, and the composer moves to the task's own thread. When the task
    * has no thread yet we deliberately do NOT mint one — we point the
@@ -289,6 +308,7 @@ function ProjectChatBody({
         const target = sessions.find((s) => !s.archived);
         if (target) {
           focusThread(target.id, target.gezelId, scope);
+          requestSessionFocus(target.id);
           return;
         }
       } catch {
@@ -300,7 +320,7 @@ function ProjectChatBody({
         setActiveTask(scope);
       }
     },
-    [focusThread],
+    [focusThread, requestSessionFocus],
   );
 
   // Reset session selection when the user switches gezel OR project. The
@@ -351,46 +371,51 @@ function ProjectChatBody({
       skillsProjectId={project.id}
       compact={compact}
       chatKey={`${project.id}:timeline`}
+      // The pill row is the status band for the whole conversation, not just
+      // the message column, so it spans the context pane as well.
+      banner={({ onTaskReference }) => (
+        <ChatPillRow
+          projectId={project.id}
+          gezels={recipientGezels}
+          activeSessionId={composeMode === 'chat' ? sessionId || undefined : undefined}
+          activeTaskRef={composeMode === 'chat' ? (activeTask?.ref ?? null) : null}
+          activeTerminalThreadId={composeMode === 'terminal' ? activeTerminalThreadId : null}
+          refreshKey={pillRefreshKey}
+          terminalRefreshKey={terminalRefreshKey}
+          onFocusThread={(pill) => {
+            focusThread(pill.sessionId, pill.gezelId, pill.taskRef ? { ref: pill.taskRef } : null);
+            requestSessionFocus(pill.sessionId);
+          }}
+          onFocusTask={(task) => {
+            onTaskReference(task.ref, { focus: true });
+            void focusTask(task);
+          }}
+          onFocusTerminal={(thread) => {
+            pickTerminalFolder(thread.workingDir);
+            setActiveTerminalThreadId(thread.id);
+            setComposeMode('terminal');
+            setTerminalFocusRequest((current) => ({
+              threadId: thread.id,
+              requestKey: (current?.requestKey ?? 0) + 1,
+            }));
+            // The thread anchor identifies the persistent shell, while its
+            // latest message records where that shell actually cd'd.
+            void api
+              .getTerminalThread(project.id, thread.id)
+              .then((detail) => {
+                const cwd = [...detail.messages]
+                  .reverse()
+                  .find((message) => message.cwd !== undefined)?.cwd;
+                if (cwd !== undefined) setTerminalPickerDisplay(cwd);
+              })
+              .catch(() => {});
+          }}
+          onNewTask={() => setNewTaskOpen(true)}
+        />
+      )}
     >
       {({ onToolActivity, onArtifactReference, onWorkspaceReference, onTaskReference }) => (
         <>
-          <ChatPillRow
-            projectId={project.id}
-            gezels={recipientGezels}
-            activeSessionId={composeMode === 'chat' ? sessionId || undefined : undefined}
-            activeTaskRef={composeMode === 'chat' ? (activeTask?.ref ?? null) : null}
-            activeTerminalThreadId={composeMode === 'terminal' ? activeTerminalThreadId : null}
-            refreshKey={pillRefreshKey}
-            terminalRefreshKey={terminalRefreshKey}
-            onFocusThread={(pill) =>
-              focusThread(pill.sessionId, pill.gezelId, pill.taskRef ? { ref: pill.taskRef } : null)
-            }
-            onFocusTask={(task) => {
-              onTaskReference(task.ref, { focus: true });
-              void focusTask(task);
-            }}
-            onFocusTerminal={(thread) => {
-              pickTerminalFolder(thread.workingDir);
-              setActiveTerminalThreadId(thread.id);
-              setComposeMode('terminal');
-              setTerminalFocusRequest((current) => ({
-                threadId: thread.id,
-                requestKey: (current?.requestKey ?? 0) + 1,
-              }));
-              // The thread anchor identifies the persistent shell, while its
-              // latest message records where that shell actually cd'd.
-              void api
-                .getTerminalThread(project.id, thread.id)
-                .then((detail) => {
-                  const cwd = [...detail.messages]
-                    .reverse()
-                    .find((message) => message.cwd !== undefined)?.cwd;
-                  if (cwd !== undefined) setTerminalPickerDisplay(cwd);
-                })
-                .catch(() => {});
-            }}
-            onNewTask={() => setNewTaskOpen(true)}
-          />
           <ProjectTimeline
             projectId={project.id}
             activeSessionId={sessionId || undefined}
@@ -408,6 +433,7 @@ function ProjectChatBody({
             terminalRefreshKey={terminalRefreshKey}
             {...(terminalSubmission ? { terminalSubmission } : {})}
             {...(terminalFocusRequest ? { terminalFocusRequest } : {})}
+            {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`

@@ -14,6 +14,13 @@ interface Props {
    * installed-model list it already holds. Unknown ids fall back to the id.
    */
   modelNames?: ReadonlyMap<string, string>;
+  /**
+   * Planned concurrent slots per `provider:modelId`. This belongs beside the
+   * reservation because each additional slot contributes another KV cache;
+   * naming the slot count makes a multi-slot reservation directly comparable
+   * with the model list's single-chat memory estimate.
+   */
+  modelConcurrentSlots?: ReadonlyMap<string, number>;
 }
 
 function poolLabel(kind: MachineMemoryUsage['kind']): string {
@@ -76,7 +83,14 @@ function describeCapacityPools(
   usage: MachineMemoryUsage,
   usesOnCardCeiling: boolean,
   residentReplicaCount: number,
+  physicalMemoryScale: { modelCapacityBytes: number; systemReserveBytes: number } | null,
 ): string | null {
+  if (physicalMemoryScale) {
+    const memoryLabel = usage.kind === 'unified' ? 'unified memory' : 'system RAM';
+    return `Scale: ~${formatBytes(physicalMemoryScale.modelCapacityBytes)} model capacity + ~${formatBytes(
+      physicalMemoryScale.systemReserveBytes,
+    )} system reserve = ${formatBytes(usage.totalBytes)} ${memoryLabel}`;
+  }
   const pools = usage.enginePools;
   if (!pools) return null;
   if (pools.kind === 'discrete-gpu') {
@@ -115,7 +129,7 @@ function describeCapacityPools(
  * ceiling; a single oversized model still uses the combined-pool denominator.
  * See the service-side note in `sampleMachineMemoryUsage`.
  */
-export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
+export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrentSlots }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [unloadingEngines, setUnloadingEngines] = useState<ReadonlySet<string>>(() => new Set());
@@ -269,27 +283,60 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const hasReservationMeter = usage.engineReservedBytes > 0 && effectiveReservationBudgetBytes > 0;
   const reservationNote =
     usage.engineReservedBytes > 0 && !hasReservationMeter ? describeReservation(usage) : null;
-  const capacityPoolSummary = describeCapacityPools(usage, usesOnCardCeiling, residentReplicaCount);
+  // Unified-memory and CPU inference draw from the same physical RAM shown in
+  // the live-use meter above. Use that physical total as this meter's scale as
+  // well, then show the part held back from models explicitly. A 98 GiB model
+  // reservation on a 128 GiB Mac with a 112 GiB model budget is therefore
+  // 98/128 wide, followed by 14 GiB of model headroom and a 16 GiB system
+  // reserve. Discrete-GPU capacity still spans two different pools, so its
+  // denominator remains the combined broker budget.
+  const usesPhysicalMemoryScale =
+    !usesOnCardCeiling &&
+    (usage.kind === 'unified' || usage.kind === 'ram') &&
+    effectiveReservationBudgetBytes <= usage.totalBytes;
+  const reservationScaleBytes = usesPhysicalMemoryScale
+    ? usage.totalBytes
+    : effectiveReservationBudgetBytes;
+  const systemReserveBytes = usesPhysicalMemoryScale
+    ? Math.max(0, usage.totalBytes - effectiveReservationBudgetBytes)
+    : 0;
+  const systemReservePercent = percent(systemReserveBytes, reservationScaleBytes);
+  const capacityPoolSummary = describeCapacityPools(
+    usage,
+    usesOnCardCeiling,
+    residentReplicaCount,
+    usesPhysicalMemoryScale
+      ? { modelCapacityBytes: effectiveReservationBudgetBytes, systemReserveBytes }
+      : null,
+  );
   const vramCapacityPercent =
     hasReservationMeter && usage.enginePools?.kind === 'discrete-gpu'
       ? percent(usage.enginePools.vramBytes, effectiveReservationBudgetBytes)
       : 0;
   const ramCapacityPercent =
-    hasReservationMeter && usage.enginePools
-      ? Math.min(
-          100 - vramCapacityPercent,
-          percent(usage.enginePools.ramShareBytes, effectiveReservationBudgetBytes),
-        )
-      : 0;
+    hasReservationMeter && usesPhysicalMemoryScale
+      ? percent(effectiveReservationBudgetBytes, reservationScaleBytes)
+      : hasReservationMeter && usage.enginePools
+        ? Math.min(
+            100 - vramCapacityPercent,
+            percent(usage.enginePools.ramShareBytes, effectiveReservationBudgetBytes),
+          )
+        : 0;
   const reservationSegments =
     residentModels.length > 0
-      ? residentModels.map((model) => ({
-          key: `${model.provider}:${model.modelId}`,
-          label: `${modelNames?.get(model.modelId) ?? model.modelId}${
-            model.replicaCount > 1 ? ` ×${model.replicaCount}` : ''
-          }`,
-          bytes: model.reservedBytes,
-        }))
+      ? residentModels.map((model) => {
+          const key = `${model.provider}:${model.modelId}`;
+          const slotsPerReplica = modelConcurrentSlots?.get(key);
+          const concurrentSlots =
+            slotsPerReplica !== undefined ? slotsPerReplica * model.replicaCount : undefined;
+          return {
+            key,
+            label: `${modelNames?.get(model.modelId) ?? model.modelId}${
+              model.replicaCount > 1 ? ` ×${model.replicaCount}` : ''
+            }${concurrentSlots !== undefined && concurrentSlots > 1 ? ` · ${concurrentSlots} concurrent` : ''}`,
+            bytes: model.reservedBytes,
+          };
+        })
       : [
           {
             key: 'all-models',
@@ -306,6 +353,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
         ...reservationSegments.map(
           (segment) => `${segment.label} about ${formatBytes(segment.bytes)} reserved`,
         ),
+        systemReserveBytes > 0 ? `System reserve about ${formatBytes(systemReserveBytes)}` : null,
         'Reservation is capacity planning, not measured use; it can include models that are not running',
       ]
         .filter(Boolean)
@@ -497,12 +545,20 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
                 />
               </span>
             )}
+            {systemReserveBytes > 0 && (
+              <span
+                className="machine-memory-reservation-system-reserve"
+                style={{ width: `${systemReservePercent}%` }}
+                title={`System reserve · ~${formatBytes(systemReserveBytes)}`}
+                aria-hidden
+              />
+            )}
             <span className="machine-memory-reservation-segments" aria-hidden>
               {reservationSegments.map((segment) => (
                 <i
                   key={segment.key}
                   className="machine-memory-reservation-segment"
-                  style={{ width: `${percent(segment.bytes, effectiveReservationBudgetBytes)}%` }}
+                  style={{ width: `${percent(segment.bytes, reservationScaleBytes)}%` }}
                   title={`${segment.label} · ~${formatBytes(segment.bytes)} reserved`}
                 />
               ))}
@@ -511,6 +567,13 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
               <i
                 className="machine-memory-reservation-boundary"
                 style={{ left: `${vramCapacityPercent}%` }}
+                aria-hidden
+              />
+            )}
+            {systemReservePercent > 0 && (
+              <i
+                className="machine-memory-reservation-boundary machine-memory-reservation-system-boundary"
+                style={{ left: `${100 - systemReservePercent}%` }}
                 aria-hidden
               />
             )}

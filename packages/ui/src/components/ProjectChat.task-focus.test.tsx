@@ -44,22 +44,33 @@ vi.mock('./TerminalComposer.js', () => ({
   TerminalComposer: () => <div data-testid="terminal" />,
   queueTerminalCommand: vi.fn(),
 }));
-// Pass-through rail: hand the render prop no-op callbacks and record the
-// task refs it was asked to focus.
+// Pass-through rail: hand both render props no-op callbacks and record the
+// task refs they were asked to focus. `banner` carries the pill row, so a
+// mock that only rendered `children` would drop every pill under test.
 const railFocusCalls = vi.hoisted(() => [] as Array<{ ref: string; focus?: boolean }>);
 vi.mock('./ChatReferences.js', () => ({
-  ChatReferences: ({ children }: { children: (api: Record<string, unknown>) => ReactNode }) => (
-    <div>
-      {children({
-        onToolActivity: vi.fn(),
-        onArtifactReference: vi.fn(),
-        onWorkspaceReference: vi.fn(),
-        onTaskReference: (ref: string, opts?: { focus?: boolean }) => {
-          railFocusCalls.push({ ref, ...(opts ?? {}) });
-        },
-      })}
-    </div>
-  ),
+  ChatReferences: ({
+    banner,
+    children,
+  }: {
+    banner?: (api: Record<string, unknown>) => ReactNode;
+    children: (api: Record<string, unknown>) => ReactNode;
+  }) => {
+    const api = {
+      onToolActivity: vi.fn(),
+      onArtifactReference: vi.fn(),
+      onWorkspaceReference: vi.fn(),
+      onTaskReference: (ref: string, opts?: { focus?: boolean }) => {
+        railFocusCalls.push({ ref, ...(opts ?? {}) });
+      },
+    };
+    return (
+      <div>
+        {banner?.(api)}
+        {children(api)}
+      </div>
+    );
+  },
 }));
 // Surface the scope props so a test can assert what the composer would send.
 vi.mock('./ChatComposer.js', () => ({

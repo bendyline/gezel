@@ -14,7 +14,7 @@ import {
   parseTaskRef,
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
-import type { ExternalFolders, TaskAssignee } from '@bendyline/gezel';
+import { type ExternalFolders, type TaskAssignee, resolveSecurityPolicy } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
@@ -36,9 +36,11 @@ import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
+import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
 import { registerGitHubReleasesAdapters } from './connectors/natives/github-releases.js';
 import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
+import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
@@ -1527,6 +1529,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       ...(task.nightShift?.enabled === true ? { nightShift: true } : {}),
       ...(newStep.lastActivatedAt ? { activationAt: newStep.lastActivatedAt } : {}),
       ...(fromGezel?.name ? { fromGezelName: fromGezel.name } : {}),
+      ...(prevGezelId ? { fromGezelId: prevGezelId } : {}),
     });
   });
 
@@ -1848,6 +1851,32 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       posture: (pol) => pol.allowExternalServices,
       syncProject: (p) => connectors.syncProject(p),
     },
+  });
+
+  // A craftbook that reads a connector corpus gets it pulled down at
+  // LAUNCH, before its first step's prompt is built — the gezel then
+  // reviews local artifact files instead of needing live API tools mid-turn.
+  // Registered here (rather than as a TaskManager dependency) so the task
+  // layer stays free of the connector subsystem.
+  registerGitHubPullsAdapters({
+    prs: gitHubPrs,
+    project: async (projectId) => {
+      const project = await store.getProject(projectId);
+      if (!project) throw new Error(`project ${projectId} not found`);
+      return project;
+    },
+  });
+  tasks.setConnectorPrepHook(async ({ projectId, craftbookId, connectors: needs, params }) => {
+    const prep = await runConnectorTaskPrep(
+      {
+        getProject: (id) => store.getProject(id),
+        sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
+        allowExternalServices: async () =>
+          resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
+      },
+      { projectId, craftbookId, connectors: needs, params },
+    );
+    return { params: prep.params, ...(prep.note ? { note: prep.note } : {}) };
   });
 
   // In-chat terminal: per-(project, workingDir) thread manager + its

@@ -2552,26 +2552,6 @@ export function SettingsView() {
             </section>
 
             <section className="provider-card">
-              <h3>Timeouts</h3>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires before
-                the model signals <code>session.idle</code>, the turn ends with a &ldquo;Turn
-                stopped before finishing&rdquo; banner. Bump this if tool-heavy gezellen (long shell
-                or Playwright chains) legitimately need longer. Leave blank to use the default (10
-                minutes).
-              </p>
-              <TimeoutRow
-                label="Hard turn timeout"
-                unit="minutes"
-                help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
-                value={copilotTurnTimeoutDraft}
-                onChange={setCopilotTurnTimeoutDraft}
-                configValue={config?.copilotTurnTimeoutMin}
-                onSave={() => void saveCopilotTurnTimeout()}
-              />
-            </section>
-
-            <section className="provider-card">
               <h3>Sandbox Copilot actions</h3>
               <p className="muted small" style={{ marginTop: 0 }}>
                 When on, new Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
@@ -2597,6 +2577,26 @@ export function SettingsView() {
                 />
                 <span>Sandbox Copilot to gezel tools only</span>
               </label>
+            </section>
+
+            <section className="provider-card">
+              <h3>Timeouts</h3>
+              <p className="muted small" style={{ marginTop: 0 }}>
+                Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires before
+                the model signals <code>session.idle</code>, the turn ends with a &ldquo;Turn
+                stopped before finishing&rdquo; banner. Bump this if tool-heavy gezellen (long shell
+                or Playwright chains) legitimately need longer. Leave blank to use the default (10
+                minutes).
+              </p>
+              <TimeoutRow
+                label="Hard turn timeout"
+                unit="minutes"
+                help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
+                value={copilotTurnTimeoutDraft}
+                onChange={setCopilotTurnTimeoutDraft}
+                configValue={config?.copilotTurnTimeoutMin}
+                onSave={() => void saveCopilotTurnTimeout()}
+              />
             </section>
 
             {copilotUsage && (

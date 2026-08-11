@@ -805,6 +805,7 @@ function craftbookManifestFromDoc(
     ...(doc.requirements ? { requirements: doc.requirements } : {}),
     ...(doc.runModes ? { runModes: doc.runModes } : {}),
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
+    ...(doc.connectors ? { connectors: doc.connectors } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
     availableVersions,
@@ -945,6 +946,7 @@ function mergeIdentityAndVersion(
       ...(version.requirements ? { requirements: version.requirements } : {}),
       ...(version.runModes ? { runModes: version.runModes } : {}),
       ...(version.toolsets ? { toolsets: version.toolsets } : {}),
+      ...(version.connectors ? { connectors: version.connectors } : {}),
       availableVersions,
     };
   }

@@ -1199,3 +1199,148 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(step?.prompt).toContain('{{reviewId}}');
   });
 });
+
+describe('connector-backed craftbooks', () => {
+  const bookWithConnector = {
+    id: 'pull-request-review',
+    name: 'Pull Request Review',
+    steps: [
+      {
+        id: 'report',
+        name: 'Review and write the report',
+        prompt: 'Read every record under `{{corpusScope}}/` for PR #{{number}}.',
+        advanceWhen: { file: 'reviews/pr-{{number}}/pr-review.md', artifact: true },
+        terminal: true,
+      },
+    ],
+    entryStepId: 'report',
+    connectors: [{ typeId: 'github-pulls', reason: 'pull the PR diff down' }],
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  };
+
+  const resolveConnectorBook = () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return { craftbook: { ...bookWithConnector, id }, sourceId: 'bundled' };
+      },
+    });
+  };
+
+  const bindConnector = async () => {
+    await store.updateProject('website', {
+      connectors: [
+        {
+          id: 'pulls-1',
+          type: 'github-pulls',
+          sourceId: 'bundled',
+          version: '1.0.0',
+          displayName: 'GitHub Pulls',
+          corpusDir: 'github-pulls',
+          config: {},
+        },
+      ],
+    });
+  };
+
+  it('refuses to launch when a required connector is not bound', async () => {
+    resolveConnectorBook();
+    await expect(
+      tasks.create('website', {
+        title: 'Review',
+        craftbookId: 'pull-request-review',
+        assignee: { kind: 'user' },
+      }),
+    ).rejects.toThrow(/SETUP REQUIRED.*github-pulls/s);
+    // No half-built task is left behind for the user to clean up.
+    expect(await tasks.list({ projectId: 'website' })).toEqual([]);
+  });
+
+  it('interpolates the prep params into step prompts and gate paths', async () => {
+    // The whole reason prep runs at launch: interpolation happens exactly
+    // once, so the corpus paths must be concrete before it.
+    resolveConnectorBook();
+    await bindConnector();
+    const seen: { craftbookId: string; typeIds: string[] }[] = [];
+    tasks.setConnectorPrepHook(async ({ craftbookId, connectors }) => {
+      seen.push({ craftbookId, typeIds: connectors.map((c) => c.typeId) });
+      return {
+        params: { number: '52', corpusScope: 'artifacts/data/github-pulls/pr-52' },
+        note: '# Connector data pulled for this run\n\n- PR #52',
+      };
+    });
+
+    const task = await tasks.create('website', {
+      title: 'Review',
+      craftbookId: 'pull-request-review',
+      assignee: { kind: 'user' },
+    });
+
+    expect(seen).toEqual([{ craftbookId: 'pull-request-review', typeIds: ['github-pulls'] }]);
+    const step = task.craftbook.steps[0]!;
+    expect(step.prompt).toBe(
+      'Read every record under `artifacts/data/github-pulls/pr-52/` for PR #52.',
+    );
+    expect(step.advanceWhen?.file).toBe('reviews/pr-52/pr-review.md');
+    expect(task.craftbookParams).toMatchObject({ number: '52' });
+    expect(task.craftbook.connectors).toEqual([
+      { typeId: 'github-pulls', reason: 'pull the PR diff down' },
+    ]);
+
+    const notes = await tasks.listNotes('website', task.num);
+    expect(notes.some((n) => n.text.includes('Connector data pulled'))).toBe(true);
+  });
+
+  it('an explicit param survives prep that does not override it', async () => {
+    resolveConnectorBook();
+    await bindConnector();
+    tasks.setConnectorPrepHook(async ({ params }) => ({
+      params: { corpusScope: `artifacts/data/github-pulls/pr-${params.number}` },
+    }));
+    const task = await tasks.create('website', {
+      title: 'Review',
+      craftbookId: 'pull-request-review',
+      assignee: { kind: 'user' },
+      craftbookParams: { number: '41' },
+    });
+    expect(task.craftbook.steps[0]!.prompt).toContain('artifacts/data/github-pulls/pr-41');
+    expect(task.craftbook.steps[0]!.prompt).toContain('PR #41');
+  });
+
+  it('a prep failure fails the launch instead of creating an empty-corpus task', async () => {
+    resolveConnectorBook();
+    await bindConnector();
+    tasks.setConnectorPrepHook(async () => {
+      throw new Error('Could not pull down PR #52: rate limited');
+    });
+    await expect(
+      tasks.create('website', {
+        title: 'Review',
+        craftbookId: 'pull-request-review',
+        assignee: { kind: 'user' },
+      }),
+    ).rejects.toThrow(/rate limited/);
+    expect(await tasks.list({ projectId: 'website' })).toEqual([]);
+  });
+
+  it('an optional connector need never blocks the launch', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithConnector,
+            id,
+            connectors: [{ typeId: 'github-pulls', optional: true }],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Review',
+      craftbookId: 'pull-request-review',
+      assignee: { kind: 'user' },
+    });
+    expect(task.status).toBe('active');
+  });
+});

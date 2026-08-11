@@ -93,7 +93,14 @@ describe('memoryProfileForLlamaGpu', () => {
     });
     expect(result.gpuMemoryKind).toBe('unified');
     expect(result.source).toBe('gpu-vulkan');
-    expect(result.budgetBytes).toBeLessThanOrEqual(96 * GiB);
+    // The distinction that matters is that its 119 GiB is the SAME memory as
+    // the host's 121 GiB, so it is never added on top — a discrete card of
+    // that size would be scored near 232 GiB. This used to be asserted as
+    // "<= 96 GiB", which was the old flat cap standing in for the unified
+    // curve; the curve now holds back a 16 GiB reserve instead, so pin the
+    // real invariant rather than a constant that moved.
+    expect(result.budgetBytes).toBe(121 * GiB - 16 * GiB);
+    expect(result.budgetBytes).toBeLessThan(121 * GiB);
   });
 });
 

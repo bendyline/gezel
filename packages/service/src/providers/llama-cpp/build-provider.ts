@@ -464,6 +464,9 @@ export async function buildLlamaCppProvider(opts: {
   const ceilingFor = (kv: LlamaCppKvCacheType) =>
     llamaCppSlotCeiling({
       budgetBytes,
+      sizingBudgetBytes: brokerSnap?.enforced
+        ? brokerSnap.pools.concurrencySizingBytes
+        : computeCapacityBudget().concurrencySizingBytes,
       weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
       perTurnCtxTokens: effectiveNumCtx,
       kvCacheType: kv,

@@ -307,12 +307,18 @@ describe('engines routes', () => {
   it('reads and persists per-model context overrides, resetting engines on change', async () => {
     let config: { modelContextOverrides?: Record<string, number> } = {};
     const resetCalls: Array<{ deferBusy?: boolean }> = [];
+    // ds4 prices its broker reservation at the launch window, so the override
+    // route must drop the cached resident bytes alongside the engine reset.
+    const residentInvalidations: Array<[string | undefined, string | undefined]> = [];
     const app = makeApp(
       {
         engineStatus: async () => null,
         reconcileEnginePool: async () => {},
         resetClient: async (opts: { deferBusy?: boolean }) => {
           resetCalls.push(opts);
+        },
+        invalidateResidentBytesCache: (provider?: string, modelId?: string) => {
+          residentInvalidations.push([provider, modelId]);
         },
       } as Parameters<typeof makeApp>[0],
       {
@@ -346,6 +352,7 @@ describe('engines routes', () => {
     });
     expect(config.modelContextOverrides).toEqual({ 'llama-cpp:qwen3.6-27b-q4': 98_304 });
     expect(resetCalls).toEqual([{ deferBusy: true }]);
+    expect(residentInvalidations).toEqual([['llama-cpp', 'qwen3.6-27b-q4']]);
 
     // Same value again — no engine churn.
     await app.request('/api/engines/llama-cpp/model-context/qwen3.6-27b-q4', {

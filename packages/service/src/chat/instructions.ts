@@ -662,31 +662,45 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       // list used to be unconditional, so a Chief Security Officer whose
       // roster has no `search_code` was still told to use it — one of the
       // `directive-missing-tool` warnings this build logs, and the drift
-      // ADR 0001 exists to prevent. The *sentence* still stands either
-      // way: these names come from an installed third-party GitHub
-      // toolset, whose tool names never appear in the predicted roster,
-      // so an empty intersection means "can't confirm", not "absent".
+      // ADR 0001 exists to prevent.
+      //
+      // The probe covers BOTH vocabularies: the first-party `github_pr_*`
+      // builtins and the third-party toolset's names. It used to list only
+      // the latter, so a project holding the built-in PR tools always
+      // missed and fell through to a blanket "the `github_*` tools on your
+      // function schema" — which was simply false whenever the surface had
+      // narrowed, and taught the model to call tools it did not have.
       const githubTools = toolsFrom([
+        'github_pr_list',
+        'github_pr_view',
+        'github_pr_diff',
+        'github_pr_files',
         'get_pull_request',
         'list_pull_requests',
         'get_issue',
         'search_code',
         'add_issue_comment',
       ]);
-      if (!trimExecutor) {
+      // An installed third-party GitHub toolset is the one case where an
+      // empty intersection means "can't confirm" rather than "absent":
+      // its tool names only exist after the bridge spawns. Without one,
+      // an empty intersection IS absence — say nothing rather than point
+      // the model at tools the surface has already narrowed away.
+      const githubToolsetInstalled = installedToolsetIds?.has('github') ?? false;
+      if (!trimExecutor && (githubTools.length > 0 || githubToolsetInstalled)) {
         const named =
           githubTools.length > 0
             ? `${formatToolList(githubTools)}, …`
-            : 'the `github_*` / PR + issue tools on your function schema';
+            : 'the PR + issue tools on your function schema';
         lines.push(
           `Use the GitHub toolset (${named}) for repo and PR actions; treat the owner/repo above as the default.`,
         );
       }
       projectContext += lines.join('\n');
     }
-    // Connected data: name each connector binding's corpus so gezels find
-    // synced mail/events/issues without stumbling over the directory in
-    // list_dir. Kept terse (one line per binding, capped) — prompt budget
+    // Connected data: name each connector binding's artifact corpus so gezels
+    // find synced mail/events/issues with the artifact tools. Kept terse (one
+    // line per binding, capped) — prompt budget
     // compounds at depth. Absent entirely when no bindings exist, so
     // no-connector prompts stay byte-identical (prefix-cache stability).
     const bindings = (project.connectors ?? []).filter((b) => !b.disabled);
@@ -694,15 +708,15 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       const shown = bindings.slice(0, 8);
       const lines = shown.map((b) => {
         const label = b.displayName ?? b.type;
-        const corpus = b.corpusDir ?? 'data/';
+        const corpus = b.corpusDir ?? 'data';
         const synced = b.lastSyncedAt
           ? `, synced ${b.lastSyncedAt.slice(0, 10)}`
           : ', not synced yet';
-        return `- **${label}** (${b.type}${synced}): \`${corpus}/\``;
+        return `- **${label}** (${b.type}${synced}): \`artifacts/${corpus.replace(/\/$/, '')}/\``;
       });
       if (bindings.length > shown.length)
         lines.push(`- …and ${bindings.length - shown.length} more`);
-      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project as readable files:\n${lines.join('\n')}\nThese directories are read-only mirrors — write analysis elsewhere (e.g. artifacts). To change something at the source, draft a connector action for the user to approve.`;
+      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths. These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
     }
     // Gezels split four ways here based on what they can actually
     // touch in the workspace:

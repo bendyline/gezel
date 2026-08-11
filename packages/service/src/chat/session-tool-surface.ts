@@ -11,6 +11,7 @@ import {
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
 import type { LocalModelTier } from './local-model-tier.js';
+import { promptMandatedTools } from './prompt-tool-contract.js';
 import {
   type WebSearchBackendName,
   computeToolAllowlist,
@@ -33,6 +34,28 @@ import {
   stepToolKitDisabled,
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
+
+/**
+ * Procedure-text scanning is lexical and re-runs on every turn of a
+ * long-lived step, so cache it by prompt text. Bounded because a daemon
+ * accumulates steps across tasks over a long uptime.
+ */
+const MANDATED_TOOL_CACHE = new Map<string, ReadonlySet<string>>();
+const MANDATED_TOOL_CACHE_MAX = 256;
+
+function stepMandatedTools(step: { prompt?: string } | undefined): ReadonlySet<string> {
+  const prompt = step?.prompt;
+  if (!prompt) return new Set<string>();
+  const cached = MANDATED_TOOL_CACHE.get(prompt);
+  if (cached) return cached;
+  const resolved = promptMandatedTools(prompt);
+  if (MANDATED_TOOL_CACHE.size >= MANDATED_TOOL_CACHE_MAX) {
+    const oldest = MANDATED_TOOL_CACHE.keys().next();
+    if (!oldest.done) MANDATED_TOOL_CACHE.delete(oldest.value);
+  }
+  MANDATED_TOOL_CACHE.set(prompt, resolved);
+  return resolved;
+}
 
 export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
@@ -108,6 +131,7 @@ export interface ResolveSessionToolSurfaceOptions {
     | 'lastGateReject'
     | 'gateAttemptHistory'
     | 'suggestedRole'
+    | 'prompt'
   >;
   /**
    * Deterministic tool invoked by a fixed-function session. Keep it through
@@ -314,6 +338,14 @@ export async function resolveSessionToolSurface(
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
       ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
+      // The kit is authored around a deliverable CLASS, so it cannot know
+      // that a PR-review step must first call `github_pr_diff` or that a
+      // deploy step needs `run_git`. Whatever the step's own procedure
+      // positively instructs stays callable. Widening is safe here by
+      // construction: this is an intersection over a surface the role,
+      // security, consent, and workspace-write filters already produced —
+      // a tool those layers removed cannot come back.
+      ...stepMandatedTools(opts.activeStep),
       'ask_user_question',
     ]);
     rawAllowlist = new Set([...rawAllowlist].filter((name) => keep.has(name)));

@@ -30,10 +30,27 @@ def _tool(name, props):
 
 
 # create_project + write_file declare params; list_projects declares none.
+# All flat scalars — no tool here wants an object/array argument.
 TOOLS = [
     _tool("create_project", {"name": {"type": "string"}, "description": {"type": "string"}}),
     _tool("list_projects", {}),
     _tool("write_file", {"path": {"type": "string"}, "content": {"type": "string"}}),
+]
+
+# DocBlocks-shaped: `source` is an object and `targets` is an array, neither
+# of which the flat `<parameter=KEY>text</parameter>` shape can carry.
+STRUCTURAL_TOOLS = TOOLS + [
+    _tool(
+        "convert_document",
+        {
+            "source": {
+                "type": "object",
+                "properties": {"kind": {"type": "string"}, "path": {"type": "string"}},
+            },
+            "targets": {"type": "array", "items": {"type": "object"}},
+            "autoTemplates": {"type": "boolean"},
+        },
+    ),
 ]
 
 
@@ -71,6 +88,46 @@ def test_name_only_mode_is_simpler_tier1():
     # per-tool or constrain <parameter=> keys.
     assert "NAME:" in g and "fn_0" not in g
     assert "create_project" in g and "write_file" in g
+
+
+def test_structural_params_detection():
+    assert tg._has_structural_params(TOOLS) is False
+    assert tg._has_structural_params(STRUCTURAL_TOOLS) is True
+    # A `$ref` we can't resolve counts as structural: widening the grammar
+    # is harmless, keeping the model pinned in an unrepresentable shape
+    # is not.
+    assert tg._has_structural_params([_tool("x", {"a": {"$ref": "#/$defs/Y"}})]) is True
+    # anyOf branches are inspected, not just the top-level `type`.
+    assert (
+        tg._has_structural_params(
+            [_tool("x", {"a": {"anyOf": [{"type": "string"}, {"type": "array"}]}})]
+        )
+        is True
+    )
+
+
+def test_json_escape_only_when_a_tool_wants_structure():
+    """The `<parameter=KEY>text</parameter>` shape is a flat KEY→text map and
+    cannot carry a nested object/array. When a wired tool declares one, the
+    grammar must also admit a raw JSON body inside `<tool_call>` — otherwise
+    the model is pinned into a shape in which no valid call exists and it
+    retries forever (wild-caught: 19 attempts on one craftbook step).
+    """
+    for mode in ("name-and-params", "name-only"):
+        flat = tg.build_grammar_string(TOOLS, {"format": "hermes", "mode": mode})
+        structural = tg.build_grammar_string(
+            STRUCTURAL_TOOLS, {"format": "hermes", "mode": mode}
+        )
+        assert LLMatcher.validate_grammar(flat) == "", mode
+        assert LLMatcher.validate_grammar(structural) == "", mode
+        # Flat rosters keep the tight grammar — no escape hatch, no cost.
+        assert "JSONCALL" not in flat, mode
+        assert "JSONCALL" in structural, mode
+        # The Hermes branch survives alongside it, so function names stay
+        # pinned when the model does use the markup shape.
+        assert "<function=" in structural, mode
+        assert "create_project" in structural, mode
+        assert "totally_fake" not in structural, mode
 
 
 def test_gemma_name_only_well_formed():

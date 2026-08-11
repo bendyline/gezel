@@ -131,6 +131,44 @@ describe('Ds4ModelManager', () => {
     expect(screen.getByText(/754B · download 197 GB/)).toBeInTheDocument();
   });
 
+  it('quotes the launch window and its memory cost on models that are not downloaded', async () => {
+    // A ds4 download runs to hundreds of GB, so the window it would run at and
+    // what that window costs have to be on the row BEFORE the download starts.
+    // Neither is knowable from the installed list — that only speaks for what
+    // is already on disk.
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'darwin',
+      totalRamBytes: 128 * GiB,
+      gpuVramBytes: null,
+      source: 'darwin-unified',
+      usableBytes: Math.floor(128 * GiB * 0.6),
+    });
+    vi.mocked(api.listDs4ContextPlans).mockResolvedValue({
+      plans: {
+        'deepseek-v4-flash-284b-q2': {
+          effectiveContextWindow: 131_072,
+          contextCeilingTokens: 262_144,
+          // 35 GiB context-free + 8192 B/token x 131072 = 36 GiB.
+          projectedResidentBytes: 36 * GiB,
+          kvBytesPerToken: 8192,
+          contextFreeResidentBytes: 35 * GiB,
+        },
+      },
+    } as never);
+
+    render(<Ds4ModelManager />);
+
+    expect(await screen.findByText(/context 128K/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/memory target ≈ 36 GB at 128K context, with SSD streaming/),
+    ).toBeInTheDocument();
+    // No plan for the FP4 row — it keeps the flat authored footprint and
+    // claims no relationship to the window.
+    expect(screen.getByText(/memory target ≈ 80 GB with SSD streaming/)).toBeInTheDocument();
+    // Nothing is installed, so there is no override to adjust yet.
+    expect(screen.queryByRole('button', { name: 'Adjust' })).not.toBeInTheDocument();
+  });
+
   it('does not offer installation when fixed model state cannot preserve system headroom', async () => {
     vi.mocked(api.getMemoryProfile).mockResolvedValue({
       platform: 'darwin',

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -717,6 +718,12 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
    * {@link CraftbookToolsetNeedSchema}.
    */
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+  /**
+   * Connector dependencies this craftbook declares. The launcher binds +
+   * syncs them so the first step reads a local corpus instead of calling a
+   * live API. See {@link CraftbookConnectorNeedSchema}.
+   */
+  connectors: z.array(CraftbookConnectorNeedSchema).optional(),
 });
 export type CraftbookTemplateVersionManifest = z.infer<
   typeof CraftbookTemplateVersionManifestSchema
@@ -777,6 +784,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   runModes: CraftbookRunModesSchema.optional(),
   /** Toolset dependencies (mirrored from the version manifest). */
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+  /** Connector dependencies (mirrored from the version manifest). */
+  connectors: z.array(CraftbookConnectorNeedSchema).optional(),
 });
 export type CraftbookTemplateManifest = z.infer<typeof CraftbookTemplateManifestSchema>;
 
@@ -1336,8 +1345,32 @@ export const ChatModelDs4SourceSchema = z
      * from `approxSizeBytes`. Absent → broker falls back to a conservative
      * streaming default (see `CapacityBroker.estimateResidentBytes('ds4')`),
      * so a 64GB box is never told an 87GB DeepSeek-V4 model can't fit.
+     *
+     * This is a footprint at ONE context window — {@link residentCtxTokens}.
+     * Pair it with {@link kvBytesPerToken} to price any other window.
      */
     residentBytes: z.number().int().positive().optional(),
+    /**
+     * Resident bytes each context token costs: ds4's compressed KV rows plus
+     * the context buffers that scale with the window. ds4-server prints the
+     * split at load —
+     * `memory: KV 1.36 GiB (raw 0.36 + compressed 1.00) + buffers 1.00 GiB + …`
+     * with `memory detail: ctx=… compressed_kv_rows=…` beneath it — so author
+     * this from a real launch, not from an architecture guess.
+     *
+     * ds4 spills COLD context to SSD, which is why the slope is far below a
+     * llama.cpp-class KV: DeepSeek V4 Flash's DSA costs ~8 KiB/token where
+     * GLM 5.2's MLA costs ~89 KiB/token. Absent → the footprint is treated as
+     * flat and the UI says so instead of drawing a line it can't justify.
+     */
+    kvBytesPerToken: z.number().int().positive().optional(),
+    /**
+     * The launch `--ctx` {@link residentBytes} was measured at. Only meaningful
+     * alongside {@link kvBytesPerToken}: together they re-base the authored
+     * footprint onto whatever window this device actually launches with —
+     * `residentBytes + kvBytesPerToken × (ctx − residentCtxTokens)`.
+     */
+    residentCtxTokens: z.number().int().positive().optional(),
     /** Short quant tag for display ('IQ2_XXS', 'Q4_K', …). */
     quantization: z.string().optional(),
     /**

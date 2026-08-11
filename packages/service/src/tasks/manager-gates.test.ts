@@ -1231,6 +1231,61 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     ).toBe(true);
   });
 
+  it('pauses at activation, before any gezel is dispatched to an unwritable deliverable', async () => {
+    // The reactive pause needs an `advance_task_step` call to fire. A
+    // stalled gezel never makes one (Pull Request Review: it asked which
+    // PR to review and the task sat active), so the step is judged when
+    // it activates instead.
+    await store.updateProject('default', { allowGezelWrites: false });
+    const task = await tasks.create('default', {
+      title: 'Dependency audit',
+      description: 'entry step targets a workspace file nobody can write.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+      }),
+    });
+
+    expect(task.status).toBe('paused');
+    const stored = await tasks.get('default', task.num);
+    expect(stored!.status).toBe('paused');
+    const notes = await tasks.listNotes('default', task.num, task.craftbook.steps[0]!.id);
+    expect(notes.some((n) => n.text.includes('Step unsatisfiable — task paused'))).toBe(true);
+    expect(
+      notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory')),
+    ).toBe(true);
+  });
+
+  it('does not pre-pause a verify-only step whose file already exists', async () => {
+    // Writes-off does not make every workspace gate unwinnable: a step
+    // that only INSPECTS an existing file can still pass. Only a
+    // deliverable that must be created (or changed) is hopeless.
+    await writeWorkspaceFile('notes/scan.md', 'x'.repeat(200));
+    await store.updateProject('default', { allowGezelWrites: false });
+    const task = await tasks.create('default', {
+      title: 'Verify the scan',
+      description: 'gate over a file that is already on disk.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+      }),
+    });
+
+    expect(task.status).toBe('active');
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+      undefined,
+      {
+        cause: 'model',
+      },
+    );
+    expect(outcome.status).toBe('advanced');
+  });
+
   it('a drawer-targeted gate stays repairable on a writes-off project', async () => {
     await store.updateProject('default', { allowGezelWrites: false });
     const task = await tasks.create('default', {

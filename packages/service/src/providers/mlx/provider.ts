@@ -93,6 +93,7 @@ import {
   StreamingSessionBase,
 } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
+import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -689,11 +690,17 @@ export class MlxProvider implements LLMProvider {
   }
 
   /**
-   * Sample mlx_lm.server's resident-set size a moment after it reports
-   * itself ready — mlx_lm doesn't log buffer allocations the way
-   * llama.cpp does, so RSS is the cheapest proxy for "how much RAM
-   * is this engine using". We delay 2s so memory-mapped weights have
-   * settled; earlier samples undercount.
+   * Sample how much memory the engine is holding, a moment after it reports
+   * itself ready — mlx_lm doesn't log buffer allocations the way llama.cpp
+   * does. We delay 2s so memory-mapped weights have settled; earlier samples
+   * undercount.
+   *
+   * Physical footprint, not RSS. Metal's unified-memory allocations — KV,
+   * activation buffers, MLX's retained buffer cache — never appear in RSS, so
+   * RSS reported 30 GB for an engine whose real footprint was ~103 GB, and
+   * the pill disagreed 3.6x with the memory strip (which samples footprint)
+   * about the same process. RSS stays as the fallback for hosts where
+   * `footprint` is unavailable; it is a floor, not a lie.
    */
   private scheduleEngineStatsSample(): void {
     if (this.engineStatsPending) return;
@@ -703,7 +710,11 @@ export class MlxProvider implements LLMProvider {
       try {
         const pid = this.supervisor?.currentChildPid();
         if (!pid) return;
-        const rssBytes = await readProcessRssBytes(pid);
+        const { sampleDarwinProcessFootprintBytes } = await import(
+          '../../system/gezel-process-memory.js'
+        );
+        const footprintBytes = await sampleDarwinProcessFootprintBytes({ pid });
+        const rssBytes = footprintBytes ?? (await readProcessRssBytes(pid));
         if (rssBytes === null) return;
         const stats: EngineStatsEvent = { provider: 'mlx', ramAllocBytes: rssBytes };
         this.lastEngineStats = stats;
@@ -1204,6 +1215,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const knownToolNames = new Set(
       (tools ?? []).map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
     );
+    // Tool-name → declared input schema, so salvaged calls can have
+    // structural arguments the markup formats flattened into strings
+    // reinterpreted before anything else reads them. The Hermes /
+    // Claude / GLM / XML shapes are all flat KEY→text maps and cannot
+    // carry a nested object or array; without this the model's correct
+    // JSON reaches the validator as `got string, expected object` and
+    // it loops re-emitting the same call. See tool-arg-schema-coercion.ts.
+    const toolArgSchemas = new Map<string, Record<string, unknown>>();
     // Param-name → owning-tool-names index, so an unknown-tool nudge can
     // catch the model naming a PARAMETER as the function (e.g. `description`
     // is an argument of `start_project`, not a tool). Built once per send.
@@ -1211,8 +1230,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     for (const t of tools ?? []) {
       const tname = chatCompletionToolName(t);
       if (!tname) continue;
-      const props = (t.function.parameters as { properties?: Record<string, unknown> } | undefined)
-        ?.properties;
+      const schema = t.function.parameters as Record<string, unknown> | undefined;
+      if (schema) toolArgSchemas.set(tname, schema);
+      const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
       if (!props) continue;
       for (const param of Object.keys(props)) {
         const arr = toolParamIndex.get(param);
@@ -2562,7 +2582,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 : split.reasoning;
           }
         }
-        const toolCalls = [
+        const mergedCalls = [
           ...structuredCalls,
           ...repairedCalls,
           ...proseRepaired,
@@ -2576,6 +2596,19 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           ...bareInvokeRepaired,
           ...codeBlockRepaired,
         ];
+        // Every markup salvage format above is a flat KEY→text map, so a
+        // parameter declared `object`/`array` arrives as a string. Repair
+        // against the declared schema here, at the one place all the
+        // salvage passes converge, so the structural shape is what gets
+        // logged, recorded, and dispatched. Schema-gated: a genuine
+        // string argument (a JSON file's `content`) is never touched.
+        const coerced = coerceToolCallArgs(mergedCalls, (n) => toolArgSchemas.get(n));
+        for (const r of coerced.repaired) {
+          log.info(
+            `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
+          );
+        }
+        const toolCalls = coerced.calls as typeof mergedCalls;
         if (rambleAborted && toolCalls.length === 0) {
           // If ctrl.abort() races with mlx-vlm closing the SSE stream,
           // the for-await loop can exit cleanly instead of throwing an

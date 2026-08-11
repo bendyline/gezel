@@ -182,7 +182,7 @@ describe('ModelContextSliderPanel', () => {
     expect(screen.queryByText(/Bigger than what fits right now/)).not.toBeInTheDocument();
   });
 
-  it('explains ds4 instead of pretending a memory estimate', () => {
+  it('says so rather than pretending an estimate for an unmeasured ds4 model', () => {
     render(
       <ModelContextSliderPanel
         engine="ds4"
@@ -195,12 +195,38 @@ describe('ModelContextSliderPanel', () => {
         }}
       />,
     );
-    expect(screen.getByText(/streams cold context to disk/)).toBeInTheDocument();
+    expect(screen.getByText(/memory-per-token yet/)).toBeInTheDocument();
     expect(screen.queryByText(/in memory/)).not.toBeInTheDocument();
     // The slider's max is the catalog launch ceiling, not the native window.
     expect(screen.getByRole('slider', { name: /deepseek-v4-flash/ })).toHaveAttribute(
       'max',
       String(262_144),
     );
+  });
+
+  it('prices a ds4 drag from the catalog-authored KV slope', () => {
+    // ds4's footprint is dominated by the routed-expert cache, so the whole
+    // point of the readout is that a 128K -> 256K drag is ~1 GB, not ~35 GB.
+    // A row that quoted the flat catalog target here would tell the user
+    // nothing about the choice they're making.
+    render(
+      <ModelContextSliderPanel
+        engine="ds4"
+        model={{
+          id: 'deepseek-v4-flash',
+          approxSizeBytes: 81 * GiB,
+          contextWindow: 1_000_000,
+          contextCeilingTokens: 262_144,
+          effectiveContextWindow: 131_072,
+          weightsResidentBytes: 35 * GiB,
+          kvFixedBytesPerSlot: 0,
+          kvBytesPerTokenPerSlot: 8192,
+        }}
+      />,
+    );
+    // 35 GiB + 8192 B x 131072 = 36.0 GB at the automatic window.
+    expect(screen.getByText(/~36\.0 GB in memory/)).toBeInTheDocument();
+    expect(screen.getByText(/8 MB per 1K tokens/)).toBeInTheDocument();
+    expect(screen.queryByText(/memory-per-token yet/)).not.toBeInTheDocument();
   });
 });

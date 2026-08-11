@@ -9,10 +9,12 @@
  * a draft that is `null` while following automatic, an "Auto" marker tick
  * on the track, explicit Save, and a first-class "Back to automatic".
  *
- * Engine-generic: llama-cpp and MLX rows carry a KV linearization so the
- * memory readout moves live while the slider drags; ds4 rows don't (its
- * resident set is context-independent — cold KV streams to disk), so the
- * panel says that instead of pretending a number.
+ * Engine-generic: every engine carries a KV linearization so the memory
+ * readout moves live while the slider drags. ds4's comes from its catalog
+ * entry rather than a GGUF header, and is far shallower than a llama.cpp-class
+ * KV because cold context spills to SSD. A row with no linearization at all
+ * (an unmeasured ds4 entry, an older daemon) says so instead of pretending a
+ * number.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -339,8 +341,15 @@ export function ModelContextSliderPanel({
 
       {kvPerToken === undefined && engine === 'ds4' && (
         <p className="muted small">
-          This model streams cold context to disk, so resident memory stays about the same at any
-          window size.
+          Nobody has measured this model's memory-per-token yet, so the footprint above can't be
+          re-priced as you drag. Cold context streams to disk, so expect it to move far less than
+          the window does.
+        </p>
+      )}
+      {kvPerToken !== undefined && engine === 'ds4' && (
+        <p className="muted small">
+          ds4 streams cold context to disk, so only part of the window stays resident —
+          {` ${formatBytes(kvPerToken * 1024)} per 1K tokens`} for this model.
         </p>
       )}
       {overFit && (

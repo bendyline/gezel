@@ -134,13 +134,13 @@ beforeEach(() => {
 });
 
 describe('ChatPillRow', () => {
-  it('shows an empty state and still offers the + button', async () => {
+  it('shows an empty state and still offers the Do + button', async () => {
     renderRow();
     expect(await screen.findByText('No recent threads')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'New task' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'New task' })).toHaveTextContent('Do +');
   });
 
-  it('hides the + button when the surface cannot create tasks', async () => {
+  it('hides the Do + button when the surface cannot create tasks', async () => {
     renderRow({ onNewTask: undefined });
     await screen.findByText('No recent threads');
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
@@ -379,5 +379,74 @@ describe('ChatPillRow', () => {
       { timeout: 3000 },
     );
     expect(vi.mocked(api.listProjectTasks).mock.calls.length).toBeGreaterThan(before);
+  });
+
+  describe('overflow bar', () => {
+    // jsdom reports every scroll metric as 0, so the strip can never look
+    // overflowed on its own.
+    function stubScrollMetrics(scrollWidth: number, clientWidth: number) {
+      const scrollWidthDescriptor = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'scrollWidth',
+      );
+      const clientWidthDescriptor = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'clientWidth',
+      );
+      Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+        configurable: true,
+        get() {
+          return (this as HTMLElement).classList.contains('chat-pill-row-scroll')
+            ? scrollWidth
+            : (scrollWidthDescriptor?.get?.call(this) ?? 0);
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+        configurable: true,
+        get() {
+          return (this as HTMLElement).classList.contains('chat-pill-row-scroll')
+            ? clientWidth
+            : (clientWidthDescriptor?.get?.call(this) ?? 0);
+        },
+      });
+      return () => {
+        if (scrollWidthDescriptor)
+          Object.defineProperty(HTMLElement.prototype, 'scrollWidth', scrollWidthDescriptor);
+        if (clientWidthDescriptor)
+          Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthDescriptor);
+      };
+    }
+
+    it('sizes a thumb to the visible fraction when the pills overflow', async () => {
+      const restore = stubScrollMetrics(1000, 250);
+      try {
+        vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
+        const { container } = renderRow();
+        await screen.findByRole('button', { name: /^Esra: Thread s1\./ });
+
+        const thumb = await waitFor(() => {
+          const found = container.querySelector<HTMLElement>('.chat-pill-row-bar-thumb');
+          expect(found).not.toBeNull();
+          return found as HTMLElement;
+        });
+        expect(thumb.style.width).toBe('25%');
+        expect(thumb.style.left).toBe('0%');
+      } finally {
+        restore();
+      }
+    });
+
+    it('stays out of the band while every pill fits', async () => {
+      const restore = stubScrollMetrics(250, 250);
+      try {
+        vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
+        const { container } = renderRow();
+        await screen.findByRole('button', { name: /^Esra: Thread s1\./ });
+
+        expect(container.querySelector('.chat-pill-row-bar')).toBeNull();
+      } finally {
+        restore();
+      }
+    });
   });
 });

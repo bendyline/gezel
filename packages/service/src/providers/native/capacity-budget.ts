@@ -2,7 +2,14 @@ import { arch, platform, totalmem } from 'node:os';
 
 const GIB = 1024 ** 3;
 
-/** Ceiling on the auto-derived SYSTEM-RAM share, however much RAM the host reports. */
+/**
+ * Ceiling on the auto-derived SYSTEM-RAM share, however much RAM the host
+ * reports. Discrete-GPU and CPU-only hosts only: there the share is memory
+ * taken from an OS that wants it back, so an absolute stop is right. A
+ * unified host bounds the RESERVE instead ({@link UNIFIED_OS_RESERVE_MAX_BYTES})
+ * — the same bytes are the GPU's pool, and capping the share stranded 16 GB
+ * on a 128 GB Mac. Still governs unified SLOT SIZING, which kept this curve.
+ */
 const BUDGET_CAP_BYTES = 96 * GIB;
 
 /** Above this, a discrete-GPU/CPU host is treated as workstation-tier. */
@@ -16,13 +23,14 @@ const HIGH_MEMORY_THRESHOLD_BYTES = 96 * GIB;
  * roughly 75% (`iogpu.wired_limit_pct`), and our budget covers weights plus
  * KV plus scratch, so the working ceiling sits just under that.
  *
- * Deliberately not higher. The budget is also what
- * {@link localEngineSlotCeiling} sizes concurrent KV slots against, so
- * raising it buys more than a bigger model — past ~0.72 on a 64 GB Mac a
- * 27B-q8 at 32K f16 goes from serial to two slots, which is the exact
- * shape that aborted Metal (see the regression test of that name). Growing
- * the load ceiling should not silently grow peak concurrency; until those
- * two are decoupled, this fraction has to respect both.
+ * Deliberately not higher, because this fraction is now what
+ * {@link localEngineSlotCeiling} sizes concurrent KV slots against: past
+ * ~0.72 on a 64 GB Mac a 27B-q8 at 32K f16 goes from serial to two slots,
+ * which is the exact shape that aborted Metal (see the regression test of
+ * that name). The admission budget no longer rides on it — it follows
+ * {@link UNIFIED_OS_RESERVE_MAX_BYTES} — so raising this raises peak
+ * concurrency and nothing else. Raise the reserve cap to fit more models;
+ * raise this only to give one model more simultaneous slots.
  */
 const UNIFIED_FRACTION = 0.7;
 
@@ -34,6 +42,23 @@ const UNIFIED_FRACTION = 0.7;
  * way and let whichever bound is tighter win.
  */
 const UNIFIED_OS_RESERVE_BYTES = 4 * GIB;
+
+/**
+ * Ceiling on that same reserve. Past a point the fraction stops describing
+ * anything real: 20% of a 128 GB Mac is 25.6 GB held back for an OS whose
+ * need is roughly constant once met, and the old flat 96 GiB cap stranded
+ * a further 16 GB on top of that — a machine bought for big models could
+ * not use a third of its memory for them. What the OS, the shell, and the
+ * user's other apps actually need is absolute, so bound the reserve in
+ * absolute terms and let the fraction govern only the small end where it
+ * is the tighter of the two.
+ *
+ * This raises the ADMISSION budget only. Concurrency is sized against
+ * {@link CapacityBudget.concurrencySizingBytes}, which deliberately keeps
+ * the older curve — see the note on {@link UNIFIED_FRACTION} about why
+ * growing the load ceiling must not silently grow peak slot count.
+ */
+const UNIFIED_OS_RESERVE_MAX_BYTES = 16 * GIB;
 
 /**
  * Share of a discrete card's VRAM local engines may hold. The whole pool is
@@ -116,6 +141,15 @@ export interface CapacityBudget {
   vramBytes: number;
   /** The system-RAM share of the budget. */
   ramShareBytes: number;
+  /**
+   * What concurrent KV slots may be sized against — never more than
+   * {@link fastBytes}, and on a unified host held to the pre-reserve-cap
+   * fraction. Admission capacity and peak concurrency grow for different
+   * reasons: a bigger budget should let MORE MODELS fit, not give one model
+   * more simultaneous slots of the same KV. The 27B-q8 Metal abort is what
+   * happens when the two move together (see {@link UNIFIED_FRACTION}).
+   */
+  concurrencySizingBytes: number;
   kind: CapacityBudgetKind;
   /** True when `GEZEL_CAPACITY_BUDGET_GB` set the total. */
   overriddenByEnv: boolean;
@@ -176,40 +210,58 @@ export function computeCapacityBudget(input: CapacityBudgetInput = {}): Capacity
   const discrete = hasCard && !unified;
 
   const highMemory = systemRamBytes >= HIGH_MEMORY_THRESHOLD_BYTES;
-  const ramShareBytes = unified
-    ? highMemory
-      ? Math.min(Math.floor(systemRamBytes * 0.8), BUDGET_CAP_BYTES)
-      : Math.max(
-          0,
-          Math.min(
-            Math.floor(systemRamBytes * UNIFIED_FRACTION),
-            systemRamBytes - UNIFIED_OS_RESERVE_BYTES,
-            BUDGET_CAP_BYTES,
-          ),
-        )
-    : Math.min(Math.floor(systemRamBytes * (highMemory ? 0.8 : 0.6)), BUDGET_CAP_BYTES);
+  // Whichever bound leaves the host MORE memory wins between the fraction and
+  // the capped reserve, then the 4 GiB floor reserve caps them both. Written
+  // as shares rather than as `ram - reserve` so the fraction cases stay
+  // byte-identical to the pre-cap curve.
+  const unifiedFractionShare = Math.floor(systemRamBytes * (highMemory ? 0.8 : UNIFIED_FRACTION));
+  const unifiedShare = Math.max(
+    0,
+    Math.min(
+      Math.max(unifiedFractionShare, systemRamBytes - UNIFIED_OS_RESERVE_MAX_BYTES),
+      systemRamBytes - UNIFIED_OS_RESERVE_BYTES,
+    ),
+  );
+  const nonUnifiedShare = Math.min(
+    Math.floor(systemRamBytes * (highMemory ? 0.8 : 0.6)),
+    BUDGET_CAP_BYTES,
+  );
+  const ramShareBytes = unified ? unifiedShare : nonUnifiedShare;
   const vramBytes = discrete ? Math.floor((measuredVram as number) * VRAM_USABLE_FRACTION) : 0;
+  // The pre-cap curve, retained for slot sizing only.
+  const concurrencyRamShare = unified
+    ? Math.max(
+        0,
+        Math.min(unifiedFractionShare, systemRamBytes - UNIFIED_OS_RESERVE_BYTES, BUDGET_CAP_BYTES),
+      )
+    : nonUnifiedShare;
 
   const kind: CapacityBudgetKind = unified ? 'unified' : discrete ? 'discrete-gpu' : 'system-ram';
   const auto = ramShareBytes + vramBytes;
 
   const envBytes = envOverrideBytes();
   if (envBytes !== null) {
+    const envFast = discrete ? Math.min(vramBytes, envBytes) : envBytes;
     return {
       budgetBytes: envBytes,
-      fastBytes: discrete ? Math.min(vramBytes, envBytes) : envBytes,
+      fastBytes: envFast,
       vramBytes,
       ramShareBytes: Math.max(0, envBytes - vramBytes),
+      // An explicit override is the operator stating the whole ceiling; it
+      // governs slot sizing too, or the override could not lower concurrency.
+      concurrencySizingBytes: envFast,
       kind,
       overriddenByEnv: true,
     };
   }
 
+  const fastBytes = discrete ? vramBytes : auto;
   return {
     budgetBytes: auto,
-    fastBytes: discrete ? vramBytes : auto,
+    fastBytes,
     vramBytes,
     ramShareBytes,
+    concurrencySizingBytes: Math.min(fastBytes, discrete ? vramBytes : concurrencyRamShare),
     kind,
     overriddenByEnv: false,
   };

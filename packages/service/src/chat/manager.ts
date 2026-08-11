@@ -144,13 +144,18 @@ import {
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { readMlxModelGeometry } from '../providers/mlx/model-geometry.js';
 import {
+  type CapacityCommitted,
   CapacityDeniedError,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
 } from '../providers/native/capacity-broker.js';
-import { type LocalProviderName, makeEngineKey } from '../providers/native/engine-key.js';
+import {
+  type LocalProviderName,
+  makeEngineKey,
+  parseEngineKey,
+} from '../providers/native/engine-key.js';
 import { OllamaProvider } from '../providers/ollama.js';
 import { OpenAIProvider } from '../providers/openai.js';
 import type { Lane } from '../providers/queue.js';
@@ -3122,6 +3127,12 @@ export class ChatManager {
     stepId: string;
     fromGezelName?: string;
     /**
+     * Id of the previous step's gezel. When it equals `gezelId` the step
+     * advance is a self-handoff — the seed then reads as "this task has
+     * advanced, carry on" instead of naming the recipient as the sender.
+     */
+    fromGezelId?: string;
+    /**
      * `'entry'` is a fresh launch (e.g. the command launcher created the
      * task and is starting its entry step) — there is no prior step, so
      * the seed says "you've been assigned" rather than "the previous
@@ -3293,14 +3304,21 @@ export class ChatManager {
     // (then aborts on the ramble cap before any tool fires). So the seed
     // now defers to the in-prompt instructions and leaves note-reading to
     // the model's judgement (it's only needed on a resume / loop-back).
+    // A step advance can land back on the gezel who just finished the
+    // previous step (a craftbook whose steps collapse onto one specialist).
+    // Naming them as their own sender — "Koray has handed step `report` to
+    // you" — reads as a bug to the user and as a second party to the model.
+    const selfHandoff = args.fromGezelId !== undefined && args.fromGezelId === args.gezelId;
     const seed =
       args.kind === 'entry'
         ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
-        : `${
-            args.fromGezelName
-              ? `${args.fromGezelName} has`
-              : 'The previous step has been completed and'
-          } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+        : selfHandoff
+          ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+          : `${
+              args.fromGezelName
+                ? `${args.fromGezelName} has`
+                : 'The previous step has been completed and'
+            } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -9937,6 +9955,27 @@ export class ChatManager {
    */
   private readonly resolveResidentBytesCache = new Map<string, number>();
 
+  /**
+   * Drop cached reservations so the next admission re-reads the catalog and
+   * config. ds4 prices its footprint at the launch context, so a per-model
+   * context override changes what the broker must reserve — leaving the old
+   * entry cached would keep billing the pre-override number for the life of
+   * the process. Call from any route that mutates context sizing.
+   */
+  invalidateResidentBytesCache(provider?: LocalProviderName, modelId?: string): void {
+    if (!provider) {
+      this.resolveResidentBytesCache.clear();
+      return;
+    }
+    if (modelId) {
+      this.resolveResidentBytesCache.delete(`${provider}:${modelId}`);
+      return;
+    }
+    for (const key of this.resolveResidentBytesCache.keys()) {
+      if (key.startsWith(`${provider}:`)) this.resolveResidentBytesCache.delete(key);
+    }
+  }
+
   private async resolveResidentBytes(
     provider: LocalProviderName,
     modelId: string,
@@ -9960,7 +9999,13 @@ export class ChatManager {
             kind: 'chat-model';
             llamaCpp?: { residentBytes?: number; approxSizeBytes?: number };
             mlx?: { residentBytes?: number; approxSizeBytes?: number };
-            ds4?: { residentBytes?: number; approxSizeBytes?: number };
+            ds4?: {
+              residentBytes?: number;
+              approxSizeBytes?: number;
+              kvBytesPerToken?: number;
+              residentCtxTokens?: number;
+              maxLaunchCtx?: number;
+            };
           }
         | undefined;
       if (cm) {
@@ -9971,9 +10016,36 @@ export class ChatManager {
             const config = await this.store.readConfig();
             const externalBaseUrl = process.env.GEZEL_DS4_SERVER_URL ?? config.ds4BaseUrl;
             if (!externalBaseUrl) {
-              const { ds4ResidentBytesForMode, shouldUseDs4SsdStreaming } = await import(
-                '../providers/ds4/residency.js'
-              );
+              const {
+                ds4ProjectedResidentBytes,
+                ds4ResidentBytesForMode,
+                ds4ResidentLine,
+                shouldUseDs4SsdStreaming,
+              } = await import('../providers/ds4/residency.js');
+              // Bill the window this model will actually launch with. The
+              // authored footprint is a measurement at `residentCtxTokens`, so
+              // without this a raised context reserves the old number and the
+              // broker admits a model whose KV no longer fits — the exact
+              // memory-pressure event the residency rules exist to prevent.
+              const ds4Block = cm.ds4;
+              const line = ds4ResidentLine({
+                residentBytes: bytes,
+                kvBytesPerToken: ds4Block?.kvBytesPerToken,
+                residentCtxTokens: ds4Block?.residentCtxTokens,
+              });
+              if (line) {
+                const { totalmem } = await import('node:os');
+                bytes = ds4ProjectedResidentBytes(
+                  line,
+                  resolveDs4LaunchCtx({
+                    configured:
+                      config.modelContextOverrides?.[`ds4:${modelId}`] ?? config.ds4NumCtx,
+                    ramTieredCtx: totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072,
+                    catalogMaxCtx: ds4Block?.maxLaunchCtx,
+                    minViableContextTokens: minViableLocalContextTokens(),
+                  }),
+                );
+              }
               bytes = ds4ResidentBytesForMode(
                 bytes,
                 shouldUseDs4SsdStreaming({
@@ -10466,6 +10538,33 @@ export class ChatManager {
   }
 
   /**
+   * Reservations held by models OTHER than the one being previewed.
+   *
+   * `committed()` totals every replica, the previewed model's own included.
+   * Feeding that back as `committedOtherBytes` prices the launch as if a
+   * second copy had to load beside the resident one, so the model currently
+   * serving chats reports "won't fit" against its own reservation — and on a
+   * host where one big model fills most of the budget, every OTHER row is
+   * denied by a reservation that eviction would release. Every consumer of
+   * `committedOtherBytes` means co-resident models, so subtract our own
+   * replicas here. A key the parser doesn't recognise stays counted: an
+   * unattributable reservation is real memory, and over-counting only makes
+   * the preview conservative.
+   */
+  private committedOtherBytesFor(
+    snapshot: CapacityCommitted | undefined,
+    provider: LocalProviderName,
+    modelId: string,
+  ): number {
+    if (!snapshot?.enforced) return 0;
+    const own = snapshot.byKey.reduce((sum, entry) => {
+      const parsed = parseEngineKey(entry.key);
+      return parsed?.provider === provider && parsed.modelId === modelId ? sum + entry.bytes : sum;
+    }, 0);
+    return Math.max(0, snapshot.committedBytes - own);
+  }
+
+  /**
    * Full non-binding launch preview: the context window a native model
    * would receive AND the resident footprint at that window. Powers the
    * models-list "size in memory" column alongside
@@ -10481,6 +10580,15 @@ export class ChatManager {
   async previewLocalEnginePlan(
     name: LocalProviderName,
     modelId: string,
+    /**
+     * ds4 only: price a catalog entry that is NOT downloaded yet. The ds4 plan
+     * needs the catalog block and this device's RAM tier, never the GGUF, so
+     * the browse list can quote the window and footprint a download would land
+     * on — which is when the fit decision is actually made. Other engines keep
+     * throwing {@link ModelNotInstalledError}: their plans read the real
+     * header.
+     */
+    opts: { allowUninstalled?: boolean } = {},
   ): Promise<{
     contextWindow?: number;
     plannedResidentBytes?: number;
@@ -10500,7 +10608,8 @@ export class ChatManager {
      * Post-quant single-slot KV linearization so the UI can price
      * "~X GB in memory" live while the slider drags:
      * `weightsResidentBytes + kvFixedBytesPerSlot + kvBytesPerTokenPerSlot × ctx`.
-     * Absent for ds4, whose resident set is context-independent.
+     * ds4 reports it too, from its catalog-authored slope; absent there only
+     * for entries that have not been measured yet.
      */
     kvBytesPerTokenPerSlot?: number;
     kvFixedBytesPerSlot?: number;
@@ -10565,7 +10674,10 @@ export class ChatManager {
       const fastBudget = brokerSnap?.enforced
         ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
         : liveBudget.fastBytes;
-      const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
+      const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
+      const concurrencySizingBudget = brokerSnap?.enforced
+        ? brokerSnap.pools.concurrencySizingBytes
+        : liveBudget.concurrencySizingBytes;
       const kvBits = config.mlxKvBits ?? 0;
       const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
       const weightsResident = CapacityBroker.estimateResidentBytes(
@@ -10597,6 +10709,7 @@ export class ChatManager {
         const ceiling = localEngineSlotCeiling({
           engine: 'mlx',
           budgetBytes: fastBudget,
+          sizingBudgetBytes: concurrencySizingBudget,
           weightsBytes: installed.approxSizeBytes,
           perTurnCtxTokens: effective,
           kvCacheType,
@@ -10616,7 +10729,6 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
-          freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: 0,
         });
         if (!admission.minimumSatisfied) {
@@ -10692,9 +10804,14 @@ export class ChatManager {
           config.ds4ModelPath ||
           config.ds4BaseUrl,
       );
-      if (!installed && !hasExplicitSource) throw new ModelNotInstalledError(name, modelId);
       const detail = await this.catalog.get('chat-model', modelId).catch(() => null);
-      const ds4Source = detail?.manifest.kind === 'chat-model' ? detail.manifest.ds4 : undefined;
+      const ds4Manifest = detail?.manifest.kind === 'chat-model' ? detail.manifest : undefined;
+      const ds4Source = ds4Manifest?.ds4;
+      // A catalog entry with a ds4 block is plannable before download; only a
+      // model we know nothing about is genuinely absent.
+      if (!installed && !hasExplicitSource && !(opts.allowUninstalled && ds4Source)) {
+        throw new ModelNotInstalledError(name, modelId);
+      }
       const { totalmem } = await import('node:os');
       const ramTieredCtx = totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
       const ds4Override = config.modelContextOverrides?.[`ds4:${modelId}`];
@@ -10718,8 +10835,10 @@ export class ChatManager {
       }
       // The slider's max for ds4: the authored catalog launch ceiling wins
       // over the advertised native window because ds4 has no ctx-vs-memory
-      // admission to catch a window the engine cannot actually serve.
-      const nativeWindow = installed?.contextWindow;
+      // admission to catch a window the engine cannot actually serve. The
+      // manifest's window stands in before download, when there is no GGUF
+      // header to read.
+      const nativeWindow = installed?.contextWindow ?? ds4Manifest?.contextWindow;
       const ceilingTokens =
         ds4Source?.maxLaunchCtx !== undefined || nativeWindow !== undefined
           ? Math.min(
@@ -10736,13 +10855,33 @@ export class ChatManager {
           minViableContextTokens: contextFloor,
         });
       }
+      // ds4's catalog residentBytes is an authored SSD-streaming working set
+      // (expert cache + resident weights + KV) measured at ONE window. Where
+      // the entry also authors the per-token slope, re-base it onto the window
+      // this device actually launches with and hand the UI the same
+      // `fixed + slope × ctx` line llama.cpp/MLX rows carry, so the slider
+      // prices a drag instead of claiming the footprint never moves. Entries
+      // without a measured slope keep the flat number and say so.
+      const { ds4ProjectedResidentBytes, ds4ResidentLine } = await import(
+        '../providers/ds4/residency.js'
+      );
+      const ds4Line = ds4ResidentLine({
+        residentBytes: ds4Source?.residentBytes,
+        kvBytesPerToken: ds4Source?.kvBytesPerToken,
+        residentCtxTokens: ds4Source?.residentCtxTokens,
+      });
       return {
         contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
-        // ds4's catalog residentBytes is an authored SSD-streaming working
-        // set (weights cache + KV allowance) — already the honest number,
-        // and deliberately context-independent (cold KV spills to SSD), so
-        // no KV linearization fields are exposed for the slider.
-        plannedResidentBytes: await this.resolveResidentBytes('ds4', modelId),
+        plannedResidentBytes: ds4Line
+          ? ds4ProjectedResidentBytes(ds4Line, effective)
+          : await this.resolveResidentBytes('ds4', modelId),
+        ...(ds4Line
+          ? {
+              weightsResidentBytes: ds4Line.contextFreeBytes,
+              kvFixedBytesPerSlot: 0,
+              kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
+            }
+          : {}),
         ...(nativeWindow ? { nativeContextWindow: nativeWindow } : {}),
         ...(ds4Override !== undefined ? { overrideContextTokens: ds4Override } : {}),
         ...(ds4AutoContextWindow !== undefined ? { autoContextWindow: ds4AutoContextWindow } : {}),
@@ -10813,7 +10952,15 @@ export class ChatManager {
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
       : liveBudget.budgetBytes;
-    const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
+    const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
+    // A preview answers a policy question, so it drops the live-free-RAM half
+    // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
+    // card still gets a placement cap: pass 0 free RAM so the live term
+    // reduces to usable VRAM, which is stable and not self-referential. On a
+    // unified host "VRAM" IS that same RAM, so there is nothing left to cap
+    // with and the field is omitted entirely.
+    const previewBudgetKind = brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind;
+    const previewLiveRam = previewBudgetKind === 'discrete-gpu' ? { freeSystemRamBytes: 0 } : {};
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
     const kvCacheType = resolveLlamaCppKvCacheType({
       architecture: installed.architecture,
@@ -10928,6 +11075,9 @@ export class ChatManager {
     const ceilingAt = (ctx: number, kv: LlamaCppKvCacheType) =>
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
+        sizingBudgetBytes: brokerSnap?.enforced
+          ? brokerSnap.pools.concurrencySizingBytes
+          : liveBudget.concurrencySizingBytes,
         weightsBytes: installed.approxSizeBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
@@ -11033,6 +11183,9 @@ export class ChatManager {
       const passCeiling = (kvType: LlamaCppKvCacheType) =>
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
+          sizingBudgetBytes: brokerSnap?.enforced
+            ? brokerSnap.pools.concurrencySizingBytes
+            : liveBudget.concurrencySizingBytes,
           weightsBytes: installed.approxSizeBytes,
           perTurnCtxTokens: grantedCtx,
           kvCacheType: kvType,
@@ -11099,7 +11252,7 @@ export class ChatManager {
           weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
-          freeSystemRamBytes: availableSystemRamBytes(),
+          ...previewLiveRam,
           vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
@@ -11149,7 +11302,7 @@ export class ChatManager {
                 Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
-              freeSystemRamBytes: availableSystemRamBytes(),
+              ...previewLiveRam,
               vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
             });
             ladderKvLinearization = {
@@ -11188,8 +11341,8 @@ export class ChatManager {
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
+            ...previewLiveRam,
             vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
-            freeSystemRamBytes: availableSystemRamBytes(),
             isMoE: (summary.expertCount ?? 0) > 1,
             // A user-chosen lane count is not growth's to spend.
             allowSlotTrade: configuredSlots === undefined,
@@ -13072,6 +13225,7 @@ export class ChatManager {
           .filter((part): part is string => Boolean(part))
           .join('\n\n'),
         availableTools: availableBuiltinTools.map((tool) => tool.name),
+        ...(toolsOverride ? {} : { partialRoster: true }),
       });
       for (const finding of [...contract.errors, ...contract.warnings]) {
         log.warn(

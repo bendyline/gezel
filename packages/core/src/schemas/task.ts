@@ -4,6 +4,7 @@ import {
   AdvanceWhenSchema,
   CraftbookBasedOnSchema,
   CraftbookBranchSchema,
+  CraftbookConnectorNeedSchema,
   CraftbookSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
@@ -191,10 +192,12 @@ export type GateAttemptRecord = NonNullable<TaskCraftbookStep['gateAttemptHistor
  * The full embedded craftbook copy on a task. Identical structure to
  * `Craftbook` except that steps carry per-instance lifecycle fields.
  *
- * `triggers`, `hooks`, and `toolsets` are snapshotted from the source
- * craftbook at task-create time so live tasks remain insulated from edits
- * to the catalog template. `toolsets` is needed here so the chat session's
- * auto-allow derivation can read it without re-resolving the catalog book.
+ * `triggers`, `hooks`, `toolsets`, and `connectors` are snapshotted from
+ * the source craftbook at task-create time so live tasks remain insulated
+ * from edits to the catalog template. `toolsets` is needed here so the chat
+ * session's auto-allow derivation can read it without re-resolving the
+ * catalog book; `connectors` records the corpus the task was launched
+ * against.
  */
 export const TaskCraftbookSchema = z.object({
   id: z.string().min(1),
@@ -211,6 +214,7 @@ export const TaskCraftbookSchema = z.object({
   /** Invocation schema retained with the task snapshot for audit/UI context. */
   paramSchema: z.record(z.string(), z.unknown()).optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+  connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /**
    * Embedded script sources snapshotted from the source craftbook, so the
    * task's gate/lifecycle scripts execute from its own copy — `scope:

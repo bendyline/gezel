@@ -2,6 +2,7 @@ import { createLogger } from '@bendyline/gezel';
 import { TOOL_REGISTRY, canonicalToolName } from '@bendyline/gezel-mcp';
 import { type AnthropicTool, McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
 import type { SessionOpts } from './types.js';
+import { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
 const log = createLogger('mcp-bridge');
 
@@ -38,6 +39,15 @@ export class McpBridgePool {
   private toolAllowlist: Set<string> | null = null;
 
   /**
+   * One ledger per session, shared by every bridge. A gezel that cannot
+   * make a tool work must not be able to call `advance_task_step` and
+   * declare the phase done on an earlier attempt's leftovers — and the
+   * failing tool is typically on a different bridge from the task tools,
+   * so the ledger has to be pool-scoped rather than per-bridge.
+   */
+  private readonly failureLedger = new UnresolvedToolFailureLedger();
+
+  /**
    * Start the primary + extras based on SessionOpts. Returns a pool that
    * exposes a merged tool list. On any individual bridge failure the pool
    * logs and skips — the session still runs with whatever bridges came up.
@@ -52,6 +62,7 @@ export class McpBridgePool {
     const isMeester = opts.isMeester === true;
     if (opts.mcpServer) {
       const primary = new McpBridge();
+      primary.failureLedger = pool.failureLedger;
       if (opts.onToolCall) primary.onToolCall = opts.onToolCall;
       if (opts.imagePersister) primary.imagePersister = opts.imagePersister;
       if (opts.audioPersister) primary.audioPersister = opts.audioPersister;
@@ -92,6 +103,7 @@ export class McpBridgePool {
 
     for (const extra of opts.extraMcpServers ?? []) {
       const bridge = new McpBridge();
+      bridge.failureLedger = pool.failureLedger;
       if (opts.onToolCall) bridge.onToolCall = opts.onToolCall;
       if (opts.imagePersister) bridge.imagePersister = opts.imagePersister;
       if (opts.audioPersister) bridge.audioPersister = opts.audioPersister;

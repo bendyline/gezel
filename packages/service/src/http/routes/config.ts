@@ -493,6 +493,14 @@ export function configRoutes(ctx: ServiceContext): Hono {
       await ctx.chat.resetClient({ deferBusy: true });
       invalidateModelsCache();
     }
+    // ds4 prices its broker reservation at the launch window, so a machine-wide
+    // context change moves what every ds4 model must reserve. The launch itself
+    // still waits for the next engine start (unchanged); only the cached
+    // reservation has to be re-derived.
+    if (body.ds4NumCtx !== undefined && body.ds4NumCtx !== previous.ds4NumCtx) {
+      ctx.chat.invalidateResidentBytesCache('ds4');
+      invalidateModelsCache('ds4');
+    }
     // Image provider reset: rebuild whenever the active image provider
     // selection changes, the default cloud model changes, or any
     // credential the cloud branches consult is touched. Scoped narrower

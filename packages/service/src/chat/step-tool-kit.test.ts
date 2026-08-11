@@ -43,6 +43,29 @@ describe('stepToolKit', () => {
     expect(code?.tools.has('run_nodejs_script')).toBe(true);
   });
 
+  it('a prose report with a findings table stays a document kit', () => {
+    const kit = stepToolKit({
+      advanceWhen: { file: 'pr-review.md', minBytes: 500 },
+      gate: {
+        at: 'completion',
+        checks: [
+          { kind: 'minBytes', file: 'pr-review.md', bytes: 500 },
+          {
+            kind: 'tableShape',
+            file: 'pr-review.md',
+            requiredColumns: ['Severity', 'File', 'Finding'],
+          },
+        ],
+      },
+    });
+    expect(kit?.kind).toBe('markdown-doc');
+    expect(kit?.tools.has('write_file')).toBe(true);
+    // A Markdown table is written, not derived — pointing the step at the
+    // transform channel told small models to script a prose review.
+    expect(kit?.tools.has('derive_file')).toBe(false);
+    expect(kit?.tools.has('run_nodejs_script')).toBe(false);
+  });
+
   it('gate-check-driven additions: grounding checks pull in search tools', () => {
     const kit = stepToolKit({
       advanceWhen: { file: 'brief.md' },

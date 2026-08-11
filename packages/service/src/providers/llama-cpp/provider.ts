@@ -82,6 +82,7 @@ import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
+import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -3163,6 +3164,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       for (const name of this.externalToolNames) known.add(name);
       return known;
     };
+    // Tool-name → declared input schema, for repairing salvaged calls
+    // whose structural arguments the markup formats flattened into
+    // strings. See tool-arg-schema-coercion.ts.
+    const toolArgSchemas = new Map<string, Record<string, unknown>>();
+    for (const t of tools ?? []) {
+      const schema = t.function.parameters as Record<string, unknown> | undefined;
+      if (t.function.name && schema) toolArgSchemas.set(t.function.name, schema);
+    }
     // Surgical edit tools on the roster ⇒ deliverable is a modify of an
     // existing file; a repeated source-write failure steers toward a
     // targeted patch rather than "re-emit the whole file." Same as MLX.
@@ -5603,6 +5612,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               );
             }
           }
+        }
+        // Every markup salvage format above is a flat KEY→text map, so a
+        // parameter declared `object`/`array` arrives as a string. Repair
+        // against the declared schema at the one point all salvage paths
+        // converge. Schema-gated: a genuine string argument (a JSON
+        // file's `content`) is never reinterpreted.
+        {
+          const coerced = coerceToolCallArgs(toolCalls, (n) => toolArgSchemas.get(n));
+          for (const r of coerced.repaired) {
+            log.info(`[llama-cpp] repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`);
+          }
+          toolCalls = coerced.calls as typeof toolCalls;
         }
         // Always pull `<think>…</think>` reasoning out of the visible
         // commit and stash the captured trace so the chat bubble can

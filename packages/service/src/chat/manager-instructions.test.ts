@@ -153,13 +153,29 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(partial).toContain('`get_pull_request`');
     expect(partial).not.toContain('search_code');
 
-    // These names come from an installed third-party toolset, so an
-    // empty intersection means "can't confirm", not "absent" — the
-    // directive stands, it just stops naming specific tools.
+    // The first-party PR builtins are named too. They used to be missing
+    // from the probe list, so a project holding them always fell through
+    // to a blanket "the `github_*` tools on your function schema".
+    const builtin = prompt(['github_pr_diff', 'github_pr_files'], { project });
+    expect(builtin).toContain('`github_pr_diff`');
+
+    // A third-party toolset's tool names only exist after its bridge
+    // spawns, so with one INSTALLED an empty intersection means "can't
+    // confirm" — the directive stands, it just names no specific tool.
+    const unconfirmable = prompt(['read_file'], {
+      project,
+      installedToolsetIds: new Set(['github']),
+    });
+    expect(unconfirmable).toContain('Use the GitHub toolset');
+    expect(unconfirmable).not.toContain('get_pull_request');
+
+    // With no GitHub toolset installed, an empty intersection IS absence.
+    // Promising tools here is what taught a PR-review step to call
+    // `github_pr_diff` from a roster it had been stripped from.
     const none = prompt(['read_file'], { project });
-    expect(none).toContain('Use the GitHub toolset');
-    expect(none).not.toContain('search_code');
-    expect(none).not.toContain('get_pull_request');
+    expect(none).toContain('This project is linked to');
+    expect(none).not.toContain('Use the GitHub toolset');
+    expect(none).not.toContain('github_*');
   });
 
   it('names only wired delegation tools in workspace guidance', () => {
@@ -270,10 +286,11 @@ describe('buildInstructions connected data', () => {
     }).full;
     expect(withBindings).toContain('### Connected data');
     expect(withBindings).toContain(
-      '**Work Gmail** (mail-gmail, synced 2026-08-08): `data/work-gmail/`',
+      '**Work Gmail** (mail-gmail, synced 2026-08-08): `artifacts/data/work-gmail/`',
     );
     expect(withBindings).not.toContain('linear-issues'); // disabled bindings hidden
     expect(withBindings).toContain('read-only mirrors');
+    expect(withBindings).toContain('Use the artifact listing/reading tools');
 
     const without = buildInstructions({
       name: 'Wren',

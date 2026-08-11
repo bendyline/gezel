@@ -666,6 +666,12 @@ export interface EngineStatusResponse {
     ramShareBytes: number;
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
+    /**
+     * What concurrent KV slots are sized against. Below `fastBytes` on a big
+     * unified host, where admission capacity was raised without raising peak
+     * concurrency. Absent on daemons that predate the field.
+     */
+    concurrencySizingBytes?: number;
   };
   /**
    * Whether models sharing a discrete card may spill into system RAM. Governs
@@ -1567,7 +1573,8 @@ export interface LlamaCppInstalledModel {
    * Post-quant single-slot KV linearization so the UI can price
    * "~X GB in memory" live while the context slider drags:
    * `weightsResidentBytes + kvFixedBytesPerSlot + kvBytesPerTokenPerSlot × ctx`.
-   * Absent for ds4 rows (context-independent resident set) and older daemons.
+   * ds4 rows carry it from their catalog-authored slope; absent on older
+   * daemons and on entries nobody has measured a slope for.
    */
   kvBytesPerTokenPerSlot?: number;
   kvFixedBytesPerSlot?: number;
@@ -1595,6 +1602,39 @@ export interface LlamaCppInstalledModel {
    * so the UI shows them as machine-provided instead of offering Delete.
    */
   readOnly?: boolean;
+}
+
+/**
+ * What a ds4 catalog entry would launch as on THIS device — resolvable before
+ * the model is downloaded, because ds4's plan reads the catalog block and the
+ * RAM tier rather than the GGUF header. Returned by
+ * {@link GezelClient.listDs4ContextPlans}.
+ */
+export interface Ds4ContextPlan {
+  /** Per-turn window the launch would request. */
+  effectiveContextWindow?: number;
+  /** What automatic sizing grants; present only while an override is active. */
+  autoContextWindow?: number;
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /** The context slider's max — min(native window, catalog `maxLaunchCtx`). */
+  contextCeilingTokens?: number;
+  /** Window the model itself advertises, before this device's tier caps it. */
+  nativeContextWindow?: number;
+  /**
+   * Resident working set at {@link effectiveContextWindow}: expert cache +
+   * resident weights + KV at that window. Falls back to the authored flat
+   * footprint for entries with no measured slope.
+   */
+  projectedResidentBytes?: number;
+  /**
+   * Resident bytes per context token. Present only where the catalog authors a
+   * measured slope — the two together are what let a row re-price as the
+   * window moves (`contextFreeResidentBytes + kvBytesPerToken × ctx`).
+   */
+  kvBytesPerToken?: number;
+  /** Footprint at a zero-token window: everything the context doesn't move. */
+  contextFreeResidentBytes?: number;
 }
 
 /**
@@ -2976,6 +3016,18 @@ export class GezelClient {
 
   listDs4Models(): Promise<{ models: LlamaCppInstalledModel[] }> {
     return this.request('GET', '/api/ds4/models');
+  }
+
+  /**
+   * Launch plan per ds4 catalog id, keyed by model id — including entries that
+   * are NOT downloaded. A ds4 download is hundreds of GB, so the window it
+   * would run at and the memory that costs belong on the row BEFORE the user
+   * commits. Entries whose plan can't be resolved are absent from the map; a
+   * daemon that predates the endpoint 404s, which callers treat as "no
+   * projections" rather than an error.
+   */
+  listDs4ContextPlans(): Promise<{ plans: Record<string, Ds4ContextPlan> }> {
+    return this.request('GET', '/api/ds4/context-plans');
   }
 
   /** Incomplete (interrupted/unverified) ds4 downloads on disk. */
@@ -4961,10 +5013,13 @@ export class GezelClient {
     id: string,
     filePath: string,
     content: string,
+    opts?: { gezelId?: string; sessionId?: string },
   ): Promise<{ ok: true; path: string }> {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/artifacts/write`, {
       path: filePath,
       content,
+      ...(opts?.gezelId ? { gezelId: opts.gezelId } : {}),
+      ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
     });
   }
 

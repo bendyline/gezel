@@ -24,6 +24,7 @@
  * dominates the raw blob: capable models are no worse off, smaller
  * models recover much better.
  */
+import { looksLikeFlattenedStructuralArg } from '../tool-arg-schema-coercion.js';
 import type { McpToolWrapper } from './types.js';
 
 interface ZodIssue {
@@ -80,10 +81,54 @@ function draftStatusGuidance(): string {
   ].join(' ');
 }
 
-function translateIssues(toolName: string, issues: ZodIssue[]): string {
+/**
+ * "Retry with corrected args" is the wrong advice when the arguments
+ * were already correct and the *transport* flattened them.
+ *
+ * The textual tool-call formats local models emit (Hermes
+ * `<parameter=KEY>`, Claude `<parameter>`, GLM `<arg_value>`, XML
+ * attributes) are flat KEY→text maps with no way to express a nested
+ * object or array. A model that correctly emits
+ * `source={"kind":"file",…}` gets it delivered as a string, sees
+ * `got string, expected object`, re-emits the identical JSON, and loops
+ * — 19 consecutive attempts on one craftbook step in the wild, each one
+ * telling the next that the tool itself was broken.
+ *
+ * The schema-aware repair in tool-arg-schema-coercion.ts should prevent
+ * this reaching the validator at all. When it still does — a tool with
+ * no declared schema, a `$ref` we can't resolve, a union that also
+ * accepts a string — the model needs to be told that re-sending the
+ * same shape cannot work, not encouraged to try again.
+ */
+function flattenedStructuralGuidance(toolName: string, fields: string[]): string {
+  const list = fields.map((f) => `\`${f}\``).join(', ');
+  return [
+    `ERROR: \`${toolName}\` received ${list} as JSON text instead of a real object/array.`,
+    'Your argument values were correct — the tool-call format you used cannot carry nested structure, so they were delivered as strings.',
+    'Do NOT retry with the same markup: re-sending identical JSON will fail identically.',
+    'Emit a real structured tool call (the function-calling mechanism) so nested arguments survive.',
+    'If you cannot, report the blocker instead of retrying — and do not claim the work succeeded.',
+  ].join(' ');
+}
+
+function translateIssues(
+  toolName: string,
+  issues: ZodIssue[],
+  args: Record<string, unknown>,
+): string {
   if (issues.some((issue) => isDraftStatusIssue(toolName, issue))) {
     return draftStatusGuidance();
   }
+
+  const flattened = issues
+    .filter(
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        issue.received === 'string' &&
+        looksLikeFlattenedStructuralArg(args, issue.path, issue.expected),
+    )
+    .map((issue) => pathLabel(issue.path));
+  if (flattened.length > 0) return flattenedStructuralGuidance(toolName, flattened);
 
   const missing: string[] = [];
   const wrongType: string[] = [];
@@ -129,7 +174,7 @@ export const ZodErrorTranslator: McpToolWrapper = {
   matches: () => true,
   async postProcessError(
     _toolName: string,
-    _args: Record<string, unknown>,
+    args: Record<string, unknown>,
     errorText: string,
   ): Promise<string> {
     const m = errorText.match(VALIDATION_PREFIX_RE);
@@ -139,6 +184,6 @@ export const ZodErrorTranslator: McpToolWrapper = {
     if (!upstreamToolName || !blob) return errorText;
     const issues = tryParseIssues(blob);
     if (!issues || issues.length === 0) return errorText;
-    return translateIssues(upstreamToolName, issues);
+    return translateIssues(upstreamToolName, issues, args);
   },
 };

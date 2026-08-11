@@ -129,7 +129,13 @@ describe('ModelFitnessManager', () => {
       systemRamBytes: 128 * GB,
       autoBudgetBytes: 96 * GB,
       overridden: false,
-      pools: { kind: 'unified', vramBytes: 0, ramShareBytes: 96 * GB, fastBytes: 96 * GB },
+      pools: {
+        kind: 'unified',
+        vramBytes: 0,
+        ramShareBytes: 96 * GB,
+        fastBytes: 96 * GB,
+        concurrencySizingBytes: 96 * GB,
+      },
       ramSpillover: { allowed: true, auto: true, overridden: false, coResidencyBytes: 96 * GB },
       entries: [
         {

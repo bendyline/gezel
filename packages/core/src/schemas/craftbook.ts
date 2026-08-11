@@ -409,6 +409,47 @@ export function unmetToolsets(
   return (toolsets ?? []).filter((t) => !t.optional && !installedToolsetIds.has(t.toolsetId));
 }
 
+/**
+ * A connector (external source mirrored into the project's `artifacts/data/`
+ * corpus) a craftbook reads from. Declaring the dependency lets the
+ * launcher bind + sync it BEFORE the first gezel step runs, so the step
+ * reviews local files instead of calling a live API mid-turn.
+ *
+ * This is the ingest-bound counterpart to {@link CraftbookToolsetNeedSchema}
+ * and follows its philosophy, not `requirements`': a missing connector
+ * never hides the craftbook, it surfaces a "needs setup" affordance. The
+ * distinction matters because connectors are deliberately NOT model-facing
+ * — nothing here grants the gezel a tool. See docs/connector-standards.md.
+ */
+export const CraftbookConnectorNeedSchema = z.object({
+  /** Catalog connector-type id, e.g. `github-pulls`, `mail-gmail`. */
+  typeId: z.string().min(1),
+  /** Catalog source provenance (bundled/community), when pinned. */
+  sourceId: z.string().optional(),
+  /**
+   * When true, the craftbook still runs without the connector bound —
+   * the corpus is a bonus, not the substrate. Default (absent/false) =
+   * required: the launcher offers to bind it before the craftbook runs.
+   */
+  optional: z.boolean().optional(),
+  /** Human-readable rationale shown in the launcher ("pull the PR diff"). */
+  reason: z.string().optional(),
+});
+export type CraftbookConnectorNeed = z.infer<typeof CraftbookConnectorNeedSchema>;
+
+/**
+ * Returns the *required* (non-optional) connector needs whose type ids are
+ * not bound on the project — the set the launcher must offer to bind
+ * before the craftbook can run. Pure; the listing route, the UI setup
+ * affordance, and `TaskManager.create` all derive from it.
+ */
+export function unmetConnectors(
+  connectors: CraftbookConnectorNeed[] | undefined,
+  boundTypeIds: ReadonlySet<string>,
+): CraftbookConnectorNeed[] {
+  return (connectors ?? []).filter((c) => !c.optional && !boundTypeIds.has(c.typeId));
+}
+
 /* ─────────────────────────── Inline scripts ─────────────────────────── */
 
 /** Per-script source ceiling. Inline sources are authored by models — a
@@ -561,6 +602,14 @@ export const CraftbookSchema = z
      * snapshot. Absent = no declared toolset dependencies.
      */
     toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+    /**
+     * Connectors whose mirrored `artifacts/data/` corpus this craftbook reads. The
+     * launcher binds and syncs them before the first step runs. See
+     * {@link CraftbookConnectorNeedSchema}. Carried into the runtime
+     * craftbook and the task snapshot so a running task records what it
+     * was launched against. Absent = no connector dependencies.
+     */
+    connectors: z.array(CraftbookConnectorNeedSchema).optional(),
     /**
      * Embedded script sources (name → TypeScript). See
      * {@link CraftbookScriptsSchema}. Hydrated at resolution time for

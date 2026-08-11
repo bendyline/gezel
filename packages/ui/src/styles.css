@@ -1536,6 +1536,17 @@ html.embedded-chat #root {
 .machine-memory-reservation-pool-ram {
   background: color-mix(in srgb, var(--warning) 10%, var(--surface));
 }
+.machine-memory-reservation-system-reserve {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--text-muted) 18%, var(--surface)) 0 4px,
+    color-mix(in srgb, var(--text-muted) 30%, var(--surface)) 4px 8px
+  );
+  transition: width 240ms ease-out;
+}
 .machine-memory-reservation-segment {
   display: block;
   height: 100%;
@@ -14474,6 +14485,19 @@ button.bench-step-foot:disabled {
   min-height: 0;
 }
 
+/* A banner (today: the chat pill row) spans the whole rail — chat column,
+   grip, and context pane — so the status band reads as one toolbar across
+   the split instead of stopping at the grip. It occupies its own auto row
+   above the panes; the grip only ever spans the content row below it. */
+.chat-rail-body:has(> .chat-rail-banner) {
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 0;
+}
+.chat-rail-banner {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 /* Compact / narrow form factor. The split rail becomes a single-pane tab
    surface so chat never competes with context for width or height. */
 .chat-rail-body-compact {
@@ -14685,11 +14709,13 @@ body.chat-rail-resizing webview {
 /* ---- Chat pill row -------------------------------------------------
    The status band at the top of a project chat: threads that are
    streaming / failed / recently active, the project's active tasks, and
-   a "+" that starts a new task.
+   a "Do +" action that starts a new task.
 
-   It sits in the `.chat-rail-main` flex column above the timeline, so it
-   must not shrink (the timeline's `flex: 1` would otherwise crush it), and
-   the cards must never wrap into a second row. Overflow scrolls sideways. */
+   It rides in the rail's `.chat-rail-banner` row, spanning the chat column
+   and the context pane; in compact mode it sits in the `.chat-rail-main`
+   flex column above the timeline, so it must not shrink (the timeline's
+   `flex: 1` would otherwise crush it). The cards must never wrap into a
+   second row — overflow scrolls sideways under a visible bar. */
 .chat-pill-row {
   display: flex;
   align-items: center;
@@ -14697,21 +14723,69 @@ body.chat-rail-resizing webview {
   flex-shrink: 0;
   min-height: var(--chat-toolbar-band-height);
   padding: 0.3rem 0.5rem;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid var(--border);
+  background: var(--tray-bg);
+  border: solid var(--tray-border);
+  border-width: 1px 0;
+  box-shadow: var(--tray-shadow);
+}
+/* Wraps the scroller so the overflow indicator can be positioned against
+   it rather than against the whole row — the track must stop where the
+   pills stop, not run under the "Do +" key. */
+.chat-pill-row-scroller {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .chat-pill-row-scroll {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex: 1 1 auto;
   min-width: 0;
   flex-wrap: nowrap;
   overflow-x: auto;
+  /* The native bar stays hidden and `.chat-pill-row-bar` stands in for it.
+     A real one can't work here: on macOS with the default "Automatic"
+     scrollbar setting Chromium paints an overlay bar that is invisible at
+     rest — exactly the state where the user needs to be told more threads
+     exist — and forcing the classic bar costs 8px of layout height, which
+     the band shares with `.project-output-toolbar` via
+     `--chat-toolbar-band-height`. The stand-in is absolutely positioned, so
+     the band's height never depends on whether the pills overflow. */
   scrollbar-width: none;
 }
 .chat-pill-row-scroll::-webkit-scrollbar {
   display: none;
+}
+
+/* Sits in the row's bottom padding, level with its border, so it reads as
+   an underline on the band. Only rendered while the pills overflow. */
+.chat-pill-row-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--scrollbar-track);
+  cursor: pointer;
+}
+.chat-pill-row-bar-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 1.5rem;
+  border-radius: 999px;
+  /* The resting colour is the app's *hover* thumb: at 4px tall the normal
+     one reads as a smudge rather than a control. */
+  background: var(--scrollbar-thumb-hover);
+  cursor: grab;
+}
+.chat-pill-row-bar-thumb:hover,
+.chat-pill-row-bar-thumb:active {
+  background: color-mix(in srgb, var(--scrollbar-thumb-hover) 65%, var(--fg));
+}
+.chat-pill-row-bar-thumb:active {
+  cursor: grabbing;
 }
 .chat-pill-row-empty {
   white-space: nowrap;
@@ -14725,20 +14799,30 @@ body.chat-rail-resizing webview {
   max-width: 14rem;
   min-height: 3rem;
   padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--key-border);
   border-radius: var(--radius-md);
-  background: var(--panel);
+  background: var(--key-bg);
   color: var(--fg);
+  box-shadow: var(--key-shadow);
   font-size: 0.72rem;
   line-height: 1.2;
   cursor: pointer;
+  transition: background 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out,
+    transform 140ms ease-out;
 }
 .chat-pill:hover {
-  border-color: var(--accent, var(--fg));
+  background: var(--key-bg-hover);
+}
+.chat-pill:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
 }
 .chat-pill.is-active {
-  border-color: var(--accent, var(--fg));
-  background: color-mix(in srgb, var(--accent, var(--fg)) 12%, var(--panel));
+  transform: translateY(1px);
+  border-color: var(--key-pressed-border);
+  background: var(--key-pressed-bg);
+  color: var(--key-pressed-ink);
+  box-shadow: var(--key-pressed-shadow);
 }
 .chat-pill-thread {
   width: 17rem;
@@ -14757,7 +14841,11 @@ body.chat-rail-resizing webview {
   min-width: 0;
   white-space: nowrap;
 }
+/* Block, not the flex the line class hands out: `text-overflow` never
+   applies to a flex container's own text, so the title hard-cut instead
+   of ellipsing. */
 .chat-pill-thread-title {
+  display: block;
   overflow: hidden;
   color: var(--fg);
   font-size: var(--text-xs);
@@ -14767,6 +14855,7 @@ body.chat-rail-resizing webview {
 .chat-pill-thread-context,
 .chat-pill-thread-update {
   gap: 0.25rem;
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--text-2xs);
 }
@@ -14792,10 +14881,27 @@ body.chat-rail-resizing webview {
   flex: 0 0 auto;
   color: var(--border-strong, var(--muted));
 }
+/* The status is the point of the line, so it holds its width and the
+   relative timestamp beside it gives way first. */
 .chat-pill-thread-status {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.chat-pill-thread-updated-at {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill.is-active :where(.chat-pill-thread-title, .chat-pill-participants, .chat-pill-label) {
+  color: var(--key-pressed-ink);
+}
+.chat-pill.is-active
+  :where(.chat-pill-thread-context, .chat-pill-thread-update, .chat-pill-separator) {
+  color: color-mix(in srgb, var(--key-pressed-ink) 78%, transparent);
 }
 .chat-pill-label {
   overflow: hidden;
@@ -14854,22 +14960,28 @@ body.chat-rail-resizing webview {
   flex: 0 0 auto;
   position: sticky;
   right: 0;
-  width: 26px;
+  width: auto;
   height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
+  padding: 0 0.55rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
   color: var(--fg);
-  font-size: 1rem;
+  box-shadow: var(--key-shadow);
+  font-size: var(--text-sm);
   line-height: 1;
   cursor: pointer;
+  transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
 }
 .chat-pill-new-task:hover {
-  border-color: var(--accent, var(--fg));
+  background: var(--key-bg-hover);
+}
+.chat-pill-new-task:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
 }
 
 /* Narrow chat rail: keep the three-line summary, but tighten its card.
@@ -18842,7 +18954,7 @@ a.license-button:hover {
 .pending-question-document-preview {
   max-height: 180px;
   overflow-y: auto;
-  padding: 0.4rem 0.55rem;
+  padding: 0.7rem 0.9rem;
   border-radius: 4px;
   background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);
   font-size: 0.85rem;
@@ -18912,10 +19024,14 @@ a.license-button:hover {
   max-height: min(62vh, 44rem);
 }
 
+/* The panel reads as a page, not a snippet, so it gets page margins —
+   generous enough that a long report's body text never runs into the
+   panel's own border. */
 .pending-question-document-panel .pending-question-document-preview {
   flex: 1;
   min-height: 0;
   max-height: none;
+  padding: 1rem 1.15rem;
 }
 
 /* The document is a preview, not this surface's own heading hierarchy —
@@ -20490,25 +20606,50 @@ a.license-button:hover {
 
 .gz-connector-config-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.65rem 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+  max-width: 42rem;
 }
 
-.gz-connector-config-fields > label {
-  min-width: 0;
-}
-
-.gz-connector-config-fields > .gz-connector-boolean-field {
+/* This tray lives outside `.gz-dialog`, so it doesn't inherit the dialog's
+   stacked label/input rule — state it here or every field renders with its
+   caption inline and an intrinsically-sized input. */
+.gz-connector-config-fields label {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.gz-connector-config-fields label > input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-connector-config-fields > .gz-connector-boolean-field,
+.gz-connector-config-fields .gz-imap-tls {
+  display: flex;
+  flex-direction: row;
   align-items: center;
   align-self: end;
   gap: 0.45rem;
   min-height: 2.15rem;
 }
 
-.gz-connector-config-fields > .gz-connector-boolean-field > input {
+.gz-connector-config-fields > .gz-connector-boolean-field > input,
+.gz-connector-config-fields .gz-imap-tls > input {
   width: auto;
   margin: 0;
+}
+
+/* Port and Use TLS join the field grid as their own cells instead of
+   sharing one cramped column. */
+.gz-connector-config-fields > .gz-imap-row {
+  display: contents;
 }
 
 .gz-connector-oauth-note {

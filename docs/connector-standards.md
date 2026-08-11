@@ -25,12 +25,13 @@ per rule, including the deliberate residual gaps.
 ## 1. The data-placement contract
 
 This is the part that most needs a standard, because a connector's whole value is that its
-output is findable — by the indexer, by a gezel, and by the user in a file browser.
+output is findable — by a gezel through artifact tools and by the user in the artifacts
+browser — without adding generated external data to the project workspace.
 
-### 1.1 One corpus root per binding, under `data/`
+### 1.1 One corpus root per binding, under `artifacts/data/`
 
 ```
-<project workspace>/
+<project artifacts>/
 └── data/
     └── <corpusName>/                 the binding's corpus root
 ```
@@ -45,14 +46,16 @@ output is findable — by the indexer, by a gezel, and by the user in a file bro
    corpus is the stable thing, the label is not.
 
 Rationale for pinning at bind time rather than deriving per sync: a derived path silently
-strands the old corpus the first time a user edits a display name, and the indexer keeps
-serving both copies.
+strands the old corpus the first time a user edits a display name and leaves both copies
+visible.
 
 Implementation: `corpusDir` on `ProjectConnectorBindingSchema`, resolved by
 `resolveCorpusDir` in [manager.ts](../packages/service/src/connectors/manager.ts) at bind
 time (lazily backfilled for older bindings on their next sync) and shared with the action
-manager through `corpusDirFor`. Mail writes here too — the separate `mail/` tree died with
-the `project.mail` stack.
+manager through `corpusDirFor`. `corpusDir` is artifact-relative; the physical root is the
+project's managed artifacts directory. Mail writes here too — the separate `mail/` tree died
+with the `project.mail` stack. On the first sync after upgrading, `storage.ts` moves an
+existing workspace corpus into artifacts before the advanced cursor can strand it.
 
 ### 1.2 Scope is a directory level, and the engine owns it
 
@@ -145,13 +148,13 @@ data/<corpusName>/
 │   ├── _outbox/<id>.md             staged, awaiting daytime approval
 │   └── _sent/<id>.md               committed receipt
 └── <scope>/
-    ├── _flags.json                 read/seen/content-hash sidecar, never indexed
+    ├── _flags.json                 read/seen/content-hash sidecar, not a record
     └── …record files (connector-managed)…
 ```
 
 `_meta.json` is the discoverability surface — binding id, type id and version, display name,
-scopes, completeness (`mirror` | `window`), and `lastSyncedAt` — so that `ls data/` tells a
-gezel what each directory is without a tool call.
+scopes, completeness (`mirror` | `window`), and `lastSyncedAt` — so that listing
+`artifacts/data/` tells a gezel what each directory is.
 
 Implementation: the sync manager writes `_meta.json` after every pass; `_actions/` lives
 under the binding's corpus root.
@@ -159,7 +162,7 @@ under the binding's corpus root.
 ### 1.6 Quarantine stays outside the corpus
 
 A `quarantine` verdict from `contentScanner.scan` diverts the raw body to
-`<workspace>/.gezel/quarantine/<namespace>/<hash8>.md` — outside every indexed root — and
+`<workspace>/.gezel/quarantine/<namespace>/<hash8>.md` — outside the artifacts tree — and
 writes only a stub into the corpus. The stub keeps the record's frontmatter, so the record
 count and the trust metadata stay honest. This is non-negotiable and already correct.
 
@@ -169,18 +172,16 @@ attributable (`mail`, `calendar`, `github-wiki`, `linear-issues`).
 ### 1.7 Who may write to a corpus
 
 The corpus is inbound source-of-truth. A gezel reasons over it and writes its conclusions to
-`artifacts/`. A gezel must not mutate or delete records.
+another artifact path. A gezel must not mutate or delete records.
 
-Enforced in the daemon, not the tool client: `Store.assertWorkspaceWritable` denies
-gezel-initiated writes under `data/**` unless a path segment below `data/` starts with `_`
-(reason `data-subtree-readonly`, mapped to an actionable MCP error). Rename is checked on
-both endpoints; user-initiated writes stay exempt. Why it matters: a deleted record is never
-re-fetched — the cursor has already advanced past it — so a gezel write here would be silent
-permanent loss. Known residual gap: sandboxed scripts (`run_nodejs_script`, npm hooks) write
-with raw filesystem access and bypass the path policy (the `derive_data` output path is
-gated); closing that fully is a sandbox-network/fs-policy conversation, not a connector one.
-A gezel can also technically write into `_sent/` (receipt spoofing) — receipts are
-informational; the commit itself is server-side.
+Enforced at the artifact write boundary: gezel-initiated writes under `artifacts/data/**`
+are denied unless a path segment below `data/` starts with `_`; user-initiated artifact
+edits stay exempt. Why it matters: a deleted record is never re-fetched — the cursor has
+already advanced past it — so a gezel write here would be silent permanent loss. Known
+residual gap: script-dispatch artifact mutations bypass the model-facing artifact write
+route; closing that fully is a sandbox/fs-policy conversation, not a connector one. A gezel
+can also technically write into `_sent/` (receipt spoofing) — receipts are informational;
+the commit itself is server-side.
 
 ## 2. The adapter contract
 
@@ -201,7 +202,7 @@ Standing rules:
 
 1. **No provider SDK types above this line.** Everything a source knows stops at the adapter.
 2. **`fetchRecord` normalizes.** Raw → `NormalizedRecord`, inside the adapter. The engine, the
-   writer, and the indexer never learn a source's quirks.
+   writer never learns a source's quirks.
 3. **`close()` releases everything** — sockets, MCP subprocesses, temp checkouts — and is
    called on the error path too.
 4. **`ensureAuth` throws on hard auth failure**, with a message a user can act on. It lands in
@@ -353,7 +354,8 @@ discard.
 
 A corpus nothing knows about is a corpus nothing reads. Three surfaces have to agree:
 
-- **The indexer** picks up the workspace, so records are searchable for free. Correct today.
+- **Artifact tools and browser** list/read the corpus without mixing it into workspace code
+  search or the user's repository.
 - **The system prompt** names the project's corpora: `buildInstructions` renders a terse
   "Connected data" block (one line per binding — label, type, corpus path, last sync —
   capped at eight) plus the read-only rule. Absent entirely when no bindings exist, so
@@ -372,7 +374,7 @@ Never traded away, for any driver:
 
 1. **`trust: untrusted-external` on every record**, plus the `scan_action` verdict. Prompt
    assembly and the safety layer key off it.
-2. **Every body through `contentScanner.scan`**, quarantine outside every indexed root.
+2. **Every body through `contentScanner.scan`**, quarantine outside the artifacts root.
 3. **Path safety twice** — `slug()` at the adapter, `resolveInside` at the writer.
 4. **Credentials never leave the daemon.** Not into the MCP subprocess env, not into a
    sandboxed script (a `script` connector reaches its credential parent-side through
@@ -398,13 +400,13 @@ Never traded away, for any driver:
 
 | # | Standard | Status | Where |
 |---|---|---|---|
-| 1 | Corpus under `data/<corpusName>/`, pinned at bind time | Met — `corpusDir` on the binding, resolved at bind, lazily backfilled | manager.ts |
+| 1 | Corpus under `artifacts/data/<corpusName>/`, pinned at bind time | Met — `corpusDir` on the binding, resolved at bind, lazily backfilled; legacy workspace corpora migrate before sync | manager.ts, storage.ts |
 | 2 | Scope is a path level, engine-owned | Met — engine joins `slug(scope)`; adapter scope segments removed | manager.ts |
 | 3 | Per-scope cursors | Met — `{v:2, scopes}` envelope; clean scopes advance independently | manager.ts |
 | 4 | Refresh-in-place, content-hashed, idempotent records + mirror prune | Met — sidecar content hash; triple-gated prune | writer.ts, manager.ts |
 | 5 | Trust frontmatter + scan + quarantine + path safety | Met | writer.ts |
-| 6 | Corpus read-only to gezels | Met at the Store chokepoint; sandbox-script raw-fs writes remain a documented gap | fs/store.ts |
-| 7 | `_`-prefix marks the mutable surface | Met — stated here, enforced by the `data/` gate | fs/safe-paths.ts |
+| 6 | Corpus read-only to gezels | Met at the artifact write boundary; script-dispatch artifact mutations remain a documented gap | fs/project-artifacts-store.ts, mcp/server.ts |
+| 7 | `_`-prefix marks the mutable surface | Met — stated here, enforced by the artifact corpus gate | fs/project-artifacts-store.ts |
 | 8 | `_meta.json` provenance | Met — written after every sync pass | manager.ts |
 | 9 | Cursor advances only on a clean batch | Met | manager.ts |
 | 10 | Bounded pass without silent loss | Met — `limit` + `partial` paging; over-return windowing counted and logged; `ordinalKey` from timestamps in generic drivers | manager.ts, drivers/ |
@@ -419,7 +421,7 @@ Never traded away, for any driver:
 
 **Mail now runs on one stack.** `project.mail` is gone: a mailbox is an ordinary
 `mail-*` connector binding (identity in the binding config, credential in the SecretStore,
-corpus under `data/<corpusName>/<folder>/…` with the address — not an opaque id — as the
+corpus under `artifacts/data/<corpusName>/<folder>/…` with the address — not an opaque id — as the
 `account` frontmatter). The mail routes, `MailManager`, and its outbox were deleted; linking
 goes through the generic bind/OAuth routes (with `loginHint`), and `draft_email` /
 `queue_email` / `send_email` are wrappers over the connector action surface, with the

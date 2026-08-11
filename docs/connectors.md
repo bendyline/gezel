@@ -2,7 +2,7 @@
 
 A **connector** binds a project to an external source of the user's own data — a
 mailbox, a calendar, a Drive folder, a git repo, a Slack export — and mirrors that source
-into a normalized, inspectable on-disk **corpus** that gezel's indexers pick up for free.
+into a normalized, inspectable on-disk **corpus** in the project's artifacts tree.
 The user configures and authorizes the connector; the connector does the auth, the fetch,
 and the normalization; the AI only ever sees the resulting files. Reading is bulk, offline,
 and low-stakes. Writing back (send an email, create a calendar event) is a separate,
@@ -13,11 +13,11 @@ on the night shift and gets committed in a morning review.
 subsystem.** Everything a connector needs already exists and is proven in production by
 [packages/service/src/mail/](../packages/service/src/mail/): a provider-agnostic adapter
 contract, cursor-resumed incremental sync, normalized files carrying trust frontmatter, an
-injection scanner that quarantines outside indexed roots, credentials in the SecretStore,
+injection scanner that quarantines outside the artifact corpus, credentials in the SecretStore,
 and a deny-by-default outbox with night-shift deferral. [git/manager.ts](../packages/service/src/git/manager.ts)
 is a second instance of the same pattern built independently. Codifying **one** contract
 lets the next source (calendar, Drive, Slack, RSS, a watched filesystem folder) reuse the
-sync engine, the safety rails, the secret store, the indexer, and the consent model instead
+sync engine, the safety rails, the secret store, artifact access, and the consent model instead
 of re-deriving each one. No new code-execution surface is added.
 
 And most connector types are **configuration over a generic driver — an MCP server or a
@@ -107,7 +107,7 @@ interface ConnectorAdapter<Record, Cursor> {
 `Record` is the type's canonical shape (a `MailMessage` for mail, an event for calendar).
 Normalization — the raw-to-canonical mapping — lives **inside** `fetchRecord` and is never
 exposed to the AI. This is the schema-design work that recurs per type; keeping it behind the
-adapter boundary is the reason the sync engine, writer, and indexer never learn a provider's
+adapter boundary is the reason the sync engine and writer never learn a provider's
 quirks.
 
 ## Drivers: most connector types are configuration, not code
@@ -171,7 +171,7 @@ for the generic-driver approach.
 The manifest makes **connect, fetch, and schedule** genuinely declarative — exactly the
 auth-lifecycle pain the contract exists to isolate. It does **not** make normalization free.
 MCP tools and CLIs return arbitrary JSON or prose; turning that into canonical, frontmattered,
-indexable records is per-source work. So a type's `normalize` step is one of:
+uniform inspectable records is per-source work. So a type's `normalize` step is one of:
 
 - a **field mapping** (declarative: source fields → frontmatter + body) — enough for tidy,
   structured tool output;
@@ -236,11 +236,11 @@ components on demand — is a later evaluate-then-decide (see phases).
 ## On-disk layout and normalization
 
 Generalizes [mail/storage.ts](../packages/service/src/mail/storage.ts) into a shared
-connector writer. Records land under the project workspace where the content indexer picks
-them up:
+connector writer. Records land under the project's managed artifacts tree, not in the
+workspace or the user's repository:
 
 ```
-<workspace>/data/<corpusName>/<scope>/…normalized records…
+<artifacts>/data/<corpusName>/<scope>/…normalized records…
 ```
 
 The naming, the scope level, the `_`-prefixed mutable surface, and the record-file shape are
@@ -253,11 +253,11 @@ Non-negotiable writer discipline, inherited verbatim from mail:
   assembly and the safety layer key off `trust`.
 - **Injection scan + quarantine.** Every record body runs through `contentScanner.scan`
   ([safety/index.ts](../packages/service/src/safety/)); a quarantine verdict diverts the raw
-  bytes to `.gezel/quarantine/` (outside any indexed root) and indexes only a stub. External
+  bytes to the workspace's `.gezel/quarantine/` (outside artifacts) and writes only a stub. External
   data is hostile-by-default; the corpus is where injection lands.
 - **Path safety.** Every path component derived from source data is slugged and funneled
   through `resolveInside` / `safeJoin` — a hostile subject, filename, or record id cannot
-  escape the workspace.
+  escape the artifacts root.
 - **Idempotent, refresh-in-place.** Records are content-hashed: re-sync is a no-op on
   unchanged records, replaces a changed record's file in place (stable ordinal), and — for
   mirror-completeness sources, after a clean full enumeration — prunes records the source no
@@ -265,13 +265,14 @@ Non-negotiable writer discipline, inherited verbatim from mail:
   content hashes) goes in an unindexed sidecar.
 
 **Corpus writability — decided and enforced.** A connector corpus is *inbound
-source-of-truth*; the AI reasons over it and writes its analysis to `artifacts/`, never
+source-of-truth*; the AI reasons over it and writes its analysis elsewhere in `artifacts/`, never
 mutating the corpus. The corpus is **read-only to the AI**, with `_`-prefixed entries
 (`_drafts/`, `_outbox/`, `_flags.json`) as the only writable surfaces — see
 [connector-standards.md §1.5–1.7](./connector-standards.md#15-the-_-rule-underscore-means-mutable).
-Enforced in `Store.assertWorkspaceWritable` (reason `data-subtree-readonly`), because a
-deleted record is never re-fetched — the cursor has already advanced past it. Sandboxed
-scripts writing with raw fs remain the documented residual gap.
+Enforced for gezel-initiated artifact writes at the daemon artifact boundary (with the MCP
+tool rejecting the same paths early), because a deleted record is never re-fetched — the
+cursor has already advanced past it. Script-dispatch artifact mutations remain the
+documented residual gap.
 
 ## The isolation boundary — what it buys, and its one caveat
 
@@ -391,11 +392,11 @@ Not download-*versus*-MCP: a connector can **be** an MCP server (the `mcp` drive
 distinction that matters is **posture**, not technology (see [the isolation rule](#two-postures-of-one-server--the-isolation-rule)):
 
 - **Ingest-bound** (connector): the server is driven by the sync host, its output normalized
-  into an inspectable corpus the model reads as files. Reproducible, indexable, diffable,
+  into an inspectable corpus the model reads as artifact files. Reproducible, diffable,
   injection-scanned. Weak at bulk/historical (below).
 - **Model-exposed** (live tool): the server's tools sit on the model's session; up-to-the-second,
   natural for "do X now," but the model holds a live handle to the API and its auth, and there
-  is no corpus to index or diff.
+  is no corpus to browse or diff.
 
 Same server, two postures; some installs want both (ingest Notion into the corpus for analysis
 *and* expose a Notion "create page" tool live). Recommended stance: **corpus for reasoning and
@@ -418,7 +419,8 @@ they do not add a parallel one:
 
 - Autonomous sync is gated by `allowExternalServices`; lockdown postures stop the loop.
 - The corpus is `trust: untrusted-external` and injection-scanned; quarantine keeps hostile
-  content out of the index. This is the single largest new attack surface — all inbound.
+  raw content out of the artifact tree while leaving a safe stub. This is the single largest
+  new attack surface — all inbound.
 - Write actions are deny-by-default and daemon-enforced; the model cannot widen its own
   allowlist.
 - **Autonomous third-party execution.** An `mcp` / `script` connector means gezel runs

@@ -1,10 +1,9 @@
 /**
  * Shared connector writer — the single on-disk chokepoint for every driver.
  * Generalized from `mail/storage.ts:writeMessage`. Turns a `NormalizedRecord`
- * into a markdown file under the project workspace, where the content indexer
- * picks it up for free:
+ * into a markdown file under the project's artifacts tree:
  *
- *   <workspace>/<corpusDir>/<...dirSegments>/
+ *   <artifacts>/<corpusDir>/<...dirSegments>/
  *     <NNN>--<fileStem>--<recordHash8>.md   (refresh-in-place: replaced when
  *                                            upstream content changes, ordinal
  *                                            + record identity stable)
@@ -21,9 +20,10 @@
  * Security (inherited from mail verbatim): every path component derived from the
  * (attacker-controlled) source is slugged by the adapter AND every write goes
  * through `resolveInside`, so a hostile id / title / filename can't escape the
- * workspace. The body runs through the content scanner; a quarantine verdict
- * diverts the raw body to `.gezel/quarantine/<namespace>/` (outside any indexed
- * root) and indexes only a stub.
+ * artifact tree. The body runs through the content scanner; a quarantine
+ * verdict diverts the raw body to the workspace's
+ * `.gezel/quarantine/<namespace>/` (outside the artifact tree) and writes only
+ * a stub to the corpus.
  */
 
 import { createHash } from 'node:crypto';
@@ -64,15 +64,18 @@ function safeFilename(name: string): string {
 export type WriteStatus = 'written' | 'refreshed' | 'exists' | 'quarantined';
 
 export interface WriteRecordInput {
-  workspaceDir: string;
-  /** Top dir under the workspace where this connector's corpus lands (mail: `mail`). */
+  /** Project artifacts root where this connector's corpus lands. */
+  storageDir: string;
+  /** Resolved workspace root; quarantined raw bodies remain under `.gezel/` here. */
+  quarantineWorkspaceDir: string;
+  /** Top dir under artifacts where this connector's corpus lands. */
   corpusDir: string;
   record: NormalizedRecord;
 }
 
 export interface WriteRecordResult {
   status: WriteStatus;
-  /** Workspace-relative path of the record markdown, when one was written. */
+  /** Artifact-relative path of the record markdown, when one was written. */
   relPath?: string;
 }
 
@@ -128,12 +131,12 @@ async function existingRecords(
  * `trust`/`scan_action`, and manages attachments + the flags sidecar.
  */
 export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordResult> {
-  const { workspaceDir, corpusDir, record } = input;
+  const { storageDir, quarantineWorkspaceDir, corpusDir, record } = input;
   const recordHash8 = sha8(record.recordId);
   const hash = contentHash(record);
 
   const relDir = [corpusDir, ...record.dirSegments].join('/');
-  const dirAbs = await resolveInside(workspaceDir, relDir);
+  const dirAbs = await resolveInside(storageDir, relDir);
   await mkdir(dirAbs, { recursive: true });
 
   const { maxOrdinal, files } = await existingRecords(dirAbs);
@@ -172,13 +175,13 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   if (verdict.action === 'quarantine') {
     // Divert the raw body to quarantine (unindexed); index only a stub. Create
     // the dir before resolveInside so its realpath check has an existing base.
-    const qBase = projectLocalQuarantineDir(workspaceDir);
+    const qBase = projectLocalQuarantineDir(quarantineWorkspaceDir);
     await mkdir(join(qBase, record.quarantineNamespace), { recursive: true });
     const qAbs = await resolveInside(qBase, `${record.quarantineNamespace}/${recordHash8}.md`);
     await writeFileAtomic(qAbs, withFrontmatter(frontmatter, record.bodyMarkdown));
     const stub = `${record.quarantineLabel} was held for safety review (flags: ${verdict.flags.join(', ') || 'injection'}). Its content is not indexed. See \`.gezel/quarantine/${record.quarantineNamespace}/${recordHash8}.md\`.`;
     await writeFileAtomic(
-      await resolveInside(workspaceDir, relPath),
+      await resolveInside(storageDir, relPath),
       withFrontmatter(frontmatter, stub),
     );
     await writeAttachments(dirAbs, ordinal, record.attachments);
@@ -187,7 +190,7 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   }
 
   await writeFileAtomic(
-    await resolveInside(workspaceDir, relPath),
+    await resolveInside(storageDir, relPath),
     withFrontmatter(frontmatter, verdict.cleaned),
   );
   await writeAttachments(dirAbs, ordinal, record.attachments);
@@ -258,7 +261,8 @@ async function updateSidecar(
 }
 
 export interface PruneInput {
-  workspaceDir: string;
+  /** Project artifacts root containing the corpus. */
+  storageDir: string;
   /** Scope-level corpus dir to prune (the same dir records were written to). */
   corpusDir: string;
   /** `sha8(recordId)` of every record the source still returns. */
@@ -278,7 +282,7 @@ export interface PruneResult {
  * go sparse by design — `writeRecord` allocates from the max, not the count.
  */
 export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
-  const rootAbs = await resolveInside(input.workspaceDir, input.corpusDir);
+  const rootAbs = await resolveInside(input.storageDir, input.corpusDir);
   let pruned = 0;
 
   async function walk(dirAbs: string): Promise<void> {

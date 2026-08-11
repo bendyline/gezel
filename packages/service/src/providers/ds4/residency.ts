@@ -108,3 +108,50 @@ export function ds4ResidentBytesForMode(
     ? catalogResidentBytes
     : Math.max(catalogResidentBytes, DS4_FULL_RESIDENCY_RESERVATION_BYTES);
 }
+
+/**
+ * DS4's resident footprint as a line in the context window:
+ * `contextFreeBytes + kvBytesPerToken × ctx`.
+ *
+ * The catalog's `residentBytes` is a measurement at ONE window
+ * (`residentCtxTokens`), so re-basing it is what lets a 64K and a 256K launch
+ * of the same model quote different numbers. Everything that does not move
+ * with the window — expert cache, prefill expert reserve, resident non-routed
+ * weights, the raw KV rows pinned to the prefill chunk — collapses into
+ * `contextFreeBytes`.
+ *
+ * Same `fixed + slope × ctx` shape llama.cpp/MLX rows already carry, so the
+ * models list and the context slider price ds4 through their existing path.
+ */
+export interface Ds4ResidentLine {
+  /** Footprint at a zero-token window: everything the context doesn't move. */
+  contextFreeBytes: number;
+  /** Resident bytes per context token (compressed KV + scaling buffers). */
+  kvBytesPerToken: number;
+}
+
+export interface Ds4ResidentLineOptions {
+  residentBytes?: number | undefined;
+  kvBytesPerToken?: number | undefined;
+  residentCtxTokens?: number | undefined;
+}
+
+/**
+ * Build the line from a catalog `ds4` source block. Returns undefined unless
+ * the entry authors all three inputs — a slope without the window it was
+ * measured at cannot be re-based, and guessing one would quote confident
+ * numbers for a model nobody measured.
+ */
+export function ds4ResidentLine(opts: Ds4ResidentLineOptions): Ds4ResidentLine | undefined {
+  const { residentBytes, kvBytesPerToken, residentCtxTokens } = opts;
+  if (!residentBytes || !kvBytesPerToken || !residentCtxTokens) return undefined;
+  // A mis-authored slope that swallows the whole footprint would quote a
+  // negative floor; clamp rather than propagate it into admission math.
+  const contextFreeBytes = Math.max(0, residentBytes - kvBytesPerToken * residentCtxTokens);
+  return { contextFreeBytes, kvBytesPerToken };
+}
+
+/** Evaluate {@link ds4ResidentLine} at a window. */
+export function ds4ProjectedResidentBytes(line: Ds4ResidentLine, ctxTokens: number): number {
+  return Math.round(line.contextFreeBytes + line.kvBytesPerToken * Math.max(0, ctxTokens));
+}

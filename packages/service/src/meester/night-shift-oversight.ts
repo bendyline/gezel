@@ -18,6 +18,8 @@ For EACH active project:
 1. Read its \`about.md\` and \`missionObjectives.md\` (the documents tools), plus recent history/artifacts, to gauge progress toward the stated objectives.
 2. Note where the project is drifting, stuck, or where its structure could be improved — craftbook structure, project layout, a stale \`about.md\`, recurring problems that deserve a documented solution.
 
+**The Default project is a deliberate catch-all and gets a narrower review.** Unrelated one-off items live there by design, so review only the state of its artifacts and loose work items — stale, half-finished, superseded, misfiled, or grown big enough to deserve a project of their own. Do NOT critique its structure, coherence, or objectives, do NOT judge its items against each other, and do NOT report its \`about.md\` or \`missionObjectives.md\` as thin, generic, or missing: they say "this is a grab bag" on purpose. This report itself lives in the Default project — its own scaffolding is not a finding.
+
 Then write ONE consolidated report to \`artifacts/${OVERSIGHT_REPORT_PATH}\` (overwrite any prior copy). Structure it as a list of concrete, approvable recommendations grouped by project, each with: what to change, why, and (where useful) a short ready-to-apply draft (e.g. a rewritten about.md paragraph). These are suggestions for the user to approve in the morning — do NOT apply them, do NOT message voormen, do NOT start or advance tasks.
 
 ## Actionable recommendations

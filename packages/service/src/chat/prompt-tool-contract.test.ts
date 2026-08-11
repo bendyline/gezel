@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { filterPromptToolDirectives, lintPromptToolContract } from './prompt-tool-contract.js';
+import {
+  filterPromptToolDirectives,
+  lintPromptToolContract,
+  promptMandatedTools,
+} from './prompt-tool-contract.js';
+
+describe('promptMandatedTools', () => {
+  it('collects positively-instructed canonical tools', () => {
+    const mandated = promptMandatedTools(
+      'Use the PR number from the Scope note. Call `github_pr_diff` for the complete unified diff and `github_pr_files` for the per-file patches. Use `read_file` only when you need surrounding context.',
+    );
+    expect([...mandated].sort()).toEqual(['github_pr_diff', 'github_pr_files', 'read_file']);
+  });
+
+  it('excludes negative, conditional, and contrast mentions', () => {
+    expect(
+      promptMandatedTools('Do not modify source and do not call `github_pr_comment`.'),
+    ).toEqual(new Set());
+    expect(
+      promptMandatedTools('If `run_nodejs_script` is available, use it for the conversion.'),
+    ).toEqual(new Set());
+    expect([
+      ...promptMandatedTools('Use `read_file`, not `read_artifact`, for workspace paths.'),
+    ]).toEqual(['read_file']);
+  });
+
+  it('ignores prose that merely names a non-tool identifier', () => {
+    expect(promptMandatedTools('Update the `max_tokens` value in the config.')).toEqual(new Set());
+  });
+});
 
 describe('lintPromptToolContract', () => {
   it('rejects a hard directive for a missing tool', () => {
@@ -118,6 +147,26 @@ describe('lintPromptToolContract', () => {
     });
 
     expect(report).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('partialRoster suppresses unknown-name noise but keeps registry findings', () => {
+    // Cold path: third-party bridge tools have no names yet, so a truthful
+    // `browser_navigate` mention must not be reported as unknown.
+    const prompt = 'Call `browser_navigate({ url })` to open the page, then call `write_file`.';
+    expect(
+      lintPromptToolContract({ prompt, availableTools: ['read_file'] }).errors.map((e) => e.rule),
+    ).toContain('unknown-tool-name');
+
+    const partial = lintPromptToolContract({
+      prompt,
+      availableTools: ['read_file'],
+      partialRoster: true,
+    });
+    expect(partial.errors.some((e) => e.rule === 'unknown-tool-name')).toBe(false);
+    // A registry tool that is genuinely off the roster still reports.
+    expect([...partial.errors, ...partial.warnings].some((f) => f.tool === 'write_file')).toBe(
+      true,
+    );
   });
 
   it('rejects a false file-capability denial', () => {

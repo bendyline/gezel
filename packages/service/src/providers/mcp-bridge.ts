@@ -19,9 +19,11 @@ import {
   type McpToolWrapperContext,
   selectWrappersFor,
 } from './mcp-wrappers/index.js';
+import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
 import type { ToolAudioPersister } from './tool-audio-persister.js';
 import type { ToolImagePersister } from './tool-image-persister.js';
 import type { ToolCallEvent } from './types.js';
+import type { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
 /**
  * Active hook entry. Combines a HookSpec with the craftbook that
@@ -415,6 +417,15 @@ export class McpBridge {
   /** Fires after every tool invocation (success or failure). */
   onToolCall?: (info: ToolCallEvent) => void | Promise<void>;
   /**
+   * Session-scoped record of tools stuck on a repeated validation
+   * rejection. Set by `McpBridgePool` to ONE shared instance across
+   * every bridge in the session, because the failing tool and the
+   * step-completion tool usually live on different bridges (DocBlocks'
+   * `convert_document` vs gezel-mcp's `advance_task_step`). Unset on a
+   * standalone bridge, which then behaves exactly as before.
+   */
+  failureLedger?: UnresolvedToolFailureLedger;
+  /**
    * Optional persister that writes any image content blocks returned by a
    * tool into the project's artifacts/ tree. When set, the bridge resolves
    * the saved paths and includes them in the `images` field of the
@@ -780,6 +791,44 @@ export class McpBridge {
   }
 
   /**
+   * Reinterpret arguments the textual tool-call path flattened into
+   * strings, against the schema the model was actually shown.
+   *
+   * Local models on the MLX/llama.cpp path emit markup
+   * (`<parameter=KEY>value</parameter>` and friends) rather than native
+   * tool calls, and every one of those shapes is a flat KEY→text map —
+   * a parameter declared `object` or `array` arrives as a string. The
+   * model then gets `got string, expected object`, re-emits the same
+   * correct JSON, and loops forever because the transport, not the
+   * model, is losing the structure. Repairing here covers every
+   * provider and every salvage format at one point.
+   *
+   * Never throws: a coercion fault must not take down a tool call that
+   * would otherwise have worked.
+   */
+  private repairFlattenedArgs(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const schema = this.tools.find((t) => t.name === toolName)?.parameters;
+    if (!schema) return args;
+    try {
+      const { args: repairedArgs, repaired } = coerceArgsToSchema(args, schema);
+      if (repaired.length === 0) return args;
+      log.debug(
+        `call_tool ${toolName} repaired flattened arg(s) against schema: ${repaired.join(', ')}`,
+      );
+      return repairedArgs;
+    } catch (err) {
+      log.warn(
+        `arg-schema coercion threw for ${toolName}; sending args unchanged:`,
+        err instanceof Error ? err.message : err,
+      );
+      return args;
+    }
+  }
+
+  /**
    * Reshape the in-memory tool list to Anthropic's Messages API format.
    * Same schemas, different field names — `parameters` → `input_schema`,
    * no top-level `type` discriminator. Wrappers / decorations have already
@@ -985,9 +1034,15 @@ export class McpBridge {
     if (toolName !== name) {
       log.debug(`call_tool alias ${name} -> ${toolName}`);
     }
+    // Repair structural arguments the textual tool-call path flattened
+    // into strings BEFORE anything downstream reads them — hooks,
+    // wrappers, the debug log, and the tool-call event all see the same
+    // repaired shape the server will. Schema-gated, so a genuine string
+    // argument is never reinterpreted. See tool-arg-schema-coercion.ts.
+    const callArgs = this.repairFlattenedArgs(toolName, args);
     const debugOn = this.debug?.isEnabled() === true;
     if (debugOn) {
-      const redactedArgs = redactObject(args, this.knownSecretValues);
+      const redactedArgs = redactObject(callArgs, this.knownSecretValues);
       let argsJson: string;
       try {
         argsJson = JSON.stringify(redactedArgs);
@@ -998,13 +1053,21 @@ export class McpBridge {
       // the model send?" is answerable from the log alone.
       log.debug(`call_tool ${toolName} args=${argsJson}`);
     } else {
-      log.debug(`call_tool ${toolName} keys=${Object.keys(args).join(',')}`);
+      log.debug(`call_tool ${toolName} keys=${Object.keys(callArgs).join(',')}`);
     }
     const start = Date.now();
     let errorMessage: string | undefined;
     let combined = '';
     let isError = false;
-    let effectiveArgs = args;
+    let effectiveArgs = callArgs;
+    /**
+     * True when THIS call was refused by the unresolved-failure ledger.
+     * The refusal text quotes the original rejection, so feeding it back
+     * into the ledger would file the gated tool as its own blocker and
+     * the message would start naming `advance_task_step` as the thing
+     * standing in its way.
+     */
+    let blockedByLedger = false;
     const images: Array<{ base64: string; mimeType: string }> = [];
     const audios: Array<{
       base64: string;
@@ -1018,7 +1081,18 @@ export class McpBridge {
       // it. A deny short-circuits like a wrapper reject — synthetic
       // error result, success=false, model sees the reason.
       let rejected: string | null = null;
-      if (this.shouldEvaluateHooks()) {
+      // Refuse to let a gezel declare a step complete while a tool it
+      // needed is still rejecting its calls. Checked ahead of hooks and
+      // wrappers because no amount of argument rewriting makes the
+      // advance legitimate — the work of this attempt did not happen.
+      // See unresolved-tool-failure-ledger.ts.
+      const ledgerBlock = this.failureLedger?.blockReason(toolName) ?? null;
+      if (ledgerBlock !== null) {
+        rejected = ledgerBlock;
+        blockedByLedger = true;
+        log.info(`call_tool ${toolName} blocked by unresolved-failure ledger`);
+      }
+      if (rejected === null && this.shouldEvaluateHooks()) {
         const verdict = await this.evaluateHooks('PreToolUse', toolName, effectiveArgs);
         if (!verdict.allow) {
           rejected = verdict.reason;
@@ -1156,6 +1230,12 @@ export class McpBridge {
           }
         }
       }
+      // Fold the settled outcome into the session's unresolved-failure
+      // ledger, using the FINAL model-facing text (post error-translation)
+      // — that is what the model saw and reacted to, so it is the right
+      // thing to compare for "identical failure". A success here clears
+      // the tool. See unresolved-tool-failure-ledger.ts.
+      if (!blockedByLedger) this.failureLedger?.record(toolName, combined, isError);
       // Persist images to the project's artifacts/ tree before firing the
       // event so the persisted paths can ride along on the ToolCallEvent.
       // A persister failure must NOT poison the tool result — log and
@@ -1183,7 +1263,7 @@ export class McpBridge {
       }
       if (this.onToolCall) {
         try {
-          const redactedArgs = redactObject(args, this.knownSecretValues);
+          const redactedArgs = redactObject(callArgs, this.knownSecretValues);
           const redactedError = errorMessage
             ? redactString(errorMessage, this.knownSecretValues)
             : undefined;
@@ -1200,7 +1280,7 @@ export class McpBridge {
           }
           await this.onToolCall({
             name: toolName,
-            argKeys: Object.keys(args),
+            argKeys: Object.keys(callArgs),
             args: redactedArgs,
             durationMs: Date.now() - start,
             success: !isError,

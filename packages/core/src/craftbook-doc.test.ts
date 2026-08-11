@@ -29,6 +29,12 @@ const FULL_DOC: CraftbookDoc = {
   triggers: ['scrape prices', 'price check'],
   command: 'scrape-prices',
   runModes: { scheduled: 'recommended', nightShift: 'supported' },
+  connectors: [
+    {
+      typeId: 'competitor-prices',
+      reason: 'Mirror the source data before fetching prices.',
+    },
+  ],
   steps: [
     {
       id: 'fetch',

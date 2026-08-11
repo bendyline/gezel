@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type ChatSessionSummary,
   type Craftbook,
+  type CraftbookConnectorNeed,
   type CraftbookStep,
   type CraftbookToolsetNeed,
   type CreateTaskRequest,
@@ -48,6 +49,7 @@ import {
   stepInsertionIndex,
   summarizePlanDocument,
   uniqueStepId,
+  unmetConnectors,
   unmetToolsets,
 } from '@bendyline/gezel';
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
@@ -109,6 +111,54 @@ export class CraftbookSetupRequiredError extends Error {
   }
 }
 
+/**
+ * A craftbook reads a connector corpus the project has not bound. The
+ * launcher offers to bind it (defaults come from the project) and retries.
+ */
+export class ConnectorSetupRequiredError extends Error {
+  readonly code = 'CONNECTOR_SETUP_REQUIRED';
+
+  constructor(
+    readonly craftbookId: string,
+    readonly missingConnectors: CraftbookConnectorNeed[],
+  ) {
+    const details = missingConnectors
+      .map((need) => `${need.typeId}${need.reason ? ` (${need.reason})` : ''}`)
+      .join(', ');
+    super(
+      `SETUP REQUIRED for craftbook "${craftbookId}": connect ${details} before creating this task. No task was created.`,
+    );
+    this.name = 'ConnectorSetupRequiredError';
+  }
+}
+
+/**
+ * The data a connector pulled down for one task launch: params to merge
+ * into `craftbookParams` (so `{{corpusScope}}` and friends interpolate
+ * into step prompts and gate paths) and a note for the audit trail.
+ */
+export interface ConnectorPrepResult {
+  params?: Record<string, string>;
+  note?: string;
+}
+
+/**
+ * Runs a craftbook's declared connectors before its first step. Kept as a
+ * hook rather than a direct dependency so `TaskManager` stays free of the
+ * connector subsystem — `service.ts` wires the real implementation once
+ * `ConnectorManager` exists.
+ *
+ * This is the runtime-initiated half of the connector contract: a gezel
+ * never calls a "fetch" tool (docs/connector-standards.md), so the data
+ * has to be on disk before the step prompt is built.
+ */
+export type ConnectorPrepHook = (ctx: {
+  projectId: string;
+  craftbookId: string;
+  connectors: CraftbookConnectorNeed[];
+  params: Record<string, string>;
+}) => Promise<ConnectorPrepResult>;
+
 function describeAssignee(
   a: TaskAssignee,
   resolveGezelName: (id: string) => string | undefined,
@@ -151,6 +201,9 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot toolsets so ChatManager can derive the auto-allow tool set
     // from `task.craftbook.toolsets` without re-resolving the catalog book.
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    // Snapshot connector needs so a running task records the corpus it was
+    // launched against without re-resolving the catalog book.
+    ...(book.connectors ? { connectors: book.connectors } : {}),
     // Snapshot embedded script sources so the task's gate/lifecycle
     // scripts execute from its own copy (scope 'craftbook' refs resolve
     // here first — see runGateScript/runStepScript).
@@ -469,6 +522,7 @@ export class TaskManager {
   private onTaskCreated?: TaskCreatedHook;
   private onTaskSettled?: TaskSettledHook;
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
+  private onConnectorPrep?: ConnectorPrepHook;
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
@@ -588,6 +642,16 @@ export class TaskManager {
 
   setTaskNeedsHelpHook(fn: TaskNeedsHelpHook): void {
     this.onTaskNeedsHelp = fn;
+  }
+
+  /**
+   * Wire the connector-prep hook — pulls a craftbook's declared connector
+   * data down before its first step runs. Unset = connector needs are
+   * still enforced (a required, unbound connector fails the launch), but
+   * nothing syncs.
+   */
+  setConnectorPrepHook(fn: ConnectorPrepHook): void {
+    this.onConnectorPrep = fn;
   }
 
   /**
@@ -839,6 +903,36 @@ export class TaskManager {
       ...craftbookParamDefaults(mainBook.paramSchema),
       ...(input.craftbookParams ?? {}),
     };
+    // Connector prep runs BEFORE interpolation, which is the whole reason
+    // it lives at launch rather than at step activation: the corpus paths
+    // it resolves (`{{corpusScope}}`, a selected PR number) have to be
+    // concrete before they are baked into step prompts and gate paths,
+    // and interpolation happens exactly once, here.
+    let connectorPrepNote: string | undefined;
+    if (!isDraft && mainBook.connectors && mainBook.connectors.length > 0) {
+      const bound = new Set(
+        ((await this.store.getProject(projectId).catch(() => null))?.connectors ?? [])
+          .filter((b) => !b.disabled)
+          .map((b) => b.type),
+      );
+      const missing = unmetConnectors(mainBook.connectors, bound);
+      if (missing.length > 0) {
+        throw new ConnectorSetupRequiredError(input.craftbookId ?? mainBook.id, missing);
+      }
+      if (this.onConnectorPrep) {
+        // A prep failure (auth, rate limit, posture) fails the launch —
+        // better than creating a task whose first step reads an empty
+        // corpus and reports the source as having nothing in it.
+        const prep = await this.onConnectorPrep({
+          projectId,
+          craftbookId: input.craftbookId ?? mainBook.id,
+          connectors: mainBook.connectors,
+          params: effectiveCraftbookParams,
+        });
+        Object.assign(effectiveCraftbookParams, prep.params ?? {});
+        connectorPrepNote = prep.note;
+      }
+    }
     if (Object.keys(effectiveCraftbookParams).length > 0) {
       interpolateStepsContext(craftbook.steps, effectiveCraftbookParams);
     }
@@ -942,6 +1036,17 @@ export class TaskManager {
       await this.store.addGezelToProject(projectId, task.assignee.gezelId, { source: 'task' });
     }
 
+    // Record what the connector actually pulled down, so the first step's
+    // assignee (and anyone auditing later) can see the corpus it is
+    // reading and when it was fetched.
+    if (connectorPrepNote) {
+      await this.appendNote(projectId, num, {
+        text: connectorPrepNote,
+        author: { kind: 'user' },
+        stepId: activeStepId,
+      }).catch(() => {});
+    }
+
     if (this.onTaskCreated) {
       try {
         await this.onTaskCreated({ projectId, task, sources });
@@ -953,6 +1058,17 @@ export class TaskManager {
     if (!isDraft && fanout && spawnsCraftbook) {
       const materialized = await this.materializeFanout(projectId, num);
       return materialized.parent;
+    }
+
+    // Entry steps never reach the activation hook (kickoff runs through
+    // `dispatchTaskEntry`), so the unsatisfiable check has to happen here
+    // too. Returning the paused task is what stops the dispatch: it
+    // guards on `status === 'active'`.
+    if (!isDraft && !fanout) {
+      const entryStep = craftbook.steps.find((s) => s.id === activeStepId);
+      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, task, entryStep))) {
+        return { ...task, status: 'paused' };
+      }
     }
     return task;
   }
@@ -1516,6 +1632,7 @@ export class TaskManager {
       ...(book.triggers ? { triggers: book.triggers } : {}),
       ...(book.hooks ? { hooks: book.hooks } : {}),
       ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+      ...(book.connectors ? { connectors: book.connectors } : {}),
       ...(book.scripts ? { scripts: book.scripts } : {}),
       createdAt: task.craftbook.createdAt,
       updatedAt: now,
@@ -2079,7 +2196,11 @@ export class TaskManager {
           return { status: 'advanced', task: cascaded.task };
         }
 
-        // No auto-advance → fire the handoff hook so a gezel picks up.
+        // No auto-advance → fire the handoff hook so a gezel picks up,
+        // unless nobody could satisfy the step under current policy.
+        if (await this.pauseIfStepUnsatisfiable(projectId, updated, newStep)) {
+          return { status: 'advanced', task: { ...updated, status: 'paused' } };
+        }
         if (this.onStepActivated) {
           try {
             await this.onStepActivated({
@@ -2652,13 +2773,18 @@ export class TaskManager {
         `[gate] ${task.ref} step "${step.id}" gate is unsatisfiable (workspace writes off) — pausing without consuming an attempt`,
       );
       await logGated('reject', priorAttempts, true, outcome);
-      await this.emitNeedsHelp({
-        projectId,
-        task,
-        stepId: step.id,
-        reason: 'gate_unsatisfiable',
-        detail: `The gate requires workspace ${fileList}, but gezel workspace writes are off for this project.`,
-      });
+      // Activation already paused and reported an unwinnable step; the
+      // caller still gets the verdict below, but one blocked step must
+      // not raise a second needs-help.
+      if (task.status !== 'paused') {
+        await this.emitNeedsHelp({
+          projectId,
+          task,
+          stepId: step.id,
+          reason: 'gate_unsatisfiable',
+          detail: `The gate requires workspace ${fileList}, but gezel workspace writes are off for this project.`,
+        });
+      }
       return {
         kind: 'held',
         task: paused,
@@ -2933,6 +3059,83 @@ export class TaskManager {
    * failures stay repairable — the artifacts drawer is deliberately
    * exempt from the writes-off policy.
    */
+  /**
+   * The workspace files a step must produce that no assignee is able to
+   * write. The proactive twin of {@link unsatisfiableWorkspaceGateFiles}:
+   * that one reads a gate REJECTION, this one reads the step's own
+   * deliverable declaration at ACTIVATION, before anyone is dispatched.
+   *
+   * Wild-caught (Pull Request Review on a writes-off project): the step
+   * mandated `write_file pr-review.md` from a roster the workspace-write
+   * ceiling had already stripped it from. Nothing could complete the
+   * step, so the gezel stalled on a clarifying question and the task sat
+   * active indefinitely — the reactive pause never fires because it needs
+   * an `advance_task_step` call that never comes.
+   */
+  private async unsatisfiableStepWorkspaceFiles(
+    projectId: string,
+    step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
+  ): Promise<string[] | null> {
+    const project = await this.store.getProject(projectId).catch(() => null);
+    if (!project || projectWorkspaceWritable(project)) return null;
+    const files = new Set<string>();
+    if (step.advanceWhen?.file && step.advanceWhen.artifact !== true) {
+      files.add(step.advanceWhen.file);
+    }
+    for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
+      if ((check as { artifact?: boolean }).artifact === true) continue;
+      const file = (check as { file?: string }).file;
+      if (file) files.add(file);
+    }
+    if (files.size === 0) return null;
+    // Only a deliverable that must be WRITTEN is unwinnable. A gate over
+    // a file that already exists may pass on its contents alone (a
+    // verify-only step), so leave that judgement to the gate itself —
+    // `requireChange` is the exception, since it demands an edit.
+    if (step.advanceWhen?.requireChange !== true) {
+      const missing = await Promise.all(
+        [...files].map(
+          async (file) =>
+            (await this.store.readProjectWorkspaceFile(projectId, file).catch(() => null)) === null,
+        ),
+      );
+      if (!missing.some(Boolean)) return null;
+    }
+    return [...files];
+  }
+
+  /**
+   * Pause a task whose newly-activated step targets an unwritable
+   * workspace deliverable, and report why. Returns true when the caller
+   * must skip the handoff — dispatching a gezel here cannot succeed.
+   */
+  private async pauseIfStepUnsatisfiable(
+    projectId: string,
+    task: Task,
+    step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
+  ): Promise<boolean> {
+    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, step);
+    if (!files) return false;
+    const fileList = files.map((f) => `\`${f}\``).join(', ');
+    await this.setStatus(projectId, task.num, 'paused').catch(() => {});
+    await this.appendNote(projectId, task.num, {
+      text: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must produce workspace ${fileList}, but gezel workspace writes are OFF for this project — no gezel has \`write_file\`, so no assignee can complete it. The step was not dispatched.\n\nFix one of these, then set the task active again:\n\n- Enable "Allow gezels to modify the workspace directory" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create the file(s) by hand and re-run the step.`,
+      author: { kind: 'user' },
+      stepId: step.id,
+    }).catch(() => {});
+    log.warn(
+      `[tasks] ${task.ref} step "${step.id}" targets workspace ${fileList} but workspace writes are off — pausing instead of dispatching`,
+    );
+    await this.emitNeedsHelp({
+      projectId,
+      task,
+      stepId: step.id,
+      reason: 'gate_unsatisfiable',
+      detail: `Step "${step.name}" must write workspace ${fileList}, but gezel workspace writes are off for this project.`,
+    });
+    return true;
+  }
+
   private async unsatisfiableWorkspaceGateFiles(
     projectId: string,
     gate: NormalizedStepGate,

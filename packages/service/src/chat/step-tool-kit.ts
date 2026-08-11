@@ -16,6 +16,7 @@ import type { CraftbookStep, DeliverableKind } from '@bendyline/gezel';
 import {
   deliverableKindForStep,
   firstActionForKind,
+  isProseDocPath,
   normalizeScriptRefs,
   normalizeStepGate,
   stepDeliverablePath,
@@ -72,9 +73,10 @@ const KIND_ADDITIONS: Partial<Record<DeliverableKind, readonly string[]>> = {
  * the worker needs the sandbox; grounding checks resolve
  * citations/values against the corpus → the worker needs search.
  */
-function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
+function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | null): string[] {
   if (!step.gate) return [];
   const gate = normalizeStepGate(step.gate);
+  const proseTarget = path !== null && isProseDocPath(path);
   const out = new Set<string>();
   for (const check of gate.checks ?? []) {
     switch (check.kind) {
@@ -93,8 +95,12 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
       case 'csvShape':
       case 'recordSchema':
       case 'tableShape':
-        out.add('derive_file');
-        out.add('run_nodejs_script');
+        // A Markdown table inside a prose report is written, not derived —
+        // handing that step the transform kit points it at the wrong verb.
+        if (!proseTarget) {
+          out.add('derive_file');
+          out.add('run_nodejs_script');
+        }
         break;
       default:
         break;
@@ -136,9 +142,10 @@ export function stepToolKit(
 ): StepKit | null {
   const kind = deliverableKindForStep(step);
   if (!kind) return null;
+  const path = stepDeliverablePath(step);
   const tools = new Set<string>(FILE_CORE);
   for (const t of KIND_ADDITIONS[kind] ?? []) tools.add(t);
-  for (const t of gateDrivenAdditions(step)) tools.add(t);
+  for (const t of gateDrivenAdditions(step, path)) tools.add(t);
   if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_installed_script');
   for (const t of ARTIFACT_DRAWER_TOOLS) tools.add(t);
   return { kind, path: stepDeliverablePath(step), tools };

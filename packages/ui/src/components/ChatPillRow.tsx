@@ -1,6 +1,13 @@
 import type { GezelSummary, Task, TerminalThreadSummary } from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../api.js';
 import { DropdownMenu } from '../primitives/index.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -19,12 +26,12 @@ function timestampMs(iso: string): number {
 /**
  * The status band across the top of a project chat: one pill per thread
  * that is streaming, failed, or recently active; one per active task; and
- * a "+" that starts a new task from a craftbook.
+ * a "Do +" action that starts a new task from a craftbook.
  *
  * Purely presentational apart from the two data hooks — it owns no dialog
  * and performs no navigation. The parent decides what focusing a thread or
  * a task means, which is what lets the same row serve a surface with no
- * task authority (omit `onNewTask` and the "+" disappears).
+ * task authority (omit `onNewTask` and "Do +" disappears).
  */
 export function ChatPillRow({
   projectId,
@@ -53,7 +60,7 @@ export function ChatPillRow({
   onFocusTask: (task: Task) => void;
   /** Omit on chat-only surfaces; supplying it adds recent terminal windows. */
   onFocusTerminal?: (thread: TerminalThreadSummary) => void;
-  /** Omit to hide the "+" on surfaces that can't create project tasks. */
+  /** Omit to hide "Do +" on surfaces that can't create project tasks. */
   onNewTask?: (() => void) | undefined;
   refreshKey?: number | undefined;
   terminalRefreshKey?: number | undefined;
@@ -123,67 +130,73 @@ export function ChatPillRow({
     .join(', ');
 
   const empty = pills.length === 0 && visibleTerminalThreads.length === 0 && tasks.length === 0;
+  const cardCount =
+    pills.length + overflow.length + visibleTerminalThreads.length + tasks.length + (empty ? 1 : 0);
+  const { scrollRef, overflowBar } = useOverflowBar(cardCount);
 
   return (
     <div className="chat-pill-row" role="toolbar" aria-label="Threads, terminal windows, and tasks">
       <output className="sr-only">{announcement}</output>
-      <div className="chat-pill-row-scroll">
-        {empty && <span className="chat-pill-row-empty muted small">No recent threads</span>}
+      <div className="chat-pill-row-scroller">
+        <div className="chat-pill-row-scroll" ref={scrollRef} onScroll={overflowBar.onScroll}>
+          {empty && <span className="chat-pill-row-empty muted small">No recent threads</span>}
 
-        {pills.map((pill) => (
-          <ThreadPillButton
-            key={pill.sessionId}
-            pill={pill}
-            gezels={gezels}
-            gezelNames={namesFor(pill)}
-            active={pill.sessionId === activeSessionId}
-            onFocus={onFocusThread}
-          />
-        ))}
-
-        {overflow.length > 0 && (
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger className="chat-pill chat-pill-overflow">
-              +{overflow.length} more
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                className="chat-rail-section-tab-menu chat-pill-overflow-menu"
-                align="start"
-                sideOffset={4}
-              >
-                {overflow.map((pill) => (
-                  <DropdownMenu.Item
-                    key={pill.sessionId}
-                    onSelect={() => onFocusThread(pill)}
-                    className={`chat-pill-overflow-item chat-pill-${pill.state}`}
-                  >
-                    <ThreadSummaryLines pill={pill} gezelNames={namesFor(pill)} />
-                  </DropdownMenu.Item>
-                ))}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        )}
-
-        {onFocusTerminal &&
-          visibleTerminalThreads.map((thread) => (
-            <TerminalPillButton
-              key={thread.id}
-              thread={thread}
-              active={thread.id === activeTerminalThreadId}
-              onFocus={onFocusTerminal}
+          {pills.map((pill) => (
+            <ThreadPillButton
+              key={pill.sessionId}
+              pill={pill}
+              gezels={gezels}
+              gezelNames={namesFor(pill)}
+              active={pill.sessionId === activeSessionId}
+              onFocus={onFocusThread}
             />
           ))}
 
-        {tasks.map((task) => (
-          <TaskPillButton
-            key={task.ref}
-            task={task}
-            active={task.ref === activeTaskRef}
-            onFocus={onFocusTask}
-          />
-        ))}
+          {overflow.length > 0 && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger className="chat-pill chat-pill-overflow">
+                +{overflow.length} more
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="chat-rail-section-tab-menu chat-pill-overflow-menu"
+                  align="start"
+                  sideOffset={4}
+                >
+                  {overflow.map((pill) => (
+                    <DropdownMenu.Item
+                      key={pill.sessionId}
+                      onSelect={() => onFocusThread(pill)}
+                      className={`chat-pill-overflow-item chat-pill-${pill.state}`}
+                    >
+                      <ThreadSummaryLines pill={pill} gezelNames={namesFor(pill)} />
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
+
+          {onFocusTerminal &&
+            visibleTerminalThreads.map((thread) => (
+              <TerminalPillButton
+                key={thread.id}
+                thread={thread}
+                active={thread.id === activeTerminalThreadId}
+                onFocus={onFocusTerminal}
+              />
+            ))}
+
+          {tasks.map((task) => (
+            <TaskPillButton
+              key={task.ref}
+              task={task}
+              active={task.ref === activeTaskRef}
+              onFocus={onFocusTask}
+            />
+          ))}
+        </div>
+        {overflowBar.node}
       </div>
 
       {onNewTask && (
@@ -194,11 +207,110 @@ export function ChatPillRow({
           aria-label="New task"
           title="New task — pick a craftbook"
         >
-          +
+          Do +
         </button>
       )}
     </div>
   );
+}
+
+/**
+ * A stand-in horizontal scrollbar for the pill strip.
+ *
+ * The native one is unusable here on two counts: macOS's default
+ * "Automatic" setting gives Chromium an overlay bar that is invisible
+ * until you are already scrolling, and forcing the classic bar adds 8px to
+ * a band whose height is shared with the output pane's toolbar. This one is
+ * absolutely positioned — visible whenever the pills overflow, and free of
+ * any effect on the band's height.
+ *
+ * `cardCount` is the re-measure trigger: pills arrive and leave without the
+ * scroller's own box ever changing size, so the ResizeObserver alone would
+ * miss them.
+ */
+function useOverflowBar(cardCount: number): {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  overflowBar: { onScroll: () => void; node: React.ReactNode };
+} {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [geometry, setGeometry] = useState<{ left: number; width: number } | null>(null);
+
+  const measure = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollWidth, clientWidth, scrollLeft } = el;
+    // Sub-pixel overflow is a rounding artifact, not a hidden pill.
+    if (scrollWidth - clientWidth < 2) {
+      setGeometry((prev) => (prev === null ? prev : null));
+      return;
+    }
+    const width = clientWidth / scrollWidth;
+    const left = scrollLeft / scrollWidth;
+    setGeometry((prev) =>
+      prev && Math.abs(prev.left - left) < 0.0005 && Math.abs(prev.width - width) < 0.0005
+        ? prev
+        : { left, width },
+    );
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cardCount is the re-measure trigger — the body doesn't read it, but a pill arriving or leaving must re-run it.
+  useEffect(() => {
+    measure();
+  }, [measure, cardCount]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  const onThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const scroller = scrollRef.current;
+    const track = event.currentTarget.parentElement;
+    if (!scroller || !track) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Thumb width is the visible fraction of the track, so a pointer moved
+    // by dx along the track maps to dx * (scrollWidth / trackWidth).
+    const ratio = scroller.scrollWidth / track.clientWidth;
+    const startX = event.clientX;
+    const startScrollLeft = scroller.scrollLeft;
+    const onMove = (move: PointerEvent) => {
+      scroller.scrollLeft = startScrollLeft + (move.clientX - startX) * ratio;
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const onTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const scroller = scrollRef.current;
+    if (!scroller || !geometry) return;
+    const track = event.currentTarget.getBoundingClientRect();
+    const fraction = (event.clientX - track.left) / track.width;
+    const page = fraction < geometry.left ? -scroller.clientWidth : scroller.clientWidth;
+    scroller.scrollBy({ left: page, behavior: 'smooth' });
+  };
+
+  // Hidden from assistive tech on purpose: every pill is a real button, so
+  // keyboard users already reach them by Tab, which scrolls the strip into
+  // view. The bar is a pointer affordance, not a second way to navigate.
+  const node = geometry && (
+    <div className="chat-pill-row-bar" aria-hidden="true" onPointerDown={onTrackPointerDown}>
+      <div
+        className="chat-pill-row-bar-thumb"
+        style={{ left: `${geometry.left * 100}%`, width: `${geometry.width * 100}%` }}
+        onPointerDown={onThumbPointerDown}
+      />
+    </div>
+  );
+
+  return { scrollRef, overflowBar: { onScroll: measure, node } };
 }
 
 function TerminalPillButton({
@@ -228,7 +340,9 @@ function TerminalPillButton({
         </span>
         <span className="chat-pill-message-preview">{folder}</span>
       </span>
-      <span className="chat-pill-thread-line chat-pill-thread-update">Updated {updated}</span>
+      <span className="chat-pill-thread-line chat-pill-thread-update">
+        <span className="chat-pill-thread-updated-at">Updated {updated}</span>
+      </span>
     </button>
   );
 }
@@ -302,7 +416,9 @@ function ThreadSummaryLines({
         <span className="chat-pill-message-preview">{message}</span>
       </span>
       <span className="chat-pill-thread-line chat-pill-thread-update">
-        <span>Updated {formatLongRelativeTime(pill.lastActivityAt)}</span>
+        <span className="chat-pill-thread-updated-at">
+          Updated {formatLongRelativeTime(pill.lastActivityAt)}
+        </span>
         <span className="chat-pill-separator" aria-hidden="true">
           ·
         </span>

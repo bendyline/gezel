@@ -386,6 +386,15 @@ describe('EngineStatusPill — simultaneous local engines', () => {
   it('states the reservation and its models instead of filling the bar the driver cannot measure', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'talkie-1930-13b-q4',
+          name: 'Talkie 1930 13B',
+          plannedSlots: 2,
+        } as never,
+      ],
+    });
     vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
       kind: 'vram',
       totalBytes: 31.9 * GiB,
@@ -447,12 +456,73 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.queryByText(/Capacity planning only/)).not.toBeInTheDocument();
     // Capacity holders are visible as well as accessible. Known ids take
     // their catalog name; the rest fall back to the id.
-    expect(screen.getByText('Talkie 1930 13B ×2')).toBeInTheDocument();
+    expect(screen.getByText('Talkie 1930 13B ×2 · 4 concurrent')).toBeInTheDocument();
     expect(screen.getByText('~30.9 GB')).toBeInTheDocument();
     expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
     expect(screen.getByText('~19.1 GB')).toBeInTheDocument();
-    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2/i);
+    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2 · 4 concurrent/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
+  });
+
+  it('scales unified-memory reservations against total RAM and shows the system reserve', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'unified',
+      totalBytes: 128 * GiB,
+      usedBytes: 125 * GiB,
+      gezelBytesEstimated: 98 * GiB,
+      gezelBytesObserved: 103.5 * GiB,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 98 * GiB,
+      engineReservedBytes: 98 * GiB,
+      engineBudgetBytes: 112 * GiB,
+      enginePools: {
+        kind: 'unified',
+        vramBytes: 0,
+        ramShareBytes: 112 * GiB,
+        fastBytes: 112 * GiB,
+      },
+      residentModels: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'qwen3.6-27b-q8',
+          reservedBytes: 98 * GiB,
+          replicaCount: 1,
+        },
+      ],
+      gezelEngineProcessCount: 1,
+      orphanedGezelEngineProcessCount: 0,
+      otherBytes: 21.5 * GiB,
+      cachedBytes: 0,
+      freeBytes: 3 * GiB,
+      sampledAt: '2026-08-10T12:00:00.000Z',
+      source: 'system-memory',
+      deviceNames: [],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    const capacityMeter = screen.getByRole('img', {
+      name: /Model capacity: about 98\.0 GB of 112\.0 GB reserved/i,
+    });
+    expect(capacityMeter).toHaveAccessibleName(/System reserve about 16\.0 GB/i);
+    expect(
+      screen.getByText(
+        'Scale: ~112.0 GB model capacity + ~16.0 GB system reserve = 128.0 GB unified memory',
+      ),
+    ).toBeVisible();
+    expect(capacityMeter.querySelector('.machine-memory-reservation-pool-ram')).toHaveStyle({
+      width: '87.5%',
+    });
+    expect(capacityMeter.querySelector('.machine-memory-reservation-segment')).toHaveStyle({
+      width: '76.5625%',
+    });
+    expect(capacityMeter.querySelector('.machine-memory-reservation-system-reserve')).toHaveStyle({
+      width: '12.5%',
+    });
   });
 
   it('shows the on-card ceiling when discrete-GPU spillover is off', async () => {

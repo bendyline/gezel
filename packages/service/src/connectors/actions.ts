@@ -8,7 +8,7 @@
  * enforcer all deny. During night shift, commit defers: the action stages to
  * `_outbox/` for daytime approval (the morning-briefing model).
  *
- *   <workspace>/<binding corpusDir>/_actions/
+ *   <artifacts>/<binding corpusDir>/_actions/
  *     _drafts/<id>.md   (drafted by the agent — the review surface)
  *     _outbox/<id>.md   (staged: queued for daytime approval)
  *     _sent/<id>.md     (committed: receipt)
@@ -30,6 +30,7 @@ import { enforceConsent } from './consent.js';
 import { ProjectLocks } from './lock.js';
 import { corpusDirFor, createConnectorAdapter } from './manager.js';
 import { newDraftId } from './outbox.js';
+import { connectorCorpusStorage } from './storage.js';
 
 const log = createLogger('connectors');
 
@@ -116,14 +117,15 @@ export class ConnectorActionManager {
   /** List pending actions (drafted + queued) across the project's connectors. */
   async list(project: ProjectDetail): Promise<{ pending: PendingAction[] }> {
     const pending: PendingAction[] = [];
-    const workspaceDir = await this.opts.store.projectWorkspaceDir(project.id);
     for (const binding of project.connectors ?? []) {
+      const corpusDir = corpusDirFor(project.connectors ?? [], binding);
+      const { storageDir } = await connectorCorpusStorage(this.opts.store, project.id, corpusDir);
       for (const [sub, status] of [
         ['_outbox', 'queued'],
         ['_drafts', 'draft'],
       ] as const) {
-        const dir = `${corpusDirFor(project.connectors ?? [], binding)}/_actions/${sub}`;
-        const abs = await resolveInside(workspaceDir, dir).catch(() => null);
+        const dir = `${corpusDir}/_actions/${sub}`;
+        const abs = await resolveInside(storageDir, dir).catch(() => null);
         if (!abs) continue;
         for (const name of await readdir(abs).catch(() => [])) {
           if (!name.endsWith('.md')) continue;
@@ -270,9 +272,10 @@ export class ConnectorActionManager {
     const bindings = project.connectors ?? [];
     const binding = bindings.find((b) => b.id === bindingId);
     if (!binding) throw new Error(`no connector binding ${bindingId}`);
-    const workspaceDir = await this.opts.store.projectWorkspaceDir(project.id);
-    const rel = `${corpusDirFor(bindings, binding)}/_actions/${sub}/${name}`;
-    return { abs: await resolveInside(workspaceDir, rel), rel };
+    const corpusDir = corpusDirFor(bindings, binding);
+    const { storageDir } = await connectorCorpusStorage(this.opts.store, project.id, corpusDir);
+    const rel = `${corpusDir}/_actions/${sub}/${name}`;
+    return { abs: await resolveInside(storageDir, rel), rel };
   }
 
   /** Find a draft by id across all bindings, `_outbox` (preferred) then `_drafts`. */
