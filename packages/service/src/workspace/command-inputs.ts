@@ -85,8 +85,12 @@ export async function fingerprintCommandInputs(
 
     // Follow only statically visible relative imports. Bare package imports
     // and dynamic expressions remain part of the documented residual risk.
+    // Use the canonical directory only when it is visibly inside the same
+    // workspace. macOS resolves /var through /private/var, which otherwise
+    // makes ordinary temp-workspace imports appear to escape containment.
+    const moduleBase = isInside(workspace, canonical) ? dirname(canonical) : dirname(absolute);
     for (const specifier of relativeModuleSpecifiers(content)) {
-      for (const candidate of moduleCandidates(dirname(canonical), specifier)) {
+      for (const candidate of moduleCandidates(moduleBase, specifier)) {
         await visit(candidate);
       }
     }

@@ -3359,7 +3359,7 @@ describe('ChatManager — per-session message queue', () => {
     expect(userTurns[1]?.content).toBe('nudge one\n\nnudge two');
     expect(userTurns[1]?.nudge).toBe(true);
     // The title came from the original message, not the nudges.
-    expect(rec?.title).toContain('long question');
+    expect(rec?.title).toBe('Long question');
 
     // Exactly one merged user_message event, and a
     // queue_removed('started') for BOTH consumed entries.

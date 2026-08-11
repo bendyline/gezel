@@ -97,8 +97,8 @@ describe('HistoryManager', () => {
       gezelId: 'ada',
       summary: 'ok',
     });
-    const file = projectHistoryFile(home, '__fake');
-    await mkdir(join(home, 'projects', '__fake'), { recursive: true });
+    const file = projectHistoryFile(home, 'fake');
+    await mkdir(join(home, 'projects', 'fake'), { recursive: true });
     await writeFile(file, 'not-json\n{"bad":\n', 'utf8');
     const events = await history.listEvents();
     expect(events).toHaveLength(1);
