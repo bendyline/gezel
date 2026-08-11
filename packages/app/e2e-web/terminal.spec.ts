@@ -192,11 +192,18 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {
-  // The reference rail intentionally becomes a compact tab surface when the
-  // output pane leaves it less than 1100 px. Give this split-geometry check a
-  // wide canvas so both resize grips are expected to render.
+  // The reference rail renders only when the conversation has side context,
+  // and becomes a compact tab surface when the output pane leaves it less
+  // than 840 px. Open a seeded task and give this split-geometry check a wide
+  // canvas so both resize grips are expected to render.
   await page.setViewportSize({ width: 2400, height: 900 });
   await gotoProject(page, world!.projectId);
+
+  await page
+    .getByRole('button', {
+      name: `Task ${world!.taskRefs[0]}: Wire up the landing page`,
+    })
+    .click();
 
   const showOutput = page.getByRole('button', { name: 'Show output pane' });
   if (await showOutput.isVisible()) await showOutput.click();
@@ -384,7 +391,7 @@ test('lets ordinary-height output flow while preserving a horizontal scrollbar',
   });
 });
 
-test('places the caret after a command staged from the Commands rail', async ({
+test('places the caret after a craftbook staged from the Terminal Tasks gallery', async ({
   page,
   world,
   daemon,
@@ -422,8 +429,12 @@ test('places the caret after a command staged from the Commands rail', async ({
   );
   test.skip(!craftbook, 'no parameterless craftbook available to stage');
 
-  const commandsTab = page.getByRole('tab', { name: 'Commands' });
-  if (await commandsTab.isVisible()) await commandsTab.click();
+  await switchToTerminal(page);
+  await page
+    .getByRole('button', {
+      name: 'Craftbooks and workspace skills a gezel can run for you',
+    })
+    .click();
   await page.getByRole('textbox', { name: 'Filter commands' }).fill(craftbook!.id);
   await page.locator('.commands-panel-item').filter({ hasText: craftbook!.name }).first().click();
 

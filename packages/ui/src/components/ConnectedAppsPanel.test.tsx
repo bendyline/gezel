@@ -233,6 +233,6 @@ describe('ConnectedAppsPanel', () => {
     fireEvent.click(toggle);
 
     await waitFor(() => expect(getCodexSetupStatus).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('button', { name: 'Set up Codex…' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Set up Codex…' })).toBeEnabled();
   });
 });

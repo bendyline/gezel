@@ -14488,14 +14488,31 @@ button.bench-step-foot:disabled {
 /* A banner (today: the chat pill row) spans the whole rail — chat column,
    grip, and context pane — so the status band reads as one toolbar across
    the split instead of stopping at the grip. It occupies its own auto row
-   above the panes; the grip only ever spans the content row below it. */
+   above the panes. The transparent grip track still spans both rows so its
+   painted handle stays aligned with the neighbouring output-pane handle;
+   the banner sits above the track so its controls keep the full hit area. */
 .chat-rail-body:has(> .chat-rail-banner) {
   grid-template-rows: auto minmax(0, 1fr);
   row-gap: 0;
 }
 .chat-rail-banner {
+  position: relative;
+  z-index: 1;
   grid-column: 1 / -1;
+  grid-row: 1;
   min-width: 0;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-main {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-grip {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-side {
+  grid-column: 3;
+  grid-row: 2;
 }
 
 /* Compact / narrow form factor. The split rail becomes a single-pane tab
