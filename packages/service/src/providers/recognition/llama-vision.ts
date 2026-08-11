@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { type ImageRecognition, createLogger, nowIso } from '@bendyline/gezel';
 import type { RecognitionHealth } from '@bendyline/gezel';
 import { readImageStaticMeta } from '../../index-store/image-meta.js';
+import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   type ModelStorageRoots,
   findModelRoot,
@@ -283,10 +284,11 @@ export class LlamaVisionProvider implements RecognitionProvider {
   }
 
   async deleteModel(id: string): Promise<void> {
+    const itemDir = resolveModelDirectory(this.modelsRoot, id);
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+    await rm(itemDir, { recursive: true, force: true });
   }
 
   async health(): Promise<RecognitionHealth> {

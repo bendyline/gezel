@@ -10,6 +10,11 @@ import {
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
+import {
+  INVALID_MODEL_ID_CODE,
+  INVALID_MODEL_ID_MESSAGE,
+  isSafeModelId,
+} from '../../models/model-id.js';
 import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
@@ -366,6 +371,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
 
   app.delete('/models/:id', async (c) => {
     const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
     const provider = await ctx.imageProvider.current();
     await provider.deleteModel(id);
     return c.json({ ok: true as const });

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   DescribeFolderResponse,
@@ -38,6 +38,7 @@ import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
   projectContentIndexDbFile,
+  projectLocalFilesDir,
   projectLocalIndexDbFile,
   projectLocalVillageFile,
   projectStorageScope,
@@ -52,10 +53,11 @@ import { VillageFileStore } from '../filemap/village-file.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
+import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
-import { docFilesPaths, ensureConvertedMarkdownSidecar } from './docs.js';
+import { ensureShadowDocSidecar, shadowDocFilesPaths } from './docs.js';
 import { type EnrichDeps, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
@@ -122,7 +124,7 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { workspaceDir, dbPath } = opened;
+    const { workspaceDir, artifactsDir, dbPath } = opened;
     try {
       if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
         await ensureIndexGitignore(workspaceDir);
@@ -134,7 +136,22 @@ export class ContentIndex {
       opened.index.close();
     }
 
-    const stats = await runStaticIndex({ dbPath, workspaceDir, collectionId: projectId });
+    const stats = await runStaticIndex({
+      dbPath,
+      workspaceDir,
+      artifactsDir,
+      collectionId: projectId,
+    });
+    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+      // Conversions now live under artifacts/shadow; the old in-workspace
+      // cache is stranded stale content and doubled disk. Regenerable and
+      // deny-all-gitignored, so removal is safe. Machine-shared workspaces are
+      // skipped: an older daemon on another account would recreate the tree,
+      // and cross-daemon churn is worse than a stale cache.
+      await rm(projectLocalFilesDir(workspaceDir), { recursive: true, force: true }).catch(
+        () => {},
+      );
+    }
     const post = await this.open(projectId);
     if (!post) return stats;
     try {
@@ -1045,17 +1062,50 @@ export class ContentIndex {
   ): Promise<{ files: number; summarized: number; embedded: number } | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { index, workspaceDir } = opened;
+    const { index, workspaceDir, artifactsDir } = opened;
     try {
       const files = index.filesNeedingEnrichment(limit);
       let summarized = 0;
       let embedded = 0;
       for (const file of files) {
-        const r = await enrichFile(index, workspaceDir, file, deps);
+        const r = await enrichFile(index, workspaceDir, artifactsDir, file, deps);
         if (r.summarized) summarized++;
         embedded += r.embedded;
       }
       return { files: files.length, summarized, embedded };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Run one batch of the AI-shadow tier: describe images / transcribe audio
+   * into `artifacts/shadow/` sidecars. Runs BEFORE the summary tier so a
+   * produced shadow immediately joins the enrichment work-list. No-op when
+   * neither producer is wired (no vision model / no STT configured).
+   */
+  async aiShadows(
+    projectId: string,
+    deps: AiShadowDeps,
+    limit = 3,
+  ): Promise<{ files: number; produced: number; called: number } | null> {
+    if (!deps.describeImage && !deps.transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir, artifactsDir } = opened;
+    try {
+      const files = index.filesNeedingAiShadow(limit);
+      let produced = 0;
+      let called = 0;
+      let handled = 0;
+      for (const file of files) {
+        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, deps);
+        if (r.skipped) continue;
+        handled++;
+        if (r.produced) produced++;
+        if (r.called) called++;
+      }
+      return { files: handled, produced, called };
     } finally {
       index.close();
     }
@@ -1128,7 +1178,7 @@ export class ContentIndex {
     if (resolved.size === 0) return { files: 0, reviewed: 0 };
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { index, workspaceDir } = opened;
+    const { index, workspaceDir, artifactsDir } = opened;
     try {
       let files = 0;
       let reviewed = 0;
@@ -1142,7 +1192,7 @@ export class ContentIndex {
           MAX_REVIEW_ATTEMPTS,
         );
         for (const file of batch) {
-          const r = await reviewFile(index, workspaceDir, file, rubric, deps);
+          const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
           if (r.reviewed || r.attempted) files++;
           if (r.reviewed) reviewed++;
           if (r.emptyReply) {
@@ -1210,7 +1260,7 @@ export class ContentIndex {
     const { index } = opened;
     try {
       const limit = Math.min(req.maxResults ?? 200, 1000);
-      const { issues, counts } = index.fileIssues({
+      const { issues, counts, reviewers } = index.fileIssues({
         ...(req.severity ? { severity: req.severity } : {}),
         ...(req.category ? { category: req.category } : {}),
         ...(req.path ? { pathPrefix: req.path } : {}),
@@ -1230,6 +1280,7 @@ export class ContentIndex {
         indexed: index.fileCount() > 0,
         reviewedFiles: rc.reviewed,
         eligibleFiles: rc.eligible,
+        ...(reviewers.length > 0 ? { reviewers } : {}),
       };
     } finally {
       index.close();
@@ -1241,18 +1292,21 @@ export class ContentIndex {
   async searchDocs(projectId: string, query: string, maxResults = 20): Promise<SearchDocsResponse> {
     const opened = await this.open(projectId);
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
-    const { index, workspaceDir } = opened;
+    const { index, artifactsDir } = opened;
     try {
       if (!index.ftsAvailable) return { results: [], engine: 'unavailable', truncated: false };
       const hits = index.searchDocs(query, maxResults + 1);
       const truncated = hits.length > maxResults;
       return {
-        results: hits.slice(0, maxResults).map((h) => ({
-          sourcePath: h.filePath,
-          markdownPath: docFilesPaths(workspaceDir, h.filePath).mdRel,
-          lineStart: h.lineStart,
-          snippet: h.snippet,
-        })),
+        results: hits.slice(0, maxResults).map((h) => {
+          const shadow = shadowDocFilesPaths(artifactsDir, h.filePath);
+          return {
+            sourcePath: h.filePath,
+            markdownPath: shadow ? `artifacts/${shadow.mdRel}` : h.filePath,
+            lineStart: h.lineStart,
+            snippet: h.snippet,
+          };
+        }),
         engine: 'fts',
         truncated,
       };
@@ -1272,16 +1326,17 @@ export class ContentIndex {
     const absSource = safeJoin(workspaceDir, relPath);
     if (!absSource) return { found: false, truncated: false };
 
-    const paths = docFilesPaths(workspaceDir, relPath);
     // Reuse the same freshness + sandboxed-conversion path as indexing and
     // the References viewer so every document consumer agrees on sidecars.
-    const md = (await ensureConvertedMarkdownSidecar(absSource, paths)).markdown;
-    if (md == null) return { found: false, sourcePath: relPath, truncated: false };
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
+    const ensured = await ensureShadowDocSidecar(absSource, artifactsDir, relPath);
+    const md = ensured?.markdown ?? null;
+    if (md == null || !ensured) return { found: false, sourcePath: relPath, truncated: false };
     const truncated = md.length > MAX_READ_BYTES;
     return {
       found: true,
       sourcePath: relPath,
-      markdownPath: paths.mdRel,
+      markdownPath: `artifacts/${ensured.paths.mdRel}`,
       markdown: truncated ? `${md.slice(0, MAX_READ_BYTES)}\n…(truncated)` : md,
       truncated,
     };
@@ -1488,9 +1543,12 @@ export class ContentIndex {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  private async open(
-    projectId: string,
-  ): Promise<{ index: IndexStore; workspaceDir: string; dbPath: string } | null> {
+  private async open(projectId: string): Promise<{
+    index: IndexStore;
+    workspaceDir: string;
+    artifactsDir: string;
+    dbPath: string;
+  } | null> {
     let workspaceDir: string;
     try {
       workspaceDir = await this.store.projectWorkspaceDir(projectId);
@@ -1498,6 +1556,7 @@ export class ContentIndex {
       return null;
     }
     if (!workspaceDir) return null;
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
 
     const open = (dbPath: string) =>
       IndexStore.open(dbPath, {
@@ -1517,7 +1576,7 @@ export class ContentIndex {
       index = await open(dbPath);
     }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir, dbPath } : null;
+    return index ? { index, workspaceDir, artifactsDir, dbPath } : null;
   }
 
   private async syncFindingLifecycle(
@@ -1702,6 +1761,10 @@ function toReviewWire(row: FileReviewRow): FileReviewWire {
     health: row.health,
     healthReason: row.healthReason,
     model: row.model,
+    provider: row.provider,
+    gezelId: row.gezelId,
+    gezelName: row.gezelName,
+    appVersion: row.appVersion,
     reviewedAt: row.reviewedAt,
   };
 }

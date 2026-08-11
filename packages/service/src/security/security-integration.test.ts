@@ -54,7 +54,7 @@ afterEach(async () => {
 describe('security-intel end-to-end', () => {
   it('surfaces planted systemic findings, dependencies, and reachability', async () => {
     // 1. Index the workspace — this runs the built-in per-file security scan.
-    await runWorkspaceContentIndex(dir, 'proj');
+    await runWorkspaceContentIndex(dir, 'proj', join(dir, '.gezel', 'artifacts'));
 
     const store = await IndexStore.open(projectLocalIndexDbFile(dir), {
       collectionId: 'proj',

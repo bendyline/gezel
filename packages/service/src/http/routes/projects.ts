@@ -40,7 +40,10 @@ import {
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
-import { ConnectorCorpusWriteDeniedError } from '../../fs/project-artifacts-store.js';
+import {
+  ConnectorCorpusWriteDeniedError,
+  ShadowPathWriteDeniedError,
+} from '../../fs/project-artifacts-store.js';
 import {
   PathSafetyError,
   intoWorkspaceRelative,
@@ -941,7 +944,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path: body.path });
     } catch (err) {
-      if (err instanceof ConnectorCorpusWriteDeniedError) {
+      if (
+        err instanceof ConnectorCorpusWriteDeniedError ||
+        err instanceof ShadowPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       throw err;
@@ -963,6 +969,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path: written });
     } catch (err) {
+      if (err instanceof ShadowPathWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         return c.json({ error: 'backup already exists' }, 409);
       }

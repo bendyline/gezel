@@ -49,7 +49,7 @@ import {
 } from './local-tool-call-salvage.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { computeToolBudgetChars } from './mcp-bridge.js';
-import { ProviderQueue, runInQueue } from './queue.js';
+import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import { terminalToolClosingText } from './terminal-tool-policy.js';
@@ -199,6 +199,12 @@ export class OllamaProvider implements LLMProvider {
     this.queue = new ProviderQueue({
       concurrency: opts.concurrency ?? 1,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
+      // Ollama serves from the same single local GPU as our native
+      // engines, so it gets the same ambient admission control as
+      // llama-cpp/mlx: housekeeping turns (index enrichment, nudges,
+      // extraction) wait for a quiet window so they never wedge the
+      // lane right before the user's next message.
+      ambientQuietMs: defaultAmbientQuietMs(),
     });
   }
 

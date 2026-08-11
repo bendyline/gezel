@@ -2,7 +2,6 @@ import type { CatalogItemSummary, CatalogKind, ToolsetCategory } from '@bendylin
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
-import { sanitizeCatalogSvg } from '../sanitize-catalog-svg.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 
 /**
@@ -45,13 +44,12 @@ const TOOLSET_CATEGORY_ORDER: ToolsetCategory[] = [
 ];
 
 function CatalogItemLogo({ item }: { item: CatalogItemSummary }) {
-  const safeSvg = item.iconSvg ? sanitizeCatalogSvg(item.iconSvg) : null;
   return (
     <CatalogArtwork
-      logoUrl={
-        safeSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(safeSvg)}` : item.logoUrl
-      }
-      imageClassName={`catalog-item-logo${safeSvg ? ' catalog-item-logo-svg' : ''}`}
+      iconSvg={item.iconSvg}
+      logoUrl={item.logoUrl}
+      svgClassName="catalog-item-logo catalog-item-logo-svg"
+      imageClassName="catalog-item-logo"
       fallback={
         <div className="catalog-item-logo catalog-item-logo-placeholder">
           {item.manifest.name.slice(0, 1)}

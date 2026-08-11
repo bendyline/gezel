@@ -1,7 +1,12 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
-import { type ExternalFolders, projectArtifactsDir } from '@bendyline/gezel/paths';
+import { isReservedShadowArtifactPath } from '@bendyline/gezel';
+import {
+  type ExternalFolders,
+  PROJECT_SHADOW_DIR_NAME,
+  projectArtifactsDir,
+} from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
@@ -69,6 +74,16 @@ export class ConnectorCorpusWriteDeniedError extends Error {
   }
 }
 
+export class ShadowPathWriteDeniedError extends Error {
+  readonly code = 'shadow-readonly' as const;
+  constructor() {
+    super(
+      'artifacts/shadow/ is the derived shadow-file cache (converted documents, descriptions, transcripts), regenerated automatically by indexing. Write your file elsewhere in artifacts.',
+    );
+    this.name = 'ShadowPathWriteDeniedError';
+  }
+}
+
 /**
  * Owns the project-level artifacts tree.
  *
@@ -92,7 +107,11 @@ export class ProjectArtifactsStore {
   }
 
   async listProjectArtifacts(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
-    return listDirEntries(this.projectArtifactsDir(id), subpath);
+    const entries = await listDirEntries(this.projectArtifactsDir(id), subpath);
+    // The reserved shadow cache stays out of listings (it would drown real
+    // artifacts); explicit-path reads under shadow/ still work.
+    if (subpath !== '') return entries;
+    return entries.filter((e) => !(e.isDirectory && e.name === PROJECT_SHADOW_DIR_NAME));
   }
 
   async listProjectArtifactsRecursive(
@@ -106,10 +125,10 @@ export class ProjectArtifactsStore {
     id: string,
     opts?: { withStats?: boolean },
   ): Promise<WalkDirResult> {
-    return walkDirDetailed(
-      this.projectArtifactsDir(id),
-      opts?.withStats ? { withStats: true } : {},
-    );
+    return walkDirDetailed(this.projectArtifactsDir(id), {
+      ...(opts?.withStats ? { withStats: true } : {}),
+      skipRootDirs: SHADOW_SKIP,
+    });
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
@@ -146,7 +165,9 @@ export class ProjectArtifactsStore {
     }
     const targetBase = cleaned.split('/').pop()?.toLowerCase() ?? '';
     if (!targetBase) return { kind: 'missing' };
-    const all = await walkDir(base);
+    // Shadow twins must not hijack fuzzy basename lookups — a converted
+    // `architecture.md` would otherwise shadow the artifact the model meant.
+    const all = await walkDir(base, { skipRootDirs: SHADOW_SKIP });
     const matches = all.filter((e) => !e.isDirectory && e.name.toLowerCase() === targetBase);
     if (matches.length === 1) {
       const hit = matches[0]!;
@@ -294,6 +315,10 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
       throw new ConnectorCorpusWriteDeniedError();
     }
+    // Unconditional (unlike the gezel-only corpus guard): the shadow cache's
+    // only legitimate writer is the indexer's converter, which bypasses this
+    // store entirely, so every write arriving here is a mistake.
+    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -310,6 +335,7 @@ export class ProjectArtifactsStore {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
+    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -328,6 +354,8 @@ export class ProjectArtifactsStore {
     await this.touchProject(id);
   }
 }
+
+const SHADOW_SKIP: ReadonlySet<string> = new Set([PROJECT_SHADOW_DIR_NAME]);
 
 /**
  * Strip leading `./`, `/`, and repeated `artifacts/` prefixes. Defense

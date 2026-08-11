@@ -409,6 +409,39 @@ describe('ChatReferences task picker', () => {
 });
 
 describe('ChatReferences reference picker', () => {
+  it('renders global HTML documents as inert source rather than srcDoc', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({
+      mode: 'text',
+      content: '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
+    });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() =>
+              onToolActivity({
+                name: 'read_document',
+                path: 'remote.html',
+                success: true,
+                durationMs: 1,
+              })
+            }
+          >
+            Open global HTML
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open global HTML' }));
+    await waitFor(() => expect(container.querySelector('.chat-rail-viewer-code')).not.toBeNull());
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
   it('offers native save-copy and containing-folder actions for the active file', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

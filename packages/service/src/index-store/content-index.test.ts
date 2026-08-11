@@ -15,6 +15,7 @@ beforeEach(async () => {
   const fakeStore = {
     projectIndexingEnabled: async () => true,
     projectWorkspaceDir: async () => dir,
+    projectArtifactsDir: () => join(home, 'artifacts'),
   } as unknown as Store;
   ci = new ContentIndex(fakeStore, home);
 });
@@ -33,6 +34,7 @@ describe('ContentIndex (code-intel façade)', () => {
           workspaceResolved = true;
           return dir;
         },
+        projectArtifactsDir: () => join(home, 'artifacts'),
       } as unknown as Store,
       home,
     );

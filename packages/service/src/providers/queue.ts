@@ -267,7 +267,7 @@ export class ProviderQueue {
   private readonly affinityWindowMs: number;
   private readonly maxWaitMs: number;
   /** See {@link ProviderQueueOptions.ambientQuietMs}. 0 = gate off. */
-  private readonly ambientQuietMs: number;
+  readonly ambientQuietMs: number;
   /**
    * Last time NON-ambient work touched this queue (enqueue, dispatch,
    * or release — any lane). Initialized to construction time so a

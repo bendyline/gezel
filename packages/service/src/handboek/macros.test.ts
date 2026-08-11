@@ -300,7 +300,9 @@ describe('whats-new-list macro', () => {
   });
 
   it('caps the inline list at the limit attribute', async () => {
-    const { markdown } = await expandMacros('::handboek-whats-new-list{limit=1}', { ...ctx('app') });
+    const { markdown } = await expandMacros('::handboek-whats-new-list{limit=1}', {
+      ...ctx('app'),
+    });
     expect(markdown).toContain('1.26223');
     expect(markdown).not.toContain('1.26219');
   });

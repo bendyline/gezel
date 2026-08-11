@@ -27,6 +27,7 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { resolveModelDirectory } from '../../models/model-id.js';
 import { type LoadTransformersEnv, pinTransformersCacheDir } from '../../transformers-cache.js';
 import type {
   AudioEngineHealth,
@@ -374,7 +375,8 @@ export class KokoroProvider implements TextToSpeechProvider {
   }
 
   async deleteModel(id: string): Promise<void> {
-    await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+    const itemDir = resolveModelDirectory(this.modelsRoot, id);
+    await rm(itemDir, { recursive: true, force: true });
     // If we deleted the loaded model out from under us, drop the cache
     // so the next synthesize re-loads (and fails loudly if no replacement
     // is installed).

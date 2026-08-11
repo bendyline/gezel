@@ -156,7 +156,7 @@ describe('preview capabilities (integration)', () => {
     ).toBe(403);
   });
 
-  it('relaxes only resource egress when External services is enabled', async () => {
+  it('relaxes only resource egress when both network capabilities are enabled', async () => {
     await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
     try {
       const minted = await mint(svc.clientToken);
@@ -174,6 +174,21 @@ describe('preview capabilities (integration)', () => {
       expect(csp).toContain('sandbox allow-scripts');
       expect(csp).toContain("webrtc 'allow'");
       expect(page.headers.get('x-gezel-preview-external-services')).toBe('allowed');
+
+      await svc.context.store.writeConfig({
+        securityPolicy: {
+          ...securityPolicyForLevel('free'),
+          level: 'custom',
+          allowAppNetwork: false,
+        },
+      });
+      const appNetworkOff = await mint(svc.clientToken);
+      const blockedLease = (await appNetworkOff.json()) as { url: string };
+      const blockedPage = await httpFetch(`${baseUrl}${blockedLease.url}`);
+      const blockedCsp = blockedPage.headers.get('content-security-policy') ?? '';
+      expect(blockedCsp).not.toContain('https:');
+      expect(blockedCsp).toContain("connect-src 'self'");
+      expect(blockedPage.headers.get('x-gezel-preview-external-services')).toBe('blocked');
     } finally {
       await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('lockdown') });
     }

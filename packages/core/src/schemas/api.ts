@@ -623,7 +623,7 @@ export const SecurityPolicySchema = z.object({
   allowExternalServices: z.boolean(),
   /** Allow model-initiated script execution — `script.run`, the code-execution tools, and craftbook script steps. App-driven npm/node/CLI/MCP runs are exempt. */
   allowScriptExecution: z.boolean(),
-  /** Allow the desktop app's background network — currently the Electron auto-update check. */
+  /** Desktop-shell network gate: updater/background traffic and renderer-originated off-daemon requests. */
   allowAppNetwork: z.boolean(),
 });
 export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;

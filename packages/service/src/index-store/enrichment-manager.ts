@@ -1,9 +1,10 @@
-import { type GezelDetail, createLogger } from '@bendyline/gezel';
+import { type GezelDetail, type HistoryEvent, createLogger } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { SystemIdleState } from '../system/idle-state.js';
+import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
 import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
@@ -65,6 +66,15 @@ export interface IndexEnrichmentManagerOptions {
   events?: Pick<ChatEventBus, 'publishGlobalEvent'>;
   /** Test seam; production resolves the role from each project's roster. */
   resolveBoekwachter?: (projectId: string) => Promise<GezelDetail | null>;
+  /**
+   * AI-shadow producers (vision describe / STT transcribe). Absent when the
+   * install has neither capability; the shadow tier is skipped entirely then.
+   */
+  shadowProducers?: AiShadowProducers;
+  /** Audit log for the once-per-wave `project.index.reviewed` drain event. */
+  history?: {
+    log: (event: Omit<HistoryEvent, 'id' | 'at'> & { at?: string; id?: string }) => Promise<void>;
+  };
 }
 
 export class IndexEnrichmentManager {
@@ -79,6 +89,8 @@ export class IndexEnrichmentManager {
   private readonly isPaused: () => Promise<boolean> | boolean;
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
   private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
+  private readonly shadowProducers: AiShadowProducers | undefined;
+  private readonly history: IndexEnrichmentManagerOptions['history'];
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -99,6 +111,8 @@ export class IndexEnrichmentManager {
     this.resolveBoekwachter =
       opts.resolveBoekwachter ??
       ((projectId) => resolveProjectBoekwachter(this.store, projectId).catch(() => null));
+    this.shadowProducers = opts.shadowProducers;
+    this.history = opts.history;
   }
 
   start(): void {
@@ -123,6 +137,37 @@ export class IndexEnrichmentManager {
   /** Live, durable-for-the-tick status consumed by the Night Shift menu. */
   getActivity(): IndexEnrichmentActivity | null {
     return this.activity ? { ...this.activity } : null;
+  }
+
+  /**
+   * Emit the once-per-wave `project.index.reviewed` audit event: only on the
+   * transition where this tick stored reviews AND the queue is now empty.
+   * Per-file events would flood the ~150-kind flat log (day batches alone
+   * would emit dozens per sweep); the drain is the meaningful moment.
+   */
+  private async logReviewDrain(
+    projectId: string,
+    boekwachter: GezelDetail,
+    deps: EnrichDeps,
+    storedThisTick: number,
+  ): Promise<void> {
+    if (!this.history || storedThisTick === 0) return;
+    const counts = await this.contentIndex.reviewCounts(projectId).catch(() => null);
+    if (!counts || counts.pending > 0) return;
+    const issues = await this.contentIndex.listFileIssues(projectId, {}).catch(() => null);
+    await this.history
+      .log({
+        kind: 'project.index.reviewed',
+        projectId,
+        gezelId: boekwachter.id,
+        summary: `${boekwachter.name} finished reviewing ${counts.reviewed} workspace files`,
+        details: {
+          files: counts.reviewed,
+          ...(issues ? { issues: issues.counts.total } : {}),
+          ...(deps.model ? { model: deps.model } : {}),
+        },
+      })
+      .catch(() => {});
   }
 
   /** Exposed for tests: run one batch ignoring the timers (still idle-gated). */
@@ -163,6 +208,42 @@ export class IndexEnrichmentManager {
         const rubrics: Map<string, ResolvedRubric> = deps.model
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
           : new Map<string, ResolvedRubric>();
+        // AI-shadow tier first: a produced description/transcript immediately
+        // joins the enrichment work-list below, so one tick can take an image
+        // from "filename only" to summarized + embedded. Small batches —
+        // vision + STT calls are heavy.
+        if (this.shadowProducers) {
+          this.activity = {
+            id: 'index-enrichment',
+            title: 'Workspace indexing',
+            detail: 'Describing images and transcribing audio',
+            projectId: p.id,
+            ...(p.name ? { projectName: p.name } : {}),
+          };
+          const sh = await this.contentIndex
+            .aiShadows(
+              p.id,
+              {
+                ...this.shadowProducers,
+                ...(deps.provenance ? { provenance: deps.provenance } : {}),
+              },
+              night ? 5 : 2,
+            )
+            .catch(() => null);
+          if (sh && sh.produced > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${sh.produced} shadow files (${sh.called} model calls)`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'shadow',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${sh.produced} media files described`,
+              gezelId: boekwachter.id,
+              gezelName: boekwachter.name,
+            });
+          }
+        }
         let drained = false;
         for (;;) {
           if (this.chat.isAnyActive()) return; // yield to live work immediately
@@ -227,12 +308,14 @@ export class IndexEnrichmentManager {
               projectId: p.id,
               ...(p.name ? { projectName: p.name } : {}),
             };
+            let storedThisTick = 0;
             for (;;) {
               if (this.chat.isAnyActive()) return; // yield to live work immediately
               const r = await this.contentIndex
                 .review(p.id, deps, batch, rubrics)
                 .catch(() => null);
               const files = r?.files ?? 0;
+              storedThisTick += r?.reviewed ?? 0;
               if (files > 0) {
                 didWork = true;
                 log.info(`[enrich] ${p.id}: ${files} files reviewed (${r!.reviewed} stored)`);
@@ -250,6 +333,7 @@ export class IndexEnrichmentManager {
               if (!night) break; // day: one review batch per project per tick
               if (deadline && Date.now() >= deadline) return;
             }
+            await this.logReviewDrain(p.id, boekwachter, deps, storedThisTick);
           }
         }
         if (!night && didWork) return; // day: one project's worth of work per tick

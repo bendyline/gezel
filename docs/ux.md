@@ -711,6 +711,18 @@ finishes. The rooftop fire reflects open and in-progress findings only, so it
 goes out when the last one is resolved and relights if a later scan finds a true
 regression.
 
+Below the findings tray, a reviewed file carries a **Boekwachter review card**
+on the same tray recipe but a neutral surface: the 1–10 health score with its
+one-line reason, the reviewer's cliffs notes as read-only markdown prose, and
+plain-text issue rows (`[severity] category — message`) that reveal their line
+in the source when clicked. Review severities (info / minor / major) are a
+deliberately separate vocabulary from security severities and never borrow
+their colors or badge treatment. The card closes on a one-line reminder that
+these are leads from a background model pass — an opinion, not a verdict — and
+a muted provenance footer naming the model, gezel, and date. A file the
+boekwachter hasn't reached yet gets one muted "not reviewed yet" line, no
+spinner.
+
 Past street zoom, miniature symbol buildings may gain compact floating tags.
 These use small-radius plates with short rooftop leaders, prioritize functions
 and methods when labels collide, and appear progressively as each building gets

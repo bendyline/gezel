@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeProjectGezelId, nowIso, projectGezelId } from '@bendyline/gezel';
-import { gezelPoppetjePath } from '@bendyline/gezel/paths';
+import { gezelPoppetjePath, projectLocalGezelDir } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from './store.js';
 
@@ -81,6 +81,30 @@ describe('project-local @project gezel', () => {
     const projectRoster = await store.listProjectGezels(projectId);
     expect(projectRoster.find((g) => g.id === projectGezelId(projectId))).toBeDefined();
     expect(projectRoster[0]?.scope).toBe('project');
+  });
+
+  it('structurally sanitizes a repository-provided project gezel icon on read', async () => {
+    const { projectId, ws } = await projectWithInstructionFile(
+      'Portable crew',
+      'AGENTS.md',
+      'portable prompt',
+    );
+    await store.createProjectGezel(projectId, { name: 'Portable crew', canonical: true });
+    const iconPath = join(projectLocalGezelDir(ws, 'project'), 'icon.svg');
+    const malicious =
+      '<svg xmlns="http://www.w3.org/2000/svg" onload="steal()"><style>@import url(https://attacker.test/x)</style><foreignObject><iframe src="https://attacker.test/frame"/></foreignObject><image href="https://attacker.test/pixel"/><path d="M0 0h2v2z" onclick="steal()"/></svg>';
+    await writeFile(iconPath, malicious);
+
+    const detail = await store.getGezel(projectGezelId(projectId));
+    expect(detail?.icon).toContain('<path d="M0 0h2v2z"/>');
+    expect(detail?.icon).not.toContain('onload');
+    expect(detail?.icon).not.toContain('onclick');
+    expect(detail?.icon).not.toContain('style');
+    expect(detail?.icon).not.toContain('foreignObject');
+    expect(detail?.icon).not.toContain('image');
+    expect(detail?.icon).not.toContain('attacker.test');
+    // Reading a portable definition must not silently rewrite its repository.
+    expect(await readFile(iconPath, 'utf8')).toBe(malicious);
   });
 
   it('refuses to write into an external workingDir without allowGezelWrites', async () => {

@@ -14,9 +14,11 @@ import { runWorkspaceContentIndex } from './content-indexer.js';
 
 let dir: string;
 let home: string;
+let artifacts: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-pptx-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-pptx-home-'));
+  artifacts = join(home, 'artifacts');
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -63,11 +65,17 @@ describe.runIf(process.platform === 'darwin')('doc-intel: pptx conversion', () =
     );
     await writeFile(join(dir, 'decks', 'plan.pptx'), pptx);
 
-    const stats = await runWorkspaceContentIndex(dir, 'c');
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(stats).not.toBeNull();
     expect(stats!.docsConverted).toBe(1);
 
-    const ci = new ContentIndex({ projectWorkspaceDir: async () => dir } as unknown as Store, home);
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => artifacts,
+      } as unknown as Store,
+      home,
+    );
     const search = await ci.searchDocs('c', 'frobnication');
     expect(search.results.some((r) => r.sourcePath === 'decks/plan.pptx')).toBe(true);
 

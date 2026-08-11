@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import type { GezelSummary, ProviderName } from '@bendyline/gezel';
+import { GEZEL_VERSION, type GezelSummary, type ProviderName } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { docFilesPaths } from './docs.js';
-import type { FileRecord, IndexStore } from './index-store.js';
+import { shadowDocFilesPaths } from './docs.js';
+import { parseFrontmatter } from './frontmatter.js';
+import type { FileRecord, IndexProvenance, IndexStore } from './index-store.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -29,6 +30,13 @@ export interface EnrichDeps {
    * configured; the review pass skips entirely then.
    */
   review?: (prompt: string) => Promise<string>;
+  /**
+   * Stamped onto every row this deps object writes. Built once in
+   * `buildEnrichDeps` from the SAME resolved target that builds the
+   * completions, so it reflects reality (env overrides, Night Shift) —
+   * output-only, never a routing input.
+   */
+  provenance?: IndexProvenance;
 }
 
 export interface EnrichResult {
@@ -137,6 +145,11 @@ export async function buildEnrichDeps(
     return { summarize: async () => '', embed };
   }
   const { providerName, model } = target;
+  const provenance: IndexProvenance = {
+    provider: providerName,
+    ...(opts.boekwachter ? { gezelId: opts.boekwachter.id, gezelName: opts.boekwachter.name } : {}),
+    appVersion: GEZEL_VERSION,
+  };
   const summarize = (prompt: string) =>
     chat
       .oneShotCompletion(prompt, 30_000, {
@@ -169,7 +182,7 @@ export async function buildEnrichDeps(
         ...(opts.ambient ? { ambient: true } : {}),
       })
       .catch(() => '');
-  return { summarize, embed, model, review };
+  return { summarize, embed, model, review, provenance };
 }
 
 const PROMPT_CONTENT_CAP = 6000;
@@ -296,14 +309,19 @@ export function parseSymbolSummaryJson(
   return out;
 }
 
-/** Read the text we should summarize/embed for a file (converted md for docs). */
+/** Read the text we should summarize/embed for a file (shadow md for docs,
+ *  descriptions/transcripts for images/audio — frontmatter stripped). */
 export async function readEnrichableText(
   workspaceDir: string,
+  artifactsDir: string,
   file: FileRecord,
 ): Promise<string | null> {
-  if (file.modality === 'doc') {
-    const md = docFilesPaths(workspaceDir, file.path).mdPath;
-    return readFile(md, 'utf8').catch(() => null);
+  if (file.modality === 'doc' || file.modality === 'image' || file.modality === 'audio') {
+    const md = shadowDocFilesPaths(artifactsDir, file.path)?.mdPath;
+    if (!md) return null;
+    const raw = await readFile(md, 'utf8').catch(() => null);
+    if (raw === null) return null;
+    return file.modality === 'doc' ? raw : parseFrontmatter(raw).body;
   }
   const abs = safeJoin(workspaceDir, file.path);
   if (!abs) return null;
@@ -313,13 +331,14 @@ export async function readEnrichableText(
 export async function enrichFile(
   store: IndexStore,
   workspaceDir: string,
+  artifactsDir: string,
   file: FileRecord,
   deps: EnrichDeps,
 ): Promise<EnrichResult> {
   const result: EnrichResult = { summarized: false, embedded: 0 };
   if (!file.hash) return result;
 
-  const content = await readEnrichableText(workspaceDir, file);
+  const content = await readEnrichableText(workspaceDir, artifactsDir, file);
 
   // 1. LLM summary — reuse the existing one for this content hash if present.
   //    Reuse makes an embed-model migration cheap: clearing `enrichments` (not
@@ -341,6 +360,7 @@ export async function enrichFile(
         filePath: file.path,
         summaryMd: summary,
         model: deps.model ?? 'unknown',
+        ...(deps.provenance ? { provenance: deps.provenance } : {}),
       });
       result.summarized = true;
     }
@@ -366,7 +386,7 @@ export async function enrichFile(
         }
         const entries = parseSymbolSummaryJson(raw, new Set(picked.map((s) => s.name)));
         if (entries.length > 0) {
-          store.putSymbolSummaries(file.path, file.hash, entries, deps.model);
+          store.putSymbolSummaries(file.path, file.hash, entries, deps.model, deps.provenance);
         }
       }
     }

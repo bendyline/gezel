@@ -193,6 +193,13 @@ export const HistoryEventKindSchema = z.enum([
   'memory.compacted',
   'memory.lessons-updated',
   'project.digest.generated',
+  /**
+   * The boekwachter review sweep DRAINED for a project — every eligible file
+   * is reviewed under the current content/rubrics. Emitted once per content
+   * wave (on the pending→0 transition), never per file; details carry
+   * `{ files, issues, model }`.
+   */
+  'project.index.reviewed',
   'meester.status.generated',
   'gezel.level.up',
   'gezel.trait.adopted',

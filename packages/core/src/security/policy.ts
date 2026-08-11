@@ -81,7 +81,7 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
  * Security & Compliance plan / panel copy.
  *
  * - `super-lockdown`: nothing leaves the machine. Local models only, no
- *   services, no scripts, no auto-update, no model git, and no
+ *   services, no scripts, no updater/background/renderer egress, no model git, and no
  *   shared-document writes from scripts. Read/review/index and the builtin
  *   artifact/document tools still work.
  *   Workspace file writes are NOT globally gated by this level — they are

@@ -1246,7 +1246,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    */
   z.object({
     type: z.literal('index_progress'),
-    phase: z.enum(['scan', 'enrich', 'review', 'digest']),
+    phase: z.enum(['scan', 'shadow', 'enrich', 'review', 'digest']),
     state: z.enum(['started', 'progress', 'ended']),
     projectId: z.string().optional(),
     detail: z.string().optional(),

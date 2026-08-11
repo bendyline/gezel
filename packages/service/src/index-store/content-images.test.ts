@@ -14,6 +14,7 @@ import { runWorkspaceContentIndex } from './content-indexer.js';
 
 let dir: string;
 let home: string;
+let artifacts: string;
 let ci: ContentIndex;
 
 // Minimal valid PNG header declaring 800x600.
@@ -28,7 +29,14 @@ const PNG_800x600 = Buffer.concat([
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-img-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-img-home-'));
-  ci = new ContentIndex({ projectWorkspaceDir: async () => dir } as unknown as Store, home);
+  artifacts = join(home, 'artifacts');
+  ci = new ContentIndex(
+    {
+      projectWorkspaceDir: async () => dir,
+      projectArtifactsDir: () => artifacts,
+    } as unknown as Store,
+    home,
+  );
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -42,7 +50,7 @@ describe('image-intel', () => {
     await writeFile(join(dir, 'photos', 'dog.png'), PNG_800x600);
     await writeFile(join(dir, 'notes.txt'), 'not an image');
 
-    const stats = await runWorkspaceContentIndex(dir, 'c');
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(stats).not.toBeNull();
 
     const search = await ci.searchImages('c', 'sunset');
@@ -59,7 +67,7 @@ describe('image-intel', () => {
     await mkdir(join(dir, 'photos'), { recursive: true });
     await writeFile(join(dir, 'photos', 'a.png'), PNG_800x600);
     await writeFile(join(dir, 'photos', 'b.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'c');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
 
     const desc = await ci.describeFolder('c', 'photos');
     expect(desc.imageCount).toBe(2);
@@ -77,7 +85,7 @@ describe('image-intel', () => {
   it('find_similar_images degrades to unavailable without CLIP embeddings', async () => {
     await mkdir(join(dir, 'photos'), { recursive: true });
     await writeFile(join(dir, 'photos', 'a.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'c');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
 
     const sim = await ci.findSimilarImages('c', 'photos/a.png');
     expect(sim.engine).toBe('unavailable');

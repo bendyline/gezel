@@ -228,6 +228,17 @@ export const ListFileIssuesResponseSchema = z.object({
    *  very differently from "3 issues"; keep the tool honest mid-sweep. */
   reviewedFiles: z.number().int().nonnegative(),
   eligibleFiles: z.number().int().nonnegative(),
+  /** Distinct reviewer identities over the filtered set (provenance line). */
+  reviewers: z
+    .array(
+      z.object({
+        model: z.string().nullable(),
+        provider: z.string().nullable(),
+        gezelName: z.string().nullable(),
+        files: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
 });
 export type ListFileIssuesResponse = z.infer<typeof ListFileIssuesResponseSchema>;
 

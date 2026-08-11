@@ -2083,11 +2083,7 @@ export const CatalogItemSummarySchema = z.object({
   manifest: CatalogItemManifestSchema,
   /** Public URL for the logo — served by the catalog HTTP route. */
   logoUrl: z.string().optional(),
-  /**
-   * Inline SVG markup. Trusted source — hand-authored by us for
-   * built-in toolsets, or pinned by a reviewed catalog source. Never
-   * populated from arbitrary user input.
-   */
+  /** Inline SVG markup. Treat as untrusted until structurally sanitized; live/community catalogs can supply it. */
   iconSvg: z.string().optional(),
 });
 export type CatalogItemSummary = z.infer<typeof CatalogItemSummarySchema>;

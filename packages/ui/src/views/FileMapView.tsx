@@ -2,6 +2,8 @@ import {
   type ComposedCodeContext,
   type FileMapResponse,
   type FileMapScope,
+  type FileReviewIssue,
+  type FileReviewWire,
   type GitHubPullSummary,
   type MapBlock,
   type MapBuilding,
@@ -9,6 +11,7 @@ import {
   type SecurityFindingWire,
   composeFileContext,
   createLogger,
+  formatReviewProvenance,
   parseGezelHref,
 } from '@bendyline/gezel';
 import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
@@ -17,11 +20,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
+import { MarkdownField } from '../components/MarkdownField.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { DropdownChevron } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
 const log = createLogger('filemap');
+
+const noop = () => undefined;
+
+/**
+ * Plain-text label for a review issue row. Severity stays text on purpose —
+ * the review vocabulary (info | minor | major) is deliberately separate from
+ * security-finding severities and must not borrow their colored badges.
+ */
+export function reviewIssueLabel(issue: FileReviewIssue): string {
+  const location = issue.line != null ? ` (Line ${issue.line})` : '';
+  return `[${issue.severity}] ${issue.category} — ${issue.message}${location}`;
+}
 
 /**
  * Decoding a binary blob as UTF-8 yields a sea of U+FFFD replacement chars and
@@ -104,6 +120,8 @@ export function FileMapView({ projectId }: { projectId: string }) {
   } | null>(null);
   const [findingError, setFindingError] = useState<string | null>(null);
   const [findingRevision, setFindingRevision] = useState(0);
+  const [review, setReview] = useState<FileReviewWire | null>(null);
+  const [reviewPending, setReviewPending] = useState(false);
   const [connectedOpen, setConnectedOpen] = useState(false);
   const [codeContext, setCodeContext] = useState<{
     path: string;
@@ -203,6 +221,33 @@ export function FileMapView({ projectId }: { projectId: string }) {
       cancelled = true;
     };
   }, [selectedId, projectId, findingRevision]);
+
+  // The boekwachter's review of the selected file (cliffs notes, issues,
+  // health). Absence — never reviewed, index not ready, request failed — just
+  // renders no card; `pending` renders the one-line "not reviewed yet" note.
+  useEffect(() => {
+    if (!selectedId) {
+      setReview(null);
+      setReviewPending(false);
+      return;
+    }
+    let cancelled = false;
+    setReview(null);
+    setReviewPending(false);
+    api
+      .toolFileReview(projectId, { path: selectedId })
+      .then((res) => {
+        if (cancelled) return;
+        setReview(res.review ?? null);
+        setReviewPending(res.pending === true);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) log.debug('file-review unavailable', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, projectId]);
 
   // Per-symbol context for the viewer — progressive enhancement, fetched in
   // parallel with the content. Every failure (404, index not ready, network)
@@ -432,6 +477,8 @@ export function FileMapView({ projectId }: { projectId: string }) {
       window.clearInterval(timer);
     };
   }, [findings, load]);
+
+  const reviewProvenance = review ? formatReviewProvenance(review) : null;
 
   return (
     <section className="filemap-view">
@@ -715,6 +762,64 @@ export function FileMapView({ projectId }: { projectId: string }) {
                       );
                     })}
                     {findingError && <p className="filemap-finding-error error">{findingError}</p>}
+                  </section>
+                )}
+                {(review || reviewPending) && (
+                  <section className="filemap-review" aria-label="Boekwachter review">
+                    {review ? (
+                      <>
+                        <div className="filemap-review-heading">
+                          <strong>Boekwachter review · {review.health}/10</strong>
+                          <span className="filemap-review-reason">{review.healthReason}</span>
+                        </div>
+                        {review.notesMd && (
+                          <div className="filemap-review-notes">
+                            <MarkdownField
+                              key={`${selected.id}:review-notes`}
+                              value={review.notesMd}
+                              readOnly
+                              minHeight="0"
+                              onCommit={noop}
+                            />
+                          </div>
+                        )}
+                        {review.issues.length > 0 && (
+                          <ul className="filemap-review-issues">
+                            {review.issues.map((issue, index) => {
+                              const line = issue.line;
+                              return (
+                                <li key={`${issue.category}:${issue.message}:${index}`}>
+                                  {line != null ? (
+                                    <button
+                                      type="button"
+                                      className="filemap-review-issue"
+                                      onClick={() => setSourceReveal({ path: selected.id, line })}
+                                    >
+                                      {reviewIssueLabel(issue)}
+                                    </button>
+                                  ) : (
+                                    <span className="filemap-review-issue">
+                                      {reviewIssueLabel(issue)}
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                        <p className="filemap-review-advice">
+                          Leads from a background model pass — its opinion, not a verdict.
+                        </p>
+                        {reviewProvenance && (
+                          <p className="filemap-review-provenance">{reviewProvenance}</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="filemap-review-pending">
+                        Not reviewed yet — the boekwachter studies files when idle or during Night
+                        Shift.
+                      </p>
+                    )}
                   </section>
                 )}
                 <div className="filemap-fileview-body">

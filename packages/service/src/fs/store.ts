@@ -143,6 +143,7 @@ import { matchReferencedTasksInContent } from '../chat/task-references.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
+import { sanitizeSvg } from '../icon/sanitize.js';
 import type { MemoryKind } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
@@ -1956,7 +1957,7 @@ export class Store {
       }
       let icon: string | undefined;
       try {
-        icon = await readFile(iconPath, 'utf8');
+        icon = sanitizeSvg(await readFile(iconPath, 'utf8')) || undefined;
       } catch {
         /* agent has no icon yet */
       }
@@ -2286,22 +2287,26 @@ export class Store {
   async readGezelIcon(id: string): Promise<string | null> {
     const iconPath = join(gezelDir(this.home, id, this.external), 'icon.svg');
     try {
-      return await readFile(iconPath, 'utf8');
+      return sanitizeSvg(await readFile(iconPath, 'utf8')) || null;
     } catch {
       return null;
     }
   }
 
   async writeGezelIcon(id: string, svg: string): Promise<GezelDetail> {
+    const sanitizedSvg = sanitizeSvg(svg);
+    if (!sanitizedSvg) throw new Error('invalid SVG icon');
     const dir = gezelDir(this.home, id, this.external);
     const iconPath = join(dir, 'icon.svg');
     const historyDir = join(dir, 'icons');
     await mkdir(historyDir, { recursive: true });
     // Archive the existing icon (if any) into history.
     try {
-      const existing = await readFile(iconPath, 'utf8');
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      await writeFileAtomic(join(historyDir, `${stamp}.svg`), existing);
+      const existing = sanitizeSvg(await readFile(iconPath, 'utf8'));
+      if (existing) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        await writeFileAtomic(join(historyDir, `${stamp}.svg`), existing);
+      }
     } catch {
       /* no existing icon */
     }
@@ -2327,14 +2332,14 @@ export class Store {
         }
       }
     }
-    await writeFileAtomic(iconPath, svg);
+    await writeFileAtomic(iconPath, sanitizedSvg);
     const detail = await this.getGezel(id);
     if (!detail) throw new Error(`agent ${id} not found after icon update`);
     await this.history?.log({
       kind: 'icon.generated',
       gezelId: detail.id,
       summary: `Updated ${detail.name}'s icon`,
-      details: { bytes: svg.length },
+      details: { bytes: sanitizedSvg.length },
     });
     return detail;
   }
@@ -2351,8 +2356,8 @@ export class Store {
       if (!name.endsWith('.svg')) continue;
       const timestamp = name.slice(0, -4);
       try {
-        const svg = await readFile(join(historyDir, name), 'utf8');
-        history.push({ timestamp, svg });
+        const svg = sanitizeSvg(await readFile(join(historyDir, name), 'utf8'));
+        if (svg) history.push({ timestamp, svg });
       } catch {
         /* skip unreadable */
       }

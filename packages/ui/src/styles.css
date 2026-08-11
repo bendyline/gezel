@@ -7703,7 +7703,6 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .gezel-icon-svg,
-.gezel-icon-svg svg,
 .gezel-icon-fallback,
 .gezel-icon-poppetje,
 .gezel-icon-poppetje svg {
@@ -17460,9 +17459,8 @@ button.timeline-session-divider-continuing::before {
   background: rgba(255, 255, 255, 0.05);
 }
 
-/* Inline-SVG variant. The catalog response embeds trusted SVG markup
-   for built-in toolsets; the wrapper sets the box and color, and the
-   SVG (which uses currentColor) inherits both. */
+/* Isolated SVG-image variant. SVG markup is sanitized and encoded into an
+   image URL rather than inserted into the live application document. */
 .catalog-item-logo-svg {
   display: inline-flex;
   align-items: center;
@@ -17472,9 +17470,8 @@ button.timeline-session-divider-continuing::before {
   color: #e0b897;
 }
 
-.catalog-item-logo-svg > svg {
-  width: 100%;
-  height: 100%;
+.catalog-item-logo-svg {
+  object-fit: contain;
 }
 
 .catalog-item-logo-placeholder {
@@ -17804,19 +17801,14 @@ a.license-button:hover {
   background: rgba(255, 255, 255, 0.05);
   padding: 4px;
   box-sizing: border-box;
-  color: #e0b897; /* default tint for built-in SVG icons (currentColor target) */
+  color: #e0b897;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-.toolsets-tile-icon > svg {
-  width: 100%;
-  height: 100%;
-}
-
 .toolsets-tile-inherited .toolsets-tile-icon {
-  color: rgba(224, 184, 151, 0.55);
+  opacity: 0.62;
 }
 
 .toolsets-tile-icon-placeholder {
@@ -20160,9 +20152,8 @@ a.license-button:hover {
   padding: 0.45rem;
 }
 
-.gz-npd-card-mark-svg > svg {
-  width: 100%;
-  height: 100%;
+.gz-npd-card-mark img.gz-npd-card-mark-svg {
+  object-fit: contain;
 }
 
 .gz-npd-card-name {
@@ -20283,9 +20274,8 @@ a.license-button:hover {
   padding: 0.55rem;
 }
 
-.gz-npd-hero-art-svg > svg {
-  width: 100%;
-  height: 100%;
+.gz-npd-hero-art img.gz-npd-hero-art-svg {
+  object-fit: contain;
 }
 
 .gz-npd-hero-eyebrow {
@@ -24943,6 +24933,75 @@ button.gz-npd-repo-cancel {
 .monaco-editor .filemap-finding-gutter-active {
   border-left-width: 4px;
   margin-left: 1px;
+}
+/* Boekwachter review card — clones the findings-tray recipe, but stays on the
+   neutral surface: review severities (info | minor | major) are a separate
+   vocabulary from security severities and never borrow their colors. */
+.filemap-review {
+  flex: 0 0 auto;
+  max-height: min(30vh, 260px);
+  overflow: auto;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.filemap-review-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.filemap-review-heading strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.filemap-review-reason {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.filemap-review-notes {
+  margin-bottom: 6px;
+}
+.filemap-review-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.filemap-review-issue {
+  display: block;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+}
+button.filemap-review-issue {
+  cursor: pointer;
+}
+button.filemap-review-issue:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.filemap-review-advice,
+.filemap-review-pending {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.filemap-review-advice {
+  margin-top: 6px;
+}
+.filemap-review-provenance {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
 }
 .filemap-hint {
   margin: 0;

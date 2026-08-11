@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import { adjacentDocFilesPaths, docFilesPaths } from '../../index-store/docs.js';
+import { adjacentDocFilesPaths, shadowDocFilesPaths } from '../../index-store/docs.js';
 import type { ServiceContext } from '../context.js';
 import { referencePreviewRoutes } from './reference-preview.js';
 
@@ -86,9 +86,9 @@ describe('referencePreviewRoutes', () => {
     });
   });
 
-  it('keeps workspace companions in the project-local .gezel files tree', async () => {
+  it('serves workspace companions from the artifacts shadow tree', async () => {
     const source = join(workspace, 'brief.docx');
-    const paths = docFilesPaths(workspace, 'brief.docx');
+    const paths = shadowDocFilesPaths(artifacts, 'brief.docx')!;
     await writeFile(source, 'cached conversion source');
     await mkdir(paths.dir, { recursive: true });
     await writeFile(paths.mdPath, '# Workspace brief');
@@ -98,7 +98,7 @@ describe('referencePreviewRoutes', () => {
     await expect(response.json()).resolves.toEqual({
       mode: 'markdown',
       content: '# Workspace brief',
-      sidecarPath: '.gezel/files/brief_files/brief.md',
+      sidecarPath: 'artifacts/shadow/brief.docx_files/brief.md',
     });
   });
 });

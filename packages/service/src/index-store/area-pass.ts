@@ -53,6 +53,7 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
       inputHash,
       summaryMd: summary.slice(0, SUMMARY_CAP),
       model: deps.model ?? 'unknown',
+      ...(deps.provenance ? { provenance: deps.provenance } : {}),
     });
     result.areasUpdated++;
   }
@@ -71,6 +72,7 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
           inputHash: archHash,
           summaryMd: note.slice(0, SUMMARY_CAP),
           model: deps.model ?? 'unknown',
+          ...(deps.provenance ? { provenance: deps.provenance } : {}),
         });
         result.architectureUpdated = true;
       }

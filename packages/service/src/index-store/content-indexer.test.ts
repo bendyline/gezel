@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,11 +10,14 @@ import { IndexStore } from './index-store.js';
 import { extractCodeSymbols, extractMarkdownOutline } from './symbols.js';
 
 let dir: string;
+let artifacts: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-ci-'));
+  artifacts = await mkdtemp(join(tmpdir(), 'gezel-ci-artifacts-'));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+  await rm(artifacts, { recursive: true, force: true });
 });
 
 it('runs native grammar compilation in the isolated integration lane', ({ task }) => {
@@ -49,7 +53,7 @@ describe('isDenseBlob', () => {
     const bigLine = `export const data = "${'x'.repeat(200 * 1024)}";`;
     await writeFile(join(dir, 'iconData.ts'), `${bigLine}\nexport function decoy() {}\n`);
     await writeFile(join(dir, 'normal.ts'), 'export function fine() { return 1; }\n');
-    await runWorkspaceContentIndex(dir, 'dense');
+    await runWorkspaceContentIndex(dir, 'dense', artifacts);
     const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
       collectionId: 'dense',
       kind: 'workspace',
@@ -103,7 +107,7 @@ describe('runWorkspaceContentIndex', () => {
     await writeFile(join(dir, 'src', 'a.ts'), 'export function alpha() { return 1; }\n');
     await writeFile(join(dir, 'README.md'), '# Hello\nworld\n');
 
-    const first = await runWorkspaceContentIndex(dir, 'col-1');
+    const first = await runWorkspaceContentIndex(dir, 'col-1', artifacts);
     expect(first).not.toBeNull();
     expect(first!.scanned).toBeGreaterThanOrEqual(2);
     expect(first!.changed).toBeGreaterThanOrEqual(2);
@@ -122,13 +126,13 @@ describe('runWorkspaceContentIndex', () => {
     store.close();
 
     // Re-run with no edits → nothing changes.
-    const second = await runWorkspaceContentIndex(dir, 'col-1');
+    const second = await runWorkspaceContentIndex(dir, 'col-1', artifacts);
     expect(second!.changed).toBe(0);
     expect(second!.skipped).toBeGreaterThanOrEqual(2);
 
     // Delete a file → pruned on next run.
     await rm(join(dir, 'src', 'a.ts'));
-    const third = await runWorkspaceContentIndex(dir, 'col-1');
+    const third = await runWorkspaceContentIndex(dir, 'col-1', artifacts);
     expect(third!.removed).toBe(1);
   });
 
@@ -141,7 +145,7 @@ describe('runWorkspaceContentIndex', () => {
     await writeFile(join(dir, 'src', 'visible.ts'), 'export const visible = true;\n');
     await writeFile(join(dir, 'generated', 'ignored.ts'), 'export const ignored = true;\n');
 
-    await runWorkspaceContentIndex(dir, 'gitignore');
+    await runWorkspaceContentIndex(dir, 'gitignore', artifacts);
     const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
       collectionId: 'gitignore',
       kind: 'workspace',
@@ -154,17 +158,17 @@ describe('runWorkspaceContentIndex', () => {
 
   it('re-extracts when content changes but mtime-only touches do not', async () => {
     await writeFile(join(dir, 'a.ts'), 'export function one() {}\n');
-    await runWorkspaceContentIndex(dir, 'c');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
 
     // mtime-only touch: same content → no change.
     const future = new Date(Date.now() + 60_000);
     await utimes(join(dir, 'a.ts'), future, future);
-    const touched = await runWorkspaceContentIndex(dir, 'c');
+    const touched = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(touched!.changed).toBe(0);
 
     // real edit → re-extract.
     await writeFile(join(dir, 'a.ts'), 'export function one() {}\nexport function two() {}\n');
-    const edited = await runWorkspaceContentIndex(dir, 'c');
+    const edited = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(edited!.changed).toBe(1);
     expect(edited!.symbols).toBe(2);
   });
@@ -173,7 +177,7 @@ describe('runWorkspaceContentIndex', () => {
     await writeFile(join(dir, 'a.ts'), "import { x } from './b.js';\nexport const y = x;\n");
     await writeFile(join(dir, 'b.ts'), 'export const x = 1;\n');
     await writeFile(join(dir, 'README.md'), '# Hello\nworld\n');
-    await runWorkspaceContentIndex(dir, 'c');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
 
     const dbPath = join(dir, '.gezel', 'index', 'index.db');
     const openStore = async () =>
@@ -190,7 +194,7 @@ describe('runWorkspaceContentIndex', () => {
     store.close();
 
     // Zero content changes — the version mismatch alone re-extracts code files.
-    const forced = await runWorkspaceContentIndex(dir, 'c');
+    const forced = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(forced!.changed).toBeGreaterThanOrEqual(2); // a.ts + b.ts, not README
     expect(forced!.docsConverted).toBe(0);
 
@@ -202,7 +206,47 @@ describe('runWorkspaceContentIndex', () => {
     store.close();
 
     // Next run is a normal no-op again.
-    const settled = await runWorkspaceContentIndex(dir, 'c');
+    const settled = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(settled!.changed).toBe(0);
+  });
+});
+
+describe('shadow tree GC', () => {
+  it('sweeps orphaned companion dirs and keeps live ones', async () => {
+    // A doc whose source is alive (conversion outcome irrelevant — the bytes
+    // are not a real docx) and an orphan with no source at all.
+    await mkdir(join(dir, 'docs'), { recursive: true });
+    await writeFile(join(dir, 'docs', 'live.docx'), 'not-really-a-docx');
+    const liveCompanion = join(artifacts, 'shadow', 'docs', 'live.docx_files');
+    const orphanCompanion = join(artifacts, 'shadow', 'docs', 'gone.docx_files');
+    await mkdir(liveCompanion, { recursive: true });
+    await writeFile(join(liveCompanion, 'live.md'), 'stale but live');
+    await mkdir(orphanCompanion, { recursive: true });
+    await writeFile(join(orphanCompanion, 'gone.md'), 'orphan');
+
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+    expect(existsSync(liveCompanion)).toBe(true);
+    expect(existsSync(orphanCompanion)).toBe(false);
+  });
+
+  it('deleting a doc source removes its companion dir with the DB row', async () => {
+    await writeFile(join(dir, 'spec.docx'), 'bytes');
+    const companion = join(artifacts, 'shadow', 'spec.docx_files');
+    await mkdir(companion, { recursive: true });
+    await writeFile(join(companion, 'spec.md'), 'converted');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(existsSync(companion)).toBe(true);
+
+    await rm(join(dir, 'spec.docx'));
+    const pruned = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(pruned!.removed).toBe(1);
+    expect(existsSync(companion)).toBe(false);
+  });
+
+  it('never writes converted docs into the workspace .gezel/files tree', async () => {
+    await writeFile(join(dir, 'spec.docx'), 'bytes');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(existsSync(join(dir, '.gezel', 'files'))).toBe(false);
   });
 });

@@ -24,6 +24,9 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
       project.json    name, working folder, crew settings
       documents/      About + Mission Objectives
       artifacts/      everything the crew produces
+        shadow/       machine-made markdown twins of workspace documents,
+                      pictures, and recordings (rebuilt automatically —
+                      safe to delete, not a place to put your own files)
   documents/          the shared library
   history.jsonl       the audit log
   logs/               service logs (rolling)

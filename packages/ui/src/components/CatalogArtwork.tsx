@@ -1,4 +1,5 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
+import { safeSvgImageUrl } from '../safe-svg-image.js';
 import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
 
 /**
@@ -6,13 +7,15 @@ import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
  * broken-image placeholder. Callers provide the glyph/initial fallback that
  * belongs to their surface.
  *
- * `iconSvg` is intended for catalog SVG that has already been sanitized by
- * the service before it reaches the UI.
+ * `iconSvg` is treated as untrusted here even if an upstream source already
+ * sanitized it. It is structurally reduced and loaded as an isolated image,
+ * never inserted as live DOM.
  *
  * `logoUrl` takes the raw value off `CatalogItemSummary` — including the
  * service's bearer-gated `/api/catalog/.../file/...` paths, which
  * `useCatalogArtworkUrl` swaps for an object URL because `<img>` cannot send
- * an Authorization header. Absolute and `data:` URLs pass through untouched.
+ * an Authorization header. In-memory `data:`/`blob:` URLs pass through;
+ * remote URLs fall back instead of causing passive renderer egress.
  */
 export function CatalogArtwork({
   iconSvg,
@@ -29,24 +32,16 @@ export function CatalogArtwork({
 }) {
   const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const [loadedLogoUrl, setLoadedLogoUrl] = useState<string | null>(null);
-  const artworkUrl = useCatalogArtworkUrl(logoUrl);
-
-  if (iconSvg) {
-    return (
-      <span
-        className={svgClassName}
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: catalog SVGs are sanitized before delivery.
-        dangerouslySetInnerHTML={{ __html: iconSvg }}
-      />
-    );
-  }
+  const iconUrl = useMemo(() => safeSvgImageUrl(iconSvg), [iconSvg]);
+  const artworkUrl = useCatalogArtworkUrl(iconUrl ?? logoUrl);
+  const artworkClassName = iconUrl ? (svgClassName ?? imageClassName) : imageClassName;
 
   if (artworkUrl && failedLogoUrl !== artworkUrl) {
     return (
       <>
         {loadedLogoUrl !== artworkUrl && fallback}
         <img
-          className={imageClassName}
+          className={artworkClassName}
           src={artworkUrl}
           alt=""
           hidden={loadedLogoUrl !== artworkUrl}

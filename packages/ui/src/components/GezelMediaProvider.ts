@@ -30,6 +30,16 @@ import { api } from '../api.js';
  */
 const readonlyProviders = new Map<string, MediaProvider>();
 
+/** Inert replacement for model-authored remote media references. */
+export const BLOCKED_REMOTE_MEDIA_URL =
+  'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+
+function isRemoteOrUnsafeMediaUrl(value: string): boolean {
+  const url = value.trim();
+  if (/^(?:data|blob):/i.test(url)) return false;
+  return url.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(url);
+}
+
 export function getReadonlyGezelMediaProvider(projectId: string, sessionId: string): MediaProvider {
   const key = `${projectId}:${sessionId}`;
   let hit = readonlyProviders.get(key);
@@ -109,13 +119,12 @@ export function createGezelMediaProvider(opts: {
     },
 
     async resolveUrl(relPath: string): Promise<string> {
-      // Absolute URLs / data URIs: pass through untouched.
-      if (
-        relPath.startsWith('http://') ||
-        relPath.startsWith('https://') ||
-        relPath.startsWith('data:') ||
-        relPath.startsWith('blob:')
-      ) {
+      // Model-authored network URLs are passive egress: merely displaying a
+      // reply would disclose the request URL and client metadata. Keep inert
+      // in-memory media, but replace every remote/custom scheme before it can
+      // reach an <img>, even when a browser shell has no Electron hook.
+      if (isRemoteOrUnsafeMediaUrl(relPath)) return BLOCKED_REMOTE_MEDIA_URL;
+      if (/^(?:data|blob):/i.test(relPath.trim())) {
         return relPath;
       }
       const cached = blobUrlCache.get(relPath);

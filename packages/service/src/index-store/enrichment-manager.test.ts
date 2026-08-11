@@ -222,6 +222,101 @@ describe('review tier scheduling', () => {
   });
 });
 
+describe('AI-shadow tier + review drain event', () => {
+  function makeShadowFixture(opts: { withProducers?: boolean; pendingAfter?: number } = {}) {
+    const enrich = vi.fn().mockResolvedValue({ files: 0, summarized: 0, embedded: 0 });
+    const enrichAreas = vi.fn().mockResolvedValue({ areasUpdated: 0, architectureUpdated: false });
+    const review = vi
+      .fn()
+      .mockResolvedValueOnce({ files: 2, reviewed: 2 })
+      .mockResolvedValue({ files: 0, reviewed: 0 });
+    const aiShadows = vi.fn().mockResolvedValue({ files: 1, produced: 1, called: 1 });
+    const reviewCounts = vi.fn().mockResolvedValue({
+      eligible: 2,
+      reviewed: 2,
+      stale: 0,
+      pending: opts.pendingAfter ?? 0,
+    });
+    const listFileIssues = vi.fn().mockResolvedValue({
+      issues: [],
+      counts: { total: 3, bySeverity: {}, byCategory: {} },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 2,
+      eligibleFiles: 2,
+    });
+    const historyLog = vi.fn().mockResolvedValue(undefined);
+    const chat = {
+      isAnyActive: () => false,
+      isProjectActive: () => false,
+      oneShotCompletion: vi.fn().mockResolvedValue('ok'),
+    } as unknown as ChatManager;
+    const store = {
+      listProjects: async () => [{ id: 'p1' }],
+      readConfig: async () => ({ defaultModel: { mlx: 'enricher' } }),
+      listIndexRubrics: async () => ({}),
+    } as unknown as Store;
+    const contentIndex = {
+      enrich,
+      enrichAreas,
+      review,
+      aiShadows,
+      reviewCounts,
+      listFileIssues,
+    } as unknown as ContentIndex;
+    const mgr = new IndexEnrichmentManager({
+      store,
+      chat,
+      contentIndex,
+      idle: agedIdleState(),
+      resolveBoekwachter: async () => BOOK,
+      history: { log: historyLog },
+      ...(opts.withProducers
+        ? { shadowProducers: { describeImage: async () => ({ body: 'x' }) } }
+        : {}),
+    });
+    return { mgr, aiShadows, review, historyLog };
+  }
+
+  it('runs the shadow tier before enrichment when producers are wired', async () => {
+    const { mgr, aiShadows } = makeShadowFixture({ withProducers: true });
+    await mgr.tick();
+    expect(aiShadows).toHaveBeenCalledTimes(1);
+    const deps = aiShadows.mock.calls[0]![1] as { describeImage?: unknown; provenance?: unknown };
+    expect(deps.describeImage).toBeDefined();
+    expect(deps.provenance).toMatchObject({ provider: 'mlx', gezelName: 'Noor' });
+  });
+
+  it('skips the shadow tier entirely without producers', async () => {
+    const { mgr, aiShadows } = makeShadowFixture({ withProducers: false });
+    await mgr.tick();
+    expect(aiShadows).not.toHaveBeenCalled();
+  });
+
+  it('logs project.index.reviewed once on the drain transition', async () => {
+    const { mgr, historyLog } = makeShadowFixture();
+    await mgr.tick();
+    expect(historyLog).toHaveBeenCalledTimes(1);
+    expect(historyLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'project.index.reviewed',
+        projectId: 'p1',
+        gezelId: 'noor',
+        details: expect.objectContaining({ files: 2, issues: 3 }),
+      }),
+    );
+    // A later tick that stores nothing must not re-emit.
+    await mgr.tick();
+    expect(historyLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not log while reviews are still pending', async () => {
+    const { mgr, historyLog } = makeShadowFixture({ pendingAfter: 4 });
+    await mgr.tick();
+    expect(historyLog).not.toHaveBeenCalled();
+  });
+});
+
 describe('buildEnrichDeps enricher override', () => {
   const priorModel = process.env.GEZEL_ENRICH_MODEL;
   const priorProvider = process.env.GEZEL_ENRICH_PROVIDER;
@@ -352,5 +447,35 @@ describe('buildEnrichDeps enricher override', () => {
     const deps = await buildEnrichDeps(store, chat);
     expect(deps.model).toBeUndefined();
     expect(deps.review).toBeUndefined();
+    expect(deps.provenance).toBeUndefined();
+  });
+
+  it('provenance reflects the ACTUAL resolved target and boekwachter identity', async () => {
+    process.env.GEZEL_ENRICH_MODEL = 'small-enricher';
+    process.env.GEZEL_ENRICH_PROVIDER = 'llama-cpp';
+    const { chat, store } = makeDepsFixture();
+    const deps = await buildEnrichDeps(store, chat, { boekwachter: BOOK });
+    expect(deps.provenance).toMatchObject({
+      provider: 'llama-cpp',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+    });
+    expect(typeof deps.provenance?.appVersion).toBe('string');
+  });
+
+  it('provenance carries the Night Shift override target when active', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const chat = { oneShotCompletion: vi.fn() } as unknown as ChatManager;
+    const store = {
+      readConfig: async () => ({
+        defaultModel: { mlx: 'day-model' },
+        nightShift: {
+          modelOverride: { enabled: true, provider: 'openai', model: 'slow-night-model' },
+        },
+      }),
+    } as unknown as Store;
+    const deps = await buildEnrichDeps(store, chat, { nightShift: true });
+    expect(deps.provenance?.provider).toBe('openai');
   });
 });

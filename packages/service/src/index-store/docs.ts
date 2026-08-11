@@ -1,21 +1,30 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative } from 'node:path';
-import { projectLocalFilesDir } from '@bendyline/gezel/paths';
+import { PROJECT_SHADOW_DIR_NAME } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
+import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { ChunkInput } from './index-store.js';
 import { convertInSandbox } from './sandbox-convert.js';
 
 /**
  * Document → markdown conversion via squisq, written into the `_files`
- * companion-folder convention:
+ * companion-folder convention. Workspace sources shadow into the project's
+ * artifacts tree — never the workspace itself, which may be read-only:
  *
- *   <source>jobs/resume.docx  →  .gezel/files/jobs/resume_files/resume.md
+ *   <workspace>docs/architecture.docx
+ *     →  <artifacts>/shadow/docs/architecture.docx_files/architecture.md
+ *
+ * The companion dir is keyed by the FULL basename (extension kept): stem
+ * keying made `a.docx` and `a.pdf` collide on one `a_files/a.md`, and the
+ * full name gives orphan GC a lossless reverse map (`X_files` → source `X`).
+ * Artifact/document previews keep the user-visible adjacent placement
+ * ({@link adjacentDocFilesPaths}), which stays stem-keyed for continuity.
  *
  * squisq is browser-oriented and its OOXML importers run native parsers (jszip,
  * pdfjs, xmldom). Because attachments are untrusted, the actual parse runs
  * out-of-process in a sandbox (see sandbox-convert.ts / convert-worker.ts);
- * this module only owns the `_files` placement + chunking. DOCX/PDF importers
- * ship in the pinned squisq packages.
+ * this module only owns placement + chunking. DOCX/PDF importers ship in the
+ * pinned squisq packages.
  */
 
 const MAX_CHUNK_CHARS = 4000;
@@ -63,18 +72,26 @@ export interface DocFilesPaths {
   mdRel: string;
 }
 
-function filesPaths(filesRoot: string, relPath: string, relativeRoot: string): DocFilesPaths {
+/**
+ * Companion paths for a workspace source inside the project's reserved
+ * `artifacts/shadow/` tree. The source relPath is untrusted workspace input,
+ * so the whole companion path is built through `safeJoin`; null means the
+ * name cannot be shadowed safely (traversal, reserved Windows name, ADS) and
+ * the caller simply skips conversion.
+ */
+export function shadowDocFilesPaths(artifactsDir: string, relPath: string): DocFilesPaths | null {
   const base = basename(relPath);
-  const nameNoExt = base.replace(/\.[^.]+$/, '');
+  const nameNoExt = base.replace(/\.[^.]+$/, '') || base;
   const parent = dirname(relPath);
-  const dir = join(filesRoot, parent === '.' ? '' : parent, `${nameNoExt}_files`);
-  const mdPath = join(dir, `${nameNoExt}.md`);
-  return { dir, mdPath, mdRel: relative(relativeRoot, mdPath).replaceAll('\\', '/') };
-}
-
-/** Compute the `_files` companion paths for a source doc (relative path). */
-export function docFilesPaths(workspaceDir: string, relPath: string): DocFilesPaths {
-  return filesPaths(projectLocalFilesDir(workspaceDir), relPath, workspaceDir);
+  const relMd = join(parent === '.' ? '' : parent, `${base}_files`, `${nameNoExt}.md`);
+  const shadowRoot = join(artifactsDir, PROJECT_SHADOW_DIR_NAME);
+  const mdPath = safeJoin(shadowRoot, relMd);
+  if (!mdPath) return null;
+  return {
+    dir: dirname(mdPath),
+    mdPath,
+    mdRel: relative(artifactsDir, mdPath).replaceAll('\\', '/'),
+  };
 }
 
 /**
@@ -82,21 +99,16 @@ export function docFilesPaths(workspaceDir: string, relPath: string): DocFilesPa
  * `decks/brief.pptx` → `decks/brief_files/brief.md`.
  *
  * Artifacts and the shared documents library use this placement. Workspace
- * conversions keep using {@link docFilesPaths} so derived files remain under
- * the project's gitignored `.gezel/files/` directory.
+ * conversions use {@link shadowDocFilesPaths} instead, so derived files land
+ * in the project's artifacts tree rather than a possibly read-only workspace.
  */
 export function adjacentDocFilesPaths(sourceRoot: string, relPath: string): DocFilesPaths {
-  return filesPaths(sourceRoot, relPath, sourceRoot);
-}
-
-/** Write converted markdown into the `_files` folder; returns its paths. */
-export async function writeConvertedMarkdown(
-  workspaceDir: string,
-  relPath: string,
-  markdown: string,
-): Promise<DocFilesPaths> {
-  const paths = docFilesPaths(workspaceDir, relPath);
-  return writeConvertedMarkdownAt(paths, markdown);
+  const base = basename(relPath);
+  const nameNoExt = base.replace(/\.[^.]+$/, '');
+  const parent = dirname(relPath);
+  const dir = join(sourceRoot, parent === '.' ? '' : parent, `${nameNoExt}_files`);
+  const mdPath = join(dir, `${nameNoExt}.md`);
+  return { dir, mdPath, mdRel: relative(sourceRoot, mdPath).replaceAll('\\', '/') };
 }
 
 /** Write markdown to an already-computed companion path. */
@@ -140,6 +152,30 @@ export async function ensureConvertedMarkdownSidecar(
     await writeConvertedMarkdownAt(paths, converted.markdown);
   }
   return { ...converted, paths };
+}
+
+/**
+ * Ensure the shadow-tree markdown companion for a workspace source doc.
+ * Null when the source name cannot map to a safe shadow path or the computed
+ * companion escapes the shadow root through a symlink. Concurrent callers
+ * (static worker, `read_doc_as_markdown`, the References preview) may race on
+ * one sidecar; `writeFileAtomic`'s rename makes that last-writer-wins with no
+ * torn reads — worst case is a wasted duplicate conversion.
+ */
+export async function ensureShadowDocSidecar(
+  sourceAbs: string,
+  artifactsDir: string,
+  relPath: string,
+): Promise<EnsuredDocSidecar | null> {
+  const paths = shadowDocFilesPaths(artifactsDir, relPath);
+  if (!paths) return null;
+  const shadowRoot = join(artifactsDir, PROJECT_SHADOW_DIR_NAME);
+  // The root must exist before the symlink check: realpathContained refuses
+  // when its base is missing, and the first conversion of a project is
+  // exactly the moment nothing exists yet. Our own cache dir — safe to make.
+  await mkdir(shadowRoot, { recursive: true }).catch(() => {});
+  if (!(await realpathContained(shadowRoot, paths.mdPath))) return null;
+  return ensureConvertedMarkdownSidecar(sourceAbs, paths);
 }
 
 /**

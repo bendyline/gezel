@@ -118,6 +118,10 @@ CREATE TABLE IF NOT EXISTS summaries (
   summary_md TEXT,
   tags TEXT,
   model TEXT,
+  provider TEXT,
+  gezel_id TEXT,
+  gezel_name TEXT,
+  app_version TEXT,
   created_at TEXT
 );
 
@@ -234,6 +238,10 @@ CREATE TABLE IF NOT EXISTS symbol_summaries (
   symbol_name TEXT NOT NULL,
   summary TEXT NOT NULL,
   model TEXT,
+  provider TEXT,
+  gezel_id TEXT,
+  gezel_name TEXT,
+  app_version TEXT,
   created_at TEXT,
   PRIMARY KEY (collection_id, file_path, file_hash, symbol_name)
 );
@@ -250,6 +258,10 @@ CREATE TABLE IF NOT EXISTS area_summaries (
   input_hash TEXT NOT NULL,
   summary_md TEXT NOT NULL,
   model TEXT,
+  provider TEXT,
+  gezel_id TEXT,
+  gezel_name TEXT,
+  app_version TEXT,
   created_at TEXT,
   PRIMARY KEY (collection_id, area_path)
 );
@@ -273,10 +285,28 @@ CREATE TABLE IF NOT EXISTS file_reviews (
   health INTEGER,
   health_reason TEXT,
   model TEXT,
+  provider TEXT,
+  gezel_id TEXT,
+  gezel_name TEXT,
+  app_version TEXT,
   reviewed_at TEXT,
   attempt_rubric_hash TEXT,
   attempts INTEGER DEFAULT 0,
   last_attempt_at TEXT
+);
+
+-- AI-shadow gate (images described by the vision model, audio transcribed by
+-- STT into artifacts/shadow markdown). Same content-addressed discipline as
+-- enrichments: 'ok' rows survive renames/reverts; failures retry up to a cap
+-- per hash. The sidecar file is the artifact; this row is only the work gate.
+CREATE TABLE IF NOT EXISTS shadow_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  state TEXT,
+  attempts INTEGER DEFAULT 0,
+  model TEXT,
+  updated_at TEXT
 );
 
 -- Mirror of the append-only history JSONL (the audit log). kind/project/gezel/at
@@ -309,7 +339,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
   USING fts5(body, event_id UNINDEXED, collection_id UNINDEXED);
 `;
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -355,6 +385,17 @@ export function applySchema(db: SqliteDriver): { fts: boolean; vec: boolean } {
       WHERE fingerprint IS NULL OR fingerprint = ''`);
   } catch {
     /* cache migration is best-effort; rowToFinding still degrades safely */
+  }
+
+  // v9 → v10: provenance stamps on every LLM-written row ("reviewed by
+  // <model>, <gezel>, gezel <version> on <date>"). No backfill — provenance
+  // for pre-existing rows is genuinely unknown; renderers degrade to the
+  // model-only line. Rubric/input hashes are untouched, so nothing re-reviews.
+  for (const table of ['summaries', 'symbol_summaries', 'area_summaries', 'file_reviews']) {
+    addColumnIfMissing(db, table, 'provider', 'TEXT');
+    addColumnIfMissing(db, table, 'gezel_id', 'TEXT');
+    addColumnIfMissing(db, table, 'gezel_name', 'TEXT');
+    addColumnIfMissing(db, table, 'app_version', 'TEXT');
   }
 
   let fts = true;

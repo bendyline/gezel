@@ -4,6 +4,11 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { readImageStaticMeta } from '../../index-store/image-meta.js';
 import {
+  INVALID_MODEL_ID_CODE,
+  INVALID_MODEL_ID_MESSAGE,
+  isSafeModelId,
+} from '../../models/model-id.js';
+import {
   RECOGNITION_MODEL_CATALOG,
   findRecognitionCatalogEntry,
 } from '../../providers/recognition/catalog.js';
@@ -162,6 +167,9 @@ export function recognitionRoutes(ctx: ServiceContext): Hono {
 
   app.delete('/models/:id', async (c) => {
     const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
     const provider = await ctx.recognition.current();
     await provider.deleteModel(id);
     // The engine may be holding the deleted weights open.

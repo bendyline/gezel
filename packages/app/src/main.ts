@@ -36,10 +36,12 @@ import {
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
+  isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
+import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { splashStage } from './splash-stage.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
@@ -88,6 +90,39 @@ let trayActivityAbort: AbortController | null = null;
 // Cert-aware client for talking to the service from the main process —
 // rebuilt whenever the supervisor rotates the token/cert on restart.
 let apiClient: GezelClient | null = null;
+let rendererNetworkPolicyEpoch = 0;
+let rendererNetworkPermissionRead: {
+  epoch: number;
+  promise: ReturnType<typeof resolveRendererNetworkPermission>;
+} | null = null;
+
+function invalidateRendererNetworkPermission(): void {
+  rendererNetworkPolicyEpoch += 1;
+  rendererNetworkPermissionRead = null;
+}
+
+/**
+ * Read the authoritative daemon config at the request sink. Simultaneous
+ * subresource requests share one read, but settled decisions are not cached:
+ * the next batch observes policy changes even if renderer IPC is compromised.
+ */
+async function rendererExternalNetworkAllowed(): Promise<boolean> {
+  const epoch = rendererNetworkPolicyEpoch;
+  let pending = rendererNetworkPermissionRead;
+  if (!pending || pending.epoch !== epoch) {
+    const client = apiClient;
+    pending = {
+      epoch,
+      promise: resolveRendererNetworkPermission(client ? () => client.getConfig() : undefined),
+    };
+    rendererNetworkPermissionRead = pending;
+  }
+
+  const permission = await pending.promise;
+  if (rendererNetworkPermissionRead === pending) rendererNetworkPermissionRead = null;
+  if (rendererNetworkPolicyEpoch !== epoch) return rendererExternalNetworkAllowed();
+  return permission.allowed;
+}
 // OS-opened files are represented in the renderer by opaque random ids. Only
 // paths placed in this map by command-line/open-file handling can be scanned;
 // a compromised renderer cannot turn the IPC method into arbitrary file read.
@@ -435,8 +470,9 @@ function previewExternalServicesForFrame(
  * model-authored inline SVG icon): with `script-src 'self'` an injected
  * <script> or on*= handler cannot execute even if it slips past the SVG
  * sanitizer. Styles keep 'unsafe-inline' (React inline styles); images
- * allow data:/blob:/https: (icons, remote catalog logos) — images can't
- * execute. connect-src is 'self' (the API is same-origin).
+ * allow only self/data:/blob:. Remote passive resources are deliberately
+ * excluded: images and media can still disclose user state through URLs even
+ * when they cannot execute. connect-src is 'self' (the API is same-origin).
  *
  * `frame-src 'self'` lets the renderer embed the same-origin sandboxed
  * preview iframes (the output pane's live HTML preview, chat references).
@@ -449,7 +485,7 @@ const GEZEL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
@@ -459,6 +495,7 @@ const GEZEL_CSP = [
   "frame-src 'self'",
   "frame-ancestors 'none'",
   "form-action 'self'",
+  "webrtc 'block'",
 ].join('; ');
 
 /**
@@ -1317,9 +1354,15 @@ ipcMain.on(
   'gezel:tray:sync-config',
   (
     _event,
-    cfg?: { aiEngagementMode?: EngagementMode; showSystemTray?: boolean; quitOnClose?: boolean },
+    cfg?: {
+      aiEngagementMode?: EngagementMode;
+      showSystemTray?: boolean;
+      quitOnClose?: boolean;
+      securityPolicy?: unknown;
+    },
   ) => {
     if (!cfg) return;
+    if (Object.hasOwn(cfg, 'securityPolicy')) invalidateRendererNetworkPermission();
     quitOnClose = cfg.quitOnClose === true;
     if (cfg.showSystemTray === false) {
       teardownTray();
@@ -2049,23 +2092,36 @@ app.whenReady().then(async () => {
     callback(got === pinnedLoopbackFingerprint ? 0 : -2);
   });
 
-  // CSP is the first preview egress boundary. This request hook is a separate
-  // Electron-level sink: even if authored markup finds a browser CSP bypass,
-  // strict previews cannot emit HTTP(S)/WebSocket traffic off the daemon
-  // endpoint. Permissive previews admit ordinary network resources, while
-  // subframe document loads remain capability-pinned in every mode.
+  // CSP is the first renderer egress boundary. This hook is an independent,
+  // daemon-authorized sink: even if authored markup finds a CSP bypass, no
+  // renderer frame may emit off-daemon HTTP(S)/WebSocket traffic unless both
+  // External services and App network are enabled. Preview leases add a
+  // second, document-specific permission; navigation stays capability-pinned.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
     const allowExternalServices = previewExternalServicesForFrame(details.frame, allowedOrigin);
-    if (allowExternalServices === null) {
+
+    if (allowExternalServices !== null && details.resourceType === 'subFrame') {
+      callback(isAllowedPreviewNavigation(details.url, allowedOrigin) ? {} : { cancel: true });
+      return;
+    }
+
+    if (
+      allowExternalServices !== null &&
+      !isAllowedPreviewResourceRequest(details.url, allowedOrigin, allowExternalServices)
+    ) {
+      callback({ cancel: true });
+      return;
+    }
+
+    if (!isExternalRendererNetworkRequest(details.url, allowedOrigin)) {
       callback({});
       return;
     }
-    const allowed =
-      details.resourceType === 'subFrame'
-        ? isAllowedPreviewNavigation(details.url, allowedOrigin)
-        : isAllowedPreviewResourceRequest(details.url, allowedOrigin, allowExternalServices);
-    callback(allowed ? {} : { cancel: true });
+
+    void rendererExternalNetworkAllowed()
+      .then((allowed) => callback(allowed ? {} : { cancel: true }))
+      .catch(() => callback({ cancel: true }));
   });
 
   // Stamp the renderer CSP onto responses from the loopback origin. CSP
@@ -2214,6 +2270,7 @@ app.whenReady().then(async () => {
   // Build the main-process API client (used by the tray to read/write the
   // engagement mode). Cert-aware, mirroring the supervisor's own client.
   apiClient = buildApiClient();
+  invalidateRendererNetworkPermission();
 
   // Reload the BrowserWindow when the supervisor swaps the child or falls
   // back to embedded. The preload re-runs on reload, re-reads the token via
@@ -2225,6 +2282,7 @@ app.whenReady().then(async () => {
     pinLoopbackCert(connection?.cert ?? null);
     // Token/cert rotated with the new daemon — rebuild the tray's client.
     apiClient = buildApiClient();
+    invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');

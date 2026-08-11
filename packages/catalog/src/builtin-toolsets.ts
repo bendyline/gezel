@@ -5,11 +5,17 @@ import type {
   CatalogKind,
   ToolsetManifest,
 } from '@bendyline/gezel';
+import { sanitizePresentationSvg } from '@bendyline/gezel/svg';
 import { BUILTIN_TOOLSET_ICONS } from './builtin-toolset-icons.js';
 import type { CatalogSource } from './source.js';
 
 const BUILTIN_VERSION = '1.0.0';
 const BUILTIN_RELEASED_AT = '2026-04-25T00:00:00Z';
+
+function builtinIconSvg(id: string): string | undefined {
+  const raw = BUILTIN_TOOLSET_ICONS[id];
+  return raw ? (sanitizePresentationSvg(raw) ?? undefined) : undefined;
+}
 
 /**
  * ─ Built-in toolsets ────────────────────────────────────────────────
@@ -449,11 +455,12 @@ export class BuiltinToolsetsSource implements CatalogSource {
     if (kind !== 'toolset') return [];
     return BUILTIN_TOOLSETS.map((g) => {
       const manifest = manifestForGroup(g);
+      const iconSvg = builtinIconSvg(g.id);
       return {
         sourceId: this.id,
         kind,
         manifest,
-        ...(BUILTIN_TOOLSET_ICONS[g.id] ? { iconSvg: BUILTIN_TOOLSET_ICONS[g.id] } : {}),
+        ...(iconSvg ? { iconSvg } : {}),
       };
     });
   }
@@ -466,11 +473,12 @@ export class BuiltinToolsetsSource implements CatalogSource {
     const g = BUILTIN_BY_ID.get(groupId);
     if (!g) return null;
     const manifest = manifestForGroup(g);
+    const iconSvg = builtinIconSvg(g.id);
     return {
       sourceId: this.id,
       kind,
       manifest,
-      ...(BUILTIN_TOOLSET_ICONS[g.id] ? { iconSvg: BUILTIN_TOOLSET_ICONS[g.id] } : {}),
+      ...(iconSvg ? { iconSvg } : {}),
     };
   }
 

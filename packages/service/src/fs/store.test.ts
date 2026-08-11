@@ -116,6 +116,28 @@ describe('agents', () => {
     expect(list[0]?.id).toBe('researcher');
   });
 
+  it('sanitizes icons again at the persistence boundary', async () => {
+    const created = await store.createGezel({ name: 'Icon keeper' });
+    const updated = await store.writeGezelIcon(
+      created.id,
+      '<svg xmlns="http://www.w3.org/2000/svg" onload="steal()"><script>steal()</script><image href="https://attacker.test/pixel"/><path d="M0 0h1v1z" style="fill:red"/></svg>',
+    );
+
+    expect(updated.icon).toContain('<path d="M0 0h1v1z"/>');
+    expect(updated.icon).not.toContain('script');
+    expect(updated.icon).not.toContain('image');
+    expect(updated.icon).not.toContain('attacker.test');
+    const persisted = await readFile(join(home, 'gezels', created.id, 'icon.svg'), 'utf8');
+    expect(persisted).toBe(updated.icon);
+
+    await expect(
+      store.writeGezelIcon(
+        created.id,
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>only content</script></svg>',
+      ),
+    ).rejects.toThrow('invalid SVG icon');
+  });
+
   it('gets agent detail with parsed markdown', async () => {
     await store.createGezel({ name: 'Helper' });
     const detail = await store.getGezel('helper');
@@ -566,6 +588,52 @@ describe('project artifacts', () => {
         'user correction',
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('denies every write into the reserved artifacts/shadow cache but allows reads and deletes', async () => {
+    await store.createProject({ name: 'ShadowArtifacts' });
+    await expect(
+      store.writeProjectArtifact('shadowartifacts', 'shadow/docs/spec.docx_files/spec.md', 'x', {
+        initiatedByGezel: true,
+      }),
+    ).rejects.toMatchObject({ code: 'shadow-readonly' });
+    // Unconditional: user-initiated and prefix/traversal variants are equally denied.
+    await expect(
+      store.writeProjectArtifact('shadowartifacts', 'artifacts/shadow/note.md', 'x'),
+    ).rejects.toMatchObject({ code: 'shadow-readonly' });
+    await expect(
+      store.writeProjectArtifactBinary(
+        'shadowartifacts',
+        'docs/../shadow/note.md',
+        Buffer.from('x'),
+      ),
+    ).rejects.toMatchObject({ code: 'shadow-readonly' });
+    // The cache is deletable (it self-heals on the next index pass).
+    await expect(store.deleteProjectArtifact('shadowartifacts', 'shadow')).resolves.toBeUndefined();
+  });
+
+  it('hides the shadow tree from listings and fuzzy resolve but serves explicit reads', async () => {
+    await store.createProject({ name: 'ShadowList' });
+    const artifactsDir = store.projectArtifactsDir('shadowlist');
+    const companion = join(artifactsDir, 'shadow', 'docs', 'spec.docx_files');
+    await mkdir(companion, { recursive: true });
+    await writeFile(join(companion, 'spec.md'), '# Converted');
+    await store.writeProjectArtifact('shadowlist', 'report.md', '# Report');
+
+    const rootListing = await store.listProjectArtifacts('shadowlist');
+    expect(rootListing.some((e) => e.name === 'shadow')).toBe(false);
+    const recursive = await store.listProjectArtifactsRecursive('shadowlist');
+    expect(recursive.some((e) => e.path.startsWith('shadow'))).toBe(false);
+
+    // Fuzzy basename resolve must not surface shadow twins…
+    const fuzzy = await store.resolveProjectArtifact('shadowlist', 'spec.md');
+    expect(fuzzy.kind).toBe('missing');
+    // …while an explicit path read still works.
+    const explicit = await store.readProjectArtifact(
+      'shadowlist',
+      'shadow/docs/spec.docx_files/spec.md',
+    );
+    expect(explicit).toContain('# Converted');
   });
 
   it('strips redundant artifacts/ prefix on write so files do not nest', async () => {

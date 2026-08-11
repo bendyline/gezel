@@ -469,6 +469,24 @@ export function projectArtifactsDir(
   return join(projectDir(root, projectId, external), 'artifacts');
 }
 
+/**
+ * Reserved artifacts subtree holding gezel-generated shadow files: markdown
+ * representations of workspace content (converted office documents, image
+ * descriptions, audio transcripts). Lives under artifacts — never the
+ * workspace, which may be read-only — and is a regenerable cache: write-denied
+ * to gezels/users, safe to delete, rebuilt by indexing.
+ */
+export const PROJECT_SHADOW_DIR_NAME = 'shadow';
+
+/** Per-project `artifacts/shadow/` root. */
+export function projectShadowDir(
+  root: string,
+  projectId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectArtifactsDir(root, projectId, external), PROJECT_SHADOW_DIR_NAME);
+}
+
 /** Per-project memories folder (daily markdown + summary + vectra index). */
 export function projectMemoriesDir(
   root: string,
@@ -860,8 +878,11 @@ export function projectLocalIndexDbFile(workspaceDir: string): string {
 }
 
 /**
- * Converted-document artifacts (squisq-flavored markdown + media + CSV),
- * mirroring the source tree under `.gezel/files/<mirror>/<name>_files/`.
+ * Legacy converted-document location under the workspace's own
+ * `.gezel/files/<mirror>/<name>_files/`. Workspace conversions now live in
+ * the project's `artifacts/shadow/` tree ({@link projectShadowDir}) so a
+ * read-only workspace never loses them; this helper remains only so the
+ * indexer can clean the old tree up.
  */
 export function projectLocalFilesDir(workspaceDir: string): string {
   return join(projectLocalRoot(workspaceDir), 'files');

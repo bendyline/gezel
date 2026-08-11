@@ -7,6 +7,7 @@
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { resolveModelDirectory } from '../../models/model-id.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -85,7 +86,7 @@ export class MockSpeechToTextProvider implements SpeechToTextProvider {
 
   async deleteModel(id: string): Promise<void> {
     if (this.modelsRoot) {
-      await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+      await rm(resolveModelDirectory(this.modelsRoot, id), { recursive: true, force: true });
     }
   }
 

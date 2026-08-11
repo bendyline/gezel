@@ -4,6 +4,7 @@ import type {
   NightShiftTasksResponse,
   RecentTab,
   RecentTabArea,
+  SecurityPolicy,
 } from '@bendyline/gezel';
 import type { QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -250,7 +251,12 @@ function FullApp() {
     void syncSidebarSideFromConfig();
     const onConfigUpdated = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { aiEngagementMode?: string; showSystemTray?: boolean; quitOnClose?: boolean }
+        | {
+            aiEngagementMode?: string;
+            showSystemTray?: boolean;
+            quitOnClose?: boolean;
+            securityPolicy?: SecurityPolicy;
+          }
         | undefined;
       if (detail?.aiEngagementMode) {
         setEngagementMode(detail.aiEngagementMode as EngagementMode);
@@ -267,6 +273,7 @@ function FullApp() {
             | undefined,
           showSystemTray: detail.showSystemTray,
           quitOnClose: detail.quitOnClose,
+          securityPolicy: detail.securityPolicy,
         });
       }
     };

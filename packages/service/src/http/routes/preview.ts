@@ -51,14 +51,14 @@ import type { PreviewCapabilityStore } from '../preview-capability.js';
 export const PREVIEW_EXTERNAL_SERVICES_HEADER = 'x-gezel-preview-external-services';
 
 /**
- * Build the preview document CSP from the effective External services
+ * Build the preview document CSP from the effective renderer-network
  * permission. The permissive form admits remote resources and API/WebSocket
  * calls, but deliberately does not relax framing, form submission, base URLs,
  * plugins, or the opaque-origin iframe sandbox.
  */
-export function previewContentSecurityPolicy(allowExternalServices: boolean): string {
-  const network = allowExternalServices ? ' http: https:' : '';
-  const sockets = allowExternalServices ? ' ws: wss:' : '';
+export function previewContentSecurityPolicy(allowExternalNetwork: boolean): string {
+  const network = allowExternalNetwork ? ' http: https:' : '';
+  const sockets = allowExternalNetwork ? ' ws: wss:' : '';
   return [
     `default-src 'self'${network}`,
     `script-src 'self' 'unsafe-inline' 'unsafe-eval'${network}`,
@@ -74,17 +74,17 @@ export function previewContentSecurityPolicy(allowExternalServices: boolean): st
     "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'none'",
-    `webrtc '${allowExternalServices ? 'allow' : 'block'}'`,
+    `webrtc '${allowExternalNetwork ? 'allow' : 'block'}'`,
     'sandbox allow-scripts',
   ].join('; ');
 }
 
-function previewSecurityHeaders(allowExternalServices: boolean): Record<string, string> {
+function previewSecurityHeaders(allowExternalNetwork: boolean): Record<string, string> {
   return {
     // A preview carries read authority for a source subtree. Any external
     // resource host is also a possible exfiltration endpoint, so every
     // fetchable class stays local until the user enables External services.
-    'content-security-policy': previewContentSecurityPolicy(allowExternalServices),
+    'content-security-policy': previewContentSecurityPolicy(allowExternalNetwork),
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'SAMEORIGIN',
     'referrer-policy': 'no-referrer',
@@ -100,19 +100,20 @@ function previewSecurityHeaders(allowExternalServices: boolean): Record<string, 
     // Trusted signal consumed only by the Electron shell for a second,
     // request-level enforcement layer. External pages cannot opt themselves
     // in because main accepts this header only on the daemon preview origin.
-    [PREVIEW_EXTERNAL_SERVICES_HEADER]: allowExternalServices ? 'allowed' : 'blocked',
+    [PREVIEW_EXTERNAL_SERVICES_HEADER]: allowExternalNetwork ? 'allowed' : 'blocked',
   };
 }
 
-function previewHeaders(mime: string, allowExternalServices = false): Record<string, string> {
-  return { ...previewSecurityHeaders(allowExternalServices), 'content-type': mime };
+function previewHeaders(mime: string, allowExternalNetwork = false): Record<string, string> {
+  return { ...previewSecurityHeaders(allowExternalNetwork), 'content-type': mime };
 }
 
-async function previewAllowsExternalServices(ctx: ServiceContext): Promise<boolean> {
+async function previewAllowsExternalNetwork(ctx: ServiceContext): Promise<boolean> {
   // A malformed or temporarily unreadable config must fail closed. This read
   // happens once per HTML navigation; subresources inherit the document CSP.
   try {
-    return resolveSecurityPolicy(await ctx.store.readConfig()).allowExternalServices;
+    const policy = resolveSecurityPolicy(await ctx.store.readConfig());
+    return policy.allowExternalServices && policy.allowAppNetwork;
   } catch {
     return false;
   }
@@ -346,11 +347,11 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       if (!buf) return c.json({ error: 'not found' }, 404);
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        const allowExternalServices = await previewAllowsExternalServices(ctx);
+        const allowExternalNetwork = await previewAllowsExternalNetwork(ctx);
         return c.body(
           preparePreviewHtml(buf.toString('utf8')),
           200,
-          previewHeaders(mime, allowExternalServices),
+          previewHeaders(mime, allowExternalNetwork),
         );
       }
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));
@@ -375,8 +376,8 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
         const html = preparePreviewHtml((await readFile(full)).toString('utf8'));
-        const allowExternalServices = await previewAllowsExternalServices(ctx);
-        return c.body(html, 200, previewHeaders(mime, allowExternalServices));
+        const allowExternalNetwork = await previewAllowsExternalNetwork(ctx);
+        return c.body(html, 200, previewHeaders(mime, allowExternalNetwork));
       }
       const buf = await readFile(full);
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));

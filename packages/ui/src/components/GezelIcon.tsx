@@ -1,6 +1,7 @@
 import type { Poppetje as PoppetjeStruct } from '@bendyline/gezel';
-import type { MouseEventHandler } from 'react';
+import { type MouseEventHandler, useMemo } from 'react';
 import { Poppetje, type PoppetjeVariant } from '../poppetje/index.js';
+import { safeSvgImageUrl } from '../safe-svg-image.js';
 import { useShowPoppetjes } from './useShowPoppetjes.js';
 
 interface GezelIconProps {
@@ -63,6 +64,7 @@ export function GezelIcon({
   fallbackForeground,
 }: GezelIconProps) {
   const showPoppetjes = useShowPoppetjes();
+  const legacyIconUrl = useMemo(() => safeSvgImageUrl(svg), [svg]);
   const style = { width: size, height: size };
   const classes = [
     'gezel-icon',
@@ -76,13 +78,12 @@ export function GezelIcon({
   // letter avatar. The letter avatar is the safety net while the first
   // poppetje read is racing back (it shouldn't normally render — the
   // service inlines the poppetje in the listGezels response).
-  const showLegacyIcon = iconOverride && !!svg;
+  const showLegacyIcon = iconOverride && !!legacyIconUrl;
   // When the user turns poppetjes off (config.showPoppetjes), skip the
   // poppetje branch so we fall through to the legacy sigil or the letter
   // avatar — the same fallbacks used when a gezel has no poppetje.
   const content = showLegacyIcon ? (
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized upstream
-    <div className="gezel-icon-svg" dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
+    <img className="gezel-icon-svg" src={legacyIconUrl} alt="" draggable={false} />
   ) : poppetje && showPoppetjes ? (
     <div className="gezel-icon-poppetje">
       <Poppetje
@@ -92,9 +93,8 @@ export function GezelIcon({
         title={title ?? `${name} poppetje`}
       />
     </div>
-  ) : svg ? (
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized upstream
-    <div className="gezel-icon-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+  ) : legacyIconUrl ? (
+    <img className="gezel-icon-svg" src={legacyIconUrl} alt="" draggable={false} />
   ) : (
     <FallbackAvatar name={name} background={fallbackBackground} foreground={fallbackForeground} />
   );
