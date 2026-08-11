@@ -15,6 +15,7 @@ import {
   type HookSpec,
   type InstalledToolset,
   type ModelTier,
+  NEW_THREAD_TITLE,
   type ProjectFileEntry,
   type Question,
   type ScriptMeta,
@@ -26,6 +27,7 @@ import {
   type ToolsetManifest,
   createLogger,
   decodeProjectGezelId,
+  deriveThreadTitleFromMessages,
   displayName,
   isEngagementAllowed,
   isLocalProvider,
@@ -2885,7 +2887,7 @@ export class ChatManager {
         frontmatterModel ?? nightShiftModel ?? routedModel ?? config.defaultModel?.[providerName],
       ...(routedModel ? { modelSource: 'capability-routing' as const } : {}),
       reasoningEffort: fm.reasoningEffort ?? config.defaultReasoningEffort?.[providerName],
-      title: 'New session',
+      title: NEW_THREAD_TITLE,
       createdAt: now,
       lastActivityAt: now,
       messages: [],
@@ -5707,8 +5709,13 @@ export class ChatManager {
       ...(opts?.nudge ? { nudge: true } : {}),
     };
     state.record.messages.push(userMessage);
-    if (!opts?.hidden && (!state.record.title || state.record.title === 'New session')) {
-      state.record.title = userText.slice(0, 60).trim() || 'Untitled';
+    if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
+      state.record.title =
+        deriveThreadTitleFromMessages(state.record.messages.slice(0, -1), {
+          requireCompletedTurn: true,
+        }) ??
+        deriveThreadTitleFromMessages([userMessage]) ??
+        'Untitled';
     }
     // Persist the user turn immediately. Writing the session only after
     // the assistant reply means that a provider timeout — e.g. Copilot's
@@ -7693,8 +7700,13 @@ export class ChatManager {
       ...(opts?.hidden ? { hidden: true } : {}),
     };
     record.messages.push(userMessage);
-    if (!opts?.hidden && (!record.title || record.title === 'New session')) {
-      record.title = userText.slice(0, 60).trim() || 'Untitled';
+    if (!record.title || record.title === NEW_THREAD_TITLE) {
+      record.title =
+        deriveThreadTitleFromMessages(record.messages.slice(0, -1), {
+          requireCompletedTurn: true,
+        }) ??
+        deriveThreadTitleFromMessages([userMessage]) ??
+        'Untitled';
     }
     try {
       await this.store.writeSession(record);

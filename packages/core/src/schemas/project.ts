@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CodexPermissionModeSchema } from './codex.js';
+import { EntityIdSchema } from './entity-id.js';
 
 /** A credential destination is an exact HTTPS origin, never a URL path. */
 export const HttpsOriginSchema = z
@@ -155,7 +156,7 @@ export const ProjectTypeProvenanceSchema = z.object({
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 
 export const ProjectSchema = z.object({
-  id: z.string(),
+  id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
   workingDir: z.string().optional(),

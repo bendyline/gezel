@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
+import { assertSafeEntityId } from './entity-id.js';
 
 /**
  * Marker written by the privileged installer after a legacy machine-home
@@ -90,10 +91,12 @@ export type MachineStorageScope = 'user' | 'machine-shared';
 
 /** Explicit user-home entity locations, bypassing shared-root resolution. */
 export function userGezelDir(root: string, gezelId: string, external?: ExternalFolders): string {
+  assertSafeEntityId(gezelId, 'gezel id');
   return join(external?.gezels ?? join(root, 'gezels'), gezelId);
 }
 
 export function userProjectDir(root: string, projectId: string): string {
+  assertSafeEntityId(projectId, 'project id');
   return join(root, 'projects', projectId);
 }
 
@@ -113,11 +116,13 @@ export function projectPrivateDir(root: string, projectId: string): string {
 }
 
 export function machineSharedGezelDir(gezelId: string): string | null {
+  assertSafeEntityId(gezelId, 'gezel id');
   const shared = activeMachineSharedHome();
   return shared ? join(shared, 'gezels', gezelId) : null;
 }
 
 export function machineSharedProjectDir(projectId: string): string | null {
+  assertSafeEntityId(projectId, 'project id');
   const shared = activeMachineSharedHome();
   return shared ? join(shared, 'projects', projectId) : null;
 }
@@ -287,6 +292,7 @@ export function gezelDir(root: string, gezelId: string, external?: ExternalFolde
  * node_modules churn is hostile to OneDrive/Dropbox-style sync.
  */
 export function gezelLocalDir(root: string, gezelId: string): string {
+  assertSafeEntityId(gezelId, 'gezel id');
   return join(root, 'gezels', gezelId);
 }
 
@@ -393,6 +399,7 @@ export function gezelPoppetjePath(
  * machine-shared.
  */
 export function projectDir(root: string, projectId: string, external?: ExternalFolders): string {
+  assertSafeEntityId(projectId, 'project id');
   if (projectStorageScope(root, projectId) === 'machine-shared') {
     return machineSharedProjectDir(projectId)!;
   }
@@ -930,6 +937,7 @@ export function projectLocalGezelsRoot(workspaceDir: string): string {
 }
 
 export function projectLocalGezelDir(workspaceDir: string, localId: string): string {
+  assertSafeEntityId(localId, 'project-local gezel id');
   return join(projectLocalGezelsRoot(workspaceDir), localId);
 }
 

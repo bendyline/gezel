@@ -1,7 +1,7 @@
 ---
 id: how-we-test-models
 title: "How we test models"
-order: 7
+order: 10
 summary: What the model scores mean, how they are measured, and what they don't tell you.
 ---
 # How we test models
@@ -75,8 +75,12 @@ a coin toss that happened to land well.
 Sometimes a run fails for reasons that have nothing to do with the model: the
 graphics driver falls over, the machine runs out of memory, someone stops the
 run. Those attempts are recorded and set aside rather than counted as
-failures. A separate column shows how many were lost that way, so you can see
-when a score rests on fewer attempts than it should.
+failures.
+
+If enough of a model's attempts are lost that its results no longer stand up,
+we leave it out of the table rather than publish a score with a hole in it.
+A missing model means "not measured properly yet", never "measured and found
+wanting".
 
 ## What we deliberately don't claim
 
@@ -86,11 +90,19 @@ task set. Change any of those and you have a different experiment. When a
 model was measured in an earlier round we list it separately and say why —
 we never quietly merge it into a newer table to make the list look fuller.
 
-**We don't rank writing quality.** Alongside the pass/fail checks we ask a
-large AI model to rate qualities like clarity and grounding. Those ratings
-are useful for spotting patterns within a single round, but the rating model
-changes over time, so we do not treat them as a score you can track. Only the
-pass/fail results are.
+**Quality scores are an opinion, not a measurement.** Alongside the pass/fail
+checks we ask a large AI model to rate qualities like clarity, grounding and
+candour, and we publish that as a Quality column. Read it with two caveats.
+
+First, it only covers work that got *produced*. A model that gives up early
+is graded on the few pieces it did finish, so a high quality score over a
+small number of pieces can mean "good when it manages it" rather than
+"good". That is why the count always travels with the score — `6.5/10 (18
+pieces)` next to `6.5/10 (26 pieces)` are not the same claim.
+
+Second, the rating model changes over time, so quality scores are comparable
+*within* a round and not across rounds. The pass/fail results are the ones
+that track.
 
 **A score is not a recommendation for your machine.** Results come from one
 particular computer. A model that scores well on a large desktop may not fit

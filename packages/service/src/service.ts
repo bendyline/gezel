@@ -52,6 +52,7 @@ import { EngineBinaryRegistry } from './engines/registry.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
+import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
 import { GildeUpdateManager } from './gilde-updates/manager.js';
@@ -339,6 +340,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const home = opts.home ?? gezelHome();
   const serviceRole = await resolveEffectiveServiceRole(opts.role, process.env, home);
+  const privateUserHome = process.env.GEZEL_SYSTEM_SCOPE !== '1';
+  // Secure the home before the runtime lock or config probe creates/reads any
+  // per-user state. Store.ensureLayout repeats this idempotently so direct
+  // Store consumers receive the same invariant.
+  if (privateUserHome) await ensurePrivateUserHome(home);
   log.info(`[service] role=${serviceRole}`);
   // Publish the writable transformers.js cache dir so every on-device model
   // consumer pins the same managed location — including the memory embed
@@ -395,7 +401,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     (rawConfigForExternal.externalFolders as ExternalFolders | undefined) ?? undefined;
   const { HistoryManager } = await import('./history/manager.js');
   const history = new HistoryManager(home);
-  const store = new Store({ home, history, external, serviceRole });
+  const store = new Store({ home, history, external, serviceRole, privateUserHome });
   if (serviceRole !== 'machine-engine') await recoverTypedProjectCreations(store);
   await store.ensureLayout();
   if (serviceRole !== 'machine-engine') {

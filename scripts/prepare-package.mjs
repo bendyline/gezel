@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calVerPrefix } from './calver.mjs';
 
 const version = process.argv[2];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,21 +46,41 @@ if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\w.]+)?$/.test(version ?? ''))
 const sourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
 const source = readFileSync(sourcePath, 'utf8');
 const pattern = /export const GEZEL_VERSION = '[^']*';/;
+const compatPattern = /export const GEZEL_CONTENT_COMPAT = '[^']*';/;
 
 if (!pattern.test(source)) {
   console.error(`prepare-package: could not find GEZEL_VERSION declaration in ${sourcePath}`);
   process.exit(1);
 }
 
+// npm versions are semver and carry no date, but gilde's `minGezelVersion`
+// floors are authored as `1.YYDDD`. Stamp today's calendar line alongside the
+// published version so floors are compared on the axis they were written for;
+// see GEZEL_CONTENT_COMPAT in packages/core/src/index.ts.
+if (!compatPattern.test(source)) {
+  console.error(
+    `prepare-package: could not find GEZEL_CONTENT_COMPAT declaration in ${sourcePath}`,
+  );
+  process.exit(1);
+}
+const contentCompat = calVerPrefix();
+
 if (process.env.GEZEL_RELEASE_DRY_RUN === '1') {
   console.log(
-    `prepare-package: [dry run] would stamp GEZEL_VERSION = '${version}' and rebuild core`,
+    `prepare-package: [dry run] would stamp GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}' and rebuild core`,
   );
   process.exit(0);
 }
 
-writeFileSync(sourcePath, source.replace(pattern, `export const GEZEL_VERSION = '${version}';`));
-console.log(`prepare-package: stamped GEZEL_VERSION = '${version}'`);
+writeFileSync(
+  sourcePath,
+  source
+    .replace(pattern, `export const GEZEL_VERSION = '${version}';`)
+    .replace(compatPattern, `export const GEZEL_CONTENT_COMPAT = '${contentCompat}';`),
+);
+console.log(
+  `prepare-package: stamped GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}'`,
+);
 
 // Rebuild so the tarball packed by publish-package.mjs carries the stamp. The
 // workflow's earlier `pnpm build` predates the version being known.
@@ -81,4 +102,12 @@ if (!built.includes(version)) {
   );
   process.exit(1);
 }
-console.log(`prepare-package: core dist carries ${version}`);
+// An unstamped compat value ships a build that every content floor treats as a
+// dev build, silently disabling the gate for every consumer of this release.
+if (!new RegExp(`GEZEL_CONTENT_COMPAT\\s*=\\s*"${contentCompat}"`).test(built)) {
+  console.error(
+    `prepare-package: core rebuilt but dist/index.js does not carry GEZEL_CONTENT_COMPAT ${contentCompat} — refusing to publish a build that cannot honour content floors`,
+  );
+  process.exit(1);
+}
+console.log(`prepare-package: core dist carries ${version} (content compat ${contentCompat})`);

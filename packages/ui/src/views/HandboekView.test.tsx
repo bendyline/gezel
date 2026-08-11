@@ -89,6 +89,43 @@ const TOC = {
         },
       ],
     },
+    {
+      area: 'craftbooks',
+      title: 'Craftbooks',
+      entries: [
+        {
+          id: 'craftbooks-index',
+          title: 'Every craftbook',
+          area: 'craftbooks',
+          order: 0,
+          generated: true,
+        },
+        {
+          id: 'craftbook/project-kickoff',
+          title: 'Project Kickoff',
+          area: 'craftbooks',
+          order: 10,
+          generated: true,
+          subcategory: {
+            id: 'project-starter',
+            title: 'New project starters',
+            order: 0,
+          },
+        },
+        {
+          id: 'craftbook/status-report',
+          title: 'Status Report',
+          area: 'craftbooks',
+          order: 10,
+          generated: true,
+          subcategory: {
+            id: 'general',
+            title: 'General work',
+            order: 2,
+          },
+        },
+      ],
+    },
   ],
 };
 
@@ -136,6 +173,49 @@ describe('HandboekView', () => {
     });
     expect(window.localStorage.getItem('gezel:handboek:article')).toBe('the-crew');
     expect(crewEntry).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('collapses and expands each top-level section', async () => {
+    const user = userEvent.setup();
+    render(<HandboekView />);
+    const concepts = await screen.findByRole('button', { name: 'Concepts' });
+    expect(concepts).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Your crew' })).toBeInTheDocument();
+
+    await user.click(concepts);
+    expect(concepts).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Your crew' })).not.toBeInTheDocument();
+
+    await user.click(concepts);
+    expect(concepts).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Your crew' })).toBeInTheDocument();
+  });
+
+  it('groups craftbooks into shelves that are collapsed by default', async () => {
+    const user = userEvent.setup();
+    render(<HandboekView />);
+    await screen.findByRole('button', { name: 'Craftbooks' });
+
+    expect(screen.getByRole('button', { name: 'Every craftbook' })).toBeInTheDocument();
+    const general = screen.getByRole('button', { name: 'General work' });
+    expect(general).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Status Report' })).not.toBeInTheDocument();
+
+    await user.click(general);
+    expect(general).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Status Report' })).toBeInTheDocument();
+  });
+
+  it('reveals the shelf containing a restored craftbook selection', async () => {
+    window.localStorage.setItem('gezel:handboek:article', 'craftbook/status-report');
+    render(<HandboekView />);
+
+    const general = await screen.findByRole('button', { name: 'General work' });
+    await waitFor(() => expect(general).toHaveAttribute('aria-expanded', 'true'));
+    expect(screen.getByRole('button', { name: 'Status Report' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   it('restores a stored selection when it still exists', async () => {

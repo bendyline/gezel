@@ -220,6 +220,14 @@ describe('CodexSetupManager', () => {
       shell_type: 'shell_command',
       apply_patch_tool_type: 'freeform',
       supports_search_tool: false,
+      default_service_tier: null,
+      service_tiers: [
+        {
+          id: 'priority',
+          name: 'Fast',
+        },
+      ],
+      additional_speed_tiers: [],
       context_window: 16_384,
     });
   });

@@ -159,7 +159,7 @@ describe('sessions API — send + events', () => {
     };
     expect(full.messages.some((m) => m.role === 'user' && m.content === 'hello mock')).toBe(true);
     expect(full.messages.some((m) => m.role === 'assistant')).toBe(true);
-    expect(full.title).toBe('hello mock');
+    expect(full.title).toBe('Mock');
   }, 15_000);
 });
 

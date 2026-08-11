@@ -67,6 +67,38 @@ describe('satisfiesMinGezelVersion', () => {
   });
 });
 
+describe('content floors are a calendar-line question, not a release-version one', () => {
+  // Regression cover for the seam that made gating on `GEZEL_VERSION` wrong on
+  // the npm channel. These are the values a *published semver* would present;
+  // none of them may be used as `current`, which is why builds stamp
+  // GEZEL_CONTENT_COMPAT separately. Kept here so the arithmetic that makes
+  // the mistake dangerous stays visible.
+  const floor = '1.26290';
+
+  it('puts every plausible npm semver below a calendar floor', () => {
+    // The bootstrap line and the first CI release both look "older" than any
+    // floor ever authored, which silently hid floored content.
+    for (const npmVersion of ['0.1.0', '0.2.0', '1.0.0', '1.1.0', '1.99.0']) {
+      expect(satisfiesMinGezelVersion(floor, npmVersion), npmVersion).toBe(false);
+    }
+  });
+
+  it('flips a major npm release above every floor', () => {
+    // The dangerous direction: `2.0.0 > 1.26290` numerically, so a future npm
+    // major would accept content requiring a build it predates — exactly what
+    // the floor exists to prevent.
+    expect(satisfiesMinGezelVersion(floor, '2.0.0')).toBe(true);
+    expect(satisfiesMinGezelVersion('1.99999', '2.0.0')).toBe(true);
+  });
+
+  it('answers correctly for values actually on the calendar line', () => {
+    expect(satisfiesMinGezelVersion(floor, '1.26289')).toBe(false);
+    expect(satisfiesMinGezelVersion(floor, '1.26290')).toBe(true);
+    expect(satisfiesMinGezelVersion(floor, '1.26290.4')).toBe(true);
+    expect(satisfiesMinGezelVersion(floor, '1.26300')).toBe(true);
+  });
+});
+
 describe('maxMinGezelVersion', () => {
   it('returns the stricter floor', () => {
     expect(maxMinGezelVersion('1.26221', '1.26300')).toBe('1.26300');

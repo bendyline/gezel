@@ -189,6 +189,47 @@ describe('Store session CRUD', () => {
     expect(sessions.map((s) => s.id)).toEqual(['new', 'mid', 'old']);
   });
 
+  it('listSessions derives a useful label for a completed legacy reaction thread', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'legacy-reaction',
+        title: 'New session',
+        messages: [
+          {
+            role: 'user',
+            content: '[Checkers page]: Your opponent played c3-d4.',
+            at: '2026-04-14T10:00:00Z',
+            hidden: true,
+          },
+          { role: 'assistant', content: 'I play d6-c5.', at: '2026-04-14T10:00:02Z' },
+        ],
+      }),
+    );
+
+    const sessions = await store.listSessions({ gezelId: 'ada' });
+    expect(sessions[0]?.title).toBe('Checkers opponent played c3-d4');
+    expect((await store.getSession('ada', 'legacy-reaction'))?.title).toBe('New session');
+  });
+
+  it('listSessions leaves a passive-CC-only legacy thread unnamed', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'passive-cc',
+        title: 'New session',
+        messages: [
+          {
+            role: 'user',
+            content: '@Ada can you finish the release?',
+            at: '2026-04-14T10:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    const sessions = await store.listSessions({ gezelId: 'ada' });
+    expect(sessions[0]?.title).toBe('New session');
+  });
+
   it('deleteSession removes the file', async () => {
     await store.writeSession(sessionFixture({ id: 'gone' }));
     expect(await store.getSession('ada', 'gone')).not.toBeNull();

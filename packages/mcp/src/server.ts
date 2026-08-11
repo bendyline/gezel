@@ -32,6 +32,8 @@ import {
   ModelTierSchema,
   type NewCraftbookStep,
   NewCraftbookStepSchema,
+  NpmPackageNameSchema,
+  NpmRegistryVersionSchema,
   type Outcome,
   ProviderNameSchema,
   type ScriptMeta,
@@ -2191,11 +2193,10 @@ server.tool(
     packages: z
       .array(
         z.object({
-          package: z.string().describe('Package name (e.g. "zod", "@types/node").'),
-          version: z
-            .string()
-            .optional()
-            .describe('Semver range or exact version (e.g. "^3", "3.22.4"). Defaults to "latest".'),
+          package: NpmPackageNameSchema.describe('Package name (e.g. "zod", "@types/node").'),
+          version: NpmRegistryVersionSchema.optional().describe(
+            'Semver range or exact version (e.g. "^3", "3.22.4"). Defaults to "latest".',
+          ),
         }),
       )
       .min(1)
@@ -2291,7 +2292,7 @@ server.tool(
 
 server.tool(
   'run_package_script',
-  "Run a `package.json` script (equivalent to `npm run <script>` / `pnpm run <script>`). Use this to build, test, lint, typecheck — anything the project already has wired up. NOT for the named project scripts `list_scripts` shows (craftbook-installed probes/ops) — run those via `run_installed_script`. Call `list_package_scripts` first if you don't know what's available. First-time invocations of a given script trigger a user approval prompt; once approved the decision sticks. SECURITY: unlike `run_nodejs_script`, package commands are not an isolation boundary. They run as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning and the exact command body.",
+  "Run a `package.json` script (equivalent to `npm run <script>` / `pnpm run <script>`). Use this to build, test, lint, typecheck — anything the project already has wired up. NOT for the named project scripts `list_scripts` shows (craftbook-installed probes/ops) — run those via `run_installed_script`. Call `list_package_scripts` first if you don't know what's available. First-time invocations of a given script trigger a user approval prompt; the approval remains valid only while the exact invocation and identifiable local input files are unchanged. SECURITY: unlike `run_nodejs_script`, package commands are not an isolation boundary. They run as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning and the exact command body.",
   {
     script: z.string().describe('Script name — a key of `package.json#scripts` (e.g. "build").'),
     args: coerceStringArray(
@@ -2325,7 +2326,7 @@ server.tool(
 
 server.tool(
   'run_npx',
-  "Run a binary that a project dependency already provides (equivalent to `npx <bin> [args]`). The binary must exist in the workspace's `node_modules/.bin` or be a declared dep — unknown binaries are rejected, no auto-download. NOT for the named project scripts `list_scripts` shows — run those via `run_installed_script`. First-time invocations of a given binary trigger a user approval prompt; once approved the decision sticks. SECURITY: this is a package command, not an isolation boundary. It runs as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning.",
+  "Run a binary that a project dependency already provides (equivalent to `npx <bin> [args]`). The binary must exist in the workspace's `node_modules/.bin` or be a declared dep — unknown binaries are rejected, no auto-download. NOT for the named project scripts `list_scripts` shows — run those via `run_installed_script`. First-time invocations of a given binary trigger a user approval prompt; the approval remains valid only while the exact invocation and identifiable local input files are unchanged. SECURITY: this is a package command, not an isolation boundary. It runs as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning.",
   {
     bin: z.string().describe('Binary name (e.g. "tsc", "vitest"). Bare name, not a path.'),
     args: coerceStringArray(z.array(z.string()).optional().describe('Args passed to the binary.')),

@@ -194,7 +194,7 @@ describe('buildSuiteScoreboard', () => {
 describe('provenance', () => {
   it('stamps a table with device, sample size, date, and code versions', () => {
     expect(describeProvenance(run('r1'))).toBe(
-      'Mac Studio (M4 Max) · 3 trials per task · 2026-08-01 · gezel abc1234 · catalog 0.1.15',
+      'Mac Studio (M4 Max) · 64 GB · 3 trials per task · 2026-08-01 · gezel abc1234 · catalog 0.1.15',
     );
   });
 

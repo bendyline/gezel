@@ -231,11 +231,16 @@ test('checkers: create from gallery, move on the board, the reaction summons the
     .toBe(true);
   const seededOrigin = board.locator('[data-square="c3"]');
   await expect(seededOrigin.locator('.piece.red')).toBeVisible({ timeout: 10_000 });
-  await seededOrigin.click();
-  // Crossing back into the iframe immediately after Playwright dispatches
-  // the click can beat the page's synchronous board rebuild. Observe the
-  // selection state first so the landing assertion targets the rebuilt DOM.
-  await expect(seededOrigin).toHaveClass(/selected/);
+  // The freshly remounted page can rebuild the board while Playwright's
+  // pointer sequence is in flight. In that narrow window the click completes
+  // against the detached cell without selecting its replacement. Retry the
+  // action only while the live origin is still unselected; once selection
+  // lands, the following assertions continue against the rebuilt DOM.
+  await expect(async () => {
+    const classes = (await seededOrigin.getAttribute('class'))?.split(/\s+/) ?? [];
+    if (!classes.includes('selected')) await seededOrigin.click();
+    await expect(seededOrigin).toHaveClass(/selected/, { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   await expect(board.locator('[data-square="e5"].hint')).toBeVisible();
   await expect(board.locator('[data-square="g7"].hint')).toHaveCount(0);
 

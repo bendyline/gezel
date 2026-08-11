@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
+import { EntityIdSchema } from './entity-id.js';
 import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
@@ -106,7 +107,7 @@ export const GezelTraitSchema = z.object({
 export type GezelTrait = z.infer<typeof GezelTraitSchema>;
 
 export const GezelFrontmatterSchema = z.object({
-  id: z.string().optional(),
+  id: EntityIdSchema.optional(),
   name: z.string(),
   description: z.string().optional(),
   role: z.string().optional(),
@@ -282,7 +283,7 @@ export const ParsedGezelSchema = z.object({
 export type ParsedGezel = z.infer<typeof ParsedGezelSchema>;
 
 export const GezelSummarySchema = z.object({
-  id: z.string(),
+  id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
   role: z.string().optional(),

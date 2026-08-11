@@ -116,6 +116,24 @@ describe('published package manifests', () => {
     expect(manifest.repository).toMatchObject({ directory: `packages/${dir}` });
   });
 
+  it.each(packages)('$name runs no code on install', ({ pkg }) => {
+    // Nothing we publish executes during `npm install`. That is a property
+    // worth stating plainly to anyone auditing the supply chain, and it is
+    // only true by construction — npm runs whatever these fields name.
+    //
+    // The service used to carry a `postinstall` that chmod +x'd node-pty's
+    // macOS spawn-helper. npm 11.16 defers install scripts behind
+    // `allowScripts`, so it stopped running on a plain install anyway; the
+    // repair now happens lazily on the PTY spawn path
+    // (`ensureNodePtyExecutable`), which also covers `--ignore-scripts` and
+    // corporate policies that block them outright.
+    const scripts = (pkg as unknown as { scripts?: Record<string, string> }).scripts ?? {};
+    const lifecycle = ['preinstall', 'install', 'postinstall'].filter((name) => scripts[name]);
+    expect(lifecycle, `${lifecycle.join(', ')} would execute on every consumer install`).toEqual(
+      [],
+    );
+  });
+
   it.each(VERSIONED_NOT_PUBLISHED)('%s stays private so publish-package.mjs skips it', (dir) => {
     // multi-semantic-release versions, tags and changelogs these, but they
     // ship through electron-builder / the VS Code Marketplace. `private`
@@ -223,9 +241,8 @@ describe('published package payloads', () => {
         pkg.main,
         pkg.module,
         pkg.types,
-        (pkg as unknown as { scripts?: Record<string, string> }).scripts?.postinstall
-          ?.replace(/^node\s+/, '')
-          .replace(/^\.\//, './'),
+        // No install-script target to check — "runs no code on install" above
+        // forbids the lifecycle fields entirely.
       ].filter((t): t is string => typeof t === 'string' && t.startsWith('./'));
 
       for (const target of new Set(referenced)) {

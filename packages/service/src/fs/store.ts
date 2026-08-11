@@ -41,6 +41,7 @@ import {
   MeesterStatusReportSchema,
   type MeesterStatusState,
   MeesterStatusStateSchema,
+  NEW_THREAD_TITLE,
   PROJECT_GEZEL_LOCAL_ID,
   type PendingImports,
   PendingImportsSchema,
@@ -72,8 +73,10 @@ import {
   type ToolsetsScope,
   createLogger,
   decodeProjectGezelId,
+  deriveThreadTitleFromMessages,
   encodeProjectGezelId,
   inferGenderForName,
+  isSafeEntityId,
   isValidKokoroVoice,
   nowIso,
   parseGezelMarkdown,
@@ -155,6 +158,7 @@ import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
 import { DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
+import { ensurePrivateUserHome } from './home-permissions.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -192,6 +196,15 @@ interface ProjectFindingLifecycleFile {
 
 export interface StoreOptions {
   home: string;
+  /**
+   * Whether `home` is private to one OS user. On Unix these homes are created
+   * and repaired as 0700 so ordinary 0644 state files remain unreachable to
+   * other local accounts. System/machine homes must opt out because their
+   * installer-managed runtime discovery is intentionally shared.
+   *
+   * Defaults to true. Production system-scope stores opt out explicitly.
+   */
+  privateUserHome?: boolean;
   /**
    * Optional history recorder. When set, the Store emits audit events after
    * successful writes (create/rename/update/delete for gezels + projects +
@@ -279,6 +292,8 @@ export class Store {
   private readonly external?: ExternalFolders;
   /** True for a `machine-engine` broker: engines and models, no product state. */
   private readonly engineOnly: boolean;
+  /** Whether the Store owns a home private to the current OS account. */
+  private readonly privateUserHome: boolean;
   private readonly poppetjes: PoppetjeManager;
   private readonly documents: DocumentsStore;
   private readonly artifacts: ProjectArtifactsStore;
@@ -309,6 +324,7 @@ export class Store {
     this.history = opts.history;
     this.external = opts.external;
     this.engineOnly = opts.serviceRole === 'machine-engine';
+    this.privateUserHome = opts.privateUserHome ?? true;
     this.poppetjes = new PoppetjeManager({
       home: this.home,
       external: this.external,
@@ -434,6 +450,11 @@ export class Store {
   async ensureLayout(): Promise<void> {
     const local = gezelPaths(this.home);
     const p = gezelPaths(this.home, this.external);
+
+    // Defends standalone Store consumers as well as the main service boot.
+    // Only the local root is constrained: explicitly configured external
+    // folders remain under the user's own permission policy.
+    if (this.privateUserHome) await ensurePrivateUserHome(local.root);
 
     // A machine-engine broker gets the operational directories it genuinely
     // owns and nothing else. Creating the product scopes here is what produced
@@ -1256,7 +1277,7 @@ export class Store {
     // Skip encoded project-local ids that happen to have an app-data
     // sidecar dir (poppetje/sessions live there keyed by the encoded id) —
     // they are NOT global gezels and must not leak into the global roster.
-    const globalDirs = dirs.filter((id) => !decodeProjectGezelId(id));
+    const globalDirs = dirs.filter((id) => isSafeEntityId(id) && !decodeProjectGezelId(id));
     const details = await Promise.all(globalDirs.map((id) => this.tryGetGezel(id)));
     const out: GezelSummary[] = details
       .filter((d): d is GezelDetail => d !== null)
@@ -2383,7 +2404,7 @@ export class Store {
     }
     const dirs = Array.from(
       new Set([...localDefinitions, ...sharedDirs.filter((id) => !localDefinitions.has(id))]),
-    );
+    ).filter(isSafeEntityId);
     const metas = await Promise.all(dirs.map((id) => this.tryGetProjectMeta(id)));
     const projects = metas.filter((m): m is Project => m !== null);
     projects.sort((a, b) => a.name.localeCompare(b.name));
@@ -4555,13 +4576,24 @@ export class Store {
           if (lastMessagePreview.length + character.length > 200) break;
           lastMessagePreview += character;
         }
+        // Older project-page reaction threads kept the sentinel forever
+        // because their machine-authored starter is hidden. Derive the list
+        // label once a real reply proves a turn happened, but do not rewrite
+        // from this read path: a list refresh can overlap an active turn and
+        // must never race its full-record session write.
+        const displayTitle =
+          session.title === NEW_THREAD_TITLE
+            ? (deriveThreadTitleFromMessages(session.messages, {
+                requireCompletedTurn: true,
+              }) ?? session.title)
+            : session.title;
         summaries.push({
           id: session.id,
           gezelId: session.gezelId,
           projectId: session.projectId,
           providerName: session.providerName,
           model: session.model,
-          title: session.title,
+          title: displayTitle,
           createdAt: session.createdAt,
           lastActivityAt: session.lastActivityAt,
           archived: session.archived,
@@ -4863,6 +4895,13 @@ export class Store {
       if (!file.endsWith('.json')) continue;
       const thread = await this.readTerminalThreadFile(join(dir, file), `${projectId}/${file}`);
       if (!thread) continue;
+      let lastCommand: string | undefined;
+      for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+        const message = thread.messages[index];
+        if (message?.kind !== 'command') continue;
+        lastCommand = message.content;
+        break;
+      }
       out.push({
         id: thread.id,
         projectId: thread.projectId,
@@ -4870,6 +4909,7 @@ export class Store {
         createdAt: thread.createdAt,
         lastActivityAt: thread.lastActivityAt,
         ...(thread.archived ? { archived: true } : {}),
+        ...(lastCommand !== undefined ? { lastCommand } : {}),
       });
     }
     out.sort((a, b) =>

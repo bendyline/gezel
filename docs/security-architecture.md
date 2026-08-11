@@ -356,6 +356,15 @@ argument. Cross-project/team tools (`message_gezel`, `create_task`, `update_proj
 daemon token never reaches scripts (env scrub), so a script can't flip the policy via the
 config route.
 
+**Package-command approvals are content-bound.** A persistent approval for
+`run_package_script` or `run_npx` hashes a versioned envelope containing the exact command
+body/path, ordered arguments, and every local input Gezel can conservatively identify. The
+snapshot always includes `package.json` for package scripts, includes the resolved `.bin`
+entry for package binaries, and adds literal file references, wrapper/symlink targets, and
+recursively visible relative JavaScript/TypeScript imports. Those paths and abbreviated
+digests are shown in the prompt. If any included file changes, the next invocation prompts
+again. The input list is not a complete runtime dependency graph; see §14.
+
 ---
 
 ## 8. Secrets at rest & in transit
@@ -460,6 +469,13 @@ fix and is not yet implemented.
   (the `.cmd` shim). `run_git` is restricted to read-only subcommands and rejects `-c`/`--exec`.
 - **`install_package`** is consent-gated and forces `--ignore-scripts` (npm lifecycle-script
   vector closed).
+- **NPM package installs are registry-only and project-bound.** Both the direct project API
+  and approval-backed `npm_install` surface accept a canonical NPM package name plus a
+  controlled semver range or dist-tag. URL, Git, local-file, workspace, alias, path, and
+  option-like specifications are rejected. The project must already exist; entity ids are
+  validated at the HTTP and path-helper boundaries; the resolved private package directory is
+  checked for containment below `~/.gezel/projects`; and pnpm receives `--` before the package
+  specification. All install paths keep lifecycle scripts disabled.
 - **Engine binaries** downloaded by the supervisor are sha256 + code-signature verified
   (`engines/resolver.ts`) before use. Standalone macOS archives must receive an `Accepted`
   result from Apple's notary service before CI hashes and packages those exact signed bytes;
@@ -548,6 +564,8 @@ privileged service identity or putting the daemon root token on disk.
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution on Windows/Linux | FAIL CLOSED | Model/gate scripts return exit 126 because no supported OS network boundary exists yet. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
+| URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |
+| Package-command input closure | PARTIAL | Persistent approvals bind identifiable project-local files, but outside-project paths, directory/glob contents, dynamically selected files, implicit config conventions, PATH-resolved programs, bare package imports, oversized files, input graphs beyond the bounded scan, and network responses cannot always be inferred safely before execution. Treat an approved package command as trusted code, not a sandbox. |
 | Default security level = `free` | BY DESIGN | Confirm against product risk appetite. |
 
 ---

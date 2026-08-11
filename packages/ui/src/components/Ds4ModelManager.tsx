@@ -432,6 +432,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
           contextOverridesSupported &&
           installedRow !== undefined &&
           contextSliderMax(installedRow) !== undefined;
+        const updateAvailable = installedRow?.updateAvailable === true;
         return (
           <Fragment key={m.id}>
             <div
@@ -528,6 +529,18 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   )
                 ) : isInstalled ? (
                   <>
+                    {updateAvailable && (
+                      <span
+                        className="home-status-pill home-status-warn"
+                        title={
+                          installedRow?.availableVersion
+                            ? `A newer build is available in the catalog (→ v${installedRow.availableVersion}). Update re-downloads and replaces this ${fmtGb(m.ds4.approxSizeBytes)} model in place.`
+                            : `A newer build is available in the catalog. Update re-downloads and replaces this ${fmtGb(m.ds4.approxSizeBytes)} model in place.`
+                        }
+                      >
+                        update available
+                      </span>
+                    )}
                     <span className="home-status-pill home-status-ok">on device</span>
                     {readOnlyIds.has(m.id) && (
                       <span
@@ -551,6 +564,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                       onToggleContextEditor={() =>
                         setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                       }
+                      onUpdate={() => startInstall(m.id)}
                       onDelete={readOnlyIds.has(m.id) ? undefined : () => void remove(m.id)}
                     />
                   </>

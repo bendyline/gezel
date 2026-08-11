@@ -7,6 +7,7 @@ const LEGACY_CHAT_MODEL_CATALOG_IDS: Record<string, string> = {
   mistral: 'mistral-7b-q4',
   'mistral-medium-3.5': 'mistral-medium-3.5-128b-q4',
   'nemotron3-nano-30b': 'nemotron3-nano-30b-q4',
+  'nemotron3.5-lightning-30b': 'nemotron3.5-lightning-30b-q4',
   'nemotron3-super-120b': 'nemotron3-super-120b-q4',
   'qwen3.5-2b': 'qwen3.5-2b-q4',
   'qwen3.5-4b': 'qwen3.5-4b-q4',

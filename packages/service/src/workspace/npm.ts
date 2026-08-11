@@ -7,6 +7,11 @@ import type {
   NpmInstallApprovalPackage,
   Question,
 } from '@bendyline/gezel';
+import {
+  NpmPackageNameSchema,
+  NpmRegistryVersionSchema,
+  formatNpmRegistrySpec,
+} from '@bendyline/gezel';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import { writeFileAtomic } from '../fs/atomic.js';
@@ -339,9 +344,8 @@ function dedupRequests(raw: NpmInstallPackageRequest[]): NpmInstallApprovalPacka
   const seen = new Set<string>();
   const out: NpmInstallApprovalPackage[] = [];
   for (const r of raw) {
-    const pkg = r.package.trim();
-    if (!pkg) continue;
-    const version = (r.version ?? 'latest').trim() || 'latest';
+    const pkg = NpmPackageNameSchema.parse(r.package);
+    const version = NpmRegistryVersionSchema.parse(r.version ?? 'latest');
     const key = keyOf(pkg, version);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -379,8 +383,11 @@ async function installNow(
   version: string,
   projectId: string,
 ): Promise<NpmInstallPackageOutcome> {
-  const spec = version === 'latest' || version === '*' ? pkg : `${pkg}@${version}`;
-  const res = await runPnpm(['add', spec], { cwd: workspaceDir });
+  const spec =
+    version === 'latest' || version === '*'
+      ? formatNpmRegistrySpec(pkg)
+      : formatNpmRegistrySpec(pkg, version);
+  const res = await runPnpm(['add', '--', spec], { cwd: workspaceDir });
   if (!res.ok) {
     return {
       kind: 'failed',

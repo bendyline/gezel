@@ -24,10 +24,6 @@ export default defineConfig({
     // metadata can be enormous, so the first inspection must not run on the
     // embedded Electron main thread; subsequent polls hit the parent cache.
     'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
-    // npm's macOS node-pty prebuild currently publishes spawn-helper without
-    // its execute bit. This lifecycle entry repairs the installed dependency
-    // after npm has laid out the consumer tree.
-    postinstall: 'src/postinstall.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.

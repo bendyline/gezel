@@ -98,6 +98,38 @@ describe('command-approvals', () => {
     ).toBeUndefined();
   });
 
+  it('binds an approval to canonical identifiable file content', async () => {
+    const body = 'node tools/build.mjs';
+    const originalFiles = [
+      { path: 'tools/build.mjs', sha256: 'a'.repeat(64) },
+      { path: 'package.json', sha256: 'b'.repeat(64) },
+    ];
+    const approved = hashCommandInvocation(body, [], originalFiles);
+    await recordApproval(home, projectId, 'script', 'build', 'approved', approved);
+    const data = await readCommandApprovals(home, projectId);
+
+    expect(
+      lookupApproval(
+        data,
+        'script',
+        'build',
+        hashCommandInvocation(body, [], [...originalFiles].reverse()),
+      ),
+    ).toBe('approved');
+    expect(
+      lookupApproval(
+        data,
+        'script',
+        'build',
+        hashCommandInvocation(
+          body,
+          [],
+          [{ path: 'tools/build.mjs', sha256: 'c'.repeat(64) }, originalFiles[1]!],
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
   it('fails closed for legacy approved decisions without an invocation hash', async () => {
     const file = join(home, 'projects', projectId, 'command-approvals.json');
     await (await import('node:fs/promises')).writeFile(

@@ -125,7 +125,9 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 
 ## Phase 4 — Fetch + eval
 
-1. **Fetch the built binaries** into `packages/app/native-bin/<platform>[-<variant>]/` (where dev `pnpm app`, packaging, and the eval harness all read). Before the draft is published, fetch from its workflow run:
+1. **Find existing model weights before downloading anything.** Local development defaults to `~/.gezel-dev`, not `~/.gezel`; inspect `${GEZEL_HOME}` when set and `~/.gezel-dev/engines/<engine>/models/` before claiming a model is absent. This is especially important for ds4, whose installed test models can be hundreds of gigabytes. Also check `~/.gezel-eval-cache` when using the eval harness.
+
+2. **Fetch the built binaries** into `packages/app/native-bin/<platform>[-<variant>]/` (where dev `pnpm app`, packaging, and the eval harness all read). Before the draft is published, fetch from its workflow run:
    ```bash
    node scripts/fetch-native-binaries.mjs --run <id>      # from a tagged or workflow_dispatch build (pre-release)
    node scripts/fetch-native-binaries.mjs                 # latest published release, all variants for this platform
@@ -133,14 +135,14 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
    ```
    Needs a `repo`-scoped token (`GEZEL_GITHUB_TOKEN` / `GITHUB_TOKEN` / `gh auth token`) — the repo is private.
 
-2. **Verify the build number** matches what you pinned:
+3. **Verify the build number** matches what you pinned:
    ```bash
    packages/app/native-bin/darwin-arm64-metal/gezel-llama-server --version   # → "version: 9843 (86b94708)"
    ```
 
-3. **Eval it** — invoke the **`/eval-run`** skill against `--provider llama-cpp` (not MLX) to confirm capability didn't regress. A version bump should be capability-neutral: composite flat, only t/s moves. Score with the eval-run rubric.
+4. **Eval it** — invoke the **`/eval-run`** skill against `--provider llama-cpp` (not MLX) to confirm capability didn't regress. A version bump should be capability-neutral: composite flat, only t/s moves. Score with the eval-run rubric.
 
-4. **Publish the validated draft manually** from the GitHub Releases UI.
+5. **Publish the validated draft manually** from the GitHub Releases UI.
 
 ---
 
@@ -166,6 +168,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 - [ ] Every matrix leg green — remember `draft_release` needs ALL of them.
 - [ ] Published release pinned with `pin-native-release.mjs`; all archive hashes are present.
 - [ ] `--macos-notarized` used only after the tag workflow's Apple notary gates passed.
+- [ ] Checked `${GEZEL_HOME}` and `~/.gezel-dev/engines/<engine>/models/` for existing weights before declaring models absent or downloading duplicates.
 - [ ] Fetched + ran `--version` + eval'd via `/eval-run` (llama-cpp provider).
 - [ ] Draft stayed private during validation, then was published explicitly through the GitHub Releases UI.
 - [ ] Engine-specific: ds4 can't yet load some hybrid MoE (e.g. qwen-agentworld crashes on load) — an upstream engine gap, not a bump error.

@@ -1,10 +1,11 @@
 import type {
   CraftbookTemplateManifest,
   HandboekArea,
+  HandboekTocSubcategory,
   ProjectTypeManifest,
   RoleId,
 } from '@bendyline/gezel';
-import { ROLES } from '@bendyline/gezel';
+import { CRAFTBOOK_ROLE_META, ROLES } from '@bendyline/gezel';
 import type { HandboekCatalog } from './macros.js';
 
 /**
@@ -24,6 +25,7 @@ export interface GeneratedSummary {
   title: string;
   order: number;
   summary?: string;
+  subcategory?: HandboekTocSubcategory;
 }
 
 function firstSentence(text: string): string | undefined {
@@ -57,12 +59,20 @@ export async function listGeneratedSummaries(
     .map((s) => s.manifest as CraftbookTemplateManifest)
     .sort((a, b) => a.name.localeCompare(b.name));
   for (const book of craftbooks) {
+    const role = book.role ?? 'general';
+    const roleIndex = CRAFTBOOK_ROLE_META.findIndex((item) => item.id === role);
+    const roleMeta = CRAFTBOOK_ROLE_META[roleIndex] ?? CRAFTBOOK_ROLE_META.at(-1)!;
     out.push({
       id: `craftbook/${book.id}`,
       area: 'craftbooks',
       title: book.name,
       order: 10,
       summary: firstSentence(book.description),
+      subcategory: {
+        id: roleMeta.id,
+        title: roleMeta.label,
+        order: roleIndex < 0 ? CRAFTBOOK_ROLE_META.length : roleIndex,
+      },
     });
   }
 

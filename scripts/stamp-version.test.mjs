@@ -21,6 +21,8 @@ test('release stamping updates packages, runtime constant, service metadata, and
 
     await Promise.all([
       copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs')),
+      // stamp-version imports it for the shared day-of-year math.
+      copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs')),
       copyFile(
         join(here, 'verify-release-version.mjs'),
         join(root, 'scripts', 'verify-release-version.mjs'),
@@ -46,7 +48,7 @@ test('release stamping updates packages, runtime constant, service metadata, and
     }
     await writeFile(
       join(root, 'packages', 'core', 'src', 'index.ts'),
-      "export const BEFORE = true;\nexport const GEZEL_VERSION = '0.0.0';\n",
+      "export const BEFORE = true;\nexport const GEZEL_VERSION = '0.0.0';\nexport const GEZEL_CONTENT_COMPAT = '0.0.0';\n",
     );
 
     const version = '1.26123.45';
@@ -76,10 +78,13 @@ test('release stamping updates packages, runtime constant, service metadata, and
 `,
       );
     }
-    assert.match(
-      await readFile(join(root, 'packages', 'core', 'src', 'index.ts'), 'utf8'),
-      /GEZEL_VERSION = '1\.26123\.45'/,
-    );
+    const stampedCore = await readFile(join(root, 'packages', 'core', 'src', 'index.ts'), 'utf8');
+    assert.match(stampedCore, /GEZEL_VERSION = '1\.26123\.45'/);
+    // The Electron scheme is already the calendar line, so both constants take
+    // the same value here. Stamped explicitly all the same: an npm release sets
+    // them to different things, and a build left on the '0.0.0' sentinel would
+    // treat every content floor as a dev build and gate nothing.
+    assert.match(stampedCore, /GEZEL_CONTENT_COMPAT = '1\.26123\.45'/);
 
     const serviceMeta = join(root, 'service-bundle.meta.json');
     const sbom = join(root, 'artifacts', 'gezel.cdx.json');
@@ -119,6 +124,7 @@ test('--print computes a release version without mutating the checkout', async (
   try {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
+    await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
     const { stdout } = await execFileP(process.execPath, [
       join(root, 'scripts', 'stamp-version.mjs'),
       '--inc',
@@ -139,6 +145,7 @@ test('a missing runtime version declaration does not partially stamp package fil
     await mkdir(join(root, 'packages', 'core', 'src'), { recursive: true });
     await mkdir(join(root, 'packages', 'service'), { recursive: true });
     await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
+    await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
 
     const paths = [
       join(root, 'package.json'),
@@ -152,6 +159,48 @@ test('a missing runtime version declaration does not partially stamp package fil
     await writeFile(
       join(root, 'packages', 'core', 'src', 'index.ts'),
       'export const WRONG_CONSTANT = true;\n',
+    );
+
+    await assert.rejects(
+      execFileP(process.execPath, [
+        join(root, 'scripts', 'stamp-version.mjs'),
+        '--version',
+        '1.26123.45',
+      ]),
+    );
+    for (const path of paths) {
+      expectVersion(await readFile(path, 'utf8'), '0.0.0');
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a missing content-compat declaration does not partially stamp package files', async () => {
+  // The same all-or-nothing contract as the version constant. Half-stamping
+  // here would ship a release whose floors compare against '0.0.0' — the dev
+  // sentinel — silently disabling content gating for everyone on that build.
+  const root = await mkdtemp(join(tmpdir(), 'gezel-version-compat-'));
+  try {
+    await mkdir(join(root, 'scripts'), { recursive: true });
+    await mkdir(join(root, 'packages', 'app'), { recursive: true });
+    await mkdir(join(root, 'packages', 'core', 'src'), { recursive: true });
+    await mkdir(join(root, 'packages', 'service'), { recursive: true });
+    await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
+    await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
+
+    const paths = [
+      join(root, 'package.json'),
+      join(root, 'packages', 'app', 'package.json'),
+      join(root, 'packages', 'core', 'package.json'),
+      join(root, 'packages', 'service', 'package.json'),
+    ];
+    for (const path of paths) {
+      await writeFile(path, `${JSON.stringify({ name: 'fixture', version: '0.0.0' }, null, 2)}\n`);
+    }
+    await writeFile(
+      join(root, 'packages', 'core', 'src', 'index.ts'),
+      "export const GEZEL_VERSION = '0.0.0';\n",
     );
 
     await assert.rejects(

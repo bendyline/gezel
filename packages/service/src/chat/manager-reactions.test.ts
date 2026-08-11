@@ -146,6 +146,7 @@ describe('deliverReaction', () => {
       role: 'assistant',
       content: 'Your move landed.',
     });
+    expect(record?.title).toBe('Checkers move c3-d4');
   });
 
   it('coalesces rapid reactions arriving while a turn is in flight into ONE merged turn', async () => {

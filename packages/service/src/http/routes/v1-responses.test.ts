@@ -148,6 +148,7 @@ describe('POST /v1/responses — Codex facade', () => {
         reasoning: { summary: 'auto' },
         store: false,
         stream: true,
+        service_tier: 'priority',
         include: ['reasoning.encrypted_content'],
         prompt_cache_key: 'codex-thread-1',
         client_metadata: { thread_id: 'codex-thread-1' },

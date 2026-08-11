@@ -59,7 +59,15 @@ Some tools deliberately run with more authority. After showing the exact
 command and receiving your approval, **package scripts and installed package
 binaries** (`run_package_script` and `run_npx`) run as your operating-system
 account. They may start other programs, use the network, and read or change
-files outside the project. Third-party MCP servers are also not inside the
+files outside the project. A persistent approval is tied to the exact command,
+its arguments, and the content hashes of local inputs Gezel can identify — such
+as `package.json`, a referenced script, relative static imports, or an installed
+binary entry. Changing one of those files asks for approval again. Commands can
+still discover files dynamically, load implicit configuration, resolve other
+programs through `PATH`, use outside-project or directory/glob inputs, or fetch
+code from the network, so this binding is not a complete dependency graph and
+does not turn package commands into a sandbox.
+Third-party MCP servers are also not inside the
 standalone-script sandbox; because they are unconfined local or remote code,
 Gezel enables them only under the corresponding Security & Compliance setting.
 
@@ -93,6 +101,15 @@ At your direction, Gezel can download additional scripts and tools from NPM
 (the Node.js package catalog). NPM is widely used, but it is not perfect and
 has experienced compromises. Gezel installs packages with their install-time
 scripts disabled, preventing that common supply-chain execution path.
+
+Gezel's ordinary install flow accepts packages from the NPM registry only: a
+package name plus a version, semver range, or dist-tag. It does not accept a
+URL, Git repository, local file or directory, workspace reference, package
+alias, or command-line option in that field. Installs can target only the
+private package directory of an existing project; project identifiers and the
+resolved destination are checked before the package manager starts. Alternate
+package sources would need a separate, explicitly approved feature with their
+own network and path protections.
 
 What happens later depends on the tool type. A standalone script uses the
 sandbox described above. A package command runs with your account's authority

@@ -483,13 +483,24 @@ describe('ChatManager — send + persistence', () => {
     expect(mock.calls.some((c) => c.kind === 'send')).toBe(false);
   });
 
-  it('auto-sets title from the first user message', async () => {
+  it('auto-sets a compact title from the first user message', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     mock.script('reply');
     await manager.send(session.id, 'what is the meaning of life?');
 
     const disk = await store.getSession('ada', session.id);
-    expect(disk!.title).toBe('what is the meaning of life?');
+    expect(disk!.title).toBe('Meaning life');
+  });
+
+  it('names a passive-CC-only session from the later direct user starter', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    await manager.notifyUserMessage(session.id, '@[Bea](gezel:bea) can you take this?');
+    mock.script('reply');
+
+    await manager.send(session.id, 'Please review the release checklist');
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk?.title).toBe('Review release checklist');
   });
 
   it('emits delta and complete events', async () => {
@@ -3348,7 +3359,7 @@ describe('ChatManager — per-session message queue', () => {
     expect(userTurns[1]?.content).toBe('nudge one\n\nnudge two');
     expect(userTurns[1]?.nudge).toBe(true);
     // The title came from the original message, not the nudges.
-    expect(rec?.title).toContain('long question');
+    expect(rec?.title).toBe('Long question');
 
     // Exactly one merged user_message event, and a
     // queue_removed('started') for BOTH consumed entries.

@@ -686,6 +686,20 @@ function catalogModelFor(model: CodexSetupModelOption): CodexCatalogModel {
     experimental_supported_tools: [],
     input_modalities: ['text'],
     supports_search_tool: false,
+    // A user-level Codex Fast preference is inherited by named profiles as
+    // `service_tier = "priority"`. Gezel local inference has no paid/queued
+    // service classes, but its Responses facade accepts this scheduling hint
+    // as a no-op. Advertising that compatibility keeps Codex from warning and
+    // stripping the field whenever the Gezel profile is selected.
+    default_service_tier: null,
+    service_tiers: [
+      {
+        id: 'priority',
+        name: 'Fast',
+        description: 'Accepted for compatibility; local inference uses its normal scheduling.',
+      },
+    ],
+    additional_speed_tiers: [],
     use_responses_lite: false,
   };
 }

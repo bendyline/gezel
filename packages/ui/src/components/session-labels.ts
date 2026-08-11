@@ -1,3 +1,5 @@
+import { NEW_THREAD_TITLE } from '@bendyline/gezel';
+
 /**
  * Shared presentation helpers for chat-thread labels.
  *
@@ -26,10 +28,8 @@ export function plainTitle(title: string): string {
  * `chat/manager.ts`). Show it as "New thread" in the UI without renaming
  * the stored sentinel.
  */
-const NEW_THREAD_SENTINEL = 'New session';
-
 export function displayThreadTitle(title: string): string {
-  return title === NEW_THREAD_SENTINEL ? 'New thread' : title;
+  return title === NEW_THREAD_TITLE ? 'New thread' : title;
 }
 
 export function formatRelativeTime(iso: string): string {

@@ -377,10 +377,19 @@ and are not yet handled for a bare `npm i -g`:
 - **`GEZEL_PNPM_PATH` / `GEZEL_NODE_PATH` are unset.** The Copilot
   system-toolset installer falls back to whatever `pnpm` is on `PATH`, and the
   sandbox runner falls back to `process.execPath`.
-- **The `node-pty` exec-bit fixup does not run.** Root `postinstall` runs
-  [`scripts/fix-node-pty-perms.mjs`](../scripts/fix-node-pty-perms.mjs) because
-  pnpm hardlinking strips the exec bit from `spawn-helper`. That is
-  pnpm-store-specific and does not apply to an npm-installed CLI.
+- ~~**The `node-pty` exec-bit fixup does not run.**~~ Handled. The service used
+  to repair `spawn-helper`'s exec bit from its own `postinstall`, which npm
+  11.16 stopped running by default (install scripts now sit behind
+  `allowScripts` approval, as do `--ignore-scripts` and equivalent corporate
+  policies). The repair moved to `ensureNodePtyExecutable()` in
+  [`node-pty-permissions.ts`](../packages/service/src/node-pty-permissions.ts),
+  called once per process immediately before the first PTY spawn — so it works
+  on every install path and costs one `stat` when the bit is already correct.
+  Dropping that hook left **no published gezel package running code on
+  install**, which [`packageShape.test.ts`](../tests/published/packageShape.test.ts)
+  now enforces. Root `postinstall` still runs
+  [`scripts/fix-node-pty-perms.mjs`](../scripts/fix-node-pty-perms.mjs) for the
+  pnpm workspace, where hardlinking strips the bit.
 - **First-run bootstrap is eager.** On first daemon boot the service
   background-downloads Playwright/Chromium, and the on-device bootstrap starts
   pulling a Gemma 4 GGUF unless a cloud provider was chosen. For an npm

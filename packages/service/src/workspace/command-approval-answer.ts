@@ -27,7 +27,11 @@ export async function applyCommandApprovalAnswer(
       : `\`npx ${opts.intent.name}\``;
   // Pin the approval to the exact body/path and argument vector the user
   // saw, so neither can be changed on replay without a fresh prompt.
-  const invocationHash = hashCommandInvocation(opts.intent.body, opts.intent.args ?? []);
+  const invocationHash = hashCommandInvocation(
+    opts.intent.body,
+    opts.intent.args ?? [],
+    opts.intent.inputFiles ?? [],
+  );
   const answer = opts.answer;
   if (!answer || answer.declined) {
     await recordApproval(

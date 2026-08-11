@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
 import { type IPty, spawn as ptySpawn } from 'node-pty';
 import { OutputRingBuffer } from '../fs/ring.js';
+import { ensureNodePtyExecutable } from '../node-pty-permissions.js';
 import { sandboxEnv } from '../sandbox/runner.js';
 
 const log = createLogger('terminal/persistent-shell');
@@ -257,6 +258,11 @@ export class PersistentShell {
       ...(process.env.GEZEL_PNPM_PATH ? { GEZEL_PNPM_PATH: process.env.GEZEL_PNPM_PATH } : {}),
       ...(process.env.GEZEL_NODE_PATH ? { GEZEL_NODE_PATH: process.env.GEZEL_NODE_PATH } : {}),
     } as { [key: string]: string };
+
+    // node-pty shells out to a `spawn-helper` binary that npm's macOS prebuild
+    // can land without its execute bit. Repair it here rather than from an
+    // install hook, which npm 11.16 no longer runs by default.
+    ensureNodePtyExecutable();
 
     log.info(`spawning shell ${spec.file} ${spec.args.join(' ')} (cwd=${options.cwd})`);
     const pty = ptySpawn(spec.file, spec.args, {

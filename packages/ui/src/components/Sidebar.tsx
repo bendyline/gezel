@@ -80,6 +80,19 @@ async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
   return resolveOutsideInLayout(path);
 }
 
+/**
+ * The sidebar is a compact document navigator, so a folder only earns a row
+ * when it leads to a visible document. The full Documents view still keeps
+ * empty folders available for selection and creation.
+ */
+function hideEmptyDocumentFolders(entries: FileEntry[]): FileEntry[] {
+  const filePaths = entries.filter((entry) => !entry.isDirectory).map((entry) => entry.path);
+  return entries.filter(
+    (entry) =>
+      !entry.isDirectory || filePaths.some((filePath) => filePath.startsWith(`${entry.path}/`)),
+  );
+}
+
 interface SidebarProps {
   /** The current selection. `null` means the Meester home view. */
   selection: RecentTab | null;
@@ -289,7 +302,10 @@ export function Sidebar({
   const refreshDocs = useCallback(() => {
     api
       .listDocuments('', true)
-      .then((r) => setDocs(r.files.filter((entry) => !isOutsideInInternalPath(entry.path))))
+      .then((r) => {
+        const visibleEntries = r.files.filter((entry) => !isOutsideInInternalPath(entry.path));
+        setDocs(hideEmptyDocumentFolders(visibleEntries));
+      })
       .catch(() => {});
   }, []);
 

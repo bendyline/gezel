@@ -52,3 +52,28 @@ describe('FileTree row actions', () => {
     expect(allowEditing).toHaveBeenCalledWith(NOTE);
   });
 });
+
+describe('FileTree folder expansion', () => {
+  it('does not show an expand/collapse control for an empty folder', () => {
+    const emptyFolder = { path: 'drafts', name: 'drafts', isDirectory: true };
+
+    render(<FileTree entries={[emptyFolder]} onSelect={vi.fn()} selectableFolders />);
+
+    expect(screen.getByRole('button', { name: 'drafts' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Expand|Collapse) drafts$/ })).toBeNull();
+  });
+
+  it('keeps the expand/collapse control for a folder with content', () => {
+    render(
+      <FileTree
+        entries={[
+          { path: 'drafts', name: 'drafts', isDirectory: true },
+          { path: 'drafts/notes.md', name: 'notes.md', isDirectory: false },
+        ]}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Collapse drafts' })).toBeInTheDocument();
+  });
+});

@@ -85,6 +85,14 @@ describe('TasksView', () => {
     window.localStorage.clear();
   });
 
+  it('uses the edge-to-edge pane layout only in the overall Tasks area', () => {
+    const { rerender } = render(<TasksView />);
+    expect(screen.getByTestId('tasks-view')).toHaveClass('tasks-view-overall');
+
+    rerender(<TasksView projectId="pj-alpha" />);
+    expect(screen.getByTestId('tasks-view')).not.toHaveClass('tasks-view-overall');
+  });
+
   it('renders the empty-state when no tasks exist', async () => {
     render(<TasksView />);
     await waitFor(() => {

@@ -53,7 +53,7 @@ describe('::handboek-model-scorecard', () => {
 
   it('stamps the table with the device, sample size, date, and versions', () => {
     const md = renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: true });
-    expect(md).toContain('Mac Studio (M4 Max)');
+    expect(md).toContain('llama-cpp');
     expect(md).toContain('3 trials per task');
     expect(md).toContain('2026-08-09');
     expect(md).toContain('gezel abc1234');
@@ -61,7 +61,7 @@ describe('::handboek-model-scorecard', () => {
 
   it('renders a rate once the sample supports it', () => {
     const md = renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: true });
-    expect(md).toContain('| Big 27B | 27B | 5/6 (83%) | — |');
+    expect(md).toContain('| Big 27B | 27B | 5/6 (83%) |');
   });
 
   it('prints a count, never a percentage, below three trials', () => {
@@ -104,8 +104,11 @@ describe('::handboek-model-scorecard', () => {
       'core',
       { includeTaskCount: true },
     );
+    // The dedicated column is gone (it read as an empty cell far more often
+    // than it carried information); the discard still shows in the ratio,
+    // which is 3/4 rather than 3/6.
     expect(md).toContain('3/4 (75%)');
-    expect(md).toContain('2 runs lost to the machine');
+    expect(md).not.toContain('Not measured');
   });
 
   it('lists an earlier round apart, and says why it is not comparable', () => {
@@ -144,7 +147,7 @@ describe('::handboek-model-scorecard', () => {
       { includeTaskCount: true },
     );
     // A perfect score from an older build must not join the headline table.
-    const headline = md.slice(0, md.indexOf('Measured in an earlier round'));
+    const headline = md.slice(0, md.indexOf('Earlier round'));
     expect(headline).not.toContain('Legacy');
     expect(md).toContain('different gezel build');
     expect(md).toContain('different catalog version');

@@ -55,3 +55,5 @@ One honest caveat, spelled out next to the switch: Ollama's convention is no pas
 ## Keeping an eye on things
 
 Every chat an app completes through these endpoints is recorded in the **History** tab (look for "App chat" entries), and the tokens they consume count in the **Usage** view — so you can always see who has been using your models, and how much.
+
+If you are developing one of these applications, continue with the technical guide [Building connected apps with gezel-app-sdk](../technical/building-connected-apps-with-gezel-app-sdk.md).

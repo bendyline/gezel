@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NpmPackageNameSchema, NpmRegistryVersionSchema } from './npm-package.js';
 
 /**
  * Structured Q&A between gezels and the user.
@@ -23,8 +24,8 @@ import { z } from 'zod';
  *   - `decline` → project-scoped decline
  */
 export const NpmInstallApprovalDecisionSchema = z.object({
-  package: z.string(),
-  version: z.string(),
+  package: NpmPackageNameSchema,
+  version: NpmRegistryVersionSchema,
   decision: z.enum(['install', 'always', 'decline']),
 });
 export type NpmInstallApprovalDecision = z.infer<typeof NpmInstallApprovalDecisionSchema>;
@@ -73,8 +74,8 @@ export type QuestionAnswer = z.infer<typeof QuestionAnswerSchema>;
  * unset — existing rendering path is unchanged.
  */
 export const NpmInstallApprovalPackageSchema = z.object({
-  package: z.string(),
-  version: z.string(),
+  package: NpmPackageNameSchema,
+  version: NpmRegistryVersionSchema,
 });
 export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackageSchema>;
 
@@ -90,11 +91,19 @@ export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackage
  * `body` carries the script body (or resolved bin path) verbatim so the
  * approval UI can show the user what they're consenting to. `args` are
  * the extra args the gezel wanted to pass on this specific run. The
- * service hashes the ordered argument vector together with `body`, so a
- * persisted approval cannot be replayed with different arguments.
+ * service hashes the ordered argument vector together with `body` and the
+ * `inputFiles` content snapshot, so a persisted approval cannot be replayed
+ * with different arguments or modified identifiable input files.
  */
 export const CommandApprovalScopeSchema = z.enum(['script', 'npx']);
 export type CommandApprovalScope = z.infer<typeof CommandApprovalScopeSchema>;
+
+export const CommandApprovalInputFileSchema = z.object({
+  /** Workspace-relative, slash-normalized path shown in the approval prompt. */
+  path: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type CommandApprovalInputFile = z.infer<typeof CommandApprovalInputFileSchema>;
 
 export const CommandApprovalIntentSchema = z.object({
   kind: z.literal('command-approval'),
@@ -102,6 +111,7 @@ export const CommandApprovalIntentSchema = z.object({
   name: z.string().min(1),
   body: z.string().optional(),
   args: z.array(z.string()).optional(),
+  inputFiles: z.array(CommandApprovalInputFileSchema).max(128).optional(),
 });
 export type CommandApprovalIntent = z.infer<typeof CommandApprovalIntentSchema>;
 

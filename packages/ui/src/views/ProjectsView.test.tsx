@@ -161,7 +161,7 @@ describe('ProjectsView', () => {
     ).toBeTruthy();
   });
 
-  it('archives the open project from its header and exposes Restore', async () => {
+  it('archives the open project from Project Settings and exposes Restore', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
       name: 'Alpha',
@@ -185,6 +185,9 @@ describe('ProjectsView', () => {
 
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
+    expect(screen.queryByRole('button', { name: 'Archive project' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Archive project' }));
 
     await waitFor(() =>
@@ -192,7 +195,7 @@ describe('ProjectsView', () => {
     );
     expect(await screen.findByText('Archived')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore project' })).toBeInTheDocument();
-    expect(screen.getAllByRole('combobox')[0]).toBeDisabled();
+    expect(screen.getByRole('option', { name: 'Active' }).closest('select')).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore project' }));
     await waitFor(() =>

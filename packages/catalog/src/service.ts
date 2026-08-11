@@ -38,10 +38,12 @@ export class CatalogService {
    *   bundled + community tiers, re-read on every disk access. The live
    *   gilde update mechanism flips it without reconstructing this service
    *   (which is built once at boot and held by many subsystems).
-   * @param opts.gezelVersion the running app's version, compared against
-   *   content `minGezelVersion` floors. Defaults to `GEZEL_VERSION`
-   *   inside each source; injectable so tests can exercise gating (dev
-   *   checkouts report `0.0.0`, which bypasses all filtering).
+   * @param opts.gezelVersion the calendar line this build sits on, compared
+   *   against content `minGezelVersion` floors. Defaults to
+   *   `GEZEL_CONTENT_COMPAT` inside each source — *not* `GEZEL_VERSION`, which
+   *   is semver on the npm channel and not on the axis floors are authored
+   *   against. Injectable so tests can exercise gating (dev checkouts report
+   *   `0.0.0`, which bypasses all filtering).
    */
   constructor(
     sources?: CatalogSource[],

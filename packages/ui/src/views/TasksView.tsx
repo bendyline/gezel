@@ -229,9 +229,13 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
 
   const showEmptyState = hasLoadedTasks && visibleTasks.length === 0;
   const hideTaskPanes = !hasLoadedTasks || showEmptyState;
+  const standalone = projectId === undefined;
 
   return (
-    <div className="tasks-view" data-testid="tasks-view">
+    <div
+      className={`tasks-view${standalone ? ' tasks-view-overall' : ''}`}
+      data-testid="tasks-view"
+    >
       <header className="tasks-header">
         <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
           {TASK_KIND_OPTIONS.map((option) => (

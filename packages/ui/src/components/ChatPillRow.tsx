@@ -324,13 +324,15 @@ function TerminalPillButton({
 }) {
   const folder = formatFolderLabel(thread.workingDir);
   const updated = formatLongRelativeTime(thread.lastActivityAt);
+  const command = thread.lastCommand?.replace(/\s+/g, ' ').trim() || null;
+  const commandPreview = command ? truncatePreview(command, 40) : null;
   return (
     <button
       type="button"
       className={`chat-pill chat-pill-thread chat-pill-terminal${active ? ' is-active' : ''}`}
       aria-pressed={active}
-      aria-label={`Terminal ${folder}. Updated ${updated}`}
-      title={`Terminal · ${folder} · updated ${updated}`}
+      aria-label={`Terminal ${folder}.${command ? ` Last command: ${command}.` : ''} Updated ${updated}`}
+      title={`Terminal · ${folder}${command ? ` · last command: ${command}` : ''} · updated ${updated}`}
       onClick={() => onFocus(thread)}
     >
       <span className="chat-pill-thread-line chat-pill-thread-title">Terminal</span>
@@ -338,9 +340,21 @@ function TerminalPillButton({
         <span className="terminal-prompt-sigil" aria-hidden="true">
           &gt;
         </span>
-        <span className="chat-pill-message-preview">{folder}</span>
+        <span
+          className={`chat-pill-message-preview${command ? ' chat-pill-terminal-command' : ''}`}
+        >
+          {commandPreview ?? folder}
+        </span>
       </span>
       <span className="chat-pill-thread-line chat-pill-thread-update">
+        {command && (
+          <>
+            <span className="chat-pill-terminal-folder">{folder}</span>
+            <span className="chat-pill-separator" aria-hidden="true">
+              ·
+            </span>
+          </>
+        )}
         <span className="chat-pill-thread-updated-at">Updated {updated}</span>
       </span>
     </button>
