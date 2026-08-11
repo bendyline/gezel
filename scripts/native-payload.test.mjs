@@ -279,6 +279,26 @@ test('Unix native wrappers configure stable source path remapping', () => {
   assert.match(ds4, /NVCCFLAGS=.*source_map|nvcc_flags\+=.*-ffile-prefix-map=/);
 });
 
+test('DS4 CUDA builds retain upstream architecture feature promotion', () => {
+  const ds4 = unixWrapperPaths.find(([path]) => path.includes('ds4/build.sh'))?.[1] ?? '';
+  assert.match(
+    ds4,
+    /nvcc_flags='-O3 --use_fast_math \$\(NVCC_ARCH_FLAGS\)'/,
+    'DS4 wrapper must retain upstream NVCC_ARCH_FLAGS in its NVCCFLAGS override',
+  );
+  assert.doesNotMatch(
+    ds4,
+    /nvcc_flags\+=["'] -arch=/,
+    'DS4 wrapper must not replace upstream architecture promotion with a plain -arch',
+  );
+
+  const spark = parseMatrix().find(
+    (entry) => entry.engine === 'ds4' && entry.platform === 'linux-arm64',
+  );
+  assert.equal(spark?.ds4_cuda_arch, 'sm_121');
+  assert.equal(spark?.cuda_pkg, '12-9');
+});
+
 test('Windows native wrappers avoid experimental path remapping', () => {
   for (const [path, contents] of windowsWrapperPaths) {
     assert.doesNotMatch(contents, /\/pathmap:/, `${path} enables MSVC /pathmap`);
