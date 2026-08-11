@@ -10,7 +10,8 @@ import { promisify } from 'node:util';
 const execFileP = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 
-const DECLARATION = "export const GEZEL_VERSION = '0.0.0';\n";
+const DECLARATION =
+  "export const GEZEL_VERSION = '0.0.0';\nexport const GEZEL_CONTENT_COMPAT = '0.0.0';\n";
 
 /** A throwaway repo root holding a copy of the script and a core source file. */
 async function fixture() {
@@ -19,6 +20,8 @@ async function fixture() {
   await mkdir(join(root, 'packages', 'core', 'src'), { recursive: true });
   await mkdir(join(root, 'packages', 'cli'), { recursive: true });
   await copyFile(join(here, 'prepare-package.mjs'), join(root, 'scripts', 'prepare-package.mjs'));
+  // prepare-package imports it to derive the content-compat calendar line.
+  await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
   await writeFile(join(root, 'packages', 'core', 'src', 'index.ts'), DECLARATION);
   return root;
 }
@@ -76,11 +79,32 @@ test('fails loudly when the GEZEL_VERSION declaration has drifted', async () => 
   }
 });
 
-test('dry run reports the stamp without writing or rebuilding', async () => {
+test('fails loudly when the GEZEL_CONTENT_COMPAT declaration has drifted', async () => {
+  // Without the stamp the published build keeps the '0.0.0' dev sentinel, which
+  // satisfiesMinGezelVersion reads as "dev build, gate nothing" — every content
+  // floor silently stops applying for everyone on that release.
+  const root = await fixture();
+  try {
+    await writeFile(
+      join(root, 'packages', 'core', 'src', 'index.ts'),
+      "export const GEZEL_VERSION = '0.0.0';\n",
+    );
+    await assert.rejects(
+      () => run(root, 'packages/core', ['1.2.3'], dryRun),
+      (err) => err.code === 1 && /could not find GEZEL_CONTENT_COMPAT declaration/.test(err.stderr),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('dry run reports both stamps without writing or rebuilding', async () => {
   const root = await fixture();
   try {
     const { stdout } = await run(root, 'packages/core', ['1.2.3'], dryRun);
     assert.match(stdout, /would stamp GEZEL_VERSION = '1\.2\.3'/);
+    // The compat line is derived from today, not from the published version.
+    assert.match(stdout, /GEZEL_CONTENT_COMPAT = '1\.\d{5}'/);
     assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -102,7 +126,8 @@ test('the release config still wires prepareCmd at this script', async () => {
   assert.match(exec[1].publishCmd ?? '', /scripts\/publish-package\.mjs/);
 });
 
-test('the real core source carries the declaration the script rewrites', async () => {
+test('the real core source carries the declarations the script rewrites', async () => {
   const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'index.ts'), 'utf8');
   assert.match(source, /export const GEZEL_VERSION = '[^']*';/);
+  assert.match(source, /export const GEZEL_CONTENT_COMPAT = '[^']*';/);
 });

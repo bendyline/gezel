@@ -126,6 +126,58 @@ export const ScorecardCellSchema = z
   .strict();
 export type ScorecardCell = z.infer<typeof ScorecardCellSchema>;
 
+/**
+ * Measured throughput for the model on the sweep's device.
+ *
+ * Both come from the harness's preflight probe, which runs once per cell —
+ * so they are measurements from the same machine, engine, and day as the
+ * pass rates beside them, not vendor figures.
+ */
+export const ScorecardPerformanceSchema = z
+  .object({
+    /** Prompt-processing rate: how fast the model reads its input. */
+    prefillTokensPerSec: z.number().positive(),
+    /** Generation rate: how fast it writes its answer. */
+    decodeTokensPerSec: z.number().positive(),
+    /** How many probes were averaged. */
+    samples: z.number().int().positive(),
+  })
+  .strict();
+export type ScorecardPerformance = z.infer<typeof ScorecardPerformanceSchema>;
+
+/**
+ * What the engine actually did on this device, as opposed to what the
+ * catalog predicts it would do. Both are measured during the sweep.
+ */
+export const ScorecardRuntimeSchema = z
+  .object({
+    /** Context window the engine launched with, tokens. */
+    contextTokens: z.number().int().positive(),
+    /** Median peak resident memory of the daemon + engine tree, MB. */
+    peakMemoryMb: z.number().int().positive(),
+  })
+  .strict();
+export type ScorecardRuntime = z.infer<typeof ScorecardRuntimeSchema>;
+
+/**
+ * Advisory quality score from the LLM judge.
+ *
+ * `artifacts` is not decoration: the mean is computed only over trials that
+ * PRODUCED something to judge, so a model that fails early is scored purely
+ * on its successes. Publishing the mean without its sample size would
+ * reward giving up. The two numbers must always travel together.
+ */
+export const ScorecardJudgeSchema = z
+  .object({
+    meanScore: z.number().min(0).max(10),
+    /** How many artifacts the mean covers. */
+    artifacts: z.number().int().positive(),
+    /** Judge model id — these are not comparable across judges. */
+    judgeModel: z.string().min(1),
+  })
+  .strict();
+export type ScorecardJudge = z.infer<typeof ScorecardJudgeSchema>;
+
 export const ScorecardModelResultSchema = z
   .object({
     /** Catalog model id, e.g. "gemma4-e4b-q4". */
@@ -145,6 +197,12 @@ export const ScorecardModelResultSchema = z
     /** The run this result belongs to — the comparability key. */
     runId: z.string().min(1),
     suiteId: z.string().min(1),
+    /** Throughput on this device; absent when no probe was recorded. */
+    performance: ScorecardPerformanceSchema.optional(),
+    /** Context + memory the engine actually used; absent when unrecorded. */
+    runtime: ScorecardRuntimeSchema.optional(),
+    /** Advisory quality score; absent when no judge pass ran. */
+    judge: ScorecardJudgeSchema.optional(),
     cells: z.array(ScorecardCellSchema),
   })
   .strict();

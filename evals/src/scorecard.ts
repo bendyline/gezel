@@ -93,7 +93,80 @@ export function cellFromBatch(
   };
 }
 
+/** Context window + peak memory a single trial actually used. */
+function readTrialRuntime(
+  matrixRoot: string,
+  scenarioId: string,
+  trialId: string,
+): { contextTokens?: number; peakMemoryMb?: number } {
+  const dir = join(matrixRoot, scenarioId, trialId);
+  const out: { contextTokens?: number; peakMemoryMb?: number } = {};
+  try {
+    const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as {
+      engineContext?: { grantedPerSlotTokens?: number };
+    };
+    const ctx = result.engineContext?.grantedPerSlotTokens;
+    if (typeof ctx === 'number' && ctx > 0) out.contextTokens = ctx;
+  } catch {
+    // absent or malformed — reported as unmeasured rather than guessed
+  }
+  try {
+    const metrics = JSON.parse(readFileSync(join(dir, 'metrics.json'), 'utf8')) as {
+      process?: { peakRssMb?: number };
+    };
+    const rss = metrics.process?.peakRssMb;
+    if (typeof rss === 'number' && rss > 0) out.peakMemoryMb = Math.round(rss);
+  } catch {
+    // same
+  }
+  return out;
+}
+
+/** Most frequent value; ties resolve to the largest. */
+function mode(values: number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  const counts = new Map<number, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]![0];
+}
+
+/**
+ * Read the post-hoc judge roll-up for one model × suite.
+ *
+ * Returns null when no judge pass has run, so the column simply does not
+ * appear rather than showing a blank.
+ */
+export function readJudgeSummary(
+  sweepRoot: string,
+  modelId: string,
+  suiteId: string,
+): { meanScore: number; artifacts: number; judgeModel: string } | null {
+  const path = join(sweepRoot, 'judge-report.json');
+  if (!existsSync(path)) return null;
+  try {
+    const report = JSON.parse(readFileSync(path, 'utf8')) as {
+      perTrial?: Array<{ modelId: string; suiteId: string; meanScore: number; judgeModel: string }>;
+    };
+    const rows = (report.perTrial ?? []).filter(
+      (row) => row.modelId === modelId && row.suiteId === suiteId,
+    );
+    if (rows.length === 0) return null;
+    const meanScore = rows.reduce((sum, row) => sum + row.meanScore, 0) / rows.length;
+    return {
+      meanScore: Math.round(meanScore * 10) / 10,
+      artifacts: rows.length,
+      judgeModel: rows[0]!.judgeModel,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface ModelIngestInput {
+  /** Measured throughput on this device, when a probe was recorded. */
+  performance?: { prefillTokensPerSec: number; decodeTokensPerSec: number; samples: number };
+  /** Advisory judge roll-up, when a judge pass has run. */
+  judge?: { meanScore: number; artifacts: number; judgeModel: string };
   modelId: string;
   label: string;
   engine: string;
@@ -111,6 +184,8 @@ export function modelResultFromMatrix(
   runId: string,
 ): ScorecardModelResult {
   const cells: ScorecardCell[] = [];
+  const contexts: number[] = [];
+  const memories: number[] = [];
   for (const scenario of input.matrix.scenarios) {
     const batchPath = join(input.matrixRoot, scenario.summaryPath);
     let batch: BatchSummary | null = null;
@@ -133,6 +208,11 @@ export function modelResultFromMatrix(
       });
       continue;
     }
+    for (const trialId of batch.trialIds ?? []) {
+      const runtime = readTrialRuntime(input.matrixRoot, scenario.scenarioId, trialId);
+      if (runtime.contextTokens) contexts.push(runtime.contextTokens);
+      if (runtime.peakMemoryMb) memories.push(runtime.peakMemoryMb);
+    }
     cells.push(
       cellFromBatch(batch, (trialId) =>
         readTrialFailureClass(input.matrixRoot, scenario.scenarioId, trialId),
@@ -151,6 +231,17 @@ export function modelResultFromMatrix(
     ...(input.parameterSize ? { parameterSize: input.parameterSize } : {}),
     ...(input.quantization ? { quantization: input.quantization } : {}),
     ...(input.grantedContextTokens ? { grantedContextTokens: input.grantedContextTokens } : {}),
+    ...(input.performance ? { performance: input.performance } : {}),
+    ...(input.judge ? { judge: input.judge } : {}),
+    // Context is the mode (the engine relaunches with the same grant);
+    // memory is the median, so one outlier trial cannot set the figure.
+    ...(() => {
+      const contextTokens = mode(contexts);
+      const peakMemoryMb = median(memories);
+      return contextTokens && peakMemoryMb
+        ? { runtime: { contextTokens, peakMemoryMb: Math.round(peakMemoryMb) } }
+        : {};
+    })(),
   };
 }
 
@@ -212,8 +303,20 @@ export function mergeScorecard(
   // re-ingest time — that would silently redate a published measurement and
   // could reorder which run counts as the headline.
   const prior = existing.runs.find((entry) => entry.id === run.id);
+  // startedAt, the git sha, and the catalog pin all describe the world AS
+  // MEASURED. Re-ingesting later — after a gilde bump or new commits — must
+  // not restamp them with today's values; that would attribute results to
+  // code and content that never produced them.
   const preserved: ScorecardRun = prior
-    ? { ...run, provenance: { ...run.provenance, startedAt: prior.provenance.startedAt } }
+    ? {
+        ...run,
+        provenance: {
+          ...run.provenance,
+          startedAt: prior.provenance.startedAt,
+          harnessCommit: prior.provenance.harnessCommit,
+          gildeVersion: prior.provenance.gildeVersion,
+        },
+      }
     : run;
   const runs = [preserved, ...existing.runs.filter((entry) => entry.id !== run.id)].sort((a, b) =>
     b.provenance.startedAt.localeCompare(a.provenance.startedAt),
@@ -357,5 +460,61 @@ export function nodeScorecardFs(): ScorecardFs {
         return null;
       }
     },
+  };
+}
+
+/**
+ * Average the preflight throughput probes recorded for one model.
+ *
+ * The harness probes once per cell and writes `preflight-report.json` into
+ * a per-probe directory keyed by model and timestamp. Probes for the same
+ * model on the same host agree closely (the 31B pair differed by 0.03
+ * tok/s), so averaging is safe and reduces single-probe noise.
+ *
+ * Only probes inside the sweep's own window are used — an older probe from
+ * a previous session describes a different machine state and must not be
+ * published beside these results.
+ */
+export function readModelPerformance(
+  preflightRoot: string,
+  modelId: string,
+  window: { fromIso: string; toIso: string },
+): { prefillTokensPerSec: number; decodeTokensPerSec: number; samples: number } | null {
+  if (!existsSync(preflightRoot)) return null;
+  const prefills: number[] = [];
+  const decodes: number[] = [];
+  for (const name of readdirSync(preflightRoot)) {
+    // `preflight-<modelId>-<iso>-<suffix>`; the model id may itself contain
+    // dashes, so anchor on the prefix rather than splitting.
+    if (!name.startsWith(`preflight-${modelId}-`)) continue;
+    const stamp = name.slice(`preflight-${modelId}-`.length).replace(/-[a-z0-9]+$/, '');
+    const iso = stamp.replace(
+      /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/,
+      '$1T$2:$3:$4.$5Z',
+    );
+    if (iso < window.fromIso || iso > window.toIso) continue;
+    const report = join(preflightRoot, name, 'preflight-report.json');
+    if (!existsSync(report)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(report, 'utf8')) as {
+        promptTokensPerSec?: number | null;
+        genTokensPerSec?: number | null;
+      };
+      if (typeof parsed.promptTokensPerSec === 'number' && parsed.promptTokensPerSec > 0) {
+        prefills.push(parsed.promptTokensPerSec);
+      }
+      if (typeof parsed.genTokensPerSec === 'number' && parsed.genTokensPerSec > 0) {
+        decodes.push(parsed.genTokensPerSec);
+      }
+    } catch {
+      // A malformed probe is skipped, never guessed at.
+    }
+  }
+  if (prefills.length === 0 || decodes.length === 0) return null;
+  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  return {
+    prefillTokensPerSec: Math.round(avg(prefills)),
+    decodeTokensPerSec: Math.round(avg(decodes) * 10) / 10,
+    samples: Math.min(prefills.length, decodes.length),
   };
 }

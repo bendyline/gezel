@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calVerPrefix } from './calver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -61,12 +62,7 @@ if (explicitVersion !== undefined) {
     process.exit(1);
   }
 
-  const now = new Date();
-  const yy = String(now.getUTCFullYear()).slice(-2);
-  const start = Date.UTC(now.getUTCFullYear(), 0, 0);
-  const dayOfYear = Math.floor((now.getTime() - start) / 86400000);
-  const ddd = String(dayOfYear).padStart(3, '0');
-  version = `1.${yy}${ddd}.${incNum}`;
+  version = `${calVerPrefix()}.${incNum}`;
 }
 
 if (process.argv.includes('--print')) {
@@ -92,6 +88,14 @@ if (!versionPattern.test(coreSource)) {
   console.error(`could not find GEZEL_VERSION declaration in ${coreVersionPath}`);
   process.exit(1);
 }
+// Already the calendar line, so content floors compare against the same value.
+// Stamped explicitly anyway: the npm channel sets it to something else, and a
+// checkout that only ever ran this script must not inherit a stale compat.
+const contentCompatPattern = /export const GEZEL_CONTENT_COMPAT = '[^']*';/;
+if (!contentCompatPattern.test(coreSource)) {
+  console.error(`could not find GEZEL_CONTENT_COMPAT declaration in ${coreVersionPath}`);
+  process.exit(1);
+}
 
 for (const { pkgPath, source } of packages) {
   writeFileSync(pkgPath, source.replace(packageVersionPattern, `  "version": "${version}",`));
@@ -100,6 +104,8 @@ for (const { pkgPath, source } of packages) {
 
 writeFileSync(
   coreVersionPath,
-  coreSource.replace(versionPattern, `export const GEZEL_VERSION = '${version}';`),
+  coreSource
+    .replace(versionPattern, `export const GEZEL_VERSION = '${version}';`)
+    .replace(contentCompatPattern, `export const GEZEL_CONTENT_COMPAT = '${version}';`),
 );
 console.log(`stamped ${coreVersionPath} → ${version}`);

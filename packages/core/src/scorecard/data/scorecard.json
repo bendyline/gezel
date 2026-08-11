@@ -49,7 +49,7 @@
           "wikipedia-research-brief"
         ]
       },
-      "note": "Published scorecard sweep. llama-cpp over the MLX platform default because macOS 26.5.2/25F84 carries the known Apple GPU-driver kernel panic under sustained MLX eval churn. --count-strict so every scenario got 3 trials."
+      "note": "Published scorecard sweep (llama-cpp, count-strict)."
     }
   ],
   "results": [
@@ -61,6 +61,20 @@
       "parameterSize": "12B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 543,
+        "decodeTokensPerSec": 50.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 31312
+      },
+      "judge": {
+        "meanScore": 6.9,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -149,6 +163,20 @@
       "parameterSize": "30.7B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 195,
+        "decodeTokensPerSec": 22.3,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 31768
+      },
+      "judge": {
+        "meanScore": 6.8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -237,6 +265,20 @@
       "parameterSize": "8B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1411,
+        "decodeTokensPerSec": 97.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 10651
+      },
+      "judge": {
+        "meanScore": 4.6,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -325,6 +367,20 @@
       "parameterSize": "9B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 657,
+        "decodeTokensPerSec": 64.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 10067
+      },
+      "judge": {
+        "meanScore": 6.7,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -413,6 +469,20 @@
       "parameterSize": "12B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 543,
+        "decodeTokensPerSec": 50.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 30402
+      },
+      "judge": {
+        "meanScore": 4.8,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -515,6 +585,20 @@
       "parameterSize": "30.7B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 195,
+        "decodeTokensPerSec": 22.3,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 30794
+      },
+      "judge": {
+        "meanScore": 6.5,
+        "artifacts": 18,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -617,6 +701,20 @@
       "parameterSize": "8B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1411,
+        "decodeTokensPerSec": 97.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 9066
+      },
+      "judge": {
+        "meanScore": 5.2,
+        "artifacts": 22,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -719,6 +817,20 @@
       "parameterSize": "9B",
       "runId": "2026-08-09-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 657,
+        "decodeTokensPerSec": 64.9,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 9100
+      },
+      "judge": {
+        "meanScore": 6.5,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",

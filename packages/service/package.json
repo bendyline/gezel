@@ -47,7 +47,6 @@
     "dist",
     "dist/NOTICE.md",
     "dist/licenses/fonts",
-    "postinstall.mjs",
     "!dist/**/*.map",
     "!dist/**/__pycache__",
     "!dist/**/*.pyc",
@@ -59,7 +58,6 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "postinstall": "node ./postinstall.mjs",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {

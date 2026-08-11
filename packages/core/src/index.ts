@@ -47,6 +47,28 @@ export * from './outside-in-paths.js';
 export const GEZEL_VERSION = '0.0.0';
 
 /**
+ * The date-based line this build sits on, for content compatibility only.
+ *
+ * `minGezelVersion` floors in gilde are authored as `1.YYDDD` — "any build of
+ * that day or later" — so satisfying one is a question about *recency*, not
+ * about which release this is. Those happen to be the same thing for the
+ * Electron scheme (`1.YYDDD.RUN`) and are entirely different for npm, whose
+ * versions are semver and carry no date at all.
+ *
+ * Comparing floors against `GEZEL_VERSION` therefore broke the npm channel in
+ * both directions: `0.1.0` and `1.0.0` sit below every floor ever authored (so
+ * floored content silently vanished), while a future `2.0.0` sits above every
+ * floor (so content needing a newer build would be served to one that cannot
+ * run it — the failure the floor exists to prevent, inverted).
+ *
+ * Both release paths stamp this from `scripts/calver.mjs`; an unstamped
+ * checkout stays `0.0.0`, which `satisfiesMinGezelVersion` treats as a dev
+ * build and never gates. Keep it out of anything user-facing —
+ * `GEZEL_VERSION` is what `gezel --version` and `/api/health` report.
+ */
+export const GEZEL_CONTENT_COMPAT = '0.0.0';
+
+/**
  * Default ISO-timestamp helper so every package produces the same shape.
  */
 export function nowIso(): string {

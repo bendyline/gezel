@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -578,6 +578,23 @@ describe('BundledSource — minGezelVersion gating', () => {
     const devItems = await dev.list('toolset');
     expect(devItems.map((i) => i.manifest.id).sort()).toEqual(['gi-tool', 'phantom-gated']);
     expect(devItems.find((i) => i.manifest.id === 'gi-tool')?.manifest.version).toBe('1.1.0');
+  });
+});
+
+describe('BundledSource — which version floors are compared against', () => {
+  it('defaults to the calendar line, never the published version', async () => {
+    // Asserted against the source because the two constants are both '0.0.0'
+    // in a dev checkout, so no runtime observation can tell them apart here —
+    // the difference only appears on a stamped release build, which is exactly
+    // where getting it wrong is expensive.
+    //
+    // Gating on GEZEL_VERSION put npm builds below every `1.YYDDD` floor
+    // (floored content silently vanished) and would have put a future 2.x
+    // above all of them. GEZEL_CONTENT_COMPAT is stamped on the calendar line
+    // by both release paths; see scripts/calver.mjs.
+    const source = await readFile(new URL('./source.ts', import.meta.url), 'utf8');
+    expect(source).toContain('opts.gezelVersion ?? GEZEL_CONTENT_COMPAT');
+    expect(source).not.toMatch(/opts\.gezelVersion \?\? GEZEL_VERSION/);
   });
 });
 

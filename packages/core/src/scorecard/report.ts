@@ -2,6 +2,7 @@ import {
   MIN_TRIALS_FOR_RATE,
   type ScorecardCell,
   type ScorecardDataset,
+  type ScorecardDevice,
   type ScorecardModelResult,
   type ScorecardRun,
 } from './schema.js';
@@ -198,6 +199,20 @@ export function buildSuiteScoreboard(
 }
 
 /**
+ * Compact hardware description for a published table.
+ *
+ * The chip and memory are what actually determine whether a reader's
+ * machine can reproduce a throughput number, so they lead. Falls back to
+ * the raw device label when the finer detail was not captured.
+ */
+export function hardwareSummary(device: ScorecardDevice): string {
+  const chip = device.cpuModel?.replace(/^Apple\s+/, '') ?? null;
+  const memory = device.memoryGb ? `${device.memoryGb} GB` : null;
+  const parts = [chip ?? device.label, memory].filter(Boolean);
+  return parts.join(' · ');
+}
+
+/**
  * One-line provenance stamp. Every published table needs this next to it —
  * a score without its device, date, and code version is not a measurement,
  * it is a rumour.
@@ -206,7 +221,7 @@ export function describeProvenance(run: ScorecardRun, engines: readonly string[]
   const p = run.provenance;
   const unique = [...new Set(engines)].sort();
   const parts = [
-    p.device.label,
+    hardwareSummary(p.device),
     // The engine is part of what a number MEANS: the same model scores
     // differently on llama.cpp and MLX, and a sweep may deliberately run a
     // non-default engine. Omitting it invites the reader to assume their own.

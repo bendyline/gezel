@@ -18,6 +18,7 @@ import {
   describeProvenance,
   provenanceDifferences,
   resolveRoleId,
+  scoreModel,
   toolsetGroupsForRole,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
@@ -555,6 +556,13 @@ export function renderScorecardMarkdown(
   }
 
   const lines: string[] = [];
+
+  // A model with any unmeasured task is WITHHELD rather than shown with a
+  // gap. A partially-measured row invites comparison against fully-measured
+  // ones, and a blank cell reads as "fine" rather than "unknown".
+  const publishable = board.scores.filter((score) => score.unmeasuredScenarios.length === 0);
+  const withheld = board.scores.filter((score) => score.unmeasuredScenarios.length > 0);
+
   lines.push(
     `**${describeProvenance(
       board.run,
@@ -562,30 +570,42 @@ export function renderScorecardMarkdown(
     )}**`,
   );
   lines.push('');
-  lines.push('| Model | Size | Tasks passed | Not measured |');
-  lines.push('| --- | --- | --- | --- |');
-  for (const score of board.scores) {
-    const discarded =
-      score.discardedTrials > 0
-        ? `${score.discardedTrials} run${score.discardedTrials === 1 ? '' : 's'} lost to the machine`
-        : '—';
-    lines.push(
-      `| ${score.result.label} | ${score.result.parameterSize ?? score.result.tier} | ${score.claim} | ${discarded} |`,
-    );
+  lines.push(...scoreTable(publishable));
+
+  if (withheld.length > 0) {
+    lines.push('');
+    lines.push('Not published — some tasks could not be measured on this round:');
+    lines.push('');
+    for (const score of withheld) {
+      lines.push(`- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`);
+    }
   }
 
-  if (board.otherRunScores.length > 0) {
+  // Previous rounds, most recent first. Framework and catalog changes mean
+  // rounds are not strictly comparable, so each carries its own stamp and
+  // sits in its own table — never merged with the current one.
+  const priorRuns = dataset.runs
+    .filter((run) => run.id !== board.run.id && run.suites.includes(suiteId))
+    .slice(0, PRIOR_ROUNDS_SHOWN);
+  for (const run of priorRuns) {
+    const scores = dataset.results
+      .filter((result) => result.runId === run.id && result.suiteId === suiteId)
+      .map((result) => scoreModel(result, run.provenance.count))
+      .filter((score) => score.unmeasuredScenarios.length === 0)
+      .sort((a, b) => b.successes / b.attributableTrials - a.successes / a.attributableTrials);
+    if (scores.length === 0) continue;
+    const why = provenanceDifferences(board.run, run);
     lines.push('');
-    lines.push('Measured in an earlier round, so not directly comparable with the table above:');
+    lines.push(`### Earlier round — ${run.provenance.startedAt.slice(0, 10)}`);
     lines.push('');
-    lines.push('| Model | Tasks passed | Why it is listed apart |');
-    lines.push('| --- | --- | --- |');
-    for (const entry of board.otherRunScores) {
-      const why = provenanceDifferences(board.run, entry.run);
-      lines.push(
-        `| ${entry.result.label} | ${entry.claim} | ${why.length > 0 ? why.join(', ') : 'earlier round'} |`,
-      );
-    }
+    lines.push(
+      `**${describeProvenance(
+        run,
+        scores.map((s) => s.result.engine),
+      )}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
+    );
+    lines.push('');
+    lines.push(...scoreTable(scores));
   }
 
   if (opts.includeTaskCount) {
@@ -593,6 +613,61 @@ export function renderScorecardMarkdown(
     lines.push(`Tasks in this set: ${board.scenarioIds.length}.`);
   }
   return lines.join('\n');
+}
+
+/** How many previous rounds a published table shows before history is elided. */
+const PRIOR_ROUNDS_SHOWN = 2;
+
+/**
+ * One results table.
+ *
+ * Every optional column is omitted entirely when no model in the table
+ * carries the measurement. An empty column reads as a missing value rather
+ * than an absent metric — the confusion the old "Not measured" column
+ * caused, which is why nothing here renders a placeholder dash for a whole
+ * column.
+ */
+function scoreTable(scores: ReturnType<typeof scoreModel>[]): string[] {
+  const anySpeed = scores.some((score) => !!score.result.performance);
+  const anyRuntime = scores.some((score) => !!score.result.runtime);
+  const anyJudge = scores.some((score) => !!score.result.judge);
+
+  const cols = ['Model', 'Size', 'Tasks passed'];
+  if (anyJudge) cols.push('Quality');
+  if (anySpeed) cols.push('Reads at', 'Writes at');
+  if (anyRuntime) cols.push('Context', 'Memory used');
+
+  const rows = scores.map((score) => {
+    const cells = [
+      score.result.label,
+      score.result.parameterSize ?? score.result.tier,
+      score.claim,
+    ];
+    if (anyJudge) {
+      const judge = score.result.judge;
+      // The sample count travels WITH the mean, always: it is scored only
+      // over work that got produced, so a model that fails early is graded
+      // on its successes alone.
+      cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts} pieces)` : '—');
+    }
+    if (anySpeed) {
+      const perf = score.result.performance;
+      cells.push(
+        perf ? `${perf.prefillTokensPerSec.toLocaleString()} tok/s` : '—',
+        perf ? `${perf.decodeTokensPerSec} tok/s` : '—',
+      );
+    }
+    if (anyRuntime) {
+      const runtime = score.result.runtime;
+      cells.push(
+        runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—',
+        runtime ? `${(runtime.peakMemoryMb / 1024).toFixed(1)} GB` : '—',
+      );
+    }
+    return `| ${cells.join(' | ')} |`;
+  });
+
+  return [`| ${cols.join(' | ')} |`, `| ${cols.map(() => '---').join(' | ')} |`, ...rows];
 }
 
 /** `::handboek-project-type-composition{id=language-trainer}`. */

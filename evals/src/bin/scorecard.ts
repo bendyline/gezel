@@ -45,6 +45,8 @@ import {
   mergeScorecard,
   modelResultFromMatrix,
   nodeScorecardFs,
+  readJudgeSummary,
+  readModelPerformance,
   resolveModelEngine,
   resolvedGildeVersion,
   runIdFor,
@@ -290,10 +292,23 @@ function main(): void {
       console.log(
         `[scorecard] ${model.id} × ${suiteId}: ${matrix.totalSuccesses}/${matrix.totalTrials} trials passed`,
       );
+      // Preflight probes are CACHED per model+binary+host and reused across
+      // cells, so a cell's probe routinely predates it by hours — an
+      // anchored-on-the-cell window found nothing at all. The honest bound
+      // is the sweep itself plus a lead margin: same machine, same binary,
+      // same model, therefore the same measurement. Probes from an older
+      // session (a different binary) stay excluded.
+      const performance = readModelPerformance(join(repoRoot, 'evals/runs/preflight'), model.id, {
+        fromIso: new Date(Date.parse(startedAt) - 6 * 60 * 60_000).toISOString(),
+        toIso: matrix.finishedAt,
+      });
+      const judge = readJudgeSummary(sweepRoot, model.id, suiteId);
       results.push(
         modelResultFromMatrix(
           {
             modelId: model.id,
+            ...(performance ? { performance } : {}),
+            ...(judge ? { judge } : {}),
             label: model.id,
             engine: model.engine,
             tier: classifyEvalModelTier({ engine: model.engine as never, modelId: model.id }),
@@ -327,8 +342,17 @@ function main(): void {
       provenance: {
         startedAt,
         device,
-        harnessCommit: currentHarnessCommit(repoRoot),
-        gildeVersion: resolvedGildeVersion(repoRoot),
+        // Overridable so a finished sweep can be re-ingested carrying the
+        // code and content that actually produced it, rather than whatever
+        // HEAD and the catalog pin happen to be at re-ingest time.
+        harnessCommit:
+          typeof args.flags['harness-commit'] === 'string'
+            ? args.flags['harness-commit']
+            : currentHarnessCommit(repoRoot),
+        gildeVersion:
+          typeof args.flags['gilde-version'] === 'string'
+            ? args.flags['gilde-version']
+            : resolvedGildeVersion(repoRoot),
         count,
         // The judge model is recorded but never used for the headline pass
         // rate — see the scorecard schema header on judge drift.

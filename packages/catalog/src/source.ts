@@ -14,7 +14,7 @@ import {
   type CraftbookDoc,
   CraftbookTemplateVersionManifestSchema,
   type CraftbookTestSpec,
-  GEZEL_VERSION,
+  GEZEL_CONTENT_COMPAT,
   GezelTemplateVersionManifestSchema,
   ImageModelVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
@@ -168,10 +168,16 @@ export interface BundledSourceOptions {
    */
   noIndex?: boolean;
   /**
-   * The running app's version, compared against content `minGezelVersion`
-   * floors. Defaults to `GEZEL_VERSION`; injectable so tests can exercise
-   * gating against a stamped version (`GEZEL_VERSION` is `0.0.0` in dev
-   * checkouts, which bypasses all filtering).
+   * The calendar line this build sits on, compared against content
+   * `minGezelVersion` floors. Defaults to `GEZEL_CONTENT_COMPAT`; injectable so
+   * tests can exercise gating against a stamped build (both constants are
+   * `0.0.0` in dev checkouts, which bypasses all filtering).
+   *
+   * Deliberately **not** `GEZEL_VERSION`. Floors are authored as `1.YYDDD`, and
+   * npm releases are semver: `0.1.0` and `1.0.0` fall below every floor while a
+   * later `2.0.0` clears all of them, so gating on the published version made
+   * npm builds hide floored content and would eventually have made them accept
+   * content they cannot run.
    */
   gezelVersion?: string;
 }
@@ -196,7 +202,7 @@ export class BundledSource implements CatalogSource {
     this.id = opts.id ?? 'bundled';
     this.label = opts.label ?? 'Bundled';
     this.useIndex = !opts.noIndex;
-    this.gezelVersion = opts.gezelVersion ?? GEZEL_VERSION;
+    this.gezelVersion = opts.gezelVersion ?? GEZEL_CONTENT_COMPAT;
   }
 
   private get root(): string {
