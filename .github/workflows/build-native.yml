@@ -336,13 +336,13 @@ jobs:
             artifact: gezel-ds4-server
             needs_cuda: false
             needs_vulkan: false
-          # Linux CUDA: ds4's Makefile takes a SINGLE -arch (CUDA_ARCH), so a
-          # prebuilt binary targets one GPU generation. linux-x64 defaults to
-          # sm_90 (Hopper/datacenter); consumer (Ada sm_89, Blackwell
-          # sm_100/120) users should rebuild from source. The DGX Spark / GB10
-          # leg uses the 'spark' sentinel (empty -arch, matching antirez's
-          # `make cuda-spark`). darwin-x64 + win32-x64 are intentionally
-          # omitted — build.sh / build.ps1 no-op there.
+          # Linux CUDA: ds4's Makefile takes a single CUDA_ARCH, so a prebuilt
+          # binary targets one GPU generation. linux-x64 defaults to sm_90
+          # (Hopper/datacenter); consumer (Ada sm_89, Blackwell sm_100/120)
+          # users should rebuild from source. The wrapper preserves upstream's
+          # NVCC_ARCH_FLAGS so base matrix capabilities automatically receive
+          # upstream architecture promotion and feature defines. darwin-x64 +
+          # win32-x64 are intentionally omitted — build.sh / build.ps1 no-op.
           # variant: cuda — on Linux ds4 emits into the `-cuda` key so it
           # shares llama-server's NVIDIA redistributables instead of shipping
           # a second byte-identical copy. See scripts/native-payload.mjs.
@@ -368,8 +368,11 @@ jobs:
             # `make cuda-spark`, which relies on nvcc auto-detecting the local
             # GPU) — but a GPU-less CI cross-build then defaults to sm_52,
             # which lacks the __dp4a intrinsic ds4_cuda.cu uses. Build for
-            # sm_121 explicitly. sm_121 first shipped in CUDA 12.9, so this
-            # leg overrides the toolkit to 12.9 (others stay 12.8).
+            # sm_121 explicitly. The pinned Makefile promotes that base target
+            # to sm_121a and enables DS4_CUDA_HAVE_MXF4; keeping the base value
+            # here lets future upstream pin bumps remain authoritative. sm_121
+            # first shipped in CUDA 12.9, so this leg overrides the toolkit to
+            # 12.9 (others stay 12.8).
             ds4_cuda_arch: 'sm_121'
             cuda_pkg: '12-9'
 

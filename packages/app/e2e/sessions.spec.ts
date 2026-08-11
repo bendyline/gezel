@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deriveThreadTitle } from '@bendyline/gezel';
 /**
  * Sessions E2E — exercises the session picker, send-and-reply, restart
  * persistence, and "new session" flows on the Meester chat surface that
@@ -100,10 +101,14 @@ test('sessions — send a message, it persists, shows up after restart', async (
         fullPage: true,
       });
 
-      // Session dropdown auto-opens the most recent; its trigger shows the
-      // session title (the first user message, truncated).
+      // Session dropdown auto-opens the most recent. The service compacts the
+      // starter into a deterministic thread title instead of retaining the
+      // raw prompt, so use that shared algorithm for the integration check.
       const sessionTrigger = page.locator('.gezel-chat-session-select').first();
-      await expect(sessionTrigger).toContainText('hello from e2e', { timeout: 10_000 });
+      await expect(sessionTrigger.locator('.session-row-title')).toHaveText(
+        deriveThreadTitle('hello from e2e'),
+        { timeout: 10_000 },
+      );
     } finally {
       await app.close();
     }
