@@ -31,8 +31,8 @@ export function Ds4Settings({ config }: Props) {
       <section style={{ marginBottom: '2rem' }}>
         <h3>On-device (DwarfStar - DS4)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          DwarfStar (ds4) is an experimental inference engine built for a handful of very large
-          mixture-of-experts models — DeepSeek V4 and GLM 5.2. They don't fit in memory, so Gezel
+          DwarfStar (ds4) is an inference engine built for a handful of very large
+          mixture-of-experts models — DeepSeek V4 and GLM 5.2. They may not fit in memory; DwarfStar
           keeps a bounded expert cache in RAM and reads the other experts from SSD as they are
           needed.
         </p>
@@ -78,10 +78,10 @@ export function Ds4Settings({ config }: Props) {
         <section style={{ marginBottom: '2rem' }}>
           <h4>DwarfStar models</h4>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Download the GGUFs DwarfStar can run. Lower quantizations (Q2) start faster and need
-            less disk and memory; higher ones (Q4) keep more model detail but can need several times
-            the disk space and a larger memory working set. Check the size on each row before
-            starting — these downloads run to hundreds of gigabytes.
+            Lower quantizations (Q2) start faster and need less disk and memory; higher ones (Q4)
+            keep more model detail but can need several times the disk space and a larger memory
+            working set. Check the size on each row before starting — these downloads run to
+            hundreds of gigabytes.
           </p>
           <Ds4ModelManager />
           <p className="muted small" style={{ marginTop: '1rem' }}>

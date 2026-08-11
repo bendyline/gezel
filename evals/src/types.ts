@@ -241,6 +241,21 @@ export interface EvalScenario {
    */
   mockServices?: import('@bendyline/gezel').MockService[];
   /**
+   * Eval-only required/optional string arguments advertised by fake MCP
+   * tools. Keyed service id -> tool name -> argument name. This keeps
+   * realistic simulator schemas out of the catalog-owned MockService wire
+   * contract while letting tool-routing probes verify meaningful calls.
+   */
+  mockMcpToolArgumentSchemas?: import('./mock/mock-server.ts').MockMcpToolArgumentSchemas;
+  /**
+   * Mock-service ids that the real built-in `fetch_url` tool may reach during
+   * this eval. The runner translates only these ids to exact HTTPS origins
+   * and passes them to the daemon behind the eval-only hermetic marker. This
+   * is deliberately opt-in per scenario and per mock: declaring mocks alone
+   * never weakens the production SSRF boundary.
+   */
+  allowFetchUrlMockServiceIds?: string[];
+  /**
    * Default image-model catalog id to warm when running this scenario.
    * Set on scenarios that need image generation (petshop, etc.). The
    * runner warms + links it before spawning the trial daemon and

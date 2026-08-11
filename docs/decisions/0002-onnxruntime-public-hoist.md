@@ -32,7 +32,7 @@ when `@huggingface/transformers` or `onnxruntime-node` changes.
 
 ## Verification and regression map
 
-Run a clean `pnpm install` before testing; an existing `node_modules` can mask a
+Run a clean `pnpm deps:install` before testing; an existing `node_modules` can mask a
 layout regression.
 
 - [`packages/service/src/memory/embed-model.test.ts`](../../packages/service/src/memory/embed-model.test.ts)

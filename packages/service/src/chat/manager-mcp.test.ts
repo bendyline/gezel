@@ -9,6 +9,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Question, Task } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -33,6 +34,128 @@ let store: Store;
 let events: ChatEventBus;
 let manager: ChatManager;
 let mock: MockProvider;
+
+/**
+ * These deliberately small guardrail-shaped scripts own the runtime seam,
+ * not the catalog wording. The catalog tests pin the production Careful and
+ * Freeze sources; this test pins that required hook metadata survives the
+ * active-task snapshot and reaches a real inline ScriptRunner invocation.
+ */
+const CAREFUL_HOOK_SOURCE = `
+  import { defineScript, gezel } from '@bendyline/gezel-sdk';
+
+  export const meta = defineScript({
+    name: 'check-careful',
+    description: 'Ask before the protected delete used by the hook integration test.',
+    inputs: {
+      toolName: { type: 'string', description: 'Matched MCP tool name.', required: true },
+      args: { type: 'json', description: 'Tool arguments.', required: true },
+      phase: { type: 'string', description: 'Hook phase.', required: true },
+    },
+    outputs: {
+      decision: { type: 'string', description: 'allow | ask' },
+      message: { type: 'string', description: 'Approval reason.' },
+    },
+  });
+
+  const input = gezel.input as {
+    toolName: string;
+    args: Record<string, unknown>;
+    phase: string;
+  };
+  const protectedDelete =
+    input.phase === 'PreToolUse' &&
+    input.toolName === 'delete_path' &&
+    input.args.path === 'protected.txt';
+  gezel.output(
+    protectedDelete
+      ? { decision: 'ask', message: 'careful integration: approve protected delete' }
+      : { decision: 'allow', message: '' },
+  );
+`;
+
+const FREEZE_HOOK_SOURCE = `
+  import { defineScript, gezel } from '@bendyline/gezel-sdk';
+
+  export const meta = defineScript({
+    name: 'check-freeze',
+    description: 'Deny writes outside the seeded freeze boundary.',
+    inputs: {
+      toolName: { type: 'string', description: 'Matched MCP tool name.', required: true },
+      args: { type: 'json', description: 'Tool arguments.', required: true },
+      phase: { type: 'string', description: 'Hook phase.', required: true },
+    },
+    outputs: {
+      decision: { type: 'string', description: 'allow | deny' },
+      message: { type: 'string', description: 'Boundary reason.' },
+    },
+    requires: ['workspace.read'],
+  });
+
+  const input = gezel.input as {
+    toolName: string;
+    args: Record<string, unknown>;
+    phase: string;
+  };
+  const state = JSON.parse(await gezel.fs.read('.gezel/freeze.json')) as { dir?: string };
+  const path = String(input.args.path ?? '');
+  const dir = String(state.dir ?? '');
+  const inside = path === dir || path.startsWith(dir + '/');
+  const checkedWrite = input.phase === 'PreToolUse' && input.toolName === 'write_file';
+  gezel.output(
+    checkedWrite && !inside
+      ? { decision: 'deny', message: 'freeze integration: outside write denied' }
+      : { decision: 'allow', message: '' },
+  );
+`;
+
+async function installInlineHookTask(input: {
+  craftbookId: string;
+  craftbookName: string;
+  matcher: string;
+  scriptName: string;
+  source: string;
+}): Promise<Task> {
+  const task = await svc.context.tasks.create('default', {
+    title: `${input.craftbookName} integration`,
+    assignee: { kind: 'gezel', gezelId: 'ada' },
+    steps: [{ name: 'Guard active', prompt: 'Exercise the active guardrail hook.' }],
+  });
+  const now = new Date().toISOString();
+  const updated: Task = {
+    ...task,
+    craftbook: {
+      ...task.craftbook,
+      id: input.craftbookId,
+      name: input.craftbookName,
+      hooks: [
+        {
+          phase: 'PreToolUse',
+          matcher: input.matcher,
+          script: { name: input.scriptName, scope: 'craftbook' },
+          label: `${input.craftbookId} integration hook`,
+        },
+      ],
+      scripts: { [input.scriptName]: input.source },
+      updatedAt: now,
+    },
+    updatedAt: now,
+  };
+  await store.writeTask(updated);
+  return updated;
+}
+
+async function waitForToolPermissionQuestion(timeoutMs = 5_000): Promise<Question> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const question = (await store.listProjectQuestions('default')).find(
+      (candidate) => candidate.intent?.kind === 'tool-permission' && !candidate.answer,
+    );
+    if (question) return question;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('timed out waiting for the Careful hook permission question');
+}
 
 beforeEach(async () => {
   // Boot a live service because the MCP tools call back into /api/...
@@ -61,6 +184,7 @@ beforeEach(async () => {
     providers: [['copilot', mock]],
     catalog: svc.context.catalog,
     secrets: svc.context.secrets,
+    history: svc.context.history,
   });
   await store.createGezel({ name: 'Ada', role: 'Developer' });
   // These tests exercise bridge plumbing — that a scripted tool call
@@ -80,6 +204,123 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true }).catch(() => {});
   delete process.env.GEZEL_MOCK_PROVIDER;
 });
+
+describe.runIf(process.platform === 'darwin')(
+  'ChatManager + MCP — inline craftbook guardrail hooks',
+  () => {
+    it('routes Careful required inputs through ScriptRunner and denies a declined delete', async () => {
+      manager.setScriptRunner(svc.context.scriptRunner);
+      await store.writeProjectWorkspaceFile('default', 'protected.txt', 'keep me\n');
+      const task = await installInlineHookTask({
+        craftbookId: 'careful-mode',
+        craftbookName: 'Careful Mode',
+        matcher: '^delete_path$',
+        scriptName: 'check-careful',
+        source: CAREFUL_HOOK_SOURCE,
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        taskRef: task.ref,
+        stepId: task.activeStepId,
+      });
+
+      mock.scriptToolCalls([{ name: 'delete_path', arguments: { path: 'protected.txt' } }]);
+      mock.script('The delete was denied.');
+      const send = manager.send(session.id, 'Delete protected.txt.');
+
+      const question = await waitForToolPermissionQuestion();
+      expect(question.intent).toMatchObject({
+        kind: 'tool-permission',
+        toolName: 'delete_path',
+      });
+      expect(question.prompt).toContain('careful integration: approve protected delete');
+      await store.writeQuestion({
+        ...question,
+        answer: { selectedChoices: [1], at: new Date().toISOString() },
+      });
+      await send;
+
+      await expect(store.readProjectWorkspaceFile('default', 'protected.txt')).resolves.toBe(
+        'keep me\n',
+      );
+      expect(mock.toolCallOutputs.find(({ name }) => name === 'delete_path')?.output).toContain(
+        'careful integration: approve protected delete',
+      );
+      const persisted = await store.getSession('ada', session.id);
+      const reply = persisted?.messages.find(({ content }) => content === 'The delete was denied.');
+      expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'delete_path', success: false });
+
+      const gated = await svc.context.history.listEvents({
+        projectId: 'default',
+        kinds: ['tool.gated'],
+      });
+      expect(gated).toEqual([
+        expect.objectContaining({
+          details: expect.objectContaining({
+            craftbookId: 'careful-mode',
+            tool: 'delete_path',
+            decision: 'ask',
+          }),
+        }),
+      ]);
+    }, 30_000);
+
+    it('routes Freeze required inputs through ScriptRunner and denies an outside write', async () => {
+      manager.setScriptRunner(svc.context.scriptRunner);
+      await store.writeProjectWorkspaceFile('default', '.gezel/freeze.json', '{"dir":"safe"}\n');
+      await store.writeProjectWorkspaceFile('default', 'outside.txt', 'original\n');
+      const task = await installInlineHookTask({
+        craftbookId: 'freeze-scope',
+        craftbookName: 'Freeze Scope',
+        matcher: '^write_file$',
+        scriptName: 'check-freeze',
+        source: FREEZE_HOOK_SOURCE,
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        taskRef: task.ref,
+        stepId: task.activeStepId,
+      });
+
+      mock.scriptToolCalls([
+        {
+          name: 'write_file',
+          arguments: { path: 'outside.txt', content: 'changed\n' },
+        },
+      ]);
+      mock.script('The outside write was denied.');
+      await manager.send(session.id, 'Overwrite outside.txt.');
+
+      await expect(store.readProjectWorkspaceFile('default', 'outside.txt')).resolves.toBe(
+        'original\n',
+      );
+      expect(mock.toolCallOutputs.find(({ name }) => name === 'write_file')?.output).toContain(
+        'freeze integration: outside write denied',
+      );
+      const persisted = await store.getSession('ada', session.id);
+      const reply = persisted?.messages.find(
+        ({ content }) => content === 'The outside write was denied.',
+      );
+      expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'write_file', success: false });
+
+      const gated = await svc.context.history.listEvents({
+        projectId: 'default',
+        kinds: ['tool.gated'],
+      });
+      expect(gated).toEqual([
+        expect.objectContaining({
+          details: expect.objectContaining({
+            craftbookId: 'freeze-scope',
+            tool: 'write_file',
+            decision: 'deny',
+          }),
+        }),
+      ]);
+    }, 30_000);
+  },
+);
 
 describe('ChatManager + MCP — tool calls fire through the bridge', () => {
   it('executes a scripted write_document tool call during send()', async () => {
@@ -185,6 +426,34 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       'write_document',
       'list_documents',
     ]);
+  }, 30_000);
+
+  it('persists every successful path returned by read_files', async () => {
+    await Promise.all([
+      store.writeProjectWorkspaceFile('default', 'src/alpha.txt', 'alpha\n'),
+      store.writeProjectWorkspaceFile('default', 'src/beta.txt', 'beta\n'),
+    ]);
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptToolCalls([
+      {
+        name: 'read_files',
+        arguments: { paths: ['src/alpha.txt', 'src/beta.txt'] },
+      },
+    ]);
+    mock.script('Compared both files.');
+
+    await manager.send(session.id, 'compare the two files');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsg = disk?.messages.find(
+      (message) => message.content === 'Compared both files.',
+    );
+    expect(assistantMsg?.toolCalls?.[0]).toMatchObject({
+      name: 'read_files',
+      path: 'src/alpha.txt',
+      paths: ['src/alpha.txt', 'src/beta.txt'],
+      success: true,
+    });
   }, 30_000);
 
   it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {
@@ -368,6 +637,22 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
   }, 30_000);
 
   it('continues an untasked PowerPoint request from suggest_craftbook through invoke_craftbook', async () => {
+    // This test owns the suggest -> invoke conversation contract, not the
+    // package installer. Seed an exact roster-only dependency so invoking
+    // the PowerPoint craftbook cannot turn into a live registry fetch.
+    const docblocks = await svc.context.catalog.get('toolset', 'docblocks');
+    if (!docblocks || docblocks.manifest.kind !== 'toolset') {
+      throw new Error('DocBlocks catalog fixture missing');
+    }
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+      {
+        toolsetId: 'docblocks',
+        sourceId: docblocks.sourceId,
+        version: docblocks.manifest.version,
+        installedAt: '2026-08-10T00:00:00.000Z',
+        runtime: docblocks.manifest.runtime,
+      },
+    ]);
     const session = await manager.createSession({ gezelId: 'ada' });
 
     mock.scriptToolCalls([

@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   chooseOutsideInSource,
   importOutsideInDocument,
+  isOutsideInMarkdownEditingEnabled,
   renderOutsideInDocument,
   resolveOutsideInLayout,
+  withOutsideInMarkdownEditing,
 } from './outside-in.js';
 
 describe('outside-in project documents', () => {
@@ -15,6 +17,7 @@ describe('outside-in project documents', () => {
       format: 'pptx',
       companionDirectory: 'decks/Tucson_files',
       markdownPath: 'decks/Tucson_files/tucson.md',
+      backupPath: 'decks/Tucson_files/.original/original.pptx',
     });
     expect(chooseOutsideInSource(layout!, ['decks/Tucson_files/hand-authored.md'])).toBe(
       'decks/Tucson_files/hand-authored.md',
@@ -29,9 +32,10 @@ describe('outside-in project documents', () => {
     );
     expect(imported.markdown).toContain('squisq-output: ../battle-of-britain.html');
     expect(imported.markdown).toContain('# Battle of Britain');
+    expect(isOutsideInMarkdownEditingEnabled(imported.markdown)).toBe(false);
 
     const rendered = await renderOutsideInDocument(
-      `${imported.markdown}\n\n![Map](map.png)\n`,
+      withOutsideInMarkdownEditing(`${imported.markdown}\n\n![Map](map.png)\n`, layout),
       layout,
       new MemoryContentContainer(),
       '../_squisq/squisq-player.js',

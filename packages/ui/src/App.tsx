@@ -650,10 +650,10 @@ function FullApp() {
                 : 'nav app-nav-questions app-header-questions'
             }
             onClick={() => setQuestionsOpen((o) => !o)}
-            title={`${pendingQuestionCount} pending question${pendingQuestionCount === 1 ? '' : 's'}`}
+            title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
             aria-expanded={questionsOpen}
           >
-            Questions
+            Updates
             <span className="app-nav-badge">{pendingQuestionCount}</span>
             <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
           </button>
@@ -698,7 +698,7 @@ function FullApp() {
             type="button"
             className="app-questions-scrim"
             onClick={() => setQuestionsOpen(false)}
-            aria-label="Close questions panel"
+            aria-label="Close updates panel"
           />
           {/* Native <dialog open> satisfies biome's useSemanticElements
              rule (beats <div role="dialog">). `open` (not `showModal`)

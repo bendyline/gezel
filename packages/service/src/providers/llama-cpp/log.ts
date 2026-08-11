@@ -4,6 +4,63 @@ import { join } from 'node:path';
 import { redactCredentials } from '@bendyline/gezel';
 import type { NativeEngineExitSnapshot } from '../native/supervisor.js';
 
+const LLAMA_PROMPT_PROGRESS =
+  /\bslot print_timing:.*?\btask\s*(\d+)\s*\|.*?\bprompt processing(?:\s+progress)?\b.*?\bn_tokens\s*=\s*(\d+).*?\bprogress\s*=\s*([\d.]+)/;
+
+/**
+ * Suppress a native llama.cpp busy-loop without hiding real progress.
+ *
+ * Some engine builds can emit the same prompt-progress state tens of
+ * thousands of times per second (the uptime prefix changes, but task, token
+ * count, and progress do not). Logging every repaint can fill gigabytes in a
+ * few minutes. Distinct progress states still pass immediately; a stuck state
+ * is sampled periodically and gets an explicit suppression summary.
+ */
+export class LlamaProgressLogThrottle {
+  private lastSignature: string | null = null;
+  private lastEmittedAt = 0;
+  private suppressed = 0;
+
+  constructor(
+    private readonly intervalMs = 5_000,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  accept(line: string): string[] {
+    const match = line.match(LLAMA_PROMPT_PROGRESS);
+    if (!match) {
+      const summary = this.takeSummary();
+      this.lastSignature = null;
+      return summary ? [summary, line] : [line];
+    }
+
+    const signature = `${match[1]}:${match[2]}:${match[3]}`;
+    const now = this.now();
+    if (signature !== this.lastSignature) {
+      const summary = this.takeSummary();
+      this.lastSignature = signature;
+      this.lastEmittedAt = now;
+      return summary ? [summary, line] : [line];
+    }
+
+    if (now - this.lastEmittedAt < this.intervalMs) {
+      this.suppressed += 1;
+      return [];
+    }
+
+    const summary = this.takeSummary();
+    this.lastEmittedAt = now;
+    return summary ? [summary, line] : [line];
+  }
+
+  private takeSummary(): string | null {
+    if (this.suppressed === 0) return null;
+    const count = this.suppressed;
+    this.suppressed = 0;
+    return `[llama-server] suppressed ${count} duplicate prompt-progress log lines with no token/progress change`;
+  }
+}
+
 /**
  * Rolling append-only log for llama-server stdout/stderr. Mirrors the
  * per-day pattern in packages/app/src/supervisor/log-rotator.ts but

@@ -28,6 +28,28 @@ export type LicenseLookup =
   | { kind: 'resolved'; spdx: string; source: 'github' | 'npm-fallback' | 'override' }
   | { kind: 'unknown'; reason: string };
 
+/**
+ * Outcomes that describe the *moment* rather than the repository —
+ * rate limiting, upstream 5xx, a dropped connection.
+ *
+ * These must never reach the cache. A cached transient failure is
+ * indistinguishable from "this repo has no discoverable license", so
+ * it silently excludes a perfectly good entry from the catalog for the
+ * full 30-day TTL, and every re-run reproduces the exclusion from disk
+ * without making a request that could correct it. One rate-limited
+ * window poisoned 530 entries this way, all of which resolve 200 with
+ * a real license on a live request.
+ */
+function isTransientFailure(result: LicenseLookup): boolean {
+  if (result.kind !== 'unknown') return false;
+  return (
+    result.reason.startsWith('github 403') ||
+    result.reason.startsWith('github 5') ||
+    result.reason.startsWith('github error 5') ||
+    result.reason.startsWith('github fetch failed')
+  );
+}
+
 export interface LicenseResolverOptions {
   cacheDir?: string;
   /** GitHub PAT — required for any meaningful volume (60/hr unauth limit). */
@@ -92,7 +114,7 @@ export class LicenseResolver {
         result = { kind: 'unknown', reason: `github fetch failed: ${(err as Error).message}` };
       }
     }
-    await this.writeCache(key, result);
+    if (!isTransientFailure(result)) await this.writeCache(key, result);
     return result;
   }
 

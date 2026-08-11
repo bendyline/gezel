@@ -18,7 +18,10 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { type ZodRawShape, type ZodTypeAny, z } from 'zod';
+import { ExecutionToolOutputSchema, errorResult, okResult } from './tool-contracts.js';
+import { normalizeToolNameSpelling } from './tool-inventory.js';
 
 function warn(message: string): void {
   process.stderr.write(`gezel-mcp script-tools: ${message}\n`);
@@ -110,10 +113,7 @@ export function jsonSchemaToZodShape(inputs: Record<string, unknown> | undefined
 }
 
 /** The `run_script` result rendering, shared with the named tool handlers. */
-export function formatScriptRunResult(res: RunScriptResponse): {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: true;
-} {
+export function formatScriptRunResult(res: RunScriptResponse): CallToolResult {
   const header = `run ${res.runId} — status: ${res.status}${
     res.error ? ` — error: ${res.error}` : ''
   }`;
@@ -124,10 +124,21 @@ export function formatScriptRunResult(res: RunScriptResponse): {
     : '';
   const outputBlock =
     res.output === undefined ? '' : `\noutput:\n${JSON.stringify(res.output, null, 2)}`;
-  return {
-    content: [{ type: 'text' as const, text: `${header}${outputBlock}${callsSummary}` }],
-    ...(res.status === 'error' ? { isError: true as const } : {}),
-  };
+  const text = `${header}${outputBlock}${callsSummary}`;
+  if (res.status === 'error') return errorResult(text);
+  return okResult(
+    ExecutionToolOutputSchema,
+    {
+      summary: header,
+      state: res.status === 'running' ? 'running' : 'completed',
+      ok: res.status === 'ok',
+      runId: res.runId,
+      calls: res.callsSummary,
+      ...(res.output !== undefined ? { output: res.output } : {}),
+      ...(res.error ? { error: res.error } : {}),
+    },
+    { text },
+  );
 }
 
 /**
@@ -141,9 +152,10 @@ export function registerScriptTools(
   deps: { api: GezelClient; projectId: string; reservedNames: ReadonlySet<string> },
 ): string[] {
   const registered: string[] = [];
+  const normalizedReservedNames = new Set([...deps.reservedNames].map(normalizeToolNameSpelling));
   for (const spec of specs) {
-    if (deps.reservedNames.has(spec.name)) {
-      warn(`skipping tool '${spec.name}': name is reserved by a builtin tool`);
+    if (normalizedReservedNames.has(normalizeToolNameSpelling(spec.name))) {
+      warn(`skipping tool '${spec.name}': spelling is reserved by the built-in tool surface`);
       continue;
     }
     server.tool(spec.name, spec.description, jsonSchemaToZodShape(spec.inputs), async (args) => {
@@ -155,10 +167,7 @@ export function registerScriptTools(
         return formatScriptRunResult(res);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text' as const, text: `${spec.name} failed: ${msg}` }],
-          isError: true,
-        };
+        return errorResult(`${spec.name} failed: ${msg}`);
       }
     });
     registered.push(spec.name);

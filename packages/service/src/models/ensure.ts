@@ -8,7 +8,7 @@ import type { MlxModelManager } from '../providers/mlx/index.js';
  * not yet wired — `/api/ollama/pull` is the current path; deferred to a
  * later phase.
  */
-export type EnsureBackend = 'llama-cpp' | 'mlx';
+export type EnsureBackend = 'llama-cpp' | 'mlx' | 'ds4';
 
 /**
  * One event from an in-flight install job. The shape is a
@@ -91,6 +91,7 @@ export class KnownEnsureError extends Error {
 
 export interface CreateEnsureModelOptions {
   llamaCpp: LlamaCppModelManager;
+  ds4: LlamaCppModelManager;
   mlx: MlxModelManager;
   catalog: CatalogService;
   /**
@@ -133,7 +134,7 @@ export function parseQualifiedModelId(
   const backendRaw = trimmed.slice(0, idx);
   const catalogId = trimmed.slice(idx + 1).trim();
   if (!catalogId) return null;
-  if (backendRaw !== 'llama-cpp' && backendRaw !== 'mlx') return null;
+  if (backendRaw !== 'llama-cpp' && backendRaw !== 'mlx' && backendRaw !== 'ds4') return null;
   return { backend: backendRaw, catalogId };
 }
 
@@ -162,11 +163,9 @@ export async function createEnsureModelOrchestrator(
   }
 
   async function isInstalled(backend: EnsureBackend, catalogId: string): Promise<boolean> {
-    if (backend === 'llama-cpp') {
-      const model = await opts.llamaCpp.resolveModel(catalogId).catch(() => null);
-      return model !== null;
-    }
-    const model = await opts.mlx.resolveModel(catalogId).catch(() => null);
+    const manager =
+      backend === 'llama-cpp' ? opts.llamaCpp : backend === 'ds4' ? opts.ds4 : opts.mlx;
+    const model = await manager.resolveModel(catalogId).catch(() => null);
     return model !== null;
   }
 
@@ -196,8 +195,9 @@ export async function createEnsureModelOrchestrator(
       // Host owns its own errors; a throw here must not abort the job.
     }
 
-    const iter =
-      backend === 'llama-cpp' ? opts.llamaCpp.install(catalogId) : opts.mlx.install(catalogId);
+    const manager =
+      backend === 'llama-cpp' ? opts.llamaCpp : backend === 'ds4' ? opts.ds4 : opts.mlx;
+    const iter = manager.install(catalogId);
 
     // Drive the install loop in the background. Subscribers get every
     // event via `emit`; the job's terminal status is set on the last
@@ -270,16 +270,21 @@ export async function createEnsureModelOrchestrator(
           `chat-model "${catalogId}" is not in the catalog`,
         );
       }
-      if (backend === 'llama-cpp' && !detail.manifest.llamaCpp) {
+      const source =
+        backend === 'llama-cpp'
+          ? detail.manifest.llamaCpp
+          : backend === 'ds4'
+            ? detail.manifest.ds4
+            : detail.manifest.mlx;
+      if (!source) {
+        const alternatives = [
+          detail.manifest.llamaCpp ? `llama-cpp:${catalogId}` : null,
+          detail.manifest.mlx ? `mlx:${catalogId}` : null,
+          detail.manifest.ds4 ? `ds4:${catalogId}` : null,
+        ].filter((id): id is string => Boolean(id));
         throw new KnownEnsureError(
           'no_source_for_backend',
-          `chat-model "${catalogId}" has no llama-cpp source — try "mlx:${catalogId}"`,
-        );
-      }
-      if (backend === 'mlx' && !detail.manifest.mlx) {
-        throw new KnownEnsureError(
-          'no_source_for_backend',
-          `chat-model "${catalogId}" has no mlx source — try "llama-cpp:${catalogId}"`,
+          `chat-model "${catalogId}" has no ${backend} source${alternatives.length > 0 ? ` — try ${alternatives.map((id) => `"${id}"`).join(' or ')}` : ''}`,
         );
       }
 

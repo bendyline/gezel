@@ -28,6 +28,7 @@ export function evalSpecFromTestSpec(
       ...(spec.setup.about ? { about: spec.setup.about } : {}),
       ...(spec.setup.missionObjectives ? { missionObjectives: spec.setup.missionObjectives } : {}),
       files: spec.setup.files,
+      ...(spec.setup.craftbookParams ? { craftbookParams: spec.setup.craftbookParams } : {}),
       ...(legacySimulators.length > 0 ? { simulators: legacySimulators } : {}),
       ...(spec.setup.worker ? { worker: spec.setup.worker } : {}),
     },
@@ -67,6 +68,10 @@ export function evalSpecFromTestSpec(
           }
         : {}),
       ...(spec.success.mocks ? { mocks: spec.success.mocks } : {}),
+      ...(spec.success.history ? { history: spec.success.history } : {}),
+      ...(spec.success.unchangedFixtures
+        ? { unchangedFixtures: spec.success.unchangedFixtures }
+        : {}),
     },
     coverage: override?.coverage ?? {
       status: 'implemented',

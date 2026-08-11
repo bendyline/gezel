@@ -126,6 +126,36 @@ export async function sampleDarwinGezelProcessMemory(opts: {
 }
 
 /**
+ * Physical footprint for ONE process, or null when it can't be measured.
+ *
+ * The per-engine counterpart of {@link sampleDarwinGezelProcessMemory}, for
+ * "how much is this engine holding". RSS is the wrong answer on macOS and
+ * wrong by a lot: an MLX 27B showed 30 GB resident while its footprint was
+ * ~103 GB, because Metal's unified-memory allocations don't land in RSS.
+ * Callers keep an RSS fallback for hosts where `footprint` is unavailable.
+ */
+export async function sampleDarwinProcessFootprintBytes(opts: {
+  pid: number;
+  platform?: NodeJS.Platform;
+  run?: ProcessMemoryCommandRunner;
+}): Promise<number | null> {
+  if ((opts.platform ?? process.platform) !== 'darwin') return null;
+  const run = opts.run ?? runCommand;
+  try {
+    const stdout = await run('/usr/bin/footprint', [
+      '--noCategories',
+      '--format',
+      'bytes',
+      '--pid',
+      String(opts.pid),
+    ]);
+    return parseFootprintBytes(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The UI polls once a second; process discovery + footprint are cheap but not
  * free. Coalesce concurrent requests and refresh at a human-live cadence.
  */

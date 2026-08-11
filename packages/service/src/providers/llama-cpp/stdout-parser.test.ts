@@ -69,7 +69,7 @@ describe('classifyStartupLine', () => {
       '[llama-server] load_tensors:    Metal_Mapped model buffer size =  2356.44 MiB',
     );
     expect(phase?.phase).toBe('loading_model');
-    expect(phase?.detail).toBe('Loading model weights (2356.44 MiB)');
+    expect(phase?.detail).toBe('Loading model weights (2.3 GB)');
     // Also exposes the allocation in bytes so the provider can
     // accumulate a RAM total — see `onStdoutLine` in provider.ts.
     expect(phase?.bufferBytes).toBe(Math.round(2356.44 * 1024 * 1024));
@@ -81,7 +81,7 @@ describe('classifyStartupLine', () => {
     );
     expect(phase?.phase).toBe('loading_model');
     expect(phase?.detail).toContain('KV cache');
-    expect(phase?.detail).toContain('256.00 MiB');
+    expect(phase?.detail).toContain('256 MB');
     expect(phase?.bufferBytes).toBe(256 * 1024 * 1024);
   });
 

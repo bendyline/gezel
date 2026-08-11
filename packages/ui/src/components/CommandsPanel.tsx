@@ -25,15 +25,28 @@ import { osCommandGroups } from './os-commands.js';
  * - `scripts` — "what can I run in THIS repo?" (npm scripts, scripts/, launches)
  * - `tasks` — "what work can a gezel pick up?" (craftbooks, workspace skills)
  *
- * `all` keeps the original single-list behaviour and is what the chat rail's
- * Commands tab uses.
+ * The chat rail asks a narrower fourth question:
+ *
+ * - `skills` — "what does THIS workspace teach a gezel?" (its own skills,
+ *   plus the bash→JS import approvals that ride with them). Deliberately
+ *   no craftbooks: those are launched from the chat's "+" button, which
+ *   creates a real task rather than staging a terminal command.
+ *
+ * `all` is the union of every slice. No product surface renders it today —
+ * it survives as the default and as a render-order regression test.
  */
-export type CommandsPanelSection = 'commands' | 'scripts' | 'tasks' | 'all';
+export type CommandsPanelSection = 'commands' | 'scripts' | 'tasks' | 'skills' | 'all';
 
 interface Props {
   projectId: string;
   /** Slice of the panel to render. Defaults to the full list. */
   section?: CommandsPanelSection;
+  /**
+   * Reports whether the selected slice has real workspace content. Used by
+   * the project chat to remove its Skills rail after the last skill/import
+   * disappears. Loading and filter text do not affect availability.
+   */
+  onAvailabilityChange?: (available: boolean) => void;
   /**
    * Stage a command string into the project-chat terminal for the user
    * to review + run (the craftbook command launcher). Absent → the
@@ -89,12 +102,20 @@ const GROUP_ORDER: Array<{
  * `section` only fetches the sources that section renders, so the
  * terminal's three toolbar popovers don't each pay for all of them.
  */
-export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Props) {
+export function CommandsPanel({
+  projectId,
+  section = 'all',
+  onAvailabilityChange,
+  onStageCommand,
+}: Props) {
   const showCommands = section === 'all' || section === 'commands';
   const showScripts = section === 'all' || section === 'scripts';
-  const showTasks = section === 'all' || section === 'tasks';
+  const showCraftbooks = section === 'all' || section === 'tasks';
+  // Skills + their pending imports ride with craftbooks in the `tasks`
+  // slice, and stand alone in `skills`.
+  const showSkills = showCraftbooks || section === 'skills';
   // The workspace index backs both the scripts groups and the machine-tools
-  // group; only the pure-tasks panel can skip it entirely.
+  // group; the tasks- and skills-scoped panels skip it entirely.
   const needsIndex = showCommands || showScripts;
   const [index, setIndex] = useState<WorkspaceCommandIndex | null>(null);
   const [craftbooks, setCraftbooks] = useState<CatalogItemSummary[]>([]);
@@ -112,8 +133,14 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
   // False until the first craftbook fetch settles, so a tasks-scoped panel can
   // say "looking…" instead of flashing its empty state.
   const [tasksLoaded, setTasksLoaded] = useState(false);
+  // The same for a skills-scoped panel, which never fetches craftbooks and so
+  // can't take its cue from `tasksLoaded`.
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [skillsLoadSucceeded, setSkillsLoadSucceeded] = useState(false);
   // Bash→JS translations awaiting review before they're written to disk.
   const [pendingImports, setPendingImports] = useState<PendingImportItem[]>([]);
+  const [pendingImportsLoaded, setPendingImportsLoaded] = useState(false);
+  const [pendingImportsLoadSucceeded, setPendingImportsLoadSucceeded] = useState(false);
   const [filter, setFilter] = useState('');
   // The craftbook whose param form is currently open (null = none).
   const [paramTarget, setParamTarget] = useState<CraftbookTemplateManifest | null>(null);
@@ -158,13 +185,17 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
 
   // Workspace skills (.claude/skills and friends). Polled alongside the
   // craftbooks rather than piggy-backing on the index refresh, so a panel
-  // scoped to `tasks` — which never fetches the index — still lists them.
+  // scoped to `tasks` or `skills` — neither of which fetches the index —
+  // still lists them.
   const loadSkills = useCallback(async () => {
     try {
       const skillsRes = await api.getProjectSkills(projectId);
       setSkills(skillsRes.skills);
+      setSkillsLoadSucceeded(true);
     } catch {
       /* skills index is optional — silently degrade */
+    } finally {
+      setSkillsLoaded(true);
     }
   }, [projectId]);
 
@@ -235,10 +266,35 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
     try {
       const res = await api.getProjectImportsPending(projectId);
       setPendingImports(res.items);
+      setPendingImportsLoadSucceeded(true);
     } catch {
       /* optional — pre-existing projects may have no .gezel/ yet */
+    } finally {
+      setPendingImportsLoaded(true);
     }
   }, [projectId]);
+
+  useEffect(() => {
+    if (
+      section !== 'skills' ||
+      !skillsLoaded ||
+      !pendingImportsLoaded ||
+      !skillsLoadSucceeded ||
+      !pendingImportsLoadSucceeded
+    ) {
+      return;
+    }
+    onAvailabilityChange?.(skills.length > 0 || pendingImports.length > 0);
+  }, [
+    section,
+    skillsLoaded,
+    pendingImportsLoaded,
+    skillsLoadSucceeded,
+    pendingImportsLoadSucceeded,
+    skills.length,
+    pendingImports.length,
+    onAvailabilityChange,
+  ]);
 
   const reviewImport = useCallback(
     async (skillSource: string, action: 'approve' | 'reject') => {
@@ -288,10 +344,12 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
-      if (showTasks && !cancelled) {
+      if (showCraftbooks && !cancelled) {
         // Re-check craftbook applicability (cheap; reflects branch/GitHub
         // changes that don't trigger a workspace re-scan).
         void loadCraftbooks();
+      }
+      if (showSkills && !cancelled) {
         void loadSkills();
         // Surface any new bash→JS import proposals awaiting review.
         void loadPendingImports();
@@ -323,7 +381,8 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
     projectId,
     scannedAt,
     needsIndex,
-    showTasks,
+    showCraftbooks,
+    showSkills,
     loadIndex,
     loadCraftbooks,
     loadSkills,
@@ -526,7 +585,12 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
   const restBooks = filteredCraftbooks.filter(
     (cb) => !suggestedIds.has((cb.manifest as { id: string }).id),
   );
-  const useSuggestedLayout = !isSearching && projectType !== null && suggestedBooks.length > 0;
+  // Gated on `showCraftbooks` so the suggested/"show all" branch can never
+  // leak craftbooks into a section that doesn't render them — today it only
+  // stays empty because the data isn't fetched, which a future fetch change
+  // would silently undo.
+  const useSuggestedLayout =
+    showCraftbooks && !isSearching && projectType !== null && suggestedBooks.length > 0;
 
   // Per-section tallies for the toolbar's right-hand count. `all` keeps the
   // original "N commands" reading of the whole index.
@@ -541,12 +605,15 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
         ? [scriptCount, 'script']
         : section === 'tasks'
           ? [taskCount, 'task']
-          : [totalCount, 'command'];
+          : section === 'skills'
+            ? [skills.length, 'skill']
+            : [totalCount, 'command'];
 
   // Only the index-backed sections have a "still scanning" state; the primer
   // is static and the task sources land in one round-trip.
   const indexBusy = needsIndex && (state === 'indexing' || (state === 'never' && index === null));
-  const showLoading = section === 'tasks' ? !tasksLoaded : indexBusy;
+  const showLoading =
+    section === 'tasks' ? !tasksLoaded : section === 'skills' ? !skillsLoaded : indexBusy;
   const hasAnything =
     grouped.length > 0 ||
     primerGroups.length > 0 ||
@@ -563,7 +630,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter…"
-          aria-label="Filter commands"
+          aria-label={section === 'skills' ? 'Filter skills' : 'Filter commands'}
         />
         <span className="commands-panel-state muted small" title={scannedAt ?? ''}>
           {needsIndex && state === 'disabled'
@@ -590,6 +657,11 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
           <p className="commands-panel-empty muted small">
             Workspace indexing is off for this project.
           </p>
+        ) : section === 'skills' ? (
+          <p className="commands-panel-empty muted small">
+            No workspace skills here yet — drop one under <code>.claude/skills/</code>,{' '}
+            <code>.gstack/skills/</code>, or <code>agents/skills/</code>.
+          </p>
         ) : section === 'tasks' ? (
           <p className="commands-panel-empty muted small">
             No tasks are available for this project yet. Craftbooks show up here once one applies to
@@ -604,7 +676,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
         ))}
       {hasAnything && (
         <div className="commands-panel-groups">
-          {showTasks && pendingImports.length > 0 && (
+          {showSkills && pendingImports.length > 0 && (
             <section className="commands-panel-group">
               <h4 className="commands-panel-group-title muted small">
                 Imports to review ({pendingImports.length})
@@ -696,7 +768,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
               )}
             </>
           ) : (
-            showTasks &&
+            showCraftbooks &&
             filteredCraftbooks.length > 0 && (
               <section className="commands-panel-group">
                 <h4 className="commands-panel-group-title muted small">Craftbooks</h4>
@@ -706,7 +778,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
               </section>
             )
           )}
-          {showTasks && filteredSkills.length > 0 && (
+          {showSkills && filteredSkills.length > 0 && (
             <section className="commands-panel-group">
               <h4 className="commands-panel-group-title muted small">Skills (workspace)</h4>
               <ul className="commands-panel-list">

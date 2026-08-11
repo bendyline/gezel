@@ -269,6 +269,7 @@ const IMMEDIATE_FILE_MODIFY_TOOLS: ReadonlySet<string> = new Set([
 ]);
 const SCENARIO_FILE_REPAIR_TOOLS: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -280,6 +281,7 @@ const SCENARIO_FILE_REPAIR_TOOLS: ReadonlySet<string> = new Set([
 ]);
 const DIRECT_FILE_WORK_TOOLS: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -300,7 +302,7 @@ const PROJECT_RETRIEVAL_HANDOFF_TOOLS: ReadonlySet<string> = new Set([
 const PROJECT_RETRIEVAL_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PROJECT_RETRIEVAL_HANDOFF_TOOLS,
   'search_code',
-  'search_files',
+  'grep_files',
   'find_symbol',
   'find_references',
   'map_repo',
@@ -1277,6 +1279,11 @@ function applySecurityPolicyGates(
   if (!policy) return next;
   if (!policy.allowScriptExecution) {
     for (const name of expandToolsetGroups(['code-execution'])) next.delete(name);
+    // Scripted Playwright is arbitrary user-authored Node execution even
+    // though it lives in the browser-automation group. Keep interactive
+    // browser tools available for local-preview policy exceptions, but hide
+    // this execution sink whenever scripts are disabled.
+    next.delete('run_playwright_script');
   }
   if (!policy.allowExternalServices) {
     for (const name of EXTERNAL_SERVICE_TOOLS) next.delete(name);

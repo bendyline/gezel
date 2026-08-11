@@ -1,5 +1,9 @@
 import { join } from 'node:path';
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  type GezelConfig,
+  createLogger,
+} from '@bendyline/gezel';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { Store } from '../../fs/store.js';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
@@ -85,6 +89,7 @@ export async function buildMlxProvider(opts: {
    * on the singleton path → full budget, committedOther = 0.
    */
   broker?: import('../native/capacity-broker.js').CapacityBroker;
+  arbiter?: import('../gpu-arbiter.js').GpuArbiter;
 }): Promise<MlxProvider> {
   const { config, affinity, store } = opts;
   const externalBaseUrl = opts.modelOverride
@@ -98,7 +103,12 @@ export async function buildMlxProvider(opts: {
   // context window, and KV dtype resolve — a memory-aware slot ceiling needs
   // all three. Sizing concurrency here (pre-resolve) from a model-blind default
   // alone is what let a 27B model open a width-4 engine gate and abort Metal.
-  const numCtx = config.mlxNumCtx;
+  // Per-model context override (Settings → Local models → Context size…)
+  // wins over the machine-wide mlxNumCtx cap for the model being launched.
+  const perModelCtxOverride = defaultModelId
+    ? config.modelContextOverrides?.[`mlx:${defaultModelId}`]
+    : undefined;
+  const numCtx = perModelCtxOverride ?? config.mlxNumCtx;
   const baseProviderOpts = {
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(concurrency ? { concurrency } : {}),
@@ -172,7 +182,13 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
-  const mlxContextFloor = minViableLocalContextTokens();
+  // A per-model override below the host floor is deliberate user intent —
+  // lower the floor to the override instead of silently raising the request
+  // back to 64K. The machine-wide mlxNumCtx keeps its historical semantics.
+  const mlxContextFloor =
+    perModelCtxOverride !== undefined
+      ? Math.min(minViableLocalContextTokens(), perModelCtxOverride)
+      : minViableLocalContextTokens();
   let effectiveNumCtx = resolveMlxEffectiveNumCtx({
     ...(modelCatalogInfo?.contextWindow
       ? { modelContextWindow: modelCatalogInfo.contextWindow }
@@ -309,6 +325,7 @@ export async function buildMlxProvider(opts: {
   // discount. An explicit `providerConcurrency.mlx` still wins verbatim
   // (documented opt-in to the risk), mirroring llama-cpp's configuredSlots.
   const {
+    computeCapacityBudget,
     defaultLocalEngineSlots,
     localEngineSlotCeiling,
     localEngineKvBudgetBytes,
@@ -336,15 +353,27 @@ export async function buildMlxProvider(opts: {
   const mlxExactPerSlotKvF16 = mlxGeometry
     ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
     : undefined;
-  const mlxSlotCeiling = localEngineSlotCeiling({
-    engine: 'mlx',
-    budgetBytes: mlxBudgetBytes,
-    weightsBytes: mlxWeightsBytes,
-    perTurnCtxTokens: effectiveNumCtx,
-    kvCacheType: mlxKvCacheType,
-    committedOtherBytes: mlxCommittedOther,
-    ...(mlxExactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: mlxExactPerSlotKvF16 } : {}),
-  });
+  // No readable geometry means no honest KV price: the weights-scaled
+  // heuristic under-prices a dense model's KV ~3x, and over-slotting MLX
+  // SIGABRTs the whole process rather than failing one request. Stay serial
+  // instead of guessing. (An inflated weights multiplier used to mask this
+  // by accident; now that the weights figure is the measured one, the guard
+  // has to be stated.) An explicit `providerConcurrency.mlx` still wins.
+  const mlxSlotCeiling =
+    mlxExactPerSlotKvF16 === undefined
+      ? 1
+      : localEngineSlotCeiling({
+          engine: 'mlx',
+          budgetBytes: mlxBudgetBytes,
+          sizingBudgetBytes: mlxBrokerSnap?.enforced
+            ? mlxBrokerSnap.pools.concurrencySizingBytes
+            : computeCapacityBudget().concurrencySizingBytes,
+          weightsBytes: mlxWeightsBytes,
+          perTurnCtxTokens: effectiveNumCtx,
+          kvCacheType: mlxKvCacheType,
+          committedOtherBytes: mlxCommittedOther,
+          exactPerSlotKvBytesF16: mlxExactPerSlotKvF16,
+        });
   const mlxRequestedSlots = concurrency ?? defaultLocalEngineSlots(mlxBudgetBytes);
   let mlxSlots = concurrency ?? Math.min(mlxRequestedSlots, mlxSlotCeiling);
   if (mlxSlots < mlxRequestedSlots) {
@@ -503,8 +532,7 @@ export async function buildMlxProvider(opts: {
   // resident, so the SIGKILL window between Stage 1 and Stage 2
   // can't lose them. MLX cold-start is ~1–3 min so the staged
   // approach is especially valuable here vs llama.cpp.
-  // Same 30-min default as llama-cpp — see `llamaIdleMs` note above.
-  const mlxIdleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
+  const mlxIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const mlxFreezeMs = Math.floor(mlxIdleMs / 2);
   // Python+MLX cold-start (PyTorch imports, MLX metal shaders JIT) is
   // slower than llama.cpp's Metal compile. 300s headroom covers the
@@ -527,6 +555,8 @@ export async function buildMlxProvider(opts: {
     startupTimeoutMs: mlxStartupTimeoutMs,
     idleTimeoutMs: mlxIdleMs,
     freezeTimeoutMs: mlxFreezeMs,
+    isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
+    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
     onFreeze: async () => {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },
@@ -581,6 +611,20 @@ export async function buildMlxProvider(opts: {
           // committedOther = 0 → full budget.
           '--gpu-memory-limit-mb',
           String(Math.max(0, Math.floor((mlxBudgetBytes - mlxCommittedOther) / (1024 * 1024)))),
+          // What this engine may PIN, as distinct from what it may use. Wiring
+          // is not reclaimable by the OS, so the ceiling above is the wrong
+          // number to pass Metal: a 27B on a 128 GB Mac wired its whole 96 GiB
+          // share, held ~103 GB against a ~45 GB working set, and drove the
+          // machine to 155 MB free. The planned resident set (weights + the
+          // KV its slots will actually hold) is what steady-state inference
+          // needs kept out of the pager. Omitted when geometry was unreadable
+          // — the server then leaves the wired limit alone rather than guessing.
+          ...(mlxPlannedReservationBytes !== undefined
+            ? [
+                '--wired-limit-mb',
+                String(Math.max(1, Math.floor(mlxPlannedReservationBytes / (1024 * 1024)))),
+              ]
+            : []),
           ...kvQuantArgs,
         ],
         env: {

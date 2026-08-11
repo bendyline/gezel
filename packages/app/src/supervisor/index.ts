@@ -1716,6 +1716,9 @@ async function spawnChild(opts: ConnectOptions): Promise<{
     GEZEL_HOME: opts.home,
     GEZEL_SERVICE_ROLE: 'user',
   };
+  if (process.env.GEZEL_USE_MACHINE_ENGINE !== '1') {
+    env.GEZEL_DISABLE_MACHINE_ENGINE = '1';
+  }
   if (opts.uiDir) env.GEZEL_UI_DIR = opts.uiDir;
   const result = await discoverOrSpawn({
     daemonEntry,
@@ -1828,6 +1831,7 @@ async function startEmbeddedRaw(
       home?: string;
       preferCanonicalPort?: boolean;
       role?: 'user' | 'machine-engine' | 'legacy-full';
+      machineEngineDiscovery?: boolean;
       onRestartRequested?: (reason: string) => void;
     }) => Promise<{
       port: number;
@@ -1855,6 +1859,10 @@ async function startEmbeddedRaw(
     // fallback) so it has a stable base URL.
     preferCanonicalPort: true,
     role: 'user',
+    // Dev must exercise the provider code that `pnpm app` just built. The
+    // installed release broker is deliberately opt-in for compatibility and
+    // machine-boundary testing, not an implicit shadow runtime.
+    machineEngineDiscovery: opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1',
     onRestartRequested,
   });
   const scheme = running.cert ? 'https' : 'http';

@@ -16,14 +16,17 @@ import {
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import {
   type MarkdownDocument,
+  parseFrontmatter,
   parseMarkdown,
   setFrontmatterValues,
+  splitFrontmatterBlock,
   stringifyMarkdown,
 } from '@bendyline/squisq/markdown';
 import { type ContentContainer, MemoryContentContainer } from '@bendyline/squisq/storage';
 
 export const OUTSIDE_IN_FORMATS = ['html', 'docx', 'pdf', 'pptx', 'xlsx'] as const;
 export type OutsideInFormat = (typeof OUTSIDE_IN_FORMATS)[number];
+export const OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY = 'squisq-updatefrommarkdown';
 
 const FORMATS = new Set<string>(OUTSIDE_IN_FORMATS);
 
@@ -37,6 +40,9 @@ export interface OutsideInLayout {
   markdownFilename: string;
   markdownPath: string;
   relativeTargetPath: string;
+  backupDirectory: string;
+  backupFilename: string;
+  backupPath: string;
 }
 
 function normalizePath(path: string): string {
@@ -76,6 +82,8 @@ export function resolveOutsideInLayout(path: string): OutsideInLayout | null {
   const companionName = `${stem}_files`;
   const companionDirectory = join(parentDirectory, companionName);
   const markdownFilename = `${slug(stem)}.md`;
+  const backupDirectory = join(companionDirectory, '.original');
+  const backupFilename = `original.${format}`;
   return {
     targetPath,
     format: format as OutsideInFormat,
@@ -86,6 +94,9 @@ export function resolveOutsideInLayout(path: string): OutsideInLayout | null {
     markdownFilename,
     markdownPath: join(companionDirectory, markdownFilename),
     relativeTargetPath: `../${filename}`,
+    backupDirectory,
+    backupFilename,
+    backupPath: join(backupDirectory, backupFilename),
   };
 }
 
@@ -119,6 +130,30 @@ export function withOutsideInMetadata(markdown: string, layout: OutsideInLayout)
   });
 }
 
+function rawFrontmatter(source: string): string | null {
+  const block = splitFrontmatterBlock(source).frontmatter;
+  if (!block) return null;
+  const firstBreak = block.indexOf('\n');
+  if (firstBreak < 0) return null;
+  return block.slice(firstBreak + 1).replace(/\r?\n---(?:\r?\n)?$/, '');
+}
+
+export function isOutsideInMarkdownEditingEnabled(markdown: string): boolean {
+  const yaml = rawFrontmatter(markdown);
+  const frontmatter = yaml === null ? null : parseFrontmatter(yaml);
+  return frontmatter?.[OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY] === true;
+}
+
+export function withOutsideInMarkdownEditing(
+  markdown: string,
+  layout: OutsideInLayout,
+  enabled = true,
+): string {
+  return setFrontmatterValues(withOutsideInMetadata(markdown, layout), {
+    [OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY]: enabled,
+  });
+}
+
 function asArrayBuffer(data: ArrayBuffer | Uint8Array): ArrayBuffer {
   if (data instanceof ArrayBuffer) return data;
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
@@ -128,7 +163,7 @@ export async function importOutsideInDocument(
   data: ArrayBuffer | Uint8Array,
   layout: OutsideInLayout,
   options: ConvertOptions = {},
-): Promise<{ markdown: string; container: ContentContainer }> {
+): Promise<{ markdown: string; container: ContentContainer; warnings: string[] }> {
   const registry = options.registry ?? defaultRegistry();
   const definition = registry.get(layout.format);
   if (!definition || (!definition.importContainer && !definition.importDoc)) {
@@ -154,9 +189,41 @@ export async function importOutsideInDocument(
   }
   if (!document)
     throw new Error(`The ${layout.format.toUpperCase()} file has no editable content.`);
+  const warnings: string[] = [];
+  if (
+    (layout.format === 'docx' || layout.format === 'xlsx') &&
+    typeof document.frontmatter?.['squisq-theme'] !== 'string'
+  ) {
+    try {
+      const [{ inferThemeFromFile }, themeCodec] = await Promise.all([
+        import('@bendyline/squisq-formats/infer'),
+        import('@bendyline/squisq/doc'),
+      ]);
+      const inferred = await inferThemeFromFile(asArrayBuffer(data), {
+        format: layout.format,
+        nameHint: layout.stem,
+        signal: options.signal,
+      });
+      const payload = themeCodec.writeCustomThemesToFrontmatter([inferred.theme]);
+      if (payload) {
+        document.frontmatter = {
+          ...(document.frontmatter ?? {}),
+          [themeCodec.FRONTMATTER_CUSTOM_THEMES_KEY]: payload,
+          'squisq-theme': inferred.theme.id,
+        };
+      }
+      warnings.push(...inferred.warnings);
+    } catch (error: unknown) {
+      if (options.signal?.aborted) throw options.signal.reason ?? error;
+      warnings.push(
+        `The ${layout.format.toUpperCase()} content was imported, but its Office theme could not be retained: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   return {
     markdown: withOutsideInMetadata(stringifyMarkdown(document), layout),
     container,
+    warnings,
   };
 }
 
@@ -166,6 +233,11 @@ export async function renderOutsideInDocument(
   container: ContentContainer,
   playerScriptPath?: string,
 ): Promise<ConversionResult> {
+  if (!isOutsideInMarkdownEditingEnabled(markdown)) {
+    throw new Error(
+      `Outside-in editing is read-only until ${OUTSIDE_IN_UPDATE_FROM_MARKDOWN_KEY}: true is set.`,
+    );
+  }
   if (layout.format !== 'html') {
     return convert(
       { kind: 'markdown', markdown, container, baseName: layout.stem },

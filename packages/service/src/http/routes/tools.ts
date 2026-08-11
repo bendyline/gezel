@@ -12,9 +12,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import type { Dirent } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { readFile as fsReadFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile as fsReadFile, mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
@@ -46,15 +45,14 @@ import {
   ReadImageBase64RequestSchema,
   type ReadImageBase64Response,
   ReadSymbolRequestSchema,
+  ReadWorkspaceFilesRequestSchema,
   ResolveSecurityFindingRequestSchema,
   RunGitRequestSchema,
   type RunGitResponse,
   ScanFindingsRequestSchema,
   SearchCodeRequestSchema,
   SearchDocsRequestSchema,
-  type SearchFilesMatch,
   SearchFilesRequestSchema,
-  type SearchFilesResponse,
   SearchImagesRequestSchema,
   SecurityScanRequestSchema,
   TraceTaintRequestSchema,
@@ -75,13 +73,14 @@ import { WikipediaSearchProvider } from '../../providers/search/wikipedia.js';
 import { DEFAULT_ARCHIVE_LIMITS, guardZipArchive } from '../../safety/archive-guard.js';
 import { collectProviderSecretValues } from '../../secrets/registry.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
+import { isAllowedHermeticEvalFetchUrl } from '../../utils/eval-fetch-url.js';
 import { SsrfError, assertPublicUrl } from '../../utils/ssrf.js';
+import { WorkspaceGrepError, grepWorkspace } from '../../workspace/grep-files.js';
+import { readWorkspaceFiles } from '../../workspace/read-files.js';
 import type { ServiceContext } from '../context.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_FETCH_MAX_BYTES = 10 * 1024 * 1024;
-const MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_SEARCH_RESULTS_DEFAULT = 200;
 const MAX_DIFF_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_WEB_SEARCH_TIMEOUT_MS = 15_000;
@@ -97,6 +96,13 @@ class ArchiveValidationError extends Error {
 
 export function toolRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+
+  app.post('/:id/tools/read-files', async (c) => {
+    const id = c.req.param('id');
+    const body = ReadWorkspaceFilesRequestSchema.parse(await c.req.json());
+    const workspaceDir = await ctx.store.projectWorkspaceDir(id);
+    return c.json(await readWorkspaceFiles({ workspaceDir, ...body }));
+  });
 
   app.post('/:id/tools/fetch-url', async (c) => {
     const body = FetchUrlRequestSchema.parse(await c.req.json());
@@ -148,7 +154,9 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       let currentUrl = body.url;
       let res: Response | null = null;
       for (let redirects = 0; redirects <= 5; redirects++) {
-        await assertPublicUrl(currentUrl);
+        if (!isAllowedHermeticEvalFetchUrl(currentUrl)) {
+          await assertPublicUrl(currentUrl);
+        }
         res = await fetch(currentUrl, {
           method: body.method ?? 'GET',
           ...(body.headers ? { headers: body.headers } : {}),
@@ -333,65 +341,17 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = SearchFilesRequestSchema.parse(await c.req.json());
     const baseDir = await ctx.store.projectWorkspaceDir(id);
-    const startPath = safeJoin(baseDir, body.path ?? '');
-    if (!startPath) return c.json({ error: 'path traversal' }, 400);
-    const limit = body.maxResults ?? MAX_SEARCH_RESULTS_DEFAULT;
-    const rgAvailable = await commandExists('rg');
-    if (rgAvailable) {
-      const result = await runRipgrep({
-        pattern: body.pattern,
-        cwd: startPath,
-        caseInsensitive: body.caseInsensitive,
-        literal: body.literal,
-        limit,
-        ...(body.glob ? { glob: body.glob } : {}),
-      });
-      const response: SearchFilesResponse = {
-        matches: result.matches.map((m) => ({
-          ...m,
-          path: relative(baseDir, join(startPath, m.path)) || m.path,
-        })),
-        truncated: result.truncated,
-        engine: 'ripgrep',
-      };
-      return c.json(response);
-    }
-    const pattern = body.literal ? escapeRegExp(body.pattern) : body.pattern;
-    let regex: RegExp;
     try {
-      regex = new RegExp(pattern, body.caseInsensitive ? 'i' : '');
+      return c.json(await grepWorkspace({ workspaceDir: baseDir, ...body }));
     } catch (err) {
+      if (err instanceof WorkspaceGrepError) {
+        return c.json({ error: err.message, code: err.code }, err.status);
+      }
       return c.json(
-        { error: `invalid regex: ${err instanceof Error ? err.message : String(err)}` },
-        400,
+        { error: `grep failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
       );
     }
-    const matches: SearchFilesMatch[] = [];
-    const globRegex = body.glob ? globToRegExp(body.glob, body.caseInsensitive) : null;
-    let truncated = false;
-    outer: for await (const filePath of walkFiles(startPath)) {
-      const rel = relative(baseDir, filePath).split(sep).join('/');
-      if (globRegex && !globRegex.test(rel)) continue;
-      try {
-        const st = await stat(filePath);
-        if (st.size > MAX_SEARCH_FILE_BYTES) continue;
-        const content = await fsReadFile(filePath, 'utf8');
-        const lines = content.split(/\r?\n/);
-        for (let i = 0; i < lines.length; i += 1) {
-          if (regex.test(lines[i] ?? '')) {
-            matches.push({ path: rel, line: i + 1, text: (lines[i] ?? '').slice(0, 500) });
-            if (matches.length >= limit) {
-              truncated = true;
-              break outer;
-            }
-          }
-        }
-      } catch {
-        /* skip unreadable / binary */
-      }
-    }
-    const response: SearchFilesResponse = { matches, truncated, engine: 'javascript' };
-    return c.json(response);
   });
 
   app.post('/:id/tools/find-files', async (c) => {
@@ -726,49 +686,33 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = FindReferencesRequestSchema.parse(await c.req.json());
     const baseDir = await ctx.store.projectWorkspaceDir(id);
-    const limit = body.maxResults ?? MAX_SEARCH_RESULTS_DEFAULT;
     // Lexical: whole-identifier match. Labelled honestly via `engine`.
     const pattern = `\\b${escapeRegExp(body.name)}\\b`;
-    if (await commandExists('rg')) {
-      const result = await runRipgrep({
+    try {
+      const result = await grepWorkspace({
+        workspaceDir: baseDir,
         pattern,
-        cwd: baseDir,
-        limit,
+        trustedRegex: true,
         ...(body.glob ? { glob: body.glob } : {}),
+        // Preserve find_references' historical default while grep_files uses
+        // the smaller, model-friendly 50-result default.
+        maxResults: body.maxResults ?? 200,
       });
       const response: FindReferencesResponse = {
         references: result.matches.map((m) => ({ path: m.path, line: m.line, text: m.text })),
         truncated: result.truncated,
-        engine: 'ripgrep',
+        engine: result.engine,
       };
       return c.json(response);
-    }
-    const regex = new RegExp(pattern);
-    const globRegex = body.glob ? globToRegExp(body.glob, false) : null;
-    const references: FindReferencesResponse['references'] = [];
-    let truncated = false;
-    outer: for await (const filePath of walkFiles(baseDir)) {
-      const rel = relative(baseDir, filePath).split(sep).join('/');
-      if (globRegex && !globRegex.test(rel)) continue;
-      try {
-        const st = await stat(filePath);
-        if (st.size > MAX_SEARCH_FILE_BYTES) continue;
-        const lines = (await fsReadFile(filePath, 'utf8')).split(/\r?\n/);
-        for (let i = 0; i < lines.length; i += 1) {
-          if (regex.test(lines[i] ?? '')) {
-            references.push({ path: rel, line: i + 1, text: (lines[i] ?? '').slice(0, 500) });
-            if (references.length >= limit) {
-              truncated = true;
-              break outer;
-            }
-          }
-        }
-      } catch {
-        /* skip unreadable */
+    } catch (err) {
+      if (err instanceof WorkspaceGrepError) {
+        return c.json({ error: err.message, code: err.code }, err.status);
       }
+      return c.json(
+        { error: `find references failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
     }
-    const response: FindReferencesResponse = { references, truncated, engine: 'javascript' };
-    return c.json(response);
   });
 
   app.post('/:id/tools/diff-files', async (c) => {
@@ -1021,86 +965,6 @@ function globMatch(pattern: string, value: string): boolean {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-async function commandExists(cmd: string): Promise<boolean> {
-  return new Promise<boolean>((resolvePromise) => {
-    const which = process.platform === 'win32' ? 'where' : 'which';
-    const child = spawn(which, [cmd], { stdio: 'ignore' });
-    child.on('error', () => resolvePromise(false));
-    child.on('exit', (code) => resolvePromise(code === 0));
-  });
-}
-
-async function runRipgrep(opts: {
-  pattern: string;
-  cwd: string;
-  caseInsensitive?: boolean;
-  literal?: boolean;
-  limit: number;
-  glob?: string;
-}): Promise<{ matches: SearchFilesMatch[]; truncated: boolean }> {
-  return new Promise((resolvePromise) => {
-    const args = ['--json', '--max-count', String(opts.limit), '--no-messages'];
-    if (opts.caseInsensitive) args.push('-i');
-    if (opts.literal) args.push('-F');
-    if (opts.glob) args.push('--glob', opts.glob);
-    args.push(opts.pattern, '.');
-    const child = spawn('rg', args, { cwd: opts.cwd });
-    const matches: SearchFilesMatch[] = [];
-    let buffer = '';
-    let truncated = false;
-    child.stdout.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf8');
-      let nl = buffer.indexOf('\n');
-      while (nl !== -1) {
-        const line = buffer.slice(0, nl);
-        buffer = buffer.slice(nl + 1);
-        nl = buffer.indexOf('\n');
-        if (!line) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === 'match' && event.data) {
-            const path = event.data.path?.text ?? '';
-            const lineNumber = event.data.line_number ?? 0;
-            const text = (event.data.lines?.text ?? '').replace(/\n$/, '').slice(0, 500);
-            if (path && lineNumber > 0) {
-              matches.push({ path, line: lineNumber, text });
-              if (matches.length >= opts.limit) {
-                truncated = true;
-                child.kill();
-                break;
-              }
-            }
-          }
-        } catch {
-          /* ignore parse */
-        }
-      }
-    });
-    child.on('error', () => resolvePromise({ matches, truncated }));
-    child.on('exit', () => resolvePromise({ matches, truncated }));
-  });
-}
-
-async function* walkFiles(root: string): AsyncGenerator<string> {
-  const skip = new Set(['node_modules', '.git', '.pnpm', 'dist']);
-  const stack: string[] = [root];
-  while (stack.length > 0) {
-    const dir = stack.pop()!;
-    let entries: Dirent[];
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (skip.has(entry.name)) continue;
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.isFile()) yield full;
-    }
-  }
 }
 
 function isTextContentType(mime: string): boolean {

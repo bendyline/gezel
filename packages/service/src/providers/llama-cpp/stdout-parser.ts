@@ -164,7 +164,7 @@ export function classifyStartupLine(rawLine: string): StartupPhase | null {
     const bytes = parseMemorySize(tensorsMatch[1]!, tensorsMatch[2]!);
     return {
       phase: 'loading_model',
-      detail: `Loading model weights (${tensorsMatch[1]} ${tensorsMatch[2]})`,
+      detail: `Loading model weights (${bytes === null ? `${tensorsMatch[1]} ${tensorsMatch[2]}` : formatMemoryBytes(bytes)})`,
       ...(bytes !== null ? { bufferBytes: bytes } : {}),
     };
   }
@@ -191,7 +191,7 @@ export function classifyStartupLine(rawLine: string): StartupPhase | null {
     const bytes = parseMemorySize(kvMatch[1]!, kvMatch[2]!);
     return {
       phase: 'loading_model',
-      detail: `Allocating KV cache (${kvMatch[1]} ${kvMatch[2]})`,
+      detail: `Allocating KV cache (${bytes === null ? `${kvMatch[1]} ${kvMatch[2]}` : formatMemoryBytes(bytes)})`,
       ...(bytes !== null ? { bufferBytes: bytes } : {}),
     };
   }
@@ -241,4 +241,11 @@ export function parseMemorySize(valueStr: string, unit: string): number | null {
   const mult = multipliers[unit];
   if (mult === undefined) return null;
   return Math.round(value * mult);
+}
+
+function formatMemoryBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }

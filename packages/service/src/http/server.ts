@@ -26,6 +26,7 @@ import { catalogRoutes } from './routes/catalog.js';
 import { channelRoutes } from './routes/channels.js';
 import { chatEventsRoutes } from './routes/chat-events.js';
 import { chatRoutes } from './routes/chats.js';
+import { codexSetupRoutes } from './routes/codex-setup.js';
 import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
@@ -99,6 +100,7 @@ import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
+import { v1ResponsesRoutes } from './routes/v1-responses.js';
 import { videoGenRoutes } from './routes/video-gen.js';
 import {
   gezelScopeGuard,
@@ -543,7 +545,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // /api/projects/:pid/sessions/:sid/images[/:filename]
   app.route('/api/projects', imagesRoutes(ctx));
   // Per-project tool endpoints backing new MCP tools (fetch_url,
-  // search_files, find_files, diff_files, read_image_as_base64,
+  // grep_files, find_files, diff_files, read_image_as_base64,
   // list/extract_archive, run_git). Live at /api/projects/:id/tools/*.
   app.route('/api/projects', toolRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
@@ -591,6 +593,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/meester-status', meesterStatusRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
+  app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));
@@ -626,7 +629,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/ollama/v1/*', requireScope('openai'));
   app.route('/ollama/v1', ollamaCompatRoutes(ctx));
 
-  // `/v1/chat/*` and `/v1/models/*` are the OpenAI-compatible inference
+  // `/v1/chat/*`, `/v1/responses`, and `/v1/models/*` are the
+  // OpenAI-compatible inference
   // surface. Gated by bearer auth + the `openai` scope (root passes
   // any scope check). Third-party apps acquire a token through
   // `/v1/apps/register`; the desktop discovery credential explicitly carries
@@ -637,6 +641,20 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/chat/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/chat/*', requireScope('openai'));
   app.route('/v1/chat', v1ChatRoutes(ctx));
+
+  // Codex custom model providers use the Responses wire protocol. Keep this
+  // on the authenticated per-user listener: the response facade is inference
+  // only, but it must never expose a user's installed models to an arbitrary
+  // local process through the unauthenticated fixed-port emulation listener.
+  app.use('/v1/responses', openAiErrorEnvelope());
+  app.use('/v1/responses', openaiEndpointsGate);
+  app.use('/v1/responses', bearerAuth(ctx.tokenStore));
+  app.use('/v1/responses', requireScope('openai'));
+  app.use('/v1/responses/*', openAiErrorEnvelope());
+  app.use('/v1/responses/*', openaiEndpointsGate);
+  app.use('/v1/responses/*', bearerAuth(ctx.tokenStore));
+  app.use('/v1/responses/*', requireScope('openai'));
+  app.route('/v1/responses', v1ResponsesRoutes(ctx));
 
   // `/v1/remote/*` — inference-only surface for paired client devices. Gated by
   // the `remote-inference` scope, so a remote token reaches ONLY inference and

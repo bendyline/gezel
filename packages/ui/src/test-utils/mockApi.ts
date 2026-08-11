@@ -26,6 +26,7 @@ import { vi } from 'vitest';
 export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>>>;
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
+  getEngineRetention: { idleTimeoutMs: 300_000 },
   listGezels: { gezels: [] },
   listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },
@@ -54,6 +55,12 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   quickOpen: { results: [], truncated: false },
   listTasks: { tasks: [] },
   listProjectTasks: { tasks: [] },
+  // Chat-thread surfaces (the pill row, SessionSwitcher) fetch these on
+  // mount. Without defaults, any view test that merely renders a project
+  // chat blows up on `undefined.then` rather than showing an empty row.
+  listChatSessions: { sessions: [] },
+  listTaskSessions: { sessions: [] },
+  listInflightTurns: { inflight: [] },
   listSuggestedWork: { items: [] },
   getReportActions: { actions: [], issues: [], stale: [] },
   getNightShiftReview: {
@@ -132,7 +139,21 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     },
   },
   getConfig: { provider: 'mock' },
+  getCodexSetupStatus: {
+    state: 'not-configured',
+    models: [],
+    reasons: [],
+    codexInstalled: false,
+    endpointsEnabled: true,
+    profileName: 'gezel',
+    profilePath: '/tmp/gezel-codex/config.toml',
+    launchCommand: 'codex --profile gezel',
+    bridge: { baseUrl: 'https://127.0.0.1:6228/v1', listening: true, port: 6228 },
+    canConfigure: false,
+    canRemove: false,
+  },
   getLlamaCppContextSizing: { policy: 'adaptive' },
+  getModelContextOverrides: { overrides: {} },
   // Copilot is an on-demand install, so most gates read this rather than a
   // stored token. Default to installed so tests that predate the gating keep
   // seeing the provider offered.

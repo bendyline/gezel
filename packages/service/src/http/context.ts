@@ -3,6 +3,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
+import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { ConnectorManager } from '../connectors/manager.js';
 import type { DebugFlag } from '../debug/flag.js';
@@ -247,6 +248,8 @@ export interface ServiceContext {
    * loopback listener (port 11434). See http/ollama-emulation.ts.
    */
   ollamaEmulation: OllamaEmulationController;
+  /** Gezel-owned Codex profile, credential, and loopback bridge lifecycle. */
+  codexSetup: CodexSetupManager;
   /**
    * Hex SHA-256 of the daemon's current TLS cert DER, when serving HTTPS.
    * `/v1/identity` signs this with the device identity key so a paired client

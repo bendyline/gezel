@@ -216,7 +216,7 @@ export interface SessionOpts {
    */
   numCtx?: number;
   /**
-   * Local-providers only (llama-cpp, mlx, ollama): callback the session
+   * Local-providers only (llama-cpp, mlx, ds4, ollama): callback the session
    * invokes mid-tool-loop when its in-memory transcript is filling the
    * context window. The session passes the messages BEFORE the current
    * turn's user message — the callback runs a one-shot compaction LLM
@@ -850,7 +850,7 @@ export interface LLMSession {
   setSystemMessage?(text: string): void;
   /**
    * Captured chain-of-thought from the most recent `sendAndWait`. Set
-   * by local providers (ollama, llama-cpp, mlx) when the model wraps
+   * by local providers (ollama, llama-cpp, mlx, ds4) when the model wraps
    * deliberation in `<think>…</think>` / `<reasoning>…</reasoning>`
    * tags — see `extractReasoning` — and by cloud providers that stream
    * a reasoning trace (Copilot's `assistant.reasoning_delta`,
@@ -989,7 +989,7 @@ export interface BatchCapability {
 export interface LLMProvider {
   readonly name: ProviderName;
   /** Boot the underlying client / authenticate. Called lazily. */
-  initialize(): Promise<void>;
+  initialize(signal?: AbortSignal): Promise<void>;
   /** Tear down everything owned by this provider. */
   shutdown(): Promise<void>;
   createSession(opts: SessionOpts): Promise<LLMSession>;
@@ -1000,7 +1000,7 @@ export interface LLMProvider {
    */
   resumeSession?(sessionId: string, opts: SessionOpts): Promise<LLMSession>;
   /** Enumerate models this provider currently offers. May hit the network. */
-  listModels(): Promise<ModelInfo[]>;
+  listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
   /**
    * The model id this provider would use right now if a session
    * doesn't override it. For local providers this is the
@@ -1040,7 +1040,7 @@ export interface LLMProvider {
    * but must not retain it across later starts where policy or pressure may
    * have changed.
    */
-  prepareContextWindow?(model?: string): Promise<number | undefined>;
+  prepareContextWindow?(model?: string, signal?: AbortSignal): Promise<number | undefined>;
   /**
    * Launch provenance of the provider's LIVE engine process — pid, start
    * time, and the request-independent launch facts (granted context

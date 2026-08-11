@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -116,7 +117,27 @@ export const RecoMetaShape = {
 // Stable across versions. Changing identity ("the github toolset is now
 // called gh") is a "different thing" signal, not a version bump.
 
+/**
+ * Oldest gezel build that can meaningfully use this content. Authored as
+ * `1.YYDDD` (the date-based app version's major.minor — see
+ * scripts/stamp-version.mjs); an optional third component is compared too.
+ * Comparison is numeric per component with missing components as 0
+ * (`satisfiesMinGezelVersion` in packages/core/src/gezel-version.ts).
+ *
+ * On an identity manifest it gates the whole item; on a version manifest it
+ * gates that version only, so older builds fall back to older eligible
+ * versions. The resolved manifest carries the effective floor — the stricter
+ * of identity and chosen version. Unstamped dev builds (`0.0.0`) never
+ * filter. Authoring rule: add floors on new item versions, never retro-add
+ * them to existing ones — older versions are the compatibility path for
+ * older gezel builds.
+ */
+export const MinGezelVersionShape = {
+  minGezelVersion: z.string().optional(),
+} as const;
+
 const IdentityCommonSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   id: z.string().regex(IdRegex),
   name: z.string().min(1),
@@ -400,6 +421,7 @@ export type ToolsetIdentity = z.infer<typeof ToolsetIdentitySchema>;
  * `versions/{version}/manifest.json`.
  */
 export const ToolsetVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   /** Must equal the parent folder name. Validated at load time. */
   version: z.string().regex(SemverRegex),
@@ -431,6 +453,7 @@ export type ToolsetVersionManifest = z.infer<typeof ToolsetVersionManifestSchema
  * UI + HTTP consumers work with this shape.
  */
 export const ToolsetManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('toolset'),
   id: z.string().regex(IdRegex),
@@ -498,6 +521,7 @@ export const SuggestedCraftbookSchema = z
 export type SuggestedCraftbook = z.infer<typeof SuggestedCraftbookSchema>;
 
 export const GezelTemplateVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -545,6 +569,7 @@ export const GezelTemplateVersionManifestSchema = z.object({
 export type GezelTemplateVersionManifest = z.infer<typeof GezelTemplateVersionManifestSchema>;
 
 export const GezelTemplateManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('gezel-template'),
   id: z.string().regex(IdRegex),
@@ -635,6 +660,7 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
 export type CraftbookTemplateIdentity = z.infer<typeof CraftbookTemplateIdentitySchema>;
 
 export const CraftbookTemplateVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -692,12 +718,19 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
    * {@link CraftbookToolsetNeedSchema}.
    */
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+  /**
+   * Connector dependencies this craftbook declares. The launcher binds +
+   * syncs them so the first step reads a local corpus instead of calling a
+   * live API. See {@link CraftbookConnectorNeedSchema}.
+   */
+  connectors: z.array(CraftbookConnectorNeedSchema).optional(),
 });
 export type CraftbookTemplateVersionManifest = z.infer<
   typeof CraftbookTemplateVersionManifestSchema
 >;
 
 export const CraftbookTemplateManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('craftbook-template'),
   id: z.string().regex(IdRegex),
@@ -751,6 +784,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   runModes: CraftbookRunModesSchema.optional(),
   /** Toolset dependencies (mirrored from the version manifest). */
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
+  /** Connector dependencies (mirrored from the version manifest). */
+  connectors: z.array(CraftbookConnectorNeedSchema).optional(),
 });
 export type CraftbookTemplateManifest = z.infer<typeof CraftbookTemplateManifestSchema>;
 
@@ -1024,6 +1059,7 @@ export type ProjectTypeIdentity = z.infer<typeof ProjectTypeIdentitySchema>;
 
 /** Per-version project-type payload. Lives in `versions/{version}/manifest.json`. */
 export const ProjectTypeVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1033,6 +1069,7 @@ export type ProjectTypeVersionManifest = z.infer<typeof ProjectTypeVersionManife
 
 /** Resolved view returned from the catalog: identity + chosen version, flattened. */
 export const ProjectTypeManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('project-type'),
   id: z.string().regex(IdRegex),
@@ -1103,6 +1140,7 @@ export type ConnectorTypeIdentity = z.infer<typeof ConnectorTypeIdentitySchema>;
 
 /** Per-version connector-type payload. Lives in `versions/{version}/manifest.json`. */
 export const ConnectorTypeVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1112,6 +1150,7 @@ export type ConnectorTypeVersionManifest = z.infer<typeof ConnectorTypeVersionMa
 
 /** Resolved view returned from the catalog: identity + chosen version, flattened. */
 export const ConnectorTypeManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('connector-type'),
   id: z.string().regex(IdRegex),
@@ -1274,13 +1313,13 @@ export const ChatModelLlamaCppSourceSchema = z
 export type ChatModelLlamaCppSource = z.infer<typeof ChatModelLlamaCppSourceSchema>;
 
 /**
- * Per-entry ds4 (DwarfStar) source. ds4 loads antirez's DeepSeek-V4 GGUFs
- * (single-file or sharded), so the shape mirrors
+ * Per-entry ds4 (DwarfStar) source. ds4 loads supported routed-MoE GGUFs
+ * (including DeepSeek V4 and GLM 5.2, single-file or sharded), so the shape mirrors
  * {@link ChatModelLlamaCppSourceSchema} — HF repo + revision + filename/shards
  * + sha256 + residentBytes + quantization — plus two ds4-specific SSD-
- * streaming hints. ds4 is NOT a general GGUF loader, so this block must only
- * appear on DeepSeek-V4 entries; the runtime prefers it over `llamaCpp` for
- * those (stock llama.cpp can't load these quants).
+ * streaming hints. ds4 is NOT a general GGUF loader: use this block only for
+ * architectures/quants the engine explicitly supports. Stock llama.cpp cannot
+ * load the routed ds4-only quants.
  */
 export const ChatModelDs4SourceSchema = z
   .object({
@@ -1306,8 +1345,32 @@ export const ChatModelDs4SourceSchema = z
      * from `approxSizeBytes`. Absent → broker falls back to a conservative
      * streaming default (see `CapacityBroker.estimateResidentBytes('ds4')`),
      * so a 64GB box is never told an 87GB DeepSeek-V4 model can't fit.
+     *
+     * This is a footprint at ONE context window — {@link residentCtxTokens}.
+     * Pair it with {@link kvBytesPerToken} to price any other window.
      */
     residentBytes: z.number().int().positive().optional(),
+    /**
+     * Resident bytes each context token costs: ds4's compressed KV rows plus
+     * the context buffers that scale with the window. ds4-server prints the
+     * split at load —
+     * `memory: KV 1.36 GiB (raw 0.36 + compressed 1.00) + buffers 1.00 GiB + …`
+     * with `memory detail: ctx=… compressed_kv_rows=…` beneath it — so author
+     * this from a real launch, not from an architecture guess.
+     *
+     * ds4 spills COLD context to SSD, which is why the slope is far below a
+     * llama.cpp-class KV: DeepSeek V4 Flash's DSA costs ~8 KiB/token where
+     * GLM 5.2's MLA costs ~89 KiB/token. Absent → the footprint is treated as
+     * flat and the UI says so instead of drawing a line it can't justify.
+     */
+    kvBytesPerToken: z.number().int().positive().optional(),
+    /**
+     * The launch `--ctx` {@link residentBytes} was measured at. Only meaningful
+     * alongside {@link kvBytesPerToken}: together they re-base the authored
+     * footprint onto whatever window this device actually launches with —
+     * `residentBytes + kvBytesPerToken × (ctx − residentCtxTokens)`.
+     */
+    residentCtxTokens: z.number().int().positive().optional(),
     /** Short quant tag for display ('IQ2_XXS', 'Q4_K', …). */
     quantization: z.string().optional(),
     /**
@@ -1471,6 +1534,7 @@ export const ChatModelIdentitySchema = IdentityCommonSchema.extend({
 export type ChatModelIdentity = z.infer<typeof ChatModelIdentitySchema>;
 
 export const ChatModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1534,6 +1598,7 @@ export const EvalHintsSchema = z.object({
 export type EvalHints = z.infer<typeof EvalHintsSchema>;
 
 export const ChatModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('chat-model'),
   id: z.string().regex(IdRegex),
@@ -1679,6 +1744,7 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
 export type ImageModelIdentity = z.infer<typeof ImageModelIdentitySchema>;
 
 export const ImageModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1700,6 +1766,7 @@ export const ImageModelVersionManifestSchema = z.object({
 export type ImageModelVersionManifest = z.infer<typeof ImageModelVersionManifestSchema>;
 
 export const ImageModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('image-model'),
   id: z.string().regex(IdRegex),
@@ -1909,6 +1976,7 @@ export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
 export type VideoModelIdentity = z.infer<typeof VideoModelIdentitySchema>;
 
 export const VideoModelVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
   releasedAt: z.string(),
@@ -1918,6 +1986,7 @@ export const VideoModelVersionManifestSchema = z.object({
 export type VideoModelVersionManifest = z.infer<typeof VideoModelVersionManifestSchema>;
 
 export const VideoModelManifestSchema = z.object({
+  ...MinGezelVersionShape,
   schemaVersion: z.literal(1),
   kind: z.literal('video-model'),
   id: z.string().regex(IdRegex),

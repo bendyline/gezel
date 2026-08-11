@@ -42,6 +42,13 @@ export type GpuPolicy = 'coexist' | 'swap';
 export type GpuPolicySetting = GpuPolicy | 'auto';
 type DeviceHealthAdmissionGate = Pick<DeviceHealthGate, 'admit' | 'setPolicy' | 'status'>;
 
+export interface GpuMemoryPressureStatus {
+  pressured: boolean;
+  freeBytes?: number;
+  totalBytes?: number;
+  detail?: string;
+}
+
 export interface GpuArbiterOptions {
   /**
    * Initial policy. Use {@link detectGpuPolicy} to derive an `auto`
@@ -297,6 +304,40 @@ export class GpuArbiter {
   /** Latest normalized machine-health snapshot for the authenticated UI. */
   async getDeviceHealthStatus(maxAgeMs?: number): Promise<DeviceHealthStatusSnapshot | undefined> {
     return this.healthGate?.status(maxAgeMs);
+  }
+
+  /**
+   * Low-free-VRAM signal for idle engine supervisors. This is deliberately a
+   * release hint, not an admission denial: active inference always finishes,
+   * then an idle model gets one minute to be reused before caches flush and
+   * its process exits.
+   */
+  async getMemoryPressureStatus(maxAgeMs = 1_000): Promise<GpuMemoryPressureStatus> {
+    const status = await this.healthGate?.status(maxAgeMs);
+    const readings = (status?.readings ?? []).filter(
+      (reading) =>
+        typeof reading.memoryTotalMb === 'number' &&
+        Number.isFinite(reading.memoryTotalMb) &&
+        reading.memoryTotalMb > 0 &&
+        typeof reading.memoryUsedMb === 'number' &&
+        Number.isFinite(reading.memoryUsedMb) &&
+        reading.memoryUsedMb >= 0,
+    );
+    if (readings.length === 0) return { pressured: false };
+    const totalBytes =
+      readings.reduce((sum, reading) => sum + (reading.memoryTotalMb ?? 0), 0) * 1024 ** 2;
+    const usedBytes =
+      readings.reduce((sum, reading) => sum + (reading.memoryUsedMb ?? 0), 0) * 1024 ** 2;
+    const freeBytes = Math.max(0, totalBytes - usedBytes);
+    const thresholdBytes = Math.max(1024 ** 3, totalBytes * 0.08);
+    const pressured = freeBytes <= thresholdBytes;
+    const gib = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
+    return {
+      pressured,
+      freeBytes,
+      totalBytes,
+      ...(pressured ? { detail: `${gib(freeBytes)} GB free of ${gib(totalBytes)} GB VRAM` } : {}),
+    };
   }
 }
 

@@ -4,6 +4,12 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
+import {
+  MENTION_RE,
+  displayThreadTitle,
+  formatRelativeTime,
+  plainTitle,
+} from './session-labels.js';
 
 interface Props {
   gezelId: string;
@@ -64,7 +70,15 @@ export function SessionSwitcher({
   const [busy, setBusy] = useState(false);
   const autoPickedFor = useRef<string | null>(null);
 
+  // The (gezel, project, task) triple the list is scoped to. Stamped onto
+  // the loaded list so the auto-pick below can tell "this list is for the
+  // scope I'm looking at" from "this list is the previous scope's, still
+  // on screen while the refetch flies".
+  const scopeKey = `${gezelId}:${projectId}:${taskRef ?? ''}`;
+  const [sessionsScope, setSessionsScope] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
+    const key = `${gezelId}:${projectId}:${taskRef ?? ''}`;
     try {
       let all: ChatSessionSummary[];
       if (taskRef) {
@@ -82,6 +96,7 @@ export function SessionSwitcher({
       }
       const visible = all.filter((s) => !s.archived);
       setSessions(visible);
+      setSessionsScope(key);
       return visible;
     } catch (err) {
       console.error('[SessionSwitcher] list sessions failed', {
@@ -97,16 +112,16 @@ export function SessionSwitcher({
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a bump counter — incrementing it is the re-fetch trigger.
   useEffect(() => {
     autoPickedFor.current = null;
-    // Clear the list synchronously so the auto-pick effect below
-    // doesn't fire on stale data while `refresh()` is in flight.
-    // Without this, an @-mention pivot from gezel A to B (which
-    // changes `gezelId` and resets `sessionId` in the parent in
-    // the same tick) leaves us showing A's sessions and we'd
-    // auto-pick A's most-recent session — landing the parent on
-    // a session id that isn't even in B's list, so the dropdown
-    // renders empty. Clearing first means the auto-pick waits
-    // for B's list to resolve before settling.
+    // Drop the previous scope's list and its stamp. Clearing `sessions`
+    // alone is not enough: this effect and the auto-pick below run in the
+    // same flush, so the auto-pick still closes over the pre-update array.
+    // The stamp is what it actually checks — an un-stamped list can't be
+    // auto-picked from, so a scope change can't land the parent on the
+    // OLD scope's newest thread (an @-mention pivot from gezel A to B
+    // picking A's session; a task pill losing its task thread to the
+    // gezel's lobby thread one tick after focusing it).
     setSessions([]);
+    setSessionsScope(null);
     void refresh();
   }, [refresh, refreshKey]);
 
@@ -114,7 +129,9 @@ export function SessionSwitcher({
   // scope) and the caller doesn't already have one. Only once per scope
   // — we don't want to stomp a user's explicit pick after they've acted.
   useEffect(() => {
-    const key = `${gezelId}:${projectId}:${taskRef ?? ''}`;
+    const key = scopeKey;
+    // Wait for a list that belongs to THIS scope before deciding anything.
+    if (sessionsScope !== key) return;
     if (sessionId) {
       // Latch the sessionId only when it's a real id from the
       // CURRENT scope's session list. Otherwise a parent that
@@ -132,7 +149,7 @@ export function SessionSwitcher({
     if (sessions.length === 0) return;
     autoPickedFor.current = key;
     onSessionIdChange(sessions[0]!.id);
-  }, [sessions, sessionId, gezelId, projectId, taskRef, onSessionIdChange]);
+  }, [sessions, sessionsScope, sessionId, scopeKey, onSessionIdChange]);
 
   const createNew = useCallback(async () => {
     setBusy(true);
@@ -219,14 +236,11 @@ export function SessionSwitcher({
 }
 
 /**
- * `@[Label](gezel:id)` mention markdown — the same wire form
- * `extractMentionTokens` reads. Used here to swap raw mention syntax in a
- * thread title for a compact `@Label` pill. The provider name in each row
- * comes from the shared `providerLabel` helper (e.g. "This Windows PC").
+ * Render a thread title with its `@mention`s as pills, rest as text.
+ * `MENTION_RE` is the shared `@[Label](gezel:id)` wire form; the provider
+ * name in each row comes from the shared `providerLabel` helper (e.g.
+ * "This Windows PC").
  */
-const MENTION_RE = /@\[([^\]]+)\]\(gezel\\?:[^)\s]+\)/g;
-
-/** Render a thread title with its `@mention`s as pills, rest as text. */
 function renderTitleWithMentions(title: string): ReactNode {
   const parts: ReactNode[] = [];
   let last = 0;
@@ -245,22 +259,6 @@ function renderTitleWithMentions(title: string): ReactNode {
   if (parts.length === 0) return title;
   if (last < title.length) parts.push(title.slice(last));
   return parts;
-}
-
-/** Flatten mentions to `@Label` text for typeahead + the trigger value. */
-function plainTitle(title: string): string {
-  return title.replace(MENTION_RE, (_full, label: string) => `@${label}`);
-}
-
-/**
- * The service stamps a fresh thread with the sentinel title "New session"
- * (and keys its auto-title logic off that exact string — see
- * `chat/manager.ts`). Show it as "New thread" in the UI without renaming
- * the stored sentinel.
- */
-const NEW_THREAD_SENTINEL = 'New session';
-function displayThreadTitle(title: string): string {
-  return title === NEW_THREAD_SENTINEL ? 'New thread' : title;
 }
 
 // The engine/model suffix shown after the relative time. `engineLabel`
@@ -286,21 +284,4 @@ function renderRow(s: ChatSessionSummary, engineLabel?: string | null): ReactNod
 
 function rowTextValue(s: ChatSessionSummary, engineLabel?: string | null): string {
   return `${plainTitle(displayThreadTitle(s.title))} · ${formatRelativeTime(s.lastActivityAt)} · ${engineSuffix(s, engineLabel)}`;
-}
-
-function formatRelativeTime(iso: string): string {
-  try {
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const diff = Math.max(0, now - then);
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  } catch {
-    return iso;
-  }
 }

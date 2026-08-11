@@ -12,6 +12,7 @@ import {
   GezelConfigSchema,
   GezelFrontmatterSchema,
   GezelSectionSchema,
+  ModelContextOverrideUpdateSchema,
   ProjectFileEntrySchema,
   ProjectSchema,
   TaskStatusSchema,
@@ -508,6 +509,39 @@ describe('llama.cpp context sizing config', () => {
       GezelConfigSchema.parse({ llamaCppContextSizing: 'model-max' }).llamaCppContextSizing,
     ).toBe('model-max');
     expect(() => GezelConfigSchema.parse({ llamaCppContextSizing: 'unsafe-max' })).toThrow();
+  });
+});
+
+describe('per-model context overrides config', () => {
+  it('accepts an engine-keyed token map and tolerates absence', () => {
+    const cfg = GezelConfigSchema.parse({
+      modelContextOverrides: { 'llama-cpp:qwen3.6-27b-q4': 98_304, 'mlx:gemma4-e4b': 131_072 },
+    });
+    expect(cfg.modelContextOverrides?.['llama-cpp:qwen3.6-27b-q4']).toBe(98_304);
+    expect(GezelConfigSchema.parse({}).modelContextOverrides).toBeUndefined();
+  });
+
+  it('rejects non-positive and fractional token counts', () => {
+    expect(() =>
+      GezelConfigSchema.parse({ modelContextOverrides: { 'llama-cpp:m': 0 } }),
+    ).toThrow();
+    expect(() =>
+      GezelConfigSchema.parse({ modelContextOverrides: { 'llama-cpp:m': -4096 } }),
+    ).toThrow();
+    expect(() =>
+      GezelConfigSchema.parse({ modelContextOverrides: { 'llama-cpp:m': 1024.5 } }),
+    ).toThrow();
+  });
+
+  it('bounds the update wire shape and allows null to clear', () => {
+    expect(ModelContextOverrideUpdateSchema.parse({ contextTokens: 32_768 }).contextTokens).toBe(
+      32_768,
+    );
+    expect(
+      ModelContextOverrideUpdateSchema.parse({ contextTokens: null }).contextTokens,
+    ).toBeNull();
+    expect(() => ModelContextOverrideUpdateSchema.parse({ contextTokens: 16_384 })).toThrow();
+    expect(() => ModelContextOverrideUpdateSchema.parse({ contextTokens: 8_388_608 })).toThrow();
   });
 });
 

@@ -1,6 +1,6 @@
 /**
  * Helpers for the runtime points where local-model providers (Ollama,
- * llama-cpp, mlx) gate features on the resolved profile. The bridge +
+ * llama-cpp, mlx, ds4) gate features on the resolved profile. The bridge +
  * chat-manager-side wiring composes hooks naturally; the providers
  * have a different shape — they instantiate stateful machinery
  * (RambleDetector class, foldPreToolPreamble call site, Gemma

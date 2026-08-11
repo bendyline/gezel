@@ -2,6 +2,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -23,8 +24,113 @@ export function ds4Routes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/ds4', '/v1/remote/manage/ds4'));
 
   app.get('/models', async (c) => {
-    const models = await ctx.ds4Models.listInstalled();
+    const installed = await ctx.ds4Models.listInstalled();
+    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
+    // Decorate with the launch-context preview (effective window, override,
+    // ceiling) the same way llama-cpp/mlx do. ds4 rows never carried these
+    // before; the preview is cheap (no GGUF read — RAM tier + catalog cap).
+    const models = await Promise.all(
+      installed.map(async (model) => {
+        const overrideContextTokens = overrides[`ds4:${model.id}`];
+        const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
+        try {
+          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id);
+          return {
+            ...model,
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.plannedResidentBytes
+              ? { predictedResidentBytes: plan.plannedResidentBytes }
+              : {}),
+            ...(plan.autoContextWindow !== undefined
+              ? { autoContextWindow: plan.autoContextWindow }
+              : {}),
+            ...(plan.contextCeilingTokens !== undefined
+              ? { contextCeilingTokens: plan.contextCeilingTokens }
+              : {}),
+            // The context slider prices a drag from these; without them it
+            // falls back to "resident memory stays about the same".
+            ...(plan.kvBytesPerTokenPerSlot !== undefined
+              ? {
+                  kvBytesPerTokenPerSlot: plan.kvBytesPerTokenPerSlot,
+                  kvFixedBytesPerSlot: plan.kvFixedBytesPerSlot ?? 0,
+                }
+              : {}),
+            ...(plan.weightsResidentBytes !== undefined
+              ? { weightsResidentBytes: plan.weightsResidentBytes }
+              : {}),
+            ...overrideField,
+          };
+        } catch (error) {
+          return {
+            ...model,
+            ...(error instanceof CapacityDeniedError
+              ? {
+                  contextSizingStatus:
+                    error.reason === 'resident-below-minimum'
+                      ? ('restart-required' as const)
+                      : ('insufficient-memory' as const),
+                }
+              : {}),
+            ...overrideField,
+          };
+        }
+      }),
+    );
     return c.json({ models });
+  });
+
+  /**
+   * Launch plan for every ds4 catalog entry, downloaded or not.
+   *
+   * `/models` can only speak for what is on disk, but a ds4 download runs to
+   * hundreds of GB — the window and the memory it costs are exactly what the
+   * user needs BEFORE committing to one. ds4's plan needs the catalog block
+   * and this device's RAM tier, never the GGUF header, so it is knowable in
+   * advance; entries that resolve to nothing are simply omitted.
+   */
+  app.get('/context-plans', async (c) => {
+    const items = await ctx.catalog.list('chat-model');
+    const plans: Record<string, unknown> = {};
+    await Promise.all(
+      items.map(async (item) => {
+        const manifest = item.manifest;
+        if (manifest.kind !== 'chat-model' || !manifest.ds4) return;
+        try {
+          const plan = await ctx.chat.previewLocalEnginePlan('ds4', manifest.id, {
+            allowUninstalled: true,
+          });
+          plans[manifest.id] = {
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.autoContextWindow !== undefined
+              ? { autoContextWindow: plan.autoContextWindow }
+              : {}),
+            ...(plan.overrideContextTokens !== undefined
+              ? { overrideContextTokens: plan.overrideContextTokens }
+              : {}),
+            ...(plan.contextCeilingTokens !== undefined
+              ? { contextCeilingTokens: plan.contextCeilingTokens }
+              : {}),
+            ...(plan.nativeContextWindow !== undefined
+              ? { nativeContextWindow: plan.nativeContextWindow }
+              : {}),
+            ...(plan.plannedResidentBytes
+              ? { projectedResidentBytes: plan.plannedResidentBytes }
+              : {}),
+            ...(plan.kvBytesPerTokenPerSlot !== undefined
+              ? { kvBytesPerToken: plan.kvBytesPerTokenPerSlot }
+              : {}),
+            ...(plan.weightsResidentBytes !== undefined
+              ? { contextFreeResidentBytes: plan.weightsResidentBytes }
+              : {}),
+          };
+        } catch {
+          // A model whose plan can't be resolved (capacity denial, missing
+          // catalog data) just has no projection — the row falls back to the
+          // authored footprint rather than the list failing wholesale.
+        }
+      }),
+    );
+    return c.json({ plans });
   });
 
   /** Polled snapshot of installs currently running (mirrors llama-cpp). */

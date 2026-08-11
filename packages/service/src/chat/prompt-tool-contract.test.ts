@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { filterPromptToolDirectives, lintPromptToolContract } from './prompt-tool-contract.js';
+import {
+  filterPromptToolDirectives,
+  lintPromptToolContract,
+  promptMandatedTools,
+} from './prompt-tool-contract.js';
+
+describe('promptMandatedTools', () => {
+  it('collects positively-instructed canonical tools', () => {
+    const mandated = promptMandatedTools(
+      'Use the PR number from the Scope note. Call `github_pr_diff` for the complete unified diff and `github_pr_files` for the per-file patches. Use `read_file` only when you need surrounding context.',
+    );
+    expect([...mandated].sort()).toEqual(['github_pr_diff', 'github_pr_files', 'read_file']);
+  });
+
+  it('excludes negative, conditional, and contrast mentions', () => {
+    expect(
+      promptMandatedTools('Do not modify source and do not call `github_pr_comment`.'),
+    ).toEqual(new Set());
+    expect(
+      promptMandatedTools('If `run_nodejs_script` is available, use it for the conversion.'),
+    ).toEqual(new Set());
+    expect([
+      ...promptMandatedTools('Use `read_file`, not `read_artifact`, for workspace paths.'),
+    ]).toEqual(['read_file']);
+  });
+
+  it('ignores prose that merely names a non-tool identifier', () => {
+    expect(promptMandatedTools('Update the `max_tokens` value in the config.')).toEqual(new Set());
+  });
+});
 
 describe('lintPromptToolContract', () => {
   it('rejects a hard directive for a missing tool', () => {
@@ -23,16 +52,92 @@ describe('lintPromptToolContract', () => {
     expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool' }]);
   });
 
-  it('continues to flag directives for compatibility-only tools', () => {
+  it('rejects directives for compatibility-only tools', () => {
     const report = lintPromptToolContract({
       prompt: 'Use `start_job({ name })` for a small build.',
       availableTools: ['start_project'],
     });
 
-    expect(report.warnings).toMatchObject([{ rule: 'directive-missing-tool', tool: 'start_job' }]);
+    expect(report.errors).toMatchObject([
+      { rule: 'non-model-facing-tool-name', tool: 'start_job' },
+    ]);
   });
 
-  it('ignores negative and conditional references', () => {
+  it('rejects hidden aliases even when compatibility dispatch still accepts them', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call `run_script({ name: "verify" })` after writing the file.',
+        'Do not call `search_files`; prefer deterministic retrieval.',
+      ].join('\n'),
+      availableTools: ['run_installed_script', 'grep_files'],
+    });
+
+    expect(report.errors).toMatchObject([
+      { rule: 'legacy-tool-name', tool: 'run_script' },
+      { rule: 'legacy-tool-name', tool: 'search_files' },
+    ]);
+  });
+
+  it('rejects explicit unknown tool spellings but ignores argument keys', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call `listAudioVoices` via the UI, then use `synthesize_speech`.',
+        'This tool does not edit the graph; modify steps via add_task_step / advance_task_step / update_task_step.',
+        'Call `read_file({ path, startLine, endLine })` for the returned range.',
+      ].join('\n'),
+      availableTools: ['synthesize_speech', 'add_task_step', 'advance_task_step', 'read_file'],
+    });
+
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'listAudioVoices' }),
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'update_task_step' }),
+      ]),
+    );
+    expect(report.errors.some((finding) => finding.tool === 'startLine')).toBe(false);
+    expect(report.errors.some((finding) => finding.tool === 'endLine')).toBe(false);
+  });
+
+  it('rejects bare imperative unknown and unavailable tool names', () => {
+    const report = lintPromptToolContract({
+      prompt: [
+        'Call missing_project_tool now.',
+        'Use another_missing_tool to continue.',
+        'Call write-file now.',
+        'Use draft_email tool now.',
+      ].join('\n'),
+      availableTools: [],
+    });
+
+    expect(report.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'missing_project_tool' }),
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'another_missing_tool' }),
+        expect.objectContaining({ rule: 'unknown-tool-name', tool: 'write-file' }),
+        expect.objectContaining({ rule: 'hard-directive-missing-tool', tool: 'draft_email' }),
+      ]),
+    );
+  });
+
+  it('distinguishes the Bash shell from an explicitly named Bash tool', () => {
+    const ordinary = lintPromptToolContract({
+      prompt: 'The Bash shell is widely installed. Do not use Bash for this workflow.',
+      availableTools: [],
+    });
+    const explicit = lintPromptToolContract({
+      prompt: 'Call Bash now, then invoke the Bash tool again.',
+      availableTools: [],
+    });
+
+    expect(ordinary).toEqual({ errors: [], warnings: [] });
+    expect(explicit.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rule: 'removed-tool-name', tool: 'Bash' }),
+      ]),
+    );
+  });
+
+  it('ignores negative and conditional references to canonical tools', () => {
     const report = lintPromptToolContract({
       prompt: [
         'Do not call `write_file`; it is not on your tool list.',
@@ -42,6 +147,26 @@ describe('lintPromptToolContract', () => {
     });
 
     expect(report).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('partialRoster suppresses unknown-name noise but keeps registry findings', () => {
+    // Cold path: third-party bridge tools have no names yet, so a truthful
+    // `browser_navigate` mention must not be reported as unknown.
+    const prompt = 'Call `browser_navigate({ url })` to open the page, then call `write_file`.';
+    expect(
+      lintPromptToolContract({ prompt, availableTools: ['read_file'] }).errors.map((e) => e.rule),
+    ).toContain('unknown-tool-name');
+
+    const partial = lintPromptToolContract({
+      prompt,
+      availableTools: ['read_file'],
+      partialRoster: true,
+    });
+    expect(partial.errors.some((e) => e.rule === 'unknown-tool-name')).toBe(false);
+    // A registry tool that is genuinely off the roster still reports.
+    expect([...partial.errors, ...partial.warnings].some((f) => f.tool === 'write_file')).toBe(
+      true,
+    );
   });
 
   it('rejects a false file-capability denial', () => {

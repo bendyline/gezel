@@ -1,50 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
 import { McpBridgePool } from './mcp-bridge-pool.js';
+import { McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
 
 function poolWithFakeBridge(toolAllowlist: Set<string> | null): McpBridgePool {
   const pool = new McpBridgePool();
+  const tools: OpenAIFunctionTool[] = [
+    tool('start_project', 'Start a project.'),
+    tool('ask_gezel', 'Ask another gezel.'),
+    tool('delegate_reviewer', 'Delegate to a reviewer.'),
+    tool('list_dir', 'List a directory.'),
+    tool('write_file', 'Write a file.'),
+    tool('append_to_file', 'Append to a file.'),
+    tool('draft_email', 'Draft email.'),
+    tool('draft_connector_action', 'Draft connector action.'),
+  ];
+  const bridge = new McpBridge();
+  const mutableBridge = bridge as unknown as {
+    tools: OpenAIFunctionTool[];
+    toolNameSet: Set<string>;
+  };
+  mutableBridge.tools = tools;
+  mutableBridge.toolNameSet = new Set(tools.map((entry) => entry.name));
+  vi.spyOn(bridge, 'callTool').mockImplementation(async (name) => `called ${name}`);
+  vi.spyOn(bridge, 'callToolRich').mockImplementation(async (name) => ({
+    text: `called ${name}`,
+    images: [],
+    isError: false,
+  }));
   const mutable = pool as unknown as {
     toolAllowlist: Set<string> | null;
-    bridges: Array<{
-      id: string;
-      bridge: {
-        getOpenAITools: () => Array<{ type: 'function'; name: string; description: string }>;
-        getAnthropicTools: () => Array<{
-          name: string;
-          description: string;
-          input_schema: Record<string, unknown>;
-        }>;
-        hasTool: (name: string) => boolean;
-        callTool: (name: string) => Promise<string>;
-        callToolRich: (
-          name: string,
-        ) => Promise<{ text: string; images: Array<{ base64: string; mimeType: string }> }>;
-      };
-    }>;
+    bridges: Array<{ id: string; bridge: McpBridge }>;
   };
   mutable.toolAllowlist = toolAllowlist;
-  mutable.bridges.push({
-    id: 'gezel',
-    bridge: {
-      getOpenAITools: () => [
-        { type: 'function', name: 'start_project', description: 'Start a project.' },
-        { type: 'function', name: 'ask_gezel', description: 'Ask another gezel.' },
-        { type: 'function', name: 'delegate_reviewer', description: 'Delegate to a reviewer.' },
-        { type: 'function', name: 'write_file', description: 'Write a file.' },
-        { type: 'function', name: 'append_to_file', description: 'Append to a file.' },
-      ],
-      getAnthropicTools: () => [],
-      hasTool: (name) =>
-        name === 'start_project' ||
-        name === 'ask_gezel' ||
-        name === 'delegate_reviewer' ||
-        name === 'write_file' ||
-        name === 'append_to_file',
-      callTool: async (name) => `called ${name}`,
-      callToolRich: async (name) => ({ text: `called ${name}`, images: [] }),
-    },
-  });
+  mutable.bridges.push({ id: 'gezel', bridge });
   return pool;
+}
+
+function tool(name: string, description: string): OpenAIFunctionTool {
+  return { type: 'function', name, description, parameters: { type: 'object' } };
 }
 
 describe('McpBridgePool allowlist enforcement', () => {
@@ -64,6 +57,32 @@ describe('McpBridgePool allowlist enforcement', () => {
     await expect(pool.callToolRich('ask_gezel', {})).rejects.toThrow(
       'tool "ask_gezel" is not available in this session',
     );
+  });
+
+  it('authorizes only after alias spellings resolve to their advertised built-ins', async () => {
+    const pool = poolWithFakeBridge(new Set(['start_project']));
+
+    for (const name of ['write-file', 'WriteFile', 'read_dir']) {
+      expect(pool.hasTool(name), name).toBe(false);
+      await expect(pool.callTool(name, {})).rejects.toThrow(
+        `tool "${name}" is not available in this session`,
+      );
+    }
+    await expect(pool.callToolRich('write-file', {})).rejects.toThrow(
+      'tool "write-file" is not available in this session',
+    );
+  });
+
+  it('treats contextual registrations as built-ins instead of fail-open third-party tools', async () => {
+    const denied = poolWithFakeBridge(new Set(['start_project']));
+    expect(denied.hasTool('draft_email')).toBe(false);
+    expect(denied.hasTool('draft_connector_action')).toBe(false);
+
+    const allowed = poolWithFakeBridge(
+      new Set(['start_project', 'draft_email', 'draft_connector_action']),
+    );
+    expect(allowed.hasTool('draft_email')).toBe(true);
+    expect(allowed.hasTool('draft_connector_action')).toBe(true);
   });
 
   it('allows the hidden append recovery primitive when write_file is authorized', async () => {

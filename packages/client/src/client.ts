@@ -18,6 +18,7 @@ import type {
   ListInstalledVideoModelsResponse,
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
+  ModelContextOverridesResponse,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -47,8 +48,10 @@ import type {
   ChatSession,
   ChatSessionSummary,
   CodeReviewResponse,
+  CodexSetupStatusResponse,
   CompleteStepRequest,
   CompleteStepResponse,
+  ConfigureCodexRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -228,6 +231,8 @@ import type {
   ReadImageBase64Response,
   ReadSymbolRequest,
   ReadSymbolResponse,
+  ReadWorkspaceFilesRequest,
+  ReadWorkspaceFilesResponse,
   ReferenceFileLocationRequest,
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
@@ -627,7 +632,7 @@ export interface ClaudeCliPoolView {
 
 export interface EngineStatusEntry {
   key: string;
-  provider: 'llama-cpp' | 'mlx';
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
   modelId: string;
   replicaIdx: number;
   residentBytes: number;
@@ -661,6 +666,12 @@ export interface EngineStatusResponse {
     ramShareBytes: number;
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
+    /**
+     * What concurrent KV slots are sized against. Below `fastBytes` on a big
+     * unified host, where admission capacity was raised without raising peak
+     * concurrency. Absent on daemons that predate the field.
+     */
+    concurrencySizingBytes?: number;
   };
   /**
    * Whether models sharing a discrete card may spill into system RAM. Governs
@@ -678,9 +689,15 @@ export interface EngineStatusResponse {
 }
 
 export interface ReconcileEnginePoolRequest {
-  provider: 'llama-cpp' | 'mlx';
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
   /** Clone count per modelId. Missing modelIds are left alone. */
   clones: Record<string, number>;
+}
+
+export interface UnloadIdleEngineRequest {
+  provider: 'llama-cpp' | 'mlx' | 'ds4';
+  modelId: string;
+  replicaIdx: number;
 }
 
 export interface ProviderCacheStatsResponse {
@@ -787,6 +804,8 @@ export interface ConfigResponse {
   ollamaTurnTimeoutMin?: number;
   /** Copilot-only hard per-turn cap, in minutes. Default 3. */
   copilotTurnTimeoutMin?: number;
+  /** Idle local models unload after this many milliseconds. Default 5 minutes. */
+  localEngineIdleTimeoutMs?: number;
   /**
    * llama-cpp: absolute path to a single GGUF file the supervised
    * llama-server should load. Phase 1 MVP; replaced by a model
@@ -1542,6 +1561,30 @@ export interface LlamaCppInstalledModel {
    * needed).
    */
   contextSizingStatus?: 'insufficient-memory' | 'restart-required';
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /**
+   * What automatic sizing would grant right now. Present only while an
+   * override is active — without one, `effectiveContextWindow` IS the
+   * automatic value. Feeds the context slider's "Auto" marker.
+   */
+  autoContextWindow?: number;
+  /**
+   * Post-quant single-slot KV linearization so the UI can price
+   * "~X GB in memory" live while the context slider drags:
+   * `weightsResidentBytes + kvFixedBytesPerSlot + kvBytesPerTokenPerSlot × ctx`.
+   * ds4 rows carry it from their catalog-authored slope; absent on older
+   * daemons and on entries nobody has measured a slope for.
+   */
+  kvBytesPerTokenPerSlot?: number;
+  kvFixedBytesPerSlot?: number;
+  weightsResidentBytes?: number;
+  /**
+   * ds4 rows only: the context slider's max — min(native window, catalog
+   * maxLaunchCtx). ds4 has no ctx-vs-memory admission, so the authored
+   * launch ceiling is the only guard against an unserveable window.
+   */
+  contextCeilingTokens?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -1559,6 +1602,39 @@ export interface LlamaCppInstalledModel {
    * so the UI shows them as machine-provided instead of offering Delete.
    */
   readOnly?: boolean;
+}
+
+/**
+ * What a ds4 catalog entry would launch as on THIS device — resolvable before
+ * the model is downloaded, because ds4's plan reads the catalog block and the
+ * RAM tier rather than the GGUF header. Returned by
+ * {@link GezelClient.listDs4ContextPlans}.
+ */
+export interface Ds4ContextPlan {
+  /** Per-turn window the launch would request. */
+  effectiveContextWindow?: number;
+  /** What automatic sizing grants; present only while an override is active. */
+  autoContextWindow?: number;
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /** The context slider's max — min(native window, catalog `maxLaunchCtx`). */
+  contextCeilingTokens?: number;
+  /** Window the model itself advertises, before this device's tier caps it. */
+  nativeContextWindow?: number;
+  /**
+   * Resident working set at {@link effectiveContextWindow}: expert cache +
+   * resident weights + KV at that window. Falls back to the authored flat
+   * footprint for entries with no measured slope.
+   */
+  projectedResidentBytes?: number;
+  /**
+   * Resident bytes per context token. Present only where the catalog authors a
+   * measured slope — the two together are what let a row re-price as the
+   * window moves (`contextFreeResidentBytes + kvBytesPerToken × ctx`).
+   */
+  kvBytesPerToken?: number;
+  /** Footprint at a zero-token window: everything the context doesn't move. */
+  contextFreeResidentBytes?: number;
 }
 
 /**
@@ -1679,6 +1755,20 @@ export interface MlxInstalledModel {
   reservedResidentBytes?: number;
   /** Concurrent engine slots the launch would be admitted at. */
   plannedSlots?: number;
+  /**
+   * Present when the selected context policy cannot be admitted right now —
+   * same contract as the llama.cpp rows (`insufficient-memory` /
+   * `restart-required`).
+   */
+  contextSizingStatus?: 'insufficient-memory' | 'restart-required';
+  /** Applied per-model context override (tokens), when one is set. */
+  overrideContextTokens?: number;
+  /** What automatic sizing would grant; present only while an override is active. */
+  autoContextWindow?: number;
+  /** Post-quant single-slot KV linearization for the context slider's live estimate. */
+  kvBytesPerTokenPerSlot?: number;
+  kvFixedBytesPerSlot?: number;
+  weightsResidentBytes?: number;
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
@@ -2019,6 +2109,20 @@ export class GezelClient {
 
   updateConfig(body: UpdateConfigRequest): Promise<ConfigResponse> {
     return this.request('PUT', '/api/config', body);
+  }
+
+  // ---------- Codex local-model setup ----------
+
+  getCodexSetupStatus(): Promise<CodexSetupStatusResponse> {
+    return this.request('GET', '/api/codex-setup');
+  }
+
+  configureCodex(body: ConfigureCodexRequest): Promise<CodexSetupStatusResponse> {
+    return this.request('PUT', '/api/codex-setup', body);
+  }
+
+  removeCodexSetup(): Promise<CodexSetupStatusResponse> {
+    return this.request('DELETE', '/api/codex-setup');
   }
 
   // ---------- live gilde content updates ----------
@@ -2914,6 +3018,18 @@ export class GezelClient {
     return this.request('GET', '/api/ds4/models');
   }
 
+  /**
+   * Launch plan per ds4 catalog id, keyed by model id — including entries that
+   * are NOT downloaded. A ds4 download is hundreds of GB, so the window it
+   * would run at and the memory that costs belong on the row BEFORE the user
+   * commits. Entries whose plan can't be resolved are absent from the map; a
+   * daemon that predates the endpoint 404s, which callers treat as "no
+   * projections" rather than an error.
+   */
+  listDs4ContextPlans(): Promise<{ plans: Record<string, Ds4ContextPlan> }> {
+    return this.request('GET', '/api/ds4/context-plans');
+  }
+
   /** Incomplete (interrupted/unverified) ds4 downloads on disk. */
   listIncompleteDs4Models(): Promise<{ incomplete: IncompleteModelDownload[] }> {
     return this.request('GET', '/api/ds4/incomplete');
@@ -3163,6 +3279,35 @@ export class GezelClient {
     return this.request('GET', '/api/engines/status');
   }
 
+  /** Effective idle-model retention owned by the process that owns the engines. */
+  getEngineRetention(): Promise<{ idleTimeoutMs: number }> {
+    return this.request('GET', '/api/engines/retention');
+  }
+
+  /** Persist idle-model retention on the local daemon or adopted machine broker. */
+  updateEngineRetention(idleTimeoutMs: number): Promise<{ idleTimeoutMs: number }> {
+    return this.request('PUT', '/api/engines/retention', { idleTimeoutMs });
+  }
+
+  /** Persist the resident-model memory budget on the process that owns the engines. */
+  updateEngineMemoryBudget(
+    localEngineMemoryGb: number | null,
+  ): Promise<{ localEngineMemoryGb: number | null }> {
+    return this.request('PUT', '/api/engines/memory-budget', { localEngineMemoryGb });
+  }
+
+  /** Persist the discrete-GPU co-residency policy on the engine owner. */
+  updateEngineRamSpillover(
+    allowRamSpillover: boolean | null,
+  ): Promise<{ allowRamSpillover: boolean | null }> {
+    return this.request('PUT', '/api/engines/ram-spillover', { allowRamSpillover });
+  }
+
+  /** Immediately unload one retained local-model replica if it is still idle. */
+  unloadIdleEngine(body: UnloadIdleEngineRequest): Promise<{ ok: true }> {
+    return this.request('POST', '/api/engines/unload', body);
+  }
+
   /** Effective context-sizing policy owned by the managed llama.cpp engine. */
   getLlamaCppContextSizing(): Promise<LlamaCppContextSizingResponse> {
     return this.request('GET', '/api/engines/llama-cpp/context-sizing');
@@ -3173,6 +3318,31 @@ export class GezelClient {
     policy: LlamaCppContextSizing,
   ): Promise<LlamaCppContextSizingResponse> {
     return this.request('PUT', '/api/engines/llama-cpp/context-sizing', { policy });
+  }
+
+  /**
+   * Per-model context overrides for one local engine, keyed by model id.
+   * Owned by the process that owns the engines (proxied to the machine
+   * broker in packaged installs). Also the UI's feature-detect: a 404 from
+   * an older daemon/broker means the override surface is unavailable.
+   */
+  getModelContextOverrides(
+    engine: 'llama-cpp' | 'mlx' | 'ds4',
+  ): Promise<ModelContextOverridesResponse> {
+    return this.request('GET', `/api/engines/${engine}/model-context`);
+  }
+
+  /** Set (tokens) or clear (null) one model's context override on the engine owner. */
+  updateModelContextOverride(
+    engine: 'llama-cpp' | 'mlx' | 'ds4',
+    modelId: string,
+    contextTokens: number | null,
+  ): Promise<{ modelId: string; contextTokens: number | null }> {
+    return this.request(
+      'PUT',
+      `/api/engines/${engine}/model-context/${encodeURIComponent(modelId)}`,
+      { contextTokens },
+    );
   }
 
   /** Source-pinned native release and executable availability in the daemon. */
@@ -3992,6 +4162,23 @@ export class GezelClient {
   /** Forcibly end a wedged turn. Safe to call when nothing's running. */
   cancelChatSessionTurn(sessionId: string): Promise<{ cancelled: boolean }> {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`);
+  }
+
+  /**
+   * Stop every in-progress chat, discard queued chat messages, and persist
+   * install-wide Reactive engagement mode. This is a product-daemon action,
+   * not an engine-broker action: the broker never owns chats or user config.
+   */
+  emergencyStopChats(): Promise<{
+    ok: boolean;
+    engagementMode: 'reactive';
+    persisted: boolean;
+    cancelledTurns: number;
+    clearedQueuedMessages: number;
+    clearedDeferredActions: number;
+    error?: string;
+  }> {
+    return this.request('POST', '/api/sessions/emergency-stop');
   }
 
   /**
@@ -4826,10 +5013,13 @@ export class GezelClient {
     id: string,
     filePath: string,
     content: string,
+    opts?: { gezelId?: string; sessionId?: string },
   ): Promise<{ ok: true; path: string }> {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/artifacts/write`, {
       path: filePath,
       content,
+      ...(opts?.gezelId ? { gezelId: opts.gezelId } : {}),
+      ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
     });
   }
 
@@ -4843,8 +5033,10 @@ export class GezelClient {
     filePath: string,
     data: Blob | ArrayBuffer | Uint8Array,
     mimeType: string,
+    options?: { createOnly?: boolean },
   ): Promise<{ ok: true; path: string }> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}`;
+    const create = options?.createOnly ? '&create=1' : '';
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}${create}`;
     const body =
       data instanceof Blob
         ? data
@@ -4938,8 +5130,10 @@ export class GezelClient {
     filePath: string,
     data: Blob | ArrayBuffer | Uint8Array,
     mimeType = 'application/octet-stream',
+    options?: { createOnly?: boolean },
   ): Promise<{ ok: true; path: string }> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}`;
+    const create = options?.createOnly ? '&create=1' : '';
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/raw?path=${encodeURIComponent(filePath)}${create}`;
     const body =
       data instanceof Blob
         ? data
@@ -5074,6 +5268,13 @@ export class GezelClient {
 
   toolSearchFiles(id: string, body: SearchFilesRequest): Promise<SearchFilesResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-files`, body);
+  }
+
+  toolReadWorkspaceFiles(
+    id: string,
+    body: ReadWorkspaceFilesRequest,
+  ): Promise<ReadWorkspaceFilesResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/read-files`, body);
   }
 
   toolFindFiles(id: string, body: FindFilesRequest): Promise<FindFilesResponse> {

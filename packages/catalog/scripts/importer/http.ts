@@ -49,7 +49,7 @@ export async function fetchWithRetry(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(url, { ...init, headers });
-      if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+      if (res.status === 429 || isRateLimited403(res) || (res.status >= 500 && res.status < 600)) {
         if (attempt >= maxRetries) {
           if (opts.throwOnError) {
             const body = await safeReadBody(res);
@@ -73,6 +73,21 @@ export async function fetchWithRetry(
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(`fetch failed: ${url}`);
+}
+
+/**
+ * GitHub reports throttling as `403` with the rate-limit budget
+ * exhausted, not `429`. Without this the retry ladder skips it
+ * entirely and the caller reads a temporary throttle as a fact about
+ * the resource — which is how a rate-limited window turned into 530
+ * permanently license-less catalog entries.
+ *
+ * Scoped to the header, not the status: a plain 403 (private repo,
+ * blocked content) is a real answer and must stay non-retryable.
+ */
+function isRateLimited403(res: Response): boolean {
+  if (res.status !== 403) return false;
+  return res.headers.get('x-ratelimit-remaining') === '0';
 }
 
 function jittered(ms: number): number {

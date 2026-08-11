@@ -377,4 +377,24 @@ describe('archetypeToCraftbook', () => {
     expect(doc.version).toBe('1.0.0');
     expect(doc.releasedAt).toBe('2026-06-05T00:00:00Z');
   });
+
+  it('emits an explicit immutable release without rewriting the 1.0.0 path', () => {
+    const spec: ArchetypeSpec = {
+      ...arcade,
+      release: { version: '1.1.0', releasedAt: '2026-08-09T00:00:00Z' },
+    };
+    const generated = archetypeToFiles(spec, '2026-06-05T00:00:00Z');
+    expect(generated.files.map((file) => file.relPath)).toEqual([
+      'manifest.json',
+      'versions/1.1.0/craftbook.json',
+    ]);
+    const doc = JSON.parse(generated.files[1]!.content) as {
+      version: string;
+      releasedAt: string;
+    };
+    expect(doc).toMatchObject({
+      version: '1.1.0',
+      releasedAt: '2026-08-09T00:00:00Z',
+    });
+  });
 });

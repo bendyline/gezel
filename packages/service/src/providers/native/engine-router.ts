@@ -216,6 +216,15 @@ export class EngineRouter {
     await this.pool.reconcile(items, (p, m) => this.resolveBytes(p, m));
   }
 
+  /** Unload one resident replica immediately, provided it is still idle. */
+  async unloadIdle(
+    provider: LocalProviderName,
+    modelId: string,
+    replicaIdx: number,
+  ): Promise<boolean> {
+    return this.pool.unloadIdle(makeEngineKey(provider, modelId, replicaIdx));
+  }
+
   snapshot(): PoolSnapshot {
     return this.pool.snapshot();
   }

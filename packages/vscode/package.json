@@ -111,7 +111,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist dist-e2e .turbo",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "build:e2e": "tsup --config tsup.e2e.config.ts",
     "test:e2e": "pnpm run build && pnpm run build:e2e && node dist-e2e/runTests.cjs"
   },

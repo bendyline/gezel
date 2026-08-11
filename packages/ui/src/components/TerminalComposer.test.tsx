@@ -5,7 +5,9 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
-vi.mock('./CommandsPanel.js', () => ({ CommandsPanel: () => null }));
+vi.mock('./CommandsPanel.js', () => ({
+  CommandsPanel: ({ section }: { section?: string }) => <div data-testid={`gallery-${section}`} />,
+}));
 vi.mock('./terminal-editor/use-terminal-completion-sources.js', () => ({
   useTerminalCompletionSources: () => undefined,
 }));
@@ -78,5 +80,18 @@ describe('TerminalComposer', () => {
     });
     expect(editor).toHaveValue('');
     expect(editor).toHaveFocus();
+  });
+
+  it('keeps all three toolbar galleries, including craftbooks', async () => {
+    // The chat rail's narrowed Skills tab no longer lists commands, scripts,
+    // or craftbooks — these three popovers are now their only home, so a
+    // regression here silently removes the craftbook launcher entirely.
+    // (The Popover mock renders content unconditionally, so all three mount.)
+    render(<TerminalComposer projectId="project-1" workingDir="/work/project" />);
+    await screen.findByLabelText('Terminal command');
+
+    expect(screen.getByTestId('gallery-commands')).toBeInTheDocument();
+    expect(screen.getByTestId('gallery-scripts')).toBeInTheDocument();
+    expect(screen.getByTestId('gallery-tasks')).toBeInTheDocument();
   });
 });

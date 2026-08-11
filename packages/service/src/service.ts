@@ -14,7 +14,7 @@ import {
   parseTaskRef,
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
-import type { ExternalFolders, TaskAssignee } from '@bendyline/gezel';
+import { type ExternalFolders, type TaskAssignee, resolveSecurityPolicy } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
@@ -30,12 +30,17 @@ import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
+import { createCodexSetupManager } from './codex-setup/manager.js';
+import { createCodexSetupModelSource } from './codex-setup/model-source.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
+import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
+import { registerGitHubReleasesAdapters } from './connectors/natives/github-releases.js';
 import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
+import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
@@ -58,6 +63,8 @@ import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
+import { codexBridgePortForHome } from './http/codex-bridge-port.js';
+import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
 import {
   buildOllamaEmulationApp,
@@ -179,6 +186,12 @@ export interface StartServiceOptions {
   role?: ServiceRole;
   /** Test seam for a split-service pair; production discovers the OS path. */
   machineEngineHome?: string;
+  /**
+   * Whether a user daemon should discover and adopt the installed machine
+   * engine. Defaults to true in production; the desktop dev supervisor turns
+   * it off so `pnpm app` exercises workspace-built native-provider code.
+   */
+  machineEngineDiscovery?: boolean;
   home?: string;
   /**
    * Bind to this exact port and FAIL if it's already in use (no
@@ -230,6 +243,10 @@ export interface StartServiceOptions {
    * the point.
    */
   ollamaEmulationPort?: number;
+  /** Test seam for the managed Codex profile root (defaults to `$CODEX_HOME` / `~/.codex`). */
+  codexHome?: string;
+  /** Exact Codex bridge port override (`0` = ephemeral); production derives one from `home`. */
+  codexBridgePort?: number;
 }
 
 export interface RunningService {
@@ -447,7 +464,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   // The EnsureModel orchestrator construction happens after the local
   // model managers + catalog are built — see the assignment below the
-  // `catalog`/`llamaCppModels`/`mlxModels` lines.
+  // `catalog`/`llamaCppModels`/`ds4Models`/`mlxModels` lines.
   // HTTPS+HTTP/2 is the default loopback transport. The browser/Electron
   // renderer needs it to multiplex our SSE streams over a single TCP
   // connection (Chromium caps HTTP/1.1 at 6 conns/origin and the chat
@@ -706,11 +723,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     onInstalled: scheduleInstallProbe,
   });
   // Backs `POST /v1/models/ensure` + `GET /v1/models/ensure/:jobId/events`.
-  // Wraps the two local model managers above into a single uniform
+  // Wraps the local model managers above into a single uniform
   // "ensure this model is downloaded" primitive so third-party apps
   // don't need to learn either install API.
   const ensureModel = await createEnsureModelOrchestrator({
     llamaCpp: llamaCppModels,
+    ds4: ds4Models,
     mlx: mlxModels,
     catalog,
   });
@@ -861,9 +879,16 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           resolveInstalled: resolveInstalledForFitness,
           resolveReasoningBudget: (modelId) => resolveCatalogReasoningBudget(catalog, modelId),
           detectMemory: detectMemoryProfile,
-          configuredNumCtx: async (engine) => {
+          configuredNumCtx: async (engine, modelId) => {
             const cfg = await store.readConfig();
-            return engine === 'mlx' ? cfg.mlxNumCtx : cfg.llamaCppNumCtx;
+            return (
+              cfg.modelContextOverrides?.[`${engine}:${modelId}`] ??
+              (engine === 'mlx'
+                ? cfg.mlxNumCtx
+                : engine === 'ds4'
+                  ? cfg.ds4NumCtx
+                  : cfg.llamaCppNumCtx)
+            );
           },
         },
         args,
@@ -1197,8 +1222,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Start discovery only after every native provider manager is wired. The
   // bridge publishes the verified remote before invoking this single drain,
   // so new work routes machine-wide while existing local work finishes.
+  const machineEngineDiscovery =
+    opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1';
+  if (serviceRole === 'user' && !machineEngineDiscovery) {
+    log.info('[machine-engine] discovery disabled; native inference stays in this user daemon');
+  }
   const machineEngine =
-    serviceRole === 'user'
+    serviceRole === 'user' && machineEngineDiscovery
       ? await startMachineEngineBridge({
           home,
           remotes,
@@ -1499,6 +1529,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       ...(task.nightShift?.enabled === true ? { nightShift: true } : {}),
       ...(newStep.lastActivatedAt ? { activationAt: newStep.lastActivatedAt } : {}),
       ...(fromGezel?.name ? { fromGezelName: fromGezel.name } : {}),
+      ...(prevGezelId ? { fromGezelId: prevGezelId } : {}),
     });
   });
 
@@ -1789,6 +1820,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // stack (MailManager + its routes) was retired in the connector overhaul.
   registerMailAdapters();
   registerCalendarAdapters();
+  registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
   const connectorLocks = new ProjectLocks();
   const connectors = new ConnectorManager({
@@ -1821,6 +1853,32 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
 
+  // A craftbook that reads a connector corpus gets it pulled down at
+  // LAUNCH, before its first step's prompt is built — the gezel then
+  // reviews local artifact files instead of needing live API tools mid-turn.
+  // Registered here (rather than as a TaskManager dependency) so the task
+  // layer stays free of the connector subsystem.
+  registerGitHubPullsAdapters({
+    prs: gitHubPrs,
+    project: async (projectId) => {
+      const project = await store.getProject(projectId);
+      if (!project) throw new Error(`project ${projectId} not found`);
+      return project;
+    },
+  });
+  tasks.setConnectorPrepHook(async ({ projectId, craftbookId, connectors: needs, params }) => {
+    const prep = await runConnectorTaskPrep(
+      {
+        getProject: (id) => store.getProject(id),
+        sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
+        allowExternalServices: async () =>
+          resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
+      },
+      { projectId, craftbookId, connectors: needs, params },
+    );
+    return { params: prep.params, ...(prep.note ? { note: prep.note } : {}) };
+  });
+
   // In-chat terminal: per-(project, workingDir) thread manager + its
   // own pub/sub bus. Separate from `chatEvents` because the chat
   // envelope requires sessionId/gezelId, which terminal threads
@@ -1837,7 +1895,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     // recognized as terminal commands — so e.g. `pull-request-review`
     // isn't a command in a non-GitHub project.
     listCraftbookCommands: async (projectId) => {
-      const items = await listApplicableCraftbooks(catalog, store, projectId);
+      const items = await listApplicableCraftbooks(catalog, store, projectId, { git });
       return items.flatMap((it) =>
         it.manifest.kind === 'craftbook-template'
           ? [
@@ -1897,6 +1955,45 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return ollamaEmulationFetchRef.value;
     },
     ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
+  });
+
+  // Codex needs a stable plain-HTTP origin because the product daemon's port
+  // and self-signed certificate rotate. Unlike Ollama emulation this listener
+  // remains bearer-authenticated and exposes only inference. Its profile/file
+  // manager decides whether it should be running.
+  const codexBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const codexBridge = createCodexBridgeController({
+    fetch: () => {
+      if (!codexBridgeFetchRef.value) {
+        throw new Error('Codex bridge cannot start before the HTTP app is ready');
+      }
+      return codexBridgeFetchRef.value;
+    },
+    port: opts.codexBridgePort ?? codexBridgePortForHome(home),
+  });
+  const listCodexSetupModels = createCodexSetupModelSource({
+    catalog,
+    listModels: (provider, signal) => chat.listModelsForProvider(provider, signal),
+    resolveNativeContextWindow: async (provider, modelId, signal) => {
+      if (resolveMachineEngineRemoteId()) {
+        const remoteProvider = await chat.getProviderForModel(provider, modelId);
+        return (
+          (await remoteProvider.prepareContextWindow?.(modelId, signal)) ??
+          remoteProvider.getContextWindow?.()
+        );
+      }
+      return chat.previewContextWindowForModel(provider, modelId);
+    },
+  });
+  const codexSetup = createCodexSetupManager({
+    home,
+    ...(opts.codexHome !== undefined ? { codexHome: opts.codexHome } : {}),
+    tokenStore,
+    bridge: codexBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    listModels: listCodexSetupModels,
   });
 
   // The meester's occasional status report — dynamic Home greeting +
@@ -1984,6 +2081,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remoteServing,
     remoteTenantLimits,
     ollamaEmulation,
+    codexSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2015,6 +2113,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
   const ollamaEmulationApp = buildOllamaEmulationApp(context);
   ollamaEmulationFetchRef.value = ollamaEmulationApp.fetch.bind(ollamaEmulationApp);
+  const codexBridgeApp = buildCodexBridgeApp(context, {
+    models: () => codexSetup.codexModelCatalog(),
+  });
+  codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2274,6 +2376,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await codexSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2515,6 +2622,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await channels.stop();
       await remoteServing.stop();
       await ollamaEmulation.stop();
+      await codexSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

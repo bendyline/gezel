@@ -93,7 +93,14 @@ describe('memoryProfileForLlamaGpu', () => {
     });
     expect(result.gpuMemoryKind).toBe('unified');
     expect(result.source).toBe('gpu-vulkan');
-    expect(result.budgetBytes).toBeLessThanOrEqual(96 * GiB);
+    // The distinction that matters is that its 119 GiB is the SAME memory as
+    // the host's 121 GiB, so it is never added on top — a discrete card of
+    // that size would be scored near 232 GiB. This used to be asserted as
+    // "<= 96 GiB", which was the old flat cap standing in for the unified
+    // curve; the curve now holds back a 16 GiB reserve instead, so pin the
+    // real invariant rather than a constant that moved.
+    expect(result.budgetBytes).toBe(121 * GiB - 16 * GiB);
+    expect(result.budgetBytes).toBeLessThan(121 * GiB);
   });
 });
 
@@ -266,7 +273,7 @@ describe('sampleMachineMemoryUsage', () => {
     expect(usage.usedBytes).toBe(24 * GiB);
   });
 
-  it('uses aggregate driver VRAM and subtracts estimated Gezel residency from other use', () => {
+  it('keeps capacity reservations separate when only aggregate driver VRAM is available', () => {
     const usage = sampleMachineMemoryUsage({
       profile: profile(),
       engineCommittedBytes: 5 * GiB,
@@ -294,17 +301,70 @@ describe('sampleMachineMemoryUsage', () => {
       kind: 'vram',
       totalBytes: 24 * GiB,
       usedBytes: 9 * GiB,
-      gezelBytesEstimated: 5 * GiB,
+      gezelBytesEstimated: 0,
       gezelBytesObserved: null,
       gezelInfraBytes: 0,
-      gezelModelWeightsBytes: 4 * GiB,
-      gezelModelCacheBytes: 1 * GiB,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 0,
       engineReservedBytes: 5 * GiB,
-      otherBytes: 4 * GiB,
+      otherBytes: 9 * GiB,
       freeBytes: 15 * GiB,
       source: 'device-health',
       deviceNames: ['Test GPU'],
     });
+  });
+
+  it('attributes Windows dedicated VRAM to actual Gezel engine processes', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile({ source: 'gpu-vulkan', gpuVendor: 'amd', gpuVramBytes: 32 * GiB }),
+      engineCommittedBytes: 21 * GiB,
+      deviceHealth: {
+        state: 'healthy',
+        mode: 'observe',
+        sampledAt: 'driver-now',
+        sources: ['amd-adl', 'windows-gpu-process-memory'],
+        readings: [
+          {
+            vendor: 'amd',
+            deviceId: '0',
+            name: 'Radeon',
+            memoryUsedMb: 30 * 1024,
+            memoryTotalMb: 32 * 1024,
+          },
+        ],
+        processes: [
+          {
+            pid: 101,
+            name: 'gezel-llama-server.exe',
+            dedicatedBytes: 13 * GiB,
+            owner: 'machine-engine',
+          },
+          {
+            pid: 202,
+            name: 'gezel-llama-server.exe',
+            dedicatedBytes: 13 * GiB,
+            owner: 'development-engine',
+          },
+          {
+            pid: 303,
+            name: 'game.exe',
+            dedicatedBytes: 3 * GiB,
+            owner: 'external',
+          },
+        ],
+        reasons: [],
+        summary: 'healthy',
+      },
+    });
+
+    expect(usage).toMatchObject({
+      usedBytes: 30 * GiB,
+      gezelBytesObserved: 26 * GiB,
+      engineReservedBytes: 21 * GiB,
+      otherBytes: 4 * GiB,
+      gezelEngineProcessCount: 2,
+    });
+    expect(usage.gpuProcesses).toHaveLength(3);
   });
 
   it('attributes nothing to the pool when a driver exposes capacity but not use', () => {

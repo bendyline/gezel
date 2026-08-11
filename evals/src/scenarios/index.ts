@@ -36,7 +36,9 @@ import { staleWorkspaceRescueScenario } from './stale-workspace-rescue.ts';
 import { symptomDebugScenario } from './symptom-debug.ts';
 import { tankCombatScenario } from './tankcombat.ts';
 import { ticTacToeScenario } from './tictactoe.ts';
+import { toolRoutingBrowserScenario } from './tool-routing-browser.ts';
 import { toolRoutingCraftbookScenario } from './tool-routing-craftbook.ts';
+import { toolRoutingFetchUrlScenario } from './tool-routing-fetch-url.ts';
 import { toolRoutingImageScenario } from './tool-routing-image.ts';
 import { toolRoutingRetrievalScenario } from './tool-routing-retrieval.ts';
 import { wikipediaResearchScenario } from './wikipedia-research-brief.ts';
@@ -50,6 +52,14 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
+  // Browser primitive probe: no craftbook or real Chromium. A small worker
+  // must use the hermetic @playwright/mcp replacement, with successful MCP
+  // calls and the real History rail both required by the gate.
+  [toolRoutingBrowserScenario.id]: toolRoutingBrowserScenario,
+  // Curl-equivalent probe: the model must call Gezel's real built-in
+  // fetch_url wrapper, reach the trial's exact-origin HTTPS fixture, and
+  // leave both mock-request and History provenance.
+  [toolRoutingFetchUrlScenario.id]: toolRoutingFetchUrlScenario,
   // Retrieval-before-file-walking probe: measures the
   // Tier-3 retrieval-first steering + workspace-gestalt behaviors. A/B via
   // forceBehaviors/removeBehaviors on prompt.retrieval-first /

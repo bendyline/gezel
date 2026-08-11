@@ -207,7 +207,15 @@ export function mergeScorecard(
   run: ScorecardRun,
   results: ScorecardModelResult[],
 ): ScorecardDataset {
-  const runs = [run, ...existing.runs.filter((entry) => entry.id !== run.id)].sort((a, b) =>
+  // A run's start time is immutable once recorded. Re-ingesting a finished
+  // sweep (to pick up a reporting fix, say) must not restamp it with the
+  // re-ingest time — that would silently redate a published measurement and
+  // could reorder which run counts as the headline.
+  const prior = existing.runs.find((entry) => entry.id === run.id);
+  const preserved: ScorecardRun = prior
+    ? { ...run, provenance: { ...run.provenance, startedAt: prior.provenance.startedAt } }
+    : run;
+  const runs = [preserved, ...existing.runs.filter((entry) => entry.id !== run.id)].sort((a, b) =>
     b.provenance.startedAt.localeCompare(a.provenance.startedAt),
   );
   const key = (r: ScorecardModelResult) => `${r.runId}::${r.suiteId}::${r.modelId}`;

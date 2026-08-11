@@ -187,6 +187,8 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     ['env', 'list'],
     ['task', 'list'],
     ['model', 'list'],
+    ['native', 'list'],
+    ['native', 'status'],
   ])('executes the %s command family in a subprocess', async (family, command) => {
     const result = await runCli(family, command);
     expect(result.stderr).toBe('');

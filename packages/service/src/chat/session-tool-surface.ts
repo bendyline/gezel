@@ -9,7 +9,9 @@ import {
   resolveRoleId,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
+import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
 import type { LocalModelTier } from './local-model-tier.js';
+import { promptMandatedTools } from './prompt-tool-contract.js';
 import {
   type WebSearchBackendName,
   computeToolAllowlist,
@@ -32,6 +34,28 @@ import {
   stepToolKitDisabled,
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
+
+/**
+ * Procedure-text scanning is lexical and re-runs on every turn of a
+ * long-lived step, so cache it by prompt text. Bounded because a daemon
+ * accumulates steps across tasks over a long uptime.
+ */
+const MANDATED_TOOL_CACHE = new Map<string, ReadonlySet<string>>();
+const MANDATED_TOOL_CACHE_MAX = 256;
+
+function stepMandatedTools(step: { prompt?: string } | undefined): ReadonlySet<string> {
+  const prompt = step?.prompt;
+  if (!prompt) return new Set<string>();
+  const cached = MANDATED_TOOL_CACHE.get(prompt);
+  if (cached) return cached;
+  const resolved = promptMandatedTools(prompt);
+  if (MANDATED_TOOL_CACHE.size >= MANDATED_TOOL_CACHE_MAX) {
+    const oldest = MANDATED_TOOL_CACHE.keys().next();
+    if (!oldest.done) MANDATED_TOOL_CACHE.delete(oldest.value);
+  }
+  MANDATED_TOOL_CACHE.set(prompt, resolved);
+  return resolved;
+}
 
 export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
@@ -81,6 +105,8 @@ export interface ResolveSessionToolSurfaceOptions {
    * so it can exercise both medium/large surfaces deterministically.
    */
   coordinatorToolDiet?: boolean;
+  /** Env-gated built-ins actually enabled for this session/project. */
+  contextualBuiltinTools?: readonly string[];
   /**
    * Post-admission per-turn context window for a local engine. A medium/large
    * coordinator whose engine was memory-clamped below the full-roster floor
@@ -105,6 +131,7 @@ export interface ResolveSessionToolSurfaceOptions {
     | 'lastGateReject'
     | 'gateAttemptHistory'
     | 'suggestedRole'
+    | 'prompt'
   >;
   /**
    * Deterministic tool invoked by a fixed-function session. Keep it through
@@ -123,6 +150,13 @@ export interface ResolvedSessionToolSurface {
   projectOrchestrationConstrained: boolean;
 }
 
+let platformUnavailableToolNames: ReadonlySet<string> | undefined;
+
+function unavailableBuiltinNamesOnThisPlatform(): ReadonlySet<string> {
+  platformUnavailableToolNames ??= new Set(unavailableToolsForPlatform(process.platform));
+  return platformUnavailableToolNames;
+}
+
 /**
  * Materialize the built-in portion of a resolved allowlist exactly as the
  * cold-session prompt predictor does. Shared with the prompt-contract matrix
@@ -130,16 +164,31 @@ export interface ResolvedSessionToolSurface {
  */
 export function availableBuiltinToolsForAllowlist(
   allowlist: ReadonlySet<string> | null,
+  contextualBuiltinTools: readonly string[] = [],
+  registeredToolNames?: ReadonlySet<string>,
 ): AvailableToolInfo[] {
   const predicted: AvailableToolInfo[] = [];
   const seenNames = new Set<string>();
+  const platformUnavailable = unavailableBuiltinNamesOnThisPlatform();
   for (const group of BUILTIN_TOOLSETS) {
     for (const toolName of group.tools) {
       if (allowlist && !allowlist.has(toolName)) continue;
+      if (platformUnavailable.has(toolName)) continue;
+      if (registeredToolNames && !registeredToolNames.has(toolName)) continue;
       if (seenNames.has(toolName)) continue;
       seenNames.add(toolName);
       predicted.push({ name: toolName, description: '' });
     }
+  }
+  for (const toolName of contextualBuiltinTools) {
+    if (seenNames.has(toolName)) continue;
+    if (platformUnavailable.has(toolName)) continue;
+    if (registeredToolNames && !registeredToolNames.has(toolName)) continue;
+    const entry = TOOL_REGISTRY[toolName as keyof typeof TOOL_REGISTRY];
+    if (!entry || entry.registration !== 'conditional' || !entry.modelFacing) continue;
+    if (allowlist && !allowlist.has(toolName)) continue;
+    seenNames.add(toolName);
+    predicted.push({ name: toolName, description: '' });
   }
   return predicted;
 }
@@ -172,6 +221,16 @@ export async function resolveSessionToolSurface(
     ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
     ...(opts.workspaceWritable !== undefined ? { workspaceWritable: opts.workspaceWritable } : {}),
   });
+  // Env-gated built-ins are absent from ordinary role kits. Grant only the
+  // conditionals that the session/project actually enabled; the final cap and
+  // clamps below still apply to them.
+  if (rawAllowlist && opts.contextualBuiltinTools?.length) {
+    rawAllowlist = new Set(rawAllowlist);
+    for (const name of opts.contextualBuiltinTools) {
+      const entry = TOOL_REGISTRY[name as keyof typeof TOOL_REGISTRY];
+      if (entry?.registration === 'conditional' && entry.modelFacing) rawAllowlist.add(name);
+    }
+  }
   // The full surgical step-patch schema is intentionally absent from every
   // ordinary role kit. It is worth its ~18K compact schema characters only
   // in the explicit Craftbook editor, where the session is pinned to one
@@ -279,6 +338,14 @@ export async function resolveSessionToolSurface(
       ...LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP,
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
       ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
+      // The kit is authored around a deliverable CLASS, so it cannot know
+      // that a PR-review step must first call `github_pr_diff` or that a
+      // deploy step needs `run_git`. Whatever the step's own procedure
+      // positively instructs stays callable. Widening is safe here by
+      // construction: this is an intersection over a surface the role,
+      // security, consent, and workspace-write filters already produced —
+      // a tool those layers removed cannot come back.
+      ...stepMandatedTools(opts.activeStep),
       'ask_user_question',
     ]);
     rawAllowlist = new Set([...rawAllowlist].filter((name) => keep.has(name)));
@@ -624,6 +691,7 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
   'craftbook_write',
   // Verify delegated deliverables actually landed before reporting done.
   'read_file',
+  'read_files',
   'list_dir',
   // Handoff briefs / scratch.
   'list_artifacts',
@@ -639,7 +707,7 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
   'list_projects',
   'stat',
   'validate',
-  'search_files',
+  'grep_files',
   'find_files',
   'diff_files',
   'grep_artifact',
@@ -655,6 +723,7 @@ const IMPLEMENTATION_TOOL_CAP_PRIORITY = [
   'replace_lines',
   'replace_in_file',
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -690,9 +759,10 @@ const IMPLEMENTATION_TOOL_CAP_PRIORITY = [
 // function of the surface alone, never of iteration order.
 const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
-  'search_files',
+  'grep_files',
   'find_files',
   'list_artifacts',
   'read_artifact',

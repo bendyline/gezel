@@ -173,8 +173,8 @@ describe('RecommendedMediaDownloads', () => {
 
     render(<RecommendedMediaDownloads />);
 
-    expect(await screen.findByText('1.1 GB of 4.3 GB · 25%')).toBeInTheDocument();
-    expect(screen.getByText('18.3 GB of 36.5 GB · 50%')).toBeInTheDocument();
+    expect(await screen.findByText('1.0 GB of 4.0 GB · 25%')).toBeInTheDocument();
+    expect(screen.getByText('17.0 GB of 34.0 GB · 50%')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Download image model/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Download video model/ })).not.toBeInTheDocument();
     expect(api.subscribeImagePull).toHaveBeenCalledWith(
@@ -191,7 +191,7 @@ describe('RecommendedMediaDownloads', () => {
     act(() => {
       onImageEvent?.({ type: 'progress', bytesWritten: 2 * GB, totalBytes: 4 * GB });
     });
-    expect(screen.getByText('2.1 GB of 4.3 GB · 50%')).toBeInTheDocument();
+    expect(screen.getByText('2.0 GB of 4.0 GB · 50%')).toBeInTheDocument();
   });
 
   it('reviews a size-aware default plan, leaves video out, and never starts a chat model', async () => {

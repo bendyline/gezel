@@ -44,6 +44,7 @@ export function TerminalBubble({
       <div
         className="msg msg-user terminal-group terminal-group-command"
         data-terminal-message-id={entry.messageId}
+        data-terminal-thread-id={entry.threadId}
       >
         <div className="msg-header terminal-group-header">
           <span className="terminal-folder-pill" title="Working folder">
@@ -76,6 +77,7 @@ export function TerminalBubble({
     <div
       className="msg msg-assistant terminal-group terminal-group-output"
       data-terminal-message-id={entry.messageId}
+      data-terminal-thread-id={entry.threadId}
     >
       <div className="msg-header terminal-group-header">
         <span className="terminal-folder-pill" title="Working folder">

@@ -588,6 +588,52 @@ describe('McpDefaultMissingFields wrapper', () => {
 describe('McpCompactToolSchemas wrapper', () => {
   const wrapper = wrapperFor(McpCompactToolSchemas);
 
+  function decorateWorkspaceReadTools() {
+    wrapper.decorateTools!(
+      [
+        {
+          type: 'function',
+          name: 'read_file',
+          description: 'Read one workspace file by line range.',
+          parameters: {
+            type: 'object',
+            required: ['path'],
+            properties: {
+              path: { type: 'string' },
+              startLine: { type: 'integer' },
+              endLine: { type: 'integer' },
+              raw: { type: 'boolean' },
+            },
+          },
+        },
+        {
+          type: 'function',
+          name: 'read_files',
+          description: 'Read several workspace files by line range.',
+          parameters: {
+            type: 'object',
+            properties: {
+              files: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['path'],
+                  properties: {
+                    path: { type: 'string' },
+                    startLine: { type: 'integer' },
+                    endLine: { type: 'integer' },
+                  },
+                },
+              },
+              paths: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      ],
+      { ...STOCK_CTX, modelTier: 'medium' },
+    );
+  }
+
   it('removes prose-only schema fields for local tiers while preserving structure', () => {
     const out = wrapper.decorateTools!(
       [
@@ -706,6 +752,114 @@ describe('McpCompactToolSchemas wrapper', () => {
         specialistRole: 'builder',
       });
     }
+  });
+
+  it('leaves canonical read_file range fields unchanged', async () => {
+    decorateWorkspaceReadTools();
+    await expect(
+      wrapper.preProcess!(
+        'read_file',
+        { path: 'src/app.ts', startLine: 10, endLine: 20 },
+        STOCK_CTX,
+      ),
+    ).resolves.toEqual({ kind: 'allow' });
+  });
+
+  it.each([
+    ['lineStart/lineEnd', { lineStart: 10, lineEnd: 20 }],
+    ['start_line/end_line', { start_line: 10, end_line: 20 }],
+  ])('normalizes %s read_file range aliases', async (_label, aliases) => {
+    decorateWorkspaceReadTools();
+    await expect(
+      wrapper.preProcess!('read_file', { path: 'src/app.ts', ...aliases }, STOCK_CTX),
+    ).resolves.toEqual({
+      kind: 'allow',
+      args: { path: 'src/app.ts', startLine: 10, endLine: 20 },
+    });
+  });
+
+  it('normalizes artifact-style lines.start/count into an inclusive workspace range', async () => {
+    decorateWorkspaceReadTools();
+    await expect(
+      wrapper.preProcess!(
+        'read_file',
+        { path: 'src/app.ts', lines: { start: 10, count: 11 } },
+        STOCK_CTX,
+      ),
+    ).resolves.toEqual({
+      kind: 'allow',
+      args: { path: 'src/app.ts', startLine: 10, endLine: 20 },
+    });
+  });
+
+  it('rejects conflicting read_file range aliases instead of choosing one', async () => {
+    decorateWorkspaceReadTools();
+    await expect(
+      wrapper.preProcess!(
+        'read_file',
+        { path: 'src/app.ts', startLine: 10, lineStart: 11, endLine: 20 },
+        STOCK_CTX,
+      ),
+    ).resolves.toEqual({
+      kind: 'reject',
+      error:
+        'Conflicting line-range fields. Use only `startLine` and `endLine` (1-based, inclusive).',
+    });
+  });
+
+  it.each([
+    ['lineStart', { lineStart: '10' }],
+    ['start_line', { start_line: null }],
+    ['lines.start', { lines: { start: '10', count: 2 } }],
+    ['lines.count', { lines: { start: 10, count: '2' } }],
+    ['lines object', { lines: { page: 2 } }],
+  ])(
+    'rejects non-numeric or unrecognized %s without falling back to a full read',
+    async (_label, bad) => {
+      decorateWorkspaceReadTools();
+      const verdict = await wrapper.preProcess!(
+        'read_file',
+        { path: 'src/app.ts', ...bad },
+        STOCK_CTX,
+      );
+      expect(verdict.kind).toBe('reject');
+      if (verdict.kind === 'reject') expect(verdict.error).toContain('line-range field');
+    },
+  );
+
+  it('normalizes line-range aliases inside every read_files item', async () => {
+    decorateWorkspaceReadTools();
+    await expect(
+      wrapper.preProcess!(
+        'read_files',
+        {
+          files: [
+            { path: 'src/a.ts', lineStart: 5, lineEnd: 8 },
+            { path: 'src/b.ts', lines: { start: 20, count: 3 } },
+          ],
+        },
+        STOCK_CTX,
+      ),
+    ).resolves.toEqual({
+      kind: 'allow',
+      args: {
+        files: [
+          { path: 'src/a.ts', startLine: 5, endLine: 8 },
+          { path: 'src/b.ts', startLine: 20, endLine: 22 },
+        ],
+      },
+    });
+  });
+
+  it('rejects a malformed nested read_files range rather than dropping it', async () => {
+    decorateWorkspaceReadTools();
+    const verdict = await wrapper.preProcess!(
+      'read_files',
+      { files: [{ path: 'src/a.ts', lineStart: '5' }] },
+      STOCK_CTX,
+    );
+    expect(verdict.kind).toBe('reject');
+    if (verdict.kind === 'reject') expect(verdict.error).toContain('`lineStart`');
   });
 
   it('keeps schema-normalization state isolated per wrapper instance', async () => {

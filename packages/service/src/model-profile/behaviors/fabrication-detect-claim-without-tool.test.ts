@@ -33,11 +33,11 @@ describe('detectFabricatedToolClaim', () => {
   it('catches the wild-caught "I have created the project" without a project kickoff', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the "Space Invaders" project.',
-      firedToolNames: ['create_gezel_from_gilde', 'update_project', 'list_projects'],
+      firedToolNames: ['create_gezel', 'update_project', 'list_projects'],
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
-    expect(v.requiredTools).toContain('create_project');
+    expect(v.requiredTools).toEqual(['start_project']);
     expect(v.nudge).toMatch(/start_project/);
   });
 
@@ -47,7 +47,7 @@ describe('detectFabricatedToolClaim', () => {
     // optional-name group and the fabrication detector silently passed.
     const v = detectFabricatedToolClaim({
       text: "I've created the **Space Invaders** project and assigned **Vivian** as your voorman.",
-      firedToolNames: ['create_gezel_from_gilde', 'update_project'],
+      firedToolNames: ['create_gezel', 'update_project'],
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
@@ -76,7 +76,7 @@ describe('detectFabricatedToolClaim', () => {
     // extended pattern now accepts that shape.
     const v = detectFabricatedToolClaim({
       text: 'I assigned **Vivian** as your voorman to lead the crew.',
-      firedToolNames: ['create_gezel_from_gilde'],
+      firedToolNames: ['create_gezel'],
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('assigned the voorman');
@@ -90,23 +90,21 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.fabricated).toBe(true);
   });
 
-  it('passes when create_project is among the fired tools', () => {
+  it('passes when start_project is among the fired tools', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the project.',
-      firedToolNames: ['create_project', 'update_project'],
+      firedToolNames: ['start_project', 'update_project'],
     });
     expect(v.fabricated).toBe(false);
     expect(v.nudge).toBeNull();
   });
 
-  it('accepts start_project/start_job as justifying macro-backed project claims', () => {
-    for (const tool of ['start_project', 'start_job']) {
-      const v = detectFabricatedToolClaim({
-        text: 'I have created the Browser Tic-Tac-Toe project.',
-        firedToolNames: [tool],
-      });
-      expect(v.fabricated, `${tool} should justify project creation prose`).toBe(false);
-    }
+  it('accepts start_project as justifying macro-backed project claims', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have created the Browser Tic-Tac-Toe project.',
+      firedToolNames: ['start_project'],
+    });
+    expect(v.fabricated).toBe(false);
   });
 
   it('catches "I created a gezel" claims without any gezel-creation tool', () => {
@@ -126,22 +124,20 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.fabricated).toBe(false);
   });
 
-  it('accepts create_gezel_from_gilde as justifying a gezel creation claim', () => {
+  it('accepts create_gezel as justifying a gezel creation claim', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have brought on a new gezel.',
-      firedToolNames: ['create_gezel_from_gilde'],
+      firedToolNames: ['create_gezel'],
     });
     expect(v.fabricated).toBe(false);
   });
 
-  it('accepts project macros as justifying lead/specialist creation claims', () => {
-    for (const tool of ['start_project', 'start_job']) {
-      const v = detectFabricatedToolClaim({
-        text: 'I have recruited a new gezel to lead the work.',
-        firedToolNames: [tool],
-      });
-      expect(v.fabricated, `${tool} should justify lead creation prose`).toBe(false);
-    }
+  it('accepts start_project as justifying lead/specialist creation claims', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have recruited a new gezel to lead the work.',
+      firedToolNames: ['start_project'],
+    });
+    expect(v.fabricated).toBe(false);
   });
 
   it('catches "I assigned the voorman" without an update_project call', () => {
@@ -210,7 +206,7 @@ describe('detectFabricatedToolClaim', () => {
   it('catches the wild-caught "I\'ve initialized the project" synonym', () => {
     const v = detectFabricatedToolClaim({
       text: "I've initialized the project and am ready to assign a voorman to lead the build.",
-      firedToolNames: ['create_gezel_from_gilde', 'list_projects'],
+      firedToolNames: ['create_gezel', 'list_projects'],
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
@@ -223,9 +219,7 @@ describe('detectFabricatedToolClaim', () => {
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('created a project');
-    expect(v.requiredTools).toEqual(
-      expect.arrayContaining(['create_project', 'start_project', 'start_job']),
-    );
+    expect(v.requiredTools).toEqual(['start_project']);
   });
 
   it('catches a recruited voorman claim after lookup-only tools', () => {
@@ -235,9 +229,7 @@ describe('detectFabricatedToolClaim', () => {
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('recruited a voorman');
-    expect(v.requiredTools).toEqual(
-      expect.arrayContaining(['ensure_gezel', 'create_gezel_from_gilde', 'start_project']),
-    );
+    expect(v.requiredTools).toEqual(['create_gezel', 'ensure_gezel', 'start_project']);
   });
 
   it('accepts start_project as proof that a voorman was recruited', () => {
@@ -265,7 +257,7 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
       turnCtx({
         assistantContent: 'I have created the "Space Invaders" project.',
         drained: [
-          { name: 'create_gezel_from_gilde', durationMs: 12, success: true } as ChatMessageToolCall,
+          { name: 'create_gezel', durationMs: 12, success: true } as ChatMessageToolCall,
           { name: 'list_projects', durationMs: 12, success: true } as ChatMessageToolCall,
         ],
       }),
@@ -281,7 +273,7 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     const verdict = FabricationDetectClaimWithoutTool.postTurnDetector!(
       turnCtx({
         assistantContent: 'I have created the project.',
-        drained: [{ name: 'create_project', durationMs: 12, success: true } as ChatMessageToolCall],
+        drained: [{ name: 'start_project', durationMs: 12, success: true } as ChatMessageToolCall],
       }),
       undefined,
     );
@@ -494,14 +486,12 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     expect(v.fabricated).toBe(false);
   });
 
-  it('accepts project macros as justifying kickoff task claims', () => {
-    for (const tool of ['start_project', 'start_job']) {
-      const v = detectFabricatedToolClaim({
-        text: 'I have created the kickoff task.',
-        firedToolNames: [tool],
-      });
-      expect(v.fabricated, `${tool} should justify kickoff task prose`).toBe(false);
-    }
+  it('accepts start_project as justifying kickoff task claims', () => {
+    const v = detectFabricatedToolClaim({
+      text: 'I have created the kickoff task.',
+      firedToolNames: ['start_project'],
+    });
+    expect(v.fabricated).toBe(false);
   });
 
   it('only counts successful tool calls (failed update_project does not justify "voorman set" claim)', () => {

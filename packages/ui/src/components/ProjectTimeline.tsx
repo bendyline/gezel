@@ -33,6 +33,8 @@ export function ProjectTimeline({
   onTerminalWorkingDirChanged,
   terminalRefreshKey,
   terminalSubmission,
+  terminalFocusRequest,
+  sessionFocusRequest,
 }: {
   projectId: string;
   gezelId?: string;
@@ -51,6 +53,8 @@ export function ProjectTimeline({
     threadId: string;
     input: string;
   };
+  terminalFocusRequest?: { threadId: string; requestKey: number };
+  sessionFocusRequest?: { sessionId: string; requestKey: number };
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) =>
@@ -176,6 +180,8 @@ export function ProjectTimeline({
       {...(gezelId || taskRef ? {} : { terminalStreamUrl })}
       {...(terminalRefreshKey !== undefined ? { terminalRefreshKey } : {})}
       {...(terminalSubmission ? { terminalSubmission } : {})}
+      {...(terminalFocusRequest ? { terminalFocusRequest } : {})}
+      {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
       {...(gezelId || taskRef || !onTerminalWorkingDirChanged
         ? {}
         : { onTerminalWorkingDirChanged })}

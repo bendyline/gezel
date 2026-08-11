@@ -248,7 +248,7 @@ const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEdit
 
         editor.focus();
         // Monaco's initial focus resets its insertion point to column 1.
-        // Move it afterwards so a command staged from the Commands rail is
+        // Move it afterwards so a command staged from a Terminal gallery is
         // ready to extend or run, matching the imperative setValue path.
         moveCaretToEnd(editor, model);
         setReady(true);

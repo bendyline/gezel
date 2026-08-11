@@ -219,6 +219,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       copilotCliInstallDir,
       cacheBudgetMb: config.cacheBudgetMb,
       providerConcurrency: config.providerConcurrency,
+      localEngineIdleTimeoutMs: config.localEngineIdleTimeoutMs,
       // Install-wide per-model tuning. Hand-pick into the whitelist or the
       // Settings preset/fine-tuning controls "lose" their value on the
       // next GET — the resolver still reads them from config.json so the
@@ -364,6 +365,15 @@ export function configRoutes(ctx: ServiceContext): Hono {
           409,
         );
       }
+      // A configured Codex profile follows the same master switch. Its
+      // authenticated bridge is best-effort here: a port collision should
+      // surface as "Update needed" on the dedicated card, not roll back the
+      // master setting for every other connected app.
+      await ctx.codexSetup.reconcile().catch((err) => {
+        log.warn(
+          `[codex-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
     // Live gilde updates: enabling kicks a background check; disabling
     // reverts to bundled content immediately and prunes the cache. Never
@@ -477,10 +487,19 @@ export function configRoutes(ctx: ServiceContext): Hono {
       invalidateModelsCache();
     } else if (
       modelPrefFields.some((f) => body[f] !== undefined) ||
-      nightShiftModelPreferenceChanged
+      nightShiftModelPreferenceChanged ||
+      body.localEngineIdleTimeoutMs !== undefined
     ) {
       await ctx.chat.resetClient({ deferBusy: true });
       invalidateModelsCache();
+    }
+    // ds4 prices its broker reservation at the launch window, so a machine-wide
+    // context change moves what every ds4 model must reserve. The launch itself
+    // still waits for the next engine start (unchanged); only the cached
+    // reservation has to be re-derived.
+    if (body.ds4NumCtx !== undefined && body.ds4NumCtx !== previous.ds4NumCtx) {
+      ctx.chat.invalidateResidentBytesCache('ds4');
+      invalidateModelsCache('ds4');
     }
     // Image provider reset: rebuild whenever the active image provider
     // selection changes, the default cloud model changes, or any
@@ -625,6 +644,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       fetchUrl: updated.fetchUrl,
       webSearch: updated.webSearch,
       playwrightHeadless: updated.playwrightHeadless !== false,
+      localEngineIdleTimeoutMs: updated.localEngineIdleTimeoutMs,
       // Echo llama-cpp fields for parity with the GET handler. Without
       // these the UI's Settings → On-device → Advanced controls would
       // appear to "lose" their value the instant the user hits Save —

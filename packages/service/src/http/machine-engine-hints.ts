@@ -21,6 +21,7 @@ const HINT_MESSAGE =
   'emulation is enabled in Settings → Connected Apps, http://127.0.0.1:11434 also works.';
 
 const HINTED_PATHS = [
+  '/v1/responses',
   '/v1/chat/completions',
   '/v1/completions',
   '/v1/models',

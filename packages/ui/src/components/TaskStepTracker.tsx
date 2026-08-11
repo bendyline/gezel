@@ -117,7 +117,7 @@ export function TaskStepTracker({
         <Poppetje
           poppetje={gezel.poppetje}
           variant="full"
-          size={44}
+          size={26}
           svgId={`track-${step.id}`}
           {...(name ? { title: name } : {})}
         />

@@ -133,7 +133,7 @@ describe('pickRecommendedModel', () => {
       budgetBytes: 23 * GB,
     });
     expect(pick?.id).toBe('gemma4-e2b-q4');
-    expect(pick?.reason).toMatch(/below 8 GiB/);
+    expect(pick?.reason).toMatch(/below 8 GB/);
   });
 
   it('consumer integrated GPU with a large shared allocation: recommends Gemma E2B', () => {

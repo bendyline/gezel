@@ -153,6 +153,7 @@ import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/erro
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
+import { DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
@@ -162,12 +163,7 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import {
-  intoWorkspaceRelative,
-  isProtectedDataPath,
-  resolveInside,
-  safeJoin,
-} from './safe-paths.js';
+import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -892,11 +888,38 @@ export class Store {
 
   async ensureDefaultProject(): Promise<void> {
     const existing = await this.tryGetProjectMeta('default');
-    if (existing) return;
+    if (existing) {
+      await this.backfillDefaultProjectDocs();
+      return;
+    }
     await this.createProject({
       name: 'Default',
       description: 'The default project for general-purpose chats.',
+      about: DEFAULT_PROJECT_ABOUT_MD,
+      missionObjectives: DEFAULT_PROJECT_MISSION_MD,
     });
+  }
+
+  /**
+   * Seed the curated catch-all docs on installs whose `default` project
+   * predates them. Only writes a doc that is genuinely absent — an existing
+   * file (even an empty one) is the user's, and a later edit here must never
+   * be clobbered on the next boot.
+   */
+  private async backfillDefaultProjectDocs(): Promise<void> {
+    const seeds: Array<[string, string]> = [
+      ['about.md', DEFAULT_PROJECT_ABOUT_MD],
+      ['missionObjectives.md', DEFAULT_PROJECT_MISSION_MD],
+    ];
+    for (const [name, content] of seeds) {
+      if ((await this.readProjectDoc('default', name)) !== null) continue;
+      await this.writeProjectDoc('default', name, content).catch((err) => {
+        log.warn(
+          `[store] failed to seed default project ${name}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
   }
 
   /**
@@ -3443,8 +3466,13 @@ export class Store {
     return this.artifacts.grepProjectArtifact(id, filePath, opts);
   }
 
-  async writeProjectArtifact(id: string, filePath: string, content: string): Promise<void> {
-    await this.artifacts.writeProjectArtifact(id, filePath, content);
+  async writeProjectArtifact(
+    id: string,
+    filePath: string,
+    content: string,
+    opts?: { initiatedByGezel?: boolean },
+  ): Promise<void> {
+    await this.artifacts.writeProjectArtifact(id, filePath, content, opts);
   }
 
   /**
@@ -3453,8 +3481,13 @@ export class Store {
    * but takes a Buffer instead of a string. The caller supplies the full
    * relative path including extension.
    */
-  async writeProjectArtifactBinary(id: string, filePath: string, data: Buffer): Promise<string> {
-    return this.artifacts.writeProjectArtifactBinary(id, filePath, data);
+  async writeProjectArtifactBinary(
+    id: string,
+    filePath: string,
+    data: Buffer,
+    options?: { createOnly?: boolean },
+  ): Promise<string> {
+    return this.artifacts.writeProjectArtifactBinary(id, filePath, data, options);
   }
 
   async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
@@ -3727,7 +3760,7 @@ export class Store {
     | { ok: true; workspaceDir: string; external: boolean }
     | {
         ok: false;
-        reason: 'missing-flag-external' | 'disabled-by-project' | 'data-subtree-readonly';
+        reason: 'missing-flag-external' | 'disabled-by-project';
         workingDir: string;
       }
   > {
@@ -3738,24 +3771,6 @@ export class Store {
     }
     if (opts?.initiatedByGezel && meta?.allowGezelWrites === false) {
       return { ok: false, reason: 'disabled-by-project', workingDir: resolved.dir };
-    }
-    // The connector-corpus subtree (`data/**`) is inbound source-of-truth and
-    // read-only to gezels; only `_`-prefixed entries (drafts, outbox, flag
-    // sidecars) are the mutable surface. A deleted record is never re-fetched
-    // — the sync cursor has already advanced past it — so a gezel write here
-    // is silent permanent data loss, not a reversible edit.
-    if (opts?.initiatedByGezel && opts.path !== undefined) {
-      const paths = Array.isArray(opts.path) ? opts.path : [opts.path];
-      const rebase = (p: string): string => {
-        try {
-          return intoWorkspaceRelative(resolved.dir, p);
-        } catch {
-          return p;
-        }
-      };
-      if (paths.some((p) => isProtectedDataPath(rebase(p)))) {
-        return { ok: false, reason: 'data-subtree-readonly', workingDir: resolved.dir };
-      }
     }
     return {
       ok: true,
@@ -3872,7 +3887,7 @@ export class Store {
       const flexible = findFlexibleMatch(oldContent, args.find);
       if (flexible.kind === 'ambiguous') {
         throw new WorkspaceEditError(
-          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replaceLines\`.`,
+          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replace_lines\`.`,
           'ambiguous-match',
         );
       }
@@ -3883,7 +3898,7 @@ export class Store {
 
     if (newContent === oldContent) {
       throw new WorkspaceEditError(
-        `replaceInFile is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
+        `replace_in_file is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
         'identity-edit',
       );
     }
@@ -3938,7 +3953,7 @@ export class Store {
 
     if (args.startLine > total) {
       throw new WorkspaceEditError(
-        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`appendToFile\` to add to the end.`,
+        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`append_to_file\` to add to the end.`,
         'line-out-of-range',
       );
     }
@@ -3951,7 +3966,7 @@ export class Store {
 
     if (newContent === oldContent) {
       throw new WorkspaceEditError(
-        `replaceLines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
+        `replace_lines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
         'identity-edit',
       );
     }
@@ -4002,7 +4017,7 @@ export class Store {
     }
     if (parsed.length > 1) {
       throw new WorkspaceEditError(
-        `applyPatch is one-file-per-call but the diff describes ${parsed.length} files; split into ${parsed.length} separate calls.`,
+        `apply_patch is one-file-per-call but the diff describes ${parsed.length} files; split into ${parsed.length} separate calls.`,
         'patch-multi-file',
       );
     }
@@ -4019,7 +4034,7 @@ export class Store {
     }
     if (applied === oldContent) {
       throw new WorkspaceEditError(
-        `applyPatch is a no-op on ${args.path} — the diff would not change file content.`,
+        `apply_patch is a no-op on ${args.path} — the diff would not change file content.`,
         'identity-edit',
       );
     }
@@ -4219,6 +4234,7 @@ export class Store {
     filePath: string,
     data: Buffer,
     ctx?: JournalContext,
+    options?: { createOnly?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
@@ -4227,7 +4243,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
-    await writeFileAtomic(full, data);
+    await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.history?.log({
       kind: 'workspace.write',
       projectId: id,
@@ -4523,12 +4539,21 @@ export class Store {
         // scheduler keys its backoff reset off this; see the field's doc
         // on ChatSessionSummarySchema.
         let lastHumanActivityAt: string | undefined;
+        const involvedGezelIds = new Set<string>([session.gezelId]);
         for (let i = session.messages.length - 1; i >= 0; i--) {
           const m = session.messages[i];
-          if (m && m.role === 'user' && !m.from) {
+          if (!m) continue;
+          if (m.from) involvedGezelIds.add(m.from.gezelId);
+          if (!lastHumanActivityAt && m.role === 'user' && !m.from) {
             lastHumanActivityAt = m.at;
-            break;
           }
+        }
+        const lastMessage = session.messages.at(-1);
+        const normalizedLastMessage = lastMessage?.content.replace(/\s+/g, ' ').trim() ?? '';
+        let lastMessagePreview = '';
+        for (const character of normalizedLastMessage) {
+          if (lastMessagePreview.length + character.length > 200) break;
+          lastMessagePreview += character;
         }
         summaries.push({
           id: session.id,
@@ -4544,6 +4569,8 @@ export class Store {
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
           ...(lastHumanActivityAt ? { lastHumanActivityAt } : {}),
+          ...(lastMessagePreview ? { lastMessagePreview } : {}),
+          involvedGezelIds: [...involvedGezelIds],
         });
       }
     }
@@ -4741,12 +4768,13 @@ export class Store {
     const hasMore = rows.length > limit;
     const trimmed = hasMore ? rows.slice(rows.length - limit) : rows;
 
-    // Per-project queries also pull terminal entries from the project's
-    // terminal threads. Returned as a sibling array; the UI interleaves
-    // by `at`. Global + gezel-scoped queries leave this undefined so
-    // their existing chat-only shape is preserved.
+    // Unfiltered per-project queries also pull terminal entries from the
+    // project's terminal threads. Returned as a sibling array; the UI
+    // interleaves by `at`. Gezel- and task-scoped project queries are chat
+    // surfaces too, so project-wide shell activity must stay out of them.
+    // Global + gezel-only queries likewise keep their chat-only shape.
     let terminalEntries: TerminalTimelineEntry[] | undefined;
-    if (opts.projectId) {
+    if (opts.projectId && !opts.gezelId && !opts.taskRef) {
       const collected = await this.collectProjectTerminalEntries(
         opts.projectId,
         includeArchived,

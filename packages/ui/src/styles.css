@@ -1,6 +1,12 @@
 :root {
   color-scheme: light dark;
 
+  /* Height of the toolbar band that runs across the top of a project's
+     body: the chat's pill row and, beside it, the output pane's launch
+     toolbar. Both consume this so the two read as one continuous bar
+     across the split and can't drift apart. */
+  --chat-toolbar-band-height: 66px;
+
   /* Typography tokens.
      `--font-ui` (Hanken Grotesk) is the default everywhere: UI chrome,
      form controls, buttons, descriptions, dropdowns, input text. The sans
@@ -393,11 +399,7 @@ h6 {
 .home-intro-body > p,
 .home-intro-body > p strong,
 .msg-body,
-.msg-body-rich,
-/* Titlebar nav (the Questions toggle) keeps the editorial register to
-   match the logotype. */
-  .app-header
-  .nav {
+.msg-body-rich {
   font-family: var(--font-display);
 }
 
@@ -1534,6 +1536,17 @@ html.embedded-chat #root {
 .machine-memory-reservation-pool-ram {
   background: color-mix(in srgb, var(--warning) 10%, var(--surface));
 }
+.machine-memory-reservation-system-reserve {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--text-muted) 18%, var(--surface)) 0 4px,
+    color-mix(in srgb, var(--text-muted) 30%, var(--surface)) 4px 8px
+  );
+  transition: width 240ms ease-out;
+}
 .machine-memory-reservation-segment {
   display: block;
   height: 100%;
@@ -1583,6 +1596,47 @@ html.embedded-chat #root {
 .machine-memory-reservation-model > :last-child {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.machine-memory-detail-list {
+  display: grid;
+  gap: 0.12rem;
+  margin-top: 0.08rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.3;
+}
+.machine-memory-detail-heading {
+  color: var(--text);
+  font-weight: 600;
+}
+.machine-memory-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.machine-memory-detail-row > :first-child {
+  overflow-wrap: anywhere;
+}
+.machine-memory-detail-row > :last-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.machine-memory-release-state {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+button.machine-memory-unload-button {
+  padding: 0.1rem 0.32rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.64rem;
+  line-height: 1.2;
+}
+.machine-memory-unload-error {
+  margin-top: 0.12rem;
+  white-space: normal;
 }
 .machine-memory-segment {
   display: block;
@@ -1674,6 +1728,50 @@ html.embedded-chat #root {
   align-items: flex-start;
   gap: 0.3rem;
 }
+.engine-pill-retention-policy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.engine-pill-retention-mode {
+  min-inline-size: 0;
+  margin: 0;
+}
+.engine-pill-retention-mode .gz-key {
+  position: relative;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.engine-pill-retention-radio {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.engine-pill-retention-mode .gz-key:has(.engine-pill-retention-radio:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.engine-pill-retention-mode .gz-key:has(.engine-pill-retention-radio:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.engine-pill-retention-radio:disabled {
+  cursor: not-allowed;
+}
+.engine-pill-retention-note {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
 .engine-pill-health-mode .gz-key {
   padding: 0.25rem 0.55rem;
   font-size: 0.72rem;
@@ -1691,6 +1789,44 @@ html.embedded-chat #root {
   color: var(--text-muted);
 }
 .engine-pill-health-policy-error {
+  color: var(--danger);
+}
+.engine-pill-emergency-stop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.engine-pill-emergency-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.engine-pill-emergency-copy span {
+  color: var(--text-muted);
+}
+.engine-pill-emergency-button {
+  min-width: 8.5rem;
+  white-space: nowrap;
+}
+.engine-pill-emergency-notice,
+.engine-pill-emergency-error {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.engine-pill-emergency-notice {
+  grid-column: 1 / -1;
+  color: var(--success);
+}
+.engine-pill-emergency-error {
   color: var(--danger);
 }
 .engine-pill-empty {
@@ -2527,13 +2663,21 @@ html.embedded-chat #root {
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* Top-nav "Questions" button — only rendered when pending-question
+/* Top-nav "Updates" button — only rendered when pending-question
    count > 0. Styled as a regular tab but with an amber accent so it
-   reads as actionable. */
+   reads as actionable. It briefly wore the serif to match the logotype;
+   it's a control, not a heading, so it takes the sans like every other
+   button (docs/ux.md, "Typography"). Pinned rather than inherited —
+   `.nav` uses `font: inherit`, so any future editorial ancestor in the
+   titlebar would silently drag it back. */
 .app-nav-questions {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  font-family: var(--font-ui);
+  /* `.nav` uses `font: inherit`, which picked up the 16px document default
+     and left the label louder than every other control in the titlebar. */
+  font-size: var(--text-sm);
 }
 .app-nav-questions .app-nav-badge {
   background: var(--accent, #b0724c);
@@ -2544,7 +2688,7 @@ html.embedded-chat #root {
   line-height: 1.4;
   min-width: 1.1rem;
   text-align: center;
-  transform: translateY(2px);
+  transform: translateY(1px);
 }
 
 /* Questions overlay — drops down from beneath the app header. The
@@ -2578,10 +2722,16 @@ html.embedded-chat #root {
   /* Override the UA default block styling on <dialog>: by default a
      non-modal <dialog open> gets `margin: auto` (centers itself),
      a light border, and UA-native padding. We want it flush to the
-     edges of the viewport below the nav. */
+     edges of the viewport below the nav.
+     `width: auto` is load-bearing — the UA sheet sets `width: fit-content`
+     on <dialog>, which shrink-wraps the drawer to its content and quietly
+     defeats the `left: 0; right: 0` stretch above (clearing `max-width`
+     alone does nothing). Without it the report card never gets the width
+     to split into two columns. */
   margin: 0;
+  width: auto;
   max-width: none;
-  max-height: calc(100vh - var(--app-header-height, 44px) - 1rem);
+  max-height: calc(100vh - var(--app-header-height, 44px));
   overflow-y: auto;
   background: var(--bg);
   color: inherit;
@@ -3218,6 +3368,12 @@ html.embedded-chat #root {
   width: min(560px, 92vw);
   max-height: 82vh;
   overflow: auto;
+}
+/* A question with an attached document renders two columns; at 560px
+   they'd stack and the panel would just be a taller letterbox. */
+.project-questions-dialog:has(.pending-question-splitwrap) {
+  width: min(1080px, 94vw);
+  max-height: 90vh;
 }
 .sr-only {
   position: absolute;
@@ -8312,6 +8468,70 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 /* Connected apps read like a small permissions ledger: one app per ruled
    line, with the revocation action kept in a predictable final column. */
+.codex-setup-card {
+  width: min(100%, 640px);
+}
+
+.codex-setup-intro {
+  margin-top: 0;
+}
+
+.codex-setup-state {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.codex-setup-state--configured {
+  color: var(--success);
+}
+
+.codex-setup-state--update-needed,
+.codex-setup-state--conflict,
+.codex-setup-state--unavailable,
+.codex-setup-caution {
+  color: var(--warning);
+}
+
+.codex-setup-model-row,
+.codex-setup-command-row,
+.codex-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.codex-setup-command-row {
+  margin: var(--space-sm) 0 var(--space-md);
+}
+
+.codex-setup-command-row code {
+  overflow-wrap: anywhere;
+}
+
+.codex-setup-model-row {
+  margin: var(--space-md) 0;
+}
+
+.codex-setup-model-row > span {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.codex-setup-model-row .gz-select-trigger {
+  min-width: min(22rem, 100%);
+}
+
+.codex-setup-reasons ul {
+  margin-top: var(--space-xs);
+}
+
+.codex-setup-error {
+  margin-bottom: 0;
+}
+
 .grant-verification {
   margin: var(--space-md) 0;
   padding: var(--space-md);
@@ -13040,6 +13260,7 @@ button.bench-step-foot:disabled {
   margin-top: 0.5rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
+  font-family: var(--font-ui);
   color: var(--accent-hover, #996142);
   background: rgba(176, 114, 76, 0.1);
   border: 1px solid rgba(176, 114, 76, 0.28);
@@ -13052,6 +13273,7 @@ button.bench-step-foot:disabled {
   margin-top: 0.5rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
+  font-family: var(--font-ui);
   color: var(--warning);
   background: var(--warning-bg);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
@@ -14252,7 +14474,7 @@ button.bench-step-foot:disabled {
 
 .chat-rail-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 22rem;
+  grid-template-columns: minmax(0, 1fr);
   /* Stretch the single grid row to fill the container's flex height.
      Without this the implicit row sizes to content (timeline + composer),
      and the chat panel stops short of the bottom edge — leaving dead
@@ -14261,6 +14483,36 @@ button.bench-step-foot:disabled {
   gap: 0.75rem;
   flex: 1;
   min-height: 0;
+}
+
+/* A banner (today: the chat pill row) spans the whole rail — chat column,
+   grip, and context pane — so the status band reads as one toolbar across
+   the split instead of stopping at the grip. It occupies its own auto row
+   above the panes. The transparent grip track still spans both rows so its
+   painted handle stays aligned with the neighbouring output-pane handle;
+   the banner sits above the track so its controls keep the full hit area. */
+.chat-rail-body:has(> .chat-rail-banner) {
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 0;
+}
+.chat-rail-banner {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-main {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-grip {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-side {
+  grid-column: 3;
+  grid-row: 2;
 }
 
 /* Compact / narrow form factor. The split rail becomes a single-pane tab
@@ -14469,6 +14721,299 @@ body.chat-rail-resizing webview {
 .chat-rail-main .chat-timeline-viewport {
   flex: 1;
   min-height: 0;
+}
+
+/* ---- Chat pill row -------------------------------------------------
+   The status band at the top of a project chat: threads that are
+   streaming / failed / recently active, the project's active tasks, and
+   a "Do +" action that starts a new task.
+
+   It rides in the rail's `.chat-rail-banner` row, spanning the chat column
+   and the context pane; in compact mode it sits in the `.chat-rail-main`
+   flex column above the timeline, so it must not shrink (the timeline's
+   `flex: 1` would otherwise crush it). The cards must never wrap into a
+   second row — overflow scrolls sideways under a visible bar. */
+.chat-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  min-height: var(--chat-toolbar-band-height);
+  padding: 0.3rem 0.5rem;
+  background: var(--tray-bg);
+  border: solid var(--tray-border);
+  border-width: 1px 0;
+  box-shadow: var(--tray-shadow);
+}
+/* Wraps the scroller so the overflow indicator can be positioned against
+   it rather than against the whole row — the track must stop where the
+   pills stop, not run under the "Do +" key. */
+.chat-pill-row-scroller {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-pill-row-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* The native bar stays hidden and `.chat-pill-row-bar` stands in for it.
+     A real one can't work here: on macOS with the default "Automatic"
+     scrollbar setting Chromium paints an overlay bar that is invisible at
+     rest — exactly the state where the user needs to be told more threads
+     exist — and forcing the classic bar costs 8px of layout height, which
+     the band shares with `.project-output-toolbar` via
+     `--chat-toolbar-band-height`. The stand-in is absolutely positioned, so
+     the band's height never depends on whether the pills overflow. */
+  scrollbar-width: none;
+}
+.chat-pill-row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Sits in the row's bottom padding, level with its border, so it reads as
+   an underline on the band. Only rendered while the pills overflow. */
+.chat-pill-row-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--scrollbar-track);
+  cursor: pointer;
+}
+.chat-pill-row-bar-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 1.5rem;
+  border-radius: 999px;
+  /* The resting colour is the app's *hover* thumb: at 4px tall the normal
+     one reads as a smudge rather than a control. */
+  background: var(--scrollbar-thumb-hover);
+  cursor: grab;
+}
+.chat-pill-row-bar-thumb:hover,
+.chat-pill-row-bar-thumb:active {
+  background: color-mix(in srgb, var(--scrollbar-thumb-hover) 65%, var(--fg));
+}
+.chat-pill-row-bar-thumb:active {
+  cursor: grabbing;
+}
+.chat-pill-row-empty {
+  white-space: nowrap;
+}
+
+.chat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  max-width: 14rem;
+  min-height: 3rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--fg);
+  box-shadow: var(--key-shadow);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out,
+    transform 140ms ease-out;
+}
+.chat-pill:hover {
+  background: var(--key-bg-hover);
+}
+.chat-pill:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+.chat-pill.is-active {
+  transform: translateY(1px);
+  border-color: var(--key-pressed-border);
+  background: var(--key-pressed-bg);
+  color: var(--key-pressed-ink);
+  box-shadow: var(--key-pressed-shadow);
+}
+.chat-pill-thread {
+  width: 17rem;
+  max-width: 17rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.12rem;
+  text-align: left;
+}
+.chat-pill-terminal .terminal-prompt-sigil {
+  flex: 0 0 auto;
+}
+.chat-pill-thread-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+/* Block, not the flex the line class hands out: `text-overflow` never
+   applies to a flex container's own text, so the title hard-cut instead
+   of ellipsing. */
+.chat-pill-thread-title {
+  display: block;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.chat-pill-thread-context,
+.chat-pill-thread-update {
+  gap: 0.25rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.chat-pill-thread-context .poppetje,
+.chat-pill-thread-context svg {
+  flex: 0 0 auto;
+}
+.chat-pill-participants {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.chat-pill-message-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill-separator {
+  flex: 0 0 auto;
+  color: var(--border-strong, var(--muted));
+}
+/* The status is the point of the line, so it holds its width and the
+   relative timestamp beside it gives way first. */
+.chat-pill-thread-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.chat-pill-thread-updated-at {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill.is-active :where(.chat-pill-thread-title, .chat-pill-participants, .chat-pill-label) {
+  color: var(--key-pressed-ink);
+}
+.chat-pill.is-active
+  :where(.chat-pill-thread-context, .chat-pill-thread-update, .chat-pill-separator) {
+  color: color-mix(in srgb, var(--key-pressed-ink) 78%, transparent);
+}
+.chat-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The task dot is shared with list rows, which nudge it down to meet a
+   multi-line title. Inside a single-line pill it centers instead. */
+.chat-pill-task .task-status-dot {
+  margin-top: 0;
+}
+
+/* State is carried by a dot rather than a color-only border, so it stays
+   legible for color-vision differences; the accessible name repeats it. */
+.chat-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chat-pill-idle .chat-pill-dot {
+  background: var(--muted);
+}
+.chat-pill-inflight .chat-pill-dot {
+  background: var(--accent, #7faa76);
+  animation: engine-pill-dot-pulse 1.6s ease-in-out infinite;
+}
+.chat-pill-errored {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.chat-pill-errored .chat-pill-dot {
+  background: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-pill-inflight .chat-pill-dot {
+    animation: none;
+  }
+}
+
+.chat-pill-overflow {
+  color: var(--muted);
+}
+.chat-pill-overflow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  align-items: flex-start;
+  width: 18rem;
+  max-width: 100%;
+}
+
+/* Pinned right so "start a new task" stays put while the pills scroll
+   under it. The panel background is what keeps the pills from showing
+   through as they pass beneath. */
+.chat-pill-new-task {
+  flex: 0 0 auto;
+  position: sticky;
+  right: 0;
+  width: auto;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.55rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--fg);
+  box-shadow: var(--key-shadow);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+}
+.chat-pill-new-task:hover {
+  background: var(--key-bg-hover);
+}
+.chat-pill-new-task:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+/* Narrow chat rail: keep the three-line summary, but tighten its card.
+   Container query, not a viewport media query — see the rail note above. */
+@container chat-rail (max-width: 560px) {
+  .chat-pill {
+    max-width: 13rem;
+  }
+  .chat-pill-thread {
+    width: 13rem;
+  }
+  .chat-pill-thread .poppetje,
+  .chat-pill-thread svg {
+    display: none;
+  }
 }
 
 /* The viewport is the positioning context for the floating pin
@@ -16238,10 +16783,21 @@ button.timeline-session-divider-continuing::before {
   font-size: 0.85rem;
 }
 
+.ollama-model-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ollama-model-table .model-name-column {
+  width: 36%;
+}
+
 .ollama-model-table th,
 .ollama-model-table td {
   padding: 0.35rem 0.5rem;
   text-align: left;
+  vertical-align: top;
   border-bottom: 1px solid var(--border);
 }
 
@@ -16253,18 +16809,60 @@ button.timeline-session-divider-continuing::before {
   letter-spacing: 0.04em;
 }
 
-/* The fitness status and its action form one compact row. Nudge the row a
-   couple of pixels left so the bordered badge aligns optically with the
-   plain FITNESS heading, then let flexbox own the inter-control spacing. */
+/* Installed-model rows use two deliberate lines instead of wrapping based on
+   incidental space. The model id stays intact on line one; any status marks
+   occupy line two. */
+.ollama-model-table td.model-name-table-cell {
+  min-width: 10.5rem;
+}
+
+.model-name-cell,
+.model-fitness-cell,
+.model-actions-cell {
+  display: grid;
+  grid-template-rows: auto minmax(1.15rem, auto);
+  row-gap: 0.2rem;
+  align-items: start;
+  justify-items: start;
+}
+
+.model-name-cell > code {
+  width: fit-content;
+  white-space: nowrap;
+}
+
+.model-name-meta,
+.model-action-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-sm);
+  min-height: 1.15rem;
+  white-space: nowrap;
+}
+
+.model-memory-headline {
+  display: block;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+
+/* Nudge the fitness stack a couple of pixels left so the bordered badge
+   aligns optically with the plain FITNESS heading. */
 .ollama-model-table td.model-fitness-table-cell {
   padding-left: 0.35rem;
 }
 
 .model-fitness-cell {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
   white-space: nowrap;
+}
+
+.model-actions-table-cell {
+  white-space: nowrap;
+}
+
+.model-action-status {
+  min-height: 1.15rem;
 }
 
 .model-fitness-badge {
@@ -17646,6 +18244,21 @@ a.license-button:hover {
   padding: 0.25rem;
 }
 
+.gz-select-label {
+  padding: 0.35rem 0.6rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gz-select-separator {
+  height: 1px;
+  margin: 0.25rem 0.35rem;
+  background: var(--border);
+}
+
 .gz-select-item {
   padding: 0.35rem 0.6rem;
   border-radius: 2px;
@@ -17949,9 +18562,9 @@ a.license-button:hover {
   align-items: center;
   gap: 0.4rem;
   flex: 0 0 auto;
-  /* Match the height of the chat's gezel-roster row to its right so the two
-     bars read as one continuous toolbar band across the split. */
-  min-height: 41px;
+  /* Match the height of the chat's pill row to its right so the two bars
+     read as one continuous toolbar band across the split. */
+  min-height: var(--chat-toolbar-band-height);
   padding: 0.3rem 0.5rem;
   padding-left: calc(0.5rem + 5px);
   background: var(--panel);
@@ -18358,7 +18971,7 @@ a.license-button:hover {
 .pending-question-document-preview {
   max-height: 180px;
   overflow-y: auto;
-  padding: 0.4rem 0.55rem;
+  padding: 0.7rem 0.9rem;
   border-radius: 4px;
   background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);
   font-size: 0.85rem;
@@ -18367,6 +18980,87 @@ a.license-button:hover {
 .pending-question-document-expand {
   align-self: flex-start;
   font-size: 0.75rem;
+}
+
+/* ── Attached-document split ──────────────────────────────────────
+   A question that carries a document (a night-shift report, a plan)
+   lifts it out of the card's context strip into its own column, so a
+   report reads as a portrait page that scrolls on its own instead of a
+   ten-line letterbox above the answer keys. The wrapper is the query
+   container: the card lives in a chat bubble, a sidebar dialog, and the
+   full-width questions overlay, and only the last two are reliably wide
+   enough for two columns. */
+.pending-question-splitwrap {
+  container: question-card / inline-size;
+}
+
+.pending-question-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+/* 680px is deliberately low: the overlay's container is the window width
+   minus its padding, and an ~800px window still deserves two columns.
+   The document takes the larger share — it's what the user is here to
+   read; the card beside it is a prompt and two keys. */
+@container question-card (min-width: 680px) {
+  .pending-question-split {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 1.15fr);
+  }
+}
+
+.pending-question-split-main {
+  min-width: 0;
+}
+
+/* The panel is a fixed portrait window, not a column that grows with the
+   document — min and max are deliberately the same height. Without the
+   cap the panel stretches to the document's full length and the *host
+   surface* scrolls instead, which is the letterbox problem again in a
+   taller costume. */
+.pending-question-document-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 18rem;
+  max-height: 28rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+}
+
+/* Both question surfaces are viewport-anchored, so the panel can claim
+   real height there; inside a chat bubble it keeps the modest default. */
+.app-questions-overlay .pending-question-document-panel,
+.project-questions-dialog .pending-question-document-panel {
+  min-height: min(62vh, 44rem);
+  max-height: min(62vh, 44rem);
+}
+
+/* The panel reads as a page, not a snippet, so it gets page margins —
+   generous enough that a long report's body text never runs into the
+   panel's own border. */
+.pending-question-document-panel .pending-question-document-preview {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 1rem 1.15rem;
+}
+
+/* The document is a preview, not this surface's own heading hierarchy —
+   a report's `# Title` set at page scale dwarfs the question it belongs
+   to. Pull the top two levels back toward panel scale. */
+.pending-question-document-panel .pending-question-document-preview :is(h1, h2) {
+  font-size: var(--text-xl);
+  margin-top: 0.4rem;
+}
+
+.pending-question-document-panel .pending-question-document-preview :is(h3, h4, h5, h6) {
+  font-size: var(--text-lg);
 }
 
 .pending-question-prompt {
@@ -18575,7 +19269,7 @@ a.license-button:hover {
 }
 
 /* The mode buttons are gz-keys (see the keys-in-trays block at the end of
-   this file). "Off" is the emergency stop — its latched key goes danger-red. */
+   this file). "Off" is the hard stop — its latched key goes danger-red. */
 .engagement-mode-off .gz-key-active {
   background: linear-gradient(to bottom, #a83326, #c0392b);
   border-color: #7f2820;
@@ -19929,12 +20623,50 @@ a.license-button:hover {
 
 .gz-connector-config-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.65rem 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+  max-width: 42rem;
 }
 
-.gz-connector-config-fields > label {
+/* This tray lives outside `.gz-dialog`, so it doesn't inherit the dialog's
+   stacked label/input rule — state it here or every field renders with its
+   caption inline and an intrinsically-sized input. */
+.gz-connector-config-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.gz-connector-config-fields label > input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-connector-config-fields > .gz-connector-boolean-field,
+.gz-connector-config-fields .gz-imap-tls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  gap: 0.45rem;
+  min-height: 2.15rem;
+}
+
+.gz-connector-config-fields > .gz-connector-boolean-field > input,
+.gz-connector-config-fields .gz-imap-tls > input {
+  width: auto;
+  margin: 0;
+}
+
+/* Port and Use TLS join the field grid as their own cells instead of
+   sharing one cramped column. */
+.gz-connector-config-fields > .gz-imap-row {
+  display: contents;
 }
 
 .gz-connector-oauth-note {
@@ -24170,10 +24902,11 @@ button.linklike {
  * thumb marks the auto-derived value so operators can see how far their
  * override drifts from what gezel recommends for this machine.
  *
- * Two users today: the per-engine prompt-cache budget (CacheControlsPanel)
- * and the total resident-engine budget (EngineMemoryBudgetPanel). Keep the
- * shape shared — they sit on the same settings pages, one above the other,
- * and any divergence reads as a bug. */
+ * Three users today: the per-engine prompt-cache budget (CacheControlsPanel),
+ * the total resident-engine budget (EngineMemoryBudgetPanel), and the
+ * per-model context-size editor (ModelContextSliderPanel). Keep the shape
+ * shared — they sit on the same settings pages, and any divergence reads
+ * as a bug. */
 .gz-budget-slider {
   margin-top: 0.75rem;
   max-width: 26rem;
@@ -24240,6 +24973,61 @@ button.linklike {
   display: flex;
   justify-content: space-between;
   margin-top: 1.9rem;
+}
+
+/* Per-model "…" actions trigger on the Local models lists. Unlike the
+ * sidebar's project trigger, it stays visible — a table row has no hover
+ * affordance culture, and a control that only appears on hover is
+ * undiscoverable on touchpads scrolling past it. */
+.model-actions-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+}
+.model-actions-trigger:hover,
+.model-actions-trigger[data-state="open"] {
+  color: var(--fg, inherit);
+  background: rgba(127, 127, 127, 0.14);
+}
+
+/* Context-size editor — the expanded row beneath a model in the Local
+ * models lists. Carries the shared gz-budget-slider; only the framing is
+ * its own. */
+.model-context-editor-row > td {
+  padding: 0.1rem 0.5rem 0.85rem;
+}
+.model-context-editor {
+  padding: 0.25rem 0.25rem 0;
+}
+.model-context-editor .gz-budget-slider {
+  margin-top: 0.25rem;
+}
+.model-context-editor-estimate {
+  margin-left: auto;
+}
+.model-context-editor-warning {
+  display: block;
+  margin-top: 0.5rem;
+}
+.model-context-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.model-context-editor-message {
+  margin-top: 0.5rem;
+}
+.model-context-custom-tag {
+  margin-left: 0.4rem;
 }
 
 /* Total on-device model memory dial, inside the engine budget strip. */
@@ -24460,6 +25248,32 @@ button.boekwachter-pill:focus-visible {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+/* Identity code — the out-of-band pairing check two people read to each
+   other. Set larger and looser than surrounding code spans on purpose:
+   this is the one string in the app a user has to transcribe by voice, so
+   the grouping and character spacing are the whole point. */
+.device-code-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.2rem;
+}
+.device-code {
+  font-size: var(--text-lg);
+  letter-spacing: 0.06em;
+  word-spacing: 0.35em;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+}
+.device-code-full > summary {
+  cursor: pointer;
+}
+.device-code-full > code {
+  display: block;
+  margin-top: 0.25rem;
 }
 
 /* ==========================================================================

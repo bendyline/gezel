@@ -92,6 +92,14 @@ export function humanizeToolCall(
       return `Edited ${str('path') ?? 'a file'}`;
     case 'read_file':
       return `Read ${str('path') ?? 'a file'}`;
+    case 'read_files': {
+      const count = Array.isArray(a.paths)
+        ? a.paths.length
+        : Array.isArray(a.files)
+          ? a.files.length
+          : 0;
+      return count > 0 ? `Read ${count} files` : 'Read several files';
+    }
     case 'list_dir':
       return `Listed ${str('path') ?? 'the folder'}`;
     case 'write_artifact':

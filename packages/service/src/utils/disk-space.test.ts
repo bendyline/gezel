@@ -72,13 +72,13 @@ describe('checkDiskSpace', () => {
 });
 
 describe('describeDiskShortfall', () => {
-  it('names the model and reports both numbers in GiB', () => {
+  it('names the model and reports both numbers in hardware-style GB', () => {
     const msg = describeDiskShortfall(
       { known: true, ok: false, freeBytes: 40 * GIB, requiredBytes: 200 * GIB },
       'GLM 5.2 (IQ2_XXS)',
     );
     expect(msg).toContain('GLM 5.2 (IQ2_XXS)');
-    expect(msg).toContain('200.0 GiB');
-    expect(msg).toContain('40.0 GiB');
+    expect(msg).toContain('200.0 GB');
+    expect(msg).toContain('40.0 GB');
   });
 });

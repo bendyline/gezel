@@ -1,20 +1,41 @@
-import { render, screen, within } from '@testing-library/react';
+import type { CodexSetupStatusResponse } from '@bendyline/gezel';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const updateConfig = vi.fn(async (body: Record<string, unknown>) => ({
   openaiEndpoints: body.openaiEndpoints,
 }));
+const getConfig = vi.fn(async () => ({
+  provider: 'copilot',
+  meesterGezelId: 'mira',
+  openaiEndpoints: { servingGezelId: 'mira' } as {
+    enabled?: boolean;
+    servingGezelId?: string;
+  },
+}));
+const getCodexSetupStatus = vi.fn(
+  async (): Promise<CodexSetupStatusResponse> => ({
+    state: 'not-configured' as const,
+    models: [],
+    reasons: [],
+    codexInstalled: false,
+    endpointsEnabled: true,
+    profileName: 'gezel',
+    profilePath: '/tmp/gezel-codex/config.toml',
+    launchCommand: 'codex --profile gezel',
+    bridge: { baseUrl: 'https://127.0.0.1:3333/v1', listening: true, port: 3333 },
+    canConfigure: false,
+    canRemove: false,
+  }),
+);
 
 vi.mock('../api.js', () => ({
   api: {
     getBaseUrl: () => 'http://127.0.0.1:3333',
     authHeader: () => ({ Authorization: 'Bearer test-token' }),
-    getConfig: async () => ({
-      provider: 'copilot',
-      meesterGezelId: 'mira',
-      openaiEndpoints: { servingGezelId: 'mira' },
-    }),
+    getConfig,
     updateConfig: (body: Record<string, unknown>) => updateConfig(body),
+    getCodexSetupStatus,
     listGezels: async () => ({
       gezels: [
         // No per-gezel provider → resolves to the install default (copilot).
@@ -31,6 +52,25 @@ const { ConnectedAppsPanel } = await import('./ConnectedAppsPanel.js');
 
 describe('ConnectedAppsPanel', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    getConfig.mockResolvedValue({
+      provider: 'copilot',
+      meesterGezelId: 'mira',
+      openaiEndpoints: { servingGezelId: 'mira' },
+    });
+    getCodexSetupStatus.mockResolvedValue({
+      state: 'not-configured',
+      models: [],
+      reasons: [],
+      codexInstalled: false,
+      endpointsEnabled: true,
+      profileName: 'gezel',
+      profilePath: '/tmp/gezel-codex/config.toml',
+      launchCommand: 'codex --profile gezel',
+      bridge: { baseUrl: 'https://127.0.0.1:3333/v1', listening: true, port: 3333 },
+      canConfigure: false,
+      canRemove: false,
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -121,7 +161,6 @@ describe('ConnectedAppsPanel', () => {
   });
 
   it('persists a toggle-off without dropping the chosen serving gezel', async () => {
-    const { fireEvent } = await import('@testing-library/react');
     render(<ConnectedAppsPanel />);
     const toggle = await screen.findByRole('checkbox', { name: 'Allow apps to connect' });
     await screen.findByText(/Mira answers/);
@@ -130,5 +169,70 @@ describe('ConnectedAppsPanel', () => {
       openaiEndpoints: { enabled: false, servingGezelId: 'mira' },
     });
     expect(await screen.findByText(/Turned off/)).toBeInTheDocument();
+  });
+
+  it('reloads Codex setup status after successfully enabling app connections', async () => {
+    getConfig.mockResolvedValueOnce({
+      provider: 'copilot',
+      meesterGezelId: 'mira',
+      openaiEndpoints: { enabled: false, servingGezelId: 'mira' },
+    });
+    getCodexSetupStatus
+      .mockResolvedValueOnce({
+        state: 'not-configured',
+        models: [
+          {
+            id: 'llama-cpp:coder.gguf',
+            label: 'Local Coder',
+            kind: 'model',
+            provider: 'llama-cpp',
+            supportsTools: true,
+          },
+        ],
+        recommendedModel: 'llama-cpp:coder.gguf',
+        reasons: [],
+        codexInstalled: true,
+        codexVersion: '0.147.0',
+        endpointsEnabled: false,
+        profileName: 'gezel-local',
+        profilePath: '/tmp/gezel-codex/gezel-local.config.toml',
+        launchCommand: 'codex --profile gezel-local',
+        bridge: { baseUrl: 'http://127.0.0.1:11435/v1', listening: false, port: 11_435 },
+        canConfigure: false,
+        canRemove: false,
+      })
+      .mockResolvedValue({
+        state: 'not-configured',
+        models: [
+          {
+            id: 'llama-cpp:coder.gguf',
+            label: 'Local Coder',
+            kind: 'model',
+            provider: 'llama-cpp',
+            supportsTools: true,
+          },
+        ],
+        recommendedModel: 'llama-cpp:coder.gguf',
+        reasons: [],
+        codexInstalled: true,
+        codexVersion: '0.147.0',
+        endpointsEnabled: true,
+        profileName: 'gezel-local',
+        profilePath: '/tmp/gezel-codex/gezel-local.config.toml',
+        launchCommand: 'codex --profile gezel-local',
+        bridge: { baseUrl: 'http://127.0.0.1:11435/v1', listening: false, port: 11_435 },
+        canConfigure: true,
+        canRemove: false,
+      });
+
+    render(<ConnectedAppsPanel />);
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Allow apps to connect' });
+    expect(toggle).not.toBeChecked();
+    expect(await screen.findByRole('button', { name: 'Set up Codex…' })).toBeDisabled();
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(getCodexSetupStatus).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', { name: 'Set up Codex…' })).toBeEnabled();
   });
 });

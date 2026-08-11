@@ -45,6 +45,13 @@ export const ModelFamilySchema = z.enum([
   'phi',
   'nemotron',
   'glm',
+  // Meta Superintelligence Labs' Muse line (Muse Spark, and Muse Glimmer
+  // distilled from it). Deliberately NOT folded into `llama`: it is a
+  // separate architecture with its own chat format (Harmony-style
+  // `<|start|>role<|message|>` channels) and tool-call grammar (ATEM XML),
+  // so a `llama` label here would tell the runtime to assume post-training
+  // this family does not have.
+  'muse',
   'other',
 ]);
 export type ModelFamily = z.infer<typeof ModelFamilySchema>;

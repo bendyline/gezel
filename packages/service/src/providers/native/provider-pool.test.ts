@@ -296,6 +296,39 @@ describe('ProviderPool', () => {
     expect(broker.committedBytes()).toBe(0);
   });
 
+  it('unloadIdle() immediately releases an idle model', async () => {
+    const made: BusyFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 20 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+    });
+    const key = makeEngineKey('mlx', 'idle-model', 0);
+    await pool.ensure('mlx', 'idle-model', 0, 10 * GB);
+
+    await expect(pool.unloadIdle(key)).resolves.toBe(true);
+    expect(pool.has(key)).toBe(false);
+    expect(made[0]?.shutdownCalls).toBe(1);
+    expect(broker.committedBytes()).toBe(0);
+  });
+
+  it('unloadIdle() refuses a model that became busy', async () => {
+    const made: BusyFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 20 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+    });
+    const key = makeEngineKey('mlx', 'busy-model', 0);
+    await pool.ensure('mlx', 'busy-model', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    await expect(pool.unloadIdle(key)).rejects.toThrow(/currently serving requests/);
+    expect(pool.has(key)).toBe(true);
+    expect(made[0]?.shutdownCalls).toBe(0);
+    expect(broker.committedBytes()).toBe(10 * GB);
+  });
+
   it('parallel ensure() on the same key collapses to a single build', async () => {
     let buildCount = 0;
     const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {

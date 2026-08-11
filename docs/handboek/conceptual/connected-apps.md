@@ -18,6 +18,24 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 1. **An address.** The address panel in **Settings → Connected Apps** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel.
 
+## Codex and other agent harnesses
+
+The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference.
+
+For Codex, use **Use a gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
+
+Keep Gezel running while Codex uses the local model. If you want the model bridge available without keeping the desktop window open, turn on Gezel's daemon autostart setting.
+
+The managed profile talks to a narrow, authenticated loopback bridge. Operationally it provides the stable address that an Ollama-style integration needs, but it keeps bearer authentication: only the Responses and model-discovery routes are present, and the credential grants no access to Gezel projects, files, terminals, or settings. The token is read by Codex through a command-backed provider credential rather than copied into a project or shell profile. Revoking the Codex entry under Connected Apps immediately stops it from using the bridge.
+
+One-click setup is available only when the desktop and the Gezel service are on the same computer. In remote-service mode the card stays read-only, because writing a profile on the service host would not configure Codex on the computer in front of you.
+
+Codex custom providers use `wire_api = "responses"`. The managed profile also sets the top-level `web_search = "disabled"`: Codex otherwise advertises a provider-hosted search tool that a local inference server cannot truthfully execute. Do not combine the Gezel profile with Codex's `--search` flag, which explicitly turns that hosted tool back on. Ordinary Codex tools such as shell commands, patching, and helper-agent namespaces remain available because Codex executes those itself.
+
+The setup card puts eligible gezels first. Choosing one gives Codex that gezel's character (`about.md`), effective local model, and tuning while Codex keeps its own tools, sandbox, approvals, and conversation loop. The profile stores the stable gezel id, so renaming the gezel does not break the connection. Raw installed models remain available in a separate fallback group for users who want inference without a gezel persona.
+
+A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
+
 ## Who answers: gezel choices and the fallback
 
 Gezel presents your crew to connected apps as model choices, including each gezel's name and role. When an app chooses one, that gezel answers with their character, model, and settings.

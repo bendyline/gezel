@@ -32,7 +32,7 @@
   "files": ["scripts", "!scripts/**/*.test.ts"],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "clean": "rm -rf .turbo"
   },
   "dependencies": {

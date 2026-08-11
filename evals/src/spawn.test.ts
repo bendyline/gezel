@@ -1,5 +1,74 @@
-import { describe, expect, it, vi } from 'vitest';
-import { findTrialNativeChildren } from './spawn.js';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BoundedDaemonLogSink, findTrialNativeChildren } from './spawn.js';
+
+const dirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+async function writeChunk(sink: BoundedDaemonLogSink, text: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    sink.write(text, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+async function endSink(sink: BoundedDaemonLogSink): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    sink.end((error?: Error | null) => (error ? reject(error) : resolve()));
+  });
+}
+
+describe('bounded eval daemon log', () => {
+  it('keeps startup and the live final tail under a hard size ceiling', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-eval-log-'));
+    dirs.push(dir);
+    const path = join(dir, 'daemon.log');
+    const sink = new BoundedDaemonLogSink(path, {
+      maxBytes: 1_024,
+      headBytes: 128,
+      tailBytes: 256,
+    });
+    const startup = `SERVICE START ${'s'.repeat(110)}\n`;
+
+    await writeChunk(sink, startup);
+    for (let i = 0; i < 80; i += 1) {
+      await writeChunk(sink, `spam-${i.toString().padStart(3, '0')} ${'x'.repeat(40)}\n`);
+    }
+    await writeChunk(sink, 'FINAL native-engine crash signature\n');
+
+    const live = await readFile(path, 'utf8');
+    expect((await stat(path)).size).toBeLessThanOrEqual(1_024);
+    expect(live).toContain('SERVICE START');
+    expect(live).toContain('[eval-log] middle daemon output omitted');
+    expect(live).toContain('FINAL native-engine crash signature');
+    expect(live).not.toContain('spam-010');
+    await endSink(sink);
+  });
+
+  it('bounds a single chunk larger than the whole log', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-eval-log-'));
+    dirs.push(dir);
+    const path = join(dir, 'daemon.log');
+    const sink = new BoundedDaemonLogSink(path, {
+      maxBytes: 512,
+      headBytes: 64,
+      tailBytes: 128,
+    });
+
+    await writeChunk(sink, `BOOT\n${'a'.repeat(2_000)}\nLAST\n`);
+    await endSink(sink);
+
+    const text = await readFile(path, 'utf8');
+    expect((await stat(path)).size).toBeLessThanOrEqual(512);
+    expect(text).toContain('BOOT');
+    expect(text).toContain('LAST');
+    expect(text).toContain('[eval-log] middle daemon output omitted');
+  });
+});
 
 describe('eval native-child cleanup', () => {
   it('finds same-home Windows native engines without relying on Unix ps', async () => {

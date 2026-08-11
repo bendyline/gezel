@@ -7,3 +7,4 @@ export const Trigger = RadixContextMenu.Trigger;
 export const Portal = RadixContextMenu.Portal;
 export const Content = RadixContextMenu.Content;
 export const Item = RadixContextMenu.Item;
+export const Separator = RadixContextMenu.Separator;

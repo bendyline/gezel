@@ -508,6 +508,7 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
           try {
             const rich = await this.deps.bridges.callToolRich(call.name, call.input);
             text = rich.text;
+            isError = rich.isError;
           } catch (err) {
             text = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
             isError = true;

@@ -19,7 +19,7 @@ const VALID_PROVIDERS: readonly ProviderName[] = [
  * Resolve a `?provider=` query string to a known {@link ProviderName}.
  * Anything we don't recognize falls back to copilot — keeps existing
  * callers that omit the param working, while letting on-device
- * providers (`llama-cpp`, `mlx`) actually probe their own engine
+ * providers (`llama-cpp`, `mlx`, `ds4`) actually probe their own engine
  * instead of being silently mis-routed to Copilot.
  */
 function parseProvider(qp: string | undefined): ProviderName {

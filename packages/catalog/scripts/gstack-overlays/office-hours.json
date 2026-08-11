@@ -1,3 +1,0 @@
-{
-  "planAppend": "### Gezel adaptations\n\nThe source skill reads `sections/design-and-handoff.md` for its design-doc template; that file is not bundled. When you reach the design-doc step, write the document with these sections: Problem, Evidence heard from the user, Chosen wedge, Alternatives considered (and why not), Decision, Next real-world action. Ask the user questions ONE at a time with `ask_user_question` and stop after each one."
-}

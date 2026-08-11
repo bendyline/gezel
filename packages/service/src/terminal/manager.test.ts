@@ -9,6 +9,7 @@ import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import { TerminalEventBus } from './events.js';
 import { type CraftbookInvoker, TerminalManager } from './manager.js';
 import type { CraftbookCommandSpec } from './resolve.js';
+import type { PersistentShellPool } from './shell-pool.js';
 
 const bashAvailable = process.platform !== 'win32' && existsSync('/bin/bash');
 const itPosix = bashAvailable ? it : it.skip;
@@ -35,11 +36,13 @@ function makeManager(opts: {
   workspaceIndex: WorkspaceIndexManager;
   listCraftbookCommands?: (projectId: string) => Promise<CraftbookCommandSpec[]>;
   craftbookInvoker?: CraftbookInvoker;
+  shellPool?: PersistentShellPool;
 }): TerminalManager {
   const mgr = new TerminalManager({
     store,
     workspaceIndex: opts.workspaceIndex,
     events,
+    ...(opts.shellPool ? { shellPool: opts.shellPool } : {}),
     ...(opts.listCraftbookCommands ? { listCraftbookCommands: opts.listCraftbookCommands } : {}),
     ...(opts.craftbookInvoker ? { craftbookInvoker: opts.craftbookInvoker } : {}),
   });
@@ -66,6 +69,39 @@ afterEach(async () => {
 });
 
 describe('TerminalManager', () => {
+  it('persists streamed output when the settled PTY buffer is unexpectedly empty', async () => {
+    const projectId = (await store.listProjects())[0]!.id;
+    const shellPool = {
+      currentCwd: () => undefined,
+      run: async (_threadId: string, opts: Parameters<PersistentShellPool['run']>[1]) => {
+        opts.onChunk?.('alpha.txt\nbeta.txt\n');
+        return {
+          output: '',
+          exitCode: 0,
+          durationMs: 12,
+          newCwd: await store.projectWorkspaceDir(projectId),
+          truncated: false,
+        };
+      },
+      shutdown: async () => {},
+      interrupt: () => {},
+      feedInput: () => false,
+    } as unknown as PersistentShellPool;
+    const mgr = makeManager({ workspaceIndex: stubIndex(null), shellPool });
+    const settled = new Promise<TerminalEventEnvelope>((resolve) => {
+      events.subscribeProject(projectId, (event) => {
+        if (event.kind === 'message' && event.message.kind === 'output') resolve(event);
+      });
+    });
+
+    const outcome = await mgr.enqueueRun(projectId, '', 'ls');
+    const event = await settled;
+
+    expect(event.kind === 'message' ? event.message.content : '').toBe('alpha.txt\nbeta.txt');
+    const thread = await store.getTerminalThread(projectId, outcome.threadId);
+    expect(thread?.messages.at(-1)?.content).toBe('alpha.txt\nbeta.txt');
+  });
+
   it('opens a verified workspace file through a one-shot UI event', async () => {
     const projectId = (await store.listProjects())[0]!.id;
     await store.writeProjectWorkspaceFile(projectId, 'notes/battle-research.md', '# Battle');

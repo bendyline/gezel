@@ -36,7 +36,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ScorecardDatasetSchema, buildSuiteScoreboard, describeProvenance } from '@bendyline/gezel';
 import type { ScorecardDataset, ScorecardModelResult, ScorecardRun } from '@bendyline/gezel';
-import { classifyEvalModelTier } from '../model-tier.ts';
+import { classifyEvalModelTier, modelBillionsForEval } from '../model-tier.ts';
 import { defaultProvider } from '../providers.ts';
 import {
   captureDevice,
@@ -213,6 +213,21 @@ function main(): void {
   const results: ScorecardModelResult[] = [];
   const ingestOnly = Boolean(args.flags['ingest-only']);
 
+  /**
+   * Persist after EVERY finished cell, not once at the end.
+   *
+   * A four-model sweep is ~22 hours; accumulating in memory and writing
+   * once meant a crash at hour 20 discarded every completed measurement.
+   * `mergeScorecard` replaces same (run, suite, model) entries, so
+   * rewriting the growing set each time is idempotent and cheap.
+   */
+  const persist = (): void => {
+    if (results.length === 0) return;
+    const merged = mergeScorecard(readDataset(datasetPath), buildRun(), results);
+    mkdirSync(dirname(datasetPath), { recursive: true });
+    writeFileSync(datasetPath, `${JSON.stringify(merged, null, 2)}\n`);
+  };
+
   for (const model of models) {
     for (const suiteId of suites) {
       const matrixRoot = join(sweepRoot, model.id, suiteId);
@@ -227,6 +242,12 @@ function main(): void {
             ...(verify ? ['--scenarios', VERIFY_SCENARIOS.join(',')] : []),
             '--count',
             String(count),
+            // Honor the count for EVERY scenario. Without this the matrix
+            // caps per-scenario trials at `suggestedTrials`, which is 1 for
+            // every craftbook scenario — so a `--count 3` sweep quietly
+            // measured six of thirteen productivity tasks exactly once and
+            // the suite could not support a published rate.
+            '--count-strict',
             '--model',
             model.id,
             '--provider',
@@ -276,6 +297,14 @@ function main(): void {
             label: model.id,
             engine: model.engine,
             tier: classifyEvalModelTier({ engine: model.engine as never, modelId: model.id }),
+            // Real parameter count, not just the tier. The published table's
+            // whole point is size-vs-family, and a Size column reading
+            // "small" for both a 4B and a 9B hides the comparison it exists
+            // to make.
+            ...(() => {
+              const billions = modelBillionsForEval(model.id);
+              return billions ? { parameterSize: `${billions}B` } : {};
+            })(),
             suiteId,
             matrix,
             matrixRoot,
@@ -283,6 +312,7 @@ function main(): void {
           runId,
         ),
       );
+      persist();
     }
   }
 
@@ -291,32 +321,34 @@ function main(): void {
     process.exit(1);
   }
 
-  const run: ScorecardRun = {
-    id: runId,
-    provenance: {
-      startedAt,
-      device,
-      harnessCommit: currentHarnessCommit(repoRoot),
-      gildeVersion: resolvedGildeVersion(repoRoot),
-      count,
-      // The judge model is recorded but never used for the headline pass
-      // rate — see the scorecard schema header on judge drift.
-      judgeModelId:
-        typeof args.flags['judge-model'] === 'string' ? args.flags['judge-model'] : null,
-    },
-    suites,
-    scenariosBySuite: Object.fromEntries(
-      suites.map((suite) => [
-        suite,
-        verify ? [...VERIFY_SCENARIOS] : suiteScenarios(suite).map((s) => s.id),
-      ]),
-    ),
-    ...(typeof args.flags.note === 'string' ? { note: args.flags.note } : {}),
-  };
+  function buildRun(): ScorecardRun {
+    return {
+      id: runId,
+      provenance: {
+        startedAt,
+        device,
+        harnessCommit: currentHarnessCommit(repoRoot),
+        gildeVersion: resolvedGildeVersion(repoRoot),
+        count,
+        // The judge model is recorded but never used for the headline pass
+        // rate — see the scorecard schema header on judge drift.
+        judgeModelId:
+          typeof args.flags['judge-model'] === 'string' ? args.flags['judge-model'] : null,
+      },
+      suites,
+      scenariosBySuite: Object.fromEntries(
+        suites.map((suite) => [
+          suite,
+          verify ? [...VERIFY_SCENARIOS] : suiteScenarios(suite).map((s) => s.id),
+        ]),
+      ),
+      ...(typeof args.flags.note === 'string' ? { note: args.flags.note } : {}),
+    };
+  }
 
+  const run = buildRun();
+  persist();
   const merged = mergeScorecard(readDataset(datasetPath), run, results);
-  mkdirSync(dirname(datasetPath), { recursive: true });
-  writeFileSync(datasetPath, `${JSON.stringify(merged, null, 2)}\n`);
   console.log(`\n[scorecard] wrote ${datasetPath}`);
   console.log(`[scorecard] ${describeProvenance(run)}`);
 

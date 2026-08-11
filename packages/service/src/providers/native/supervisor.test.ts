@@ -313,6 +313,50 @@ not a process row
     expect(logs.some((l) => /idle timeout — stopping/.test(l))).toBe(true);
   });
 
+  it('flushes and releases an idle engine early under memory pressure', async () => {
+    const fakeSpawn = (() =>
+      makeFakeChild(4243) as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const fakeFetch: typeof fetch = async () => new Response('ok', { status: 200 });
+    let busy = true;
+    let flushes = 0;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9997',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: fakeFetch,
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 20,
+      idleTimeoutMs: 500,
+      freezeTimeoutMs: 250,
+      pressureIdleTimeoutMs: 40,
+      isBusy: () => busy,
+      memoryPressure: async () => ({ pressured: true, detail: '0.8 GB free' }),
+      onFreeze: async () => {
+        flushes++;
+      },
+      onLog: () => {},
+    });
+
+    await sup.ensureRunning();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(sup.currentBaseUrl()).toBe('http://127.0.0.1:9997');
+    expect(sup.lifecycleSnapshot()).toMatchObject({
+      running: true,
+      active: true,
+      releaseReason: null,
+    });
+
+    busy = false;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(sup.currentBaseUrl()).toBeUndefined();
+    expect(flushes).toBe(1);
+  });
+
   it('fails cleanly when the engine never becomes ready', async () => {
     const fakeSpawn = (() =>
       makeFakeChild() as unknown as ReturnType<

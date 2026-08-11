@@ -126,7 +126,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   // No `code-intel` either: symbol-level navigation
   // (outline_file / find_symbol / read_symbol / find_references / map_repo /
   // search_code) is the DEVELOPER's surface — the voorman reads to diagnose
-  // (workspace-fs-read covers read_file/search_files/find_files) and then
+  // (workspace-fs-read covers read_file/grep_files/find_files) and then
   // delegates the deep code work. Those 6 tools were ~pure roster tax on a
   // coordinator that never calls them, and on a medium local model (the
   // qwen3.6-27b/MLX 37K-token prefill stall) every tool schema costs

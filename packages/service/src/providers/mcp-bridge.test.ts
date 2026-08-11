@@ -14,9 +14,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../service.js';
 import { McpBridge } from './mcp-bridge.js';
+import { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
 const require = createRequire(import.meta.url);
 
@@ -170,14 +171,27 @@ describe('McpBridge', () => {
     expect(advertised.has('read_file')).toBe(true);
     expect(advertised.has('readFile')).toBe(false);
     expect(advertised.has('readdir')).toBe(false);
+    expect(advertised.has('grep_files')).toBe(true);
+    expect(advertised.has('search_files')).toBe(false);
 
     expect(bridge.hasTool('readFile')).toBe(true);
     expect(bridge.hasTool('read-file')).toBe(true);
+    expect(bridge.hasTool('search_files')).toBe(true);
 
     const viaLegacy = await bridge.callTool('readdir', { path: '.' });
     expect(viaLegacy).not.toContain('not found');
     const viaCanonical = await bridge.callTool('list_dir', { path: '.' });
     expect(viaLegacy).toBe(viaCanonical);
+
+    const viaLegacySearch = await bridge.callTool('search_files', {
+      pattern: 'definitely-absent',
+      literal: true,
+    });
+    const viaCanonicalGrep = await bridge.callTool('grep_files', {
+      pattern: 'definitely-absent',
+      literal: true,
+    });
+    expect(viaLegacySearch).toBe(viaCanonicalGrep);
   });
 
   // Static-decision hooks (the shape `buildAutoAllowHook` produces for
@@ -799,8 +813,9 @@ describe('McpBridge', () => {
       expect(repaired).toContain('set_step_deliverable');
       expect(repaired).toContain('remains a draft plan');
 
-      const taskJson = await bridge.callTool('get_task', { ref });
-      const task = JSON.parse(taskJson);
+      const taskText = await bridge.callTool('get_task', { ref });
+      expect(taskText).toContain(`Loaded task ${ref}.`);
+      const task = JSON.parse(taskText.slice(taskText.indexOf('\n') + 1));
       const implement = task.craftbook.steps.find(
         (step: { id: string }) => step.id === 'implement',
       );
@@ -1321,6 +1336,69 @@ describe('McpBridge', () => {
         raw: true,
       });
       expect(readBack).toBe(cleanHtml);
+    });
+  });
+
+  describe('unresolved-failure ledger gate on advance_task_step', () => {
+    const REJECTION =
+      'ERROR: `convert_document` rejected by validator. Wrong type: `source` (got string, expected object).';
+
+    afterEach(() => {
+      bridge.failureLedger = undefined;
+      bridge.onToolCall = undefined;
+    });
+
+    it('refuses the advance without dispatching, then allows it once the tool succeeds', async () => {
+      const ledger = new UnresolvedToolFailureLedger();
+      bridge.failureLedger = ledger;
+      const events: Array<{ name: string; success: boolean }> = [];
+      bridge.onToolCall = (info) => {
+        events.push({ name: info.name, success: info.success });
+      };
+
+      // Two identical rejections on a tool from another bridge — exactly
+      // the DocBlocks shape that let task default/3 advance on a stale
+      // artifact. The ledger is pool-scoped precisely so this is visible
+      // to gezel-mcp's task tools.
+      ledger.record('convert_document', REJECTION, true);
+      ledger.record('convert_document', REJECTION, true);
+
+      const blocked = await bridge.callToolRich('advance_task_step', {
+        ref: 'default/1',
+        stepId: 'publish',
+      });
+      expect(blocked.isError).toBe(true);
+      expect(blocked.text).toContain('unresolved tool failure');
+      expect(blocked.text).toContain('`convert_document` (2× identical)');
+      // Refused before the wire, but still recorded as a failed call so
+      // the refusal is auditable rather than invisible.
+      expect(events).toEqual([{ name: 'advance_task_step', success: false }]);
+      // Our own refusal must not be filed as a failure: it quotes the
+      // original rejection, so re-recording it would make
+      // `advance_task_step` show up as its own blocker.
+      expect(ledger.unresolved().map((u) => u.toolName)).toEqual(['convert_document']);
+
+      // Recovery: the tool finally works, so the gate lifts. The call now
+      // reaches the real server — whatever it answers, it is no longer
+      // our synthetic refusal.
+      ledger.record('convert_document', 'docblocks://artifacts/f7c561a6', false);
+      const allowed = await bridge.callToolRich('advance_task_step', {
+        ref: 'default/1',
+        stepId: 'publish',
+      });
+      expect(allowed.text).not.toContain('unresolved tool failure');
+    });
+
+    it('leaves the advance alone when the failure never repeated', async () => {
+      const ledger = new UnresolvedToolFailureLedger();
+      bridge.failureLedger = ledger;
+      ledger.record('convert_document', REJECTION, true);
+
+      const out = await bridge.callToolRich('advance_task_step', {
+        ref: 'default/1',
+        stepId: 'publish',
+      });
+      expect(out.text).not.toContain('unresolved tool failure');
     });
   });
 });

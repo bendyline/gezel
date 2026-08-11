@@ -72,6 +72,7 @@ const FRONTMATTER_KEYS = [
   'requirements',
   'runModes',
   'toolsets',
+  'connectors',
   'paramSchema',
   'hooks',
   'version',

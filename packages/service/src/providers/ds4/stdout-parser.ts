@@ -126,7 +126,7 @@ export function classifyDs4Line(rawLine: string): StartupPhase | null {
   if (mappedMatch) {
     return {
       phase: 'loading_model',
-      detail: `Mapping model tensors (${mappedMatch[1]} GiB)`,
+      detail: `Mapping model tensors (${mappedMatch[1]} GB)`,
     };
   }
 
@@ -138,7 +138,7 @@ export function classifyDs4Line(rawLine: string): StartupPhase | null {
     const bytes = parseMemorySize(warmingMatch[1]!, 'GiB');
     return {
       phase: 'loading_model',
-      detail: `Warming model pages (${warmingMatch[1]} GiB)`,
+      detail: `Warming model pages (${warmingMatch[1]} GB)`,
       ...(bytes !== null ? { bufferBytes: bytes } : {}),
     };
   }

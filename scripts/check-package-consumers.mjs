@@ -302,7 +302,7 @@ try {
   // ── 5. The CLI binary ──────────────────────────────────────────────────
   step('running the installed CLI');
   const bin = join(consumer, 'node_modules', '@bendyline', 'gezel-cli', 'dist', 'bin', 'gezel.js');
-  for (const args of [['--version'], ['--help']]) {
+  for (const args of [['--version'], ['--help'], ['native', '--help']]) {
     const result = run(process.execPath, [bin, ...args], {
       cwd: consumer,
       env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },

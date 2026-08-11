@@ -145,10 +145,11 @@ const PROVIDERS_WITHOUT_BRIDGE = new Set([
 const WORKSPACE_SURFACE_TOOLS = new Set([
   'list_dir',
   'read_file',
+  'read_files',
   'write_file',
   'stat',
   'validate',
-  'search_files',
+  'grep_files',
   'find_files',
   'diff_files',
 ]);

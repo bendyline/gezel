@@ -11,6 +11,9 @@ function makeApp(
   chat: {
     engineStatus: () => Promise<unknown>;
     reconcileEnginePool: (provider: string, target: Record<string, number>) => Promise<void>;
+    unloadIdleEngine?: (provider: string, modelId: string, replicaIdx: number) => Promise<boolean>;
+    setLocalEngineMemoryBudget?: (bytes: number | null) => Promise<void>;
+    setAllowRamSpillover?: (allow: boolean | null) => Promise<void>;
   },
   extras: Record<string, unknown> = {},
 ): Hono {
@@ -132,6 +135,116 @@ describe('engines routes', () => {
     expect(body.entries).toEqual([]);
   });
 
+  it('POST /unload releases a specific idle model replica', async () => {
+    const unloadCalls: Array<{ provider: string; modelId: string; replicaIdx: number }> = [];
+    const app = makeApp({
+      engineStatus: async () => null,
+      reconcileEnginePool: async () => {},
+      unloadIdleEngine: async (provider, modelId, replicaIdx) => {
+        unloadCalls.push({ provider, modelId, replicaIdx });
+        return true;
+      },
+    });
+    const res = await app.request('/api/engines/unload', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'llama-cpp', modelId: 'gemma4-4b-q4', replicaIdx: 0 }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(unloadCalls).toEqual([
+      { provider: 'llama-cpp', modelId: 'gemma4-4b-q4', replicaIdx: 0 },
+    ]);
+  });
+
+  it('reads and persists idle retention on the engine owner', async () => {
+    let config: { localEngineIdleTimeoutMs?: number } = {};
+    const resetCalls: Array<{ deferBusy?: boolean }> = [];
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+        resetClient: async (opts: { deferBusy?: boolean }) => {
+          resetCalls.push(opts);
+        },
+      } as Parameters<typeof makeApp>[0],
+      {
+        store: {
+          readConfig: async () => config,
+          writeConfig: async (patch: { localEngineIdleTimeoutMs: number }) => {
+            config = { localEngineIdleTimeoutMs: patch.localEngineIdleTimeoutMs };
+            return config;
+          },
+        },
+      },
+    );
+
+    const initial = await app.request('/api/engines/retention');
+    await expect(initial.json()).resolves.toEqual({ idleTimeoutMs: 300_000 });
+
+    const update = await app.request('/api/engines/retention', {
+      method: 'PUT',
+      body: JSON.stringify({ idleTimeoutMs: 60_000 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(update.json()).resolves.toEqual({ idleTimeoutMs: 60_000 });
+    expect(config).toEqual({ localEngineIdleTimeoutMs: 60_000 });
+    expect(resetCalls).toEqual([{ deferBusy: true }]);
+  });
+
+  it('persists memory policy on the engine owner and applies it live', async () => {
+    const GiB = 1024 ** 3;
+    let config: { localEngineMemoryGb?: number | null; allowRamSpillover?: boolean | null } = {};
+    const budgetCalls: Array<number | null> = [];
+    const spilloverCalls: Array<boolean | null> = [];
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+        setLocalEngineMemoryBudget: async (bytes) => {
+          budgetCalls.push(bytes);
+        },
+        setAllowRamSpillover: async (allow) => {
+          spilloverCalls.push(allow);
+        },
+      },
+      {
+        store: {
+          writeConfig: async (
+            patch: Partial<{
+              localEngineMemoryGb: number | null;
+              allowRamSpillover: boolean | null;
+            }>,
+          ) => {
+            config = { ...config, ...patch };
+            return config;
+          },
+        },
+      },
+    );
+
+    const budget = await app.request('/api/engines/memory-budget', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ localEngineMemoryGb: 48 }),
+    });
+    expect(budget.status).toBe(200);
+    await expect(budget.json()).resolves.toEqual({ localEngineMemoryGb: 48 });
+    expect(budgetCalls).toEqual([48 * GiB]);
+    expect(config.localEngineMemoryGb).toBe(48);
+
+    const spillover = await app.request('/api/engines/ram-spillover', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allowRamSpillover: true }),
+    });
+    expect(spillover.status).toBe(200);
+    await expect(spillover.json()).resolves.toEqual({ allowRamSpillover: true });
+    expect(spilloverCalls).toEqual([true]);
+    expect(config.allowRamSpillover).toBe(true);
+  });
+
   it('reads and persists the machine-owned llama.cpp context policy, resetting engines on change', async () => {
     let config: { llamaCppContextSizing?: 'adaptive' | 'model-max' } = {};
     const resetCalls: Array<{ deferBusy?: boolean }> = [];
@@ -189,6 +302,108 @@ describe('engines routes', () => {
     await expect(setAdaptive.json()).resolves.toEqual({ policy: 'adaptive' });
     expect(config).toEqual({});
     expect(resetCalls).toHaveLength(2);
+  });
+
+  it('reads and persists per-model context overrides, resetting engines on change', async () => {
+    let config: { modelContextOverrides?: Record<string, number> } = {};
+    const resetCalls: Array<{ deferBusy?: boolean }> = [];
+    // ds4 prices its broker reservation at the launch window, so the override
+    // route must drop the cached resident bytes alongside the engine reset.
+    const residentInvalidations: Array<[string | undefined, string | undefined]> = [];
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+        resetClient: async (opts: { deferBusy?: boolean }) => {
+          resetCalls.push(opts);
+        },
+        invalidateResidentBytesCache: (provider?: string, modelId?: string) => {
+          residentInvalidations.push([provider, modelId]);
+        },
+      } as Parameters<typeof makeApp>[0],
+      {
+        store: {
+          readConfig: async () => config,
+          writeConfig: async (patch: {
+            modelContextOverrides?: Record<string, number> | null;
+          }) => {
+            // Mirror Store.writeConfig: records replace wholesale, null clears.
+            config =
+              patch.modelContextOverrides === null
+                ? {}
+                : { modelContextOverrides: patch.modelContextOverrides };
+            return config;
+          },
+        },
+      },
+    );
+
+    const empty = await app.request('/api/engines/llama-cpp/model-context');
+    await expect(empty.json()).resolves.toEqual({ overrides: {} });
+
+    const set = await app.request('/api/engines/llama-cpp/model-context/qwen3.6-27b-q4', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: 98_304 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(set.json()).resolves.toEqual({
+      modelId: 'qwen3.6-27b-q4',
+      contextTokens: 98_304,
+    });
+    expect(config.modelContextOverrides).toEqual({ 'llama-cpp:qwen3.6-27b-q4': 98_304 });
+    expect(resetCalls).toEqual([{ deferBusy: true }]);
+    expect(residentInvalidations).toEqual([['llama-cpp', 'qwen3.6-27b-q4']]);
+
+    // Same value again — no engine churn.
+    await app.request('/api/engines/llama-cpp/model-context/qwen3.6-27b-q4', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: 98_304 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(resetCalls).toHaveLength(1);
+
+    // A second model (different engine) merges instead of replacing.
+    await app.request('/api/engines/mlx/model-context/gemma4-e4b', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: 131_072 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(config.modelContextOverrides).toEqual({
+      'llama-cpp:qwen3.6-27b-q4': 98_304,
+      'mlx:gemma4-e4b': 131_072,
+    });
+
+    // The GET map is engine-filtered and keyed by bare model id.
+    const llamaList = await app.request('/api/engines/llama-cpp/model-context');
+    await expect(llamaList.json()).resolves.toEqual({
+      overrides: { 'qwen3.6-27b-q4': 98_304 },
+    });
+
+    // Null clears one key; the record survives while others remain.
+    await app.request('/api/engines/llama-cpp/model-context/qwen3.6-27b-q4', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: null }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(config.modelContextOverrides).toEqual({ 'mlx:gemma4-e4b': 131_072 });
+
+    // Clearing the last key nulls the whole record off disk.
+    await app.request('/api/engines/mlx/model-context/gemma4-e4b', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: null }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(config).toEqual({});
+
+    // Bounds + engine validation.
+    const tooSmall = await app.request('/api/engines/llama-cpp/model-context/m', {
+      method: 'PUT',
+      body: JSON.stringify({ contextTokens: 16_384 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(tooSmall.status).not.toBe(200);
+    const badEngine = await app.request('/api/engines/openai/model-context');
+    expect(badEngine.status).toBe(400);
   });
 
   it('POST /reconcile rejects an invalid provider', async () => {

@@ -29,18 +29,29 @@ export type GildeContentValidation =
 export async function validateGildeContentUpgrade(opts: {
   currentDataDir: string;
   candidateDataDir: string;
+  /**
+   * App version for `minGezelVersion` gating — defaults to `GEZEL_VERSION`
+   * inside the sources. Both sides run on the same build, so gating is
+   * symmetric: a candidate that retro-gates a currently-resolvable item
+   * fails this gate (correctly — that item would vanish for this install),
+   * while a brand-new gated item passes (it never resolved here before).
+   * Injectable for tests; dev builds (`0.0.0`) never gate.
+   */
+  gezelVersion?: string;
 }): Promise<GildeContentValidation> {
-  const currentBundled = new BundledSource({ dataDir: opts.currentDataDir });
+  const gezelVersion = opts.gezelVersion;
+  const versionOpt = gezelVersion !== undefined ? { gezelVersion } : {};
+  const currentBundled = new BundledSource({ dataDir: opts.currentDataDir, ...versionOpt });
   // Bundled + community per side, mirroring production shadowing semantics.
   // Builtin/local sources are deliberately absent: they are not gilde
   // content and cannot regress from a content swap.
   const current = new CatalogService([
     currentBundled,
-    new CommunitySource(join(opts.currentDataDir, 'community')),
+    new CommunitySource(join(opts.currentDataDir, 'community'), gezelVersion),
   ]);
   const candidate = new CatalogService([
-    new BundledSource({ dataDir: opts.candidateDataDir }),
-    new CommunitySource(join(opts.candidateDataDir, 'community')),
+    new BundledSource({ dataDir: opts.candidateDataDir, ...versionOpt }),
+    new CommunitySource(join(opts.candidateDataDir, 'community'), gezelVersion),
   ]);
 
   const kinds = await currentBundled.listKinds();

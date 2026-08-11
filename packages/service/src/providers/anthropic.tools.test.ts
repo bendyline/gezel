@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AnthropicSession, type AnthropicSessionDeps } from './anthropic.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue } from './queue.js';
@@ -15,6 +15,21 @@ function stubAnthropic(events: unknown[], onRequest?: (req: unknown) => void): A
     messages: {
       create: async (req: unknown) => {
         onRequest?.(req);
+        return (async function* () {
+          for (const ev of events) yield ev;
+        })() as AsyncIterable<unknown>;
+      },
+    },
+  } as unknown as Anthropic;
+}
+
+function stubAnthropicTurns(turns: unknown[][], onRequest?: (req: unknown) => void): Anthropic {
+  let turn = 0;
+  return {
+    messages: {
+      create: async (req: unknown) => {
+        onRequest?.(req);
+        const events = turns[turn++] ?? [];
         return (async function* () {
           for (const ev of events) yield ev;
         })() as AsyncIterable<unknown>;
@@ -155,6 +170,47 @@ describe('AnthropicSession — external tools', () => {
     const text = await session.sendAndWait('Quick chat');
     expect(text).toBe('Sunny and 20C.');
     expect(session.capturedToolCalls()).toEqual([]);
+  });
+});
+
+describe('AnthropicSession — bridge tool results', () => {
+  it('propagates an in-band MCP error to Anthropic tool_result.is_error', async () => {
+    const requests: unknown[] = [];
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const callToolRich = vi.spyOn(bridges, 'callToolRich').mockResolvedValue({
+      text: 'ERROR: memory service unavailable',
+      images: [],
+      isError: true,
+    });
+    const session = new AnthropicSession({
+      anthropic: stubAnthropicTurns(
+        [toolUseStream('tu_error', 'save_memory', { text: 'remember this' }), textStream('Done.')],
+        (request) => requests.push(request),
+      ),
+      model: 'claude-test',
+      systemMessage: 'You are a test assistant.',
+      bridges,
+      priorMessages: [],
+      queue: new ProviderQueue({ concurrency: 1 }),
+    });
+
+    await expect(session.sendAndWait('Remember this.')).resolves.toBe('Done.');
+    expect(callToolRich).toHaveBeenCalledWith('save_memory', { text: 'remember this' });
+
+    const secondRequest = requests[1] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const resultMessage = secondRequest.messages.at(-1);
+    expect(resultMessage?.role).toBe('user');
+    expect(resultMessage?.content).toEqual([
+      expect.objectContaining({
+        type: 'tool_result',
+        tool_use_id: 'tu_error',
+        content: 'ERROR: memory service unavailable',
+        is_error: true,
+      }),
+    ]);
   });
 });
 

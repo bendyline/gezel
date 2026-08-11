@@ -1,21 +1,29 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import type { GezelClient } from '@bendyline/gezel-client/node';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   describeMachineEngineBroker,
+  ensureProjectForFolder,
   fileTokenStorage,
   findHealthySystemService,
   isSystemProductServiceRole,
   normalizeServiceUrl,
   resolveCliAppId,
+  resolveRunProject,
   resolveStartPortEnv,
+  resolveTuiProject,
   shouldTrySystemService,
   validateGlobals,
 } from './connection.js';
 
 const originalHome = process.env.GEZEL_HOME;
 const homes: string[] = [];
+
+function makeClient(overrides: Partial<GezelClient>): GezelClient {
+  return overrides as GezelClient;
+}
 
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.GEZEL_HOME;
@@ -207,5 +215,106 @@ describe('CLI grant token storage', () => {
     await first.delete('gezel-cli');
     await expect(first.load('gezel-cli')).resolves.toBeNull();
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
+  });
+});
+
+describe('project folder resolution', () => {
+  it('reuses a project whose working directory exactly matches the resolved folder', async () => {
+    const folder = join(tmpdir(), 'gezel-cli-existing-project');
+    const listProjects = vi.fn().mockResolvedValue({
+      projects: [
+        { id: 'elsewhere', name: 'Elsewhere', workingDir: join(tmpdir(), 'elsewhere') },
+        { id: 'matching', name: 'Matching', workingDir: folder },
+      ],
+    });
+    const createProject = vi.fn();
+    const setProjectWorkingDir = vi.fn();
+    const client = makeClient({ listProjects, createProject, setProjectWorkingDir });
+
+    await expect(ensureProjectForFolder(client, folder)).resolves.toBe('matching');
+    expect(createProject).not.toHaveBeenCalled();
+    expect(setProjectWorkingDir).not.toHaveBeenCalled();
+  });
+
+  it('adopts a same-name orphan and binds it to the resolved folder', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'gezel-cli-project-parent-'));
+    homes.push(parent);
+    const folder = join(parent, 'customer-portal');
+    const listProjects = vi.fn().mockResolvedValue({
+      projects: [
+        { id: 'unrelated', name: 'Other', workingDir: undefined },
+        { id: 'orphan', name: 'customer-portal', workingDir: undefined },
+      ],
+    });
+    const createProject = vi.fn();
+    const setProjectWorkingDir = vi.fn().mockResolvedValue(undefined);
+    const client = makeClient({ listProjects, createProject, setProjectWorkingDir });
+
+    await expect(ensureProjectForFolder(client, folder)).resolves.toBe('orphan');
+    expect(createProject).not.toHaveBeenCalled();
+    expect(setProjectWorkingDir).toHaveBeenCalledWith('orphan', folder);
+  });
+
+  it('creates and binds a fully described project when no project matches', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'gezel-cli-project-create-'));
+    homes.push(parent);
+    const folder = join(parent, 'new-workspace');
+    const listProjects = vi.fn().mockResolvedValue({ projects: [] });
+    const createProject = vi.fn().mockResolvedValue({ id: 'created' });
+    const setProjectWorkingDir = vi.fn().mockResolvedValue(undefined);
+    const client = makeClient({ listProjects, createProject, setProjectWorkingDir });
+
+    await expect(ensureProjectForFolder(client, folder)).resolves.toBe('created');
+    expect(createProject).toHaveBeenCalledWith({
+      name: 'new-workspace',
+      description: `CLI workspace at ${folder}`,
+      about: `new-workspace — working directory ${folder}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
+      missionObjectives: 'new-workspace — fill in concrete success criteria for this project.',
+    });
+    expect(setProjectWorkingDir).toHaveBeenCalledWith('created', folder);
+  });
+});
+
+describe('command project semantics', () => {
+  it.each([undefined, false] as const)(
+    'uses the shared default project for run when --project is %s',
+    async (project) => {
+      const listProjects = vi.fn();
+      const client = makeClient({ listProjects });
+
+      await expect(resolveRunProject(client, { project })).resolves.toBe('default');
+      expect(listProjects).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses the current directory for a bare run --project flag', async () => {
+    const listProjects = vi.fn().mockResolvedValue({
+      projects: [{ id: 'cwd-project', name: 'cwd', workingDir: process.cwd() }],
+    });
+    const client = makeClient({ listProjects });
+
+    await expect(resolveRunProject(client, { project: true })).resolves.toBe('cwd-project');
+  });
+
+  it.each([undefined, true, false] as const)(
+    'uses the current directory for the TUI when --project is %s',
+    async (project) => {
+      const listProjects = vi.fn().mockResolvedValue({
+        projects: [{ id: 'cwd-project', name: 'cwd', workingDir: process.cwd() }],
+      });
+      const client = makeClient({ listProjects });
+
+      await expect(resolveTuiProject(client, { project })).resolves.toBe('cwd-project');
+    },
+  );
+
+  it('honors an explicit TUI project folder', async () => {
+    const folder = join(tmpdir(), 'gezel-cli-explicit-tui-project');
+    const listProjects = vi.fn().mockResolvedValue({
+      projects: [{ id: 'explicit-project', name: 'explicit', workingDir: folder }],
+    });
+    const client = makeClient({ listProjects });
+
+    await expect(resolveTuiProject(client, { project: folder })).resolves.toBe('explicit-project');
   });
 });

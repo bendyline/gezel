@@ -1,3 +1,4 @@
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import { TurnAbortError } from './turn-abort-error.js';
 
 const DEFAULT_SOFT_READ_WARNING_AT = 5;
@@ -7,12 +8,13 @@ const HARD_ABORT_OUTPUT_CHAR_LIMIT = 8_000;
 const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'list_dir',
   'read_file',
+  'read_files',
   'stat',
   'validate',
   'list_artifacts',
   'read_artifact',
   'grep_artifact',
-  'search_files',
+  'grep_files',
   'find_files',
   'diff_files',
 ]);
@@ -59,11 +61,12 @@ export class DeliverableReadPaceTracker {
   }
 
   recordCall(toolName: string, output: string): DeliverableReadPaceResult {
-    if (WRITE_TOOL_NAMES.has(toolName)) {
+    const canonicalName = canonicalToolName(toolName);
+    if (WRITE_TOOL_NAMES.has(canonicalName)) {
       this.wrote = true;
       return { output, shouldAbort: false, readCount: this.readCount };
     }
-    if (this.wrote || !READ_ONLY_TOOL_NAMES.has(toolName)) {
+    if (this.wrote || !READ_ONLY_TOOL_NAMES.has(canonicalName)) {
       return { output, shouldAbort: false, readCount: this.readCount };
     }
 

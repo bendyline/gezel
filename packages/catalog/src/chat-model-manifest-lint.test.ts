@@ -104,13 +104,21 @@ describe('lintChatModelManifest rules', () => {
     expect(r.errors.map((f) => f.rule)).toContain('missing-tuning');
   });
 
-  it('thinking model without a reasoning bound is an error; effort or enableThinking:false count as bounds', () => {
+  it('thinking model without a reasoning bound is an error; effort, native strength, or disabled thinking count as bounds', () => {
     const unbounded = { ...complete, tuning: { ...complete.tuning, reasoning: {} } };
     expect(lintChatModelManifest(unbounded).errors.map((f) => f.rule)).toContain(
       'unbounded-reasoning',
     );
     const effort = { ...complete, tuning: { ...complete.tuning, reasoning: { effort: 'high' } } };
     expect(lintChatModelManifest(effort).errors).toEqual([]);
+    const nativeStrength = {
+      ...complete,
+      tuning: {
+        ...complete.tuning,
+        reasoning: { enableThinking: true, templateKwargs: { reasoning_strength: 'high' } },
+      },
+    };
+    expect(lintChatModelManifest(nativeStrength).errors).toEqual([]);
     const disabled = {
       ...complete,
       tuning: { ...complete.tuning, reasoning: { enableThinking: false } },

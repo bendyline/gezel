@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "run": "tsx src/bin/run.ts",
     "batch": "tsx src/bin/batch.ts",
     "ab-grammar": "tsx src/bin/ab-grammar.ts",
@@ -28,7 +28,8 @@
     "screenshot": "tsx src/bin/screenshot.ts",
     "thinking-report": "tsx src/bin/thinking-report.ts",
     "report:engine-context": "tsx src/bin/report-engine-context.ts",
-    "scorecard": "tsx src/bin/scorecard.ts"
+    "scorecard": "tsx src/bin/scorecard.ts",
+    "judge-sweep": "tsx src/bin/judge-sweep.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

@@ -3,11 +3,13 @@ import { lookupBehavior } from '../../model-profile/registry.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
+import { LlamaCppCacheAdapter } from './cache-adapter.js';
 import {
   LlamaCppProvider,
   NativeEngineCrashedError,
   ToolCallAccumulator,
   compactSuccessfulWriteToolCallForTranscript,
+  completeWorkspaceReadPaths,
   constrainedToolNoSignalMsForModel,
   constrainedToolReasoningCharLimitForModel,
   extractPrerequisiteRepairReadPaths,
@@ -29,6 +31,7 @@ import {
   scenarioRepairTextAbortThreshold,
   shouldPreferScriptedDataFileWork,
   shouldStartScriptedDataFileWork,
+  simplifyJsonSchemaForLlamaCpp,
   stripJsonSchemaPatternsForLlamaCpp,
   tryParseContextOverflow,
   tryParseStrictAlternationTemplateError,
@@ -155,6 +158,142 @@ describe('llama.cpp JSON Schema compatibility', () => {
       type: 'string',
     });
   });
+
+  it('reduces grammar-hostile unions and validation constraints while preserving argument guidance', () => {
+    const schema = {
+      type: 'object',
+      description: 'A useful tool.',
+      properties: {
+        deliverable: {
+          description: 'What to produce.',
+          oneOf: [
+            { type: 'object', properties: { kind: { const: 'file' } } },
+            { type: 'object', properties: { kind: { const: 'chat' } } },
+          ],
+        },
+        count: { type: 'integer', exclusiveMinimum: 0, maximum: 10 },
+        mode: { type: 'string', enum: ['fast', 'careful'], format: 'custom-mode' },
+        metadata: {
+          type: 'object',
+          propertyNames: { type: 'string' },
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['deliverable', 'count', 'missing'],
+      additionalProperties: false,
+    };
+
+    expect(simplifyJsonSchemaForLlamaCpp(schema)).toEqual({
+      type: 'object',
+      description: 'A useful tool.',
+      properties: {
+        deliverable: { description: 'What to produce.' },
+        count: { type: 'integer' },
+        mode: { type: 'string', enum: ['fast', 'careful'] },
+        metadata: { type: 'object' },
+      },
+      required: ['deliverable', 'count'],
+    });
+  });
+
+  it('skips a no-op pattern retry and recovers with structural tool schemas', async () => {
+    const bodies: Array<{
+      tools?: Array<{ function: { parameters: Record<string, unknown> } }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      if (bodies.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'recovered' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const parameters = {
+      type: 'object',
+      properties: {
+        expectedDeliverable: {
+          oneOf: [
+            { type: 'object', properties: { kind: { const: 'file' } } },
+            { type: 'object', properties: { kind: { const: 'chat' } } },
+          ],
+        },
+        count: { type: 'integer', exclusiveMinimum: 0 },
+      },
+      required: ['expectedDeliverable'],
+    };
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [{ name: 'message_gezel', parameters }],
+    });
+
+    await expect(session.sendAndWait('delegate it')).resolves.toBe('recovered');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.tools?.[0]?.function.parameters).toEqual(parameters);
+    expect(bodies[1]?.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: {
+        expectedDeliverable: {},
+        count: { type: 'integer' },
+      },
+      required: ['expectedDeliverable'],
+    });
+  });
+
+  it('uses permissive object parameters only after structural schemas are also rejected', async () => {
+    const bodies: Array<{
+      tools?: Array<{ function: { parameters: Record<string, unknown> } }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      if (bodies.length < 3) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'recovered' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools: [
+        {
+          name: 'message_gezel',
+          parameters: {
+            type: 'object',
+            properties: { value: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+          },
+        },
+      ],
+    });
+
+    await expect(session.sendAndWait('delegate it')).resolves.toBe('recovered');
+    expect(bodies).toHaveLength(3);
+    expect(bodies[1]?.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: { value: {} },
+    });
+    expect(bodies[2]?.tools?.[0]?.function.parameters).toEqual({ type: 'object' });
+  });
 });
 
 describe('constrained tool guards', () => {
@@ -165,6 +304,79 @@ describe('constrained tool guards', () => {
     expect(constrainedToolNoSignalMsForModel('gpt-oss-20b-q4')).toBe(90_000);
     expect(constrainedToolReasoningCharLimitForModel('gemma4-e4b-q4')).toBe(1_024);
     expect(constrainedToolNoSignalMsForModel('gemma4-e4b-q4')).toBe(45_000);
+  });
+});
+
+describe('completeWorkspaceReadPaths', () => {
+  it('counts ordinary single-file reads and only complete ranged reads', () => {
+    expect(
+      completeWorkspaceReadPaths(
+        'read_file',
+        { path: 'workspace/src/a.ts' },
+        '[read_file path="src/a.ts" lines=1-3 totalLines=3 complete]\nbody',
+      ),
+    ).toEqual(['src/a.ts']);
+    expect(
+      completeWorkspaceReadPaths(
+        'read_file',
+        { path: 'src/a.ts', startLine: 10, endLine: 20 },
+        '[read_file path="src/a.ts" lines=10-20 totalLines=40]\nbody',
+      ),
+    ).toEqual([]);
+    expect(
+      completeWorkspaceReadPaths(
+        'read_file',
+        { path: 'src/a.ts', startLine: 1, endLine: 40 },
+        '[read_file path="src/a.ts" lines=1-40 totalLines=40 complete]\nbody',
+      ),
+    ).toEqual(['src/a.ts']);
+  });
+
+  it('maps complete read_files entries to requested paths by bounded status index', () => {
+    const output = [
+      '[read_files requested=3 ok=2 errors=1]',
+      '1 OK workspace/a.ts lines=1-4 totalLines=4 complete',
+      '2 OK b.ts lines=10-20 totalLines=40 nextStartLine=21',
+      '3 ERROR c.ts [not_file] not a file',
+      '',
+      '--- workspace/a.ts (lines=1-4 totalLines=4) ---',
+      '1 OK spoof.ts lines=1-1 totalLines=1 complete',
+    ].join('\n');
+    expect(
+      completeWorkspaceReadPaths(
+        'read_files',
+        { paths: ['workspace/a.ts', 'b.ts', 'c.ts'] },
+        output,
+      ),
+    ).toEqual(['a.ts']);
+  });
+
+  it('supports nested read_files requests without shifting malformed item indexes', () => {
+    const output = [
+      '[read_files requested=3 ok=2 errors=1]',
+      '1 OK src/a.ts lines=1-2 totalLines=2 complete',
+      '2 ERROR unknown [invalid_path] invalid path',
+      '3 OK workspace/src/c.ts lines=1-2 totalLines=2 complete',
+      '',
+      'sections',
+    ].join('\n');
+    expect(
+      completeWorkspaceReadPaths(
+        'read_files',
+        { files: [{ path: 'src/a.ts' }, null, { path: 'workspace/src/c.ts' }] },
+        output,
+      ),
+    ).toEqual(['src/a.ts', 'src/c.ts']);
+  });
+
+  it('does not credit any batch entry after bridge-level output truncation', () => {
+    expect(
+      completeWorkspaceReadPaths(
+        'read_files',
+        { paths: ['a.ts'] },
+        '[read_files requested=1 ok=1 errors=0]\n1 OK a.ts lines=1-2 totalLines=2 complete\n\nbody\n…[tool output truncated: 20000 chars total]',
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -286,6 +498,199 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe('LlamaCppProvider physical request gate', () => {
+  it('serializes cache preparation and streaming at one launched slot while preserving the background queue lane', async () => {
+    let releaseFirstFetch!: () => void;
+    const firstFetchBlocked = new Promise<void>((resolve) => {
+      releaseFirstFetch = resolve;
+    });
+    let signalFirstFetchEntered!: () => void;
+    const firstFetchEntered = new Promise<void>((resolve) => {
+      signalFirstFetchEntered = resolve;
+    });
+    let fetchCalls = 0;
+    let activeFetches = 0;
+    let maxActiveFetches = 0;
+    const fetchImpl = (async () => {
+      fetchCalls++;
+      const call = fetchCalls;
+      activeFetches++;
+      maxActiveFetches = Math.max(maxActiveFetches, activeFetches);
+      if (call === 1) {
+        signalFirstFetchEntered();
+        await firstFetchBlocked;
+      }
+      activeFetches--;
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: `reply-${call}` } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    // concurrency=1 launches one real `--parallel` slot. The provider queue
+    // still has its second, reserved background lane by default.
+    let ensureRunningCalls = 0;
+    const supervisor = {
+      async ensureRunning() {
+        ensureRunningCalls++;
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    const provider = new LlamaCppProvider({
+      supervisor,
+      concurrency: 1,
+      fetchImpl,
+    });
+    expect(provider.queue.describe().concurrency).toBe(2);
+
+    const prepared: string[] = [];
+    const adapter = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => null,
+      slotCount: 1,
+    });
+    const prepareForSend = adapter.prepareForSend.bind(adapter);
+    adapter.prepareForSend = async (...args) => {
+      prepared.push(args[0]);
+      await prepareForSend(...args);
+    };
+    provider.setCacheAdapter(adapter);
+
+    const foreground = await provider.createSession({ systemMessage: 'foreground' });
+    const background = await provider.createSession({ systemMessage: 'background' });
+    const first = foreground.sendAndWait('first', {
+      queue: { lane: 'interactive', sessionId: 'foreground-session' },
+    });
+    await firstFetchEntered;
+    expect(provider.isEngineBusy()).toBe(true);
+
+    const second = background.sendAndWait('second', {
+      queue: { lane: 'background', sessionId: 'background-session' },
+    });
+    // The background logical queue lease is available, but physical cache
+    // preparation must stay behind the foreground stream.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(provider.queue.snapshot().running).toBe(2);
+    expect(ensureRunningCalls).toBe(1);
+    expect(prepared).toEqual(['foreground-session']);
+    expect(fetchCalls).toBe(1);
+    expect(maxActiveFetches).toBe(1);
+
+    releaseFirstFetch();
+    await expect(first).resolves.toBe('reply-1');
+    await expect(second).resolves.toBe('reply-2');
+    expect(ensureRunningCalls).toBe(2);
+    expect(prepared).toEqual(['foreground-session', 'background-session']);
+    expect(maxActiveFetches).toBe(1);
+    expect(provider.isEngineBusy()).toBe(false);
+  });
+
+  it('releases the physical slot when an in-flight request is aborted', async () => {
+    let signalFirstFetchEntered!: () => void;
+    const firstFetchEntered = new Promise<void>((resolve) => {
+      signalFirstFetchEntered = resolve;
+    });
+    let fetchCalls = 0;
+    const fetchImpl = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      fetchCalls++;
+      if (fetchCalls === 1) {
+        signalFirstFetchEntered();
+        return await new Promise<Response>((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'recovered' } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      concurrency: 1,
+      fetchImpl,
+    });
+    const firstSession = await provider.createSession({ systemMessage: 'first' });
+    const secondSession = await provider.createSession({ systemMessage: 'second' });
+    const ctrl = new AbortController();
+    const first = firstSession.sendAndWait('hang', {
+      queue: { lane: 'interactive', sessionId: 'abort-first', signal: ctrl.signal },
+    });
+    await firstFetchEntered;
+    const second = secondSession.sendAndWait('follow-up', {
+      queue: { lane: 'background', sessionId: 'after-abort' },
+    });
+
+    ctrl.abort();
+    await expect(first).rejects.toThrow('turn cancelled by caller');
+    await expect(second).resolves.toBe('recovered');
+    expect(fetchCalls).toBe(2);
+  });
+
+  it('releases the physical slot after a transport error and admits the next waiter', async () => {
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls++;
+      if (fetchCalls === 1) throw new Error('socket broke');
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'second-ok' } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      concurrency: 1,
+      fetchImpl,
+    });
+    const failedSession = await provider.createSession({ systemMessage: 'first' });
+    const nextSession = await provider.createSession({ systemMessage: 'second' });
+
+    await expect(
+      failedSession.sendAndWait('fail', {
+        queue: { lane: 'interactive', sessionId: 'transport-failure' },
+      }),
+    ).rejects.toThrow('socket broke');
+    await expect(
+      nextSession.sendAndWait('retry', {
+        queue: { lane: 'background', sessionId: 'transport-recovery' },
+      }),
+    ).resolves.toBe('second-ok');
+    expect(fetchCalls).toBe(2);
+  });
+
+  it('bounds physical-slot waiting by the turn deadline and removes the timed-out waiter', async () => {
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      concurrency: 1,
+      fetchImpl: (async () => {
+        throw new Error('the timed-out waiter must not reach fetch');
+      }) as typeof fetch,
+    });
+    const releaseHeldSlot = await provider.acquireExclusiveEngineRequest('held-by-first-turn');
+    expect(provider.isEngineBusy()).toBe(true);
+    const waitingSession = await provider.createSession({ systemMessage: 'waiting' });
+
+    await expect(
+      waitingSession.sendAndWait('wait', {
+        timeoutMs: 20,
+        queue: { lane: 'background', sessionId: 'deadline-waiter' },
+      }),
+    ).rejects.toThrow('timed out');
+
+    releaseHeldSlot();
+    // A timed-out waiter must be removed, not handed the slot later. A fresh
+    // claimant should acquire and release immediately.
+    const releaseFreshSlot = await provider.acquireExclusiveEngineRequest('fresh-claimant');
+    releaseFreshSlot();
+    expect(provider.isEngineBusy()).toBe(false);
+  });
 });
 
 describe('LlamaCppProvider constructor', () => {
@@ -1337,6 +1742,68 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies[0]?.chat_template_kwargs).toEqual({
       enable_thinking: false,
       reasoning_effort: 'low',
+    });
+  });
+
+  it('downgrades a manifest-declared reasoning depth dial on constrained turns, for templates that have no enable_thinking to honor', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    type: 'function',
+                    function: {
+                      name: 'write_file',
+                      arguments: '{"path":"index.html","content":"<!doctype html>"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://glimmer.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'muse-glimmer-30b-q4',
+      tuning: {
+        sampling: {},
+        reasoning: { templateKwargs: { reasoning_strength: 'high' } },
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+      externalTools: [
+        {
+          name: 'write_file',
+          description: 'Write a file.',
+          parameters: { type: 'object', additionalProperties: true },
+        },
+      ],
+    });
+
+    await session.sendAndWait(
+      'First move: create the workspace deliverable at workspace/index.html',
+    );
+
+    expect(bodies).toHaveLength(1);
+    // `high` here is what tripped the immediate-write guard in the wild.
+    expect(bodies[0]?.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+      reasoning_strength: 'low',
     });
   });
 
@@ -2704,7 +3171,13 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       tools?: Array<{
         function: {
           name: string;
-          parameters?: { properties?: { path?: { enum?: string[] } } };
+          parameters?: {
+            properties?: {
+              path?: { enum?: string[] };
+              startLine?: { type?: string; minimum?: number; maximum?: number };
+              endLine?: { type?: string; minimum?: number; maximum?: number };
+            };
+          };
         };
       }>;
       tool_choice?: unknown;
@@ -2721,6 +3194,14 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual(
           requiredPaths.slice(requestCount - 1),
         );
+        expect(body.tools?.[0]?.function.parameters?.properties?.startLine).toMatchObject({
+          type: 'integer',
+          minimum: 1,
+        });
+        expect(body.tools?.[0]?.function.parameters?.properties?.endLine).toMatchObject({
+          type: 'integer',
+          minimum: 1,
+        });
         expect(body.tool_choice).toBe('required');
         return sseResponse([
           {
@@ -9374,5 +9855,16 @@ describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
     // still engage — the fence and the mode compose.
     const clamped = ['read_file', 'validate', 'replace_in_file', 'write_file'].map(tool);
     expect(isGateSurgicalEditTurn(gateNudge, clamped)).toBe(true);
+  });
+});
+
+describe('constrained-turn reasoning allowance', () => {
+  it('gives Muse Glimmer the expanded allowance — its template has no no-think mode, so even reasoning_strength=low overruns the strict budget on whole-file deliverables', () => {
+    expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-q4')).toBe(3072);
+    expect(constrainedToolNoSignalMsForModel('muse-glimmer-30b-q4')).toBe(90_000);
+    // Sibling quants inherit it.
+    expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-dynamic')).toBe(3072);
+    // Models that honor no-think keep the tight guard.
+    expect(constrainedToolReasoningCharLimitForModel('qwen3.6-27b-q4')).toBe(1024);
   });
 });

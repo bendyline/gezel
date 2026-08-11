@@ -244,28 +244,3 @@ export async function resolveInside(base: string, relPath: string): Promise<stri
   }
   return joined;
 }
-
-/**
- * Policy check for the connector-corpus subtree: true when a
- * workspace-relative path points into `data/**` WITHOUT passing through a
- * `_`-prefixed entry. `_`-prefixed entries below `data/` (`_actions/`,
- * `_flags.json`, `_meta.json`) are the corpus's designated mutable surface;
- * everything else is a mirrored record and read-only to gezels. Lexical only
- * — traversal/symlink escapes are `resolveInside`'s job, and a `..` that
- * dodges this check still cannot leave the workspace.
- */
-export function isProtectedDataPath(relPath: string): boolean {
-  const segments = relPath
-    .replaceAll('\\', '/')
-    .split('/')
-    .filter((s) => s !== '' && s !== '.');
-  // Lexically collapse `..` so `data/../artifacts/x` isn't misflagged and
-  // `artifacts/../data/x` is.
-  const collapsed: string[] = [];
-  for (const seg of segments) {
-    if (seg === '..') collapsed.pop();
-    else collapsed.push(seg);
-  }
-  if (collapsed[0] !== 'data') return false;
-  return !collapsed.slice(1).some((s) => s.startsWith('_'));
-}

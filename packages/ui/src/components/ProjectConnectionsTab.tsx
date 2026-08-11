@@ -13,7 +13,17 @@ interface ConnManifest {
   name: string;
   description: string;
   configSchema?: {
-    properties?: Record<string, { type?: string; title?: string; const?: unknown }>;
+    properties?: Record<
+      string,
+      {
+        type?: string;
+        title?: string;
+        const?: unknown;
+        default?: unknown;
+        minimum?: number;
+        maximum?: number;
+      }
+    >;
     required?: string[];
   };
   secretShape?: { kind?: string; label?: string; required?: boolean };
@@ -24,6 +34,18 @@ interface ConnManifest {
 interface ConnectorOption extends ConnManifest {
   iconSvg?: string;
   logoUrl?: string;
+}
+
+type ConnectorConfigValue = string | boolean;
+
+function initialConnectorConfig(connector: ConnectorOption): Record<string, ConnectorConfigValue> {
+  const initial: Record<string, ConnectorConfigValue> = {};
+  for (const [key, property] of Object.entries(connector.configSchema?.properties ?? {})) {
+    if (property.default === undefined) continue;
+    initial[key] =
+      property.type === 'boolean' ? property.default === true : String(property.default);
+  }
+  return initial;
 }
 
 function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
@@ -75,7 +97,7 @@ export function ProjectConnectionsTab({
   const [loadingTypes, setLoadingTypes] = useState(false);
   const [types, setTypes] = useState<ConnectorOption[]>([]);
   const [selected, setSelected] = useState<ConnectorOption | null>(null);
-  const [config, setConfig] = useState<Record<string, string>>({});
+  const [config, setConfig] = useState<Record<string, ConnectorConfigValue>>({});
   const [displayName, setDisplayName] = useState('');
   const [credential, setCredential] = useState('');
   const [imapHost, setImapHost] = useState('');
@@ -216,14 +238,20 @@ export function ProjectConnectionsTab({
       if (prop.const !== undefined) {
         out[key] = prop.const;
       } else if (prop.type === 'array') {
-        const raw = (config[key] ?? '').trim();
+        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
         if (raw)
           out[key] = raw
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean);
-      } else if (config[key]?.trim()) {
-        out[key] = config[key].trim();
+      } else if (prop.type === 'boolean') {
+        if (typeof config[key] === 'boolean') out[key] = config[key];
+      } else if (prop.type === 'integer' || prop.type === 'number') {
+        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
+        if (raw) out[key] = Number(raw);
+      } else {
+        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
+        if (raw) out[key] = raw;
       }
     }
     return out;
@@ -310,7 +338,7 @@ export function ProjectConnectionsTab({
   const selectConnector = (connector: ConnectorOption) => {
     if (connector.id === selected?.id) return;
     setSelected(connector);
-    setConfig({});
+    setConfig(initialConnectorConfig(connector));
     setDisplayName('');
     setCredential('');
     setImapHost('');
@@ -497,16 +525,37 @@ export function ProjectConnectionsTab({
                 </label>
                 {Object.entries(selected.configSchema?.properties ?? {})
                   .filter(([, prop]) => prop.const === undefined)
-                  .map(([key, prop]) => (
-                    <label key={key}>
-                      {prop.title ?? key}
-                      <input
-                        value={config[key] ?? ''}
-                        onChange={(e) => setConfig((c) => ({ ...c, [key]: e.target.value }))}
-                        placeholder={prop.type === 'array' ? 'comma,separated' : ''}
-                      />
-                    </label>
-                  ))}
+                  .map(([key, prop]) =>
+                    prop.type === 'boolean' ? (
+                      <label key={key} className="gz-connector-boolean-field">
+                        <input
+                          type="checkbox"
+                          checked={config[key] === true}
+                          onChange={(e) =>
+                            setConfig((current) => ({ ...current, [key]: e.target.checked }))
+                          }
+                        />
+                        {prop.title ?? key}
+                      </label>
+                    ) : (
+                      <label key={key}>
+                        {prop.title ?? key}
+                        <input
+                          type={
+                            prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'
+                          }
+                          value={typeof config[key] === 'string' ? config[key] : ''}
+                          onChange={(e) =>
+                            setConfig((current) => ({ ...current, [key]: e.target.value }))
+                          }
+                          placeholder={prop.type === 'array' ? 'comma,separated' : ''}
+                          min={prop.minimum}
+                          max={prop.maximum}
+                          step={prop.type === 'integer' ? 1 : undefined}
+                        />
+                      </label>
+                    ),
+                  )}
 
                 {kind === 'oauth2' ? (
                   <p className="muted small gz-connector-oauth-note">

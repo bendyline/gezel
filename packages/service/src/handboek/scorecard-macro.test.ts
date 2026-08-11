@@ -82,7 +82,7 @@ describe('::handboek-model-scorecard', () => {
       'core',
       { includeTaskCount: true },
     );
-    expect(md).toContain('1/1 (n<3, count not rate)');
+    expect(md).toContain('1/1 (some tasks run once — count not rate)');
     expect(md).not.toMatch(/100%/);
   });
 

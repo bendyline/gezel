@@ -14,7 +14,7 @@ persona-bearing conversions queue for approval; persona gezels mint at approval)
 manual surfaces (`POST /imports/convert`, the `import_skill` MCP tool, `gezel skills
 list|import|convert`), hooks through the CraftbookDoc format, the hook `ask` →
 permission-card wire-through, and the shipped catalog wave: all nine Wave 1+2 skills
-(committed snapshot + overlays + regen-fidelity test in
+(Gilde-owned snapshot + overlays + regen-fidelity test in
 [gstack-import.test.ts](../packages/catalog/src/gstack-import.test.ts)) plus the
 hand-authored `careful-mode` and `freeze-scope` guardrail books
 ([guardrail-books.ts](../packages/catalog/src/guardrail-books.ts)).
@@ -22,7 +22,7 @@ hand-authored `careful-mode` and `freeze-scope` guardrail books
 **Presentation:** the shipped books present as ordinary gezel skills —
 nothing in the recipe content is branded as gstack; each book credits the upstream
 repository through its structured `basedOn` link. Each carries a plain, role-safe id/name
-from the `WAVE` config in [gstack-import.ts](../packages/catalog/src/gstack-import.ts): `idea-office-hours`,
+from Gilde's `authoring/gstack/wave.json`: `idea-office-hours`,
 `root-cause-investigation`, `technical-documentation`, `executive-level-review` (not
 "ceo-review" — avoids reading as a gezel role), `spec-authoring`,
 `security-architecture-review` (was "cso"), `design-system-consultation`,
@@ -31,8 +31,8 @@ from the `WAVE` config in [gstack-import.ts](../packages/catalog/src/gstack-impo
 fenced-plumbing + line-level scrub removes `~/.gstack/` paths, `gstack-*` CLIs, gbrain,
 and brand footers) so procedure prose is gstack-free too — a test asserts zero
 `gstack`/`gbrain` in the shipped bytes. Source credit lives only in dev-facing places:
-the `scripts/gstack-skills/` snapshot, code comments, and git history. Persona drafts for
-five skills await hand review under `packages/catalog/scripts/gstack-personas/` before
+Gilde's `authoring/gstack/snapshots/` tree, code comments, and git history. Persona drafts
+for five skills await hand review under Gilde's `authoring/gstack/persona-drafts/` before
 any ships as a gezel-template.
 
 Still open from the recommendations: the documents-library lane for non-repo sources, the
@@ -79,7 +79,7 @@ preamble-free versions maintained upstream — use them as source where they exi
 
 ### Wave 2 — MEDIUM, needs mapping work or a toolset requirement
 
-- **cso** — security audit; its grep sweeps map to `search_files`/`search_code` (more
+- **cso** — security audit; its grep sweeps map to `grep_files`/`search_code` (more
   portable than it looks); daily-vs-comprehensive confidence gate = `paramSchema`.
 - **design-consultation** — interview → DESIGN.md; font/color preview pages become
   workspace HTML deliverables rendered in gezel's preview pane (no `$D` binary needed).

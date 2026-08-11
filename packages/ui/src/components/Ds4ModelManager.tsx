@@ -1,6 +1,11 @@
 import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
-import type { IncompleteModelDownload, LlamaCppInstallEvent } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  Ds4ContextPlan,
+  IncompleteModelDownload,
+  LlamaCppInstallEvent,
+  LlamaCppInstalledModel,
+} from '@bendyline/gezel-client';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import {
   MODEL_INVENTORY_CHANGED_EVENT,
@@ -8,8 +13,15 @@ import {
   changedModelInventoryEngine,
 } from '../model-inventory.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
-import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
+import { ImportModelBundleButton } from './ModelBundleControls.js';
+import {
+  ModelActionsMenu,
+  ModelContextSliderPanel,
+  contextSliderMax,
+} from './ModelContextControls.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { formatContextWindow } from './model-context.js';
+import { formatBytes } from './model-memory-copy.js';
 
 /**
  * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
@@ -18,11 +30,17 @@ import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
  * of the DeepSeek-V4 / GLM 5.2 builds its engine supports, so this list is
  * exactly the models carrying that block.
  *
- * ds4 streams MoE experts from SSD, so device guidance uses the catalog's
- * `residentBytes` (expert cache + fixed model state + runtime buffers), not the
- * much larger download size. The service now enforces the same headroom rule
- * at launch; this UI is guidance, not the only protection against memory
+ * ds4 streams MoE experts from SSD, so device guidance uses the working set
+ * (expert cache + fixed model state + KV at the launch window), not the much
+ * larger download size. The service now enforces the same headroom rule at
+ * launch; this UI is guidance, not the only protection against memory
  * pressure.
+ *
+ * Every row — downloaded or not — carries the window this device would launch
+ * it at and what that window costs, because a ds4 download runs to hundreds of
+ * GB and the fit decision happens before it starts. Those come from
+ * `/api/ds4/context-plans`, which prices catalog entries the same way
+ * `/api/ds4/models` prices installed ones.
  */
 interface Mem {
   totalRamBytes: number;
@@ -47,8 +65,8 @@ function ds4Entry(m: CatalogItemSummary['manifest']): Ds4ChatModel | null {
   return m as Ds4ChatModel;
 }
 
-function fmtGib(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(0)} GiB`;
+function fmtGb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(0)} GB`;
 }
 
 export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => void }) {
@@ -60,11 +78,27 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // real empty catalog.
   const [items, setItems] = useState<CatalogItemSummary[] | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
+  // Full installed rows (context window, override, launch ceiling) keyed by
+  // id — the catalog drives the list, but the context controls need the
+  // daemon's per-install decoration.
+  const [installedModels, setInstalledModels] = useState<Map<string, LlamaCppInstalledModel>>(
+    new Map(),
+  );
   // Ids that resolve from a read-only machine/shared overlay — delete refuses
   // these, so the row shows them as machine-provided rather than offering a
   // Delete that only 400s.
   const [readOnlyIds, setReadOnlyIds] = useState<Set<string>>(new Set());
+  // Launch plan per catalog id, downloaded or not — the window this device
+  // would run each model at and the memory that window costs. Empty on a
+  // daemon that predates the endpoint; rows then fall back to the catalog's
+  // flat footprint and show no window.
+  const [plans, setPlans] = useState<Map<string, Ds4ContextPlan>>(new Map());
   const [mem, setMem] = useState<Mem | null>(null);
+  // Which installed row has the context-size editor expanded beneath it.
+  const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // False until the override endpoint answers — an older daemon or machine
+  // broker 404s and the affordance hides rather than erroring per row.
+  const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [installing, setInstalling] = useState<Map<string, InstallState>>(new Map());
   const [error, setError] = useState<string | null>(null);
   // Interrupted/unverified downloads with no manifest — invisible to the
@@ -85,9 +119,17 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     try {
       const r = await api.listDs4Models();
       setInstalled(new Set(r.models.map((m) => m.id)));
+      setInstalledModels(new Map(r.models.map((m) => [m.id, m])));
       setReadOnlyIds(new Set(r.models.filter((m) => m.readOnly).map((m) => m.id)));
     } catch {
       /* the row's own error surfaces install failures */
+    }
+    try {
+      const r = await api.listDs4ContextPlans();
+      setPlans(new Map(Object.entries(r.plans ?? {})));
+    } catch {
+      // Older daemon (404) or a blip — rows quote the flat catalog footprint
+      // rather than the list failing.
     }
     void refreshIncomplete();
   }, [refreshIncomplete]);
@@ -109,6 +151,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   useEffect(() => {
     void loadCatalog();
     void refresh();
+    void api
+      .getModelContextOverrides('ds4')
+      .then(() => setContextOverridesSupported(true))
+      .catch(() => setContextOverridesSupported(false));
   }, [loadCatalog, refresh]);
 
   useEffect(() => {
@@ -282,8 +328,12 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     return <p className="muted small">No DwarfStar models in the catalog.</p>;
   }
 
+  // Rank by what each model would actually occupy at its planned window, so
+  // "recommended on this device" tracks the same number the rows quote.
+  const residentFor = (m: Ds4ChatModel): number | undefined =>
+    plans.get(m.id)?.projectedResidentBytes ?? m.ds4.residentBytes;
   const lightestResidentBytes = Math.min(
-    ...ds4Models.map(({ m }) => m.ds4.residentBytes ?? Number.POSITIVE_INFINITY),
+    ...ds4Models.map(({ m }) => residentFor(m) ?? Number.POSITIVE_INFINITY),
   );
 
   return (
@@ -295,7 +345,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         onDelete={(id) => void remove(id)}
       />
       {ds4Models.map(({ m }) => {
-        const resident = m.ds4.residentBytes;
+        const plan = plans.get(m.id);
+        // Fit is judged at the window this device would launch with, not at
+        // whatever window the catalog footprint was authored against.
+        const resident = residentFor(m);
         const cache = m.ds4.cacheExpertsBytes ?? 0;
         // Match the launcher's fixed system/runtime reserve. If the catalog
         // target exceeds the ceiling, the service reduces only the routed-
@@ -315,16 +368,16 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
           fitsRecommendedCache ? (
             <span
               className="home-status-pill home-status-ok"
-              title={`Uses SSD streaming with a target memory working set of about ${fmtGib(resident)}.`}
+              title={`Uses SSD streaming with a target memory working set of about ${fmtGb(resident)}.`}
             >
               {isLightest ? 'recommended on this device' : 'fits with SSD streaming'}
             </span>
           ) : canRunSafely ? (
             <span
               className="home-status-pill home-status-warn"
-              title={`Gezel will reduce this model's expert cache below its ${fmtGib(
+              title={`Gezel will reduce this model's expert cache below its ${fmtGb(
                 resident,
-              )} target to preserve 32 GiB for the system and other apps. It should run, but will read from SSD more often.`}
+              )} target to preserve 32 GB for the system and other apps. It should run, but will read from SSD more often.`}
             >
               reduced cache · slower
             </span>
@@ -341,87 +394,179 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         // A hardcoded model family here silently mislabels every entry that
         // isn't the one it was written for.
         const displayName = m.name;
+        // Merge the plan into the installed row so the slider gets the launch
+        // ceiling and the KV slope even when /models predates them.
+        const baseRow = installedModels.get(m.id);
+        const installedRow: LlamaCppInstalledModel | undefined = baseRow
+          ? {
+              ...baseRow,
+              ...(plan?.effectiveContextWindow !== undefined && !baseRow.effectiveContextWindow
+                ? { effectiveContextWindow: plan.effectiveContextWindow }
+                : {}),
+              ...(plan?.contextCeilingTokens !== undefined &&
+              baseRow.contextCeilingTokens === undefined
+                ? { contextCeilingTokens: plan.contextCeilingTokens }
+                : {}),
+              ...(plan?.kvBytesPerToken !== undefined &&
+              baseRow.kvBytesPerTokenPerSlot === undefined
+                ? { kvBytesPerTokenPerSlot: plan.kvBytesPerToken, kvFixedBytesPerSlot: 0 }
+                : {}),
+              ...(plan?.contextFreeResidentBytes !== undefined &&
+              baseRow.weightsResidentBytes === undefined
+                ? { weightsResidentBytes: plan.contextFreeResidentBytes }
+                : {}),
+            }
+          : undefined;
+        // The launch window to quote: the daemon's per-install answer first,
+        // else the catalog projection for a model that isn't downloaded.
+        const launchCtx = installedRow?.effectiveContextWindow ?? plan?.effectiveContextWindow;
+        const overrideTokens = installedRow?.overrideContextTokens ?? plan?.overrideContextTokens;
+        const restartNeeded = installedRow?.contextSizingStatus === 'restart-required';
+        // Only claim the footprint moves with the window where a measured
+        // slope says it does; otherwise the number is a flat authored target.
+        const kvPerToken = plan?.kvBytesPerToken;
+        const ctxKvBytes =
+          kvPerToken !== undefined && launchCtx !== undefined ? kvPerToken * launchCtx : undefined;
+        const contextAdjustable =
+          isInstalled &&
+          contextOverridesSupported &&
+          installedRow !== undefined &&
+          contextSliderMax(installedRow) !== undefined;
         return (
-          <div
-            key={m.id}
-            className="new-row"
-            style={{ alignItems: 'center', gap: '0.6rem', marginTop: '0.6rem', flexWrap: 'wrap' }}
-          >
-            <div style={{ flex: 1, minWidth: '14rem' }}>
-              <strong>{displayName}</strong>{' '}
-              <span className="muted small">
-                {m.parameterSize} · download {fmtGib(m.ds4.approxSizeBytes)}
-              </span>
-              {resident ? (
-                <div className="muted small">
-                  memory target ≈ {fmtGib(resident)} with SSD streaming
-                </div>
-              ) : null}
-            </div>
-
+          <Fragment key={m.id}>
             <div
-              style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: '0.5rem',
-                flexShrink: 0,
-              }}
+              className="new-row"
+              style={{ alignItems: 'center', gap: '0.6rem', marginTop: '0.6rem', flexWrap: 'wrap' }}
             >
-              {fitPill}
-              {job ? (
-                job.error ? (
-                  <>
-                    <span className="home-status-pill home-status-warn">{job.error}</span>
-                    <button type="button" onClick={() => startInstall(m.id)}>
-                      Retry
-                    </button>
-                  </>
-                ) : (
-                  // Fixed-width, right-aligned so the changing percentage /
-                  // phase label doesn't reflow the pill to its left. Tabular
-                  // figures keep the digits from jittering too.
-                  <span
+              <div style={{ flex: 1, minWidth: '14rem' }}>
+                <strong>{displayName}</strong>{' '}
+                <span className="muted small">
+                  {m.parameterSize} · download {fmtGb(m.ds4.approxSizeBytes)}
+                </span>
+                {resident ? (
+                  <div
                     className="muted small"
-                    style={{
-                      display: 'inline-block',
-                      minWidth: '9rem',
-                      textAlign: 'right',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
+                    title={
+                      ctxKvBytes !== undefined
+                        ? `About ${formatBytes(ctxKvBytes)} of this is context (KV) at ${formatContextWindow(launchCtx)}; the rest is the routed-expert cache and resident model state. Changing the context size moves the total.`
+                        : `Target memory working set with SSD streaming. Routed experts stream from disk, so this is far below the ${fmtGb(m.ds4.approxSizeBytes)} download.`
+                    }
                   >
-                    {job.phase === 'downloading'
-                      ? `downloading… ${pct}%`
-                      : job.phase === 'verifying'
-                        ? 'verifying sha256…'
-                        : 'finalizing…'}
-                  </span>
-                )
-              ) : isInstalled ? (
-                <>
-                  <span className="home-status-pill home-status-ok">on device</span>
-                  <ExportModelBundleButton engine="ds4" id={m.id} />
-                  {readOnlyIds.has(m.id) ? (
+                    memory target ≈ {fmtGb(resident)}
+                    {ctxKvBytes !== undefined
+                      ? ` at ${formatContextWindow(launchCtx)} context,`
+                      : ''}{' '}
+                    with SSD streaming
+                  </div>
+                ) : null}
+                {restartNeeded ? (
+                  <div className="muted small">context: restart needed to apply the new size</div>
+                ) : launchCtx ? (
+                  <div className="muted small">
+                    context {formatContextWindow(launchCtx)}
+                    {overrideTokens !== undefined && (
+                      <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                        custom
+                      </span>
+                    )}
+                    {contextAdjustable && (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                          }
+                        >
+                          {contextEditorFor === m.id ? 'Done' : 'Adjust'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              <div
+                style={{
+                  marginLeft: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'flex-end',
+                  gap: '0.5rem',
+                  flexShrink: 0,
+                }}
+              >
+                {fitPill}
+                {job ? (
+                  job.error ? (
+                    <>
+                      <span className="home-status-pill home-status-warn">{job.error}</span>
+                      <button type="button" onClick={() => startInstall(m.id)}>
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    // Fixed-width, right-aligned so the changing percentage /
+                    // phase label doesn't reflow the pill to its left. Tabular
+                    // figures keep the digits from jittering too.
                     <span
                       className="muted small"
-                      title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                      style={{
+                        display: 'inline-block',
+                        minWidth: '9rem',
+                        textAlign: 'right',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
                     >
-                      Machine model
+                      {job.phase === 'downloading'
+                        ? `downloading… ${pct}%`
+                        : job.phase === 'verifying'
+                          ? 'verifying sha256…'
+                          : 'finalizing…'}
                     </span>
-                  ) : (
-                    <button type="button" onClick={() => void remove(m.id)}>
-                      Delete
-                    </button>
-                  )}
-                </>
-              ) : canRunSafely ? (
-                <button type="button" onClick={() => startInstall(m.id)}>
-                  Download
-                </button>
-              ) : null}
+                  )
+                ) : isInstalled ? (
+                  <>
+                    <span className="home-status-pill home-status-ok">on device</span>
+                    {readOnlyIds.has(m.id) && (
+                      <span
+                        className="muted small"
+                        title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                      >
+                        Machine model
+                      </span>
+                    )}
+                    <ModelActionsMenu
+                      engine="ds4"
+                      model={
+                        installedRow ?? {
+                          id: m.id,
+                          approxSizeBytes: m.ds4.approxSizeBytes,
+                          readOnly: readOnlyIds.has(m.id),
+                        }
+                      }
+                      contextSupported={contextOverridesSupported}
+                      contextEditorOpen={contextEditorFor === m.id}
+                      onToggleContextEditor={() =>
+                        setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                      }
+                      onDelete={readOnlyIds.has(m.id) ? undefined : () => void remove(m.id)}
+                    />
+                  </>
+                ) : canRunSafely ? (
+                  <button type="button" onClick={() => startInstall(m.id)}>
+                    Download
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
+            {contextEditorFor === m.id && installedRow && (
+              <div className="model-context-editor-row">
+                <ModelContextSliderPanel engine="ds4" model={installedRow} onSaved={refresh} />
+              </div>
+            )}
+          </Fragment>
         );
       })}
       <div style={{ marginTop: '1.25rem' }}>

@@ -478,7 +478,7 @@ export const squisqReviewScenario: EvalScenario = {
   prompt: [
     `Please conduct a comprehensive architecture and code review of the open-source repository at ${REPO_URL}.`,
     '',
-    `MANDATORY FIRST TOOL CALL: \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. Do not call \`start_project\`, \`start_job\`, or \`create_project\` first for this eval; those create an empty bootstrap project with no Squisq source and will fail the review.`,
+    `MANDATORY FIRST TOOL CALL: \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. Do not call \`start_project\` first for this eval; it creates an empty bootstrap project with no Squisq source and will fail the review.`,
     '',
     'Recommended workflow:',
     `1. First, call \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. This atomically creates a new project, links it to the github URL, and shallow-clones the source AT THE WORKSPACE ROOT of that new project. The workspace IS the cloned repo — \`list_dir('.')\` lists the repo's top-level files; \`read_file('package.json')\` returns the repo's package.json. The tool returns the new \`projectId\` — hold onto it.`,

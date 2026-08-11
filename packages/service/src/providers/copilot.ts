@@ -927,7 +927,7 @@ export const SANDBOX_ALLOWED_TOOL_PATTERNS = ['mcp:*', 'custom:*'];
  */
 export const NON_SANDBOX_EXCLUDED_MCP_TOOLS = [
   'fetch_url',
-  'search_files',
+  'grep_files',
   'find_files',
   'read_image_as_base64',
 ];

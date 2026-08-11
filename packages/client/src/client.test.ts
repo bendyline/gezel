@@ -72,6 +72,24 @@ describe('GezelClient workspace binary writes', () => {
       ),
     ).resolves.toEqual({ ok: true, path: 'report.pdf' });
   });
+
+  it('requests create-only publication for a restorable backup', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe(
+        'http://test/api/projects/demo/workspace/raw?path=report_files%2F.original%2Foriginal.pdf&create=1',
+      );
+      return Response.json({ ok: true, path: 'report_files/.original/original.pdf' });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await client.writeProjectWorkspaceBinary(
+      'demo',
+      'report_files/.original/original.pdf',
+      new Uint8Array([1, 2, 3]),
+      'application/pdf',
+      { createOnly: true },
+    );
+  });
 });
 
 describe('GezelClient project preview', () => {

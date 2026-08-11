@@ -29,10 +29,16 @@ const LOCAL_KINDS: ReadonlySet<CatalogKind> = new Set([
 ]);
 
 export class LocalCatalogSource extends BundledSource {
-  constructor(home: string) {
+  constructor(home: string, gezelVersion?: string) {
     // No index.json here — imported items are written straight to disk, so the
     // disk walk is the source of truth.
-    super({ dataDir: home, id: 'local', label: 'Installed', noIndex: true });
+    super({
+      dataDir: home,
+      id: 'local',
+      label: 'Installed',
+      noIndex: true,
+      ...(gezelVersion !== undefined ? { gezelVersion } : {}),
+    });
   }
 
   override async listKinds(): Promise<CatalogKind[]> {

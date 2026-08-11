@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,7 +80,7 @@ describe('spawnPnpm', () => {
     });
   });
 
-  it('keeps cmd quoting and the headless launch policy in one spawn boundary', () => {
+  it('keeps cmd quoting at the spawn boundary without detaching the shell fallback', () => {
     let captured:
       | {
           command: string;
@@ -112,8 +112,32 @@ describe('spawnPnpm', () => {
     expect(captured?.args).toEqual([]);
     expect(captured?.options).toMatchObject({ shell: true });
     expect(captured?.options.windowsHide).toBeUndefined();
-    expect(captured?.options.detached).toBe(process.platform === 'win32' ? true : undefined);
+    expect(captured?.options.detached).toBeUndefined();
   });
+
+  it.runIf(process.platform === 'win32')(
+    'preserves piped output from the Windows shell fallback',
+    async () => {
+      const child = spawnPnpm(
+        {
+          command: process.execPath,
+          args: ['-e', "process.stdout.write('pnpm-shell-output')"],
+          shell: true,
+          mode: 'path-fallback',
+        },
+        { cwd: workRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let stdout = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+
+      const [code] = await once(child, 'close');
+
+      expect(code).toBe(0);
+      expect(stdout).toBe('pnpm-shell-output');
+    },
+  );
 });
 
 describe('normalizeBundledPnpmPath', () => {

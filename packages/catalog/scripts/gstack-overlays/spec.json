@@ -1,3 +1,0 @@
-{
-  "planAppend": "### Gezel adaptations\n\nFile the finished spec as a workspace file at `specs/<slug>.md`. Only create a GitHub issue when the github toolset is installed and the user asks for one — the `gh` CLI is not available here. The Phase 4.5 fail-closed secret redaction still applies to whatever leaves the workspace."
-}

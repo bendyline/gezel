@@ -161,6 +161,15 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   /** Slot LRU — the head is the oldest assignment, evicted first on wrap. */
   private readonly slotOrder: number[] = [];
   private nextSlotToTry = 0;
+  /**
+   * Allocation includes asynchronous disk restore work. Without a small
+   * critical section, two callers can both observe the same slot as free
+   * before either one reaches {@link bind}, then issue concurrent requests
+   * with the same explicit `id_slot`. Keep the allocator itself serial while
+   * still allowing the provider to stream on all configured engine slots once
+   * each mapping has been established.
+   */
+  private allocationTail: Promise<void> = Promise.resolve();
   private readonly slotCount: number;
   private readonly resolveBaseUrl: LlamaCppCacheAdapterOptions['resolveBaseUrl'];
   private readonly resolveAuthToken: () => string | null;
@@ -359,6 +368,21 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    * {@link prepareForSend}.
    */
   private async allocateSlot(sessionId: string): Promise<number> {
+    const previous = this.allocationTail;
+    let release!: () => void;
+    this.allocationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      return await this.allocateSlotUnlocked(sessionId);
+    } finally {
+      release();
+    }
+  }
+
+  private async allocateSlotUnlocked(sessionId: string): Promise<number> {
     const existing = this.sessionToSlot.get(sessionId);
     if (existing !== undefined) {
       // Promote in LRU.

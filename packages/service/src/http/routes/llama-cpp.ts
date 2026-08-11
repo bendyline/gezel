@@ -20,8 +20,14 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
 
   app.get('/models', async (c) => {
     const installed = await ctx.llamaCppModels.listInstalled();
+    // Override state rides the row even when the preview throws (a stale
+    // resident engine yields restart-required, and the slider still needs
+    // to show the custom setting it should return to).
+    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
     const models = await Promise.all(
       installed.map(async (model) => {
+        const overrideContextTokens = overrides[`llama-cpp:${model.id}`];
+        const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
           const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id);
           return {
@@ -34,6 +40,19 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
               ? { reservedResidentBytes: plan.reservedResidentBytes }
               : {}),
             ...(plan.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
+            ...(plan.autoContextWindow !== undefined
+              ? { autoContextWindow: plan.autoContextWindow }
+              : {}),
+            ...(plan.kvBytesPerTokenPerSlot !== undefined
+              ? { kvBytesPerTokenPerSlot: plan.kvBytesPerTokenPerSlot }
+              : {}),
+            ...(plan.kvFixedBytesPerSlot !== undefined
+              ? { kvFixedBytesPerSlot: plan.kvFixedBytesPerSlot }
+              : {}),
+            ...(plan.weightsResidentBytes !== undefined
+              ? { weightsResidentBytes: plan.weightsResidentBytes }
+              : {}),
+            ...overrideField,
           };
         } catch (error) {
           // Two distinct denials, two distinct remedies: a model RESIDENT
@@ -51,6 +70,7 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
                       : ('insufficient-memory' as const),
                 }
               : {}),
+            ...overrideField,
           };
         }
       }),

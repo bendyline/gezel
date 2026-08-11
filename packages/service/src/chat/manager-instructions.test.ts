@@ -68,6 +68,37 @@ describe('buildInstructions coordinator routing', () => {
       'Manage projects and tasks with the tools actually wired this turn (none wired)',
     );
   });
+
+  it('uses the advertised grep spelling in retrieval-first guidance', () => {
+    const prompt = buildInstructions({
+      name: 'Tomas',
+      role: 'Meester',
+      about: 'Route work to the right specialist.',
+      executionDensity: 'flat',
+      project: { id: 'default', name: 'Default' } as ProjectDetail,
+      workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+      retrievalFirstHint: true,
+      availableTools: [{ name: 'grep_files', description: 'grep workspace files' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(prompt).toContain('call `grep_files` — do not read files one by one');
+  });
+
+  it('emits search_files in the legacy naming A/B arm while resolving it canonically', () => {
+    const prompt = buildInstructions({
+      name: 'Tomas',
+      role: 'Meester',
+      about: 'Route work to the right specialist.',
+      executionDensity: 'flat',
+      project: { id: 'default', name: 'Default' } as ProjectDetail,
+      workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+      retrievalFirstHint: true,
+      availableTools: [{ name: 'search_files', description: 'search workspace files' }],
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(prompt).toContain('call `search_files` — do not read files one by one');
+    expect(prompt).not.toContain('call `grep_files` — do not read files one by one');
+  });
 });
 
 describe('buildInstructions never advertises a tool the role lacks', () => {
@@ -122,13 +153,29 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(partial).toContain('`get_pull_request`');
     expect(partial).not.toContain('search_code');
 
-    // These names come from an installed third-party toolset, so an
-    // empty intersection means "can't confirm", not "absent" — the
-    // directive stands, it just stops naming specific tools.
+    // The first-party PR builtins are named too. They used to be missing
+    // from the probe list, so a project holding them always fell through
+    // to a blanket "the `github_*` tools on your function schema".
+    const builtin = prompt(['github_pr_diff', 'github_pr_files'], { project });
+    expect(builtin).toContain('`github_pr_diff`');
+
+    // A third-party toolset's tool names only exist after its bridge
+    // spawns, so with one INSTALLED an empty intersection means "can't
+    // confirm" — the directive stands, it just names no specific tool.
+    const unconfirmable = prompt(['read_file'], {
+      project,
+      installedToolsetIds: new Set(['github']),
+    });
+    expect(unconfirmable).toContain('Use the GitHub toolset');
+    expect(unconfirmable).not.toContain('get_pull_request');
+
+    // With no GitHub toolset installed, an empty intersection IS absence.
+    // Promising tools here is what taught a PR-review step to call
+    // `github_pr_diff` from a roster it had been stripped from.
     const none = prompt(['read_file'], { project });
-    expect(none).toContain('Use the GitHub toolset');
-    expect(none).not.toContain('search_code');
-    expect(none).not.toContain('get_pull_request');
+    expect(none).toContain('This project is linked to');
+    expect(none).not.toContain('Use the GitHub toolset');
+    expect(none).not.toContain('github_*');
   });
 
   it('names only wired delegation tools in workspace guidance', () => {
@@ -161,6 +208,30 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(none).not.toContain('`message_gezel`');
     expect(none).not.toContain('`create_task`');
     expect(none).not.toContain('`assign_task`');
+  });
+
+  it('teaches ranged and batched reads only when those tools are wired', () => {
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const render = (names: string[]) =>
+      buildInstructions({
+        name: 'Ada',
+        role: 'Developer',
+        about: 'Work on the project.',
+        project,
+        executionDensity: 'flat',
+        workspaceFiles: [{ path: 'src/app.ts', isDirectory: false }],
+        availableTools: names.map((name) => ({ name, description: `${name} tool` })),
+      } as unknown as BuildInstructionsOptions).full;
+
+    const full = render(['read_file', 'read_files', 'grep_files', 'write_file']);
+    expect(full).toContain('use `read_file` with `{ path, startLine, endLine }`');
+    expect(full).toContain('and `read_files` for several independent known paths/ranges');
+    expect(full).toContain('use `grep_files` first when the location is unknown');
+
+    const singular = render(['read_file', 'write_file']);
+    expect(singular).toContain('use `read_file` with `{ path, startLine, endLine }`');
+    expect(singular).not.toContain('and `read_files` for several independent known paths/ranges');
+    expect(singular).not.toContain('use `grep_files` first when the location is unknown');
   });
 
   it('does not advertise unavailable shared-document tools', () => {
@@ -215,10 +286,11 @@ describe('buildInstructions connected data', () => {
     }).full;
     expect(withBindings).toContain('### Connected data');
     expect(withBindings).toContain(
-      '**Work Gmail** (mail-gmail, synced 2026-08-08): `data/work-gmail/`',
+      '**Work Gmail** (mail-gmail, synced 2026-08-08): `artifacts/data/work-gmail/`',
     );
     expect(withBindings).not.toContain('linear-issues'); // disabled bindings hidden
     expect(withBindings).toContain('read-only mirrors');
+    expect(withBindings).toContain('Use the artifact listing/reading tools');
 
     const without = buildInstructions({
       name: 'Wren',

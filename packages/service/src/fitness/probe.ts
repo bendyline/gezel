@@ -174,8 +174,15 @@ export interface FitnessProbeDeps {
   resolveReasoningBudget(modelId: string): Promise<number | undefined>;
   /** Host memory profile, recorded on the report. */
   detectMemory(): Promise<{ totalRamBytes: number; gpuVramBytes: number | null; source: string }>;
-  /** The user-facing launch numCtx setting for this engine, when configured. */
-  configuredNumCtx(engine: FitnessEngine): Promise<number | undefined>;
+  /**
+   * The user-facing launch numCtx setting for this engine, when configured.
+   * Receives the model id so a per-model context override wins over the
+   * engine-wide setting, same as the launch path. Caveat: in packaged
+   * installs the user daemon's store may lack the machine broker's
+   * overrides — contextFit pricing is best-effort there, the same
+   * limitation the raw engine-wide read has always had.
+   */
+  configuredNumCtx(engine: FitnessEngine, modelId: string): Promise<number | undefined>;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
 }
@@ -222,13 +229,15 @@ export async function runFitnessProbe(
     .catch(() => ({ totalRamBytes: 0, gpuVramBytes: null, source: 'unknown' }));
   const installed = await deps.resolveInstalled(args.provider, args.modelId).catch(() => null);
   const reasoningBudget = await deps.resolveReasoningBudget(args.modelId).catch(() => undefined);
-  const configuredCtx = await deps.configuredNumCtx(args.provider).catch(() => undefined);
+  const configuredCtx = await deps
+    .configuredNumCtx(args.provider, args.modelId)
+    .catch(() => undefined);
 
-  // GEZEL_LLAMA_NUM_CTX only reaches the llama.cpp/ds4 supervisors; the
-  // MLX supervisor has no env override, so honouring it here would report
-  // a launch context the engine never uses.
+  // GEZEL_LLAMA_NUM_CTX reaches only the llama.cpp supervisor. MLX and ds4
+  // have their own config paths, so honouring it for either would report a
+  // launch context that engine never uses.
   const envCtxRaw =
-    args.provider === 'mlx' ? undefined : (deps.env ?? process.env).GEZEL_LLAMA_NUM_CTX;
+    args.provider === 'llama-cpp' ? (deps.env ?? process.env).GEZEL_LLAMA_NUM_CTX : undefined;
   const envCtx = envCtxRaw ? Number.parseInt(envCtxRaw, 10) : Number.NaN;
   const launchCtx =
     Number.isFinite(envCtx) && envCtx > 0 ? envCtx : (configuredCtx ?? DEFAULT_LAUNCH_NUM_CTX);

@@ -7,3 +7,4 @@ export const Trigger = RadixDropdownMenu.Trigger;
 export const Portal = RadixDropdownMenu.Portal;
 export const Content = RadixDropdownMenu.Content;
 export const Item = RadixDropdownMenu.Item;
+export const Separator = RadixDropdownMenu.Separator;

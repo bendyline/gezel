@@ -54,6 +54,12 @@ beforeAll(async () => {
   await svc.context.store.writeSession(
     base('sess-unscoped', '2026-04-14T10:00:02Z', 'general project check-in'),
   );
+  await svc.context.store.appendTerminalMessage(projectId, '_root', '', {
+    id: 'terminal-command-1',
+    kind: 'command',
+    content: 'ls',
+    at: '2026-04-14T10:00:03Z',
+  });
 }, 30_000);
 
 afterAll(async () => {
@@ -71,11 +77,19 @@ describe('GET /api/projects/:id/timeline', () => {
       'about the contract review',
       'general project check-in',
     ]);
+    expect(res.terminalEntries?.map((entry) => entry.content)).toEqual(['ls']);
+  });
+
+  it('omits project terminal history when scoped to one gezel', async () => {
+    const res = await client.listProjectTimeline(projectId, { gezelId });
+    expect(res.messages).toHaveLength(3);
+    expect(res.terminalEntries).toBeUndefined();
   });
 
   it('narrows to one task when ?task= is set', async () => {
     const res = await client.listProjectTimeline(projectId, { taskRef: `${projectId}/1` });
     expect(res.messages.map((m) => m.content)).toEqual(['about the contract review']);
+    expect(res.terminalEntries).toBeUndefined();
   });
 
   it('returns nothing for a task with no sessions rather than falling back to the project', async () => {

@@ -291,12 +291,24 @@ export function NewTaskDialog({
   );
   const filteredBooks = useMemo(() => {
     if (!searching) return books;
-    return books.filter((b) =>
-      `${b.manifest.id} ${b.manifest.name} ${b.manifest.description} ${(b.manifest.tags ?? []).join(' ')}`
-        .toLowerCase()
-        .includes(normalizedQuery),
-    );
-  }, [books, searching, normalizedQuery]);
+    return books
+      .filter((b) =>
+        `${b.manifest.id} ${b.manifest.name} ${b.manifest.description} ${(b.manifest.tags ?? []).join(' ')}`
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
+      .sort((a, b) => {
+        const aRecommended =
+          suggestedIds.has(a.manifest.id) || a.manifest.tags?.includes('recommended') ? 1 : 0;
+        const bRecommended =
+          suggestedIds.has(b.manifest.id) || b.manifest.tags?.includes('recommended') ? 1 : 0;
+        return (
+          bRecommended - aRecommended ||
+          craftbookSearchRank(a, normalizedQuery) - craftbookSearchRank(b, normalizedQuery) ||
+          a.manifest.name.localeCompare(b.manifest.name)
+        );
+      });
+  }, [books, searching, normalizedQuery, suggestedIds]);
   const generalMatches =
     !searching ||
     `${modeCopy.generalLabel} ${modeCopy.generalDescription} blank fresh`
@@ -702,7 +714,7 @@ export function NewTaskDialog({
                       )}
                       <div className="gz-ntd-steps">
                         <p className="gz-npd-give-eyebrow">
-                          The recipe — {selectedBook.manifest.steps.length} step
+                          {selectedBook.manifest.steps.length} step
                           {selectedBook.manifest.steps.length === 1 ? '' : 's'}
                         </p>
                         <ol className="gz-ntd-steps-list">
@@ -923,6 +935,16 @@ export function NewTaskDialog({
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function craftbookSearchRank(book: BookItem, query: string): number {
+  const name = book.manifest.name.toLowerCase();
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.split(/\s+/).some((word) => word.startsWith(query))) return 2;
+  if (name.includes(query)) return 3;
+  const aliases = `${book.manifest.id} ${(book.manifest.tags ?? []).join(' ')}`.toLowerCase();
+  return aliases.includes(query) ? 4 : 5;
 }
 
 function GalleryCard({

@@ -31,7 +31,9 @@ beforeEach(async () => {
 afterEach(async () => {
   if (previousOverride === undefined) delete process.env.GEZEL_GILDE_DATA_DIR;
   else process.env.GEZEL_GILDE_DATA_DIR = previousOverride;
-  await rm(home, { recursive: true, force: true });
+  // maxRetries absorbs Windows's transient ENOTEMPTY/EBUSY on freshly-written
+  // trees (handles detach a beat after close).
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function writeToolset(dataDir: string, id: string, opts: { broken?: boolean } = {}) {
@@ -438,7 +440,12 @@ describe('GildeUpdateManager.setEnabled', () => {
       const manager = await makeManager({ registry: registry.registry });
       await manager.setEnabled(true);
       await vi.waitFor(async () => {
-        expect((await manager.status()).activeVersion).toBe('0.1.16');
+        const status = await manager.status();
+        expect(status.activeVersion).toBe('0.1.16');
+        // Drain the whole background check, not just activation — its tail
+        // (pruning, state writes) must not race afterEach's temp-dir removal
+        // (Windows surfaces that race as ENOTEMPTY).
+        expect(status.updateInProgress).toBe(false);
       });
     } finally {
       await registry.close();

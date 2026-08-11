@@ -516,6 +516,65 @@ describe('applyTuning — llama-cpp', () => {
     expect(target.chat_template_kwargs).toEqual({ enable_thinking: true });
     expect(target.reasoning_budget_tokens).toBeUndefined();
   });
+
+  it('forwards manifest-declared reasoning.templateKwargs verbatim — the model names its own control (Muse Glimmer reads reasoning_strength, GPT-OSS reads reasoning_effort)', () => {
+    const target: Record<string, unknown> = {};
+    applyTuning(
+      target,
+      resolveTuning({
+        catalog: { reasoning: { templateKwargs: { reasoning_strength: 'high' } } },
+      }),
+      LLAMA_CPP_TUNING_MAP,
+    );
+    expect(target.chat_template_kwargs).toEqual({ reasoning_strength: 'high' });
+  });
+
+  it('merges templateKwargs alongside enable_thinking rather than replacing the object', () => {
+    const target: Record<string, unknown> = {};
+    applyTuning(
+      target,
+      resolveTuning({
+        catalog: {
+          reasoning: { enableThinking: true, templateKwargs: { reasoning_strength: 'xhigh' } },
+        },
+      }),
+      LLAMA_CPP_TUNING_MAP,
+    );
+    expect(target.chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      reasoning_strength: 'xhigh',
+    });
+  });
+
+  it('lets a tuning profile override reasoning depth per-request — the reason this lives under `reasoning` and not `engine`', () => {
+    const target: Record<string, unknown> = {};
+    applyTuning(
+      target,
+      resolveTuning({
+        catalog: {
+          reasoning: { templateKwargs: { reasoning_strength: 'high' } },
+          profiles: {
+            instruct: { reasoning: { templateKwargs: { reasoning_strength: 'low' } } },
+          },
+        },
+        tuningProfileId: 'instruct',
+      }),
+      LLAMA_CPP_TUNING_MAP,
+    );
+    expect(target.chat_template_kwargs).toEqual({ reasoning_strength: 'low' });
+  });
+
+  it('drops templateKwargs on cloud providers, which have no chat template to parameterize', () => {
+    const target: Record<string, unknown> = {};
+    applyTuning(
+      target,
+      resolveTuning({
+        catalog: { reasoning: { templateKwargs: { reasoning_strength: 'high' } } },
+      }),
+      OPENAI_TUNING_MAP,
+    );
+    expect(target.chat_template_kwargs).toBeUndefined();
+  });
 });
 
 describe('applyTuning — mlx', () => {

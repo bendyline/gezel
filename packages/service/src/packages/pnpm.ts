@@ -109,13 +109,15 @@ export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide' | 'det
 
 /**
  * The only supported way to spawn a resolved pnpm invocation from the
- * service. In addition to applying cmd.exe-safe quoting, this forces a
- * console-free Windows launch (DETACHED_PROCESS, via `detached`), which is
- * what the Session 0 machine service needs. On other platforms `detached`
- * means setsid(), so it stays win32-only.
+ * service. In addition to applying cmd.exe-safe quoting, direct executable
+ * launches use DETACHED_PROCESS on Windows, which is what the Session 0
+ * machine service needs. The shell fallback is development-only: Windows
+ * drops piped stdout/stderr when cmd.exe is detached, so that path must stay
+ * attached or callers receive a correct exit code with an empty log. Packaged
+ * services use the bundled Node + pnpm script path and never need cmd.exe.
  *
- * Keep `shell`, `windowsHide` and `detached` out of the caller-owned
- * options: all three are invocation/runtime invariants, not per-call policy.
+ * Keep `shell`, `windowsHide` and `detached` out of the caller-owned options:
+ * all three are invocation/runtime invariants, not per-call policy.
  */
 export function spawnPnpm(
   invocation: PnpmInvocation,
@@ -126,7 +128,7 @@ export function spawnPnpm(
   return spawnImpl(target.command, target.args, {
     ...options,
     shell: invocation.shell,
-    ...windowsDetachedSpawnOptions(),
+    ...(invocation.shell ? {} : windowsDetachedSpawnOptions()),
   });
 }
 

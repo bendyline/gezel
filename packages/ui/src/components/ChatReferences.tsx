@@ -64,20 +64,34 @@ const MAX_SIDE_FRACTION = 0.65;
 const DEFAULT_SIDE_FRACTION = 0.34;
 
 /**
- * Minimum widths for the split chat/reference layout. The split is
- * technically able to fit at 686 px, but at that width both panes read as
- * cramped utility columns. Below 1100 px the rail becomes a single-pane tab
- * surface instead: Chat keeps the whole canvas, while Task, Commands, and
+ * Minimum widths for the split chat/reference layout. Below
+ * `CHAT_RAIL_MIN_SPLIT_PX` the rail becomes a single-pane tab surface
+ * instead: Chat keeps the whole canvas, while Task, Skills, and
  * References remain one click away. This is measured on the rail itself
  * because an output pane can squeeze chat even while the surrounding project
  * view is still wide.
+ *
+ * The split's mechanical floor is 480 + 14 + 192 = 686 px. 840 sits a
+ * comfortable step above it — a ~630 px chat column beside the 12 rem side
+ * pane at its narrowest, ~555/285 at the default 0.34 fraction — without
+ * demanding a width the project view can rarely hand over. The previous
+ * 1100 was calibrated against a rail with nothing to its left; with the
+ * output pane open, a 1512 px window leaves the rail only ~1035 px, so the
+ * split could never appear on a laptop no matter how wide the window got.
+ *
+ * The hysteresis band is what makes dragging the output-pane grip bearable:
+ * the layout collapses at 840 but doesn't rebuild until 900, so a grip
+ * parked near the boundary can't tear the rail down and back up per pixel.
  */
 export const CHAT_RAIL_MIN_CHAT_PX = 480;
 const CHAT_RAIL_MIN_SIDE_PX = 192;
 const CHAT_RAIL_GRIP_TRACK_PX = 14;
-export const CHAT_RAIL_MIN_SPLIT_PX = 1100;
+export const CHAT_RAIL_MIN_SPLIT_PX = 840;
+export const CHAT_RAIL_SPLIT_HYSTERESIS_PX = 60;
 
-type RailSection = 'tasks' | 'references' | 'commands';
+// `'tasks'` here means task REFS — the TaskRailCard surface. It is
+// unrelated to `CommandsPanelSection['tasks']`, which means craftbooks.
+type RailSection = 'tasks' | 'references' | 'skills';
 type CompactPane = 'chat' | RailSection;
 
 function clampFraction(f: number): number {
@@ -114,6 +128,7 @@ function classifyTool(name: string): RefKind | null {
     case 'write_document':
       return 'document';
     case 'read_file':
+    case 'read_files':
     case 'write_file':
       return 'workspace';
     default:
@@ -168,8 +183,13 @@ export interface ChatReferencesApi {
    * (`scoped: true`, pinned to the top) which rides on every message's
    * `taskRef`, and any other task ref the parser recognized in a reply
    * body (`scoped: false`). Both dedupe on the ref.
+   *
+   * `focus: true` additionally pulls the rail onto this task — select it
+   * and switch to the Task tab. Reserve it for a direct user action (the
+   * pill row's task click); the passive timeline feeds must not yank the
+   * rail off whatever the user is reading.
    */
-  onTaskReference: (ref: string, opts?: { scoped?: boolean }) => void;
+  onTaskReference: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
 }
 
 interface TaskRef {
@@ -182,9 +202,9 @@ interface TaskRef {
 export function ChatReferences({
   projectId,
   chatKey,
-  commandsProjectId,
+  skillsProjectId,
   compact = false,
-  onStageTerminalCommand,
+  banner,
   children,
 }: {
   /** Project context used to resolve reference paths. Defaults to 'default'. */
@@ -192,26 +212,30 @@ export function ChatReferences({
   /** Stable key for the current chat — changing it resets the reference list. */
   chatKey: string;
   /**
-   * When set, the side rail gains a "Commands" tab that lists the
-   * workspace's discovered runnable commands for this project. The
-   * rail is always visible while this prop is set, even with no
-   * references in the chat. Omit for chats that aren't scoped to a
-   * single project workspace (the global Meester timeline).
+   * When set, the side rail gains a "Skills" tab listing this project's
+   * workspace skills and any pending bash→JS import approvals. The tab is
+   * omitted while both sources are empty. Omit for chats that aren't scoped
+   * to a single project workspace (the global Meester timeline).
+   *
+   * Runnable commands and craftbooks deliberately do NOT appear here:
+   * commands live in the terminal composer's toolbar galleries, and
+   * craftbooks are launched from the chat pill row's "+", which creates a
+   * real task instead of staging a terminal line.
    */
-  commandsProjectId?: string;
+  skillsProjectId?: string;
   /**
    * Narrow-form-factor mode (VS Code chat panel, mobile, or an explicitly
    * compact host). The side-by-side rail and resize grip are suppressed;
-   * Chat, Task, Commands, and References become full-width tabs instead.
+   * Chat, Task, Skills, and References become full-width tabs instead.
    */
   compact?: boolean;
   /**
-   * Stage a command string into the project-chat terminal composer
-   * (switch to terminal mode + insert text; does NOT run it). Wired from
-   * ProjectChatBody and handed to the CommandsPanel craftbook launcher.
-   * Optional — surfaces without a terminal (the Meester timeline) omit it.
+   * Optional full-width band above both panes (the project chat's pill
+   * row). It gets the same reference API as `children` because focusing a
+   * task pill also scopes the side rail. In compact mode there is no split
+   * to span, so it rides above the chat pane inside the Chat tab.
    */
-  onStageTerminalCommand?: (command: string) => void;
+  banner?: (api: ChatReferencesApi) => ReactNode;
   /**
    * Render prop: receives two callbacks the chat child threads into
    * the timeline and composer. `onToolActivity` is fed by MCP tool
@@ -225,10 +249,12 @@ export function ChatReferences({
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<RailSection>(
-    commandsProjectId ? 'commands' : 'references',
-  );
+  const [activeTab, setActiveTab] = useState<RailSection>('references');
   const [compactPane, setCompactPane] = useState<CompactPane>('chat');
+  // Store the id, rather than a bare boolean, so switching projects cannot
+  // briefly expose the previous project's Skills rail while the new probe is
+  // still settling.
+  const [skillsAvailableProjectId, setSkillsAvailableProjectId] = useState<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey is the reset trigger — the effect body doesn't read it, but changing it must re-fire.
   useEffect(() => {
@@ -239,21 +265,65 @@ export function ChatReferences({
     setCompactPane('chat');
   }, [chatKey]);
 
-  const handleTaskReference = useCallback((ref: string, opts?: { scoped?: boolean }) => {
-    const scoped = opts?.scoped ?? false;
-    setTaskRefs((prev) => {
-      const hit = prev.find((t) => t.ref === ref);
-      if (hit) {
-        // A ref first seen as a mention can later be confirmed as the
-        // session's scoped task — promote it so it pins to the top.
-        if (scoped && !hit.scoped) {
-          return prev.map((t) => (t.ref === ref ? { ...t, scoped: true } : t));
-        }
-        return prev;
+  // The Skills panel owns richer polling while it is visible, but it cannot
+  // discover that it should mount in the first place. This lightweight probe
+  // keeps empty project chats full-width and notices newly-added skills or
+  // pending imports without requiring a reload.
+  useEffect(() => {
+    if (!skillsProjectId) {
+      setSkillsAvailableProjectId(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      const [skillsResult, importsResult] = await Promise.allSettled([
+        api.getProjectSkills(skillsProjectId),
+        api.getProjectImportsPending(skillsProjectId),
+      ]);
+      if (
+        cancelled ||
+        skillsResult.status !== 'fulfilled' ||
+        importsResult.status !== 'fulfilled'
+      ) {
+        return;
       }
-      return [...prev, { ref, scoped, firstSeenAt: Date.now() }];
-    });
-  }, []);
+      const available =
+        skillsResult.value.skills.length > 0 || importsResult.value.items.length > 0;
+      setSkillsAvailableProjectId(available ? skillsProjectId : null);
+    };
+    void refresh();
+    const intervalId = window.setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [skillsProjectId]);
+
+  const handleTaskReference = useCallback(
+    (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => {
+      const scoped = opts?.scoped ?? false;
+      setTaskRefs((prev) => {
+        const hit = prev.find((t) => t.ref === ref);
+        if (hit) {
+          // A ref first seen as a mention can later be confirmed as the
+          // session's scoped task — promote it so it pins to the top.
+          if (scoped && !hit.scoped) {
+            return prev.map((t) => (t.ref === ref ? { ...t, scoped: true } : t));
+          }
+          return prev;
+        }
+        return [...prev, { ref, scoped, firstSeenAt: Date.now() }];
+      });
+      // A deliberate click wins over the rising-edge effects below, which
+      // deliberately hold back when a reference is already open.
+      if (opts?.focus) {
+        setActiveTaskRef(ref);
+        setActiveTab('tasks');
+        setCompactPane('tasks');
+      }
+    },
+    [],
+  );
 
   const handleToolActivity = useCallback((tool: ToolActivity) => {
     if (!tool.success) return;
@@ -287,28 +357,31 @@ export function ChatReferences({
         if (m.promote && ref) setActiveRef(ref);
       }
     }
-    if (!tool.path) return;
     const kind = classifyTool(tool.name);
     if (!kind) return;
-    // Workspace HTML already gets a dedicated, larger live preview in the
-    // left-hand Output pane (ProjectOutputPane). Surfacing it here too just
-    // duplicates the running app, so skip it. Non-HTML workspace files
-    // (code, markdown, images) and artifact/document references aren't
-    // shown by the Output pane, so they still belong in this rail.
-    if (kind === 'workspace' && isHtml(tool.path)) return;
-    const key = referenceKey(kind, tool.projectId, tool.path);
+    const paths = tool.paths && tool.paths.length > 0 ? tool.paths : tool.path ? [tool.path] : [];
+    if (paths.length === 0) return;
     setReferences((prev) => {
-      if (prev.some((r) => r.key === key)) return prev;
-      return [
-        ...prev,
-        {
+      const next = [...prev];
+      const known = new Set(prev.map((reference) => reference.key));
+      for (const path of paths) {
+        // Workspace HTML already gets a dedicated, larger live preview in the
+        // left-hand Output pane (ProjectOutputPane). Surfacing it here too just
+        // duplicates the running app, so skip it. Non-HTML workspace files
+        // still belong in this rail.
+        if (kind === 'workspace' && isHtml(path)) continue;
+        const key = referenceKey(kind, tool.projectId, path);
+        if (known.has(key)) continue;
+        known.add(key);
+        next.push({
           key,
           kind,
-          path: tool.path!,
+          path,
           firstSeenAt: Date.now(),
           ...(tool.projectId ? { projectId: tool.projectId } : {}),
-        },
-      ];
+        });
+      }
+      return next;
     });
   }, []);
 
@@ -362,7 +435,7 @@ export function ChatReferences({
     }
   }, []);
 
-  const api = useMemo<ChatReferencesApi>(
+  const referenceApi = useMemo<ChatReferencesApi>(
     () => ({
       onToolActivity: handleToolActivity,
       onArtifactReference: handleArtifactReference,
@@ -382,13 +455,18 @@ export function ChatReferences({
   // 480 px chat column beside the 12 rem side pane. The `compact` prop is
   // driven by the project-view width, which can stay wide while only the
   // chat panel is squeezed (e.g. a wide game-output column on its left), so
-  // we also measure this rail's own width here.
-  const narrow = useCompactLayout(containerRef, CHAT_RAIL_MIN_SPLIT_PX);
+  // we also measure this rail's own width here. The hysteresis band keeps
+  // an output-pane grip drag from flipping the layout on every pixel.
+  const narrow = useCompactLayout(
+    containerRef,
+    CHAT_RAIL_MIN_SPLIT_PX,
+    CHAT_RAIL_SPLIT_HYSTERESIS_PX,
+  );
   const isCompact = compact || narrow;
 
   const effectiveActive = activeRef ?? references[0] ?? null;
   const hasReferences = effectiveActive !== null;
-  const hasCommands = Boolean(commandsProjectId);
+  const hasSkills = Boolean(skillsProjectId && skillsAvailableProjectId === skillsProjectId);
   // Pinned-first ordering: the session's own task sits at the top, then
   // mentioned tasks in first-seen order.
   const orderedTasks = useMemo(
@@ -404,11 +482,11 @@ export function ChatReferences({
     (activeTaskRef && orderedTasks.find((t) => t.ref === activeTaskRef)?.ref) ||
     orderedTasks[0]?.ref ||
     null;
-  const hasSide = !isCompact && (hasTasks || hasReferences || hasCommands);
+  const hasSide = !isCompact && (hasTasks || hasReferences || hasSkills);
 
   // Auto-switch to References whenever a new ref arrives, but only on
   // the rising edge — don't fight the user if they've manually
-  // selected Commands and then dismiss a viewer.
+  // selected Skills and then dismiss a viewer.
   useEffect(() => {
     if (hasReferences) setActiveTab('references');
   }, [hasReferences]);
@@ -420,6 +498,34 @@ export function ChatReferences({
   useEffect(() => {
     if (hasTasks && !hasReferences) setActiveTab('tasks');
   }, [hasTasks, hasReferences]);
+
+  // Skills arrive asynchronously from the availability probe. Select them
+  // only when they are the sole side context; task/reference arrivals retain
+  // their existing precedence and never get yanked away.
+  useEffect(() => {
+    if (hasSkills && !hasTasks && !hasReferences) setActiveTab('skills');
+  }, [hasSkills, hasTasks, hasReferences]);
+
+  // Approving the final pending import can empty the Skills panel while it is
+  // open. Move to another meaningful pane (or back to Chat in compact mode)
+  // instead of leaving a selected tab with no content.
+  useEffect(() => {
+    if (hasSkills) return;
+    if (activeTab === 'skills') {
+      setActiveTab(hasReferences ? 'references' : hasTasks ? 'tasks' : 'references');
+    }
+    if (compactPane === 'skills') {
+      setCompactPane(hasReferences ? 'references' : hasTasks ? 'tasks' : 'chat');
+    }
+  }, [hasSkills, hasReferences, hasTasks, activeTab, compactPane]);
+
+  const handleSkillsAvailabilityChange = useCallback(
+    (available: boolean) => {
+      if (!skillsProjectId) return;
+      setSkillsAvailableProjectId(available ? skillsProjectId : null);
+    },
+    [skillsProjectId],
+  );
 
   // Side width is stored as a fraction of the container width so the
   // split reflows sensibly when the window resizes. Persisted across
@@ -522,9 +628,9 @@ export function ChatReferences({
                 Task
               </Tabs.Trigger>
             )}
-            {hasCommands && (
-              <Tabs.Trigger className="chat-rail-compact-tab" value="commands">
-                Commands
+            {hasSkills && (
+              <Tabs.Trigger className="chat-rail-compact-tab" value="skills">
+                Skills
               </Tabs.Trigger>
             )}
             {hasReferences && (
@@ -539,7 +645,8 @@ export function ChatReferences({
             className="chat-rail-compact-panel chat-rail-compact-chat"
             value="chat"
           >
-            <div className="chat-rail-main">{children(api)}</div>
+            {banner?.(referenceApi)}
+            <div className="chat-rail-main">{children(referenceApi)}</div>
           </Tabs.Content>
 
           {hasTasks && effectiveTaskRef && (
@@ -568,11 +675,13 @@ export function ChatReferences({
             </Tabs.Content>
           )}
 
-          {hasCommands && commandsProjectId && (
-            <Tabs.Content className="chat-rail-compact-panel" value="commands">
+          {hasSkills && skillsProjectId && (
+            <Tabs.Content className="chat-rail-compact-panel" value="skills">
               <CommandsPanel
-                projectId={commandsProjectId}
-                {...(onStageTerminalCommand ? { onStageCommand: onStageTerminalCommand } : {})}
+                key={skillsProjectId}
+                projectId={skillsProjectId}
+                section="skills"
+                onAvailabilityChange={handleSkillsAvailabilityChange}
               />
             </Tabs.Content>
           )}
@@ -617,7 +726,9 @@ export function ChatReferences({
         ['--chat-rail-grip-track-width' as string]: `${CHAT_RAIL_GRIP_TRACK_PX}px`,
       }}
     >
-      <div className="chat-rail-main">{children(api)}</div>
+      {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
+
+      <div className="chat-rail-main">{children(referenceApi)}</div>
 
       {hasSide && (
         <div
@@ -631,10 +742,10 @@ export function ChatReferences({
         />
       )}
 
-      <aside className="chat-rail-side">
-        {hasSide && (
+      {hasSide && (
+        <aside className="chat-rail-side">
           <div className="chat-rail-side-inner">
-            {([hasTasks, hasReferences, hasCommands].filter(Boolean).length > 1 ||
+            {([hasTasks, hasReferences, hasSkills].filter(Boolean).length > 1 ||
               orderedTasks.length > 1 ||
               references.length > 1) && (
               <div className="chat-rail-section-tabs" role="tablist">
@@ -661,15 +772,15 @@ export function ChatReferences({
                       Task
                     </button>
                   ))}
-                {hasCommands && (
+                {hasSkills && (
                   <button
                     type="button"
                     role="tab"
-                    className={`chat-rail-section-tab${activeTab === 'commands' ? ' is-active' : ''}`}
-                    aria-selected={activeTab === 'commands'}
-                    onClick={() => setActiveTab('commands')}
+                    className={`chat-rail-section-tab${activeTab === 'skills' ? ' is-active' : ''}`}
+                    aria-selected={activeTab === 'skills'}
+                    onClick={() => setActiveTab('skills')}
                   >
-                    Commands
+                    Skills
                   </button>
                 )}
                 {hasReferences &&
@@ -726,17 +837,19 @@ export function ChatReferences({
                 </div>
               </div>
             )}
-            {activeTab === 'commands' && commandsProjectId && (
+            {activeTab === 'skills' && skillsProjectId && (
               <div className="chat-rail-section-body">
                 <CommandsPanel
-                  projectId={commandsProjectId}
-                  {...(onStageTerminalCommand ? { onStageCommand: onStageTerminalCommand } : {})}
+                  key={skillsProjectId}
+                  projectId={skillsProjectId}
+                  section="skills"
+                  onAvailabilityChange={handleSkillsAvailabilityChange}
                 />
               </div>
             )}
           </div>
-        )}
-      </aside>
+        </aside>
+      )}
     </div>
   );
 }

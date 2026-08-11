@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,9 @@ const VERSION = '9.9.9';
 const VARIANT = 'cpu';
 const ARCHIVE_NAME = `gezel-native-${VERSION}-${PLATFORM_KEY}-${VARIANT}.${EXT}`;
 const BIN_CONTENT = Buffer.from('#!/fake-llama-server\nbytes\n');
+const SIDECAR = IS_WIN ? 'cudart64_12.dll' : 'libcudart.so.12.9.99';
+const SIDECAR_LINK = 'libcudart.so.12';
+const SIDECAR_CONTENT = Buffer.from('fake-cuda-runtime\n');
 
 // Always-accept signature stub so the test never spawns powershell/codesign.
 const verifyOverride = async () => ({ result: { status: 'unsigned' as const }, accepted: true });
@@ -37,12 +40,15 @@ async function buildArchive(): Promise<Buffer> {
   if (IS_WIN) {
     const zip = new AdmZip();
     zip.addFile(BIN, BIN_CONTENT);
+    zip.addFile(SIDECAR, SIDECAR_CONTENT);
     return zip.toBuffer();
   }
   const stage = await mkdtemp(join(tmpdir(), 'engine-archive-'));
   await writeFile(join(stage, BIN), BIN_CONTENT);
+  await writeFile(join(stage, SIDECAR), SIDECAR_CONTENT);
+  await symlink(SIDECAR, join(stage, SIDECAR_LINK));
   const file = join(stage, 'a.tgz');
-  await tar.create({ gzip: true, file, cwd: stage }, [BIN]);
+  await tar.create({ gzip: true, file, cwd: stage }, [BIN, SIDECAR, SIDECAR_LINK]);
   const bytes = await readFile(file);
   await rm(stage, { recursive: true, force: true });
   return bytes;
@@ -156,6 +162,17 @@ describe('resolveEngine — happy path', () => {
       expect(result.cached).toBe(false);
       expect(existsSync(expectedPath)).toBe(true);
       expect((await readFile(expectedPath)).equals(BIN_CONTENT)).toBe(true);
+      const extractedDir = join(
+        home,
+        'engines',
+        'native-bin',
+        VERSION,
+        `${PLATFORM_KEY}-${VARIANT}`,
+      );
+      expect((await readFile(join(extractedDir, SIDECAR))).equals(SIDECAR_CONTENT)).toBe(true);
+      if (!IS_WIN) {
+        expect(await readlink(join(extractedDir, SIDECAR_LINK))).toBe(SIDECAR);
+      }
       expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(expectedPath);
       expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe(VARIANT);
 

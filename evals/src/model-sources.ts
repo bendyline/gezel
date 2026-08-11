@@ -14,8 +14,8 @@
  * same merged (identity + version) view the runtime resolves against — so it
  * never disagrees with what would actually be installed. Reading raw
  * per-model `manifest.json` files would be subtler: source blocks live in the
- * version payload, and only the build-manifest "fat root" happens to mirror
- * them.
+ * version payload; any copy left in an identity is legacy authoring metadata,
+ * not the runtime contract.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

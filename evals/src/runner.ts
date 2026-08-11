@@ -13,6 +13,7 @@ import {
   readDaemonLogTailSync,
   summarizeNativeEngineIncidents,
 } from './failure-class.ts';
+import { evalFetchUrlMockOriginEnv } from './fetch-url-mock-origins.ts';
 import { attachableDeliverable, describeSendFailure } from './handoff.ts';
 import { summarizeKeurmeesterCases } from './keurmeester-metrics.ts';
 import { TrialLogger } from './logging.ts';
@@ -659,7 +660,12 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     )
   ) {
     try {
-      mockRuntime = await startMockServices(scenario.mockServices, { trialHome });
+      mockRuntime = await startMockServices(scenario.mockServices, {
+        trialHome,
+        ...(scenario.mockMcpToolArgumentSchemas
+          ? { mcpToolArgumentSchemas: scenario.mockMcpToolArgumentSchemas }
+          : {}),
+      });
     } catch (err) {
       return finalize({
         trialId,
@@ -685,10 +691,11 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     await writeFile(seedPath, JSON.stringify(mockRuntime.seedEntries()), 'utf8');
     mergedExtraEnv.NODE_EXTRA_CA_CERTS = caPath;
     mergedExtraEnv.GEZEL_SEED_SECRETS_FILE = seedPath;
-    // Fake-MCP toolsets: written into the trial home's LOCAL catalog root
-    // (`<home>/toolsets/…`) before the daemon spawns, so the scenario can
-    // `installToolset('mock-mcp-<id>', …)` through the ordinary catalog
-    // rail. The runner writes them because only it knows the trial home —
+    // Fake-MCP toolsets: catalog-valid ids go into the trial home's local
+    // catalog and install through the ordinary rail. Runtime-managed scoped
+    // ids such as @playwright/mcp are seeded into the fresh system roster so
+    // a craftbook's required-toolset check sees the hermetic replacement.
+    // The runner writes both because only it knows the trial home —
     // EvalContext deliberately has no home path.
     for (const file of mockRuntime.mcpToolsetFiles()) {
       const target = join(trialHome, file.path);
@@ -699,6 +706,36 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     for (const service of mockRuntime.services.values()) {
       log(`[mock] ${service.id} (${service.kind}) listening at ${service.baseUrl}`);
     }
+  }
+  const fetchUrlMockIds = scenario.allowFetchUrlMockServiceIds ?? [];
+  if (fetchUrlMockIds.length > 0) {
+    let originEnv: Record<string, string>;
+    try {
+      originEnv = evalFetchUrlMockOriginEnv(mockRuntime, fetchUrlMockIds);
+    } catch (error) {
+      await mockRuntime?.close().catch(() => {});
+      return finalize({
+        trialId,
+        scenarioId: scenario.id,
+        modelId: opts.modelId,
+        modelTier,
+        startedAt,
+        startMonotonic,
+        runDir,
+        success: false,
+        reason: error instanceof Error ? error.message : String(error),
+        failureMode: 'spawn-error',
+        logger,
+        trialHome,
+        client: null,
+      });
+    }
+    // Two-key eval-only contract consumed by the service's fetch_url SSRF
+    // guard. The marker alone grants nothing; the JSON value is an exact
+    // origin list derived from this trial's ephemeral HTTPS mocks. Never
+    // pass globs, hosts without ports, or every running mock implicitly.
+    Object.assign(mergedExtraEnv, originEnv);
+    log(`[mock] fetch_url exact-origin grant: ${originEnv.GEZEL_EVAL_FETCH_URL_ALLOWED_ORIGINS}`);
   }
   let spawned: Awaited<ReturnType<typeof spawnTrialDaemon>>;
   try {

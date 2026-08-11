@@ -66,10 +66,26 @@ export interface DeviceHealthReading {
   powerBrake?: boolean;
 }
 
+export type DeviceGpuProcessOwner =
+  | 'machine-engine'
+  | 'app-engine'
+  | 'development-engine'
+  | 'gezel-engine'
+  | 'external';
+
+export interface DeviceGpuProcess {
+  pid: number;
+  name?: string;
+  dedicatedBytes: number;
+  owner: DeviceGpuProcessOwner;
+}
+
 export interface DeviceHealthSample {
   sampledAt: string;
   sources: string[];
   readings: DeviceHealthReading[];
+  /** Dedicated GPU-memory owners when the platform exposes process counters. */
+  processes?: DeviceGpuProcess[];
   errors: string[];
 }
 
@@ -91,6 +107,7 @@ export interface DeviceHealthStatusSnapshot {
   sampledAt: string | null;
   sources: string[];
   readings: DeviceHealthReading[];
+  processes?: DeviceGpuProcess[];
   reasons: string[];
   summary: string;
 }
@@ -415,6 +432,40 @@ export function parseDeviceHealthHelperJson(stdout: string): DeviceHealthHelperP
     readings.push(normalized);
   }
 
+  const processes: DeviceGpuProcess[] = [];
+  if (root.processes !== undefined) {
+    if (!Array.isArray(root.processes)) return null;
+    for (const entry of root.processes) {
+      if (!entry || typeof entry !== 'object') return null;
+      const process = entry as Record<string, unknown>;
+      const pid = optionalFiniteNumber(process.pid);
+      const dedicatedBytes = optionalFiniteNumber(process.dedicatedBytes);
+      const owner = String(process.owner);
+      if (
+        pid === undefined ||
+        !Number.isInteger(pid) ||
+        pid <= 0 ||
+        dedicatedBytes === undefined ||
+        dedicatedBytes < 0 ||
+        ![
+          'machine-engine',
+          'app-engine',
+          'development-engine',
+          'gezel-engine',
+          'external',
+        ].includes(owner)
+      ) {
+        return null;
+      }
+      processes.push({
+        pid,
+        ...(typeof process.name === 'string' ? { name: process.name } : {}),
+        dedicatedBytes,
+        owner: owner as DeviceGpuProcessOwner,
+      });
+    }
+  }
+
   const strings = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
   return {
@@ -425,6 +476,7 @@ export function parseDeviceHealthHelperJson(stdout: string): DeviceHealthHelperP
           : new Date().toISOString(),
       sources: strings(root.sources),
       readings,
+      ...(processes.length > 0 ? { processes } : {}),
       errors: strings(root.errors),
     },
     diagnostics: strings(root.diagnostics),
@@ -488,6 +540,7 @@ export function createSystemDeviceHealthProbe(
       const readings: DeviceHealthReading[] = [];
       const sources: string[] = [];
       const errors: string[] = [];
+      let processes: DeviceGpuProcess[] | undefined;
 
       if (helperPath) {
         try {
@@ -498,12 +551,14 @@ export function createSystemDeviceHealthProbe(
           } else {
             readings.push(...parsed.sample.readings);
             sources.push(...parsed.sample.sources);
+            processes = parsed.sample.processes;
             errors.push(...parsed.sample.errors.map((error) => `device-health helper: ${error}`));
             if (parsed.sample.readings.length > 0) {
               return {
                 sampledAt: parsed.sample.sampledAt,
                 sources,
                 readings,
+                ...(processes ? { processes } : {}),
                 errors,
               };
             }
@@ -568,6 +623,7 @@ export function createSystemDeviceHealthProbe(
         sampledAt: new Date().toISOString(),
         sources,
         readings,
+        ...(processes ? { processes } : {}),
         errors,
       };
     },
@@ -691,6 +747,9 @@ export class DeviceHealthGate {
         sampledAt: sample.sampledAt,
         sources: [...sample.sources],
         readings: sample.readings.map((reading) => ({ ...reading })),
+        ...(sample.processes
+          ? { processes: sample.processes.map((process) => ({ ...process })) }
+          : {}),
         reasons: [],
         summary: 'Device safety is off',
       };
@@ -711,6 +770,9 @@ export class DeviceHealthGate {
       sampledAt: sample.sampledAt,
       sources: [...sample.sources],
       readings: sample.readings.map((reading) => ({ ...reading })),
+      ...(sample.processes
+        ? { processes: sample.processes.map((process) => ({ ...process })) }
+        : {}),
       reasons: [...decision.reasons],
       summary: decision.summary,
     };

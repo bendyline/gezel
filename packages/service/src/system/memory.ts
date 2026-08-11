@@ -1,7 +1,12 @@
 import { execFile } from 'node:child_process';
 import { freemem, platform as osPlatform, totalmem } from 'node:os';
 import { promisify } from 'node:util';
-import type { MachineMemoryUsage, ResidentEngineModel } from '@bendyline/gezel';
+import type {
+  GpuProcessMemory,
+  LocalEngineLifecycle,
+  MachineMemoryUsage,
+  ResidentEngineModel,
+} from '@bendyline/gezel';
 import {
   type DeviceHealthStatusSnapshot,
   windowsDetachedSpawnOptions,
@@ -251,6 +256,8 @@ export interface SampleMachineMemoryUsageOptions {
   engineBudgetBytes?: number | null;
   /** Resident replicas behind the reservation, aggregated per model. */
   residentModels?: ResidentEngineModel[];
+  /** Running replicas and their idle/pressure release deadlines. */
+  engineLifecycles?: LocalEngineLifecycle[];
   /** Installed parameter payloads for the resident replicas, when known. */
   engineModelWeightsBytes?: number;
   /** macOS physical footprint for gezeld + same-home engine processes. */
@@ -272,18 +279,16 @@ export interface SampleMachineMemoryUsageOptions {
  * Combine stable capacity detection, cached accelerator health, and cheap OS
  * RAM counters into the live memory strip's portable wire shape.
  *
- * Driver telemetry reliably gives aggregate GPU use but not portable
- * per-process VRAM. On macOS, physical-footprint sampling observes gezeld and
- * same-home engine processes directly, including Metal allocations. UMA/CPU
- * hosts without that sample fall back to the broker reservation + daemon RSS.
- * The remainder is labelled "Other", never as an exact process audit.
+ * Driver telemetry reliably gives aggregate GPU use. On Windows, the bundled
+ * helper also reads the OS GPU Process Memory counter and classifies Gezel's
+ * supervised engine processes; on macOS, physical-footprint sampling observes
+ * gezeld and same-home engines, including Metal allocations. Other hosts fall
+ * back to the broker reservation + daemon RSS.
  *
- * A discrete card gets NO reservation-derived attribution when the driver
- * cannot report pool use: the broker's number is a budget spanning VRAM and a
- * system-RAM share, and folding it into the card's pool clamped a 50 GiB
- * three-model reservation to a 32 GiB card and drew the bar at 100%. The
- * reservation travels as `engineReservedBytes` with its own budget and model
- * list so the surface can state it as what it is.
+ * A discrete card uses process accounting when available and otherwise keeps
+ * the older reservation estimate clearly approximate. The reservation itself
+ * still travels separately as `engineReservedBytes`: it spans VRAM and a
+ * system-RAM share and must never be presented as measured placement.
  */
 export function sampleMachineMemoryUsage(
   opts: SampleMachineMemoryUsageOptions,
@@ -344,6 +349,7 @@ export function sampleMachineMemoryUsage(
       engineReservedBytes: engineBytes,
       engineBudgetBytes,
       residentModels,
+      ...(opts.engineLifecycles ? { engineLifecycles: opts.engineLifecycles } : {}),
       gezelEngineProcessCount: opts.gezelProcessMemory?.engineProcessCount ?? 0,
       orphanedGezelEngineProcessCount: opts.gezelProcessMemory?.orphanedEngineProcessCount ?? 0,
       otherBytes: Math.max(0, usedBytes - gezelBytesAttributed),
@@ -386,9 +392,32 @@ export function sampleMachineMemoryUsage(
   // capacity, and the reservation exceeds that as soon as a second model
   // loads — which drew a full bar and a "Gezel ~31.9 GiB" legend on a card
   // holding a single 5.5 GiB model. Report nothing rather than the total.
-  const gezelBytesEstimated = usedBytes === null ? 0 : clamp(engineBytes, 0, usedBytes);
+  // A broker reservation spans VRAM and a system-RAM share, so it is not a
+  // fallback measurement of this card. Without OS process accounting, leave
+  // attribution unknown (zero here, with the reservation shown separately).
+  const gezelBytesEstimated = 0;
+  const gpuProcesses: GpuProcessMemory[] = (opts.deviceHealth?.processes ?? [])
+    .filter(
+      (process) =>
+        Number.isInteger(process.pid) &&
+        process.pid > 0 &&
+        Number.isFinite(process.dedicatedBytes) &&
+        process.dedicatedBytes >= 0,
+    )
+    .map((process) => ({ ...process }));
+  const observedGezelBytes =
+    usedBytes !== null && gpuProcesses.length > 0
+      ? clamp(
+          gpuProcesses
+            .filter((process) => process.owner !== 'external')
+            .reduce((sum, process) => sum + process.dedicatedBytes, 0),
+          0,
+          usedBytes,
+        )
+      : null;
+  const gezelBytesAttributed = observedGezelBytes ?? gezelBytesEstimated;
   const breakdown = splitGezelMemory({
-    attributedBytes: gezelBytesEstimated,
+    attributedBytes: gezelBytesAttributed,
     engineReservedBytes: engineBytes,
     modelWeightsBytes: engineModelWeightsBytes,
     coreFloorBytes: 0,
@@ -406,14 +435,16 @@ export function sampleMachineMemoryUsage(
     totalBytes,
     usedBytes,
     gezelBytesEstimated,
-    gezelBytesObserved: null,
+    gezelBytesObserved: observedGezelBytes,
     ...breakdown,
     engineReservedBytes: engineBytes,
     engineBudgetBytes,
     residentModels,
-    gezelEngineProcessCount: 0,
+    ...(opts.engineLifecycles ? { engineLifecycles: opts.engineLifecycles } : {}),
+    ...(gpuProcesses.length > 0 ? { gpuProcesses } : {}),
+    gezelEngineProcessCount: gpuProcesses.filter((process) => process.owner !== 'external').length,
     orphanedGezelEngineProcessCount: 0,
-    otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesEstimated),
+    otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesAttributed),
     cachedBytes: null,
     freeBytes: usedBytes === null ? null : Math.max(0, totalBytes - usedBytes),
     sampledAt,

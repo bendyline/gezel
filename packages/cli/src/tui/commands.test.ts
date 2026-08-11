@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { SLASH_COMMANDS, suggestSlashCommands, suggestSlashWordwheel } from './commands.js';
+import {
+  SLASH_COMMANDS,
+  parseInput,
+  suggestSlashCommands,
+  suggestSlashWordwheel,
+} from './commands.js';
 
 const CRAFTBOOKS = [
   {
@@ -73,5 +78,45 @@ describe('suggestSlashWordwheel', () => {
       '/nightshift list',
     ]);
     expect(suggestSlashWordwheel('/nightshift l', CRAFTBOOKS)[0]?.submit).toBe('/nightshift list');
+  });
+});
+
+describe('parseInput', () => {
+  it('distinguishes empty, chat, and CLI-mode input', () => {
+    expect(parseInput('   ', false)).toEqual({ kind: 'empty' });
+    expect(parseInput('  explain this  ', false)).toEqual({
+      kind: 'prompt',
+      text: 'explain this',
+    });
+    expect(parseInput('  pwd  ', true)).toEqual({ kind: 'shell', text: 'pwd' });
+  });
+
+  it('normalizes slash commands and preserves their arguments', () => {
+    expect(parseInput(' /NiGhTsHiFt   start ', false)).toEqual({
+      kind: 'command',
+      name: 'nightshift',
+      rest: 'start',
+    });
+    expect(parseInput('/', false)).toEqual({ kind: 'command', name: '', rest: '' });
+  });
+
+  it('recognizes explicit shell and tool forms in either mode', () => {
+    expect(parseInput(' !  ls -la ', false)).toEqual({ kind: 'shell', text: 'ls -la' });
+    expect(parseInput('@tools', true)).toEqual({ kind: 'tools' });
+    expect(parseInput('@tool read_file {"path":"a b.md"}', false)).toEqual({
+      kind: 'tool',
+      name: 'read_file',
+      argsJson: '{"path":"a b.md"}',
+    });
+    expect(parseInput('@tool list_files', false)).toEqual({
+      kind: 'tool',
+      name: 'list_files',
+      argsJson: '',
+    });
+  });
+
+  it('does not treat near-miss tool syntax as an invocation', () => {
+    expect(parseInput('@Tools', false)).toEqual({ kind: 'prompt', text: '@Tools' });
+    expect(parseInput('@tool', false)).toEqual({ kind: 'prompt', text: '@tool' });
   });
 });

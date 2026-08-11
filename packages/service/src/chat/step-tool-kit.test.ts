@@ -18,6 +18,8 @@ describe('stepToolKit', () => {
     const kit = stepToolKit(expandedStep('report.md', 'markdown-report'));
     expect(kit?.kind).toBe('markdown-doc');
     expect(kit?.path).toBe('report.md');
+    expect(kit?.tools.has('read_file')).toBe(true);
+    expect(kit?.tools.has('read_files')).toBe(true);
     expect(kit?.tools.has('write_file')).toBe(true);
     expect(kit?.tools.has('replace_in_file')).toBe(true);
     expect(kit?.tools.has('run_nodejs_script')).toBe(false);
@@ -41,6 +43,29 @@ describe('stepToolKit', () => {
     expect(code?.tools.has('run_nodejs_script')).toBe(true);
   });
 
+  it('a prose report with a findings table stays a document kit', () => {
+    const kit = stepToolKit({
+      advanceWhen: { file: 'pr-review.md', minBytes: 500 },
+      gate: {
+        at: 'completion',
+        checks: [
+          { kind: 'minBytes', file: 'pr-review.md', bytes: 500 },
+          {
+            kind: 'tableShape',
+            file: 'pr-review.md',
+            requiredColumns: ['Severity', 'File', 'Finding'],
+          },
+        ],
+      },
+    });
+    expect(kit?.kind).toBe('markdown-doc');
+    expect(kit?.tools.has('write_file')).toBe(true);
+    // A Markdown table is written, not derived — pointing the step at the
+    // transform channel told small models to script a prose review.
+    expect(kit?.tools.has('derive_file')).toBe(false);
+    expect(kit?.tools.has('run_nodejs_script')).toBe(false);
+  });
+
   it('gate-check-driven additions: grounding checks pull in search tools', () => {
     const kit = stepToolKit({
       advanceWhen: { file: 'brief.md' },
@@ -52,7 +77,7 @@ describe('stepToolKit', () => {
         ],
       },
     });
-    expect(kit?.tools.has('search_files')).toBe(true);
+    expect(kit?.tools.has('grep_files')).toBe(true);
     expect(kit?.tools.has('find_files')).toBe(true);
   });
 
@@ -144,4 +169,12 @@ describe('capPriorityPrefixForKind', () => {
     expect(capPriorityPrefixForKind('data-file')[0]).toBe('derive_file');
     expect(capPriorityPrefixForKind(null)).toEqual([]);
   });
+
+  it.each(['data-file', 'code-module', 'markdown-report'] as const)(
+    'keeps read_files beside read_file in the %s cap prefix',
+    (kind) => {
+      const priority = capPriorityPrefixForKind(kind);
+      expect(priority.indexOf('read_files')).toBe(priority.indexOf('read_file') + 1);
+    },
+  );
 });

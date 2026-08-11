@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
+import { ds4Routes } from './ds4.js';
 import { llamaCppRoutes } from './llama-cpp.js';
 import { mlxRoutes } from './mlx.js';
 
@@ -14,6 +15,8 @@ const installed = {
   chatTemplatePresent: true,
 };
 
+const emptyStore = { readConfig: async () => ({}) };
+
 describe('local model inventory context caps', () => {
   it('adds the live llama.cpp admission cap without replacing the advertised window', async () => {
     const previewLocalEnginePlan = vi.fn(async () => ({
@@ -25,6 +28,7 @@ describe('local model inventory context caps', () => {
         listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
       },
       chat: { previewLocalEnginePlan },
+      store: emptyStore,
     } as unknown as ServiceContext;
 
     const response = await llamaCppRoutes(ctx).request('http://test/models');
@@ -58,6 +62,7 @@ describe('local model inventory context caps', () => {
         listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
       },
       chat: { previewLocalEnginePlan },
+      store: emptyStore,
     } as never;
 
     const response = await llamaCppRoutes(ctx).request('http://test/models');
@@ -74,6 +79,44 @@ describe('local model inventory context caps', () => {
     });
   });
 
+  it('carries the context-slider payload: linearization, auto marker, and override', async () => {
+    const previewLocalEnginePlan = vi.fn(async () => ({
+      contextWindow: 98_304,
+      plannedResidentBytes: 9_000_000_000,
+      autoContextWindow: 81_920,
+      kvBytesPerTokenPerSlot: 36_864,
+      kvFixedBytesPerSlot: 0,
+      weightsResidentBytes: 4_800_000_000,
+    }));
+    const ctx = {
+      llamaCppModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: { previewLocalEnginePlan },
+      store: {
+        readConfig: async () => ({
+          modelContextOverrides: { 'llama-cpp:local-model': 98_304 },
+        }),
+      },
+    } as unknown as ServiceContext;
+
+    const response = await llamaCppRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [
+        {
+          effectiveContextWindow: 98_304,
+          overrideContextTokens: 98_304,
+          autoContextWindow: 81_920,
+          kvBytesPerTokenPerSlot: 36_864,
+          kvFixedBytesPerSlot: 0,
+          weightsResidentBytes: 4_800_000_000,
+        },
+      ],
+    });
+  });
+
   it('adds the configured MLX cap without replacing the advertised window', async () => {
     const previewLocalEnginePlan = vi.fn(async () => ({
       contextWindow: 65_536,
@@ -84,6 +127,7 @@ describe('local model inventory context caps', () => {
         listInstalled: vi.fn(async () => [{ ...installed, modelDir: '/models/model' }]),
       },
       chat: { previewLocalEnginePlan },
+      store: emptyStore,
     } as unknown as ServiceContext;
 
     const response = await mlxRoutes(ctx).request('http://test/models');
@@ -111,6 +155,7 @@ describe('local model inventory context caps', () => {
           throw new CapacityDeniedError('strict context does not fit');
         }),
       },
+      store: emptyStore,
     } as unknown as ServiceContext;
 
     const response = await llamaCppRoutes(ctx).request('http://test/models');
@@ -135,6 +180,7 @@ describe('local model inventory context caps', () => {
           });
         }),
       },
+      store: emptyStore,
     } as unknown as ServiceContext;
 
     const response = await llamaCppRoutes(ctx).request('http://test/models');
@@ -143,5 +189,90 @@ describe('local model inventory context caps', () => {
     await expect(response.json()).resolves.toMatchObject({
       models: [{ contextSizingStatus: 'restart-required' }],
     });
+  });
+
+  it('keeps the override on a restart-required row so the slider shows the pending setting', async () => {
+    const ctx = {
+      llamaCppModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: {
+        previewLocalEnginePlan: vi.fn(async () => {
+          throw new CapacityDeniedError('stale resident window', {
+            reason: 'resident-below-minimum',
+          });
+        }),
+      },
+      store: {
+        readConfig: async () => ({
+          modelContextOverrides: { 'llama-cpp:local-model': 98_304 },
+        }),
+      },
+    } as unknown as ServiceContext;
+
+    const response = await llamaCppRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [{ contextSizingStatus: 'restart-required', overrideContextTokens: 98_304 }],
+    });
+  });
+
+  it('MLX surfaces the same contextSizingStatus contract as llama.cpp', async () => {
+    // MLX previously swallowed denials into a bare row, which left an
+    // applied override indistinguishable from a pending one.
+    const ctx = {
+      mlxModels: {
+        listInstalled: vi.fn(async () => [{ ...installed, modelDir: '/models/model' }]),
+      },
+      chat: {
+        previewLocalEnginePlan: vi.fn(async () => {
+          throw new CapacityDeniedError('already running below the required window', {
+            reason: 'resident-below-minimum',
+          });
+        }),
+      },
+      store: emptyStore,
+    } as unknown as ServiceContext;
+
+    const response = await mlxRoutes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [{ contextSizingStatus: 'restart-required' }],
+    });
+  });
+
+  it('ds4 rows now carry the effective window, override, and launch ceiling', async () => {
+    const previewLocalEnginePlan = vi.fn(async () => ({
+      contextWindow: 65_536,
+      plannedResidentBytes: 48_000_000_000,
+      contextCeilingTokens: 65_536,
+    }));
+    const ctx = {
+      ds4Models: {
+        listInstalled: vi.fn(async () => [{ ...installed, weightsPath: '/models/model.gguf' }]),
+      },
+      chat: { previewLocalEnginePlan },
+      store: {
+        readConfig: async () => ({
+          modelContextOverrides: { 'ds4:local-model': 65_536 },
+        }),
+      },
+    } as unknown as ServiceContext;
+
+    const response = await ds4Routes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [
+        {
+          effectiveContextWindow: 65_536,
+          overrideContextTokens: 65_536,
+          contextCeilingTokens: 65_536,
+        },
+      ],
+    });
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('ds4', 'local-model');
   });
 });

@@ -1,7 +1,11 @@
 import type { CatalogItemSummary } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
-import { listApplicableCraftbooks, workspaceEntriesLookLikeCodebase } from './applicable.js';
+import {
+  craftbookContextForProject,
+  listApplicableCraftbooks,
+  workspaceEntriesLookLikeCodebase,
+} from './applicable.js';
 
 function entry(name: string, directory = false) {
   return { name, isDirectory: () => directory };
@@ -52,5 +56,93 @@ describe('project-aware craftbook roles', () => {
       'code-review',
       'research-report',
     ]);
+  });
+
+  it('uses the checkout HEAD instead of stale stored branch metadata', async () => {
+    const store = {
+      getProject: async () => ({
+        id: 'project',
+        name: 'Project',
+        github: {
+          url: 'https://github.com/bendyline/gezel',
+          branch: 'main',
+        },
+      }),
+    } as unknown as Store;
+    const git = { status: async () => ({ branch: 'bendymike-uxfixes8.9' }) };
+
+    await expect(craftbookContextForProject(store, 'project', git)).resolves.toEqual({
+      hasGitHub: true,
+      branch: 'bendymike-uxfixes8.9',
+    });
+  });
+
+  it('offers branch-gated craftbooks when the live checkout is on a feature branch', async () => {
+    const pullRequestReview = book('pull-request-review', 'maintenance-review');
+    if (pullRequestReview.manifest.kind !== 'craftbook-template') {
+      throw new Error('expected craftbook template');
+    }
+    pullRequestReview.manifest.requirements = [{ kind: 'github' }, { kind: 'non-main-branch' }];
+    const catalog = { list: async () => [pullRequestReview] };
+    const store = {
+      getProject: async () => ({
+        id: 'project',
+        name: 'Project',
+        github: {
+          url: 'https://github.com/bendyline/gezel',
+          branch: 'main',
+        },
+      }),
+    } as unknown as Store;
+    const git = { status: async () => ({ branch: 'bendymike-uxfixes8.9' }) };
+
+    const items = await listApplicableCraftbooks(catalog as never, store, 'project', {
+      establishedCodebase: true,
+      git,
+    });
+
+    expect(items.map((item) => item.manifest.id)).toEqual(['pull-request-review']);
+  });
+
+  it('falls back to stored branch metadata when live git status fails', async () => {
+    const store = {
+      getProject: async () => ({
+        id: 'project',
+        name: 'Project',
+        github: {
+          url: 'https://github.com/bendyline/gezel',
+          branch: 'feature/stored',
+        },
+      }),
+    } as unknown as Store;
+    const git = {
+      status: async (): Promise<{ branch?: string }> => {
+        throw new Error('git unavailable');
+      },
+    };
+
+    await expect(craftbookContextForProject(store, 'project', git)).resolves.toEqual({
+      hasGitHub: true,
+      branch: 'feature/stored',
+    });
+  });
+
+  it('does not revive a stale stored branch when live HEAD is detached', async () => {
+    const store = {
+      getProject: async () => ({
+        id: 'project',
+        name: 'Project',
+        github: {
+          url: 'https://github.com/bendyline/gezel',
+          branch: 'feature/stale',
+        },
+      }),
+    } as unknown as Store;
+    const git = { status: async () => ({}) };
+
+    await expect(craftbookContextForProject(store, 'project', git)).resolves.toEqual({
+      hasGitHub: true,
+      branch: null,
+    });
   });
 });

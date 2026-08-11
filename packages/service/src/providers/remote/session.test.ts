@@ -165,6 +165,62 @@ describe('RemoteSession', () => {
     expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
+  it('captures every call when caller tools are advertised, even if no returned name matches', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let bridgeCalls = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return sseResponse([
+        { type: 'delta', text: 'I will inspect it.' },
+        {
+          type: 'tool_call',
+          calls: [
+            { id: 'read-1', name: 'read_file', arguments: '{"path":"README.md"}' },
+            { id: 'unknown-1', name: 'hallucinated_tool', arguments: '{}' },
+          ],
+        },
+        { type: 'done' },
+      ]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://broker',
+      token: 'broker-token',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({
+        read_file: async () => {
+          bridgeCalls += 1;
+          return 'must not run';
+        },
+      }),
+      externalTools: [
+        {
+          name: 'shell',
+          description: 'Run a shell command',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      ],
+      systemMessage: 'system',
+      model: 'llama-cpp:qwen',
+      priorMessages: [],
+      numCtx: 65_536,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('inspect the repository')).resolves.toBe('I will inspect it.');
+
+    expect(requests).toHaveLength(1);
+    expect((requests[0]!.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual([
+      'read_file',
+      'shell',
+    ]);
+    expect(bridgeCalls).toBe(0);
+    expect(session.capturedToolCalls()).toEqual([
+      { id: 'read-1', name: 'read_file', arguments: '{"path":"README.md"}' },
+      { id: 'unknown-1', name: 'hallucinated_tool', arguments: '{}' },
+    ]);
+  });
+
   it('forwards native-engine liveness, TTFT phases, and performance telemetry', async () => {
     const fetchImpl = (async () =>
       sseResponse([
@@ -521,6 +577,70 @@ describe('RemoteSession', () => {
     await expect(
       session.sendAndWait('hi', { queue: { lane: 'interactive', affinity: true } }),
     ).rejects.toThrow(/model_not_loaded/);
+  });
+
+  it('simplifies rejected llama.cpp tool grammars across an older remote broker', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let attempt = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      attempt += 1;
+      if (attempt <= 2) {
+        return sseResponse([
+          {
+            type: 'error',
+            code: 'inference_failed',
+            message:
+              '[llama-cpp] /v1/chat/completions returned 400 Bad Request: Failed to initialize samplers: failed to parse grammar',
+          },
+        ]);
+      }
+      return sseResponse([{ type: 'delta', text: 'Recovered.' }, { type: 'done' }]);
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://b',
+      token: 't',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      externalTools: [
+        {
+          name: 'handoff',
+          description: 'Delegate work',
+          parameters: {
+            type: 'object',
+            properties: {
+              target: {
+                oneOf: [{ type: 'string', pattern: '^developer$' }, { type: 'number' }],
+              },
+            },
+            required: ['target'],
+          },
+        },
+      ],
+      systemMessage: 's',
+      model: 'llama-cpp:qwen',
+      priorMessages: [],
+      numCtx: 65_536,
+      timeoutMs: 60_000,
+    });
+
+    await expect(session.sendAndWait('hi')).resolves.toBe('Recovered.');
+
+    expect(requests).toHaveLength(3);
+    const parameters = requests.map(
+      (request) => (request.tools as Array<{ parameters: Record<string, unknown> }>)[0]!.parameters,
+    );
+    expect(parameters[0]).toMatchObject({
+      properties: { target: { oneOf: expect.any(Array) } },
+      required: ['target'],
+    });
+    expect(parameters[1]).toEqual({
+      type: 'object',
+      properties: { target: {} },
+      required: ['target'],
+    });
+    expect(parameters[2]).toEqual({ type: 'object' });
   });
 
   it('returns immediately when B streams no tool calls', async () => {

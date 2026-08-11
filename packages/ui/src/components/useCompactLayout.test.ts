@@ -105,6 +105,29 @@ describe('useCompactLayout', () => {
     await waitFor(() => expect(result.current).toBe(true));
   });
 
+  it('holds the last decision inside the hysteresis band', async () => {
+    const el = document.createElement('div');
+    setWidth(el, 900);
+    const { result } = renderHook(() => useCompactLayout({ current: el }, 800, 100));
+    await waitFor(() => expect(active).not.toBeNull());
+    expect(result.current).toBe(false);
+
+    // Entering still uses the bare threshold.
+    setWidth(el, 850);
+    await waitFor(() => expect(active).not.toBeNull());
+    expect(result.current).toBe(false);
+    setWidth(el, 799);
+    await waitFor(() => expect(result.current).toBe(true));
+
+    // Leaving needs threshold + band — 850 is inside it, so compact sticks.
+    setWidth(el, 850);
+    await waitFor(() => expect(active).not.toBeNull());
+    expect(result.current).toBe(true);
+
+    setWidth(el, 900);
+    await waitFor(() => expect(result.current).toBe(false));
+  });
+
   it('ignores width 0 (element not laid out yet) — stays non-compact', async () => {
     const el = document.createElement('div');
     setWidth(el, 0);

@@ -16,6 +16,7 @@ import type { CraftbookStep, DeliverableKind } from '@bendyline/gezel';
 import {
   deliverableKindForStep,
   firstActionForKind,
+  isProseDocPath,
   normalizeScriptRefs,
   normalizeStepGate,
   stepDeliverablePath,
@@ -39,6 +40,7 @@ export const RESEARCH_STEP_TOOLS: readonly string[] = [
 /** Read/inspect/write/edit — the core of every file-producing step. */
 const FILE_CORE: readonly string[] = [
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -71,9 +73,10 @@ const KIND_ADDITIONS: Partial<Record<DeliverableKind, readonly string[]>> = {
  * the worker needs the sandbox; grounding checks resolve
  * citations/values against the corpus → the worker needs search.
  */
-function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
+function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | null): string[] {
   if (!step.gate) return [];
   const gate = normalizeStepGate(step.gate);
+  const proseTarget = path !== null && isProseDocPath(path);
   const out = new Set<string>();
   for (const check of gate.checks ?? []) {
     switch (check.kind) {
@@ -83,7 +86,7 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
       case 'citationsResolve':
       case 'valueGrounding':
       case 'unsupportedClaims':
-        out.add('search_files');
+        out.add('grep_files');
         out.add('find_files');
         break;
       case 'researchEvidence':
@@ -92,8 +95,12 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>): string[] {
       case 'csvShape':
       case 'recordSchema':
       case 'tableShape':
-        out.add('derive_file');
-        out.add('run_nodejs_script');
+        // A Markdown table inside a prose report is written, not derived —
+        // handing that step the transform kit points it at the wrong verb.
+        if (!proseTarget) {
+          out.add('derive_file');
+          out.add('run_nodejs_script');
+        }
         break;
       default:
         break;
@@ -135,9 +142,10 @@ export function stepToolKit(
 ): StepKit | null {
   const kind = deliverableKindForStep(step);
   if (!kind) return null;
+  const path = stepDeliverablePath(step);
   const tools = new Set<string>(FILE_CORE);
   for (const t of KIND_ADDITIONS[kind] ?? []) tools.add(t);
-  for (const t of gateDrivenAdditions(step)) tools.add(t);
+  for (const t of gateDrivenAdditions(step, path)) tools.add(t);
   if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_installed_script');
   for (const t of ARTIFACT_DRAWER_TOOLS) tools.add(t);
   return { kind, path: stepDeliverablePath(step), tools };
@@ -173,10 +181,24 @@ export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySe
 export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly string[] {
   if (!kind) return [];
   if (kind === 'data-file' || kind === 'json') {
-    return ['derive_file', 'run_nodejs_script', 'read_file', 'write_file', 'validate'];
+    return [
+      'derive_file',
+      'run_nodejs_script',
+      'read_file',
+      'read_files',
+      'write_file',
+      'validate',
+    ];
   }
   if (kind === 'code-module' || kind === 'code-with-tests') {
-    return ['read_file', 'write_file', 'replace_in_file', 'run_nodejs_script', 'validate'];
+    return [
+      'read_file',
+      'read_files',
+      'write_file',
+      'replace_in_file',
+      'run_nodejs_script',
+      'validate',
+    ];
   }
   if (kind === 'image-set') {
     return ['generate_image', 'render_image', 'list_dir', 'write_file'];
@@ -185,6 +207,7 @@ export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly
     'write_file',
     'write_artifact',
     'read_file',
+    'read_files',
     'append_to_file',
     'replace_in_file',
     'validate',

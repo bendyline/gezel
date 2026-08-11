@@ -144,13 +144,18 @@ import {
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { readMlxModelGeometry } from '../providers/mlx/model-geometry.js';
 import {
+  type CapacityCommitted,
   CapacityDeniedError,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
 } from '../providers/native/capacity-broker.js';
-import type { LocalProviderName } from '../providers/native/engine-key.js';
+import {
+  type LocalProviderName,
+  makeEngineKey,
+  parseEngineKey,
+} from '../providers/native/engine-key.js';
 import { OllamaProvider } from '../providers/ollama.js';
 import { OpenAIProvider } from '../providers/openai.js';
 import type { Lane } from '../providers/queue.js';
@@ -1527,10 +1532,10 @@ export class ChatManager {
    * (`remote:<remoteId>/<model>`). Used by the model picker. Returns [] if the
    * server is unpaired or unreachable.
    */
-  async listRemoteModels(remoteId: string): Promise<ModelInfo[]> {
+  async listRemoteModels(remoteId: string, signal?: AbortSignal): Promise<ModelInfo[]> {
     try {
       const provider = this.getRemoteProvider(makeRemoteModelId(remoteId, '_'));
-      return await provider.listModels();
+      return await provider.listModels(signal);
     } catch {
       return [];
     }
@@ -2422,6 +2427,53 @@ export class ChatManager {
   }
 
   /**
+   * Install-wide panic stop for chat work. The engagement-mode cache flips
+   * synchronously before any teardown awaits, so task runners and autonomous
+   * follow-ups cannot admit replacement turns while the current ones unwind.
+   * Pending user messages and after-idle handoffs are deliberately discarded:
+   * leaving either queue intact would make an "emergency stop" immediately
+   * restart work as soon as the cancelled provider call releases its slot.
+   *
+   * The HTTP route persists the matching `reactive` config value. Keeping the
+   * runtime transition here makes the stop ordering atomic from ChatManager's
+   * point of view and leaves the manager independently testable.
+   */
+  async emergencyStop(): Promise<{
+    cancelledTurns: number;
+    clearedQueuedMessages: number;
+    clearedDeferredActions: number;
+  }> {
+    this.engagementMode = 'reactive';
+
+    const clearedQueuedMessages = Array.from(this.pendingSends.values()).reduce(
+      (total, queue) => total + queue.length,
+      0,
+    );
+    const clearedDeferredActions = Array.from(this.afterSessionIdle.values()).reduce(
+      (total, actions) => total + actions.length,
+      0,
+    );
+
+    // Clear deferred callbacks before cancelling live turns. A cancel frees
+    // the session slot synchronously, and the unwind path may otherwise drain
+    // one of these callbacks before all cancellations have settled.
+    this.afterSessionIdle.clear();
+    for (const sessionId of Array.from(this.pendingSends.keys())) {
+      this.rejectQueuedForSession(sessionId, 'emergency stop');
+    }
+
+    const results = await Promise.allSettled(
+      Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
+    );
+    const cancelledTurns = results.reduce(
+      (total, result) => total + (result.status === 'fulfilled' && result.value.cancelled ? 1 : 0),
+      0,
+    );
+
+    return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
+  }
+
+  /**
    * Interrupt: cancel the in-flight turn (identical salvage path to
    * {@link cancelInflight} — the partial reply persists as a
    * `turn-aborted` bubble) and send `userText` immediately, AHEAD of
@@ -3075,6 +3127,12 @@ export class ChatManager {
     stepId: string;
     fromGezelName?: string;
     /**
+     * Id of the previous step's gezel. When it equals `gezelId` the step
+     * advance is a self-handoff — the seed then reads as "this task has
+     * advanced, carry on" instead of naming the recipient as the sender.
+     */
+    fromGezelId?: string;
+    /**
      * `'entry'` is a fresh launch (e.g. the command launcher created the
      * task and is starting its entry step) — there is no prior step, so
      * the seed says "you've been assigned" rather than "the previous
@@ -3246,14 +3304,21 @@ export class ChatManager {
     // (then aborts on the ramble cap before any tool fires). So the seed
     // now defers to the in-prompt instructions and leaves note-reading to
     // the model's judgement (it's only needed on a resume / loop-back).
+    // A step advance can land back on the gezel who just finished the
+    // previous step (a craftbook whose steps collapse onto one specialist).
+    // Naming them as their own sender — "Koray has handed step `report` to
+    // you" — reads as a bug to the user and as a second party to the model.
+    const selfHandoff = args.fromGezelId !== undefined && args.fromGezelId === args.gezelId;
     const seed =
       args.kind === 'entry'
         ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
-        : `${
-            args.fromGezelName
-              ? `${args.fromGezelName} has`
-              : 'The previous step has been completed and'
-          } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+        : selfHandoff
+          ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+          : `${
+              args.fromGezelName
+                ? `${args.fromGezelName} has`
+                : 'The previous step has been completed and'
+            } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -8853,11 +8918,11 @@ export class ChatManager {
   }
 
   /** List the models available on the given provider (for the UI dropdown). */
-  async listModelsForProvider(name: ProviderName): Promise<ModelInfo[]> {
+  async listModelsForProvider(name: ProviderName, signal?: AbortSignal): Promise<ModelInfo[]> {
     const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
     if (machineRemoteId && (name === 'llama-cpp' || name === 'mlx' || name === 'ds4')) {
       const prefix = `${name}:`;
-      const remoteModels = await this.listRemoteModels(machineRemoteId);
+      const remoteModels = await this.listRemoteModels(machineRemoteId, signal);
       return remoteModels.flatMap((model) => {
         const parsed = parseRemoteModelId(model.id);
         if (!parsed?.modelId.startsWith(prefix)) return [];
@@ -8899,8 +8964,8 @@ export class ChatManager {
         // installed-model manifest itself is unreadable.
       }
     }
-    const provider = await this.ensureProvider(name);
-    const models = await provider.listModels();
+    const provider = await this.ensureProvider(name, signal);
+    const models = await provider.listModels(signal);
     if (name !== 'ollama') return models;
 
     // Ollama's provider-level list reports Gezel's parameter-size heuristic.
@@ -9530,7 +9595,7 @@ export class ChatManager {
 
   /**
    * Lazily construct the multi-engine router using ChatManager's
-   * already-resolved deps (store, catalog, llamaCppModels, mlxModels,
+   * already-resolved deps (store, catalog, llamaCppModels, ds4Models, mlxModels,
    * uvRuntime). Once built, the router owns the {@link ProviderPool}
    * and {@link CapacityBroker}; subsequent calls return the cached
    * instance.
@@ -9581,7 +9646,7 @@ export class ChatManager {
   /**
    * Resolve (or build) the router. Returns `null` only when no local
    * provider is wired up at all (cloud-only installs); production
-   * installs with `llamaCppModels` or `mlxModels` set always get a
+   * installs with `llamaCppModels`, `ds4Models`, or `mlxModels` set always get a
    * router. Callers MUST tolerate a `null` return — the legacy
    * singleton path takes over.
    */
@@ -9590,7 +9655,7 @@ export class ChatManager {
   > {
     if (this.engineRouter) return this.engineRouter;
     if (this.engineRouterCache) return this.engineRouterCache;
-    if (!this.llamaCppModels && !this.mlxModels) return null;
+    if (!this.llamaCppModels && !this.ds4Models && !this.mlxModels) return null;
     if (this.engineRouterInitPromise) return this.engineRouterInitPromise;
     this.engineRouterInitPromise = this.buildEngineRouter().then((r) => {
       this.engineRouterCache = r;
@@ -9654,7 +9719,6 @@ export class ChatManager {
         config: cfg,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.llamaCppModels ? { llamaCppModels: this.llamaCppModels } : {}),
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         ...(eb ? { ensureEngine: () => ensureLlamaEngineStatus(eb, cfg) } : {}),
@@ -9692,6 +9756,7 @@ export class ChatManager {
         ...(this.mlxModels ? { mlxModels: this.mlxModels } : {}),
         ...(this.uvRuntime ? { uvRuntime: this.uvRuntime } : {}),
         ...(this.mlxRuntimeStatus ? { mlxRuntimeStatus: this.mlxRuntimeStatus } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         modelOverride: { modelId, replicaIdx },
         broker,
       });
@@ -9718,8 +9783,8 @@ export class ChatManager {
         config: cfg,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.ds4Models ? { ds4Models: this.ds4Models } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
         modelOverride: { modelId, replicaIdx },
         broker,
@@ -9890,6 +9955,27 @@ export class ChatManager {
    */
   private readonly resolveResidentBytesCache = new Map<string, number>();
 
+  /**
+   * Drop cached reservations so the next admission re-reads the catalog and
+   * config. ds4 prices its footprint at the launch context, so a per-model
+   * context override changes what the broker must reserve — leaving the old
+   * entry cached would keep billing the pre-override number for the life of
+   * the process. Call from any route that mutates context sizing.
+   */
+  invalidateResidentBytesCache(provider?: LocalProviderName, modelId?: string): void {
+    if (!provider) {
+      this.resolveResidentBytesCache.clear();
+      return;
+    }
+    if (modelId) {
+      this.resolveResidentBytesCache.delete(`${provider}:${modelId}`);
+      return;
+    }
+    for (const key of this.resolveResidentBytesCache.keys()) {
+      if (key.startsWith(`${provider}:`)) this.resolveResidentBytesCache.delete(key);
+    }
+  }
+
   private async resolveResidentBytes(
     provider: LocalProviderName,
     modelId: string,
@@ -9898,7 +9984,7 @@ export class ChatManager {
     const cached = this.resolveResidentBytesCache.get(cacheKey);
     if (cached !== undefined) return cached;
     // Read from the catalog. The chat-model manifest carries
-    // residentBytes per source block (llamaCpp / mlx); fall back to
+    // residentBytes per source block (llamaCpp / ds4 / mlx); fall back to
     // approxSizeBytes * tier multiplier when missing.
     let bytes: number | undefined;
     try {
@@ -9913,7 +9999,13 @@ export class ChatManager {
             kind: 'chat-model';
             llamaCpp?: { residentBytes?: number; approxSizeBytes?: number };
             mlx?: { residentBytes?: number; approxSizeBytes?: number };
-            ds4?: { residentBytes?: number; approxSizeBytes?: number };
+            ds4?: {
+              residentBytes?: number;
+              approxSizeBytes?: number;
+              kvBytesPerToken?: number;
+              residentCtxTokens?: number;
+              maxLaunchCtx?: number;
+            };
           }
         | undefined;
       if (cm) {
@@ -9924,9 +10016,36 @@ export class ChatManager {
             const config = await this.store.readConfig();
             const externalBaseUrl = process.env.GEZEL_DS4_SERVER_URL ?? config.ds4BaseUrl;
             if (!externalBaseUrl) {
-              const { ds4ResidentBytesForMode, shouldUseDs4SsdStreaming } = await import(
-                '../providers/ds4/residency.js'
-              );
+              const {
+                ds4ProjectedResidentBytes,
+                ds4ResidentBytesForMode,
+                ds4ResidentLine,
+                shouldUseDs4SsdStreaming,
+              } = await import('../providers/ds4/residency.js');
+              // Bill the window this model will actually launch with. The
+              // authored footprint is a measurement at `residentCtxTokens`, so
+              // without this a raised context reserves the old number and the
+              // broker admits a model whose KV no longer fits — the exact
+              // memory-pressure event the residency rules exist to prevent.
+              const ds4Block = cm.ds4;
+              const line = ds4ResidentLine({
+                residentBytes: bytes,
+                kvBytesPerToken: ds4Block?.kvBytesPerToken,
+                residentCtxTokens: ds4Block?.residentCtxTokens,
+              });
+              if (line) {
+                const { totalmem } = await import('node:os');
+                bytes = ds4ProjectedResidentBytes(
+                  line,
+                  resolveDs4LaunchCtx({
+                    configured:
+                      config.modelContextOverrides?.[`ds4:${modelId}`] ?? config.ds4NumCtx,
+                    ramTieredCtx: totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072,
+                    catalogMaxCtx: ds4Block?.maxLaunchCtx,
+                    minViableContextTokens: minViableLocalContextTokens(),
+                  }),
+                );
+              }
               bytes = ds4ResidentBytesForMode(
                 bytes,
                 shouldUseDs4SsdStreaming({
@@ -10297,6 +10416,21 @@ export class ChatManager {
   }
 
   /**
+   * Unload one already-resident local model replica without constructing the
+   * engine router as a side effect. The pool rejects the request if the model
+   * became busy after the UI's last lifecycle sample.
+   */
+  async unloadIdleEngine(
+    provider: LocalProviderName,
+    modelId: string,
+    replicaIdx: number,
+  ): Promise<boolean> {
+    const router = this.engineRouter ?? this.engineRouterCache;
+    if (!router || !router.pool.has(makeEngineKey(provider, modelId, replicaIdx))) return false;
+    return router.unloadIdle(provider, modelId, replicaIdx);
+  }
+
+  /**
    * Snapshot of the live pool — committed bytes, budget, per-key
    * resident set. Surfaced via `GET /api/engines/status`. Returns
    * `null` for installs without a pool wired.
@@ -10404,6 +10538,33 @@ export class ChatManager {
   }
 
   /**
+   * Reservations held by models OTHER than the one being previewed.
+   *
+   * `committed()` totals every replica, the previewed model's own included.
+   * Feeding that back as `committedOtherBytes` prices the launch as if a
+   * second copy had to load beside the resident one, so the model currently
+   * serving chats reports "won't fit" against its own reservation — and on a
+   * host where one big model fills most of the budget, every OTHER row is
+   * denied by a reservation that eviction would release. Every consumer of
+   * `committedOtherBytes` means co-resident models, so subtract our own
+   * replicas here. A key the parser doesn't recognise stays counted: an
+   * unattributable reservation is real memory, and over-counting only makes
+   * the preview conservative.
+   */
+  private committedOtherBytesFor(
+    snapshot: CapacityCommitted | undefined,
+    provider: LocalProviderName,
+    modelId: string,
+  ): number {
+    if (!snapshot?.enforced) return 0;
+    const own = snapshot.byKey.reduce((sum, entry) => {
+      const parsed = parseEngineKey(entry.key);
+      return parsed?.provider === provider && parsed.modelId === modelId ? sum + entry.bytes : sum;
+    }, 0);
+    return Math.max(0, snapshot.committedBytes - own);
+  }
+
+  /**
    * Full non-binding launch preview: the context window a native model
    * would receive AND the resident footprint at that window. Powers the
    * models-list "size in memory" column alongside
@@ -10419,11 +10580,46 @@ export class ChatManager {
   async previewLocalEnginePlan(
     name: LocalProviderName,
     modelId: string,
+    /**
+     * ds4 only: price a catalog entry that is NOT downloaded yet. The ds4 plan
+     * needs the catalog block and this device's RAM tier, never the GGUF, so
+     * the browse list can quote the window and footprint a download would land
+     * on — which is when the fit decision is actually made. Other engines keep
+     * throwing {@link ModelNotInstalledError}: their plans read the real
+     * header.
+     */
+    opts: { allowUninstalled?: boolean } = {},
   ): Promise<{
     contextWindow?: number;
     plannedResidentBytes?: number;
     reservedResidentBytes?: number;
     plannedSlots?: number;
+    /** GGUF/model-config advertised native window — the context slider's max. */
+    nativeContextWindow?: number;
+    /** Applied per-model context override (config.modelContextOverrides). */
+    overrideContextTokens?: number;
+    /**
+     * What automatic sizing would grant right now, computed only while an
+     * override is active (otherwise `contextWindow` IS the automatic value).
+     * The slider's "Auto" marker.
+     */
+    autoContextWindow?: number;
+    /**
+     * Post-quant single-slot KV linearization so the UI can price
+     * "~X GB in memory" live while the slider drags:
+     * `weightsResidentBytes + kvFixedBytesPerSlot + kvBytesPerTokenPerSlot × ctx`.
+     * ds4 reports it too, from its catalog-authored slope; absent there only
+     * for entries that have not been measured yet.
+     */
+    kvBytesPerTokenPerSlot?: number;
+    kvFixedBytesPerSlot?: number;
+    weightsResidentBytes?: number;
+    /**
+     * ds4 only: the slider's max — min(native window, catalog maxLaunchCtx).
+     * ds4 has no ctx-vs-memory admission, so the authored launch ceiling is
+     * the only guard against a window the engine cannot actually serve.
+     */
+    contextCeilingTokens?: number;
   }> {
     let residentContextWindow: number | undefined;
     for (const resident of this.peekResidentLocalProviders(name, modelId)) {
@@ -10456,52 +10652,64 @@ export class ChatManager {
     if (name === 'mlx') {
       const installed = await this.mlxModels?.resolveModel(modelId);
       if (!installed) throw new ModelNotInstalledError(name, modelId);
-      let effective = resolveMlxEffectiveNumCtx({
-        ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
-        ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
-        minViableContextTokens: contextFloor,
-      });
-      const minimum = Math.min(installed.contextWindow ?? contextFloor, contextFloor);
-      // Memory-priced preview (M4): mirror buildMlxProvider's admission so
-      // the advertised window is what memory admits, not the native max —
-      // before this an MLX 26B on a 16 GB Mac previewed 256K.
+      const mlxOverride = config.modelContextOverrides?.[`mlx:${modelId}`];
+      // An override below the host floor is deliberate user intent — lower
+      // the floor to the override instead of raising the request back up.
+      const mlxFloor =
+        mlxOverride !== undefined ? Math.min(contextFloor, mlxOverride) : contextFloor;
       const geometry = installed.modelDir ? readMlxModelGeometry(installed.modelDir) : undefined;
-      const exactPerSlotKvF16 = geometry
-        ? estimateExactPerSlotKvBytesF16(geometry, effective)
-        : undefined;
-      let plannedResidentBytes: number | undefined;
-      let reservedResidentBytes: number | undefined;
-      let plannedSlots: number | undefined;
-      if (geometry && exactPerSlotKvF16 !== undefined) {
-        const {
-          CapacityBroker,
-          computeCapacityBudget,
-          defaultLocalEngineSlots,
-          kvQuantScale,
-          localEngineSlotCeiling,
-          planCtxTokensForMemory,
-          plannedLocalEngineSlots,
-        } = await import('../providers/native/capacity-broker.js');
-        const router = this.engineRouter ?? this.engineRouterCache;
-        const brokerSnap = router?.broker.committed();
-        const liveBudget = computeCapacityBudget();
-        const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
-        const fastBudget = brokerSnap?.enforced
-          ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-          : liveBudget.fastBytes;
-        const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
-        const kvBits = config.mlxKvBits ?? 0;
-        const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
+      const {
+        CapacityBroker,
+        computeCapacityBudget,
+        defaultLocalEngineSlots,
+        kvQuantScale,
+        localEngineSlotCeiling,
+        planCtxTokensForMemory,
+        plannedLocalEngineSlots,
+      } = await import('../providers/native/capacity-broker.js');
+      const router = this.engineRouter ?? this.engineRouterCache;
+      const brokerSnap = router?.broker.committed();
+      const liveBudget = computeCapacityBudget();
+      const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
+      const fastBudget = brokerSnap?.enforced
+        ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
+        : liveBudget.fastBytes;
+      const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
+      const concurrencySizingBudget = brokerSnap?.enforced
+        ? brokerSnap.pools.concurrencySizingBytes
+        : liveBudget.concurrencySizingBytes;
+      const kvBits = config.mlxKvBits ?? 0;
+      const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
+      const weightsResident = CapacityBroker.estimateResidentBytes(
+        'mlx',
+        installed.approxSizeBytes,
+      );
+      // One planning pass — request resolution + memory-priced admission
+      // (M4: mirror buildMlxProvider so the advertised window is what memory
+      // admits, not the native max — before this an MLX 26B on a 16 GB Mac
+      // previewed 256K). Runs a second time with the override ignored to
+      // mark where "Automatic" lands on the slider.
+      const planPass = (
+        configuredLimit: number | undefined,
+        floor: number,
+      ): { grantedCtx: number; slots?: number; kvBytesPerToken?: number; minimum: number } => {
+        let effective = resolveMlxEffectiveNumCtx({
+          ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
+          ...(configuredLimit !== undefined ? { configuredLimit } : {}),
+          minViableContextTokens: floor,
+        });
+        const minimum = Math.min(installed.contextWindow ?? floor, floor);
+        const exactPerSlotKvF16 = geometry
+          ? estimateExactPerSlotKvBytesF16(geometry, effective)
+          : undefined;
+        if (!geometry || exactPerSlotKvF16 === undefined) return { grantedCtx: effective, minimum };
         const kvBytesPerToken =
           (exactPerSlotKvF16 / Math.max(1, effective)) * kvQuantScale(kvCacheType);
-        const weightsResident = CapacityBroker.estimateResidentBytes(
-          'mlx',
-          installed.approxSizeBytes,
-        );
         const configured = config.providerConcurrency?.mlx;
         const ceiling = localEngineSlotCeiling({
           engine: 'mlx',
           budgetBytes: fastBudget,
+          sizingBudgetBytes: concurrencySizingBudget,
           weightsBytes: installed.approxSizeBytes,
           perTurnCtxTokens: effective,
           kvCacheType,
@@ -10521,7 +10729,6 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
-          freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: 0,
         });
         if (!admission.minimumSatisfied) {
@@ -10531,15 +10738,61 @@ export class ChatManager {
         }
         slots = admission.slots;
         effective = admission.perTurnCtxTokens;
-        plannedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective);
-        reservedResidentBytes = Math.round(weightsResident + kvBytesPerToken * effective * slots);
-        plannedSlots = slots;
+        return { grantedCtx: effective, slots, kvBytesPerToken, minimum };
+      };
+      const plan = planPass(mlxOverride ?? config.mlxNumCtx, mlxFloor);
+      let autoContextWindow: number | undefined;
+      if (mlxOverride !== undefined) {
+        try {
+          autoContextWindow = planPass(config.mlxNumCtx, contextFloor).grantedCtx;
+        } catch {
+          // Automatic sizing may not fit where a smaller override does — no marker.
+        }
       }
+      // A resident engine below (or above) a freshly-set override keeps its
+      // launch window until restart; surface that as restart-required
+      // instead of quietly showing the stale window as if it were current.
+      if (
+        mlxOverride !== undefined &&
+        residentContextWindow !== undefined &&
+        residentContextWindow !== plan.grantedCtx
+      ) {
+        throw new CapacityDeniedError(
+          `${modelId} is running with ${residentContextWindow.toLocaleString('en-US')} context tokens per turn, but its custom context setting now resolves to ${plan.grantedCtx.toLocaleString('en-US')}. Restart the local engine to apply it.`,
+          { reason: 'resident-below-minimum' },
+        );
+      }
+      const kvLin =
+        geometry !== undefined
+          ? (() => {
+              const a = estimateExactPerSlotKvBytesF16(geometry, 8_192);
+              const b = estimateExactPerSlotKvBytesF16(geometry, 65_536);
+              if (a === undefined || b === undefined) return undefined;
+              const scale = kvQuantScale(kvCacheType);
+              const bytesPerToken = ((b - a) / (65_536 - 8_192)) * scale;
+              return { bytesPerToken, fixedBytes: Math.max(0, a * scale - bytesPerToken * 8_192) };
+            })()
+          : undefined;
       return {
-        contextWindow: useResidentOr(effective, minimum),
-        ...(plannedResidentBytes !== undefined ? { plannedResidentBytes } : {}),
-        ...(reservedResidentBytes !== undefined ? { reservedResidentBytes } : {}),
-        ...(plannedSlots !== undefined ? { plannedSlots } : {}),
+        contextWindow: useResidentOr(plan.grantedCtx, plan.minimum),
+        ...(plan.slots !== undefined && plan.kvBytesPerToken !== undefined
+          ? {
+              plannedResidentBytes: Math.round(
+                weightsResident + plan.kvBytesPerToken * plan.grantedCtx,
+              ),
+              reservedResidentBytes: Math.round(
+                weightsResident + plan.kvBytesPerToken * plan.grantedCtx * plan.slots,
+              ),
+              plannedSlots: plan.slots,
+              weightsResidentBytes: weightsResident,
+            }
+          : {}),
+        ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
+        ...(mlxOverride !== undefined ? { overrideContextTokens: mlxOverride } : {}),
+        ...(autoContextWindow !== undefined ? { autoContextWindow } : {}),
+        ...(kvLin !== undefined
+          ? { kvBytesPerTokenPerSlot: kvLin.bytesPerToken, kvFixedBytesPerSlot: kvLin.fixedBytes }
+          : {}),
       };
     }
 
@@ -10551,22 +10804,90 @@ export class ChatManager {
           config.ds4ModelPath ||
           config.ds4BaseUrl,
       );
-      if (!installed && !hasExplicitSource) throw new ModelNotInstalledError(name, modelId);
       const detail = await this.catalog.get('chat-model', modelId).catch(() => null);
-      const ds4Source = detail?.manifest.kind === 'chat-model' ? detail.manifest.ds4 : undefined;
+      const ds4Manifest = detail?.manifest.kind === 'chat-model' ? detail.manifest : undefined;
+      const ds4Source = ds4Manifest?.ds4;
+      // A catalog entry with a ds4 block is plannable before download; only a
+      // model we know nothing about is genuinely absent.
+      if (!installed && !hasExplicitSource && !(opts.allowUninstalled && ds4Source)) {
+        throw new ModelNotInstalledError(name, modelId);
+      }
       const { totalmem } = await import('node:os');
       const ramTieredCtx = totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
+      const ds4Override = config.modelContextOverrides?.[`ds4:${modelId}`];
+      const ds4Floor =
+        ds4Override !== undefined ? Math.min(contextFloor, ds4Override) : contextFloor;
       const effective = resolveDs4LaunchCtx({
-        configured: config.ds4NumCtx,
+        configured: ds4Override ?? config.ds4NumCtx,
         ramTieredCtx,
         catalogMaxCtx: ds4Source?.maxLaunchCtx,
-        minViableContextTokens: contextFloor,
+        minViableContextTokens: ds4Floor,
+      });
+      if (
+        ds4Override !== undefined &&
+        residentContextWindow !== undefined &&
+        residentContextWindow !== effective
+      ) {
+        throw new CapacityDeniedError(
+          `${modelId} is running with ${residentContextWindow.toLocaleString('en-US')} context tokens per turn, but its custom context setting now resolves to ${effective.toLocaleString('en-US')}. Restart the local engine to apply it.`,
+          { reason: 'resident-below-minimum' },
+        );
+      }
+      // The slider's max for ds4: the authored catalog launch ceiling wins
+      // over the advertised native window because ds4 has no ctx-vs-memory
+      // admission to catch a window the engine cannot actually serve. The
+      // manifest's window stands in before download, when there is no GGUF
+      // header to read.
+      const nativeWindow = installed?.contextWindow ?? ds4Manifest?.contextWindow;
+      const ceilingTokens =
+        ds4Source?.maxLaunchCtx !== undefined || nativeWindow !== undefined
+          ? Math.min(
+              ds4Source?.maxLaunchCtx ?? Number.POSITIVE_INFINITY,
+              nativeWindow ?? Number.POSITIVE_INFINITY,
+            )
+          : undefined;
+      let ds4AutoContextWindow: number | undefined;
+      if (ds4Override !== undefined) {
+        ds4AutoContextWindow = resolveDs4LaunchCtx({
+          configured: config.ds4NumCtx,
+          ramTieredCtx,
+          catalogMaxCtx: ds4Source?.maxLaunchCtx,
+          minViableContextTokens: contextFloor,
+        });
+      }
+      // ds4's catalog residentBytes is an authored SSD-streaming working set
+      // (expert cache + resident weights + KV) measured at ONE window. Where
+      // the entry also authors the per-token slope, re-base it onto the window
+      // this device actually launches with and hand the UI the same
+      // `fixed + slope × ctx` line llama.cpp/MLX rows carry, so the slider
+      // prices a drag instead of claiming the footprint never moves. Entries
+      // without a measured slope keep the flat number and say so.
+      const { ds4ProjectedResidentBytes, ds4ResidentLine } = await import(
+        '../providers/ds4/residency.js'
+      );
+      const ds4Line = ds4ResidentLine({
+        residentBytes: ds4Source?.residentBytes,
+        kvBytesPerToken: ds4Source?.kvBytesPerToken,
+        residentCtxTokens: ds4Source?.residentCtxTokens,
       });
       return {
-        contextWindow: useResidentOr(effective, Math.min(effective, contextFloor)),
-        // ds4's catalog residentBytes is an authored SSD-streaming working
-        // set (weights cache + KV allowance) — already the honest number.
-        plannedResidentBytes: await this.resolveResidentBytes('ds4', modelId),
+        contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
+        plannedResidentBytes: ds4Line
+          ? ds4ProjectedResidentBytes(ds4Line, effective)
+          : await this.resolveResidentBytes('ds4', modelId),
+        ...(ds4Line
+          ? {
+              weightsResidentBytes: ds4Line.contextFreeBytes,
+              kvFixedBytesPerSlot: 0,
+              kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
+            }
+          : {}),
+        ...(nativeWindow ? { nativeContextWindow: nativeWindow } : {}),
+        ...(ds4Override !== undefined ? { overrideContextTokens: ds4Override } : {}),
+        ...(ds4AutoContextWindow !== undefined ? { autoContextWindow: ds4AutoContextWindow } : {}),
+        ...(ceilingTokens !== undefined && Number.isFinite(ceilingTokens)
+          ? { contextCeilingTokens: ceilingTokens }
+          : {}),
       };
     }
 
@@ -10580,20 +10901,37 @@ export class ChatManager {
       return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
     })();
     const manifestEngineConfig = await resolveCatalogLlamaCppEngineConfig(this.catalog, modelId);
-    const explicitContextWindow = envNumCtx ?? config.llamaCppNumCtx;
+    const perModelCtxOverride = config.modelContextOverrides?.[`llama-cpp:${modelId}`];
+    const explicitContextWindow = envNumCtx ?? perModelCtxOverride ?? config.llamaCppNumCtx;
+    // A per-model override below the host floor is deliberate user intent —
+    // lower the admission floor to the override instead of silently raising
+    // the request back to 64K. Env / machine-wide values keep their
+    // historical floor semantics. Mirrors buildLlamaCppProvider.
+    const overrideActive =
+      perModelCtxOverride !== undefined && explicitContextWindow === perModelCtxOverride;
+    const minViableTokens = overrideActive
+      ? Math.min(contextFloor, perModelCtxOverride)
+      : contextFloor;
     const contextRequirement = resolveLlamaCppContextRequirement({
       modelContextWindow: installed.contextWindow,
-      minViableContextTokens: contextFloor,
+      minViableContextTokens: minViableTokens,
       ...(explicitContextWindow !== undefined ? { explicitContextWindow } : {}),
       ...(manifestEngineConfig?.contextSize !== undefined
-        ? { adaptiveContextWindow: manifestEngineConfig.contextSize }
+        ? {
+            adaptiveContextWindow: manifestEngineConfig.contextSize,
+            manifestContextSize: manifestEngineConfig.contextSize,
+          }
         : {}),
       contextSizing: config.llamaCppContextSizing ?? 'adaptive',
     });
-    let effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
+    const effectiveNumCtx = contextRequirement.requestedPerTurnCtxTokens;
     // Resident/env short-circuits still want a footprint estimate, which
-    // needs the header read below — the return moves after it.
-    const shortCircuit = residentContextWindow !== undefined || envNumCtx !== undefined;
+    // needs the header read below — the return moves after it. An active
+    // per-model override deliberately does NOT short-circuit on a resident
+    // engine: the full plan must run so a stale resident window surfaces as
+    // restart-required instead of masquerading as the applied setting.
+    const shortCircuit =
+      (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
 
     const {
       computeCapacityBudget,
@@ -10601,6 +10939,7 @@ export class ChatManager {
       estimatePerSlotKvBytes,
       kvQuantScale,
       llamaCppSlotCeiling,
+      planAdaptiveContextGrowth,
       planCtxTokensForMemory,
       plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
@@ -10613,9 +10952,17 @@ export class ChatManager {
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
       : liveBudget.budgetBytes;
-    const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
+    const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
+    // A preview answers a policy question, so it drops the live-free-RAM half
+    // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
+    // card still gets a placement cap: pass 0 free RAM so the live term
+    // reduces to usable VRAM, which is stable and not self-referential. On a
+    // unified host "VRAM" IS that same RAM, so there is nothing left to cap
+    // with and the field is omitted entirely.
+    const previewBudgetKind = brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind;
+    const previewLiveRam = previewBudgetKind === 'discrete-gpu' ? { freeSystemRamBytes: 0 } : {};
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
-    let kvCacheType = resolveLlamaCppKvCacheType({
+    const kvCacheType = resolveLlamaCppKvCacheType({
       architecture: installed.architecture,
       modelId,
       override: config.llamaCppKvCacheType,
@@ -10692,9 +11039,45 @@ export class ChatManager {
         slots: slotCount,
       };
     };
+    // Post-quant single-slot KV linearization for the UI's live slider
+    // estimate. Two-point sampling stays exact for full-attention models
+    // and matches the windowed/hybrid piecewise slope everywhere above the
+    // sliding window — the slider's 32K floor clears every real window.
+    const kvLinearizationFor = (
+      kv: string,
+    ): { bytesPerToken: number; fixedBytes: number } | undefined => {
+      if (!summary) return undefined;
+      const geometry = {
+        blockCount: summary.blockCount,
+        embeddingLength: summary.embeddingLength,
+        headCount: summary.headCount,
+        headCountKv: summary.headCountKv,
+        headCountKvPerLayer: summary.headCountKvPerLayer,
+        slidingWindow: summary.slidingWindow,
+        slidingWindowPattern: summary.slidingWindowPattern,
+        sharedKvLayers: summary.sharedKvLayers,
+        keyLength: summary.keyLength,
+        valueLength: summary.valueLength,
+        keyLengthSwa: summary.keyLengthSwa,
+        valueLengthSwa: summary.valueLengthSwa,
+        fullAttentionInterval: summary.fullAttentionInterval,
+        ssmInnerSize: summary.ssmInnerSize,
+        ssmStateSize: summary.ssmStateSize,
+        ssmConvKernel: summary.ssmConvKernel,
+      };
+      const a = estimateExactPerSlotKvBytesF16(geometry, 8_192);
+      const b = estimateExactPerSlotKvBytesF16(geometry, 65_536);
+      if (a === undefined || b === undefined) return undefined;
+      const scale = kvQuantScale(kv);
+      const bytesPerToken = ((b - a) / (65_536 - 8_192)) * scale;
+      return { bytesPerToken, fixedBytes: Math.max(0, a * scale - bytesPerToken * 8_192) };
+    };
     const ceilingAt = (ctx: number, kv: LlamaCppKvCacheType) =>
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
+        sizingBudgetBytes: brokerSnap?.enforced
+          ? brokerSnap.pools.concurrencySizingBytes
+          : liveBudget.concurrencySizingBytes,
         weightsBytes: installed.approxSizeBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
@@ -10719,6 +11102,7 @@ export class ChatManager {
         }),
         kvCacheType,
       );
+      const lin = kvLinearizationFor(kvCacheType);
       return {
         contextWindow,
         ...(planned !== undefined
@@ -10726,93 +11110,113 @@ export class ChatManager {
               plannedResidentBytes: planned.single,
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
+              weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
             }
+          : {}),
+        ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
+        ...(perModelCtxOverride !== undefined
+          ? { overrideContextTokens: perModelCtxOverride }
+          : {}),
+        ...(lin !== undefined
+          ? { kvBytesPerTokenPerSlot: lin.bytesPerToken, kvFixedBytesPerSlot: lin.fixedBytes }
           : {}),
       };
     }
-    const ceilingFor = (kv: LlamaCppKvCacheType) => ceilingAt(effectiveNumCtx, kv);
-    const kvPlan = planLlamaCppKv({
-      architecture: installed.architecture,
-      modelId,
-      override: config.llamaCppKvCacheType,
-      slotsConfigured: configuredSlots !== undefined,
-      ceilingFor,
-      maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
-    });
-    kvCacheType = kvPlan.kvCacheType;
-    let slots = plannedLocalEngineSlots({
-      configuredSlots,
-      ceiling: ceilingFor(kvCacheType),
-      tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
-    });
-    if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
+    // One planning pass: policy resolution → KV/slot plan → admission
+    // ladder → windowed re-plan → adaptive growth, mirroring
+    // buildLlamaCppProvider. Runs once for the live preview and — while a
+    // per-model override is active — a second time with the override
+    // ignored, so the slider can mark where "Automatic" lands right now.
+    const llamaPlanPass = (
+      explicitArg: number | undefined,
+      minViableArg: number,
+    ): {
+      grantedCtx: number;
+      slots: number;
+      kvCacheType: LlamaCppKvCacheType;
+      plannedFieldsOk: boolean;
+    } => {
+      const requirement = resolveLlamaCppContextRequirement({
+        modelContextWindow: installed.contextWindow,
+        minViableContextTokens: minViableArg,
+        ...(explicitArg !== undefined ? { explicitContextWindow: explicitArg } : {}),
+        ...(manifestEngineConfig?.contextSize !== undefined
+          ? {
+              adaptiveContextWindow: manifestEngineConfig.contextSize,
+              manifestContextSize: manifestEngineConfig.contextSize,
+            }
+          : {}),
+        contextSizing: config.llamaCppContextSizing ?? 'adaptive',
+      });
+      let grantedCtx = requirement.requestedPerTurnCtxTokens;
+      let kv = resolveLlamaCppKvCacheType({
+        architecture: installed.architecture,
+        modelId,
+        override: config.llamaCppKvCacheType,
+      });
+      // Per-pass exact KV at this pass's requested window — the auto pass
+      // may request a different window than the primary one, and a slot
+      // ceiling fed with the other pass's bytes skews the marker.
+      const exactAtRequested = summary
+        ? estimateExactPerSlotKvBytesF16(
+            {
+              blockCount: summary.blockCount,
+              embeddingLength: summary.embeddingLength,
+              headCount: summary.headCount,
+              headCountKv: summary.headCountKv,
+              headCountKvPerLayer: summary.headCountKvPerLayer,
+              slidingWindow: summary.slidingWindow,
+              slidingWindowPattern: summary.slidingWindowPattern,
+              sharedKvLayers: summary.sharedKvLayers,
+              keyLength: summary.keyLength,
+              valueLength: summary.valueLength,
+              keyLengthSwa: summary.keyLengthSwa,
+              valueLengthSwa: summary.valueLengthSwa,
+              fullAttentionInterval: summary.fullAttentionInterval,
+              ssmInnerSize: summary.ssmInnerSize,
+              ssmStateSize: summary.ssmStateSize,
+              ssmConvKernel: summary.ssmConvKernel,
+            },
+            grantedCtx,
+          )
+        : undefined;
+      const passCeiling = (kvType: LlamaCppKvCacheType) =>
+        llamaCppSlotCeiling({
+          budgetBytes: fastBudgetBytes,
+          sizingBudgetBytes: brokerSnap?.enforced
+            ? brokerSnap.pools.concurrencySizingBytes
+            : liveBudget.concurrencySizingBytes,
+          weightsBytes: installed.approxSizeBytes,
+          perTurnCtxTokens: grantedCtx,
+          kvCacheType: kvType,
+          committedOtherBytes,
+          ...(exactAtRequested !== undefined ? { exactPerSlotKvBytesF16: exactAtRequested } : {}),
+        });
+      const kvPlan = planLlamaCppKv({
+        architecture: installed.architecture,
+        modelId,
+        override: config.llamaCppKvCacheType,
+        slotsConfigured: configuredSlots !== undefined,
+        ceilingFor: passCeiling,
+        maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
+      });
+      kv = kvPlan.kvCacheType;
+      let slots = plannedLocalEngineSlots({
+        configuredSlots,
+        ceiling: passCeiling(kv),
+        tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
+      });
+      if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
-    try {
-      if (!summary) throw new Error('GGUF header unreadable');
-      const referenceCtx = 4096;
-      const exactKvAtReference = estimateKvReserveBytes({
-        blockCount: summary.blockCount,
-        embeddingLength: summary.embeddingLength,
-        headCount: summary.headCount,
-        headCountKv: summary.headCountKv,
-        headCountKvPerLayer: summary.headCountKvPerLayer,
-        slidingWindowPattern: summary.slidingWindowPattern,
-        sharedKvLayers: summary.sharedKvLayers,
-        keyLength: summary.keyLength,
-        valueLength: summary.valueLength,
-        keyLengthSwa: summary.keyLengthSwa,
-        valueLengthSwa: summary.valueLengthSwa,
-        fullAttentionInterval: summary.fullAttentionInterval,
-        ssmInnerSize: summary.ssmInnerSize,
-        ssmStateSize: summary.ssmStateSize,
-        ssmConvKernel: summary.ssmConvKernel,
-        ctxTokens: referenceCtx,
-        kvCacheType,
-      });
-      const kvBytesPerToken =
-        exactKvAtReference !== undefined
-          ? exactKvAtReference / referenceCtx
-          : estimatePerSlotKvBytes({
-              perTurnCtxTokens: referenceCtx,
-              weightsBytes: installed.approxSizeBytes,
-              kvCacheType,
-            }) / referenceCtx;
-      let admission = planCtxTokensForMemory({
-        requestedPerTurnCtxTokens: effectiveNumCtx,
-        slots,
-        minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
-        kvBytesPerToken,
-        weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
-        budgetBytes: admissionBudgetBytes,
-        committedOtherBytes,
-        freeSystemRamBytes: availableSystemRamBytes(),
-        vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
-      });
-      // Mirror the launch path's windowed-cache admission (see
-      // buildLlamaCppProvider): when the launch will decline the Gemma
-      // `--swa-full` auto-default (or the windowed cache is pinned), the
-      // full-attention plan above overstates the real allocation — re-plan
-      // with the windowed linearization so the previewed window matches
-      // what the engine will actually grant.
-      // Strict model-max deliberately does NOT gate this: for SWA models
-      // the windowed cache is the only layout whose native-window KV can
-      // fit real machines, and the strict minimum rides inside
-      // `contextRequirement.minimumPerTurnCtxTokens`, so the windowed
-      // re-plan sheds slots or denies but never shortens the window.
-      const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
-      const windowedCacheWillRun =
-        (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
-        (explicitSwaFull === false ||
-          (explicitSwaFull === undefined &&
-            isGemmaModel({ architecture: installed.architecture, modelId })));
-      if (windowedCacheWillRun) {
-        const windowed = estimateWindowedKvLinearization({
+      try {
+        if (!summary) throw new Error('GGUF header unreadable');
+        const referenceCtx = 4096;
+        const exactKvAtReference = estimateKvReserveBytes({
           blockCount: summary.blockCount,
           embeddingLength: summary.embeddingLength,
           headCount: summary.headCount,
           headCountKv: summary.headCountKv,
           headCountKvPerLayer: summary.headCountKvPerLayer,
-          slidingWindow: summary.slidingWindow,
           slidingWindowPattern: summary.slidingWindowPattern,
           sharedKvLayers: summary.sharedKvLayers,
           keyLength: summary.keyLength,
@@ -10823,49 +11227,182 @@ export class ChatManager {
           ssmInnerSize: summary.ssmInnerSize,
           ssmStateSize: summary.ssmStateSize,
           ssmConvKernel: summary.ssmConvKernel,
-          kvCacheType,
+          ctxTokens: referenceCtx,
+          kvCacheType: kv,
         });
-        if (windowed) {
-          admission = planCtxTokensForMemory({
-            requestedPerTurnCtxTokens: effectiveNumCtx,
-            slots,
-            minimumPerTurnCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
-            kvBytesPerToken: windowed.bytesPerToken,
-            weightsResidentBytes:
-              Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
-            budgetBytes: admissionBudgetBytes,
-            committedOtherBytes,
-            freeSystemRamBytes: availableSystemRamBytes(),
-            vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+        const kvBytesPerToken =
+          exactKvAtReference !== undefined
+            ? exactKvAtReference / referenceCtx
+            : estimatePerSlotKvBytes({
+                perTurnCtxTokens: referenceCtx,
+                weightsBytes: installed.approxSizeBytes,
+                kvCacheType: kv,
+              }) / referenceCtx;
+        // The linearization the accepted plan priced with, so the growth
+        // pass cannot disagree with admission about the same launch.
+        let ladderKvLinearization: {
+          bytesPerToken: number;
+          fixedPerSlotBytes: number;
+        } | null = { bytesPerToken: kvBytesPerToken, fixedPerSlotBytes: 0 };
+        let admission = planCtxTokensForMemory({
+          requestedPerTurnCtxTokens: grantedCtx,
+          slots,
+          minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+          kvBytesPerToken,
+          weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+          budgetBytes: admissionBudgetBytes,
+          committedOtherBytes,
+          ...previewLiveRam,
+          vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+        });
+        // Mirror the launch path's windowed-cache admission (see
+        // buildLlamaCppProvider): when the launch will decline the Gemma
+        // `--swa-full` auto-default (or the windowed cache is pinned), the
+        // full-attention plan above overstates the real allocation — re-plan
+        // with the windowed linearization so the previewed window matches
+        // what the engine will actually grant.
+        // Strict model-max deliberately does NOT gate this: for SWA models
+        // the windowed cache is the only layout whose native-window KV can
+        // fit real machines, and the strict minimum rides inside
+        // `requirement.minimumPerTurnCtxTokens`, so the windowed
+        // re-plan sheds slots or denies but never shortens the window.
+        const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
+        const windowedCacheWillRun =
+          (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
+          (explicitSwaFull === false ||
+            (explicitSwaFull === undefined &&
+              isGemmaModel({ architecture: installed.architecture, modelId })));
+        if (windowedCacheWillRun) {
+          const windowed = estimateWindowedKvLinearization({
+            blockCount: summary.blockCount,
+            embeddingLength: summary.embeddingLength,
+            headCount: summary.headCount,
+            headCountKv: summary.headCountKv,
+            headCountKvPerLayer: summary.headCountKvPerLayer,
+            slidingWindow: summary.slidingWindow,
+            slidingWindowPattern: summary.slidingWindowPattern,
+            sharedKvLayers: summary.sharedKvLayers,
+            keyLength: summary.keyLength,
+            valueLength: summary.valueLength,
+            keyLengthSwa: summary.keyLengthSwa,
+            valueLengthSwa: summary.valueLengthSwa,
+            fullAttentionInterval: summary.fullAttentionInterval,
+            ssmInnerSize: summary.ssmInnerSize,
+            ssmStateSize: summary.ssmStateSize,
+            ssmConvKernel: summary.ssmConvKernel,
+            kvCacheType: kv,
           });
-        } else if ((summary.slidingWindow ?? 0) > 0 || explicitSwaFull === undefined) {
-          // SWA model without a readable layout: the launch path leaves
-          // such a launch untouched — preview the requested window.
-          return { contextWindow: effectiveNumCtx };
+          if (windowed) {
+            admission = planCtxTokensForMemory({
+              requestedPerTurnCtxTokens: grantedCtx,
+              slots,
+              minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
+              kvBytesPerToken: windowed.bytesPerToken,
+              weightsResidentBytes:
+                Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
+              budgetBytes: admissionBudgetBytes,
+              committedOtherBytes,
+              ...previewLiveRam,
+              vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+            });
+            ladderKvLinearization = {
+              bytesPerToken: windowed.bytesPerToken,
+              fixedPerSlotBytes: windowed.fixedBytes,
+            };
+          } else if ((summary.slidingWindow ?? 0) > 0 || explicitSwaFull === undefined) {
+            // SWA model without a readable layout: the launch path leaves
+            // such a launch untouched — preview the requested window.
+            return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: false };
+          }
         }
-      }
-      if (!admission.minimumSatisfied) {
-        throw new CapacityDeniedError(
-          formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
+        if (!admission.minimumSatisfied) {
+          throw new CapacityDeniedError(
+            formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
+          );
+        }
+        slots = admission.slots;
+        grantedCtx = admission.perTurnCtxTokens;
+        // ── Adaptive context growth ── mirror of buildLlamaCppProvider:
+        // slots and the base grant are settled; spend leftover FAST memory
+        // on a longer window up to the resolver's target. Exact GGUF
+        // geometry only.
+        if (
+          requirement.growthTargetTokens !== undefined &&
+          ladderKvLinearization !== null &&
+          exactKvAtReference !== undefined
+        ) {
+          const growth = planAdaptiveContextGrowth({
+            basePerTurnCtxTokens: grantedCtx,
+            targetPerTurnCtxTokens: requirement.growthTargetTokens,
+            slots,
+            kvBytesPerToken: ladderKvLinearization.bytesPerToken,
+            kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
+            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+            fastBudgetBytes,
+            committedOtherBytes,
+            budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
+            ...previewLiveRam,
+            vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+            isMoE: (summary.expertCount ?? 0) > 1,
+            // A user-chosen lane count is not growth's to spend.
+            allowSlotTrade: configuredSlots === undefined,
+          });
+          if (growth.grown) {
+            grantedCtx = growth.perTurnCtxTokens;
+            slots = growth.slots;
+          }
+        }
+      } catch (error) {
+        if (error instanceof CapacityDeniedError) throw error;
+        log.warn(
+          `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      slots = admission.slots;
-      effectiveNumCtx = admission.perTurnCtxTokens;
-    } catch (error) {
-      if (error instanceof CapacityDeniedError) throw error;
-      log.warn(
-        `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
+      return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: true };
+    };
+
+    const plan = llamaPlanPass(explicitContextWindow, minViableTokens);
+    let autoContextWindow: number | undefined;
+    if (overrideActive) {
+      try {
+        autoContextWindow = llamaPlanPass(config.llamaCppNumCtx, contextFloor).grantedCtx;
+      } catch {
+        // Automatic sizing may not fit where a smaller override does — no marker.
+      }
+    }
+    // A resident engine holding a different window than a freshly-set
+    // override keeps its launch window until restart; surface that as
+    // restart-required instead of quietly showing the stale window as if
+    // the setting had applied.
+    if (
+      overrideActive &&
+      residentContextWindow !== undefined &&
+      residentContextWindow !== plan.grantedCtx
+    ) {
+      throw new CapacityDeniedError(
+        `${modelId} is running with ${residentContextWindow.toLocaleString('en-US')} context tokens per turn, but its custom context setting now resolves to ${plan.grantedCtx.toLocaleString('en-US')}. Restart the local engine to apply it.`,
+        { reason: 'resident-below-minimum' },
       );
     }
-    const planned = plannedFor(effectiveNumCtx, slots, kvCacheType);
+    const planned = plan.plannedFieldsOk
+      ? plannedFor(plan.grantedCtx, plan.slots, plan.kvCacheType)
+      : undefined;
+    const lin = plan.plannedFieldsOk ? kvLinearizationFor(plan.kvCacheType) : undefined;
     return {
-      contextWindow: effectiveNumCtx,
+      contextWindow: plan.grantedCtx,
       ...(planned !== undefined
         ? {
             plannedResidentBytes: planned.single,
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
+            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
           }
+        : {}),
+      ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
+      ...(perModelCtxOverride !== undefined ? { overrideContextTokens: perModelCtxOverride } : {}),
+      ...(autoContextWindow !== undefined ? { autoContextWindow } : {}),
+      ...(lin !== undefined
+        ? { kvBytesPerTokenPerSlot: lin.bytesPerToken, kvFixedBytesPerSlot: lin.fixedBytes }
         : {}),
     };
   }
@@ -10905,7 +11442,7 @@ export class ChatManager {
    * so the caller's singleton build can surface its own clearer error.
    */
   private async tryPooledProvider(name: ProviderName): Promise<LLMProvider | null> {
-    // Use the engine-key type guard (narrows to `'llama-cpp' | 'mlx'`),
+    // Use the engine-key type guard (narrows to `'llama-cpp' | 'mlx' | 'ds4'`),
     // not the barrel `isLocalProvider` (boolean-only) — same reason
     // {@link getProviderForModel} imports it locally.
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
@@ -10930,7 +11467,7 @@ export class ChatManager {
     return provider;
   }
 
-  private async ensureProvider(name: ProviderName): Promise<LLMProvider> {
+  private async ensureProvider(name: ProviderName, signal?: AbortSignal): Promise<LLMProvider> {
     if (name === 'remote') {
       // Remote providers are keyed per-server and need a model id to resolve
       // which server; they must be reached via getProviderForModel /
@@ -10986,7 +11523,7 @@ export class ChatManager {
     // to construct any non-local (cloud) provider. This is the hard gate —
     // every chat path (sessions, model listing, one-shot completions)
     // funnels through here, so the picker hiding cloud entries is just UX.
-    // Local engines (ollama / llama-cpp / mlx) are always permitted.
+    // Local engines (ollama / llama-cpp / mlx / ds4) are always permitted.
     if (!isLocalProvider(name) && !resolveSecurityPolicy(config).allowExternalChat) {
       throw new Error(
         `Security policy: external chat providers are disabled (provider "${name}" blocked). Switch to a local model, or raise the security level in Settings → Security & Compliance.`,
@@ -11108,7 +11645,6 @@ export class ChatManager {
         config,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.llamaCppModels ? { llamaCppModels: this.llamaCppModels } : {}),
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
@@ -11122,14 +11658,15 @@ export class ChatManager {
         ...(this.mlxModels ? { mlxModels: this.mlxModels } : {}),
         ...(this.uvRuntime ? { uvRuntime: this.uvRuntime } : {}),
         ...(this.mlxRuntimeStatus ? { mlxRuntimeStatus: this.mlxRuntimeStatus } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
       });
     } else if (name === 'ds4') {
       provider = await buildDs4Provider({
         config,
         affinity,
         home: this.home,
-        isBusy: () => this.isAnyActive(),
         ...(this.ds4Models ? { ds4Models: this.ds4Models } : {}),
+        ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
       });
     } else {
@@ -11151,7 +11688,7 @@ export class ChatManager {
       });
     }
     try {
-      await provider.initialize();
+      await provider.initialize(signal);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const actionable =
@@ -11867,7 +12404,7 @@ export class ChatManager {
         this.events.publish(scope, {
           type: 'warning',
           message:
-            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
+            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
         });
         return;
       }
@@ -12517,6 +13054,14 @@ export class ChatManager {
       );
       return existingSubstantialFileForImmediate;
     };
+    const contextualBuiltinTools = [
+      ...(record.craftbookRef ? ['craftbook_update_step'] : []),
+      ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
+      securityPolicy.allowMail
+        ? ['draft_email', 'queue_email', 'send_email']
+        : []),
+      ...(project?.connectors?.length ? ['draft_connector_action'] : []),
+    ];
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,
@@ -12536,6 +13081,7 @@ export class ChatManager {
       isGitRepo,
       securityPolicy,
       workspaceWritable,
+      contextualBuiltinTools,
       tier: localModelTier,
       ...(runtime?.effectiveContextWindow !== undefined
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
@@ -12585,7 +13131,10 @@ export class ChatManager {
       // `list_tasks`, `get_task`, `read_task_notes`" under Task
       // Visibility on Meester sessions. First-group-wins matches the
       // live `getOpenAITools()` dedupe in `McpBridgePool`.
-      availableBuiltinTools = availableBuiltinToolsForAllowlist(promptToolAllowlist);
+      availableBuiltinTools = availableBuiltinToolsForAllowlist(
+        promptToolAllowlist,
+        contextualBuiltinTools,
+      );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
 
@@ -12676,6 +13225,7 @@ export class ChatManager {
           .filter((part): part is string => Boolean(part))
           .join('\n\n'),
         availableTools: availableBuiltinTools.map((tool) => tool.name),
+        ...(toolsOverride ? {} : { partialRoster: true }),
       });
       for (const finding of [...contract.errors, ...contract.warnings]) {
         log.warn(
@@ -13050,8 +13600,25 @@ export class ChatManager {
       // file path from well-known file tools so the References panel can
       // surface the touched files. Derive a compact args preview the UI
       // can render next to the tool name (e.g. "path: 'tests/x.spec.ts'").
+      const sc = info.structuredContent;
+      const batchedWorkspaceRead =
+        info.name === 'read_files' || info.name === 'read_multiple_files';
+      const structuredReadPaths =
+        batchedWorkspaceRead && Array.isArray(sc?.results)
+          ? sc.results
+              .filter((result): result is { path: string; status: 'ok' } =>
+                Boolean(
+                  result &&
+                    typeof result === 'object' &&
+                    (result as { status?: unknown }).status === 'ok' &&
+                    typeof (result as { path?: unknown }).path === 'string',
+                ),
+              )
+              .map((result) => result.path)
+          : [];
+      const paths = [...new Set(structuredReadPaths)];
       const rawPath = info.args?.path;
-      const path = typeof rawPath === 'string' ? rawPath : undefined;
+      const path = typeof rawPath === 'string' ? rawPath : paths[0];
       const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
@@ -13064,16 +13631,22 @@ export class ChatManager {
       // onto the persisted ChatMessageToolCall so the inline diff
       // viewer has something to render. Unknown fields stay on info
       // but don't leak into the schema — keeps the wire shape stable.
-      const sc = info.structuredContent;
-      const diff = typeof sc?.diff === 'string' ? sc.diff : undefined;
-      const addedLines = typeof sc?.addedLines === 'number' ? sc.addedLines : undefined;
-      const removedLines = typeof sc?.removedLines === 'number' ? sc.removedLines : undefined;
+      const trustedDiffTool =
+        info.name === 'replace_in_file' ||
+        info.name === 'replace_lines' ||
+        info.name === 'apply_patch' ||
+        info.name === 'insert_at_marker';
+      const diff = trustedDiffTool && typeof sc?.diff === 'string' ? sc.diff : undefined;
+      const addedLines =
+        trustedDiffTool && typeof sc?.addedLines === 'number' ? sc.addedLines : undefined;
+      const removedLines =
+        trustedDiffTool && typeof sc?.removedLines === 'number' ? sc.removedLines : undefined;
       // `generate_video` reports its mp4 by artifact path via
       // structuredContent.gezelVideo (the bytes are never base64'd into
       // the result). Map it to the persisted `videos[]` the chat UI
       // plays inline. Same pattern as the surgical-edit `diff` above.
       const gv =
-        sc && typeof sc === 'object'
+        info.name === 'generate_video' && sc && typeof sc === 'object'
           ? (sc as { gezelVideo?: { artifactPath?: unknown; mimeType?: unknown } }).gezelVideo
           : undefined;
       const videos: ChatMessageToolCall['videos'] =
@@ -13094,6 +13667,7 @@ export class ChatManager {
         success: info.success,
         ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
         ...(path ? { path } : {}),
+        ...(paths.length > 0 ? { paths } : {}),
         ...(argsSummary ? { argsSummary } : {}),
         ...(argsFull ? { argsFull } : {}),
         ...(result ? { resultText: result.text } : {}),
@@ -13119,6 +13693,7 @@ export class ChatManager {
           success: info.success,
           ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
           ...(path ? { path } : {}),
+          ...(paths.length > 0 ? { paths } : {}),
           ...(argsSummary ? { argsSummary } : {}),
           ...(argsFull ? { argsFull } : {}),
           ...(result ? { resultText: result.text } : {}),
@@ -13148,6 +13723,7 @@ export class ChatManager {
             durationMs: info.durationMs,
             success: info.success,
             ...(path ? { path } : {}),
+            ...(paths.length > 0 ? { paths } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
@@ -13265,7 +13841,7 @@ export class ChatManager {
         // Only projects with a mail-type connector binding expose the email
         // write tools, so a non-mail project's agent never sees
         // draft_email/queue_email/send_email.
-        ...(project?.connectors?.some((b) => b.type.startsWith('mail-'))
+        ...(securityPolicy.allowMail && project?.connectors?.some((b) => b.type.startsWith('mail-'))
           ? { GEZEL_MAIL_ENABLED: '1' }
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
@@ -13700,6 +14276,7 @@ export class ChatManager {
       isGitRepo,
       securityPolicy,
       workspaceWritable,
+      contextualBuiltinTools,
       tier: localModelTier,
       ...(runtime?.effectiveContextWindow !== undefined
         ? { effectiveContextWindow: runtime.effectiveContextWindow }

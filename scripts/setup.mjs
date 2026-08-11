@@ -26,7 +26,7 @@ try {
   transformersIndex = serviceRequire.resolve('@huggingface/transformers');
 } catch (err) {
   console.error(
-    '[setup] could not resolve @huggingface/transformers from packages/service. Run `pnpm install` first.',
+    '[setup] could not resolve @huggingface/transformers from packages/service. Run `pnpm deps:install` first.',
   );
   console.error(`[setup] underlying: ${err instanceof Error ? err.message : err}`);
   process.exit(1);

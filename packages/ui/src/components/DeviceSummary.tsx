@@ -41,8 +41,10 @@ function isLowAccelerationDevice(memory: MemoryProfile): boolean {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} MB`;
+  // Match the familiar capacities printed on RAM and GPU packaging: binary
+  // math, presented as GB rather than exposing GiB terminology in the UI.
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
   return `${bytes} B`;
 }
 

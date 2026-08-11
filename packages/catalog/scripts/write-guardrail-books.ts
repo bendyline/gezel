@@ -8,7 +8,7 @@
  * src/guardrail-books.ts so the regen test pins the same source.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CraftbookDoc,
@@ -17,12 +17,7 @@ import {
   formatCraftbookDocErrors,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
-import {
-  CAREFUL_MODE,
-  FREEZE_SCOPE,
-  GUARDRAIL_RELEASED_AT,
-  GUARDRAIL_VERSION,
-} from '../src/guardrail-books.js';
+import { CAREFUL_MODE, FREEZE_SCOPE, GUARDRAIL_RELEASED_AT } from '../src/guardrail-books.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 
 const dataRoot = join(requireGildeCheckout().dataDir, 'craftbook-templates');
@@ -36,9 +31,10 @@ async function writeBook(doc: CraftbookDoc): Promise<void> {
     );
   }
   const id = parsed.id!;
+  const version = parsed.version!;
   const shard = id.slice(0, 2).toLowerCase();
   const bookDir = join(dataRoot, shard, id);
-  await mkdir(join(bookDir, 'versions', GUARDRAIL_VERSION), { recursive: true });
+  await mkdir(join(bookDir, 'versions', version), { recursive: true });
   const identity = {
     schemaVersion: 1,
     kind: 'craftbook-template',
@@ -50,9 +46,17 @@ async function writeBook(doc: CraftbookDoc): Promise<void> {
     license: 'MIT',
     yankedVersions: [],
   };
-  await writeFile(join(bookDir, 'manifest.json'), `${JSON.stringify(identity, null, 2)}\n`);
+  const manifestPath = join(bookDir, 'manifest.json');
+  try {
+    // Identity metadata is release-independent. Preserve the reviewed
+    // manifest (including artwork/role fields this small writer does not
+    // own) when adding a new immutable version.
+    await readFile(manifestPath, 'utf8');
+  } catch {
+    await writeFile(manifestPath, `${JSON.stringify(identity, null, 2)}\n`);
+  }
   await writeFile(
-    join(bookDir, 'versions', GUARDRAIL_VERSION, 'craftbook.json'),
+    join(bookDir, 'versions', version, 'craftbook.json'),
     serializeCraftbookDoc(parsed, 'json'),
   );
   console.log(

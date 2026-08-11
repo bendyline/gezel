@@ -12,6 +12,11 @@ const apiMocks = vi.hoisted(() => ({
   getProjectSkills: vi.fn(),
   listProjectCraftbooks: vi.fn(),
   getProjectImportsPending: vi.fn(),
+  // The skills + imports actions. Without these, `invokeSkill` and
+  // `reviewImport` throw "is not a function" the moment a test clicks one.
+  createTask: vi.fn(),
+  approveProjectImport: vi.fn(),
+  rejectProjectImport: vi.fn(),
 }));
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
@@ -65,7 +70,35 @@ beforeEach(() => {
   apiMocks.getProjectSkills.mockResolvedValue({ skills: [] });
   apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [] });
   apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
+  apiMocks.createTask.mockResolvedValue({ ref: 'p1/1', projectId: 'p1', num: 1 });
+  apiMocks.approveProjectImport.mockResolvedValue({ ok: true });
+  apiMocks.rejectProjectImport.mockResolvedValue({ ok: true });
 });
+
+const SKILL = {
+  name: 'summarize',
+  source: '.claude/skills/summarize/SKILL.md',
+  description: 'Summarize a document',
+  body: '# Summarize\n\nDo the thing.',
+};
+
+const PENDING_IMPORT = {
+  skillSource: '.claude/skills/old-script/SKILL.md',
+  sourceHash: 'h1',
+  craftbook: { id: 'old-script', name: 'Old script' },
+  scripts: [{ name: 'old-script.mjs', source: 'export default () => {};' }],
+  createdAt: '2026-08-01T00:00:00.000Z',
+};
+
+const CRAFTBOOK = {
+  sourceId: 'gilde',
+  manifest: {
+    id: 'ship-it',
+    name: 'Ship it',
+    description: 'Ship the thing',
+    paramSchema: {},
+  },
+};
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -133,6 +166,82 @@ describe('CommandsPanel sections', () => {
     render(<CommandsPanel projectId="p1" section="commands" onStageCommand={onStage} />);
     await userEvent.click(await screen.findByTitle('Stage: pwd'));
     expect(onStage).toHaveBeenCalledWith('pwd');
+  });
+
+  it('still lists craftbooks alongside skills and imports in "tasks"', async () => {
+    // The regression net for the terminal toolbar's third gallery, which is
+    // the only remaining craftbook launcher outside the "+" button.
+    apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [CRAFTBOOK] });
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [SKILL] });
+    apiMocks.getProjectImportsPending.mockResolvedValue({
+      items: [PENDING_IMPORT],
+    });
+
+    render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
+
+    expect(await screen.findByText('Craftbooks')).toBeTruthy();
+    expect(screen.getByText('Skills (workspace)')).toBeTruthy();
+    expect(screen.getByText('Imports to review (1)')).toBeTruthy();
+  });
+});
+
+describe('CommandsPanel "skills" section', () => {
+  it('shows only workspace skills and pending imports, and touches no other source', async () => {
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [SKILL] });
+    apiMocks.getProjectImportsPending.mockResolvedValue({
+      items: [PENDING_IMPORT],
+    });
+    apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [CRAFTBOOK] });
+
+    render(<CommandsPanel projectId="p1" section="skills" />);
+
+    expect(await screen.findByText('Skills (workspace)')).toBeTruthy();
+    expect(screen.getByText('Imports to review (1)')).toBeTruthy();
+
+    expect(screen.queryByText('Craftbooks')).toBeNull();
+    expect(screen.queryByText('Getting around')).toBeNull();
+    expect(screen.queryByText('Tools on this machine')).toBeNull();
+    expect(screen.queryByText('npm scripts')).toBeNull();
+
+    // The no-network guarantee: neither the craftbook list nor the workspace
+    // index is fetched for a rail that renders neither.
+    expect(apiMocks.listProjectCraftbooks).not.toHaveBeenCalled();
+    expect(apiMocks.getProjectIndexStatus).not.toHaveBeenCalled();
+  });
+
+  it('invokes a workspace skill as a task with no staging callback wired', async () => {
+    // Rendered with no `onStageCommand` at all — this is what makes it safe
+    // for the chat rail to stop passing one.
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [SKILL] });
+    render(<CommandsPanel projectId="p1" section="skills" />);
+
+    await userEvent.click(await screen.findByText('summarize'));
+
+    await waitFor(() => expect(apiMocks.createTask).toHaveBeenCalled());
+    const [projectId, body] = apiMocks.createTask.mock.calls[0] as [
+      string,
+      { assignee: { kind: string }; steps: Array<{ prompt: string }> },
+    ];
+    expect(projectId).toBe('p1');
+    expect(body.assignee).toEqual({ kind: 'user' });
+    expect(body.steps[0]?.prompt).toBe(SKILL.body);
+  });
+
+  it('approves a pending import', async () => {
+    apiMocks.getProjectImportsPending.mockResolvedValue({
+      items: [PENDING_IMPORT],
+    });
+    render(<CommandsPanel projectId="p1" section="skills" />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    await waitFor(() =>
+      expect(apiMocks.approveProjectImport).toHaveBeenCalledWith('p1', PENDING_IMPORT.skillSource),
+    );
+  });
+
+  it('shows a skills-specific empty state', async () => {
+    render(<CommandsPanel projectId="p1" section="skills" />);
+    expect(await screen.findByText(/No workspace skills here yet/)).toBeTruthy();
   });
 });
 

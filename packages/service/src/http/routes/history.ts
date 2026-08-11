@@ -1,47 +1,7 @@
-import type { HistoryEventKind } from '@bendyline/gezel';
+import { type HistoryEventKind, HistoryEventKindSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ServiceContext } from '../context.js';
-
-const KNOWN_KINDS: HistoryEventKind[] = [
-  'gezel.created',
-  'gezel.deleted',
-  'gezel.renamed',
-  'gezel.settings.updated',
-  'gezel.about.generated',
-  'icon.generated',
-  'icon.reverted',
-  'project.created',
-  'project.updated',
-  'project.about.updated',
-  'project.mission.updated',
-  'project.voorman.changed',
-  'project.digest.generated',
-  'meester.status.generated',
-  'document.created',
-  'document.deleted',
-  'tool.called',
-  'meester.changed',
-  'klerk.changed',
-  'boekwachter.changed',
-  'keurmeester.changed',
-  'task.created',
-  'task.updated',
-  'task.status.changed',
-  'task.assignee.changed',
-  'task.step.added',
-  'task.step.activated',
-  'task.step.completed',
-  'task.step.gated',
-  'task.step.routed',
-  'task.entry.dispatched',
-  'task.tick',
-  'task.canceled',
-  'gezel.level.up',
-  'gezel.trait.adopted',
-  'gezel.trait.removed',
-  'gezel.tuning.adjusted',
-];
 
 export function historyRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -119,7 +79,12 @@ function parseKinds(raw: string | undefined): HistoryEventKind[] | undefined {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  const valid = parts.filter((k): k is HistoryEventKind => (KNOWN_KINDS as string[]).includes(k));
+  // History kinds grow with the product. Validate against the canonical
+  // schema instead of a route-local copy, which previously drifted and made
+  // valid filters such as `tool.gated` silently become unfiltered queries.
+  const valid = parts.filter(
+    (k): k is HistoryEventKind => HistoryEventKindSchema.safeParse(k).success,
+  );
   return valid.length > 0 ? valid : undefined;
 }
 

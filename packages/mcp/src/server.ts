@@ -39,6 +39,10 @@ import {
   StepGateUnionSchema,
   type StepPatch,
   TaskRefSchema,
+  WORKSPACE_READ_MAX_FILES,
+  WORKSPACE_READ_MAX_RANGE_LINES,
+  type WorkspaceReadFileRequest,
+  type WorkspaceReadFileSuccess,
   applyStepPatch,
   assertCraftbookGraph,
   coerceDeliverableKind,
@@ -74,6 +78,7 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
+import { prioritizePullsForCurrentBranch } from './github-pr-selection.js';
 import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
@@ -99,9 +104,24 @@ import {
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
 import {
+  ActionToolOutputSchema,
+  ExecutionToolOutputSchema,
+  GitToolOutputSchema,
+  ListToolOutputSchema,
+  MemoryListToolOutputSchema,
+  MemorySaveToolOutputSchema,
+  SearchToolOutputSchema,
+  StatToolOutputSchema,
+  TaskToolOutputSchema,
+  annotationsForTool,
+  errorResult,
+  okResult,
+  outputSchemaForTool,
+} from './tool-contracts.js';
+import {
   ALWAYS_REGISTERED_TOOLS,
-  CONDITIONALLY_REGISTERED_TOOLS,
   LEGACY_SPELLING_BY_CANONICAL,
+  RESERVED_TOOL_NAMES,
   canonicalToolName,
   resolveToolNameSpelling,
 } from './tool-inventory.js';
@@ -153,7 +173,16 @@ const fetchImpl: typeof fetch = certPath
   : createPatientFetch();
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
-const ExpectedDeliverableArgSchema = coerceJsonObject(ExpectedDeliverableSchema);
+// Keep the model-facing handoff hint deliberately small. The persisted/API
+// ExpectedDeliverableSchema also carries the full 24-variant gate contract
+// (`checks` + `scripts`). Advertising that internal completion machinery on
+// every message/delegate tool duplicated tens of thousands of JSON-Schema
+// characters in local-model requests and could make llama.cpp's aggregate
+// tool grammar fail before inference began. Gate defaults are resolved by the
+// receiving service; callers only need to identify the reply shape and path.
+const ExpectedDeliverableArgSchema = coerceJsonObject(
+  ExpectedDeliverableSchema.pick({ kind: true, filePath: true }),
+);
 const sessionExpectedDeliverable = parseSessionExpectedDeliverable(
   process.env.GEZEL_EXPECTED_DELIVERABLE,
 );
@@ -230,10 +259,24 @@ const allowedToolNames =
 // dispatch below work in canonical space, so both arms accept both spellings.
 const legacyNamingMode = process.env.GEZEL_MCP_TOOL_NAMING === 'legacy';
 
-function registeredToolRegistry(): Record<string, { inputSchema?: z.ZodType }> {
+function registeredToolRegistry(): Record<
+  string,
+  {
+    inputSchema?: z.ZodType;
+    outputSchema?: z.ZodType;
+    annotations?: ReturnType<typeof annotationsForTool>;
+  }
+> {
   return (
     server as unknown as {
-      _registeredTools: Record<string, { inputSchema?: z.ZodType }>;
+      _registeredTools: Record<
+        string,
+        {
+          inputSchema?: z.ZodType;
+          outputSchema?: z.ZodType;
+          annotations?: ReturnType<typeof annotationsForTool>;
+        }
+      >;
     }
   )._registeredTools;
 }
@@ -292,6 +335,9 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   }
   const advertised = legacyNamingMode ? (LEGACY_SPELLING_BY_CANONICAL[name] ?? name) : name;
   const registered = originalRegister(advertised, ...rest);
+  const stored = registeredToolRegistry()[advertised]!;
+  stored.annotations = annotationsForTool(name);
+  stored.outputSchema = outputSchemaForTool(name);
 
   // MCP SDK's legacy `tool(name, shape, callback)` API wraps raw shapes in
   // `z.object`. With Zod 4, input-mode JSON Schema correctly advertises that
@@ -301,7 +347,7 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   // validation aligned without rewriting every legacy registration call.
   const rawShape = rest.find(isZodRawShape);
   if (rawShape) {
-    registeredToolRegistry()[advertised]!.inputSchema = z.strictObject(rawShape);
+    stored.inputSchema = z.strictObject(rawShape);
   }
   installAliasDispatchOnce();
   return registered;
@@ -325,24 +371,42 @@ server.tool(
   'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
   { query: z.string().describe('What to search for in memory') },
   async ({ query }) => {
-    const res = await fetchImpl(`${baseUrl}/api/memory/search`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ gezelId, projectId, query }),
-    });
-    const data = (await res.json()) as {
-      results: Array<{ text: string; score: number; day: string; scope: string }>;
-    };
-    if (!data.results?.length) {
-      return { content: [{ type: 'text' as const, text: 'No relevant memories found.' }] };
+    try {
+      const res = await fetchImpl(`${baseUrl}/api/memory/search`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ gezelId, projectId, query }),
+      });
+      if (!res.ok) {
+        return errorResult(`search_memory failed: ${await responseErrorMessage(res)}`);
+      }
+      const data = (await res.json()) as {
+        results: Array<{ text: string; score: number; day: string; scope: string }>;
+      };
+      const results = data.results ?? [];
+      const summary = results.length
+        ? `Found ${results.length} relevant ${results.length === 1 ? 'memory' : 'memories'}.`
+        : 'No relevant memories found.';
+      const formatted = results
+        .map((r) => `[${r.scope}/${r.day} score=${r.score.toFixed(2)}] ${r.text}`)
+        .join('\n\n');
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query,
+          matches: results,
+          count: results.length,
+          truncated: false,
+        },
+        { text: formatted ? `${summary}\n${formatted}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search_memory failed: ${unwrapApiError(err)}`);
     }
-    const formatted = data.results
-      .map((r) => `[${r.scope}/${r.day} score=${r.score.toFixed(2)}] ${r.text}`)
-      .join('\n\n');
-    return { content: [{ type: 'text' as const, text: formatted }] };
   },
 );
 
@@ -364,20 +428,33 @@ server.tool(
       ),
   },
   async ({ text, scope, kind }) => {
-    await fetchImpl(`${baseUrl}/api/memory/save`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        scope,
-        id: scope === 'gezel' ? gezelId : projectId,
-        text: normalizeMarkdown(text),
-        ...(kind ? { kind } : {}),
-      }),
-    });
-    return { content: [{ type: 'text' as const, text: `Memory saved (${scope}).` }] };
+    try {
+      const res = await fetchImpl(`${baseUrl}/api/memory/save`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          scope,
+          id: scope === 'gezel' ? gezelId : projectId,
+          text: normalizeMarkdown(text),
+          ...(kind ? { kind } : {}),
+        }),
+      });
+      if (!res.ok) {
+        return errorResult(`save_memory failed: ${await responseErrorMessage(res)}`);
+      }
+      const data = (await res.json().catch(() => ({}))) as { status?: unknown };
+      const status = data.status === 'duplicate' ? 'duplicate' : 'saved';
+      const summary =
+        status === 'duplicate'
+          ? `Memory already existed (${scope}); no duplicate was added.`
+          : `Memory saved (${scope}).`;
+      return okResult(MemorySaveToolOutputSchema, { summary, status, scope }, { text: summary });
+    } catch (err) {
+      return errorResult(`save_memory failed: ${unwrapApiError(err)}`);
+    }
   },
 );
 
@@ -386,18 +463,32 @@ server.tool(
   'List recent memory entries for the current agent or project.',
   {
     scope: z.enum(['gezel', 'project']).describe('Which memory to list'),
-    days: z.number().optional().describe('How many days back to look (default 7)'),
+    days: z.number().int().positive().optional().describe('How many days back to look (default 7)'),
   },
   async ({ scope, days }) => {
-    const id = scope === 'gezel' ? gezelId : projectId;
-    const res = await fetchImpl(
-      `${baseUrl}/api/memory/recent?scope=${scope}&id=${encodeURIComponent(id)}&days=${days ?? 7}`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    const data = (await res.json()) as { content: string };
-    return {
-      content: [{ type: 'text' as const, text: data.content || 'No recent memories.' }],
-    };
+    try {
+      const id = scope === 'gezel' ? gezelId : projectId;
+      const res = await fetchImpl(
+        `${baseUrl}/api/memory/recent?scope=${scope}&id=${encodeURIComponent(id)}&days=${days ?? 7}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) {
+        return errorResult(`list_memories failed: ${await responseErrorMessage(res)}`);
+      }
+      const data = (await res.json()) as { content: string };
+      const content = data.content || '';
+      const requestedDays = days ?? 7;
+      const summary = content
+        ? `Loaded recent ${scope} memories from the last ${requestedDays} days.`
+        : 'No recent memories.';
+      return okResult(
+        MemoryListToolOutputSchema,
+        { summary, scope, days: requestedDays, content },
+        { text: content ? `${summary}\n${content}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`list_memories failed: ${unwrapApiError(err)}`);
+    }
   },
 );
 
@@ -427,10 +518,14 @@ async function connectorActionApi(
 /** Mail-type bindings on the project (accountId narrows to one). */
 async function resolveMailBinding(accountId?: string): Promise<string | null> {
   const { ok, data } = await connectorActionApi('', 'GET');
-  if (!ok) return null;
+  if (!ok) throw new Error(String(data.error ?? 'failed to list connector bindings'));
   const bindings = (data.bindings ?? []) as { id: string; type: string }[];
   const mail = bindings.filter((b) => typeof b.type === 'string' && b.type.startsWith('mail-'));
-  if (accountId) return mail.find((b) => b.id === accountId)?.id ?? null;
+  if (accountId) {
+    const match = mail.find((b) => b.id === accountId)?.id;
+    if (!match) throw new Error(`mail connector binding "${accountId}" was not found`);
+    return match;
+  }
   return mail[0]?.id ?? null;
 }
 
@@ -451,31 +546,32 @@ function registerEmailTools() {
         .describe('Which mail connector binding to send from (defaults to the first)'),
     },
     async (args) => {
-      const bindingId = await resolveMailBinding(args.accountId);
-      if (!bindingId)
-        return {
-          content: [
-            { type: 'text' as const, text: 'ERROR: this project has no linked mail connector.' },
-          ],
-        };
-      const { accountId: _drop, ...input } = args;
-      const { ok, data } = await connectorActionApi(
-        `${encodeURIComponent(bindingId)}/actions`,
-        'POST',
-        { action: 'send', input },
-      );
-      if (!ok)
-        return {
-          content: [{ type: 'text' as const, text: `ERROR: ${data.error ?? 'draft failed'}` }],
-        };
-      return {
-        content: [
+      try {
+        const bindingId = await resolveMailBinding(args.accountId);
+        if (!bindingId) return errorResult('This project has no linked mail connector.');
+        const { accountId: _drop, ...input } = args;
+        const { ok, data } = await connectorActionApi(
+          `${encodeURIComponent(bindingId)}/actions`,
+          'POST',
+          { action: 'send', input },
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Email draft failed.'));
+        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Draft saved${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. Review it, then call queue_email then send_email.`;
+        return okResult(
+          ActionToolOutputSchema,
           {
-            type: 'text' as const,
-            text: `Draft saved (id: ${data.draftId}) at ${data.relPath}. Review it, then call queue_email then send_email.`,
+            summary,
+            status: 'drafted',
+            ...(draftId ? { draftId } : {}),
+            ...(relPath ? { relPath } : {}),
           },
-        ],
-      };
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`draft_email failed: ${unwrapApiError(err)}`);
+      }
     },
   );
 
@@ -484,17 +580,27 @@ function registerEmailTools() {
     'Stage a saved draft for sending by moving it to the outbox. Does not transmit.',
     { draftId: z.string().describe('The draft id returned by draft_email') },
     async ({ draftId }) => {
-      const { ok, data } = await connectorActionApi(
-        `actions/${encodeURIComponent(draftId)}/queue`,
-        'POST',
-      );
-      if (!ok)
-        return {
-          content: [{ type: 'text' as const, text: `ERROR: ${data.error ?? 'queue failed'}` }],
-        };
-      return {
-        content: [{ type: 'text' as const, text: `Queued draft ${draftId} (${data.relPath}).` }],
-      };
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/queue`,
+          'POST',
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Email queue failed.'));
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Queued draft ${draftId}${relPath ? ` (${relPath})` : ''}.`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'queued',
+            draftId,
+            ...(relPath ? { relPath } : {}),
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`queue_email failed: ${unwrapApiError(err)}`);
+      }
     },
   );
 
@@ -503,38 +609,47 @@ function registerEmailTools() {
     'Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
     { draftId: z.string().describe('The draft id to send') },
     async ({ draftId }) => {
-      const { ok, data } = await connectorActionApi(
-        `actions/${encodeURIComponent(draftId)}/commit`,
-        'POST',
-      );
-      if (!ok) {
-        const message = String(data.error ?? 'send failed');
-        const extra = /allowlist/i.test(message)
-          ? " Ask the user to add the recipient to the connector's allowed recipients/domains."
-          : '';
-        return {
-          content: [{ type: 'text' as const, text: `ERROR: ${message}.${extra}` }],
-        };
-      }
-      if (data.status === 'queued-night-shift') {
-        return {
-          content: [
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/commit`,
+          'POST',
+        );
+        if (!ok) {
+          const message = String(data.error ?? 'Email send failed.');
+          const hint = /allowlist/i.test(message)
+            ? "Ask the user to add the recipient to the connector's allowed recipients/domains."
+            : undefined;
+          return errorResult(message, { ...(hint ? { hint } : {}) });
+        }
+        if (data.status === 'queued-night-shift') {
+          const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+          const summary = `Night shift is active — not sending unattended. The message is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
+          return okResult(
+            ActionToolOutputSchema,
             {
-              type: 'text' as const,
-              text: `Night shift is active — not sending unattended. The message is staged in the outbox (${data.relPath}) and will require explicit approval.`,
+              summary,
+              status: 'queued-night-shift',
+              draftId,
+              ...(relPath ? { relPath } : {}),
             },
-          ],
-        };
-      }
-      const result = (data.result ?? {}) as { messageId?: string };
-      return {
-        content: [
+            { text: summary },
+          );
+        }
+        const result = (data.result ?? {}) as { messageId?: string };
+        const summary = `Sent.${result.messageId ? ` Message-ID: ${result.messageId}` : ''}`;
+        return okResult(
+          ActionToolOutputSchema,
           {
-            type: 'text' as const,
-            text: `Sent.${result.messageId ? ` Message-ID: ${result.messageId}` : ''}`,
+            summary,
+            status: 'sent',
+            draftId,
+            ...(result.messageId ? { messageId: result.messageId } : {}),
           },
-        ],
-      };
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`send_email failed: ${unwrapApiError(err)}`);
+      }
     },
   );
 }
@@ -554,10 +669,7 @@ if (process.env.GEZEL_SCRIPT_TOOLS) {
   registerScriptTools(server, parseScriptToolSpecs(process.env.GEZEL_SCRIPT_TOOLS), {
     api,
     projectId,
-    reservedNames: new Set<string>([
-      ...ALWAYS_REGISTERED_TOOLS,
-      ...Object.keys(CONDITIONALLY_REGISTERED_TOOLS),
-    ]),
+    reservedNames: new Set<string>(RESERVED_TOOL_NAMES),
   });
 }
 
@@ -577,23 +689,29 @@ function registerConnectorTools() {
       input: z.record(z.string(), z.unknown()).optional().describe('Action payload'),
     },
     async (args) => {
-      const { ok, data } = await connectorActionApi(
-        `${encodeURIComponent(args.bindingId)}/actions`,
-        'POST',
-        { action: args.action, input: args.input },
-      );
-      if (!ok)
-        return {
-          content: [{ type: 'text' as const, text: `ERROR: ${data.error ?? 'draft failed'}` }],
-        };
-      return {
-        content: [
+      try {
+        const { ok, data } = await connectorActionApi(
+          `${encodeURIComponent(args.bindingId)}/actions`,
+          'POST',
+          { action: args.action, input: args.input },
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Connector action draft failed.'));
+        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Action drafted${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. The user reviews and commits it — you cannot commit it yourself.`;
+        return okResult(
+          ActionToolOutputSchema,
           {
-            type: 'text' as const,
-            text: `Action drafted (id: ${data.draftId}) at ${data.relPath}. The user reviews and commits it — you cannot commit it yourself.`,
+            summary,
+            status: 'drafted',
+            ...(draftId ? { draftId } : {}),
+            ...(relPath ? { relPath } : {}),
           },
-        ],
-      };
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`draft_connector_action failed: ${unwrapApiError(err)}`);
+      }
     },
   );
 }
@@ -621,30 +739,81 @@ server.tool(
     try {
       const res = await api.listProjectWorkspace(projectId, path ?? '', false);
       const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
-      return { content: [{ type: 'text' as const, text: listing || 'Empty directory.' }] };
+      const summary = res.files.length
+        ? `Listed ${res.files.length} ${res.files.length === 1 ? 'entry' : 'entries'}.`
+        : 'Empty directory.';
+      return okResult(
+        ListToolOutputSchema,
+        { summary, items: res.files, count: res.files.length },
+        { text: listing ? `${summary}\n${listing}` : summary },
+      );
     } catch (err) {
-      return { content: [{ type: 'text' as const, text: unwrapApiError(err) }], isError: true };
+      return errorResult(`list_dir failed: ${unwrapApiError(err)}`);
     }
   },
 );
 
 server.tool(
   'read_file',
-  "Read a file's contents from the project. Use this to understand code, configs, or documentation. Output is shown with `N→` line-number gutters so you can target edits by line (e.g. with `replace_lines`). **The `N→` gutter is a display aid, NOT part of the file** — never copy it into `find`/`replace` or `write_file` content. Pass `raw: true` to get the bytes without gutters.",
+  'Read one workspace file, optionally only an inclusive line range. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
   {
-    path: z.string().describe('File path relative to the project root.'),
+    path: z.string().min(1).max(4096).describe('File path relative to the project root.'),
+    startLine: z
+      .number()
+      .int()
+      .min(1)
+      .max(10_000_000)
+      .optional()
+      .describe('1-based first line to return (inclusive). Defaults to 1.'),
+    endLine: z
+      .number()
+      .int()
+      .min(1)
+      .max(10_000_000)
+      .optional()
+      .describe(
+        `1-based last line to return (inclusive). Maximum ${WORKSPACE_READ_MAX_RANGE_LINES} lines per ranged read; omit to read the next bounded chunk.`,
+      ),
     raw: z
       .boolean()
       .optional()
       .describe('Return the file content without `N→` line-number gutters. Default false.'),
   },
-  async ({ path, raw }) => {
+  async ({ path, startLine, endLine, raw }) => {
     try {
-      const res = await api.readProjectWorkspaceFile(projectId, path);
-      return {
-        content: [
-          { type: 'text' as const, text: raw ? res.content : withLineNumbers(res.content) },
+      const rangeError = workspaceReadRangeError({ startLine, endLine });
+      if (rangeError) throw new Error(rangeError);
+      if (raw && (startLine !== undefined || endLine !== undefined)) {
+        throw new Error(
+          '`raw: true` cannot be combined with a line range; omit `raw` for a numbered range',
+        );
+      }
+      // No range stays on the long-standing full-read route. Besides wire
+      // compatibility, raw full reads are used internally by the source-write
+      // guard and must remain byte-for-byte text without pagination metadata.
+      if (startLine === undefined && endLine === undefined) {
+        const res = await api.readProjectWorkspaceFile(projectId, path);
+        return {
+          content: [
+            { type: 'text' as const, text: raw ? res.content : withLineNumbers(res.content) },
+          ],
+        };
+      }
+
+      const response = await api.toolReadWorkspaceFiles(projectId, {
+        files: [
+          {
+            path,
+            ...(startLine !== undefined ? { startLine } : {}),
+            ...(endLine !== undefined ? { endLine } : {}),
+          },
         ],
+      });
+      const result = response.results[0];
+      if (!result) throw new Error('ranged read returned no result');
+      if (result.status === 'error') throw new Error(`[${result.code}] ${result.error}`);
+      return {
+        content: [{ type: 'text' as const, text: formatWorkspaceRead(result, raw === true) }],
       };
     } catch (err) {
       const base = unwrapApiError(err);
@@ -681,6 +850,144 @@ server.tool(
 );
 
 server.tool(
+  'read_files',
+  `Read up to ${WORKSPACE_READ_MAX_FILES} known workspace files or line ranges in one call. Pass simple \`paths\` for whole-file first chunks, or richer \`files\` entries with inclusive startLine/endLine ranges; pass exactly one of those fields. Use this for independent files you already identified and grep_files/find_files first when paths are unknown. Results stay in request order and report item-level errors without discarding successful reads.`,
+  {
+    files: z
+      .array(
+        z.object({
+          path: z.string().min(1).max(4096).describe('Workspace-relative file path.'),
+          startLine: z
+            .number()
+            .int()
+            .min(1)
+            .max(10_000_000)
+            .optional()
+            .describe('1-based first line to return (inclusive). Defaults to 1.'),
+          endLine: z
+            .number()
+            .int()
+            .min(1)
+            .max(10_000_000)
+            .optional()
+            .describe(
+              `1-based last line to return (inclusive); at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines.`,
+            ),
+        }),
+      )
+      .min(1)
+      .max(WORKSPACE_READ_MAX_FILES)
+      .optional()
+      .describe('Files/ranges to read, in the order their results should be returned.'),
+    paths: z
+      .array(z.string().min(1).max(4096))
+      .min(1)
+      .max(WORKSPACE_READ_MAX_FILES)
+      .optional()
+      .describe(
+        'Simple workspace-relative paths. Use `files` instead when any path needs a range.',
+      ),
+  },
+  async ({ files, paths }) => {
+    try {
+      if ((files === undefined) === (paths === undefined)) {
+        throw new Error('pass exactly one of `paths` or `files`');
+      }
+      const requests: WorkspaceReadFileRequest[] = files ?? paths?.map((path) => ({ path })) ?? [];
+      for (const request of requests) {
+        const rangeError = workspaceReadRangeError(request);
+        if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
+      }
+      const response = await api.toolReadWorkspaceFiles(projectId, { files: requests });
+      const index = response.results.map((result, index) => {
+        if (result.status === 'error') {
+          return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
+        }
+        const next = result.nextStartLine ? ` nextStartLine=${result.nextStartLine}` : '';
+        return `${index + 1} OK ${result.path} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}${next}`;
+      });
+      const sections = response.results.map((result) => {
+        if (result.status === 'error') {
+          return `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`;
+        }
+        const range = workspaceReadRangeLabel(result);
+        const body = withLineNumbers(result.content, result.startLine) || '(no lines returned)';
+        const hint = workspaceReadHint(result);
+        return `--- ${result.path} (${range}) ---\n${body}${hint}`;
+      });
+      const allFailed =
+        response.results.length > 0 && response.results.every((r) => r.status === 'error');
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `[read_files requested=${response.results.length} ok=${response.results.filter((r) => r.status === 'ok').length} errors=${response.results.filter((r) => r.status === 'error').length}]\n${index.join('\n')}\n\n${sections.join('\n\n')}`,
+          },
+        ],
+        structuredContent: {
+          results: response.results.map((result) =>
+            result.status === 'ok'
+              ? {
+                  path: result.path,
+                  status: result.status,
+                  startLine: result.startLine,
+                  endLine: result.endLine,
+                  completeFile: result.completeFile,
+                }
+              : { path: result.path, status: result.status, code: result.code },
+          ),
+        },
+        ...(allFailed ? { isError: true } : {}),
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `read_files failed: ${unwrapApiError(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+function formatWorkspaceRead(result: WorkspaceReadFileSuccess, raw: boolean): string {
+  const body = raw ? result.content : withLineNumbers(result.content, result.startLine);
+  if (raw) return body;
+  return `[read_file path=${JSON.stringify(result.path)} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}]\n${body || '(no lines returned)'}${workspaceReadHint(result)}`;
+}
+
+function workspaceReadRangeLabel(result: WorkspaceReadFileSuccess): string {
+  const total = result.totalLines === undefined ? '?' : String(result.totalLines);
+  if (result.linesReturned === 0) return `lines=none totalLines=${total}`;
+  return `lines=${result.startLine}-${result.endLine} totalLines=${total}`;
+}
+
+function workspaceReadHint(result: WorkspaceReadFileSuccess): string {
+  if (result.nextStartLine === undefined && !result.truncated) return '';
+  const parts: string[] = [];
+  if (result.nextStartLine !== undefined) {
+    const nextEnd = result.nextStartLine + WORKSPACE_READ_MAX_RANGE_LINES - 1;
+    parts.push(
+      `next: read_file({"path":${JSON.stringify(result.path)},"startLine":${result.nextStartLine},"endLine":${nextEnd}})`,
+    );
+  }
+  if (result.truncationReason) parts.push(`truncated=${result.truncationReason}`);
+  return `\n\n…[${parts.join('; ')}]`;
+}
+
+function workspaceReadRangeError(args: {
+  startLine?: number;
+  endLine?: number;
+}): string | null {
+  const start = args.startLine ?? 1;
+  if (args.endLine !== undefined && args.endLine < start) {
+    return `endLine (${args.endLine}) must be greater than or equal to startLine (${start})`;
+  }
+  if (args.endLine !== undefined && args.endLine - start + 1 > WORKSPACE_READ_MAX_RANGE_LINES) {
+    return `a read range may contain at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines`;
+  }
+  return null;
+}
+
+server.tool(
   'stat',
   "Return metadata (kind, size, mtime) about a path in the project, or `missing` if it doesn't exist. Cheap existence probe before a write — use this to avoid accidentally overwriting a file. Mirrors Node's `fs.stat`.",
   {
@@ -695,9 +1002,19 @@ server.tool(
           : res.kind === 'dir'
             ? `dir: ${path}${res.mtime ? ` (mtime ${res.mtime})` : ''}`
             : `file: ${path} (${res.size ?? 0} bytes${res.mtime ? `, mtime ${res.mtime}` : ''})`;
-      return { content: [{ type: 'text' as const, text }] };
+      return okResult(
+        StatToolOutputSchema,
+        {
+          summary: text,
+          path,
+          kind: res.kind,
+          ...(res.size !== undefined ? { size: res.size } : {}),
+          ...(res.mtime ? { mtime: res.mtime } : {}),
+        },
+        { text },
+      );
     } catch (err) {
-      return { content: [{ type: 'text' as const, text: unwrapApiError(err) }], isError: true };
+      return errorResult(`stat failed: ${unwrapApiError(err)}`);
     }
   },
 );
@@ -1916,16 +2233,23 @@ server.tool(
       if (declined.length > 0)
         lines.push(`Declined: ${declined.join('; ')}. Try a different approach for these.`);
       if (failed.length > 0) lines.push(`Failed: ${failed.join('; ')}`);
-      const isError = installed.length === 0 && pending.length === 0 && failed.length > 0;
-      return {
-        content: [{ type: 'text' as const, text: lines.join('\n\n') || 'No packages processed.' }],
-        ...(isError ? { isError: true } : {}),
-      };
+      const isError =
+        installed.length === 0 &&
+        pending.length === 0 &&
+        (declined.length > 0 || failed.length > 0);
+      const text = lines.join('\n\n') || 'No packages processed.';
+      if (isError) return errorResult(text);
+      return okResult(
+        ListToolOutputSchema,
+        {
+          summary: `Processed ${res.results.length} package ${res.results.length === 1 ? 'request' : 'requests'}.`,
+          items: res.results,
+          count: res.results.length,
+        },
+        { text },
+      );
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
@@ -1938,33 +2262,36 @@ server.tool(
     try {
       const res = await api.listPackageScripts(projectId);
       const entries = Object.entries(res.scripts);
-      if (entries.length === 0) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'No scripts defined in package.json. Add some, or use `run_npx` for a locally installed binary.',
-            },
-          ],
-        };
-      }
       const lines = entries.map(([name, body]) => `  ${name}: ${body}`);
       const header = res.packageManager
         ? `Scripts (packageManager: ${res.packageManager}):`
         : 'Scripts:';
-      return { content: [{ type: 'text' as const, text: `${header}\n${lines.join('\n')}` }] };
+      const summary = entries.length
+        ? `Listed ${entries.length} package ${entries.length === 1 ? 'script' : 'scripts'}.`
+        : 'No scripts defined in package.json.';
+      return okResult(
+        ListToolOutputSchema,
+        {
+          summary,
+          items: entries.map(([name, command]) => ({ name, command })),
+          count: entries.length,
+          ...(res.packageManager ? { packageManager: res.packageManager } : {}),
+        },
+        {
+          text: entries.length
+            ? `${summary}\n${header}\n${lines.join('\n')}`
+            : `${summary} Add some, or use \`run_npx\` for a locally installed binary.`,
+        },
+      );
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
 
 server.tool(
   'run_package_script',
-  "Run a `package.json` script (equivalent to `npm run <script>` / `pnpm run <script>`). Use this to build, test, lint, typecheck — anything the project already has wired up. NOT for the named project scripts `list_scripts` shows (craftbook-installed probes/ops) — run those via `run_script`. Call `list_package_scripts` first if you don't know what's available. First-time invocations of a given script trigger a user approval prompt; once approved the decision sticks. SECURITY: unlike `run_nodejs_script`, package commands are not an isolation boundary. They run as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning and the exact command body.",
+  "Run a `package.json` script (equivalent to `npm run <script>` / `pnpm run <script>`). Use this to build, test, lint, typecheck — anything the project already has wired up. NOT for the named project scripts `list_scripts` shows (craftbook-installed probes/ops) — run those via `run_installed_script`. Call `list_package_scripts` first if you don't know what's available. First-time invocations of a given script trigger a user approval prompt; once approved the decision sticks. SECURITY: unlike `run_nodejs_script`, package commands are not an isolation boundary. They run as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning and the exact command body.",
   {
     script: z.string().describe('Script name — a key of `package.json#scripts` (e.g. "build").'),
     args: coerceStringArray(
@@ -1989,22 +2316,16 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
-      return {
-        content: [{ type: 'text' as const, text: formatCommandResult(`npm run ${script}`, res) }],
-        ...(commandResultIsError(res) ? { isError: true } : {}),
-      };
+      return commandToolResult(`npm run ${script}`, res);
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
 
 server.tool(
   'run_npx',
-  "Run a binary that a project dependency already provides (equivalent to `npx <bin> [args]`). The binary must exist in the workspace's `node_modules/.bin` or be a declared dep — unknown binaries are rejected, no auto-download. NOT for the named project scripts `list_scripts` shows — run those via `run_script`. First-time invocations of a given binary trigger a user approval prompt; once approved the decision sticks. SECURITY: this is a package command, not an isolation boundary. It runs as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning.",
+  "Run a binary that a project dependency already provides (equivalent to `npx <bin> [args]`). The binary must exist in the workspace's `node_modules/.bin` or be a declared dep — unknown binaries are rejected, no auto-download. NOT for the named project scripts `list_scripts` shows — run those via `run_installed_script`. First-time invocations of a given binary trigger a user approval prompt; once approved the decision sticks. SECURITY: this is a package command, not an isolation boundary. It runs as the user's OS account and may spawn processes, use the network, and read or modify files outside the project. The approval dialog shows this warning.",
   {
     bin: z.string().describe('Binary name (e.g. "tsc", "vitest"). Bare name, not a path.'),
     args: coerceStringArray(z.array(z.string()).optional().describe('Args passed to the binary.')),
@@ -2024,15 +2345,9 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
-      return {
-        content: [{ type: 'text' as const, text: formatCommandResult(`npx ${bin}`, res) }],
-        ...(commandResultIsError(res) ? { isError: true } : {}),
-      };
+      return commandToolResult(`npx ${bin}`, res);
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
@@ -2054,7 +2369,9 @@ function formatCommandResult(
     timedOut: boolean;
     error?: string;
     approvalPending?: boolean;
+    questionId?: string;
     declined?: string;
+    resolvedBinPath?: string;
   },
 ): string {
   if (res.approvalPending) {
@@ -2081,9 +2398,36 @@ function formatCommandResult(
   return parts.join('\n');
 }
 
+type CommandToolResponse = Parameters<typeof formatCommandResult>[1];
+
+function commandToolResult(label: string, res: CommandToolResponse) {
+  const text = formatCommandResult(label, res);
+  if (commandResultIsError(res)) return errorResult(text);
+  return okResult(
+    ExecutionToolOutputSchema,
+    {
+      summary: text.split('\n', 1)[0] || `${label} completed.`,
+      state: res.approvalPending ? 'approval_pending' : 'completed',
+      ok: res.ok,
+      code: res.code,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      stdoutTruncated: res.stdoutTruncated,
+      stderrTruncated: res.stderrTruncated,
+      timedOut: res.timedOut,
+      ...(res.error ? { error: res.error } : {}),
+      ...(res.approvalPending !== undefined ? { approvalPending: res.approvalPending } : {}),
+      ...(res.questionId ? { questionId: res.questionId } : {}),
+      ...(res.declined ? { declined: res.declined } : {}),
+      ...(res.resolvedBinPath ? { resolvedBinPath: res.resolvedBinPath } : {}),
+    },
+    { text },
+  );
+}
+
 server.tool(
   'run_nodejs_script',
-  "Run a Node.js / TypeScript script you wrote in the project. **This is how you execute code.** Do NOT paste a script into chat and describe what would happen — that does nothing; call this tool and read the real output. For an installed project script with a name and declared inputs (see `list_scripts`), call `run_script` instead. Only Node is available — do not try to write a shell script (`.sh`, `.ps1`) and run it. The script requires an enforceable sandbox: no child processes, no network, filesystem access limited to the project + artifacts folders, and a 5-minute default timeout. It fails closed on platforms where that boundary is unavailable. TypeScript is supported natively (Node's `--experimental-strip-types`).",
+  "Run a Node.js / TypeScript script you wrote in the project. **This is how you execute code.** Do NOT paste a script into chat and describe what would happen — that does nothing; call this tool and read the real output. For an installed project script with a name and declared inputs (see `list_scripts`), call `run_installed_script` instead. Only Node is available — do not try to write a shell script (`.sh`, `.ps1`) and run it. The script requires an enforceable sandbox: no child processes, no network, filesystem access limited to the project + artifacts folders, and a 5-minute default timeout. It fails closed on platforms where that boundary is unavailable. TypeScript is supported natively (Node's `--experimental-strip-types`).",
   {
     path: z
       .string()
@@ -2108,30 +2452,9 @@ server.tool(
         ...(args ? { args } : {}),
         ...(timeoutMs ? { timeoutMs } : {}),
       });
-      const heading = res.ok
-        ? `✓ ${path} completed (exit ${res.code})`
-        : res.timedOut
-          ? `✗ ${path} timed out`
-          : `✗ ${path} failed (exit ${res.code})`;
-      const parts: string[] = [heading];
-      if (res.error) parts.push(`error: ${res.error}`);
-      if (res.stdout) {
-        parts.push(`stdout${res.stdoutTruncated ? ' (truncated)' : ''}:`);
-        parts.push(res.stdout.trimEnd());
-      }
-      if (res.stderr) {
-        parts.push(`stderr${res.stderrTruncated ? ' (truncated)' : ''}:`);
-        parts.push(res.stderr.trimEnd());
-      }
-      return {
-        content: [{ type: 'text' as const, text: parts.join('\n') }],
-        ...(commandResultIsError(res) ? { isError: true } : {}),
-      };
+      return commandToolResult(path, res);
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
@@ -2188,15 +2511,27 @@ server.tool(
         parts.push(`stderr${res.stderrTruncated ? ' (truncated)' : ''}:`);
         parts.push(res.stderr.trimEnd());
       }
-      return {
-        content: [{ type: 'text' as const, text: parts.join('\n') }],
-        ...(res.ok ? {} : { isError: true }),
-      };
+      const text = parts.join('\n');
+      if (!res.ok) return errorResult(text);
+      return okResult(
+        ExecutionToolOutputSchema,
+        {
+          summary: parts[0] ?? `derive_file wrote ${outputPath}.`,
+          state: 'completed',
+          ok: true,
+          code: res.code,
+          stdout: res.stdout,
+          stderr: res.stderr,
+          stdoutTruncated: res.stdoutTruncated,
+          stderrTruncated: res.stderrTruncated,
+          timedOut: res.timedOut,
+          ...(res.error ? { error: res.error } : {}),
+          ...(res.output ? { output: res.output } : {}),
+        },
+        { text },
+      );
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-        isError: true,
-      };
+      return errorResult(explainWriteFailure(err));
     }
   },
 );
@@ -2232,6 +2567,22 @@ function unwrapApiError(err: unknown): string {
   return message;
 }
 
+/** Recover a concise daemon error from a non-2xx fetch response. */
+async function responseErrorMessage(res: Response): Promise<string> {
+  const body = await res.text().catch(() => '');
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
+      if (typeof parsed.message === 'string' && parsed.message) return parsed.message;
+    } catch {
+      // Plain-text errors are already useful to a model; clamp noisy bodies.
+    }
+    return body.length > 1_000 ? `${body.slice(0, 1_000)}…` : body;
+  }
+  return `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`;
+}
+
 function explainWriteFailure(err: unknown): string {
   // `GezelApiError` carries the server's response body in `details`.
   // Surgical-edit endpoints stash their model-facing message under
@@ -2240,9 +2591,6 @@ function explainWriteFailure(err: unknown): string {
   // HTTP status line, which is useless to the model.
   const detailsMessage = extractApiErrorMessage(err);
   const message = detailsMessage ?? (err instanceof Error ? err.message : String(err));
-  if (/data-subtree-readonly/i.test(message) || /mirrored connector corpora/i.test(message)) {
-    return 'The data/ directory holds mirrored connector corpora (synced email, calendar events, issues) and is read-only to you: editing or deleting a record there causes permanent, silent data loss, because the sync cursor has already advanced past it and it will never be re-fetched. Read these files freely, but write your analysis, summaries, or outputs to another location such as artifacts/ or a different workspace folder. To change something at the source, draft a connector action for the user to approve instead.';
-  }
   if (/workspace-write-denied/i.test(message) || /Gezel writes are disabled/i.test(message)) {
     return `This project's workspace is read-only to gezels. The user pointed the project at an external directory and hasn't enabled writes. Ask the user to open Project → Settings and toggle "Allow gezels to modify the workspace directory." Do not retry until they've done that.`;
   }
@@ -2376,6 +2724,21 @@ function normalizeArtifactPath(path: string): string {
   // and the pathological `artifacts/artifacts/` case).
   while (/^artifacts\/+/i.test(p)) p = p.replace(/^artifacts\/+/i, '');
   return p;
+}
+
+/** Connector-managed records under artifacts/data are read-only to gezels. */
+function isProtectedConnectorArtifactPath(path: string): boolean {
+  const segments = normalizeArtifactPath(path)
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.');
+  const collapsed: string[] = [];
+  for (const segment of segments) {
+    if (segment === '..') collapsed.pop();
+    else collapsed.push(segment);
+  }
+  if (collapsed[0]?.toLowerCase() !== 'data') return false;
+  return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
 }
 
 function normalizeExpectedWorkspacePath(path: string): string {
@@ -2621,7 +2984,22 @@ server.tool(
       ? await api.listProjectArtifacts(projectId, undefined, true)
       : await api.listProjectArtifacts(projectId, subpath, false);
     const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
-    return { content: [{ type: 'text' as const, text: listing || 'No artifacts yet.' }] };
+    const summary = res.files.length
+      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}.`
+      : 'No artifacts yet.';
+    const truncation = res.truncated
+      ? '\nResults were truncated; narrow `path` or use `recursive: false`.'
+      : '';
+    return okResult(
+      ListToolOutputSchema,
+      {
+        summary,
+        items: res.files,
+        count: res.files.length,
+        ...(res.truncated !== undefined ? { truncated: res.truncated } : {}),
+      },
+      { text: listing ? `${summary}\n${listing}${truncation}` : `${summary}${truncation}` },
+    );
   },
 );
 
@@ -3069,6 +3447,17 @@ server.tool(
   },
   async ({ path, content, force }) => {
     const clean = normalizeArtifactPath(path);
+    if (isProtectedConnectorArtifactPath(clean)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
+          },
+        ],
+        isError: true,
+      };
+    }
     if (!force) {
       const redirected = await redirectExpectedDeliverableWriteToWorkspace(
         clean,
@@ -3141,7 +3530,10 @@ server.tool(
     // `// comment` would eat the next statement when collapsed onto one line
     // (observed corrupting inline JS in the tictactoe eval).
     const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-    await api.writeProjectArtifact(projectId, clean, stored);
+    await api.writeProjectArtifact(projectId, clean, stored, {
+      ...(gezelId ? { gezelId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}` }] };
   },
 );
@@ -3169,10 +3561,23 @@ server.tool(
       : `✗ ${path} failed${res.error ? ` (${res.error})` : ''}.`;
     // Log gets truncated at the service layer; still clamp here in case
     // the MCP framing struggles with very large replies.
-    const tail = res.log.length > 30_000 ? res.log.slice(-30_000) : res.log;
-    return {
-      content: [{ type: 'text' as const, text: `${heading}\n\n${tail}` }],
-    };
+    const locallyTruncated = res.log.length > 30_000;
+    const tail = locallyTruncated ? res.log.slice(-30_000) : res.log;
+    const text = `${heading}\n\n${tail}`;
+    if (!res.ok) return errorResult(text);
+    return okResult(
+      ExecutionToolOutputSchema,
+      {
+        summary: heading,
+        state: 'completed',
+        ok: true,
+        stdout: tail,
+        stdoutTruncated: locallyTruncated,
+        ...(res.error ? { error: res.error } : {}),
+        output: { path, ...(mode ? { mode } : {}) },
+      },
+      { text },
+    );
   },
 );
 
@@ -3182,13 +3587,17 @@ server.tool(
   {},
   async () => {
     const project = await api.getProject(projectId);
-    if (!project.packages.length) {
-      return { content: [{ type: 'text' as const, text: 'No packages installed.' }] };
-    }
     const listing = project.packages
       .map((p: { name: string; version: string }) => `${p.name}@${p.version}`)
       .join('\n');
-    return { content: [{ type: 'text' as const, text: listing }] };
+    const summary = project.packages.length
+      ? `Listed ${project.packages.length} installed ${project.packages.length === 1 ? 'package' : 'packages'}.`
+      : 'No packages installed.';
+    return okResult(
+      ListToolOutputSchema,
+      { summary, items: project.packages, count: project.packages.length },
+      { text: listing ? `${summary}\n${listing}` : summary },
+    );
   },
 );
 
@@ -3203,11 +3612,15 @@ server.tool(
   },
   async ({ path, recursive }) => {
     const res = await api.listDocuments(path ?? '', recursive ?? false);
-    if (!res.files.length) {
-      return { content: [{ type: 'text' as const, text: 'No documents found.' }] };
-    }
     const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
-    return { content: [{ type: 'text' as const, text: listing }] };
+    const summary = res.files.length
+      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'document entry' : 'document entries'}.`
+      : 'No documents found.';
+    return okResult(
+      ListToolOutputSchema,
+      { summary, items: res.files, count: res.files.length },
+      { text: listing ? `${summary}\n${listing}` : summary },
+    );
   },
 );
 
@@ -3268,20 +3681,26 @@ server.tool(
   async ({ q, limit }) => {
     const res = await api.searchDocuments({ q, maxResults: limit ?? 10 });
     if (res.engine === 'unavailable') {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'Document content search is unavailable on this install.',
-          },
-        ],
-      };
-    }
-    if (!res.results.length) {
-      return { content: [{ type: 'text' as const, text: 'No documents match.' }] };
+      return errorResult('Document content search is unavailable on this install.', {
+        code: 'search_unavailable',
+        retryable: false,
+        hint: 'Use list_documents and read_document instead.',
+      });
     }
     const lines = res.results.map((r) => `${r.path}:${r.lineStart}: ${r.snippet}`);
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    const summary = res.results.length
+      ? `Found ${res.results.length} matching ${res.results.length === 1 ? 'document' : 'documents'}.`
+      : 'No documents match.';
+    return okResult(
+      SearchToolOutputSchema,
+      {
+        summary,
+        query: q,
+        matches: res.results,
+        count: res.results.length,
+      },
+      { text: lines.length ? `${summary}\n${lines.join('\n')}` : summary },
+    );
   },
 );
 
@@ -3293,16 +3712,20 @@ server.tool(
   {},
   async () => {
     const res = await api.listGezels();
-    if (!res.gezels.length) {
-      return { content: [{ type: 'text' as const, text: 'No gezels yet.' }] };
-    }
     const listing = res.gezels
       .map(
         (g: { id: string; name: string; role?: string }) =>
           `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`,
       )
       .join('\n');
-    return { content: [{ type: 'text' as const, text: listing }] };
+    const summary = res.gezels.length
+      ? `Listed ${res.gezels.length} ${res.gezels.length === 1 ? 'gezel' : 'gezels'}.`
+      : 'No gezels yet.';
+    return okResult(
+      ListToolOutputSchema,
+      { summary, items: res.gezels, count: res.gezels.length },
+      { text: listing ? `${summary}\n${listing}` : summary },
+    );
   },
 );
 
@@ -4087,23 +4510,12 @@ server.tool(
           ],
         };
       case 'not-found':
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `No discovered skill at "${source}". Call import_skill with no arguments to list the discoverable skills.`,
-            },
-          ],
-        };
+        return errorResult(
+          `No discovered skill at "${source}". Call import_skill with no arguments to list the discoverable skills.`,
+          { code: 'skill_not_found', retryable: true },
+        );
       default:
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Conversion failed.${notes || ' See the service log.'}`,
-            },
-          ],
-        };
+        return errorResult(`Conversion failed.${notes || ' See the service log.'}`);
     }
   },
 );
@@ -5665,14 +6077,10 @@ server.tool(
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `ask_user_question failed: ${message}. Retry the call with corrected arguments — \`question\` must be a non-empty string and \`choices\` (when used) must be a real JSON array like \`["A","B","C"]\` (not a stringified one). Do NOT fall back to asking the question in prose; the user's notification depends on this tool firing.`,
-          },
-        ],
-      };
+      return errorResult(
+        `ask_user_question failed: ${message}. Retry the call with corrected arguments — \`question\` must be a non-empty string and \`choices\` (when used) must be a real JSON array like \`["A","B","C"]\` (not a stringified one). Do NOT fall back to asking the question in prose; the user's notification depends on this tool firing.`,
+        { retryable: true },
+      );
     }
   },
 );
@@ -5683,9 +6091,6 @@ server.tool(
   {},
   async () => {
     const res = await api.listProjects({ rollup: true });
-    if (!res.projects.length) {
-      return { content: [{ type: 'text' as const, text: 'No projects yet.' }] };
-    }
     const listing = res.projects
       .map(
         (p: {
@@ -5705,7 +6110,14 @@ server.tool(
         },
       )
       .join('\n');
-    return { content: [{ type: 'text' as const, text: listing }] };
+    const summary = res.projects.length
+      ? `Listed ${res.projects.length} ${res.projects.length === 1 ? 'project' : 'projects'}.`
+      : 'No projects yet.';
+    return okResult(
+      ListToolOutputSchema,
+      { summary, items: res.projects, count: res.projects.length },
+      { text: listing ? `${summary}\n${listing}` : summary },
+    );
   },
 );
 
@@ -7155,12 +7567,18 @@ server.tool(
             ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
             : undefined,
         );
-    if (!res.tasks.length) {
-      return { content: [{ type: 'text' as const, text: 'No tasks match.' }] };
-    }
-    return {
-      content: [{ type: 'text' as const, text: res.tasks.map(formatTaskLine).join('\n') }],
-    };
+    const summary = res.tasks.length
+      ? `Listed ${res.tasks.length} matching ${res.tasks.length === 1 ? 'task' : 'tasks'}.`
+      : 'No tasks match.';
+    return okResult(
+      TaskToolOutputSchema,
+      { summary, operation: 'list', tasks: res.tasks, count: res.tasks.length },
+      {
+        text: res.tasks.length
+          ? `${summary}\n${res.tasks.map(formatTaskLine).join('\n')}`
+          : summary,
+      },
+    );
   },
 );
 
@@ -7170,7 +7588,17 @@ server.tool(
   { ref: z.string().describe('Task ref, e.g. "marketing/7"') },
   async ({ ref }) => {
     const t = await api.getTaskByRef(ref);
-    return { content: [{ type: 'text' as const, text: JSON.stringify(t, null, 2) }] };
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: `Loaded task ${t.ref}.`,
+        operation: 'get',
+        ref: t.ref,
+        status: t.status,
+        task: t,
+      },
+      { text: `Loaded task ${t.ref}.\n${JSON.stringify(t, null, 2)}` },
+    );
   },
 );
 
@@ -7367,14 +7795,18 @@ server.tool(
         : created.craftbook.steps.length > 0 && assigneeGezelId && assigneeGezelId !== gezelId
           ? `\n\n${assigneeGezelId} has NOT been engaged. Prefer \`dispatch: true\` on create_task so the assignee starts in a task-scoped session with the step contract in-prompt. For this already-created task, call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }) to brief them.`
           : '';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Created ${created.ref} — "${created.title}" with ${created.craftbook.steps.length} step(s).${spawnNote}${fanoutNote}${kickoff}`,
-          },
-        ],
-      };
+      const text = `Created ${created.ref} — "${created.title}" with ${created.craftbook.steps.length} step(s).${spawnNote}${fanoutNote}${kickoff}`;
+      return okResult(
+        TaskToolOutputSchema,
+        {
+          summary: `Created task ${created.ref}.`,
+          operation: 'create',
+          ref: created.ref,
+          status: created.status,
+          task: created,
+        },
+        { text },
+      );
     } catch (err) {
       // Surface the route's actionable Zod-shaped reason instead of
       // the generic "API error 500". With the global onError handler
@@ -7382,10 +7814,7 @@ server.tool(
       // and the model gets a path-level "craftbookId: exactly one of
       // craftbookId or steps must be provided" message — enough to
       // self-correct on the next call.
-      return {
-        content: [{ type: 'text' as const, text: `create_task failed: ${unwrapApiError(err)}` }],
-        isError: true,
-      };
+      return errorResult(`create_task failed: ${unwrapApiError(err)}`);
     }
   },
 );
@@ -7427,26 +7856,28 @@ server.tool(
         craftbookParams: { draftRef: draft.ref, goal },
         assignee,
       });
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Drafting a plan in ${draft.ref}. The authoring task ${authoring.ref} (plan craftbook) will frame the goal, set outcomes, design gated build steps, and add a verification step. When it is ready, review the draft and call activate_task({ ref: "${draft.ref}" }) to run it.`,
-          },
-        ],
-      };
+      const text = `Drafting a plan in ${draft.ref}. The authoring task ${authoring.ref} (plan craftbook) will frame the goal, set outcomes, design gated build steps, and add a verification step. When it is ready, review the draft and call activate_task({ ref: "${draft.ref}" }) to run it.`;
+      return okResult(
+        TaskToolOutputSchema,
+        {
+          summary: `Created draft plan ${draft.ref} and authoring task ${authoring.ref}.`,
+          operation: 'start_plan',
+          ref: draft.ref,
+          status: draft.status,
+          task: draft,
+          details: { authoringTask: authoring },
+        },
+        { text },
+      );
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: `start_plan failed: ${unwrapApiError(err)}` }],
-        isError: true,
-      };
+      return errorResult(`start_plan failed: ${unwrapApiError(err)}`);
     }
   },
 );
 
 server.tool(
   'update_task',
-  'Update a task — change title, description, plan, assignee, cron, or fanout. Pass `cron: ""` to clear the schedule. Fanout cannot be edited after it has materialized. The craftbook itself (steps/edges) is set at create time and not updated through this tool — modify steps via add_task_step / advance_task_step / update_task_step.',
+  'Update a task — change title, description, plan, assignee, cron, or fanout. Pass `cron: ""` to clear the schedule. Fanout cannot be edited after it has materialized. The craftbook itself (steps/edges) is set at create time and not updated through this tool. Use `add_task_step` to append a task step; use `advance_task_step` to complete a step and follow the existing graph. Existing step definitions and edges require a craftbook-authoring session.',
   {
     ref: z.string(),
     title: z.string().optional(),
@@ -7483,13 +7914,23 @@ server.tool(
         ...(fanout.variations ? { variations: fanout.variations } : {}),
       };
     }
-    await api.updateTask(parsed.projectId, parsed.num, body as never);
+    const updated = await api.updateTask(parsed.projectId, parsed.num, body as never);
     const assigneeGezelId = nextAssignee?.kind === 'gezel' ? nextAssignee.gezelId : null;
     const kickoff =
       assigneeGezelId && assigneeGezelId !== gezelId
         ? `\n\n${assigneeGezelId} has NOT been notified. Call message_gezel({ gezel: "${assigneeGezelId}", project: "${parsed.projectId}", message: "task ${ref} - <specific shippable ask>" }) now to actually kick them off. Writing task notes or changing assignee does not notify them.`
         : '';
-    return { content: [{ type: 'text' as const, text: `Updated ${ref}${kickoff}` }] };
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: `Updated task ${ref}.`,
+        operation: 'update',
+        ref,
+        status: updated.status,
+        task: updated,
+      },
+      { text: `Updated ${ref}${kickoff}` },
+    );
   },
 );
 
@@ -7505,21 +7946,25 @@ server.tool(
   async ({ task, outcomes }) => {
     const parsed = parseRef(task || sessionTaskRef);
     const list: Outcome[] = (outcomes ?? []).map((text, i) => ({ id: `o${i + 1}`, text }));
-    await api.updateTask(parsed.projectId, parsed.num, { outcomes: list } as never);
+    const updated = await api.updateTask(parsed.projectId, parsed.num, { outcomes: list } as never);
     const ref = `${parsed.projectId}/${parsed.num}`;
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text:
-            list.length === 0
-              ? `Cleared outcomes on ${ref}.`
-              : `Set ${list.length} outcome(s) on ${ref}:\n${list
-                  .map((o) => `- ${o.id}: ${o.text}`)
-                  .join('\n')}`,
-        },
-      ],
-    };
+    const text =
+      list.length === 0
+        ? `Cleared outcomes on ${ref}.`
+        : `Set ${list.length} outcome(s) on ${ref}:\n${list
+            .map((o) => `- ${o.id}: ${o.text}`)
+            .join('\n')}`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: list.length === 0 ? `Cleared outcomes on ${ref}.` : `Set outcomes on ${ref}.`,
+        operation: 'set_outcomes',
+        ref,
+        status: updated.status,
+        task: updated,
+      },
+      { text },
+    );
   },
 );
 
@@ -7540,27 +7985,29 @@ server.tool(
     const t = await api.getTask(parsed.projectId, parsed.num);
     const existing = t.outcomes ?? [];
     if (!existing.some((o) => o.id === id)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `No outcome "${id}" on ${ref}. Existing: ${existing.map((o) => o.id).join(', ') || '(none)'}.`,
-          },
-        ],
-        isError: true,
-      };
+      return errorResult(
+        `No outcome "${id}" on ${ref}. Existing: ${existing.map((o) => o.id).join(', ') || '(none)'}.`,
+      );
     }
     const outcomes: Outcome[] = existing.map((o) =>
       o.id === id
         ? { ...o, met, ...(evidence ? { evidence } : {}), verifiedAt: new Date().toISOString() }
         : o,
     );
-    await api.updateTask(parsed.projectId, parsed.num, { outcomes } as never);
-    return {
-      content: [
-        { type: 'text' as const, text: `Outcome ${id} on ${ref} → ${met ? 'met' : 'not met'}.` },
-      ],
-    };
+    const updated = await api.updateTask(parsed.projectId, parsed.num, { outcomes } as never);
+    const summary = `Outcome ${id} on ${ref} → ${met ? 'met' : 'not met'}.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'verify_outcome',
+        ref,
+        status: updated.status,
+        task: updated,
+        details: { outcomeId: id, met, ...(evidence ? { evidence } : {}) },
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -7590,7 +8037,7 @@ server.tool(
     });
     const newStep = afterAdd.craftbook.steps.find((s) => !beforeIds.has(s.id));
     if (!newStep) throw new Error('failed to add verification step');
-    await api.updateTaskStep(parsed.projectId, parsed.num, newStep.id, {
+    const { task: updated } = await api.updateTaskStep(parsed.projectId, parsed.num, newStep.id, {
       gate: {
         at: 'completion',
         scripts: [{ name: 'checkOutcomesMet', scope: 'standard', inputs: {} }],
@@ -7598,14 +8045,20 @@ server.tool(
         maxAttempts: 4,
       },
     });
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Added terminal verification step "${stepName}" (${newStep.id}) to ${parsed.projectId}/${parsed.num}, gated by checkOutcomesMet.`,
-        },
-      ],
-    };
+    const ref = `${parsed.projectId}/${parsed.num}`;
+    const summary = `Added terminal verification step "${stepName}" (${newStep.id}) to ${ref}, gated by checkOutcomesMet.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'add_verification_step',
+        ref,
+        status: updated.status,
+        stepId: newStep.id,
+        task: updated,
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -7637,14 +8090,18 @@ server.tool(
       ...(variations ? { variations } : {}),
     });
     const childRefs = result.children.map((c) => c.ref).join(', ');
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Spawned ${result.children.length} instance(s) from ${ref}: ${childRefs}`,
-        },
-      ],
-    };
+    const summary = `Spawned ${result.children.length} instance(s) from ${ref}.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'spawn_instances',
+        ref,
+        tasks: result.children,
+        count: result.children.length,
+      },
+      { text: `${summary}${childRefs ? ` ${childRefs}` : ''}` },
+    );
   },
 );
 
@@ -7662,12 +8119,24 @@ server.tool(
       ...(status ? { status } : {}),
       ...(limit ? { limit } : {}),
     });
-    if (!res.tasks.length) {
-      return { content: [{ type: 'text' as const, text: `No children found for ${ref}.` }] };
-    }
-    return {
-      content: [{ type: 'text' as const, text: res.tasks.map(formatTaskLine).join('\n') }],
-    };
+    const summary = res.tasks.length
+      ? `Listed ${res.tasks.length} ${res.tasks.length === 1 ? 'child task' : 'child tasks'} for ${ref}.`
+      : `No children found for ${ref}.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'list_children',
+        ref,
+        tasks: res.tasks,
+        count: res.tasks.length,
+      },
+      {
+        text: res.tasks.length
+          ? `${summary}\n${res.tasks.map(formatTaskLine).join('\n')}`
+          : summary,
+      },
+    );
   },
 );
 
@@ -7705,21 +8174,26 @@ server.tool(
           });
           await api.updateTaskStep(parsed.projectId, parsed.num, step.id, { advanceWhen, gate });
         }
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: [
-                `Recovered from set_task_status on draft task ${ref}: attached ${inferredDeliverable.kind} deliverable gates to ${ungatedBuildSteps.length} ungated build step(s), using ${inferredDeliverable.path}.`,
-                ...ungatedBuildSteps.map((step) =>
-                  setStepDeliverableCall(ref, step.id, inferredDeliverable),
-                ),
-                `Status was not changed; ${ref} remains a draft plan for user review.`,
-                'Do not call set_task_status or activate_task again while authoring the draft. Continue reviewing the plan or hand it to the user for approval.',
-              ].join('\n'),
-            },
-          ],
-        };
+        const updated = await api.getTask(parsed.projectId, parsed.num);
+        const text = [
+          `Recovered from set_task_status on draft task ${ref}: attached ${inferredDeliverable.kind} deliverable gates to ${ungatedBuildSteps.length} ungated build step(s), using ${inferredDeliverable.path}.`,
+          ...ungatedBuildSteps.map((step) =>
+            setStepDeliverableCall(ref, step.id, inferredDeliverable),
+          ),
+          `Status was not changed; ${ref} remains a draft plan for user review.`,
+          'Do not call set_task_status or activate_task again while authoring the draft. Continue reviewing the plan or hand it to the user for approval.',
+        ].join('\n');
+        return okResult(
+          TaskToolOutputSchema,
+          {
+            summary: `Recovered deliverable gates on draft task ${ref}; status remains draft.`,
+            operation: 'recover_draft_gates',
+            ref,
+            status: updated.status,
+            task: updated,
+          },
+          { text },
+        );
       }
       const gateInstructions =
         ungatedBuildSteps.length > 0
@@ -7735,61 +8209,43 @@ server.tool(
               ),
             ].join('\n')
           : 'When the draft is ready and the user approves it, call activate_task instead of set_task_status.';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: [
-              `Cannot change draft task ${ref} with set_task_status.`,
-              'Draft plans stay in draft while you author about, outcomes, gated build steps, and verification.',
-              gateInstructions,
-            ].join('\n'),
-          },
-        ],
-        isError: true,
-      };
+      return errorResult(
+        [
+          `Cannot change draft task ${ref} with set_task_status.`,
+          'Draft plans stay in draft while you author about, outcomes, gated build steps, and verification.',
+          gateInstructions,
+        ].join('\n'),
+      );
     }
     if (status === 'complete') {
       const project = await api.getProject(parsed.projectId);
       const objectives = (project.missionObjectives ?? '').trim();
       const verif = (verification ?? '').trim();
       if (objectives.length > 0 && verif.length === 0) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: [
-                `Cannot mark ${ref} complete yet — project "${project.name}" has mission objectives that need verification before closing.`,
-                '',
-                '## Mission objectives',
-                '',
-                objectives,
-                '',
-                'Re-call `set_task_status` with a `verification` argument: for each objective above, name the artifact path (e.g. `workspace/<project>/index.html`) or task note that proves it is met. If an objective is NOT met, use `status: "paused"` instead and keep working — open a follow-up step (`add_task_step`), advance the phase (`advance_task_step`), or hand off (`assign_task` + `message_gezel`). Don\'t close a mission-objective project on prose alone.',
-              ].join('\n'),
-            },
-          ],
-          isError: true,
-        };
+        return errorResult(
+          [
+            `Cannot mark ${ref} complete yet — project "${project.name}" has mission objectives that need verification before closing.`,
+            '',
+            '## Mission objectives',
+            '',
+            objectives,
+            '',
+            'Re-call `set_task_status` with a `verification` argument: for each objective above, name the artifact path (e.g. `workspace/<project>/index.html`) or task note that proves it is met. If an objective is NOT met, use `status: "paused"` instead and keep working — open a follow-up step (`add_task_step`), advance the phase (`advance_task_step`), or hand off (`assign_task` + `message_gezel`). Don\'t close a mission-objective project on prose alone.',
+          ].join('\n'),
+        );
       }
       if (objectives.length > 0 && missionLooksLikeWorkspaceDeliverable(project.name, objectives)) {
         const deliverables = await listWorkspaceDeliverableFiles(parsed.projectId);
         if (deliverables.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: [
-                  `Cannot mark ${ref} complete yet — project "${project.name}" appears to require a real workspace deliverable, but the workspace has no shippable file yet.`,
-                  '',
-                  'Bootstrap files like package.json, tsconfig.json, and .gitignore do not count. Artifact-only plans or notes also do not count because they are not the user-facing deliverable.',
-                  '',
-                  'Write the actual deliverable with `write_file` first (for browser games/sites, usually `write_file({ path: "index.html", content: "..." })`), or assign/message a developer to do it. Then validate or re-read the workspace file and call `set_task_status` again with verification that cites the workspace path.',
-                ].join('\n'),
-              },
-            ],
-            isError: true,
-          };
+          return errorResult(
+            [
+              `Cannot mark ${ref} complete yet — project "${project.name}" appears to require a real workspace deliverable, but the workspace has no shippable file yet.`,
+              '',
+              'Bootstrap files like package.json, tsconfig.json, and .gitignore do not count. Artifact-only plans or notes also do not count because they are not the user-facing deliverable.',
+              '',
+              'Write the actual deliverable with `write_file` first (for browser games/sites, usually `write_file({ path: "index.html", content: "..." })`), or assign/message a developer to do it. Then validate or re-read the workspace file and call `set_task_status` again with verification that cites the workspace path.',
+            ].join('\n'),
+          );
         }
       }
       if (verif.length > 0) {
@@ -7801,8 +8257,19 @@ server.tool(
         );
       }
     }
-    await api.setTaskStatus(parsed.projectId, parsed.num, status);
-    return { content: [{ type: 'text' as const, text: `${ref} → ${status}` }] };
+    const updated = await api.setTaskStatus(parsed.projectId, parsed.num, status);
+    const summary = `${ref} → ${status}`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'set_status',
+        ref,
+        status: updated.status,
+        task: updated,
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -7816,14 +8283,19 @@ server.tool(
   async ({ ref, force }) => {
     const parsed = parseRef(ref);
     const t = await api.activateTask(parsed.projectId, parsed.num, force === true);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Activated ${ref} — now running at step "${t.activeStepId}".`,
-        },
-      ],
-    };
+    const summary = `Activated ${ref} — now running at step "${t.activeStepId}".`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'activate',
+        ref,
+        status: t.status,
+        ...(t.activeStepId ? { stepId: t.activeStepId } : {}),
+        task: t,
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -7836,15 +8308,23 @@ server.tool(
   },
   async ({ ref, assignee }) => {
     const parsed = parseRef(ref);
-    await api.setTaskAssignee(parsed.projectId, parsed.num, assigneeFromArg(assignee));
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `${ref} assigned to ${assignee.kind === 'user' ? 'the user' : assignee.gezelId}`,
-        },
-      ],
-    };
+    const updated = await api.setTaskAssignee(
+      parsed.projectId,
+      parsed.num,
+      assigneeFromArg(assignee),
+    );
+    const summary = `${ref} assigned to ${assignee.kind === 'user' ? 'the user' : assignee.gezelId}`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'assign',
+        ref,
+        status: updated.status,
+        task: updated,
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -7899,14 +8379,19 @@ server.tool(
     const gateNote = d
       ? ' Its deliverable gate is attached.'
       : ' If this step should produce a file, prefer a `deliverable` (or call set_step_deliverable) so it has an enforced gate.';
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Added step "${name}" to ${ref}. Task craftbook now has ${task.craftbook.steps.length} step(s).${idNote}${gateNote}`,
-        },
-      ],
-    };
+    const text = `Added step "${name}" to ${ref}. Task craftbook now has ${task.craftbook.steps.length} step(s).${idNote}${gateNote}`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: `Added step "${name}" to ${ref}.`,
+        operation: 'add_step',
+        ref,
+        status: task.status,
+        ...(newStep ? { stepId: newStep.id } : {}),
+        task,
+      },
+      { text },
+    );
   },
 );
 
@@ -7944,16 +8429,15 @@ server.tool(
       const diagnosticNote = failedRun
         ? `\nScript diagnostic: ${failedRun.scriptName}${failedRun.runId ? ` (run ${failedRun.runId})` : ''}${failedRun.error ? ` — ${failedRun.error}` : ''}. Full redacted logs are in the task note.`
         : '';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: gate.infrastructureError
-              ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
-              : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
-          },
-        ],
-      };
+      return errorResult(
+        gate.infrastructureError
+          ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
+          : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
+        {
+          code: gate.infrastructureError ? 'gate_infrastructure_error' : 'gate_rejected',
+          retryable: !gate.paused && !gate.infrastructureError,
+        },
+      );
     }
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
@@ -7963,14 +8447,19 @@ server.tool(
       : task.status === 'complete'
         ? ' Task is now complete (terminal step).'
         : ' (No gezel is assigned to the new step, so no handoff was started.)';
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`,
-        },
-      ],
-    };
+    const text = `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: `Completed step "${stepId}" on ${ref}.`,
+        operation: 'advance_step',
+        ref,
+        status: task.status,
+        ...(task.activeStepId ? { stepId: task.activeStepId } : {}),
+        task,
+      },
+      { text },
+    );
   },
 );
 
@@ -7985,9 +8474,19 @@ server.tool(
     const parsed = parseRef(ref);
     const effectiveStep = stepId ?? (sessionStepId || undefined);
     const { notes } = await api.listTaskNotes(parsed.projectId, parsed.num, effectiveStep);
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify({ notes }) }],
-    };
+    const summary = `Loaded ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} for ${ref}${effectiveStep ? `/${effectiveStep}` : ''}.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'read_notes',
+        ref,
+        ...(effectiveStep ? { stepId: effectiveStep } : {}),
+        count: notes.length,
+        details: { notes },
+      },
+      { text: `${summary}\n${JSON.stringify({ notes })}` },
+    );
   },
 );
 
@@ -8011,14 +8510,18 @@ server.tool(
       },
       gezelId ? { actorGezelId: gezelId } : {},
     );
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Appended note ${note.id} to ${ref}${effectiveStep ? `/${effectiveStep}` : ''} at ${note.at}.`,
-        },
-      ],
-    };
+    const summary = `Appended note ${note.id} to ${ref}${effectiveStep ? `/${effectiveStep}` : ''} at ${note.at}.`;
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary,
+        operation: 'write_note',
+        ref,
+        ...(effectiveStep ? { stepId: effectiveStep } : {}),
+        note,
+      },
+      { text: summary },
+    );
   },
 );
 
@@ -8191,11 +8694,10 @@ server.tool(
       maxResults: limit ?? 10,
     });
     if (res.engine === 'unavailable') {
-      return {
-        content: [
-          { type: 'text' as const, text: 'Transcript search is unavailable on this install.' },
-        ],
-      };
+      return errorResult('Transcript search is unavailable on this install.', {
+        code: 'search_unavailable',
+        retryable: false,
+      });
     }
     if (!res.results.length) {
       return { content: [{ type: 'text' as const, text: 'No session transcripts match.' }] };
@@ -8289,14 +8791,10 @@ server.tool(
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Render failed: ${msg}. Check that Chromium has finished installing (it downloads in the background on first boot).`,
-          },
-        ],
-      };
+      return errorResult(
+        `Render failed: ${msg}. Check that Chromium has finished installing (it downloads in the background on first boot).`,
+        { retryable: true },
+      );
     }
   },
 );
@@ -8677,7 +9175,7 @@ server.tool(
       .string()
       .optional()
       .describe(
-        "Voice id (e.g. 'af_heart', 'bm_george'). Defaults to 'af_heart'. Call `listAudioVoices` via the UI to see all available voices.",
+        "Voice id (e.g. 'af_heart', 'bm_george'). Defaults to 'af_heart'. Choose a voice shown in Settings → Audio, or omit this field to use the default.",
       ),
     speed: z
       .number()
@@ -8831,41 +9329,155 @@ server.tool(
 );
 
 server.tool(
-  'search_files',
-  'Search file contents across the project workspace for a pattern. Use this (or `search_code` for search by meaning) to LOCATE things — one search beats reading files one at a time. Prefers `ripgrep` (fast) when installed on the host; falls back to a JS walker otherwise. Skips `node_modules`, `.git`, `dist`. Returns matches with file path, 1-based line number, and line text.',
+  'grep_files',
+  'Find exact text or regex matches in workspace files. Use this to LOCATE names, strings, imports, errors, and tests before reading files one by one; use `search_code` instead when you know the meaning but not the wording. The search is workspace-confined, skips dependency/build folders, and returns grep-style file:line evidence. Literal search works everywhere; regex search requires ripgrep.',
   {
-    pattern: z.string().min(1).describe('Regex or literal string (see `literal`).'),
-    path: z.string().optional().describe('Subpath inside the workspace to scope the search to.'),
-    glob: z.string().optional().describe('Filename filter (e.g. **/*.ts).'),
-    caseInsensitive: z.boolean().optional(),
-    literal: z.boolean().optional().describe('When true, escape regex metacharacters in pattern.'),
-    maxResults: z.number().int().positive().optional(),
+    pattern: z.string().min(1).max(4000).describe('Regex or literal string (see `literal`).'),
+    path: z
+      .string()
+      .max(4096)
+      .optional()
+      .describe('Workspace-relative file or directory to search. Defaults to the project root.'),
+    glob: z
+      .string()
+      .min(1)
+      .max(512)
+      .optional()
+      .describe('Legacy single include glob (e.g. **/*.ts); prefer includeGlobs.'),
+    includeGlobs: z
+      .array(z.string().min(1).max(512))
+      .max(32)
+      .optional()
+      .describe('Only search files matching at least one glob, relative to path.'),
+    excludeGlobs: z
+      .array(z.string().min(1).max(512))
+      .max(32)
+      .optional()
+      .describe('Skip files matching any glob, relative to path. Excludes win over includes.'),
+    caseInsensitive: z.boolean().optional().describe('Ignore letter case. Defaults to false.'),
+    literal: z
+      .boolean()
+      .optional()
+      .describe('Treat pattern as plain text instead of regex. Use this by default when possible.'),
+    contextLines: z
+      .number()
+      .int()
+      .min(0)
+      .max(5)
+      .optional()
+      .describe(
+        'Surrounding lines to return before and after each match (matches mode only; 0-5, default 0).',
+      ),
+    resultMode: z
+      .enum(['matches', 'files', 'count'])
+      .optional()
+      .describe('Return matching lines (default), unique file paths, or a bounded count.'),
+    cursor: z
+      .number()
+      .int()
+      .min(0)
+      .max(10_000)
+      .optional()
+      .describe('Continuation cursor from a prior truncated matches/files response.'),
+    maxResults: z
+      .number()
+      .int()
+      .positive()
+      .max(200)
+      .optional()
+      .describe('Maximum returned matches/files or count ceiling (default 50, max 200).'),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(100)
+      .max(30_000)
+      .optional()
+      .describe('Search deadline in milliseconds (default 10000, max 30000).'),
   },
   async (args) => {
     try {
       const res = await api.toolSearchFiles(projectId, args);
-      const lines = res.matches.map((m) => `${m.path}:${m.line}: ${m.text}`);
-      const header = `${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} (engine=${res.engine}${
-        res.truncated ? ', truncated' : ''
-      })`;
-      return {
-        content: [
-          { type: 'text' as const, text: `${header}\n${lines.join('\n') || '(no matches)'}` },
-        ],
-      };
+      const truncation = res.truncated
+        ? `\nResults truncated (${res.truncationReason ?? 'limit'}).${
+            res.nextCursor !== undefined
+              ? ` Continue with cursor=${res.nextCursor}, or narrow path/includeGlobs/pattern.`
+              : ' Narrow path/includeGlobs/pattern.'
+          }`
+        : '';
+      if (res.mode === 'count') {
+        const qualifier = res.truncated ? 'at least ' : '';
+        const summary = `${qualifier}${res.count} matching line${res.count === 1 ? '' : 's'} (engine=${res.engine}).`;
+        return okResult(
+          SearchToolOutputSchema,
+          {
+            summary,
+            query: args.pattern,
+            matches: [],
+            count: res.count,
+            truncated: res.truncated,
+            engine: res.engine,
+            mode: res.mode,
+            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+          },
+          { text: `${summary}${truncation}` },
+        );
+      }
+      if (res.mode === 'files') {
+        const header = `${res.files.length} matching file${res.files.length === 1 ? '' : 's'} (engine=${res.engine})`;
+        return okResult(
+          SearchToolOutputSchema,
+          {
+            summary: `${header}.`,
+            query: args.pattern,
+            matches: res.files.map((path) => ({ path })),
+            count: res.files.length,
+            truncated: res.truncated,
+            engine: res.engine,
+            mode: res.mode,
+            ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+            ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+          },
+          { text: `${header}\n${res.files.join('\n') || '(none)'}${truncation}` },
+        );
+      }
+      const lines = res.matches.flatMap((match, index) => {
+        const block = [
+          ...(match.before ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
+          `${match.path}:${match.line}:${match.text}`,
+          ...(match.after ?? []).map((line) => `${match.path}-${line.line}-${line.text}`),
+        ];
+        if (index < res.matches.length - 1 && (match.before?.length || match.after?.length)) {
+          block.push('--');
+        }
+        return block;
+      });
+      const header = `${res.matches.length} match${res.matches.length === 1 ? '' : 'es'} (engine=${res.engine})`;
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary: `${header}.`,
+          query: args.pattern,
+          matches: res.matches,
+          count: res.matches.length,
+          truncated: res.truncated,
+          engine: res.engine,
+          mode: res.mode,
+          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+          ...(res.truncationReason ? { truncationReason: res.truncationReason } : {}),
+        },
+        { text: `${header}\n${lines.join('\n') || '(no matches)'}${truncation}` },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_files failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`grep_files failed: ${msg}`);
     }
   },
 );
 
 server.tool(
   'find_files',
-  'Find files in the project workspace by glob (e.g. `**/*.spec.ts`). Complement to `search_files`, which searches contents. Skips `node_modules` and `.git`.',
+  'Find files in the project workspace by glob (e.g. `**/*.spec.ts`). Complement to `grep_files`, which searches contents. Skips `node_modules` and `.git`.',
   {
     glob: z.string().min(1),
     path: z.string().optional(),
@@ -8878,24 +9490,27 @@ server.tool(
       const header = `${res.files.length} file${res.files.length === 1 ? '' : 's'}${
         res.truncated ? ' (truncated)' : ''
       }`;
-      return {
-        content: [
-          { type: 'text' as const, text: `${header}\n${res.files.join('\n') || '(none)'}` },
-        ],
-      };
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary: `${header}.`,
+          query: args.glob,
+          matches: res.files.map((path) => ({ path })),
+          count: res.files.length,
+          truncated: res.truncated,
+        },
+        { text: `${header}\n${res.files.join('\n') || '(none)'}` },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `find_files failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`find_files failed: ${msg}`);
     }
   },
 );
 
 server.tool(
   'outline_file',
-  "Get a file's symbol map — functions, classes, methods, interfaces, or markdown headings — each with a 1-based line range. Call this INSTEAD of read_file when you want to understand a file's shape, and BEFORE read_file on any file over ~200 lines: then read_file only the lineStart..lineEnd of the symbol you care about. Far cheaper than reading the whole file.",
+  "Get a file's symbol map — functions, classes, methods, interfaces, or markdown headings — each with a 1-based line range. Call this INSTEAD of read_file when you want to understand a file's shape, and BEFORE read_file on any file over ~200 lines. For a returned {path,lineStart,lineEnd}, call read_file({path,startLine:lineStart,endLine:lineEnd}). Far cheaper than reading the whole file.",
   {
     path: z.string().min(1).describe('Workspace-relative file path, e.g. src/server.ts.'),
   },
@@ -8975,7 +9590,7 @@ server.tool(
 
 server.tool(
   'find_symbol',
-  'Find where a function/class/type is DEFINED across the workspace (go-to-definition). Returns file path + line range for each definition; follow up with read_symbol or read_file on the returned range. Use this instead of grepping for a definition.',
+  'Find where a function/class/type is DEFINED across the workspace (go-to-definition). Returns path + lineStart/lineEnd; follow with read_symbol or read_file({path,startLine:lineStart,endLine:lineEnd}). Use this instead of grepping for a definition.',
   {
     name: z.string().min(1).describe('Exact symbol name to find.'),
     kind: z
@@ -9116,7 +9731,7 @@ server.tool(
 
 server.tool(
   'search_code',
-  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search (over indexed summaries) with keyword search over symbols and docs. Returns ranked hits with file + line range; follow up with read_symbol or read_file on the range. Use this when you don\'t know the exact name; use find_symbol when you do.',
+  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search with keyword search and returns path + lineStart/lineEnd; follow with read_file({path,startLine:lineStart,endLine:lineEnd}). Use this when you don\'t know the exact name; use find_symbol when you do.',
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     mode: z
@@ -9133,20 +9748,24 @@ server.tool(
         (r) =>
           `${r.path}:${r.lineStart}-${r.lineEnd}  [${r.source}] ${r.name ? `${r.name} — ` : ''}${r.snippet}`,
       );
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `${head}\n${lines.join('\n') || '(no results — index may still be enriching)'}`,
-          },
-        ],
-      };
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary: `${head}.`,
+          query: args.query,
+          matches: res.results,
+          count: res.results.length,
+          truncated: res.truncated,
+          engine: res.engine,
+          mode: args.mode ?? 'auto',
+        },
+        {
+          text: `${head}\n${lines.join('\n') || '(no results — index may still be enriching; use grep_files for deterministic text search)'}`,
+        },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_code failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`search_code failed: ${msg}`);
     }
   },
 );
@@ -9240,7 +9859,7 @@ server.tool(
 
 server.tool(
   'scan_findings',
-  'List static security findings from the index (built-in scanners + any OSS-tool ingestion), filterable by severity, category (injection, command-injection, xss, ssrf, path-traversal, deserialization, crypto, secret, taint-source, auth), path prefix, or source. Each finding gives file:line + a rule id — follow up with read_file on the range or trace_taint to check reachability. These are LEADS, not confirmed vulnerabilities; verify each in the code.',
+  'List static security findings from the index (built-in scanners + any OSS-tool ingestion), filterable by severity, category (injection, command-injection, xss, ssrf, path-traversal, deserialization, crypto, secret, taint-source, auth), path prefix, or source. Each finding gives file:line + a rule id — verify it with a focused read_file({path,startLine,endLine}) or trace_taint. These are LEADS, not confirmed problems.',
   {
     severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
     category: z.string().optional().describe('e.g. injection, ssrf, secret, crypto, taint-source.'),
@@ -9633,14 +10252,10 @@ server.tool(
     try {
       const res = await api.toolReadDocAsMarkdown(projectId, args);
       if (!res.found) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `read_doc_as_markdown: could not convert '${args.path}' (unsupported format or conversion failed).`,
-            },
-          ],
-        };
+        return errorResult(
+          `read_doc_as_markdown: could not convert '${args.path}' (unsupported format or conversion failed).`,
+          { code: 'document_conversion_failed', retryable: false },
+        );
       }
       const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
       return { content: [{ type: 'text' as const, text: `${head}\n---\n${res.markdown ?? ''}` }] };
@@ -9891,7 +10506,7 @@ server.tool(
 
 server.tool(
   'run_git',
-  'Run a read-only git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Args are passed through but rejected if they include `-c`, `--exec`, or `--upload-pack`. Use this instead of asking for a shell.',
+  'Run a restricted git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Most are inspections, but `branch` arguments can create, rename, or delete local refs; use `branch` with no args for inspection, and only pass mutation args when the user explicitly requested that change. Args use a structured argv array rather than a shell and reject `-c`, `--exec`, and `--upload-pack`.',
   {
     subcommand: z.enum([
       'status',
@@ -9913,23 +10528,29 @@ server.tool(
       const status = res.timedOut
         ? `timed out after running \`git ${args.subcommand}\``
         : `exit ${res.code}`;
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `${status}\n--- stdout ---\n${stdout || '(empty)'}${
-              res.stderr ? `\n--- stderr ---\n${res.stderr}` : ''
-            }`,
-          },
-        ],
-        ...(res.code !== 0 || res.timedOut ? { isError: true } : {}),
-      };
+      const text = `${status}\n--- stdout ---\n${stdout || '(empty)'}${
+        res.stderr ? `\n--- stderr ---\n${res.stderr}` : ''
+      }`;
+      if (res.code !== 0 || res.timedOut) return errorResult(text);
+      return okResult(
+        GitToolOutputSchema,
+        {
+          summary: `git ${args.subcommand} completed (exit ${res.code}).`,
+          state: 'completed',
+          ok: true,
+          command: 'git',
+          args: [args.subcommand, ...(args.args ?? [])],
+          code: res.code,
+          stdout: res.stdout,
+          stderr: res.stderr,
+          stdoutTruncated: res.stdoutTruncated,
+          timedOut: res.timedOut,
+        },
+        { text },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `run_git failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`run_git failed: ${msg}`);
     }
   },
 );
@@ -9966,7 +10587,16 @@ server.tool(
         `## Standard library (read-only, scope: "standard")\n${std.scripts.map(fmt).join('\n')}`,
       );
     }
-    return { content: [{ type: 'text' as const, text: sections.join('\n\n') }] };
+    const items = [
+      ...res.scripts.map((script) => ({ ...script, scope: 'project' })),
+      ...std.scripts.map((script) => ({ ...script, scope: 'standard' })),
+    ];
+    const summary = `Listed ${items.length} installed ${items.length === 1 ? 'script' : 'scripts'}.`;
+    return okResult(
+      ListToolOutputSchema,
+      { summary, items, count: items.length },
+      { text: `${summary}\n${sections.join('\n\n')}` },
+    );
   },
 );
 
@@ -10005,10 +10635,7 @@ server.tool(
       return formatScriptRunResult(res);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `run_installed_script failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`run_installed_script failed: ${msg}`);
     }
   },
 );
@@ -10024,15 +10651,25 @@ server.tool(
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
       const run = await api.getProjectScriptRun(resolved, runId);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(run, null, 2) }],
-      };
+      const summary = `Loaded script run ${run.id} — status: ${run.status}.`;
+      return okResult(
+        ExecutionToolOutputSchema,
+        {
+          summary,
+          state:
+            run.status === 'ok' ? 'completed' : run.status === 'running' ? 'running' : 'failed',
+          ok: run.status === 'ok',
+          runId: run.id,
+          calls: run.calls,
+          logs: run.logs,
+          ...(run.output !== undefined ? { output: run.output } : {}),
+          ...(run.error ? { error: run.error } : {}),
+        },
+        { text: `${summary}\n${JSON.stringify(run, null, 2)}` },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: 'text' as const, text: `get_script_run failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`get_script_run failed: ${msg}`);
     }
   },
 );
@@ -10046,21 +10683,34 @@ server.tool(
 
 server.tool(
   'github_pr_list',
-  "List open pull requests on the current project's linked GitHub repo. Returns title, author, branches, and PR number. Use this to find the right PR for a review or ship operation.",
+  "List open pull requests on the current project's linked GitHub repo. Returns title, author, branches, and PR number. When the project has a local checkout, PRs whose head matches the checked-out branch are listed first and explicitly marked as the default. Use this to find the right PR for a review or ship operation.",
   {
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
   },
   async ({ project }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGitHubPulls(resolved);
-      if (!res.pulls.length) {
+      const [res, status] = await Promise.all([
+        api.listProjectGitHubPulls(resolved),
+        api.getProjectGitStatus(resolved).catch(() => null),
+      ]);
+      const prioritized = prioritizePullsForCurrentBranch(res.pulls, status?.branch);
+      if (!prioritized.pulls.length) {
         return { content: [{ type: 'text' as const, text: 'No open pull requests.' }] };
       }
-      const lines = res.pulls.map(
-        (p) =>
-          `#${p.number} — ${p.title} (${p.author}, ${p.headRef} → ${p.baseRef}${p.draft ? ', draft' : ''})\n  ${p.url}`,
-      );
+      const lines = prioritized.pulls.map((p) => {
+        const currentBranchMatch =
+          prioritized.currentBranch && p.headRef === prioritized.currentBranch;
+        return [
+          `#${p.number} — ${p.title} (${p.author}, ${p.headRef} → ${p.baseRef}${p.draft ? ', draft' : ''})`,
+          `  ${p.url}`,
+          ...(currentBranchMatch
+            ? [
+                `  Current branch match${prioritized.matchingCount === 1 ? ' — default' : ''}: ${prioritized.currentBranch}`,
+              ]
+            : []),
+        ].join('\n');
+      });
       return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -10211,7 +10861,7 @@ server.tool(
 
 server.tool(
   'github_pr_create',
-  'Open a new pull request. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch. Returns the new PR number + URL. Push the branch with `commitProjectGit` + `pushProjectGit` first.',
+  'Open a new pull request. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch. Returns the new PR number + URL. The head branch must already exist on the remote; this tool does not commit or push local changes. If needed, ask the user to commit and push it from the project Git UI first.',
   {
     project: z.string().optional(),
     title: z.string().min(1),

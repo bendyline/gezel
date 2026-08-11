@@ -1,5 +1,9 @@
 import { delimiter, dirname, join } from 'node:path';
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  type GezelConfig,
+  createLogger,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
@@ -14,6 +18,7 @@ import {
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
+  planAdaptiveContextGrowth,
   resolveLlamaCppContextRequirement,
 } from '../native/capacity-broker.js';
 import { makeEngineKey } from '../native/engine-key.js';
@@ -96,9 +101,6 @@ export async function buildLlamaCppProvider(opts: {
   config: GezelConfig;
   affinity: boolean | undefined;
   home: string;
-  /** Busy predicate for the supervisor's idle timer — true while any turn is
-   *  in-flight, so an idle-stop can't strand an active session. */
-  isBusy?: () => boolean;
   llamaCppModels?: import('./index.js').LlamaCppModelManager;
   arbiter?: import('../gpu-arbiter.js').GpuArbiter;
   /**
@@ -168,6 +170,14 @@ export async function buildLlamaCppProvider(opts: {
     return undefined;
   })();
   const numCtx = envNumCtx ?? config.llamaCppNumCtx;
+  // Per-model context override (Settings → Local models → Context size…).
+  // More specific than the machine-wide llamaCppNumCtx, still below the env
+  // escape hatch. Consumed by the supervised context resolution below — an
+  // external llama-server owns its own --ctx-size, so the external path
+  // keeps reading `numCtx`.
+  const perModelCtxOverride = defaultModelId
+    ? config.modelContextOverrides?.[`llama-cpp:${defaultModelId}`]
+    : undefined;
   const baseProviderOpts = {
     fetchImpl: createLlamaCppPatientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
@@ -353,16 +363,31 @@ export async function buildLlamaCppProvider(opts: {
     : undefined;
 
   const PREFERRED_CTX_DEFAULT = 65_536;
-  // Explicit env/config numeric values win. Otherwise Adaptive uses the
-  // per-model manifest recommendation (or the 64K practical default), while
-  // Model maximum requests the GGUF's native window and makes it the strict
-  // admission floor. Every path still clamps to the native train context.
+  // Explicit numeric values win: env, then the per-model override, then the
+  // machine-wide config. Otherwise Adaptive uses the per-model manifest
+  // recommendation (or the 64K practical default) and may GROW toward the
+  // native window after admission settles, while Model maximum requests the
+  // GGUF's native window and makes it the strict admission floor. Every
+  // path still clamps to the native train context.
+  const explicitCtx = envNumCtx ?? perModelCtxOverride ?? config.llamaCppNumCtx;
+  const hostFloorTokens = minViableLocalContextTokens();
+  // A per-model override below the host floor is deliberate user intent —
+  // lower the admission floor to the override instead of silently raising
+  // the request back to 64K. Env / machine-wide values keep their
+  // historical floor semantics.
+  const minViableTokens =
+    perModelCtxOverride !== undefined && explicitCtx === perModelCtxOverride
+      ? Math.min(hostFloorTokens, perModelCtxOverride)
+      : hostFloorTokens;
   const contextRequirement = resolveLlamaCppContextRequirement({
     modelContextWindow: modelCatalogInfo?.contextWindow,
-    ...(numCtx !== undefined ? { explicitContextWindow: numCtx } : {}),
+    ...(explicitCtx !== undefined ? { explicitContextWindow: explicitCtx } : {}),
     adaptiveContextWindow: manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT,
+    ...(manifestEngineConfig?.contextSize !== undefined
+      ? { manifestContextSize: manifestEngineConfig.contextSize }
+      : {}),
     contextSizing: config.llamaCppContextSizing ?? 'adaptive',
-    minViableContextTokens: minViableLocalContextTokens(),
+    minViableContextTokens: minViableTokens,
   });
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.
@@ -439,6 +464,9 @@ export async function buildLlamaCppProvider(opts: {
   const ceilingFor = (kv: LlamaCppKvCacheType) =>
     llamaCppSlotCeiling({
       budgetBytes,
+      sizingBudgetBytes: brokerSnap?.enforced
+        ? brokerSnap.pools.concurrencySizingBytes
+        : computeCapacityBudget().concurrencySizingBytes,
       weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
       perTurnCtxTokens: effectiveNumCtx,
       kvCacheType: kv,
@@ -496,8 +524,9 @@ export async function buildLlamaCppProvider(opts: {
   // Captures raw stdout/stderr so users (and bug reports) have a
   // durable record of what the engine was doing. Tee with the
   // default console.log path so dev iteration still sees output live.
-  const { LlamaCppLogFile } = await import('./log.js');
+  const { LlamaCppLogFile, LlamaProgressLogThrottle } = await import('./log.js');
   const logFile = new LlamaCppLogFile(gezelPaths(home).logs);
+  const progressLogThrottle = new LlamaProgressLogThrottle();
 
   // ── Slot-cache persistence (Phase 1.2) ──
   // Per-model directory passed to llama-server's --slot-save-path.
@@ -748,6 +777,14 @@ export async function buildLlamaCppProvider(opts: {
         // hides its SWA layout — null (no safe estimate; launch untouched,
         // the pre-windowed-admission behavior).
         let ladderPlan: typeof admission | null = admission;
+        // The per-slot KV linearization the accepted plan priced with, so
+        // the growth pass below cannot disagree with admission about the
+        // same launch. Windowed branch swaps in its slope + fixed block;
+        // the no-safe-estimate branch nulls it (no growth either).
+        let ladderKvLinearization: { bytesPerToken: number; fixedPerSlotBytes: number } | null = {
+          bytesPerToken: kvBytesPerToken,
+          fixedPerSlotBytes: 0,
+        };
         // Strict model-max deliberately does NOT gate this: for SWA models
         // the windowed cache is the only layout whose native-window KV can
         // fit real machines (gemma4-12b at 256K: 4.8 GB windowed vs 164 GB
@@ -821,11 +858,16 @@ export async function buildLlamaCppProvider(opts: {
               freeSystemRamBytes: availableSystemRamBytes(),
               vramBytes: liveBudget.vramBytes,
             });
+            ladderKvLinearization = {
+              bytesPerToken: windowed.bytesPerToken,
+              fixedPerSlotBytes: windowed.fixedBytes,
+            };
           } else if ((summary.slidingWindow ?? 0) > 0 || swaFullAutoDefault) {
             // A sliding-window model whose GGUF hides the layer layout:
             // full math over-states the real cache and there is no exact
             // substitute — leave the launch alone rather than over-clamp.
             ladderPlan = null;
+            ladderKvLinearization = null;
           }
           // else: `swaFull: false` pinned on a model with no SWA layers at
           // all — the flag is a no-op there and the full-attention plan IS
@@ -853,6 +895,45 @@ export async function buildLlamaCppProvider(opts: {
               `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}${windowedNote}: ${ladderPlan.reason}`,
             );
             effectiveNumCtx = ladderPlan.perTurnCtxTokens;
+          }
+          // ── Adaptive context growth ──
+          // Slots and the base grant are settled; spend whatever FAST
+          // memory is left on a longer window, up to the resolver's target
+          // (native window ∧ authored tuning ceiling ∧ operator env cap).
+          // Exact GGUF geometry only: the weights-scaled heuristic
+          // misprices KV by up to ~10× in both directions, and growth on a
+          // mispriced slope is how a safe launch becomes a paging one.
+          if (
+            contextRequirement.growthTargetTokens !== undefined &&
+            ladderKvLinearization !== null &&
+            exactKvAtReference !== undefined
+          ) {
+            const growth = planAdaptiveContextGrowth({
+              basePerTurnCtxTokens: effectiveNumCtx,
+              targetPerTurnCtxTokens: contextRequirement.growthTargetTokens,
+              slots,
+              kvBytesPerToken: ladderKvLinearization.bytesPerToken,
+              kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
+              weightsResidentBytes: residentBytes,
+              fastBudgetBytes,
+              committedOtherBytes,
+              budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
+              vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+              freeSystemRamBytes: availableSystemRamBytes(),
+              isMoE,
+              // A user-chosen lane count is not growth's to spend.
+              allowSlotTrade: configuredSlots === undefined,
+            });
+            if (growth.grown) {
+              log.info(
+                `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: ${growth.reason}`,
+              );
+              effectiveNumCtx = growth.perTurnCtxTokens;
+              if (growth.slots < slots) {
+                slots = growth.slots;
+                batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+              }
+            }
           }
         }
       }
@@ -974,13 +1055,10 @@ export async function buildLlamaCppProvider(opts: {
   // Two-stage idle (Phase 2.5): freeze at half the idle budget,
   // SIGTERM at the full budget. The freeze hook flushes slot caches
   // to disk while the engine is still healthy — so a SIGKILL during
-  // the freeze→stop window doesn't lose them. Default 30 min, matching
-  // `OLLAMA_TURN_TIMEOUT_MS` so the supervisor never kills the engine
-  // before the chat layer would have timed the turn out. Operators on
-  // tight memory who want faster reclaim can drop `localEngineIdleTimeoutMs`
-  // in config. The 10-min default that preceded this killed mid-stream
-  // on long Builder generations (tankcombat regression).
-  const llamaIdleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
+  // the freeze→stop window doesn't lose them. The busy guard below is the
+  // provider's physical request gate, so a long generation is protected while
+  // a tool loop parked between requests can release the GPU normally.
+  const llamaIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const llamaFreezeMs = Math.floor(llamaIdleMs / 2);
   // Per-model native-vision opt-in. Absent means off — see the `--mmproj`
   // block below for why this isn't simply "the projector is on disk".
@@ -1004,9 +1082,8 @@ export async function buildLlamaCppProvider(opts: {
     startupTimeoutMs: llamaStartupTimeoutMs,
     idleTimeoutMs: llamaIdleMs,
     freezeTimeoutMs: llamaFreezeMs,
-    // Don't idle-unload while a turn is in-flight (a parked question / long
-    // tool call leaves lastUsedAt stale — see the supervisor's isBusy doc).
-    ...(opts.isBusy ? { isBusy: opts.isBusy } : {}),
+    isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
+    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
     onFreeze: async () => {
       // flushAll is best-effort and handles its own try/catch — but
       // we await so the supervisor's freeze log line aligns with
@@ -1014,8 +1091,10 @@ export async function buildLlamaCppProvider(opts: {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },
     onLog: (line) => {
-      log.info(line);
-      logFile.write(line);
+      for (const retainedLine of progressLogThrottle.accept(line)) {
+        log.info(retainedLine);
+        logFile.write(retainedLine);
+      }
     },
     onExit: (snapshot) => {
       if (snapshot.expected) return;

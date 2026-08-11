@@ -271,6 +271,27 @@ describe('projects', () => {
     ]);
   });
 
+  it('seeds the default project with catch-all about + mission objectives', async () => {
+    await store.ensureDefaultProject();
+    const detail = await store.getProject('default');
+    expect(detail!.about).toContain('catch-all project');
+    expect(detail!.missionObjectives).toContain('Do not pursue coherence between items');
+  });
+
+  it('backfills the default docs on installs created before them', async () => {
+    await store.createProject({ name: 'Default' });
+    expect((await store.getProject('default'))!.about).toBeUndefined();
+    await store.ensureDefaultProject();
+    expect((await store.getProject('default'))!.about).toContain('catch-all project');
+  });
+
+  it('never overwrites an edited default about', async () => {
+    await store.ensureDefaultProject();
+    await store.writeProjectDoc('default', 'about.md', 'Mine now.');
+    await store.ensureDefaultProject();
+    expect((await store.getProject('default'))!.about).toBe('Mine now.');
+  });
+
   it('reads project.json metadata', async () => {
     await store.createProject({ name: 'Demo' });
     const detail = await store.getProject('demo');
@@ -498,6 +519,33 @@ describe('project artifacts', () => {
     await expect(
       store.writeProjectArtifact('traverse', '../../etc/passwd', 'hacked'),
     ).rejects.toThrow('traversal');
+  });
+
+  it('keeps connector corpora read-only to gezels without blocking user edits', async () => {
+    await store.createProject({ name: 'ConnectorArtifacts' });
+    await expect(
+      store.writeProjectArtifact(
+        'connectorartifacts',
+        'data/work-mail/inbox/001--hello--deadbeef.md',
+        'tampered',
+        { initiatedByGezel: true },
+      ),
+    ).rejects.toMatchObject({ code: 'connector-corpus-readonly' });
+    await expect(
+      store.writeProjectArtifact(
+        'connectorartifacts',
+        'data/work-mail/_actions/_drafts/action.md',
+        'draft',
+        { initiatedByGezel: true },
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      store.writeProjectArtifact(
+        'connectorartifacts',
+        'data/work-mail/inbox/001--hello--deadbeef.md',
+        'user correction',
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it('strips redundant artifacts/ prefix on write so files do not nest', async () => {
@@ -734,66 +782,11 @@ describe('project workspace', () => {
     });
   });
 
-  // The connector-corpus subtree (`data/**`) is read-only to gezels; only
-  // `_`-prefixed entries below it (drafts, sidecars, _meta.json) are the
-  // mutable surface. User/app-initiated writes stay exempt.
-  describe('data/ corpus read-only gate', () => {
-    const gezelWrite = (path: string | string[]) =>
-      store.assertWorkspaceWritable('pcorpus', { initiatedByGezel: true, path });
-
-    beforeEach(async () => {
-      await store.createProject({ name: 'PCorpus' }).catch(() => {});
-    });
-
-    it('denies gezel writes to corpus records, allows the _-prefixed surface', async () => {
-      for (const path of [
-        'data/work-gmail/inbox/001--hello--deadbeef.md',
-        'data/work-gmail',
-        'data\\work-gmail\\inbox\\001--x--00000000.md',
-        'artifacts/../data/work-gmail/002--x--00000000.md',
-      ]) {
-        const gate = await gezelWrite(path);
-        expect(gate.ok, path).toBe(false);
-        if (!gate.ok) expect(gate.reason).toBe('data-subtree-readonly');
-      }
-      for (const path of [
-        'data/work-gmail/_actions/_drafts/abc.md',
-        'data/work-gmail/inbox/_flags.json',
-        'data/work-gmail/_meta.json',
-        'artifacts/report.md',
-        'notes/data/file.md',
-      ]) {
-        const gate = await gezelWrite(path);
-        expect(gate.ok, path).toBe(true);
-      }
-    });
-
-    it('rename is denied when either endpoint touches the corpus', async () => {
-      const outOf = await gezelWrite(['data/x/001--r--00000000.md', 'artifacts/stolen.md']);
-      expect(outOf.ok).toBe(false);
-      const into = await gezelWrite(['artifacts/a.md', 'data/x/001--r--00000000.md']);
-      expect(into.ok).toBe(false);
-    });
-
-    it('user-initiated writes into data/ stay permitted', async () => {
-      const gate = await store.assertWorkspaceWritable('pcorpus', {
-        path: 'data/work-gmail/inbox/001--hello--deadbeef.md',
-      });
-      expect(gate.ok).toBe(true);
-    });
-
-    it('write path enforces it end to end with the actionable error', async () => {
-      await expect(
-        store.writeProjectWorkspaceFile('pcorpus', 'data/c/001--r--deadbeef.md', 'tampered', {
-          gezelId: 'g1',
-        }),
-      ).rejects.toThrow(/read-only to gezels/);
-      await expect(
-        store.writeProjectWorkspaceFile('pcorpus', 'data/c/_actions/_drafts/d.md', 'draft', {
-          gezelId: 'g1',
-        }),
-      ).resolves.toBeUndefined();
-    });
+  it('does not reserve data/ inside the workspace for connector corpora', async () => {
+    await store.createProject({ name: 'PData' });
+    await expect(
+      store.writeProjectWorkspaceFile('pdata', 'data/app-state.json', '{}', { gezelId: 'g1' }),
+    ).resolves.toBeUndefined();
   });
 
   // Phase 2 one-shot migration: existing projects with a legacy `gh/`

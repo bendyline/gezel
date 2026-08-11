@@ -6,6 +6,7 @@ import type {
   CraftbookRequirementContext,
   CraftbookTemplateManifest,
   CraftbookToolsetNeed,
+  ProjectDetail,
   ProjectType,
   ToolsetsScope,
 } from '@bendyline/gezel';
@@ -81,6 +82,11 @@ interface WorkspaceEntryShape {
   isDirectory(): boolean;
 }
 
+/** The narrow GitManager surface needed to resolve the checkout's live branch. */
+export interface ProjectGitStatusReader {
+  status(project: ProjectDetail): Promise<{ branch?: string }>;
+}
+
 /** Pure root-level signal used by the project-aware craftbook filter. */
 export function workspaceEntriesLookLikeCodebase(
   entries: ReadonlyArray<WorkspaceEntryShape>,
@@ -122,19 +128,29 @@ export async function projectHasEstablishedCodebase(
 }
 
 /**
- * Build the requirement-evaluation context for a project from its stored
- * GitHub state. `project.github.branch` is kept current by the github
- * manager on clone / branch-switch (see `persistCheckoutDir`), so no git
- * subprocess is needed.
+ * Build the requirement-evaluation context for a project. When a git status
+ * reader is available, its checkout HEAD is authoritative — the user may
+ * switch branches outside Gezel and the branch chip already reflects that
+ * live state. Stored `project.github.branch` is only a fallback for callers
+ * that cannot inspect the checkout or when git status fails.
  */
 export async function craftbookContextForProject(
   store: Store,
   projectId: string,
+  git?: ProjectGitStatusReader,
 ): Promise<CraftbookRequirementContext> {
   const project = await store.getProject(projectId).catch(() => null);
+  let branch = project?.github?.branch ?? null;
+  if (project && git) {
+    try {
+      branch = (await git.status(project)).branch ?? null;
+    } catch {
+      // Keep the stored fallback only when live status itself is unavailable.
+    }
+  }
   return {
     hasGitHub: !!project?.github?.url,
-    branch: project?.github?.branch ?? null,
+    branch,
   };
 }
 
@@ -149,10 +165,15 @@ export async function listApplicableCraftbooks(
   catalog: CatalogService,
   store: Store,
   projectId: string,
-  opts: { establishedCodebase?: boolean } = {},
+  opts: {
+    establishedCodebase?: boolean;
+    git?: ProjectGitStatusReader;
+    requirementContext?: CraftbookRequirementContext;
+  } = {},
 ): Promise<CatalogItemSummary[]> {
   const items = await catalog.list('craftbook-template').catch(() => []);
-  const ctx = await craftbookContextForProject(store, projectId);
+  const ctx =
+    opts.requirementContext ?? (await craftbookContextForProject(store, projectId, opts.git));
   const establishedCodebase =
     opts.establishedCodebase ?? (await projectHasEstablishedCodebase(store, projectId));
   return items.filter(
@@ -231,10 +252,15 @@ export function craftbookTemplateManifestFromRuntime(
 export async function projectCraftbookSummaries(
   store: Store,
   projectId: string,
+  opts: {
+    git?: ProjectGitStatusReader;
+    requirementContext?: CraftbookRequirementContext;
+  } = {},
 ): Promise<CatalogItemSummary[]> {
   const summaries = await store.listProjectCraftbooks(projectId).catch(() => []);
   if (summaries.length === 0) return [];
-  const ctx = await craftbookContextForProject(store, projectId);
+  const ctx =
+    opts.requirementContext ?? (await craftbookContextForProject(store, projectId, opts.git));
   const out: CatalogItemSummary[] = [];
   for (const s of summaries) {
     const book = await store.getProjectCraftbook(projectId, s.id).catch(() => null);

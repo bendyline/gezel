@@ -48,6 +48,22 @@ describe('parseCraftbookTestSpec', () => {
     }
   });
 
+  it('preserves hidden fixtures while ordinary fixtures remain model inputs by default', () => {
+    const spec = minimalSpec();
+    (spec.setup as { files: unknown[] }).files.push({
+      path: 'fixtures/black-box.html',
+      content: '<main>Browser-only fixture</main>',
+      modelInput: false,
+    });
+
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.setup.files[0]?.modelInput).toBeUndefined();
+      expect(result.spec.setup.files[1]?.modelInput).toBe(false);
+    }
+  });
+
   it('reuses the core gate-check vocabulary and the eval-only kinds', () => {
     const spec = minimalSpec();
     (spec.success as Record<string, unknown>).checks = [
@@ -57,6 +73,80 @@ describe('parseCraftbookTestSpec', () => {
     ];
     const result = parseCraftbookTestSpec(spec);
     expect(result.ok).toBe(true);
+  });
+
+  it('accepts runtime history expectations for workflow and hook evidence', () => {
+    const spec = minimalSpec();
+    (spec.success as Record<string, unknown>).history = [
+      {
+        kind: 'tool.gated',
+        minEntries: 1,
+        details: { craftbookId: 'careful-mode', decision: 'ask', tool: 'delete_path' },
+      },
+    ];
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts task parameters, terminal proof, harness fixtures, and exact preservation gates', () => {
+    const spec = minimalSpec();
+    (spec.setup as Record<string, unknown>).craftbookParams = { language: 'Nederlands' };
+    (spec.setup as { files: unknown[] }).files.push({
+      path: 'tests/verify.mjs',
+      content: 'process.exit(0);',
+      surface: 'harness',
+    });
+    (spec.success as Record<string, unknown>).taskGraph = {
+      requireCraftbookTask: true,
+      requireTerminalStep: true,
+    };
+    (spec.success as Record<string, unknown>).unchangedFixtures = ['source/brief.md'];
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a hermetic MCP replacement for a scoped required toolset', () => {
+    const spec = minimalSpec();
+    (spec as { mocks?: unknown[] }).mocks = [
+      {
+        kind: 'mcp',
+        id: 'playwright',
+        description: 'Hermetic browser simulator.',
+        toolsetId: '@playwright/mcp',
+        tools: [
+          {
+            name: 'browser_navigate',
+            description: 'Navigate the simulated browser.',
+            resultTemplate: { ok: true },
+          },
+        ],
+      },
+    ];
+
+    expect(parseCraftbookTestSpec(spec).ok).toBe(true);
+  });
+
+  it('rejects an unchanged fixture that is not seeded in the workspace', () => {
+    const spec = minimalSpec();
+    (spec.success as Record<string, unknown>).unchangedFixtures = ['source/missing.md'];
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('\n')).toContain('not a seeded workspace file');
+  });
+
+  it('accepts forbidden History expectations and rejects inverted bounds', () => {
+    const spec = minimalSpec();
+    (spec.success as Record<string, unknown>).history = [
+      { kind: 'tool.called', minEntries: 0, maxEntries: 0, details: { name: 'read_file' } },
+    ];
+    expect(parseCraftbookTestSpec(spec).ok).toBe(true);
+
+    (spec.success as Record<string, unknown>).history = [
+      { kind: 'tool.called', minEntries: 2, maxEntries: 1 },
+    ];
+    const invalid = parseCraftbookTestSpec(spec);
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.errors.join('\n')).toContain('minEntries');
   });
 
   it('rejects unknown keys in strict mode with a path-qualified error', () => {
@@ -133,10 +223,32 @@ describe('parseCraftbookTestSpec', () => {
       },
     ];
     (spec.success as Record<string, unknown>).mocks = [
-      { service: 'alerts', requiredTools: ['list_alerts'] },
+      {
+        service: 'alerts',
+        requiredTools: ['list_alerts'],
+        toolCalls: { list_alerts: { minCalls: 2, maxCalls: 4 } },
+      },
     ];
     const result = parseCraftbookTestSpec(spec);
     expect(result.ok).toBe(true);
+  });
+
+  it('rejects an inverted per-tool MCP call budget', () => {
+    const spec = minimalSpec();
+    spec.mocks = [
+      {
+        kind: 'mcp',
+        id: 'alerts',
+        description: 'Fake alerting MCP',
+        tools: [{ name: 'list_alerts', description: 'List firing alerts' }],
+      },
+    ];
+    (spec.success as Record<string, unknown>).mocks = [
+      { service: 'alerts', toolCalls: { list_alerts: { minCalls: 3, maxCalls: 2 } } },
+    ];
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('\n')).toContain('minCalls');
   });
 
   it('rejects requiredTools naming an undeclared tool', () => {

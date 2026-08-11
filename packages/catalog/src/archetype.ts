@@ -94,6 +94,15 @@ export interface ArchetypeSpec {
   description: string;
   /** Project-lifecycle shelf. Older specs safely default to general. */
   role?: CraftbookRole;
+  /**
+   * Immutable catalog release emitted for this spec. Seeds without an
+   * explicit release retain the original 1.0.0 baseline, while a changed
+   * seed must opt into a new version instead of overwriting released JSON.
+   */
+  release?: {
+    version: string;
+    releasedAt: string;
+  };
   tags?: string[];
   triggers?: string[];
   /**
@@ -394,17 +403,19 @@ export interface GeneratedCraftbookFiles {
 
 /**
  * Serialize a spec into the on-disk bundled-catalog layout (Craftbooks V2):
- * the identity manifest plus ONE `versions/1.0.0/craftbook.json` — the
+ * the identity manifest plus one versioned `craftbook.json` — the
  * single CraftbookDoc with the about prose inlined as `description` and
  * step prompts inlined on the steps. The generation script writes these,
  * then `build-index` folds them into `craftbook-templates/index.json`.
  */
 export function archetypeToFiles(
   rawSpec: ArchetypeSpec,
-  releasedAt: string,
+  defaultReleasedAt: string,
 ): GeneratedCraftbookFiles {
   const spec = normalizeArchetypeSpec(rawSpec);
   const { steps, entryStepId } = archetypeToCraftbook(spec);
+  const version = spec.release?.version ?? '1.0.0';
+  const releasedAt = spec.release?.releasedAt ?? defaultReleasedAt;
 
   // Guarantee the generated book is runtime-valid (graph integrity, gate +
   // advanceWhen edge resolution, step shape) BEFORE it ever touches disk.
@@ -412,7 +423,7 @@ export function archetypeToFiles(
     id: spec.id,
     name: spec.name,
     description: spec.description,
-    version: '1.0.0',
+    version,
     steps,
     entryStepId,
     ...(spec.triggers && spec.triggers.length > 0 ? { triggers: spec.triggers } : {}),
@@ -430,13 +441,14 @@ export function archetypeToFiles(
     schemaVersion: 1,
     kind: 'craftbook-template',
     id: spec.id,
+    role: spec.role ?? 'general',
     name: spec.name,
     description: spec.description,
     tags: dedupe(['gallery', ...(spec.tags ?? [])]),
     maintainer: { name: 'Gezel' },
+    logo: 'logo.webp',
     license: 'MIT',
     yankedVersions: [],
-    role: spec.role ?? 'general',
     workflow: 'build-loop',
   };
 
@@ -451,7 +463,7 @@ export function archetypeToFiles(
     ...(spec.triggers && spec.triggers.length > 0 ? { triggers: spec.triggers } : {}),
     ...(spec.toolsets && spec.toolsets.length > 0 ? { toolsets: spec.toolsets } : {}),
     steps,
-    version: '1.0.0',
+    version,
     releasedAt,
   } satisfies CraftbookDoc);
 
@@ -460,7 +472,10 @@ export function archetypeToFiles(
     id: spec.id,
     files: [
       { relPath: 'manifest.json', content: `${JSON.stringify(topManifest, null, 2)}\n` },
-      { relPath: 'versions/1.0.0/craftbook.json', content: serializeCraftbookDoc(doc, 'json') },
+      {
+        relPath: `versions/${version}/craftbook.json`,
+        content: serializeCraftbookDoc(doc, 'json'),
+      },
     ],
   };
 }

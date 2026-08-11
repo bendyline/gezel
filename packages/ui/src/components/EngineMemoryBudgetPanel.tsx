@@ -79,7 +79,7 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
       setSaving(true);
       setMessage(null);
       try {
-        await api.updateConfig({ localEngineMemoryGb: gb });
+        await api.updateEngineMemoryBudget(gb);
         setMessage(gb === null ? 'Back to automatic' : 'Saved');
         await onSaved();
       } catch (err) {
@@ -211,7 +211,7 @@ function RamSpilloverChoice({ status, onSaved }: EngineMemoryBudgetPanelProps) {
       setSaving(true);
       setError(null);
       try {
-        await api.updateConfig({ allowRamSpillover: allow });
+        await api.updateEngineRamSpillover(allow);
         await onSaved();
       } catch (err) {
         setError(`Could not save: ${err instanceof Error ? err.message : String(err)}`);

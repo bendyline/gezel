@@ -108,6 +108,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  model-tool-contracts:
+    name: Model-facing tool contracts
+    needs: workflow-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Build the service tool-contract dependency graph
+        run: pnpm --filter @bendyline/gezel-service... run build
+      - name: Reject hidden or undeclared names in model-facing text
+        run: pnpm lint:tool-names
+      - name: Verify rendered prompts against final post-filter rosters
+        run: pnpm lint:prompts
+
   windows-service-portability:
     name: Windows service portability contracts
     needs: workflow-policy
@@ -160,7 +178,7 @@ jobs:
         run: pnpm test:stability
 
   packaged-bundle:
-    name: Packaged service-bundle smoke
+    name: Packaged and published-artifact contracts
     needs: workflow-policy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -173,6 +191,12 @@ jobs:
       - run: pnpm build
       - name: Build and import the packaged service bundle
         run: pnpm build:bundle
+      - name: Verify publishable package shapes and subpaths
+        # Source-level tests resolve through workspace links and cannot catch a
+        # missing export, leaked workspace range, or omitted tarball asset.
+        # Keep the full clean-consumer install in the release gate, but catch
+        # the hermetic packaging contract on every pull request.
+        run: pnpm test:published
 
   supply-chain:
     name: Supply-chain audit

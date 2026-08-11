@@ -10,14 +10,25 @@
  */
 export {
   ALWAYS_REGISTERED_TOOLS,
+  BUILTIN_TOOL_NAMES,
+  CANONICAL_TOOL_NAMES,
   CONDITIONALLY_REGISTERED_TOOLS,
-  RENAMED_TOOLS,
   LEGACY_SPELLING_BY_CANONICAL,
+  LEGACY_TOOL_NAMES,
+  RENAMED_TOOLS,
+  RESERVED_TOOL_NAMES,
+  TOOL_REGISTRY,
+  TOOL_NAME_TOMBSTONES,
   canonicalToolName,
+  normalizeToolNameSpelling,
   resolveToolNameSpelling,
   type AlwaysRegisteredToolName,
+  type CanonicalToolName,
+  type CanonicalToolRegistryEntry,
   type ConditionallyRegisteredToolName,
   type LegacyToolName,
+  type ToolRegistrationGate,
+  type ToolNameTombstone,
 } from './tool-inventory.js';
 export {
   formatValidateResult,
@@ -26,3 +37,12 @@ export {
   type ValidateCheck,
   type ValidateResult,
 } from './validate.js';
+export {
+  canUseLinuxSystemdDenyNet,
+  unavailableToolsForPlatform,
+} from './platform-tool-availability.js';
+export {
+  prioritizePullsForCurrentBranch,
+  type BranchPrioritizedPulls,
+  type PullWithHeadRef,
+} from './github-pr-selection.js';

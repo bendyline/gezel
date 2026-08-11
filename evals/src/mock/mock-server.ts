@@ -44,6 +44,13 @@ export interface MockRequestLogEntry {
   matchedRoute: string | null;
   status: number;
   authorized: boolean;
+  /** Request media type as received by the fixture (webhook requests only). */
+  contentType?: string;
+  /** Bounded request bytes decoded as UTF-8 (webhook requests only). */
+  requestBody?: string;
+  requestBodyTruncated?: boolean;
+  /** Validated arguments from an MCP tools/call request. */
+  toolArgs?: Record<string, unknown>;
 }
 
 export interface StartedMockService {
@@ -59,6 +66,18 @@ export interface StartedMockService {
 /** Catalog id of the local toolset that fronts a `kind:'mcp'` mock service. */
 export function mockMcpToolsetId(serviceId: string, explicitId?: string): string {
   return explicitId ?? `mock-mcp-${serviceId}`;
+}
+
+/**
+ * System toolset ids (for example `@playwright/mcp`) are valid installed
+ * runtime ids but intentionally invalid local-catalog identity ids. The eval
+ * runner seeds those records directly into the fresh trial home's system
+ * roster; ordinary mock ids still install through LocalCatalogSource.
+ */
+const LOCAL_CATALOG_TOOLSET_ID = /^[a-z0-9][a-z0-9.\-:]{1,63}$/;
+
+export function mockMcpUsesSystemSeed(serviceId: string, explicitId?: string): boolean {
+  return !LOCAL_CATALOG_TOOLSET_ID.test(mockMcpToolsetId(serviceId, explicitId));
 }
 
 export interface MockServicesRuntime {
@@ -78,11 +97,9 @@ export interface MockServicesRuntime {
   servicesMarkdown(): string;
   servicesJson(): string;
   /**
-   * Local-catalog toolset manifest files for the `kind:'mcp'` services,
-   * as paths relative to the trial's GEZEL_HOME. The runner writes them
-   * before spawning the daemon so `installToolset('mock-mcp-<id>', …)`
-   * resolves through the daemon's LocalCatalogSource like any other
-   * catalog toolset. Empty when the book declares no mcp mocks.
+   * Toolset seed files for `kind:'mcp'` services, relative to the trial's
+   * GEZEL_HOME. Catalog-valid ids get ordinary local-catalog manifests;
+   * scoped system ids are written into `installed-toolsets-system.json`.
    */
   mcpToolsetFiles(): Array<{ path: string; content: string }>;
   /** Bind deterministic MCP file effects to the scenario's project. */
@@ -90,9 +107,35 @@ export interface MockServicesRuntime {
   close(): Promise<void>;
 }
 
+/**
+ * Small eval-only argument vocabulary for fake MCP tools.
+ *
+ * `MockService` intentionally stays a catalog-owned, dependency-light wire
+ * schema. Tool-routing evals may layer these required/optional string fields
+ * over it so the simulator advertises realistic affordances without adding
+ * test-only Zod shapes to the product catalog contract.
+ */
+export type MockMcpToolArgumentSchemas = Record<
+  string,
+  Record<
+    string,
+    Record<
+      string,
+      {
+        description?: string;
+        /** Defaults to true. */
+        required?: boolean;
+      }
+    >
+  >
+>;
+
 export async function startMockServices(
   mocks: CraftbookTestSpec['mocks'],
-  opts: { trialHome?: string } = {},
+  opts: {
+    trialHome?: string;
+    mcpToolArgumentSchemas?: MockMcpToolArgumentSchemas;
+  } = {},
 ): Promise<MockServicesRuntime | null> {
   const live = mocks.filter(
     (mock): mock is Extract<MockService, { kind: 'http' | 'webhook' | 'mcp' }> =>
@@ -133,6 +176,7 @@ export async function startMockServices(
         void handleMcpMockRequest(mock, started, req, res, {
           trialHome: opts.trialHome,
           projectId: boundProjectId,
+          toolArgumentSchemas: opts.mcpToolArgumentSchemas?.[mock.id],
         });
       });
       await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -199,9 +243,33 @@ export async function startMockServices(
       const receiverPath = mock.path ?? '/webhook';
       if ((req.method ?? 'GET') === 'POST' && pathMatches(receiverPath, url.pathname)) {
         entry.matchedRoute = `POST ${receiverPath}`;
-        // Drain the body so keep-alive clients aren't stalled.
-        req.resume();
-        req.on('end', () => finish(200, {}, JSON.stringify({ ok: true })));
+        // Retain bounded request evidence so an eval cannot pass merely by
+        // reaching the right path with an empty or wrongly-typed POST. This
+        // is a per-trial fake endpoint; the capture is written only into the
+        // trial run directory. Keep the cap defensive in case a broken model
+        // sends an unexpectedly large payload.
+        const maxLoggedBytes = 64 * 1024;
+        const chunks: Buffer[] = [];
+        let keptBytes = 0;
+        req.on('data', (chunk: Buffer | string) => {
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          const remaining = maxLoggedBytes - keptBytes;
+          if (remaining > 0) {
+            const kept = bytes.subarray(0, remaining);
+            chunks.push(kept);
+            keptBytes += kept.length;
+          }
+          if (bytes.length > remaining) entry.requestBodyTruncated = true;
+        });
+        req.on('end', () => {
+          const rawContentType = req.headers['content-type'];
+          const contentType = Array.isArray(rawContentType)
+            ? rawContentType.join(', ')
+            : rawContentType;
+          if (contentType !== undefined) entry.contentType = contentType;
+          entry.requestBody = Buffer.concat(chunks).toString('utf8');
+          finish(200, {}, JSON.stringify({ ok: true }));
+        });
         return;
       }
       finish(405, {}, JSON.stringify({ error: `webhook receiver accepts POST ${receiverPath}` }));
@@ -253,11 +321,28 @@ export async function startMockServices(
     },
     mcpToolsetFiles() {
       const files: Array<{ path: string; content: string }> = [];
+      const systemInstalled: Array<Record<string, unknown>> = [];
       for (const mock of live) {
         if (mock.kind !== 'mcp') continue;
         const service = services.get(mock.id);
         if (!service) continue;
         const toolsetId = mockMcpToolsetId(mock.id, mock.toolsetId);
+        if (mockMcpUsesSystemSeed(mock.id, mock.toolsetId)) {
+          systemInstalled.push({
+            toolsetId,
+            sourceId: 'eval-mock',
+            version: '1.0.0',
+            installedAt: new Date().toISOString(),
+            runtime: {
+              kind: 'http-mcp',
+              url: `${service.baseUrl}/mcp`,
+              transport: 'streamable-http',
+              authHint: 'none',
+              envHints: [],
+            },
+          });
+          continue;
+        }
         const shard = toolsetId.slice(0, 2).toLowerCase();
         const base = `toolsets/${shard}/${toolsetId}`;
         files.push({
@@ -298,6 +383,12 @@ export async function startMockServices(
           )}\n`,
         });
       }
+      if (systemInstalled.length > 0) {
+        files.push({
+          path: 'installed-toolsets-system.json',
+          content: `${JSON.stringify(systemInstalled, null, 2)}\n`,
+        });
+      }
       return files;
     },
     servicesMarkdown() {
@@ -318,7 +409,7 @@ export async function startMockServices(
         for (const shim of shims) {
           const name = shim.shim.path.replace(/^scripts\//, '').replace(/\.(ts|mjs|js)$/, '');
           lines.push(`- \`${name}\` — ${shim.description}`);
-          lines.push(`  Run it with \`run_script({ name: "${name}" })\`.`);
+          lines.push(`  Run it with \`run_installed_script({ name: "${name}" })\`.`);
         }
         lines.push('');
       }
@@ -410,6 +501,7 @@ export function evaluateMockExpectations(
     requiredPaths?: string[];
     forbiddenPaths?: string[];
     requiredTools?: string[];
+    toolCalls?: Record<string, { minCalls: number; maxCalls?: number }>;
   }>,
   runtime: Pick<MockServicesRuntime, 'services'>,
 ): string[] {
@@ -426,7 +518,7 @@ export function evaluateMockExpectations(
     // ship pilot: 4 repair rounds of report rewrites, 0 requests). Name
     // the recovery path explicitly.
     const actionHint =
-      'writing about it does not count — actually call the service (run the probe script listed in mocks/services.md via run_script, or use http.authed), then update the report from the response';
+      'writing about it does not count — actually call the service (run the probe script listed in mocks/services.md via run_installed_script, or use http.authed), then update the report from the response';
     if (expectation.minRequests !== undefined && authorized.length < expectation.minRequests) {
       failures.push(
         `mock ${expectation.service}: ${authorized.length}/${expectation.minRequests} authorized request(s) seen; ${actionHint}`,
@@ -457,6 +549,20 @@ export function evaluateMockExpectations(
         );
       }
     }
+    for (const [name, budget] of Object.entries(expectation.toolCalls ?? {})) {
+      const wanted = `tools/call:${name}`;
+      const calls = authorized.filter((entry) => entry.path === wanted).length;
+      if (calls < budget.minCalls) {
+        failures.push(
+          `mock ${expectation.service}: MCP tool "${name}" was called ${calls}/${budget.minCalls} required time(s); perform the missing journey or retry with the real tool`,
+        );
+      }
+      if (budget.maxCalls !== undefined && calls > budget.maxCalls) {
+        failures.push(
+          `mock ${expectation.service}: MCP tool "${name}" was called ${calls} time(s); expected at most ${budget.maxCalls}`,
+        );
+      }
+    }
   }
   return failures;
 }
@@ -480,7 +586,11 @@ async function handleMcpMockRequest(
   started: StartedMockService,
   req: IncomingMessage,
   res: ServerResponse,
-  fixtureContext: { trialHome?: string; projectId: string | null },
+  fixtureContext: {
+    trialHome?: string;
+    projectId: string | null;
+    toolArgumentSchemas?: MockMcpToolArgumentSchemas[string];
+  },
 ): Promise<void> {
   try {
     if (req.method !== 'POST') {
@@ -496,10 +606,10 @@ async function handleMcpMockRequest(
     }
     const server = new McpServer({ name: `mock-mcp-${mock.id}`, version: '1.0.0' });
     for (const tool of mock.tools) {
-      // Tools WITHOUT a file effect stay schema-less on purpose: the SDK
-      // then skips argument validation, so a model may pass anything (e.g.
-      // `ack_alert({id})`) without a rejection and the mock serves the
-      // template regardless.
+      // Tools WITHOUT a file effect or an explicit eval argument declaration
+      // stay schema-less on purpose: the SDK then skips argument validation,
+      // so a model may pass anything (e.g. `ack_alert({id})`) without a
+      // rejection and the mock serves the template regardless.
       //
       // A tool that MATERIALIZES A FILE cannot afford that. Wild-caught on
       // the first two live runs of research-to-document: with no schema the
@@ -510,30 +620,44 @@ async function handleMcpMockRequest(
       // while every provenance check passed. The model was not being
       // careless — nothing told it the argument existed.
       //
-      // So the schema is DERIVED from the same `pathArgument` the fixture
-      // reads. One field, therefore no way for the declared contract and
-      // the consumed contract to drift.
-      const inputSchema = tool.writeFixture
-        ? fixturePathSchema(tool.writeFixture.pathArgument)
-        : undefined;
+      // File-effect schema is DERIVED from the same `pathArgument` the
+      // fixture reads. Explicit declarations are a separate eval-only layer
+      // for external-tool affordances such as browser_navigate({url}).
+      const declaredInputSchema = declaredMockToolInputSchema(
+        fixtureContext.toolArgumentSchemas?.[tool.name],
+      );
+      const inputSchema = {
+        ...declaredInputSchema,
+        ...(tool.writeFixture ? fixturePathSchema(tool.writeFixture.pathArgument) : {}),
+      };
       const config = {
         description: tool.description,
-        ...(inputSchema ? { inputSchema } : {}),
+        ...(Object.keys(inputSchema).length > 0 ? { inputSchema } : {}),
       };
       server.registerTool(tool.name, config, async (args) => {
+        const callPath = `tools/call:${tool.name}`;
+        const callIndex = started.requests.filter((entry) => entry.path === callPath).length;
         started.requests.push({
           at: new Date().toISOString(),
           method: 'POST',
-          path: `tools/call:${tool.name}`,
+          path: callPath,
           matchedRoute: `tools/call ${tool.name}`,
           status: 200,
           authorized: true,
+          toolArgs: { ...args },
         });
         if (tool.writeFixture) {
           await materializeMockToolFixture(tool.writeFixture, args, fixtureContext);
         }
+        const sequenced =
+          tool.resultSequence?.[Math.min(callIndex, Math.max(0, tool.resultSequence.length - 1))];
         return {
-          content: [{ type: 'text', text: JSON.stringify(tool.resultTemplate ?? { ok: true }) }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(sequenced ?? tool.resultTemplate ?? { ok: true }),
+            },
+          ],
         };
       });
     }
@@ -558,6 +682,19 @@ async function handleMcpMockRequest(
       res.end();
     }
   }
+}
+
+function declaredMockToolInputSchema(
+  fields: MockMcpToolArgumentSchemas[string][string] | undefined,
+): Record<string, z.ZodTypeAny> {
+  if (!fields) return {};
+  return Object.fromEntries(
+    Object.entries(fields).map(([name, field]) => {
+      let schema = z.string().min(1);
+      if (field.description) schema = schema.describe(field.description);
+      return [name, field.required === false ? schema.optional() : schema];
+    }),
+  );
 }
 
 function valueAtPath(value: unknown, dottedPath: string): unknown {
@@ -627,9 +764,10 @@ const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = 
   'minimal-pptx': () => minimalPptxFixture(),
   'minimal-docx': () => minimalDocxFixture(),
   'minimal-pdf': () => minimalPdfFixture(),
+  'minimal-png': () => minimalPngFixture(),
 };
 
-export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf';
+export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf' | 'minimal-png';
 
 /**
  * Materialize a deterministic fixture through the trial project's real file
@@ -669,6 +807,15 @@ export async function materializeMockToolFixture(
   const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, bytes());
+}
+
+/** Deterministic valid 1×1 PNG padded beyond the image-gate byte floor. */
+export function minimalPngFixture(): Uint8Array {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  return Buffer.concat([png, Buffer.alloc(2_048)]);
 }
 
 /** Small deterministic ZIP-shaped Open XML presentation used only by eval mocks. */

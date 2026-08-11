@@ -14,6 +14,7 @@ import {
   pronounFormsForGender,
   pronounsForGender,
 } from '@bendyline/gezel';
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
 import { SQUISQ_DIALECT_BRIEF } from '../prompts/squisq-dialect.js';
 import type { ProviderName } from '../providers/types.js';
@@ -303,7 +304,7 @@ export interface BuildInstructionsOptions {
   workspaceGestalt?: string;
   /**
    * Resolved `prompt.retrieval-first` flag. Appends one steering line to
-   * the workspace-files block pointing at search_code/search_files — gated
+   * the workspace-files block pointing at search_code/grep_files — gated
    * here on those tools actually being in the session surface, so the
    * nudge never names an evicted tool.
    */
@@ -448,10 +449,17 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // routing/file/task guidance no longer falsely says "none wired" in Codex
   // debug snapshots (or any future provider that exposes qualified names).
   const availableToolNameSet = new Set<string>();
+  const advertisedToolNameByCanonical = new Map<string, string>();
   for (const tool of availableTools ?? []) {
     availableToolNameSet.add(tool.name);
     const qualified = tool.name.match(/^mcp__.+?__(.+)$/);
-    if (qualified?.[1] && qualified[1] !== '*') availableToolNameSet.add(qualified[1]);
+    const unqualified = qualified?.[1] && qualified[1] !== '*' ? qualified[1] : tool.name;
+    availableToolNameSet.add(unqualified);
+    const canonical = canonicalToolName(unqualified);
+    availableToolNameSet.add(canonical);
+    if (!advertisedToolNameByCanonical.has(canonical)) {
+      advertisedToolNameByCanonical.set(canonical, unqualified);
+    }
   }
   const isProjectStrategicOwner =
     project?.voormanGezelId !== undefined &&
@@ -506,7 +514,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // roster. Never coach a model to call a tool that was removed by role,
   // security policy, install state, or the coordinator context diet.
   const toolsFrom = (names: readonly string[]) =>
-    names.filter((tool) => availableToolNameSet.has(tool));
+    names.flatMap((tool) => {
+      const advertised = advertisedToolNameByCanonical.get(canonicalToolName(tool));
+      return advertised ? [advertised] : [];
+    });
   const formatToolList = (names: readonly string[]) =>
     names.length > 0 ? names.map((tool) => `\`${tool}\``).join(' / ') : 'none wired';
   const teamTools = toolsFrom([
@@ -651,31 +662,45 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       // list used to be unconditional, so a Chief Security Officer whose
       // roster has no `search_code` was still told to use it — one of the
       // `directive-missing-tool` warnings this build logs, and the drift
-      // ADR 0001 exists to prevent. The *sentence* still stands either
-      // way: these names come from an installed third-party GitHub
-      // toolset, whose tool names never appear in the predicted roster,
-      // so an empty intersection means "can't confirm", not "absent".
+      // ADR 0001 exists to prevent.
+      //
+      // The probe covers BOTH vocabularies: the first-party `github_pr_*`
+      // builtins and the third-party toolset's names. It used to list only
+      // the latter, so a project holding the built-in PR tools always
+      // missed and fell through to a blanket "the `github_*` tools on your
+      // function schema" — which was simply false whenever the surface had
+      // narrowed, and taught the model to call tools it did not have.
       const githubTools = toolsFrom([
+        'github_pr_list',
+        'github_pr_view',
+        'github_pr_diff',
+        'github_pr_files',
         'get_pull_request',
         'list_pull_requests',
         'get_issue',
         'search_code',
         'add_issue_comment',
       ]);
-      if (!trimExecutor) {
+      // An installed third-party GitHub toolset is the one case where an
+      // empty intersection means "can't confirm" rather than "absent":
+      // its tool names only exist after the bridge spawns. Without one,
+      // an empty intersection IS absence — say nothing rather than point
+      // the model at tools the surface has already narrowed away.
+      const githubToolsetInstalled = installedToolsetIds?.has('github') ?? false;
+      if (!trimExecutor && (githubTools.length > 0 || githubToolsetInstalled)) {
         const named =
           githubTools.length > 0
             ? `${formatToolList(githubTools)}, …`
-            : 'the `github_*` / PR + issue tools on your function schema';
+            : 'the PR + issue tools on your function schema';
         lines.push(
           `Use the GitHub toolset (${named}) for repo and PR actions; treat the owner/repo above as the default.`,
         );
       }
       projectContext += lines.join('\n');
     }
-    // Connected data: name each connector binding's corpus so gezels find
-    // synced mail/events/issues without stumbling over the directory in
-    // list_dir. Kept terse (one line per binding, capped) — prompt budget
+    // Connected data: name each connector binding's artifact corpus so gezels
+    // find synced mail/events/issues with the artifact tools. Kept terse (one
+    // line per binding, capped) — prompt budget
     // compounds at depth. Absent entirely when no bindings exist, so
     // no-connector prompts stay byte-identical (prefix-cache stability).
     const bindings = (project.connectors ?? []).filter((b) => !b.disabled);
@@ -683,15 +708,15 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       const shown = bindings.slice(0, 8);
       const lines = shown.map((b) => {
         const label = b.displayName ?? b.type;
-        const corpus = b.corpusDir ?? 'data/';
+        const corpus = b.corpusDir ?? 'data';
         const synced = b.lastSyncedAt
           ? `, synced ${b.lastSyncedAt.slice(0, 10)}`
           : ', not synced yet';
-        return `- **${label}** (${b.type}${synced}): \`${corpus}/\``;
+        return `- **${label}** (${b.type}${synced}): \`artifacts/${corpus.replace(/\/$/, '')}/\``;
       });
       if (bindings.length > shown.length)
         lines.push(`- …and ${bindings.length - shown.length} more`);
-      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project as readable files:\n${lines.join('\n')}\nThese directories are read-only mirrors — write analysis elsewhere (e.g. artifacts). To change something at the source, draft a connector action for the user to approve.`;
+      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths. These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
     }
     // Gezels split four ways here based on what they can actually
     // touch in the workspace:
@@ -715,7 +740,24 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     const hasSearchMemory = availableTools?.some((t) => t.name === 'search_memory') ?? false;
     const hasSaveMemory = availableTools?.some((t) => t.name === 'save_memory') ?? false;
     const hasMemoryTools = hasSearchMemory || hasSaveMemory;
-    const workspaceReadTools = toolsFrom(['read_file', 'list_dir', 'find_files', 'search_files']);
+    const workspaceReadTools = toolsFrom([
+      'read_file',
+      'read_files',
+      'list_dir',
+      'find_files',
+      'grep_files',
+    ]);
+    const singleReadTools = toolsFrom(['read_file']);
+    const batchReadTools = toolsFrom(['read_files']);
+    const grepReadTools = toolsFrom(['grep_files']);
+    const batchReadClause =
+      batchReadTools.length > 0
+        ? `; use ${formatToolList(batchReadTools)} when several known paths or ranges are independent`
+        : '';
+    const efficientReadGuidance =
+      singleReadTools.length > 0
+        ? `\nReading efficiently: use ${formatToolList(singleReadTools)} with \`{ path, startLine, endLine }\` for one known range${batchReadTools.length > 0 ? ` and ${formatToolList(batchReadTools)} for several independent known paths/ranges` : ''}${grepReadTools.length > 0 ? `; use ${formatToolList(grepReadTools)} first when the location is unknown` : ''}.`
+        : '';
     const workspaceWriteTools = toolsFrom(['write_file']);
     const workspaceDelegationTools = toolsFrom([
       'message_gezel',
@@ -740,7 +782,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
 
 - **Workspace** (${formatToolList([...workspaceWriteTools, ...workspaceReadTools])}) — files the user ships: source, configs, assets, README, tests for their product.
 ${artifactsLine}
-${decisionLine}`;
+${decisionLine}${efficientReadGuidance}`;
     } else if (hasReadFile) {
       const artifactsLine = hasArtifactTools
         ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving \`packages/...\`, \`src/...\`, or a path listed in \`### Workspace files\` with an artifact-writing tool creates only a side-drawer copy and does not change the project.\n`
@@ -749,9 +791,10 @@ ${decisionLine}`;
 
 ### Where work belongs
 
-- **Workspace reads** (${formatToolList(workspaceReadTools)}) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}. You can read; you cannot write.
+- **Workspace reads** (${formatToolList(workspaceReadTools)}) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`${hasReadArtifact ? ', not `read_artifact`' : ''}${batchReadClause}. You can read; you cannot write.
 ${artifactsLine}
 - **Workspace writes are delegated.** ${workspaceDelegationGuidance} Don't paste source into chat — that can't be applied.`;
+      projectContext += efficientReadGuidance;
     } else if (hasWriteFile) {
       projectContext += `
 
@@ -827,8 +870,7 @@ ${artifactsLine}
       workspaceFilesBlock += `\n(${workspaceFiles.length - 200} more files truncated)`;
     }
     if (retrievalFirstHint) {
-      const toolNames = new Set((availableTools ?? []).map((t) => t.name));
-      const retrievalTools = ['search_code', 'search_files'].filter((t) => toolNames.has(t));
+      const retrievalTools = toolsFrom(['search_code', 'grep_files']);
       if (retrievalTools.length > 0) {
         workspaceFilesBlock += `\nTo find something in these files, call ${retrievalTools
           .map((t) => `\`${t}\``)
@@ -1040,8 +1082,8 @@ ${artifactsLine}
       const exitRefs = normalizeScriptRefs(task.step?.onExit);
       const lastExitName = exitRefs[exitRefs.length - 1]?.name;
       const onExitHint =
-        lastExitName && availableToolNameSet.has('run_script')
-          ? ` The step's onExit script is **${lastExitName}** — calling \`run_script({ name: "${lastExitName}", input: { … } })\` is almost always the right next action.`
+        lastExitName && availableToolNameSet.has('run_installed_script')
+          ? ` The step's onExit script is **${lastExitName}** — calling \`run_installed_script({ name: "${lastExitName}", input: { … } })\` is almost always the right next action.`
           : '';
       const gateReminder = activeStepIsGate
         ? ` This step is a **gate** — do not \`advance_task_step\` forward until its exit criteria are genuinely met; if they are not, loop back and fix the named gap${activeStepAttempt > 1 ? ` (attempt ${activeStepAttempt})` : ''}.`

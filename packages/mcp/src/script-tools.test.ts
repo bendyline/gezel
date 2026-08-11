@@ -1,6 +1,7 @@
 import type { RunScriptResponse } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
@@ -9,6 +10,14 @@ import {
   parseScriptToolSpecs,
   registerScriptTools,
 } from './script-tools.js';
+
+function resultText(result: CallToolResult): string {
+  const block = result.content[0];
+  if (!block || block.type !== 'text') {
+    throw new Error('Expected a text result block');
+  }
+  return block.text;
+}
 
 describe('parseScriptToolSpecs', () => {
   it('parses valid specs and preserves bind', () => {
@@ -86,9 +95,9 @@ describe('formatScriptRunResult', () => {
     };
     const formatted = formatScriptRunResult(res);
     expect(formatted.isError).toBeUndefined();
-    expect(formatted.content[0]?.text).toContain('run r-1 — status: ok');
-    expect(formatted.content[0]?.text).toContain('"total": 3');
-    expect(formatted.content[0]?.text).toContain('fs.write (4ms)');
+    expect(resultText(formatted)).toContain('run r-1 — status: ok');
+    expect(resultText(formatted)).toContain('"total": 3');
+    expect(resultText(formatted)).toContain('fs.write (4ms)');
   });
 
   it('marks error runs as isError', () => {
@@ -99,7 +108,7 @@ describe('formatScriptRunResult', () => {
       callsSummary: [],
     });
     expect(formatted.isError).toBe(true);
-    expect(formatted.content[0]?.text).toContain('error: capability denied');
+    expect(resultText(formatted)).toContain('error: capability denied');
   });
 });
 
@@ -124,6 +133,30 @@ describe('registerScriptTools', () => {
         reservedNames: new Set(['run_installed_script']),
       },
     );
+    expect(registered).toEqual(['record_application']);
+    expect(server.tool).toHaveBeenCalledTimes(1);
+    expect(server.tool.mock.calls[0]?.[0]).toBe('record_application');
+  });
+
+  it('skips normalized collisions with canonical, alias, and tombstone spellings', () => {
+    const server = fakeServer();
+    const registered = registerScriptTools(
+      server as unknown as McpServer,
+      parseScriptToolSpecs(
+        JSON.stringify([
+          { name: 'writefile', description: 'canonical collision', script: 's' },
+          { name: 'searchfiles', description: 'alias collision', script: 's' },
+          { name: 'exitplanmode', description: 'tombstone collision', script: 's' },
+          { name: 'record_application', description: 'ok', script: 'application-store' },
+        ]),
+      ),
+      {
+        api: {} as GezelClient,
+        projectId: 'p1',
+        reservedNames: new Set(['write_file', 'search_files', 'ExitPlanMode']),
+      },
+    );
+
     expect(registered).toEqual(['record_application']);
     expect(server.tool).toHaveBeenCalledTimes(1);
     expect(server.tool.mock.calls[0]?.[0]).toBe('record_application');

@@ -106,6 +106,26 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   resident footprint; GLM 5.2 IQ2_XXS keeps 19.6 GiB of non-routed weights
   resident (vs ~4 GiB) and spends 89 KiB/token on MLA KV, so it caps at 64K.
   An explicit `config.ds4NumCtx` still overrides both.
+- **`ds4-server` prints its own memory plan at load — author the catalog from
+  it, never from an architecture guess.** Two lines, both unconditional:
+
+  ```
+  ds4: memory: KV 1.36 GiB (raw 0.36 + compressed 1.00) + buffers 1.00 GiB
+       + resident model 0.99 GiB + expert cache 28.62 GiB
+       + prefill expert reserve 3.38 GiB = 35.35 GiB planned
+  ds4: memory detail: ctx=131072 prefill_cap=4096 raw_kv_rows=4352
+       compressed_kv_rows=32770
+  ```
+
+  `compressed_kv_rows` tracks the window (DSA compresses 4:1 here, hence
+  ctx/4); `raw_kv_rows` tracks `prefill_cap`, so it does NOT scale with ctx.
+  The window-scaling part alone is `ds4.kvBytesPerToken` — 1.00 GiB / 131072 =
+  8192 B/token for DeepSeek V4 Flash, against 89 KiB/token for GLM 5.2's
+  uncompressed MLA. Pair it with `ds4.residentCtxTokens` (the `ctx=` the
+  `residentBytes` figure was measured at) and both the models list and the
+  capacity broker re-price the model at whatever window a device launches it
+  with. Omit both and the footprint is treated as flat, which is what every
+  entry did before these fields existed.
 - GLM does not support directional steering, `--power` below 100, an explicit
   `--prefill-chunk`, or the external `--mtp` file. We pass none of these, so
   the launch args are family-agnostic. `--glm-mtp` (experimental greedy

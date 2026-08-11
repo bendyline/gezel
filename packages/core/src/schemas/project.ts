@@ -67,7 +67,7 @@ export const ProjectConnectorBindingSchema = z.object({
   version: z.string().optional(),
   displayName: z.string().optional(),
   /**
-   * Workspace-relative corpus root (`data/<corpusName>`), resolved once at bind
+   * Artifact-relative corpus root (`data/<corpusName>`), resolved once at bind
    * time and never recomputed — renaming a binding must not strand its corpus.
    */
   corpusDir: z.string().optional(),

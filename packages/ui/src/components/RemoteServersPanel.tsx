@@ -14,13 +14,13 @@ import { ConfirmDialog } from './ConfirmDialog.js';
  *
  *  1. "This device as a server" — opt-in toggle for serving this device's
  *     models to paired clients over the LAN (off by default), the identity
- *     fingerprint to verify out-of-band when another device pairs, and the
+ *     code to check out-of-band when another device pairs, and the
  *     server settings (port, bind interface, allowed models, per-device
  *     limits, queue priority) behind an explicit Apply — a port/bind change
  *     rebinds the live listener, so edits never save keystroke-by-keystroke.
  *     On machine installs the listener is owned by the machine service (it
  *     holds the engines and serves even while nobody is logged in), so the
- *     toggle, settings, fingerprint, pending pairings, and paired devices
+ *     toggle, settings, identity code, pending pairings, and paired devices
  *     are all backed by /api/machine-serving; otherwise they manage this
  *     user daemon's own config, with pairing approvals in Connected Apps.
  *  2. "Paired servers" — the servers THIS device has paired with as a client;
@@ -32,8 +32,20 @@ interface DeviceIdentity {
   fingerprint: string;
 }
 
-function shortFp(fp: string): string {
-  return `${fp.slice(0, 16)}…`;
+/**
+ * The human-comparable form of an identity fingerprint: the first 16 hex
+ * characters, in groups of four, so two people can actually read it to each
+ * other. The full 64-char value is what gets pinned and compared in code —
+ * this is only the out-of-band check.
+ *
+ * 16 characters (64 bits) is a floor, not a style choice. The check has to
+ * survive an attacker who grinds Ed25519 keypairs offline looking for one
+ * whose SPKI SHA-256 shares the displayed prefix; a 10-character (40-bit)
+ * code is within reach of a few GPU-days, 64 bits is not. Don't shorten it
+ * further to make the line prettier.
+ */
+function deviceCode(fp: string): string {
+  return (fp.slice(0, 16).match(/.{1,4}/g) ?? []).join(' ');
 }
 
 function formatRelative(ms?: number): string {
@@ -369,7 +381,9 @@ export function RemoteServersPanel() {
     }
   }, [unpairTarget, refresh]);
 
-  const serverFingerprint = machineServing ? machineServing.identity.fingerprint : null;
+  const ownFingerprint = machineServing
+    ? machineServing.identity.fingerprint
+    : (identity?.fingerprint ?? null);
 
   return (
     <section className="settings-section">
@@ -410,24 +424,24 @@ export function RemoteServersPanel() {
         ) : (
           <p className="muted small">Off — no other device can run models here.</p>
         )}
-        {machineServing ? (
-          <p className="muted small">
-            This machine's identity fingerprint (read it across when pairing to verify):{' '}
-            <code style={{ wordBreak: 'break-all' }}>{serverFingerprint}</code>
-          </p>
-        ) : (
-          identity && (
-            <p className="muted small">
-              This device's identity fingerprint (read it across when pairing to verify):{' '}
-              <code style={{ wordBreak: 'break-all' }}>{identity.fingerprint}</code>
-            </p>
-          )
+        {ownFingerprint && (
+          <div className="device-code-block">
+            <span className="muted small">
+              {machineServing ? "This machine's identity code" : "This device's identity code"} —
+              when you pair from another device, check that it shows the same code:
+            </span>
+            <code className="device-code">{deviceCode(ownFingerprint)}</code>
+            <details className="device-code-full">
+              <summary className="muted small">Show the full fingerprint</summary>
+              <code style={{ wordBreak: 'break-all' }}>{ownFingerprint}</code>
+            </details>
+          </div>
         )}
         {machineServing && staleUserPairings && (
           <p className="muted small">
             Some devices paired with this account's daemon before the machine service took over
             serving. Those pairings no longer work — ask them to unpair and pair again against this
-            machine's fingerprint above.
+            machine's identity code above.
           </p>
         )}
 
@@ -627,8 +641,9 @@ export function RemoteServersPanel() {
                 <div className="connected-app-meta">
                   <div className="connected-app-name">{r.displayName}</div>
                   <div className="muted small">
-                    {r.baseUrl} — identity <code>{shortFp(r.pinnedIdentityFingerprint)}</code> —
-                    last seen {formatRelative(r.lastSeenAt)}
+                    {r.baseUrl} — identity code{' '}
+                    <code>{deviceCode(r.pinnedIdentityFingerprint)}</code> — last seen{' '}
+                    {formatRelative(r.lastSeenAt)}
                   </div>
                 </div>
                 <div className="connected-app-actions">
@@ -650,27 +665,32 @@ export function RemoteServersPanel() {
       <ConfirmDialog
         open={pairInspection !== null}
         title={
-          pairInspection?.identityChanged ? 'Server identity changed' : 'Verify server identity'
+          pairInspection?.identityChanged ? 'Server identity changed' : 'Check the identity code'
         }
         message={
           pairInspection ? (
             <>
-              Compare this complete fingerprint with the one displayed on the server device before
-              continuing:
-              <br />
-              <code style={{ wordBreak: 'break-all' }}>{pairInspection.fingerprint}</code>
+              On the server device, open Settings → Remote Servers and check that it shows this same
+              identity code:
+              <div className="device-code-block">
+                <code className="device-code">{deviceCode(pairInspection.fingerprint)}</code>
+                <details className="device-code-full">
+                  <summary className="muted small">Show the full fingerprint</summary>
+                  <code style={{ wordBreak: 'break-all' }}>{pairInspection.fingerprint}</code>
+                </details>
+              </div>
               {pairInspection.identityChanged && pairInspection.existingFingerprint && (
                 <>
-                  <br />
-                  Previously pinned: <code>{pairInspection.existingFingerprint}</code>
+                  This is not the code you trusted before. Continue only if you know why it changed
+                  — a reinstall or a wiped keychain does this, and so does someone impersonating the
+                  server. Previously trusted:{' '}
+                  <code>{deviceCode(pairInspection.existingFingerprint)}</code>
                 </>
               )}
             </>
           ) : null
         }
-        confirmLabel={
-          pairInspection?.identityChanged ? 'Trust new identity' : 'Fingerprint matches'
-        }
+        confirmLabel={pairInspection?.identityChanged ? 'Trust new identity' : 'The code matches'}
         danger={pairInspection?.identityChanged === true}
         onConfirm={confirmPair}
         onCancel={() => setPairInspection(null)}

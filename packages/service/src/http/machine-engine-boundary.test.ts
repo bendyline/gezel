@@ -52,6 +52,9 @@ describe('machine-engine service boundary', () => {
     expect((await machineFetch('/v1/remote/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/llama-cpp/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/engines/status')).status).toBe(200);
+    expect((await machineFetch('/v1/remote/manage/engines/llama-cpp/model-context')).status).toBe(
+      200,
+    );
     expect((await machineFetch('/v1/remote/manage/system/memory/usage')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/image-gen/models')).status).toBe(200);
     expect((await machineFetch('/v1/remote/manage/video-gen/models')).status).toBe(200);
@@ -122,6 +125,16 @@ describe('machine-engine service boundary', () => {
     const body = (await post.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe('gezel_machine_engine_not_product_api');
     expect(body.error.message).toContain('runtime/port');
+
+    const responses = await httpFetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', input: 'hi' }),
+    });
+    expect(responses.status).toBe(404);
+    await expect(responses.json()).resolves.toMatchObject({
+      error: { code: 'gezel_machine_engine_not_product_api' },
+    });
 
     // The hint does not vary with auth.
     const authed = await machineFetch('/v1/models');

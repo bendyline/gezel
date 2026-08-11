@@ -157,6 +157,6 @@ function isDraftPlanGateFailure(call: TurnCtx['drained'][number]): boolean {
 export const TurnAutoAcknowledgeToolErrors: Behavior = {
   id: 'turn.auto-acknowledge-tool-errors',
   description:
-    'Re-prompts when ≥1 unresolved tool call this turn errored AND the assistant text does not acknowledge the failure. Catches Gemma 4 26B claiming "I have created the project" after `create_project` rejected with a Zod error.',
+    'Re-prompts when ≥1 unresolved tool call this turn errored AND the assistant text does not acknowledge the failure. Catches Gemma 4 26B claiming "I have created the project" after `start_project` rejected with a validation error.',
   postTurnDetector: (ctx) => detect(ctx),
 };

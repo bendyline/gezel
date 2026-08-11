@@ -13,12 +13,14 @@ export type { ArtifactsContentContainerOptions } from './artifacts-container.js'
 export {
   chooseOutsideInSource,
   importOutsideInDocument,
+  isOutsideInMarkdownEditingEnabled,
   isOutsideInInternalPath,
   relativePath,
   renderOutsideInDocument,
   resolveOutsideInLayout,
   runtimePathForTarget,
   withOutsideInMetadata,
+  withOutsideInMarkdownEditing,
 } from './outside-in.js';
 export type { OutsideInFormat, OutsideInLayout } from './outside-in.js';
 

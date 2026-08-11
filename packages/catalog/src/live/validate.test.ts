@@ -14,7 +14,11 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function writeToolset(dataDir: string, id: string, opts: { broken?: boolean } = {}) {
+async function writeToolset(
+  dataDir: string,
+  id: string,
+  opts: { broken?: boolean; minGezelVersion?: string } = {},
+) {
   const dir = join(dataDir, 'toolsets', id.slice(0, 2), id);
   await mkdir(join(dir, 'versions', '1.0.0'), { recursive: true });
   await writeFile(
@@ -28,6 +32,7 @@ async function writeToolset(dataDir: string, id: string, opts: { broken?: boolea
       tags: [],
       maintainer: { name: 'Test' },
       yankedVersions: [],
+      ...(opts.minGezelVersion ? { minGezelVersion: opts.minGezelVersion } : {}),
     }),
   );
   const version = opts.broken
@@ -115,6 +120,33 @@ describe('validateGildeContentUpgrade', () => {
       ok: false,
       regressions: [{ kind: 'toolset', id: 'cc-community' }],
     });
+  });
+
+  it('refuses a candidate that retro-gates a resolvable item behind a minGezelVersion floor', async () => {
+    const current = await makeDataDir('current');
+    const candidate = await makeDataDir('candidate');
+    await writeToolset(current, 'aa-tool');
+    await writeToolset(candidate, 'aa-tool', { minGezelVersion: '1.26290' });
+    const result = await validateGildeContentUpgrade({
+      currentDataDir: current,
+      candidateDataDir: candidate,
+      gezelVersion: '1.26200.3',
+    });
+    expect(result).toEqual({ ok: false, regressions: [{ kind: 'toolset', id: 'aa-tool' }] });
+  });
+
+  it('accepts a candidate that adds a brand-new gated item (it never resolved here before)', async () => {
+    const current = await makeDataDir('current');
+    const candidate = await makeDataDir('candidate');
+    await writeToolset(current, 'aa-tool');
+    await writeToolset(candidate, 'aa-tool');
+    await writeToolset(candidate, 'zz-future', { minGezelVersion: '1.26290' });
+    const result = await validateGildeContentUpgrade({
+      currentDataDir: current,
+      candidateDataDir: candidate,
+      gezelVersion: '1.26200.3',
+    });
+    expect(result).toEqual({ ok: true, checked: 1 });
   });
 
   it('honors bundled-over-community shadowing on both sides', async () => {

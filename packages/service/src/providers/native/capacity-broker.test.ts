@@ -20,6 +20,7 @@ import {
   minViableLocalContextTokens,
   parseMeminfoAvailableBytes,
   parseVmStatAvailableBytes,
+  planAdaptiveContextGrowth,
   planCtxTokensForMemory,
   plannedLocalEngineSlots,
   resolveLlamaCppContextRequirement,
@@ -139,11 +140,31 @@ describe('CapacityBroker', () => {
     // The 4 GB reserve binds at the small end where the fraction alone
     // would leave the OS too little.
     expect(autoDetectBudgetBytes(8 * GB, uma)).toBe(4 * GB);
-    // The fraction binds everywhere above it.
+    // The fraction binds in the middle, where its reserve is under 16 GiB.
     expect(autoDetectBudgetBytes(32 * GB, uma)).toBe(Math.floor(32 * GB * 0.7));
-    // Big Macs keep the workstation share they already had — no regression.
-    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(Math.floor(96 * GB * 0.8));
-    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(96 * GB);
+    // Above that the capped reserve binds instead: what macOS, the shell, and
+    // the user's apps need is absolute, so a bigger machine hands the extra
+    // to models rather than holding back a proportional share of it. The old
+    // curve stranded 19 GB on a 64 GB Mac and 32 GB on a 128 GB one.
+    expect(autoDetectBudgetBytes(64 * GB, uma)).toBe(64 * GB - 16 * GB);
+    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(96 * GB - 16 * GB);
+    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(112 * GB);
+    // The reserve is a ceiling, not a target — it never grows with the host.
+    expect(autoDetectBudgetBytes(512 * GB, uma)).toBe(512 * GB - 16 * GB);
+  });
+
+  it('raises admission capacity without raising peak concurrency', () => {
+    // The two must not move together: a bigger budget should let MORE MODELS
+    // fit, not give one model more simultaneous KV slots (that is the 27B-q8
+    // Metal abort below). Slot sizing keeps the pre-cap curve.
+    const uma = { unifiedMemory: true };
+    const big = computeCapacityBudget({ systemRamBytes: 128 * GB, ...uma });
+    expect(big.budgetBytes).toBe(112 * GB);
+    expect(big.concurrencySizingBytes).toBe(96 * GB);
+
+    // Where the reserve cap doesn't bind, the two agree.
+    const small = computeCapacityBudget({ systemRamBytes: 32 * GB, ...uma });
+    expect(small.concurrencySizingBytes).toBe(small.budgetBytes);
   });
 
   it('auto-detect kicks in when budgetBytes is omitted', () => {
@@ -310,6 +331,7 @@ describe('CapacityBroker', () => {
         vramBytes: 30 * GB,
         ramShareBytes: 38 * GB,
         fastBytes: 30 * GB,
+        concurrencySizingBytes: 30 * GB,
       },
     });
     expect(msg).toMatch(/keep models on the graphics card/);
@@ -355,7 +377,10 @@ describe('CapacityBroker', () => {
     expect(CapacityBroker.estimateResidentBytes('llama-cpp', 10 * GB)).toBe(
       Math.round(10 * GB * 1.2),
     );
-    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.3));
+    // Measured: `mx.get_active_memory()` after load(), before inference, on a
+    // 27.50 GiB model reads 27.47 GiB. The old 1.3 folded KV into the weights
+    // term; callers price KV explicitly, so it was a double-count.
+    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.05));
   });
 
   it('estimateResidentBytes caps ds4 at the streaming working set, not the weight size', () => {
@@ -510,12 +535,22 @@ describe('llamaCppSlotCeiling', () => {
 });
 
 describe('localEngineKvBudgetBytes', () => {
-  it('leaves less headroom for MLX than llama-cpp (heavier working set)', () => {
+  it('prices weights from measurement, and charges MLX its heavier working set as headroom', () => {
+    // This used to read "leaves less headroom for MLX than llama-cpp" and
+    // assert it through a 1.3x weights multiplier. That inverted the meaning
+    // of the number: MLX's weights are the LIGHTER of the two (0.999x
+    // measured, vs llama's unmeasured 1.2), and what is heavier is its
+    // per-wave compute working set. Both halves are now stated where they
+    // belong — weights here, working set in the slot ceiling's headroom — so
+    // the invariant that matters is still MLX <= llama in SLOTS.
     const base = { budgetBytes: 96 * GB, weightsBytes: 28 * GB };
-    const mlx = localEngineKvBudgetBytes({ engine: 'mlx', ...base });
-    const llama = localEngineKvBudgetBytes({ engine: 'llama-cpp', ...base });
-    expect(mlx).toBeLessThan(llama);
-    expect(mlx).toBe(96 * GB - Math.round(28 * GB * 1.3));
+    expect(localEngineKvBudgetBytes({ engine: 'mlx', ...base })).toBe(
+      96 * GB - Math.round(28 * GB * 1.05),
+    );
+    const slotInput = { ...base, perTurnCtxTokens: 32_768, kvCacheType: 'f16' as const };
+    expect(localEngineSlotCeiling({ engine: 'mlx', ...slotInput })).toBeLessThanOrEqual(
+      localEngineSlotCeiling({ engine: 'llama-cpp', ...slotInput }),
+    );
   });
 
   it('goes negative when the model overflows the budget', () => {
@@ -567,14 +602,45 @@ describe('localEngineSlotCeiling', () => {
     // the MLX slot ceiling this used defaultLocalEngineSlots()=4 → a width-4
     // engine gate → three co-resident sessions + a prefill aborted Metal
     // (SIGABRT — the "Python quit unexpectedly" crash). Must collapse to serial.
+    //
+    // Sized the way buildMlxProvider sizes it: against `concurrencySizingBytes`
+    // rather than the admission budget, and with the header-exact per-slot KV
+    // MLX reads from the model dir's config.json. Both matter — the raised
+    // reserve cap and the measured (1.0, not 1.3) weights multiplier each free
+    // memory that the weights-scaled KV heuristic, which under-prices a dense
+    // model ~3x, would happily spend on a second slot. buildMlxProvider pins
+    // the ceiling to 1 outright when geometry is unreadable, for that reason.
+    const budget = computeCapacityBudget({ systemRamBytes: 64 * GB, unifiedMemory: true });
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
+      budgetBytes: budget.fastBytes,
+      sizingBudgetBytes: budget.concurrencySizingBytes,
       weightsBytes: 28 * GB,
       perTurnCtxTokens: 32_768,
       kvCacheType: 'f16',
+      // 64 layers x 4 KV heads x 256 head_dim x 2 (K+V) x 2 B x 32K tokens.
+      exactPerSlotKvBytesF16: 64 * 4 * 256 * 2 * 2 * 32_768,
     });
     expect(n).toBe(1);
+  });
+
+  it('correcting the MLX weights multiplier does not buy a slot', () => {
+    // The trap in measuring 1.3x -> 1.0x: ~9 GB of phantom weights on a 27B
+    // was silently funding the compute-headroom margin, so an honest weights
+    // figure alone would have raised peak concurrency — the one outcome the
+    // margin exists to prevent. MLX carries its share of that margin openly
+    // instead, and the slot count is unchanged.
+    const budget = computeCapacityBudget({ systemRamBytes: 128 * GB, unifiedMemory: true });
+    const n = localEngineSlotCeiling({
+      engine: 'mlx',
+      budgetBytes: budget.fastBytes,
+      sizingBudgetBytes: budget.concurrencySizingBytes,
+      weightsBytes: 27.5 * GB,
+      perTurnCtxTokens: 65_536,
+      kvCacheType: 'f16',
+      exactPerSlotKvBytesF16: 64 * 4 * 256 * 2 * 2 * 65_536,
+    });
+    expect(n).toBe(2);
   });
 
   it('still allows real batching for a small model on a big machine', () => {
@@ -670,7 +736,8 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     const shared = computeCapacityBudget({ systemRamBytes: RAM, gpuVramBytes: 60 * GB });
     expect(shared.kind).toBe('unified');
     expect(shared.vramBytes).toBe(0);
-    expect(shared.budgetBytes).toBe(Math.floor(RAM * 0.7));
+    // Unified curve: the 16 GiB reserve cap, not the 0.7 fraction, at 64 GB.
+    expect(shared.budgetBytes).toBe(RAM - 16 * GB);
     expect(shared.fastBytes).toBe(shared.budgetBytes);
   });
 
@@ -1071,6 +1138,288 @@ describe('model-aware context admission', () => {
     ).toMatchObject({
       minimumPerTurnCtxTokens: 65_536,
       requestedPerTurnCtxTokens: 131_072,
+    });
+  });
+
+  it('a per-model override below the floor is honored via a reduced caller floor', () => {
+    const requirement = resolveLlamaCppContextRequirement({
+      modelContextWindow: 262_144,
+      explicitContextWindow: 32_768,
+      adaptiveContextWindow: 65_536,
+      contextSizing: 'adaptive',
+      // Callers pass min(hostFloor, override) so an explicit 32K survives
+      // the 64K floor's max() instead of being silently raised.
+      minViableContextTokens: 32_768,
+    });
+    expect(requirement).toMatchObject({
+      minimumPerTurnCtxTokens: 32_768,
+      requestedPerTurnCtxTokens: 32_768,
+      strict: false,
+    });
+    expect(requirement.growthTargetTokens).toBeUndefined();
+  });
+});
+
+describe('adaptive context growth', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  describe('resolveLlamaCppContextRequirement growth target', () => {
+    it('emits the native window as the target for a plain adaptive launch', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(262_144);
+    });
+
+    it('floors an off-grid native window to 1024 alignment', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 100_000,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(99_328);
+    });
+
+    it('emits no target under strict model-max, explicit overrides, or unknown native', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'model-max',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          explicitContextWindow: 98_304,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      expect(
+        resolveLlamaCppContextRequirement({
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+    });
+
+    it('treats an authored manifest contextSize as a growth ceiling', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 98_304,
+          manifestContextSize: 98_304,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBeUndefined();
+      // A manifest ceiling above the request still allows growth up to it.
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          manifestContextSize: 131_072,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(131_072);
+    });
+
+    it('honors the explicit and env growth ceilings', () => {
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+          growthCeilingTokens: 131_072,
+        }).growthTargetTokens,
+      ).toBe(131_072);
+      vi.stubEnv('GEZEL_LLAMA_GROWTH_CEILING_TOKENS', '98304');
+      expect(
+        resolveLlamaCppContextRequirement({
+          modelContextWindow: 262_144,
+          adaptiveContextWindow: 65_536,
+          contextSizing: 'adaptive',
+        }).growthTargetTokens,
+      ).toBe(98_304);
+    });
+  });
+
+  describe('planAdaptiveContextGrowth', () => {
+    // A 24 GB discrete card holding a dense ~27B q4: weights ~19.1 GB
+    // resident against a 22.8 GB usable fast pool, ~36 KB/token of KV.
+    const DENSE_ON_CARD = {
+      basePerTurnCtxTokens: 65_536,
+      targetPerTurnCtxTokens: 262_144,
+      slots: 1,
+      kvBytesPerToken: 36 * 1024,
+      weightsResidentBytes: 19.1 * GB,
+      fastBudgetBytes: 22.8 * GB,
+      committedOtherBytes: 0,
+      budgetKind: 'discrete-gpu' as const,
+      vramBytes: 22.8 * GB,
+      freeSystemRamBytes: 64 * GB,
+    };
+
+    it('grows a dense model into leftover VRAM, 1024-aligned, above the base grant', () => {
+      const result = planAdaptiveContextGrowth(DENSE_ON_CARD);
+      expect(result.grown).toBe(true);
+      expect(result.perTurnCtxTokens).toBeGreaterThan(65_536);
+      expect(result.perTurnCtxTokens % 1024).toBe(0);
+      expect(result.reason).toMatch(/growing context 65536/);
+      // The grown KV plus weights stays inside the fast pool with the
+      // compute headroom the shared clamp enforces.
+      const kv = result.perTurnCtxTokens * DENSE_ON_CARD.kvBytesPerToken;
+      expect(DENSE_ON_CARD.weightsResidentBytes + kv / 0.8).toBeLessThanOrEqual(
+        DENSE_ON_CARD.fastBudgetBytes + 1024,
+      );
+    });
+
+    it('confines discrete-GPU growth to the card — free system RAM is invisible', () => {
+      const dry = planAdaptiveContextGrowth({ ...DENSE_ON_CARD, freeSystemRamBytes: 0 });
+      const flooded = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        freeSystemRamBytes: 999 * GB,
+      });
+      expect(flooded.perTurnCtxTokens).toBe(dry.perTurnCtxTokens);
+    });
+
+    it('uses live free RAM on shared-pool hosts', () => {
+      const unified = {
+        ...DENSE_ON_CARD,
+        budgetKind: 'unified' as const,
+        vramBytes: 0,
+        weightsResidentBytes: 8.6 * GB,
+        fastBudgetBytes: 44.8 * GB,
+      };
+      const tight = planAdaptiveContextGrowth({ ...unified, freeSystemRamBytes: 14 * GB });
+      const roomy = planAdaptiveContextGrowth({ ...unified, freeSystemRamBytes: 64 * GB });
+      expect(roomy.perTurnCtxTokens).toBeGreaterThan(tight.perTurnCtxTokens);
+    });
+
+    it('never grows past the target and reports a full-native grant exactly', () => {
+      // SWA-class linearization: ~2 KB/token makes the whole native window cheap.
+      const result = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        weightsResidentBytes: 5.9 * GB,
+        kvBytesPerToken: 2 * 1024,
+      });
+      expect(result).toMatchObject({ grown: true, perTurnCtxTokens: 262_144 });
+    });
+
+    it('never returns below the base grant when weights exceed the fast pool', () => {
+      const result = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        weightsResidentBytes: 30 * GB,
+      });
+      expect(result).toMatchObject({ grown: false, perTurnCtxTokens: 65_536, reason: null });
+    });
+
+    it('refuses MoE growth on a discrete card but allows it on unified hosts', () => {
+      expect(planAdaptiveContextGrowth({ ...DENSE_ON_CARD, isMoE: true }).grown).toBe(false);
+      expect(
+        planAdaptiveContextGrowth({
+          ...DENSE_ON_CARD,
+          isMoE: true,
+          budgetKind: 'unified',
+          vramBytes: 0,
+          weightsResidentBytes: 8.6 * GB,
+          fastBudgetBytes: 44.8 * GB,
+        }).grown,
+      ).toBe(true);
+    });
+
+    it('shrinks growth by other models’ committed reservations', () => {
+      const alone = planAdaptiveContextGrowth(DENSE_ON_CARD);
+      const shared = planAdaptiveContextGrowth({
+        ...DENSE_ON_CARD,
+        committedOtherBytes: 2 * GB,
+      });
+      expect(shared.perTurnCtxTokens).toBeLessThan(alone.perTurnCtxTokens);
+    });
+  });
+
+  describe('planAdaptiveContextGrowth — slot trade', () => {
+    // A 32 GB-class card: 30 GB fast pool, 19 GB of resident weights,
+    // ~36 KB/token of KV. The 11 GB KV allowance splits as 84,992
+    // tokens/slot at 3 lanes and 128,000 at 2.
+    const THREE_LANES = {
+      basePerTurnCtxTokens: 65_536,
+      targetPerTurnCtxTokens: 262_144,
+      slots: 3,
+      kvBytesPerToken: 36_864,
+      weightsResidentBytes: 19 * GB,
+      fastBudgetBytes: 30 * GB,
+      committedOtherBytes: 0,
+      budgetKind: 'discrete-gpu' as const,
+      vramBytes: 30 * GB,
+      freeSystemRamBytes: 0,
+      allowSlotTrade: true,
+    };
+
+    it('consolidates 3 → 2 lanes when the target is out of reach and the gain is real', () => {
+      const result = planAdaptiveContextGrowth(THREE_LANES);
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 128_000 });
+      expect(result.reason).toMatch(/consolidating 3 → 2 engine lanes/);
+    });
+
+    it('never trades lanes without allowSlotTrade — an explicit pin is not growth’s to spend', () => {
+      const result = planAdaptiveContextGrowth({ ...THREE_LANES, allowSlotTrade: false });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 84_992 });
+    });
+
+    it('keeps every lane when the target is already reachable without trading', () => {
+      // 80K target fits at 3 lanes (84,992 available per slot).
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        targetPerTurnCtxTokens: 81_920,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 81_920 });
+    });
+
+    it('takes the LARGEST lane count that reaches the target, not always two', () => {
+      // At 4 lanes the pool yields 63,488/slot; the 80K target is reachable
+      // at 3 — consolidating all the way to 2 would spend a lane for nothing.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        slots: 4,
+        targetPerTurnCtxTokens: 81_920,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 81_920 });
+    });
+
+    it('never consolidates below two lanes', () => {
+      const result = planAdaptiveContextGrowth({ ...THREE_LANES, slots: 2 });
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 128_000 });
+    });
+
+    it('refuses a marginal trade — a lane is worth more than a few percent of window', () => {
+      // 88K target: 3 lanes already grant 84,992, so trading to 2 buys only
+      // ~6% — under the materiality bar, the lanes win.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        targetPerTurnCtxTokens: 90_112,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 3, perTurnCtxTokens: 84_992 });
+    });
+
+    it('prices the windowed fixed block per LANE, so trading also frees fixed KV', () => {
+      // SWA-class shape: modest slope, large per-slot fixed block. Dropping
+      // a lane returns its whole 3 GB fixed block to the pool: 3 lanes leave
+      // only (30−19−9)×0.8 = 1.6 GB of slope KV (~69K/slot), while 2 lanes
+      // leave (30−19−6)×0.8 = 4 GB — the full native window.
+      const result = planAdaptiveContextGrowth({
+        ...THREE_LANES,
+        kvBytesPerToken: 8 * 1024,
+        kvFixedPerSlotBytes: 3 * GB,
+        targetPerTurnCtxTokens: 262_144,
+      });
+      expect(result).toMatchObject({ grown: true, slots: 2, perTurnCtxTokens: 262_144 });
     });
   });
 });

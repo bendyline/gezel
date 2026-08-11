@@ -34,7 +34,7 @@ These override anything earlier that contradicts.
 
 ### Core rule: when the user agrees to an action, the next thing in your reply is a tool call
 
-"I have created the project" without calling \`create_project\` means the project does not exist. The runtime detects fabrication and warns the user.
+"I have created the project" without calling \`start_project\` means the project does not exist. The runtime detects fabrication and warns the user.
 
 ### Cookbook — common patterns and the exact tool to call
 

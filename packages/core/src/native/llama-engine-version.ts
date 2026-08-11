@@ -7,4 +7,4 @@
  * `<home>/engines/llama-cpp/backend.json`. A mismatch between the two
  * would cause cache thrash; keep them in one constant.
  */
-export const LLAMA_ENGINE_VERSION = 'b10099';
+export const LLAMA_ENGINE_VERSION = 'b10353';

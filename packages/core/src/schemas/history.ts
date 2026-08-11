@@ -121,7 +121,7 @@ export const HistoryEventKindSchema = z.enum([
   'gilde.updated',
   /**
    * A third-party app completed a chat turn through the public
-   * OpenAI-compatible surface (`/v1/chat/completions`) or the Ollama
+   * OpenAI-compatible surface (`/v1/responses`, `/v1/chat/completions`) or the Ollama
    * facade/emulation. `details` carries `{ appId, surface, model,
    * provider, inputTokens?, outputTokens? }` — `appId` is
    * `'unauthenticated'` for the no-auth Ollama emulation listener.

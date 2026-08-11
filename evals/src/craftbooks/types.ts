@@ -46,12 +46,23 @@ export type CraftbookEvalGateCheck =
 
 export type CraftbookEvalCoverageStatus = 'missing' | 'planned' | 'implemented' | 'validated';
 
-export type CraftbookEvalFixtureSurface = 'workspace' | 'artifact';
+/**
+ * What a recorded local-model validation actually proves. Artifact-only
+ * validations show that the prompt produced deliverables which passed the
+ * scenario gates. Workflow validations additionally prove observable runtime
+ * progression (terminal-step, gate, dispatch, hook, or draft-workflow evidence);
+ * mere task existence is intentionally insufficient.
+ */
+export type CraftbookEvalValidationScope = 'none' | 'artifact-only' | 'workflow';
+
+export type CraftbookEvalFixtureSurface = 'workspace' | 'artifact' | 'harness';
 
 export interface CraftbookEvalFixtureFile {
   path: string;
   content: string;
   surface?: CraftbookEvalFixtureSurface;
+  /** False seeds the fixture without presenting it as model-readable source. */
+  modelInput?: boolean;
 }
 
 export interface CraftbookEvalSimulator {
@@ -79,6 +90,7 @@ export interface CraftbookEvalSetup {
   about?: string;
   missionObjectives?: string;
   files?: CraftbookEvalFixtureFile[];
+  craftbookParams?: Record<string, string>;
   simulators?: CraftbookEvalSimulator[];
   /**
    * Optional direct execution target for generic adapter scenarios. Use
@@ -122,6 +134,7 @@ export interface CraftbookEvalSuccessSpec {
   taskGraph?: {
     checks?: CraftbookEvalGateCheck[];
     requireCraftbookTask?: boolean;
+    requireTerminalStep?: boolean;
     requireDraftRef?: boolean;
     draft?: {
       status?: 'draft' | 'paused' | 'active' | 'complete' | 'canceled';
@@ -134,6 +147,17 @@ export interface CraftbookEvalSuccessSpec {
   };
   /** Request-log assertions against the live mock services. */
   mocks?: CraftbookTestMockExpectation[];
+  /** Append-only project History evidence proving runtime behavior occurred. */
+  history?: Array<{
+    kind: string;
+    minEntries?: number;
+    maxEntries?: number;
+    summaryPattern?: string;
+    flags?: string;
+    details?: Record<string, string | number | boolean | null>;
+  }>;
+  /** Workspace fixtures that must remain byte-for-byte unchanged. */
+  unchangedFixtures?: string[];
 }
 
 export interface CraftbookEvalSpec {
@@ -198,6 +222,15 @@ export interface CraftbookTemplateSummary {
   triggers: string[];
   steps: CraftbookTemplateStepSummary[];
   entryStepId: string;
+  /** Runtime safety/automation hooks carried by the indexed craftbook. */
+  hooks?: Array<{
+    phase: string;
+    matcher: string;
+    script?: { name: string; scope?: string };
+    decision?: 'allow' | 'deny' | 'ask';
+  }>;
+  /** Inline craftbook scripts addressable by hook script refs. */
+  scripts?: Record<string, string>;
 }
 
 export interface CraftbookTemplateStepSummary {
@@ -227,6 +260,7 @@ export interface CraftbookAuditResult {
   band: 'strong' | 'needs-work' | 'weak';
   hasEvalSpec: boolean;
   evalStatus: CraftbookEvalCoverageStatus;
+  validationScope: CraftbookEvalValidationScope;
   issues: CraftbookAuditIssue[];
 }
 
@@ -235,6 +269,8 @@ export interface CraftbookCoverageSummary {
   evalSpecs: number;
   implementedSpecs: number;
   validatedSpecs: number;
+  artifactOnlyValidatedSpecs: number;
+  workflowValidatedSpecs: number;
   averageQualityScore: number;
   byBand: Record<CraftbookAuditResult['band'], number>;
   byEvalStatus: Record<CraftbookEvalCoverageStatus, number>;

@@ -3,10 +3,11 @@ import {
   auditCraftbookTemplate,
   auditCraftbookTemplates,
   validateCraftbookEvalSpecs,
+  validationScopeForSpec,
 } from './audit.ts';
 import { loadCraftbookTemplates } from './catalog.ts';
 import { CRAFTBOOK_EVAL_SPECS, runnableGenericCraftbookSpecs } from './specs.ts';
-import type { CraftbookTemplateSummary } from './types.ts';
+import type { CraftbookEvalSpec, CraftbookTemplateSummary } from './types.ts';
 
 describe('craftbook eval audit', () => {
   it('keeps eval specs pointed at real bundled craftbooks', async () => {
@@ -22,6 +23,90 @@ describe('craftbook eval audit', () => {
     expect(summary.totalTemplates).toBeGreaterThan(100);
     expect(summary.evalSpecs).toBe(CRAFTBOOK_EVAL_SPECS.length);
     expect(summary.byEvalStatus.missing).toBe(summary.totalTemplates - summary.evalSpecs);
+    expect(summary.artifactOnlyValidatedSpecs).toBeGreaterThan(0);
+    expect(summary.workflowValidatedSpecs + summary.artifactOnlyValidatedSpecs).toBe(
+      summary.validatedSpecs,
+    );
+  });
+
+  it('does not call task existence workflow proof without terminal or runtime evidence', () => {
+    const spec: CraftbookEvalSpec = {
+      craftbookId: 'sample',
+      scenarioId: 'craftbook-sample',
+      title: 'Sample',
+      objective: 'Exercise a real workflow.',
+      prompt: 'Run it.',
+      runAsCraftbookTask: true,
+      setup: { projectName: 'Sample' },
+      success: {
+        summary: 'The output exists.',
+        taskGraph: { requireCraftbookTask: true },
+      },
+      coverage: { status: 'validated' },
+      qualityFocus: [],
+    };
+    expect(validationScopeForSpec(spec)).toBe('artifact-only');
+    spec.success.taskGraph!.requireTerminalStep = true;
+    expect(validationScopeForSpec(spec)).toBe('workflow');
+  });
+
+  it('distinguishes artifact validation from proof that the craftbook workflow ran', () => {
+    const template: CraftbookTemplateSummary = {
+      id: 'sample',
+      name: 'Sample',
+      triggers: ['sample'],
+      entryStepId: 'finish',
+      steps: [
+        {
+          id: 'finish',
+          name: 'Finish',
+          suggestedRole: 'developer',
+          prompt:
+            'Finish the workflow only after checking the requested deliverable and recording the verification evidence.',
+          terminal: true,
+        },
+      ],
+    };
+
+    expect(auditCraftbookTemplate(template, 'validated').validationScope).toBe('artifact-only');
+    expect(auditCraftbookTemplate(template, 'validated', 'workflow').validationScope).toBe(
+      'workflow',
+    );
+  });
+
+  it('recognizes a valid hook-driven guardrail as an alternative to deliverable gates', () => {
+    const guardrail: CraftbookTemplateSummary = {
+      id: 'sample-guardrail',
+      name: 'Sample Guardrail',
+      description: 'Blocks a dangerous tool while its task is active.',
+      triggers: ['turn on guardrail'],
+      entryStepId: 'active',
+      hooks: [
+        {
+          phase: 'PreToolUse',
+          matcher: '^rm$',
+          script: { name: 'check-danger', scope: 'craftbook' },
+        },
+      ],
+      scripts: { 'check-danger': 'export const meta = {}; // deterministic hook fixture' },
+      steps: [
+        {
+          id: 'active',
+          name: 'Guardrail active',
+          suggestedRole: 'developer',
+          prompt:
+            'Work normally while this task remains active. The bundled pre-tool hook enforces the safety boundary for every matching call.',
+          terminal: true,
+        },
+      ],
+    };
+
+    const valid = auditCraftbookTemplate(guardrail, 'implemented');
+    expect(valid.band).toBe('strong');
+    expect(valid.issues.map((entry) => entry.code)).not.toContain('reviewer.no-evaluate-step');
+
+    const broken = auditCraftbookTemplate({ ...guardrail, scripts: {} }, 'implemented');
+    expect(broken.issues.map((entry) => entry.code)).toContain('hook.missing-script');
   });
 
   it('scores a well-structured craftbook above a weak one', () => {

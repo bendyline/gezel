@@ -19,6 +19,10 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(gezel-device-health PRIVATE dl)
 endif()
 
+if(WIN32)
+  target_link_libraries(gezel-device-health PRIVATE pdh)
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME device-health-self-test COMMAND gezel-device-health --self-test)

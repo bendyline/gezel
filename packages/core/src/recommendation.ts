@@ -316,7 +316,7 @@ export function pickRecommendedModel(
     return {
       id: top.m.id,
       recoScore: top.score,
-      reason: `${top.m.id} (recoScore ${top.score}) — safest small model for CPU, integrated graphics, or a GPU below 8 GiB`,
+      reason: `${top.m.id} (recoScore ${top.score}) — safest small model for CPU, integrated graphics, or a GPU below 8 GB`,
     };
   }
 

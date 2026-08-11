@@ -14,7 +14,7 @@ import {
  * map. Any unknown id returns null (matches the real catalog's miss path).
  */
 function stubCatalog(
-  entries: Record<string, { llamaCpp?: unknown; mlx?: unknown }>,
+  entries: Record<string, { llamaCpp?: unknown; mlx?: unknown; ds4?: unknown }>,
 ): CatalogService {
   return {
     get: async (kind: string, id: string) => {
@@ -72,12 +72,14 @@ function stubMlx(opts: {
 
 function makeOrchestrator(opts: {
   llamaCpp?: Parameters<typeof stubLlamaCpp>[0];
+  ds4?: Parameters<typeof stubLlamaCpp>[0];
   mlx?: Parameters<typeof stubMlx>[0];
   catalog?: Parameters<typeof stubCatalog>[0];
-  onInstallStart?: (info: { backend: 'llama-cpp' | 'mlx'; catalogId: string }) => void;
+  onInstallStart?: (info: { backend: 'llama-cpp' | 'mlx' | 'ds4'; catalogId: string }) => void;
 }) {
   return createEnsureModelOrchestrator({
     llamaCpp: stubLlamaCpp(opts.llamaCpp ?? {}),
+    ds4: stubLlamaCpp(opts.ds4 ?? {}),
     mlx: stubMlx(opts.mlx ?? {}),
     catalog: stubCatalog(opts.catalog ?? {}),
     ...(opts.onInstallStart ? { onInstallStart: opts.onInstallStart } : {}),
@@ -93,6 +95,10 @@ describe('parseQualifiedModelId', () => {
     expect(parseQualifiedModelId('mlx:gemma-2b')).toEqual({
       backend: 'mlx',
       catalogId: 'gemma-2b',
+    });
+    expect(parseQualifiedModelId('ds4:glm-5.2-754b-q2')).toEqual({
+      backend: 'ds4',
+      catalogId: 'glm-5.2-754b-q2',
     });
   });
 
@@ -145,6 +151,17 @@ describe('EnsureModelOrchestrator — ready path', () => {
     const result = await o.ensure('llama-cpp:already-installed');
     expect(result).toEqual({ status: 'ready', modelId: 'llama-cpp:already-installed' });
   });
+
+  it('returns ready for an installed ds4-only model', async () => {
+    const o = await makeOrchestrator({
+      catalog: { 'ds4-ready': { ds4: { url: 'x' } } },
+      ds4: { installed: new Set(['ds4-ready']) },
+    });
+    await expect(o.ensure('ds4:ds4-ready')).resolves.toEqual({
+      status: 'ready',
+      modelId: 'ds4:ds4-ready',
+    });
+  });
 });
 
 describe('EnsureModelOrchestrator — onInstallStart hook', () => {
@@ -185,6 +202,7 @@ describe('EnsureModelOrchestrator — onInstallStart hook', () => {
     } as unknown as MlxModelManager;
     const o = await createEnsureModelOrchestrator({
       llamaCpp: stubLlamaCpp({}),
+      ds4: stubLlamaCpp({}),
       mlx,
       catalog: stubCatalog({ 'fresh-mlx': { mlx: { url: 'x' } } }),
       onInstallStart: (info) => calls.push(info),
@@ -237,6 +255,23 @@ describe('EnsureModelOrchestrator — job lifecycle', () => {
     expect(snap?.events.some((e) => e.type === 'progress')).toBe(true);
   });
 
+  it('starts ds4 installs through the ds4 model manager', async () => {
+    const o = await makeOrchestrator({
+      catalog: { 'ds4-download': { ds4: { url: 'x' } } },
+      ds4: {
+        installs: {
+          'ds4-download': {
+            events: [{ type: 'done', jobId: '', modelId: '' }],
+          },
+        },
+      },
+    });
+    const result = await o.ensure('ds4:ds4-download');
+    expect(result).toMatchObject({ status: 'downloading', modelId: 'ds4:ds4-download' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(o.getJob(result.jobId!)?.status).toBe('done');
+  });
+
   it('coalesces concurrent ensure calls for the same model into one job', async () => {
     // Gated install: the iterable yields `progress`, then awaits a
     // promise that the test resolves at the end. While the install is
@@ -258,6 +293,7 @@ describe('EnsureModelOrchestrator — job lifecycle', () => {
     } as unknown as LlamaCppModelManager;
     const o = await createEnsureModelOrchestrator({
       llamaCpp,
+      ds4: stubLlamaCpp({}),
       mlx: stubMlx({}),
       catalog: stubCatalog({ 'slow-model': { llamaCpp: { url: 'x' } } }),
     });

@@ -132,7 +132,7 @@ Rules:
 - **Only a spectrum's extremes may recolor the latch.** The pressed face
   defaults to the accent. When a group is a spectrum with meaningful ends,
   the end keys may override it — the AI engagement "Off" latches
-  danger-red (emergency stop), the security posture latches sealed-green
+  danger-red (hard stop), the security posture latches sealed-green
   on Super Lockdown and open-amber on Unrestricted. Middle options keep
   the accent; never give every key its own color.
 - **State groups are the exception: they latch in the state's own color.**
@@ -155,6 +155,40 @@ Rules:
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
+
+## Controls: budget sliders
+
+The standard treatment for **continuous "how much may gezel take" ranges** —
+memory budgets, cache budgets, per-model context size. One CSS recipe
+(`.gz-budget-slider` in [styles.css](../packages/ui/src/styles.css)), one
+interaction contract, shared by every user (`EngineMemoryBudgetPanel`,
+`CacheControlsPanel`, `ModelContextSliderPanel`). Don't restyle a slider
+per-surface; if a surface needs something the recipe lacks, extend the recipe
+(and this section) instead.
+
+The contract:
+
+- **"Automatic" is a visible position, not a hidden default.** A `▲ Auto ·
+  <value>` tick sits under the track at the auto-derived value, so an
+  override always shows how far it drifts from what gezel would pick for
+  this machine. Dragging within one step of the tick snaps back to
+  Automatic.
+- **Draft, then Save.** The slider holds a draft (`null` = following
+  automatic); nothing persists until an explicit **Save**, and an active
+  override always offers **Back to automatic** as a first-class button —
+  never make users hunt for the escape hatch.
+- **Show the consequence while dragging.** The head row updates live with
+  what the position costs (`~X GB in memory`, a value tag flipping
+  Automatic → Custom → a warning tone when past what's recommended or
+  fits).
+- **Warn above the safe zone, don't block.** Positions past what the
+  machine can comfortably back stay reachable — flagged with an `<output>`
+  line explaining what actually happens (clamping, swapping) — because the
+  honest failure mode is visible degradation, not a wall.
+- The native range input keeps `accent-color: var(--accent)`; the thumb is
+  a sanctioned true circle (see the keys-in-trays rules above). The
+  machine-health temperature control's key-shaped thumb is the one
+  deliberate variant.
 
 ## Typography
 
@@ -290,6 +324,20 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Questions with an attached document.** When a pending question carries a
+document — a night-shift report, a draft plan — the document is not a
+ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
+it into its own right-hand column (`.pending-question-split*` in
+[styles.css](../packages/ui/src/styles.css)): the card and its actions on
+the left, the whole document as a portrait page on the right, scrolling in
+place. `.pending-question-splitwrap` is a named `question-card` query
+container, so the same card falls back to one column in a narrow chat
+bubble and the panel keeps its own scroll there. Two rules travel with the
+pattern: the document's own `#`/`##` headings are pulled back to panel
+scale (a report title must not out-shout the question it belongs to), and
+an *answered* card — which collapses to one line — stays single-column,
+because a full-height panel beside one sentence reads as broken.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:
@@ -358,6 +406,19 @@ empty-pool stripes: it is physically occupied, but remains available when the
 operating system needs the capacity.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
+
+**Identity codes.** When two people must compare a cryptographic value
+out loud — device pairing is the only case today — show a short grouped
+**identity code** (`.device-code`, the first 16 hex characters in groups
+of four) and keep the full value behind a "Show the full fingerprint"
+disclosure. Both ends of the comparison must show the *same* form, and the
+prompt asks the user to *check that the codes match*, never to "read it
+across". Length is a security floor, not a style choice: 16 hex characters
+is 64 bits, and a shorter code can be ground out offline by an attacker
+who wants a colliding prefix. Full-length values still travel in the API
+and are what the code compares —
+[RemoteServersPanel](../packages/ui/src/components/RemoteServersPanel.tsx)
+is the reference.
 
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along
@@ -471,6 +532,19 @@ rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that
 fades, no-motion variant included) and remove it once it settles. Never
 leave a permanent highlight behind — the ring is a cue, not a selection.
+
+**Horizontal strips need their own overflow cue.** A row that scrolls
+sideways — the chat pill row is the reference — cannot lean on the native
+scrollbar: on macOS's default "Automatic" setting Chromium paints an
+overlay bar that is invisible exactly when the user needs it, at rest, and
+forcing the classic bar costs 8px of height in a band whose height is often
+shared with a neighbouring toolbar. Draw the affordance instead:
+`.chat-pill-row-bar` is a 4px absolutely-positioned track sitting in the
+row's bottom padding, level with its border, rendered only while the
+content actually overflows, with a draggable thumb sized to the visible
+fraction. Absolute positioning is the point — the band's height must not
+depend on how many cards are in it. Vertical scrollers keep the native bar;
+this is a horizontal-strip pattern, not a general replacement.
 
 **Figure lists in articles.** A Handboek list whose items lead with a
 poppetje — what `::handboek-gezel-roster` expands to — renders as a card

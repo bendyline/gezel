@@ -23,7 +23,7 @@
  */
 
 import * as os from 'node:os';
-import { createLogger, leaksUntaggedReasoning } from '@bendyline/gezel';
+import { WORKSPACE_READ_MAX_FILES, createLogger, leaksUntaggedReasoning } from '@bendyline/gezel';
 import { Agent, fetch as undiciFetch } from 'undici';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
@@ -74,6 +74,7 @@ import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
 import type {
   NativeEngineExitSnapshot,
   NativeEngineLaunch,
+  NativeEngineLifecycleSnapshot,
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
@@ -81,6 +82,7 @@ import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
+import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -99,6 +101,12 @@ import type {
 import { buildTurnUsage } from '../usage-builder.js';
 import type { LlamaCppLogFile } from './log.js';
 import { type StartupPhase, classifyStartupLine } from './stdout-parser.js';
+import {
+  isLlamaCppGrammarParseError,
+  normalizeJsonSchemaForLlamaCpp,
+  simplifyJsonSchemaForLlamaCpp,
+  stripJsonSchemaPatternsForLlamaCpp,
+} from './tool-grammar.js';
 
 const log = createLogger('llama-cpp');
 
@@ -266,8 +274,20 @@ function isGptOss20bModel(model: string | undefined): boolean {
   return model === 'gpt-oss-20b-q4';
 }
 
+// Muse Glimmer's template has no no-think mode at all — only a
+// `reasoning_strength` dial, which constrained turns already pull down to
+// `low` (see disableThinkingForConstrainedTurn). Even there it plans past the
+// tight budget on a whole-file deliverable: measured 2026-08-10 on the
+// tictactoe eval, the turn aborted at 1025 reasoning chars against the 1024
+// limit. Same shape as the GPT-OSS note above — a native depth control that
+// still wants the bounded allowance rather than the strict one. Prefix-matched
+// so sibling quants (dynamic / q8) inherit it.
+function isMuseGlimmerModel(model: string | undefined): boolean {
+  return model?.startsWith('muse-glimmer') === true;
+}
+
 function needsExpandedConstrainedToolReasoning(model: string | undefined): boolean {
-  return isDeepSeekR1Model(model) || isGptOss20bModel(model);
+  return isDeepSeekR1Model(model) || isGptOss20bModel(model) || isMuseGlimmerModel(model);
 }
 
 export function constrainedToolReasoningCharLimitForModel(model: string): number {
@@ -284,7 +304,7 @@ export function constrainedToolNoSignalMsForModel(model: string | undefined): nu
 const DIRECT_FILE_WORK_PROMPT_SUFFIX =
   '\n\n[Local-model file-work mode: this turn has a concrete workspace file deliverable. Use reads only to inspect required inputs, then write the named output file. Do not answer with a plan or paste file contents in chat. The turn is not complete until `write_file`, `append_to_file`, `replace_in_file`, `replace_lines`, or a workspace-writing `run_nodejs_script` has succeeded.]';
 const DIRECT_FILE_WORK_AFTER_READ_PROMPT_SUFFIX =
-  '\n\n[Local-model write-now mode: you already inspected the relevant inputs. Your next output must start with a workspace mutation. Use `write_file` for small direct deliverables; use a helper script when the output is a derived data file and `run_nodejs_script` is exposed. Do not call `read_file`, `list_dir`, `stat`, or `validate` again before writing.]';
+  '\n\n[Local-model write-now mode: you already inspected the relevant inputs. Your next output must start with a workspace mutation. Use `write_file` for small direct deliverables; use a helper script when the output is a derived data file and `run_nodejs_script` is exposed. Do not call `read_file`, `read_files`, `list_dir`, `stat`, or `validate` again before writing.]';
 const DIRECT_FILE_WORK_PREREQUISITE_READ_PROMPT_SUFFIX =
   '\n\n[Local-model prerequisite-read mode: the request explicitly names source files. Read every named source successfully before writing the output. While sources remain, call only `read_file`; after the final source read, the tool surface will switch to file mutations.]';
 const DOM_NULL_REPAIR_PROMPT_SUFFIX =
@@ -296,6 +316,7 @@ const GATE_SURGICAL_EDIT_PROMPT_SUFFIX =
   '\n\n[Local-model gate patch mode: the deliverable exists and failed named checks. Your next output must start with `replace_in_file` (or `replace_lines`) making the smallest edit that clears the FIRST failing check. Copy the `find` text from the file content you already produced this session. Do not re-emit the whole file, do not read, do not reply in prose.]';
 const SCENARIO_FILE_REPAIR_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -306,6 +327,7 @@ const SCENARIO_FILE_REPAIR_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 const SCENARIO_FILE_REPAIR_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -328,6 +350,7 @@ const SCENARIO_SOURCE_REPAIR_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 const DIRECT_FILE_WORK_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -340,6 +363,7 @@ const DIRECT_FILE_WORK_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 const DIRECT_FILE_WORK_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'read_file',
+  'read_files',
   'list_dir',
   'stat',
   'validate',
@@ -472,82 +496,44 @@ function withWireMessages(body: Record<string, unknown>): Record<string, unknown
   return { ...body, messages: toWireMessages(messages) };
 }
 
+export {
+  isLlamaCppGrammarParseError,
+  normalizeJsonSchemaForLlamaCpp,
+  simplifyJsonSchemaForLlamaCpp,
+  stripJsonSchemaPatternsForLlamaCpp,
+} from './tool-grammar.js';
+
 interface ChatCompletionTool {
   type: 'function';
   function: { name: string; description: string; parameters: unknown };
 }
 
-/**
- * Normalize JSON Schema regexes before llama-server turns tool definitions
- * into a GBNF grammar.
- *
- * JavaScript's `RegExp#source` escapes forward slashes so the source can be
- * embedded in a `/.../` literal (`https:\/\/...`). That escape is
- * semantically identical to a plain `/` in an ECMA-262 pattern, but
- * llama.cpp's JSON-Schema-to-GBNF converter used to copy it into a quoted
- * GBNF terminal where `\/` is not a recognized escape. One otherwise-unused
- * tool could therefore reject the entire request with "failed to parse
- * grammar" before inference began.
- *
- * Keep this compatibility transform local to llama.cpp: cloud providers can
- * consume the original schema, and callers retain ownership of their object.
- */
-export function normalizeJsonSchemaForLlamaCpp(schema: unknown): unknown {
-  if (Array.isArray(schema)) {
-    let changed = false;
-    const normalized = schema.map((entry) => {
-      const next = normalizeJsonSchemaForLlamaCpp(entry);
-      if (next !== entry) changed = true;
-      return next;
-    });
-    return changed ? normalized : schema;
-  }
-  if (!schema || typeof schema !== 'object') return schema;
-
-  const record = schema as Record<string, unknown>;
-  let changed = false;
-  const normalized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    const next =
-      key === 'pattern' && typeof value === 'string'
-        ? value.replace(/\\\//g, '/')
-        : normalizeJsonSchemaForLlamaCpp(value);
-    normalized[key] = next;
-    if (next !== value) changed = true;
-  }
-  return changed ? normalized : schema;
+function hasJsonSchemaPatternsForLlamaCpp(tools: ChatCompletionTool[]): boolean {
+  return tools.some(
+    (tool) =>
+      stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters) !== tool.function.parameters,
+  );
 }
 
-/** Last-resort recovery for a server build that still rejects a tool grammar. */
-export function stripJsonSchemaPatternsForLlamaCpp(schema: unknown): unknown {
-  if (Array.isArray(schema)) {
-    let changed = false;
-    const stripped = schema.map((entry) => {
-      const next = stripJsonSchemaPatternsForLlamaCpp(entry);
-      if (next !== entry) changed = true;
-      return next;
-    });
-    return changed ? stripped : schema;
-  }
-  if (!schema || typeof schema !== 'object') return schema;
+type ToolGrammarFallback = 'none' | 'strip-patterns' | 'simplified' | 'permissive';
 
-  const record = schema as Record<string, unknown>;
-  let changed = false;
-  const stripped: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (key === 'pattern' && typeof value === 'string') {
-      changed = true;
-      continue;
-    }
-    const next = stripJsonSchemaPatternsForLlamaCpp(value);
-    stripped[key] = next;
-    if (next !== value) changed = true;
-  }
-  return changed ? stripped : schema;
-}
-
-export function isLlamaCppGrammarParseError(text: string): boolean {
-  return /failed to (?:initialize samplers:[^\r\n]*failed to )?parse grammar/i.test(text);
+function applyToolGrammarFallback(
+  tools: ChatCompletionTool[],
+  fallback: ToolGrammarFallback,
+): ChatCompletionTool[] {
+  if (fallback === 'none') return tools;
+  return tools.map((tool) => ({
+    ...tool,
+    function: {
+      ...tool.function,
+      parameters:
+        fallback === 'strip-patterns'
+          ? stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters)
+          : fallback === 'simplified'
+            ? simplifyJsonSchemaForLlamaCpp(tool.function.parameters)
+            : { type: 'object' },
+    },
+  }));
 }
 
 function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
@@ -566,6 +552,52 @@ function writeFileOnlyTools(tools: ChatCompletionTool[] | undefined): ChatComple
 function readFileOnlyTools(tools: ChatCompletionTool[] | undefined): ChatCompletionTool[] {
   const readFile = tools?.find((tool) => chatCompletionToolName(tool) === 'read_file');
   return readFile ? [readFile] : [];
+}
+
+/**
+ * Paths whose complete contents reached the model in one workspace-read call.
+ * `read_files` status rows are emitted in request order, so map by index rather
+ * than parsing an unescaped path back out of model-facing prose. A bridge-level
+ * truncation invalidates the whole batch: later file bodies may not have reached
+ * the model even when their source-side status row said `complete`.
+ */
+export function completeWorkspaceReadPaths(
+  toolName: string,
+  args: Record<string, unknown>,
+  output: string,
+): string[] {
+  if (output.startsWith('ERROR:') || output.includes('…[tool output truncated:')) return [];
+  if (toolName === 'read_file') {
+    if (typeof args.path !== 'string') return [];
+    const ranged = args.startLine !== undefined || args.endLine !== undefined;
+    if (ranged && !/^\[read_file [^\n]* complete\]/.test(output)) return [];
+    return [normalizeWorkspacePathForCompare(args.path)];
+  }
+  if (toolName !== 'read_files') return [];
+
+  const requested: Array<string | undefined> = Array.isArray(args.paths)
+    ? args.paths.map((path) => (typeof path === 'string' ? path : undefined))
+    : Array.isArray(args.files)
+      ? args.files.map((item) =>
+          item &&
+          typeof item === 'object' &&
+          !Array.isArray(item) &&
+          typeof (item as Record<string, unknown>).path === 'string'
+            ? ((item as Record<string, unknown>).path as string)
+            : undefined,
+        )
+      : [];
+  const statusLines = (output.split('\n\n', 1)[0] ?? '').split('\n').slice(1);
+  return requested.slice(0, WORKSPACE_READ_MAX_FILES).flatMap((path, index) => {
+    if (!path) return [];
+    const statusPrefix = `${index + 1} OK `;
+    const line = statusLines.find((candidate) => candidate.indexOf(statusPrefix) === 0);
+    const complete =
+      line?.match(
+        /\slines=(?:none|\d+-\d+)\s+totalLines=(?:\?|\d+)(\s+complete)?(?:\s+nextStartLine=\d+)?$/,
+      )?.[1] !== undefined;
+    return complete ? [normalizeWorkspacePathForCompare(path)] : [];
+  });
 }
 
 function isImmediateFileWritePrompt(
@@ -1191,6 +1223,18 @@ function compactToolForConstrainedLocalTurn(
               type: 'boolean',
               description: 'When true, return raw contents without line gutters.',
             },
+            startLine: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 10_000_000,
+              description: 'Optional 1-based first line to read (inclusive).',
+            },
+            endLine: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 10_000_000,
+              description: 'Optional 1-based last line to read (inclusive).',
+            },
           },
           required: ['path'],
         },
@@ -1457,15 +1501,41 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 
 type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
 
+/**
+ * Chat-template variables that name a model's reasoning DEPTH rather than an
+ * on/off switch. `applyTuning` has already written the manifest's declared
+ * `reasoning.templateKwargs` onto the body by the time the constrained-turn
+ * paths run, so we downgrade whichever dial this model actually reads instead
+ * of keeping a per-model branch here.
+ *
+ * Load-bearing for templates that have no `enable_thinking` at all: Muse
+ * Glimmer reads only `reasoning_strength`, so the disable below is a silent
+ * no-op there and the model keeps reasoning at its manifest default until the
+ * immediate-write guard kills the turn. Measured 2026-08-10 on the tictactoe
+ * eval — 1027 reasoning chars against the 1024 limit, two aborted turns and a
+ * poisoned-session recovery on a run that otherwise passed.
+ */
+const REASONING_DEPTH_TEMPLATE_KWARGS = new Set(['reasoning_effort', 'reasoning_strength']);
+
 function disableThinkingForConstrainedTurn(
   body: Record<string, unknown>,
   shape: DisableThinkingRequestShape,
   model: string | undefined,
 ): void {
   setChatTemplateKwarg(body, 'enable_thinking', false);
+  const declared = body.chat_template_kwargs;
+  if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
+    for (const key of Object.keys(declared as Record<string, unknown>)) {
+      if (REASONING_DEPTH_TEMPLATE_KWARGS.has(key)) {
+        setChatTemplateKwarg(body, key, 'low');
+      }
+    }
+  }
   // llama.cpp's bundled GPT-OSS template ignores enable_thinking and defaults
   // reasoning_effort to "medium". Set the template's actual control for terse,
   // tool-constrained turns so the model can reach the required call promptly.
+  // Kept explicit because that manifest predates `reasoning.templateKwargs`
+  // and so declares no dial for the loop above to find.
   if (isGptOss20bModel(model)) {
     setChatTemplateKwarg(body, 'reasoning_effort', 'low');
   }
@@ -1598,6 +1668,12 @@ export function compactSuccessfulWriteToolCallForTranscript(
   return true;
 }
 
+function engineRequestAbortError(label: string): Error {
+  const err = new Error(`[llama-cpp] engine request ${label} cancelled while waiting for a slot`);
+  err.name = 'AbortError';
+  return err;
+}
+
 export class LlamaCppProvider implements LLMProvider {
   readonly name = 'llama-cpp' as const;
   readonly queue: ProviderQueue;
@@ -1686,6 +1762,22 @@ export class LlamaCppProvider implements LLMProvider {
   private readonly disableThinkingRequestShape: DisableThinkingRequestShape;
   /** Engine batch width; see the `batchMaxConcurrency` constructor opt. */
   private readonly batchMaxConcurrency: number;
+  /**
+   * Number of real llama-server request slots (`--parallel`). The provider
+   * queue can intentionally be wider than this by one reserved background
+   * lane so an in-turn one-shot can dispatch without deadlocking behind the
+   * foreground turn that awaits it. This gate is the separate physical
+   * boundary: cache slot save/restore plus the streamed engine request must
+   * never exceed the slots the native server actually owns.
+   */
+  private readonly engineRequestWidth: number;
+  private engineRequestsActive = 0;
+  private readonly engineRequestWaiters: Array<{
+    resolve: () => void;
+    reject: (err: Error) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }> = [];
   /**
    * Mid-stream silence cap (ms). After this many ms with no SSE chunk,
    * the in-flight `/v1/chat/completions` request is aborted with an
@@ -1963,6 +2055,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.slotSavePath) this.slotSavePath = opts.slotSavePath;
     const slots = opts.concurrency ?? 2;
     this.launchedSlots = slots;
+    this.engineRequestWidth = slots;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     const batching = batchMax > 1;
@@ -1983,10 +2076,11 @@ export class LlamaCppProvider implements LLMProvider {
     this.queue = new ProviderQueue({
       // llama-server is launched with `--parallel ${slots}` (see
       // `buildLlamaCppProvider` in chat/manager.ts) so the engine has matching
-      // KV slots; the reserved background slot may briefly queue inside
-      // llama-server past `--parallel`, which it handles gracefully (unlike the
-      // single-stream MLX server) — and a background chore the foreground awaits
-      // gets its slot the moment the foreground frees one between round-trips.
+      // KV slots. The queue may have one extra logical background lane, while
+      // `acquireExclusiveEngineRequest` caps actual cache+generation work at
+      // `slots`. A background chore the foreground awaits can therefore enter
+      // this queue and claim the physical slot between tool-loop round-trips,
+      // without two sessions ever pinning the same native slot concurrently.
       concurrency: queueConcurrency,
       interactiveConcurrency,
       backgroundConcurrency: Math.max(1, queueConcurrency - interactiveConcurrency),
@@ -2052,6 +2146,67 @@ export class LlamaCppProvider implements LLMProvider {
   }
 
   /**
+   * Claim one physical llama-server request slot.
+   *
+   * This is deliberately narrower than {@link queue}: a logical turn holds its
+   * ProviderQueue lease across the whole tool loop, while this lease covers one
+   * cache-prepare + `/v1/chat/completions` round-trip. On a one-slot launch that
+   * lets a synchronous background one-shot run between foreground iterations,
+   * but prevents the wild-caught failure where a recovery nudge saved/restored
+   * slot 0 while another session was still generating on slot 0, leaving the
+   * native prompt processor stuck forever.
+   */
+  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) throw engineRequestAbortError(label);
+
+    const waitStartedAt = Date.now();
+    if (this.engineRequestsActive < this.engineRequestWidth) {
+      this.engineRequestsActive++;
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        const waiter: (typeof this.engineRequestWaiters)[number] = {
+          resolve,
+          reject,
+          ...(signal ? { signal } : {}),
+        };
+        if (signal) {
+          waiter.onAbort = () => {
+            const idx = this.engineRequestWaiters.indexOf(waiter);
+            if (idx === -1) return;
+            this.engineRequestWaiters.splice(idx, 1);
+            signal.removeEventListener('abort', waiter.onAbort!);
+            reject(engineRequestAbortError(label));
+          };
+          signal.addEventListener('abort', waiter.onAbort, { once: true });
+        }
+        this.engineRequestWaiters.push(waiter);
+      });
+    }
+
+    const waitedMs = Date.now() - waitStartedAt;
+    if (waitedMs > 1_000) {
+      log.debug(`[llama-cpp] engine request ${label} waited ${waitedMs}ms for a physical slot`);
+    }
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = this.engineRequestWaiters.shift();
+      if (next) {
+        if (next.signal && next.onAbort) {
+          next.signal.removeEventListener('abort', next.onAbort);
+        }
+        // Hand the physical slot straight to the next waiter. The active count
+        // stays unchanged across the handoff, so it can never exceed width.
+        next.resolve();
+      } else {
+        this.engineRequestsActive--;
+      }
+    };
+  }
+
+  /**
    * Current base URL (when supervised) or the externally-configured
    * one. `undefined` when the supervised engine hasn't started yet —
    * the cache adapter treats that as "engine not ready, return empty
@@ -2060,6 +2215,15 @@ export class LlamaCppProvider implements LLMProvider {
   currentBaseUrl(): string | null {
     if (this.externalBaseUrl) return this.externalBaseUrl;
     return this.supervisor?.currentBaseUrl() ?? null;
+  }
+
+  /** True only while this native engine is serving or queuing a physical request. */
+  isEngineBusy(): boolean {
+    return this.engineRequestsActive > 0 || this.engineRequestWaiters.length > 0;
+  }
+
+  engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
+    return this.supervisor?.lifecycleSnapshot();
   }
 
   async initialize(): Promise<void> {
@@ -2660,64 +2824,77 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * differences: no user message is appended, `max_tokens` is forced
    * to 1, and nothing is pushed to history.
    *
-   * Callers (the ds4 cache adapter's `warm`) gate on engine-idle;
-   * this method itself does no queueing — it is best-effort
-   * background work and must never contend with a real turn.
+   * Callers (the ds4 cache adapter's `warm`) normally gate on engine-idle.
+   * The provider's physical request gate remains authoritative here so a
+   * warm racing a newly-started turn waits instead of touching its cache slot.
    */
   async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
-    const baseUrl = await this.deps.resolveBaseUrl();
-    let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
-      ? flattenToolMessagesForStrictAlternation(this.messages)
-      : this.messages;
-    if (this.mergeSystemMessages) {
-      wireMessages = mergeSystemMessagesIntoFirst(wireMessages);
-    }
-    const bridgeTools = this.deps.bridges.isEmpty()
-      ? []
-      : toChatCompletionsTools(this.deps.bridges);
-    const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
-      (t) => ({
-        type: 'function' as const,
-        function: {
-          name: t.name,
-          description: t.description ?? '',
-          parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
-        },
-      }),
+    // The signal bounds physical-slot waiting and the HTTP request. Engine
+    // startup and cache restore retain their own existing backstops; the
+    // physical lease still starts before cache preparation so a warm cannot
+    // save/restore a slot another session is actively using.
+    const requestSignal = AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000);
+    const label = `cache-warm:${(opts?.sessionId ?? 'anonymous').slice(0, 8)}`;
+    const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+      label,
+      requestSignal,
     );
-    const tools = [...bridgeTools, ...externalAsChatCompletions];
-    const body: Record<string, unknown> = {
-      model: this.deps.model,
-      messages: wireMessages,
-      stream: false,
-    };
-    if (this.deps.tuning) applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
-    // After tuning so a catalog `maxTokens` can't re-widen the decode.
-    body.max_tokens = 1;
-    if (tools.length > 0) body.tools = tools;
-    if (opts?.sessionId) {
-      const adapter = this.deps.provider.getCacheAdapter();
-      if (adapter) {
-        await adapter.prepareForSend(
-          opts.sessionId,
-          this.deps.systemMessage,
-          this.deps.systemPromptLayers,
-        );
-        Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+    try {
+      const baseUrl = await this.deps.resolveBaseUrl();
+      let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
+        ? flattenToolMessagesForStrictAlternation(this.messages)
+        : this.messages;
+      if (this.mergeSystemMessages) {
+        wireMessages = mergeSystemMessagesIntoFirst(wireMessages);
       }
+      const bridgeTools = this.deps.bridges.isEmpty()
+        ? []
+        : toChatCompletionsTools(this.deps.bridges);
+      const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
+        (t) => ({
+          type: 'function' as const,
+          function: {
+            name: t.name,
+            description: t.description ?? '',
+            parameters: normalizeJsonSchemaForLlamaCpp(t.parameters),
+          },
+        }),
+      );
+      const tools = [...bridgeTools, ...externalAsChatCompletions];
+      const body: Record<string, unknown> = {
+        model: this.deps.model,
+        messages: wireMessages,
+        stream: false,
+      };
+      if (this.deps.tuning) applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
+      // After tuning so a catalog `maxTokens` can't re-widen the decode.
+      body.max_tokens = 1;
+      if (tools.length > 0) body.tools = tools;
+      if (opts?.sessionId) {
+        const adapter = this.deps.provider.getCacheAdapter();
+        if (adapter) {
+          await adapter.prepareForSend(
+            opts.sessionId,
+            this.deps.systemMessage,
+            this.deps.systemPromptLayers,
+          );
+          Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+        }
+      }
+      const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(withWireMessages(body)),
+        signal: requestSignal,
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`prefillOnly: HTTP ${res.status} ${txt.slice(0, 200)}`);
+      }
+      await res.text().catch(() => '');
+    } finally {
+      releaseEngineRequest();
     }
-    const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(withWireMessages(body)),
-      // An SSD-streamed 284B model legitimately prefills for minutes.
-      signal: AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`prefillOnly: HTTP ${res.status} ${txt.slice(0, 200)}`);
-    }
-    await res.text().catch(() => '');
   }
 
   /**
@@ -2987,6 +3164,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       for (const name of this.externalToolNames) known.add(name);
       return known;
     };
+    // Tool-name → declared input schema, for repairing salvaged calls
+    // whose structural arguments the markup formats flattened into
+    // strings. See tool-arg-schema-coercion.ts.
+    const toolArgSchemas = new Map<string, Record<string, unknown>>();
+    for (const t of tools ?? []) {
+      const schema = t.function.parameters as Record<string, unknown> | undefined;
+      if (t.function.name && schema) toolArgSchemas.set(t.function.name, schema);
+    }
     // Surgical edit tools on the roster ⇒ deliverable is a modify of an
     // existing file; a repeated source-write failure steers toward a
     // targeted patch rather than "re-emit the whole file." Same as MLX.
@@ -3077,10 +3262,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // drives `foldPostActionRumination` on later reply-only iterations
     // (the wrap-up wall a verbose model emits after its tool ran).
     let actionFiredEarlierThisTurn = false;
-    // Some llama.cpp builds reject otherwise-valid JSON Schema regexes while
-    // compiling the aggregate tool grammar. A single retry strips only
-    // `pattern` constraints; MCP/Zod still validates the eventual arguments.
-    let grammarPatternFallback = false;
+    // llama.cpp builds vary in which JSON-Schema constructs their aggregate
+    // tool-grammar converter accepts. Recover in stages while MCP/Zod remains
+    // the authority at execution: patterns first (only when that changes the
+    // request), then a useful structural schema, finally a permissive object.
+    let toolGrammarFallback: ToolGrammarFallback = 'none';
     // The GPU lease is acquired per loop iteration and normally released by
     // that iteration's `cleanupTurn`. The loop body is thousands of lines with
     // many `throw` sites (bounded-repair guardrails, deadline checks, grammar
@@ -3092,6 +3278,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // Holding the release here lets the outer `finally` guarantee it no matter
     // how the loop exits.
     let releaseActiveGpuLease: (() => void) | null = null;
+    let releaseActiveEngineRequest: (() => void) | null = null;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -3105,6 +3292,45 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // the session's exact post-clamp roster is more accurate here than
         // the manager's earlier boundary estimate.
         await this.maybeCompactMidLoop();
+
+        const engineRequestLabel = `${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)}#${turn}`;
+        const engineWaitRemaining = deadline - Date.now();
+        if (engineWaitRemaining <= 0) {
+          throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+        }
+        const engineDeadlineSignal = AbortSignal.timeout(engineWaitRemaining);
+        const engineWaitSignal = opts?.queue?.signal
+          ? AbortSignal.any([opts.queue.signal, engineDeadlineSignal])
+          : engineDeadlineSignal;
+        let releaseEngineRequest: () => void;
+        try {
+          releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+            engineRequestLabel,
+            engineWaitSignal,
+          );
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            if (opts?.queue?.signal?.aborted) {
+              throw new Error('[llama-cpp] turn cancelled by caller');
+            }
+            if (engineDeadlineSignal.aborted) {
+              throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+            }
+          }
+          throw err;
+        }
+        let engineRequestReleased = false;
+        const releaseEngineRequestOnce = () => {
+          if (engineRequestReleased) return;
+          engineRequestReleased = true;
+          releaseActiveEngineRequest = null;
+          releaseEngineRequest();
+        };
+        releaseActiveEngineRequest = releaseEngineRequestOnce;
+        if (Date.now() >= deadline) {
+          releaseEngineRequestOnce();
+          throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+        }
 
         const releaseGpuLease = await this.deps.acquireGpuLease?.();
         let gpuLeaseReleased = false;
@@ -3120,6 +3346,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           baseUrl = await this.deps.resolveBaseUrl();
         } catch (err) {
           releaseGpuLeaseOnce();
+          releaseEngineRequestOnce();
           throw err;
         }
         let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
@@ -3841,14 +4068,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
-        if (grammarPatternFallback && Array.isArray(body.tools)) {
-          body.tools = (body.tools as ChatCompletionTool[]).map((tool) => ({
-            ...tool,
-            function: {
-              ...tool.function,
-              parameters: stripJsonSchemaPatternsForLlamaCpp(tool.function.parameters),
-            },
-          }));
+        if (toolGrammarFallback !== 'none' && Array.isArray(body.tools)) {
+          body.tools = applyToolGrammarFallback(
+            body.tools as ChatCompletionTool[],
+            toolGrammarFallback,
+          );
         }
         // llama-server accepts the string choices `auto`, `none`, and
         // `required`. Its OpenAI-compatible endpoint currently rejects the
@@ -4244,6 +4468,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           }
           cancelPostReasoningWatchdog();
           releaseGpuLeaseOnce();
+          releaseEngineRequestOnce();
           // Clear so a subsequent iteration installs its own handle.
           // Stdout signals after this point have no in-flight turn to
           // affect, which is the correct semantic — `notifyReasoningEnded`
@@ -4323,17 +4548,38 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           cleanupTurn();
           this.deps.markUsed();
           const txt = await res.text().catch(() => '');
-          if (
-            tools &&
-            tools.length > 0 &&
-            isLlamaCppGrammarParseError(txt) &&
-            !grammarPatternFallback
-          ) {
-            grammarPatternFallback = true;
-            log.warn(
-              '[llama-cpp] tool grammar rejected by server; retrying once without JSON Schema pattern constraints',
-            );
-            continue;
+          const failedGrammarTools = Array.isArray(body.tools)
+            ? (body.tools as ChatCompletionTool[])
+            : [];
+          if (failedGrammarTools.length > 0 && isLlamaCppGrammarParseError(txt)) {
+            if (toolGrammarFallback === 'none') {
+              if (hasJsonSchemaPatternsForLlamaCpp(failedGrammarTools)) {
+                toolGrammarFallback = 'strip-patterns';
+                log.warn(
+                  '[llama-cpp] tool grammar rejected by server; retrying without JSON Schema pattern constraints',
+                );
+              } else {
+                toolGrammarFallback = 'simplified';
+                log.warn(
+                  '[llama-cpp] tool grammar rejected by server; no pattern constraints to remove, retrying with structural tool schemas',
+                );
+              }
+              continue;
+            }
+            if (toolGrammarFallback === 'strip-patterns') {
+              toolGrammarFallback = 'simplified';
+              log.warn(
+                '[llama-cpp] pattern-free tool grammar still rejected; retrying with structural tool schemas',
+              );
+              continue;
+            }
+            if (toolGrammarFallback === 'simplified') {
+              toolGrammarFallback = 'permissive';
+              log.warn(
+                '[llama-cpp] structural tool grammar still rejected; retrying with permissive object parameters',
+              );
+              continue;
+            }
           }
           if (
             tryParseStrictAlternationTemplateError(txt) &&
@@ -5367,6 +5613,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             }
           }
         }
+        // Every markup salvage format above is a flat KEY→text map, so a
+        // parameter declared `object`/`array` arrives as a string. Repair
+        // against the declared schema at the one point all salvage paths
+        // converge. Schema-gated: a genuine string argument (a JSON
+        // file's `content`) is never reinterpreted.
+        {
+          const coerced = coerceToolCallArgs(toolCalls, (n) => toolArgSchemas.get(n));
+          for (const r of coerced.repaired) {
+            log.info(`[llama-cpp] repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`);
+          }
+          toolCalls = coerced.calls as typeof toolCalls;
+        }
         // Always pull `<think>…</think>` reasoning out of the visible
         // commit and stash the captured trace so the chat bubble can
         // render it behind a collapsed expander instead of dropping it.
@@ -5742,7 +6000,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             (call.function.name === 'start_project' || call.function.name === 'start_job') &&
             startedProjectOrJobThisTurn
           ) {
-            output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call \`start_project\` or \`start_job\` again to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
+            output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
           } else if (directFileWorkScriptHelperUnchangedRewrite) {
             output = buildDirectFileWorkUnchangedHelperError(
               directFileWorkScriptHelperFailure ?? 'The previous helper execution failed.',
@@ -5974,8 +6232,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             !output.startsWith('ERROR:')
           ) {
             scenarioRepairReadOnlyCalls += 1;
-            if (call.function.name === 'read_file' && typeof args.path === 'string') {
-              const normalizedPath = args.path.replace(/^workspace\//i, '');
+            for (const normalizedPath of completeWorkspaceReadPaths(
+              call.function.name,
+              args,
+              output,
+            )) {
               const alreadyRead = scenarioRepairReadFilePaths.some(
                 (path) =>
                   normalizeWorkspacePathForCompare(path).toLowerCase() ===
@@ -5998,8 +6259,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             !output.startsWith('ERROR:')
           ) {
             existingSourceEditReadOnlyCalls += 1;
-            if (call.function.name === 'read_file' && typeof args.path === 'string') {
-              const normalizedPath = args.path.replace(/^workspace\//i, '');
+            for (const normalizedPath of completeWorkspaceReadPaths(
+              call.function.name,
+              args,
+              output,
+            )) {
               if (!existingSourceEditReadFilePaths.includes(normalizedPath)) {
                 existingSourceEditReadFilePaths.push(normalizedPath);
               }
@@ -6011,8 +6275,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             !output.startsWith('ERROR:')
           ) {
             directFileWorkReadOnlyCalls += 1;
-            if (call.function.name === 'read_file' && typeof args.path === 'string') {
-              const normalizedPath = args.path.replace(/^workspace\//i, '');
+            for (const normalizedPath of completeWorkspaceReadPaths(
+              call.function.name,
+              args,
+              output,
+            )) {
               if (!directFileWorkReadFilePaths.includes(normalizedPath)) {
                 directFileWorkReadFilePaths.push(normalizedPath);
                 const satisfiedPrerequisite = directFileWorkPrerequisiteReadPaths.some(
@@ -6335,9 +6602,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       );
     } finally {
       // Safety net for every escape the per-iteration `cleanupTurn` misses.
-      // No-ops on the normal path — `releaseGpuLeaseOnce` is idempotent and
-      // nulls this handle when it runs.
+      // No-ops on the normal path — both per-request release functions are
+      // idempotent and null their handles when they run.
       releaseActiveGpuLease?.();
+      releaseActiveEngineRequest?.();
       this.deps.provider._deregisterActiveSession(this);
     }
   }

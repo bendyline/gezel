@@ -31,7 +31,7 @@ describe('ImageRecognitionSettings', () => {
       expect(screen.getByText('Granite Vision 4.1 (4B)')).toBeInTheDocument();
     });
     expect(screen.getByText(GRANITE.id)).toBeInTheDocument();
-    expect(screen.getByText('3.3 GB')).toBeInTheDocument();
+    expect(screen.getByText('3.0 GB')).toBeInTheDocument();
     expect(screen.getByText('Apache-2.0')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
   });

@@ -22,13 +22,14 @@ export const CODEX_CLI_EXCLUDED_MCP_TOOLS = [
   // Filesystem ops — Codex has built-in read/write/edit equivalents.
   'list_dir',
   'read_file',
+  'read_files',
   'stat',
   'write_file',
   'delete_path',
   'make_dir',
   'rename',
   // Search ops — Codex shell can grep/glob.
-  'search_files',
+  'grep_files',
   'find_files',
   'diff_files',
   // Web ops — Codex has built-in web_search.

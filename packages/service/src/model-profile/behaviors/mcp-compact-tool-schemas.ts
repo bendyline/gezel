@@ -10,6 +10,7 @@
  * prose-only metadata.
  */
 
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import type { McpServerSpec, OpenAIFunctionTool } from '../../providers/mcp-bridge.js';
 import { isGezelMcp } from '../../providers/mcp-wrappers/gezel-mcp-small-model.js';
 import type { McpToolWrapper, McpToolWrapperContext } from '../../providers/mcp-wrappers/types.js';
@@ -178,6 +179,98 @@ function normalizeArgKeyCasing(
   return changed ? { value: out, changed: true } : { value, changed: false };
 }
 
+function normalizeReadRangeAliases(args: Record<string, unknown>): {
+  args?: Record<string, unknown>;
+  error?: string;
+} {
+  const hasLines = 'lines' in args;
+  if (hasLines && (!args.lines || typeof args.lines !== 'object' || Array.isArray(args.lines))) {
+    return {
+      error:
+        'Invalid line-range field `lines`: expected an object such as `{ start: 10, count: 20 }`.',
+    };
+  }
+  const lines = hasLines ? (args.lines as Record<string, unknown>) : undefined;
+  const startFields: ReadonlyArray<readonly [string, boolean, unknown]> = [
+    ['startLine', 'startLine' in args, args.startLine],
+    ['start_line', 'start_line' in args, args.start_line],
+    ['lineStart', 'lineStart' in args, args.lineStart],
+    ['line_start', 'line_start' in args, args.line_start],
+    ['lines.start', !!lines && 'start' in lines, lines?.start],
+    ['lines.startLine', !!lines && 'startLine' in lines, lines?.startLine],
+  ];
+  const endFields: ReadonlyArray<readonly [string, boolean, unknown]> = [
+    ['endLine', 'endLine' in args, args.endLine],
+    ['end_line', 'end_line' in args, args.end_line],
+    ['lineEnd', 'lineEnd' in args, args.lineEnd],
+    ['line_end', 'line_end' in args, args.line_end],
+    ['lines.end', !!lines && 'end' in lines, lines?.end],
+    ['lines.endLine', !!lines && 'endLine' in lines, lines?.endLine],
+  ];
+  const presentFields = [...startFields, ...endFields].filter(([, present]) => present);
+  for (const [name, , value] of presentFields) {
+    if (!Number.isInteger(value) || (value as number) < 1) {
+      return {
+        error: `Invalid line-range field \`${name}\`: expected a positive integer.`,
+      };
+    }
+  }
+  const startCandidates = startFields
+    .filter(([, present]) => present)
+    .map(([, , value]) => value as number);
+  const endCandidates = endFields
+    .filter(([, present]) => present)
+    .map(([, , value]) => value as number);
+  const uniqueStart = [...new Set(startCandidates)];
+  const uniqueEnd = [...new Set(endCandidates)];
+  if (uniqueStart.length > 1 || uniqueEnd.length > 1) {
+    return {
+      error:
+        'Conflicting line-range fields. Use only `startLine` and `endLine` (1-based, inclusive).',
+    };
+  }
+  const startLine = uniqueStart[0];
+  let endLine = uniqueEnd[0];
+  const hasCount = !!lines && 'count' in lines;
+  const count = lines?.count;
+  if (hasCount && (!Number.isInteger(count) || (count as number) < 1)) {
+    return {
+      error: 'Invalid line-range field `lines.count`: expected a positive integer.',
+    };
+  }
+  if (hasCount) {
+    const calculatedEnd = (startLine ?? 1) + (count as number) - 1;
+    if (endLine !== undefined && endLine !== calculatedEnd) {
+      return {
+        error: 'Conflicting `lines.count` and end-line fields. Use only `startLine` and `endLine`.',
+      };
+    }
+    endLine = calculatedEnd;
+  }
+  const aliasKeys = [
+    'start_line',
+    'lineStart',
+    'line_start',
+    'end_line',
+    'lineEnd',
+    'line_end',
+    'lines',
+  ];
+  const usedAlias = aliasKeys.some((key) => key in args);
+  if (!usedAlias) return {};
+  if (presentFields.length === 0 && !hasCount) {
+    return {
+      error:
+        'Invalid line-range field `lines`: expected `start`, `end`, or `count` with numeric values.',
+    };
+  }
+  const normalized = { ...args };
+  for (const key of aliasKeys) delete normalized[key];
+  if (startLine !== undefined) normalized.startLine = startLine;
+  if (endLine !== undefined) normalized.endLine = endLine;
+  return { args: normalized };
+}
+
 function buildCompactToolSchemasWrapper(): McpToolWrapper {
   const schemaByTool = new Map<string, Record<string, unknown>>();
   return {
@@ -196,10 +289,33 @@ function buildCompactToolSchemasWrapper(): McpToolWrapper {
     async preProcess(toolName: string, args: Record<string, unknown>) {
       const schema = schemaByTool.get(toolName);
       const normalized = normalizeArgKeyCasing(args, schema);
-      if (!normalized.changed || !normalized.value || typeof normalized.value !== 'object') {
-        return { kind: 'allow' as const };
+      let nextArgs =
+        normalized.changed && normalized.value && typeof normalized.value === 'object'
+          ? (normalized.value as Record<string, unknown>)
+          : args;
+      const canonicalName = canonicalToolName(toolName);
+      if (canonicalName === 'read_file') {
+        const range = normalizeReadRangeAliases(nextArgs);
+        if (range.error) return { kind: 'reject' as const, error: range.error };
+        if (range.args) nextArgs = range.args;
+      } else if (canonicalName === 'read_files' && Array.isArray(nextArgs.files)) {
+        let changed = false;
+        const files: unknown[] = [];
+        for (const item of nextArgs.files) {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            files.push(item);
+            continue;
+          }
+          const range = normalizeReadRangeAliases(item as Record<string, unknown>);
+          if (range.error) return { kind: 'reject' as const, error: range.error };
+          files.push(range.args ?? item);
+          if (range.args) changed = true;
+        }
+        if (changed) nextArgs = { ...nextArgs, files };
       }
-      return { kind: 'allow' as const, args: normalized.value as Record<string, unknown> };
+      return nextArgs === args
+        ? { kind: 'allow' as const }
+        : { kind: 'allow' as const, args: nextArgs };
     },
   };
 }

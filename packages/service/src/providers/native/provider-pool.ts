@@ -32,6 +32,7 @@ import {
   parseEngineKey,
 } from './engine-key.js';
 import type { GpuSpawnGuard } from './gpu-panic-guard.js';
+import type { NativeEngineLifecycleSnapshot } from './supervisor.js';
 
 const log = createLogger('provider-pool');
 
@@ -121,6 +122,8 @@ export interface PoolEntrySnapshot {
   createdAt: number;
   /** True while a non-forced eviction is waiting for in-flight turns to finish. */
   draining: boolean;
+  /** Native process state; absent for external/non-supervised providers. */
+  lifecycle?: NativeEngineLifecycleSnapshot;
 }
 
 export interface PoolSnapshot {
@@ -490,6 +493,32 @@ export class ProviderPool {
   }
 
   /**
+   * Immediately unload one resident engine, but only while it is idle.
+   *
+   * This is the user-triggered counterpart to the idle-retention timer. It
+   * deliberately refuses a busy engine instead of entering the ordinary
+   * bounded drain path: an "Unload now" click must never turn into a delayed
+   * teardown of work that started just after the status surface was sampled.
+   * Returns false when the engine has already gone away.
+   */
+  async unloadIdle(key: string): Promise<boolean> {
+    const existingEviction = this.evicting.get(key);
+    if (existingEviction) {
+      await existingEviction;
+      return true;
+    }
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    if (isBusy(entry)) {
+      throw new EngineBusyError(
+        `engine ${key} is currently serving requests and cannot be unloaded yet. Wait for current turns to finish.`,
+      );
+    }
+    await this.evict(key);
+    return true;
+  }
+
+  /**
    * Evict a specific entry. Awaits the provider's `shutdown` so the
    * disk-cache flush (Tier 1 prior plan) completes before the broker
    * releases capacity.
@@ -829,6 +858,11 @@ export class ProviderPool {
     const committed = this.broker.committed();
     const entries: PoolEntrySnapshot[] = [];
     for (const [key, e] of this.entries) {
+      const lifecycle = (
+        e.provider as LLMProvider & {
+          engineLifecycleSnapshot?: () => NativeEngineLifecycleSnapshot | undefined;
+        }
+      ).engineLifecycleSnapshot?.();
       entries.push({
         key,
         provider: e.parsed.provider,
@@ -839,6 +873,7 @@ export class ProviderPool {
         lastUsedAt: e.lastUsedAt,
         createdAt: e.createdAt,
         draining: e.draining,
+        ...(lifecycle ? { lifecycle } : {}),
       });
     }
     return {

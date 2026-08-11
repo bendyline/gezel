@@ -30,6 +30,7 @@ import {
   securityPolicyForLevel,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { RESERVED_TOOL_NAMES, normalizeToolNameSpelling } from '@bendyline/gezel-mcp';
 import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contracts';
 import { resolveProfile } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
@@ -110,6 +111,9 @@ interface MatrixScenario {
   executorOnly?: boolean;
   delegationOnly?: boolean;
   existingSubstantialFile?: boolean;
+  /** Env-gated built-ins enabled by this deterministic project/session. */
+  contextualBuiltinTools?: readonly string[];
+  craftbookRef?: string;
 }
 
 interface MatrixToolStrategy {
@@ -118,6 +122,7 @@ interface MatrixToolStrategy {
 }
 
 const NOW = '2026-01-01T00:00:00.000Z';
+const RESERVED_NORMALIZED_TOOL_NAMES = new Set(RESERVED_TOOL_NAMES.map(normalizeToolNameSpelling));
 const PROJECT: ProjectDetail = {
   id: 'prompt-contract-project',
   name: 'Prompt contract fixture',
@@ -276,6 +281,28 @@ function scenariosForRole(
         workspaceFiles: [{ name: 'customers.csv', path: 'customers.csv', isDirectory: false }],
         securityPolicy: normal,
       },
+      {
+        id: 'craftbook-editor-context',
+        latestUserMessage: 'Update the active craftbook step procedure.',
+        workspaceFiles: [],
+        securityPolicy: normal,
+        craftbookRef: 'fixture-craftbook@1.0.0',
+        contextualBuiltinTools: ['craftbook_update_step'],
+      },
+      {
+        id: 'mail-connector-context',
+        latestUserMessage: 'Draft a reply for the connected mailbox.',
+        workspaceFiles: [],
+        securityPolicy: normal,
+        contextualBuiltinTools: ['draft_email', 'queue_email', 'send_email'],
+      },
+      {
+        id: 'generic-connector-context',
+        latestUserMessage: 'Draft the requested action for the connected service.',
+        workspaceFiles: [],
+        securityPolicy: normal,
+        contextualBuiltinTools: ['draft_connector_action'],
+      },
     );
   }
   if (canWriteWorkspace) {
@@ -398,6 +425,10 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
   const catalog = new CatalogService();
   const toolContracts = await loadBuiltinToolContractsForLint();
   const toolNamesWithSchemas = toolContracts.map((tool) => tool.name);
+  // This is an actual in-memory `tools/list` under all known contextual
+  // gates, so it already reflects platform registration removals. Each case
+  // intersects its resolved allowlist with this live namespace below.
+  const registeredToolNames = new Set(toolNamesWithSchemas);
   const staticSchemaErrors: Array<PromptToolContractFinding & { matrix: string }> = [];
   for (const tool of toolContracts) {
     const descriptionContract = lintPromptToolSchemaContract({
@@ -434,6 +465,48 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
   const roleItems = (await catalog.list('gezel-template')).filter(
     (item) => item.manifest.kind === 'gezel-template' && !item.manifest.frontmatter?.fixedFunction,
   );
+  const roleScriptToolNames = new Map<string, Set<string>>();
+  const projectTypeItems = (await catalog.list('project-type')).filter(
+    (item) => item.manifest.kind === 'project-type',
+  );
+  await Promise.all(
+    projectTypeItems.map(async (item) => {
+      if (item.manifest.kind !== 'project-type') return;
+      const detail = await catalog.get('project-type', item.manifest.id, item.sourceId);
+      if (!detail || detail.manifest.kind !== 'project-type') return;
+      const pageOnly = new Set(detail.manifest.pages?.tools ?? []);
+      const toolNames = (detail.manifest.tools ?? [])
+        .map((tool) => tool.name)
+        .filter(
+          (name) =>
+            !pageOnly.has(name) &&
+            !RESERVED_NORMALIZED_TOOL_NAMES.has(normalizeToolNameSpelling(name)),
+        );
+      for (const gezel of detail.manifest.gezels ?? []) {
+        if (!gezel.templateId) continue;
+        const names = roleScriptToolNames.get(gezel.templateId) ?? new Set<string>();
+        for (const name of toolNames) names.add(name);
+        roleScriptToolNames.set(gezel.templateId, names);
+      }
+    }),
+  );
+  // Role content is invariant across model/backend cases. Resolve it once;
+  // doing this inside the cross-product turned a static contract check into
+  // thousands of repeated catalog reads.
+  const matrixRoles = await Promise.all(
+    roleItems.map(async (roleItem) => {
+      if (roleItem.manifest.kind !== 'gezel-template') return null;
+      const roleManifest = roleItem.manifest;
+      const detail = await catalog.get('gezel-template', roleManifest.id, roleItem.sourceId);
+      return {
+        roleManifest,
+        about: detail?.about ?? '',
+        canWriteWorkspace: roleToolAllowlist(roleManifest.role).has('write_file'),
+        delegationRole: isPureDelegationRole(roleManifest.role),
+        scriptToolNames: [...(roleScriptToolNames.get(roleManifest.id) ?? [])],
+      };
+    }),
+  );
   const modelItems = (await catalog.list('chat-model')).filter(
     (item) => item.manifest.kind === 'chat-model' && item.manifest.supportsTools,
   );
@@ -463,13 +536,10 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
       const trimExecutorContext = profileHasBehavior(profile, 'prompt.executor-context-trim');
       const retrievalFirst = profileHasBehavior(profile, 'prompt.retrieval-first');
 
-      for (const roleItem of roleItems) {
-        if (roleItem.manifest.kind !== 'gezel-template') continue;
-        const roleManifest = roleItem.manifest;
-        const detail = await catalog.get('gezel-template', roleManifest.id, roleItem.sourceId);
-        const about = detail?.about ?? '';
-        const canWriteWorkspace = roleToolAllowlist(roleManifest.role).has('write_file');
-        const delegationRole = isPureDelegationRole(roleManifest.role);
+      for (const matrixRole of matrixRoles) {
+        if (!matrixRole) continue;
+        const { roleManifest, about, canWriteWorkspace, delegationRole, scriptToolNames } =
+          matrixRole;
         for (const scenario of scenariosForRole(
           roleManifest.role,
           canWriteWorkspace,
@@ -498,6 +568,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               ...(scenario.expectedDeliverable
                 ? { expectedDeliverable: scenario.expectedDeliverable }
                 : {}),
+              ...(scenario.craftbookRef ? { craftbookRef: scenario.craftbookRef } : {}),
             };
             const surface = await resolveSessionToolSurface({
               surface: 'prompt',
@@ -519,6 +590,9 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
                 : {}),
               tier,
               coordinatorToolDiet: toolStrategy.coordinatorToolDiet,
+              ...(scenario.contextualBuiltinTools
+                ? { contextualBuiltinTools: scenario.contextualBuiltinTools }
+                : {}),
               latestUserMessage: scenario.latestUserMessage,
               onCapTrim: (event) => {
                 capTrim = event;
@@ -528,7 +602,14 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
                 ? { existingSubstantialFileForImmediate: async () => true }
                 : {}),
             });
-            const availableTools = availableBuiltinToolsForAllowlist(surface.allowlist);
+            const availableTools = [
+              ...availableBuiltinToolsForAllowlist(
+                surface.allowlist,
+                scenario.contextualBuiltinTools,
+                registeredToolNames,
+              ),
+              ...scriptToolNames.map((name) => ({ name, description: '' })),
+            ];
             const instructions = buildInstructions({
               name: roleManifest.name,
               about,
@@ -661,6 +742,22 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
   if (missingCapExercise.length > 0) {
     throw new Error(
       `Prompt contract matrix did not exercise an active tool-count cap for: ${missingCapExercise.join(', ')}. Keep the default tiny/small caps and the medium coordinator-diet strategy represented in this matrix.`,
+    );
+  }
+  const requiredConditionalCoverage: Array<[scenario: string, tool: string]> = [
+    ['craftbook-editor-context', 'craftbook_update_step'],
+    ['mail-connector-context', 'draft_email'],
+    ['generic-connector-context', 'draft_connector_action'],
+  ];
+  const missingConditionals = requiredConditionalCoverage.filter(
+    ([scenario, tool]) =>
+      !cases.some((row) => row.scenario === scenario && row.tools.includes(tool)),
+  );
+  if (missingConditionals.length > 0) {
+    throw new Error(
+      `Prompt contract matrix lost contextual-tool coverage: ${missingConditionals
+        .map(([scenario, tool]) => `${scenario}:${tool}`)
+        .join(', ')}.`,
     );
   }
   return {

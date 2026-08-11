@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -23,20 +24,55 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
 
   app.get('/models', async (c) => {
     const installed = await ctx.mlxModels.listInstalled();
+    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
     const models = await Promise.all(
       installed.map(async (model) => {
-        const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id).catch(() => null);
-        return {
-          ...model,
-          ...(plan?.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
-          ...(plan?.plannedResidentBytes
-            ? { predictedResidentBytes: plan.plannedResidentBytes }
-            : {}),
-          ...(plan?.reservedResidentBytes
-            ? { reservedResidentBytes: plan.reservedResidentBytes }
-            : {}),
-          ...(plan?.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
-        };
+        const overrideContextTokens = overrides[`mlx:${model.id}`];
+        const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
+        try {
+          const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id);
+          return {
+            ...model,
+            ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
+            ...(plan.plannedResidentBytes
+              ? { predictedResidentBytes: plan.plannedResidentBytes }
+              : {}),
+            ...(plan.reservedResidentBytes
+              ? { reservedResidentBytes: plan.reservedResidentBytes }
+              : {}),
+            ...(plan.plannedSlots ? { plannedSlots: plan.plannedSlots } : {}),
+            ...(plan.autoContextWindow !== undefined
+              ? { autoContextWindow: plan.autoContextWindow }
+              : {}),
+            ...(plan.kvBytesPerTokenPerSlot !== undefined
+              ? { kvBytesPerTokenPerSlot: plan.kvBytesPerTokenPerSlot }
+              : {}),
+            ...(plan.kvFixedBytesPerSlot !== undefined
+              ? { kvFixedBytesPerSlot: plan.kvFixedBytesPerSlot }
+              : {}),
+            ...(plan.weightsResidentBytes !== undefined
+              ? { weightsResidentBytes: plan.weightsResidentBytes }
+              : {}),
+            ...overrideField,
+          };
+        } catch (error) {
+          // Mirror llama-cpp's status mapping: a resident engine holding a
+          // stale window needs a restart, a genuine can't-fit needs memory.
+          // MLX previously swallowed both into a bare row, which left an
+          // applied override indistinguishable from a pending one.
+          return {
+            ...model,
+            ...(error instanceof CapacityDeniedError
+              ? {
+                  contextSizingStatus:
+                    error.reason === 'resident-below-minimum'
+                      ? ('restart-required' as const)
+                      : ('insufficient-memory' as const),
+                }
+              : {}),
+            ...overrideField,
+          };
+        }
       }),
     );
     return c.json({ models });

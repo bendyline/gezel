@@ -555,7 +555,12 @@ export function renderScorecardMarkdown(
   }
 
   const lines: string[] = [];
-  lines.push(`**${describeProvenance(board.run)}**`);
+  lines.push(
+    `**${describeProvenance(
+      board.run,
+      board.scores.map((s) => s.result.engine),
+    )}**`,
+  );
   lines.push('');
   lines.push('| Model | Size | Tasks passed | Not measured |');
   lines.push('| --- | --- | --- | --- |');

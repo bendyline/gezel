@@ -41,7 +41,8 @@ describe('PromptToolCookbookFull', () => {
       undefined,
     );
     expect(out).toContain('Cookbook — common patterns');
-    expect(out).toContain('create_project');
+    expect(out).toContain('start_project');
+    expect(out).not.toContain('create_project');
     // The conditional row mentions "fetch / look up / browse / read this URL"
     // and instructs `browser_navigate({ url })`. browser_find_page_element
     // is unconditional and stays.

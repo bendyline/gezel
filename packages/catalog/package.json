@@ -39,19 +39,18 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/tsconfig.json",
-    "test": "vitest run --passWithNoTests && node --test ../../scripts/update-gilde.test.mjs",
+    "test": "vitest run && node --test ../../scripts/update-gilde.test.mjs",
     "clean": "rm -rf dist .turbo",
     "import-mcp-registry": "tsx scripts/import-mcp-registry.ts",
     "build-index": "node scripts/run-gilde-build-index.mjs",
     "lint-manifests": "tsx src/chat-model-manifest-lint.ts",
-    "build-manifest": "tsx scripts/build-manifest.mjs",
     "generate-craftbooks": "tsx scripts/generate-craftbooks.ts",
     "pin-revisions": "tsx scripts/pin-revisions.ts",
     "export-gilde-schemas": "tsx scripts/export-gilde-schemas.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
-    "@bendyline/gilde": "0.1.17",
+    "@bendyline/gilde": "0.1.20",
     "tar": "7.5.21",
     "zod": "^4.4.3"
   },

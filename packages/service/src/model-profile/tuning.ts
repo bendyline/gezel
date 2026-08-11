@@ -268,6 +268,7 @@ export type TuningPath =
   | 'reasoning.effort'
   | 'reasoning.thinkingBudget'
   | 'reasoning.enableThinking'
+  | 'reasoning.templateKwargs'
   | 'output.responseFormat'
   | 'output.jsonSchema'
   | 'output.grammar'
@@ -305,6 +306,8 @@ function pluck(tuning: ResolvedTuning, path: TuningPath): unknown {
       return tuning.reasoning.thinkingBudget;
     case 'reasoning.enableThinking':
       return tuning.reasoning.enableThinking;
+    case 'reasoning.templateKwargs':
+      return tuning.reasoning.templateKwargs;
     case 'output.responseFormat':
       return tuning.output.responseFormat;
     case 'output.jsonSchema':
@@ -400,6 +403,20 @@ function writeChatTemplateKwarg(name: string) {
   };
 }
 
+/**
+ * Merge a manifest-declared `reasoning.templateKwargs` record into the
+ * request's `chat_template_kwargs`, one key at a time so it composes with
+ * whatever `enableThinking` (and any per-turn override) already wrote
+ * rather than replacing the whole object.
+ */
+function writeChatTemplateKwargs(target: Record<string, unknown>, value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  for (const [name, kwarg] of Object.entries(value as Record<string, unknown>)) {
+    if (kwarg === undefined) continue;
+    writeChatTemplateKwarg(name)(target, kwarg);
+  }
+}
+
 /** OpenAI-flavored `response_format` writer. */
 function writeOpenAIResponseFormat(target: Record<string, unknown>, value: unknown): void {
   if (value === 'text') return; // Default; sending it is noise.
@@ -483,6 +500,7 @@ export const OLLAMA_OPTIONS_TUNING_MAP: TuningMap = {
   'reasoning.effort': null,
   'reasoning.thinkingBudget': null,
   'reasoning.enableThinking': null,
+  'reasoning.templateKwargs': null,
   'output.responseFormat': null,
   'output.jsonSchema': null,
   'output.grammar': null,
@@ -505,6 +523,7 @@ export const OLLAMA_BODY_TUNING_MAP: TuningMap = {
   'reasoning.effort': null,
   'reasoning.thinkingBudget': null,
   'reasoning.enableThinking': { key: 'think' },
+  'reasoning.templateKwargs': null,
   'output.responseFormat': { write: writeOllamaResponseFormat },
   'output.jsonSchema': { write: writeOllamaJsonSchema },
   'output.grammar': null,
@@ -543,6 +562,7 @@ export const LLAMA_CPP_TUNING_MAP: TuningMap = {
   // gezels, the budget is a server-wide knob.
   'reasoning.thinkingBudget': null,
   'reasoning.enableThinking': { write: writeChatTemplateKwarg('enable_thinking') },
+  'reasoning.templateKwargs': { write: writeChatTemplateKwargs },
   'output.responseFormat': { write: writeLlamaCppResponseFormat },
   'output.jsonSchema': { write: writeLlamaCppJsonSchema },
   'output.grammar': { key: 'grammar' },
@@ -569,6 +589,7 @@ export const MLX_TUNING_MAP: TuningMap = {
   // 44K-char/70-hesitation single think block against a 4,096 budget.
   'reasoning.thinkingBudget': { key: 'max_thinking_tokens' },
   'reasoning.enableThinking': { write: writeChatTemplateKwarg('enable_thinking') },
+  'reasoning.templateKwargs': { write: writeChatTemplateKwargs },
   'output.responseFormat': { write: writeMlxResponseFormat },
   'output.jsonSchema': null,
   'output.grammar': null,
@@ -592,6 +613,7 @@ export const ANTHROPIC_TUNING_MAP: TuningMap = {
   'reasoning.thinkingBudget': { write: writeAnthropicThinkingBudget },
   'reasoning.effort': { write: writeAnthropicEffort },
   'reasoning.enableThinking': null,
+  'reasoning.templateKwargs': null,
   'output.responseFormat': null,
   'output.jsonSchema': null,
   'output.grammar': null,
@@ -619,6 +641,7 @@ export const OPENAI_TUNING_MAP: TuningMap = {
   },
   'reasoning.thinkingBudget': null,
   'reasoning.enableThinking': null,
+  'reasoning.templateKwargs': null,
   'output.responseFormat': { write: writeOpenAIResponseFormat },
   'output.jsonSchema': { write: writeOpenAIJsonSchema },
   'output.grammar': null,
@@ -647,6 +670,7 @@ export const COPILOT_TUNING_MAP: TuningMap = {
   'reasoning.effort': null,
   'reasoning.thinkingBudget': null,
   'reasoning.enableThinking': null,
+  'reasoning.templateKwargs': null,
   'output.responseFormat': null,
   'output.jsonSchema': null,
   'output.grammar': null,

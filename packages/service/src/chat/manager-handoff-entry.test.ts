@@ -168,3 +168,36 @@ describe('single-channel kickoff (D1)', () => {
     expect(messaged).toHaveLength(0);
   });
 });
+
+describe('handoff seed wording', () => {
+  async function seedFor(args: { fromGezelName?: string; fromGezelId?: string }) {
+    mock.script('ok');
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'report',
+      ...args,
+    });
+    await manager.drainBackground();
+    const full = await store.getSession('worker', sessionId);
+    return full?.messages[0]?.content ?? '';
+  }
+
+  it('names the sender when the previous step belonged to another gezel', async () => {
+    const seed = await seedFor({ fromGezelName: 'Koray', fromGezelId: 'koray' });
+    expect(seed).toContain('Koray has handed step `report`');
+  });
+
+  it('reads as a step advance when the same gezel owned the previous step', async () => {
+    const seed = await seedFor({ fromGezelName: 'Worker', fromGezelId: 'worker' });
+    expect(seed).not.toContain('handed step');
+    expect(seed).toContain('has advanced to the next step');
+    expect(seed).toContain('Please continue');
+  });
+
+  it('falls back to the anonymous wording without a previous gezel', async () => {
+    const seed = await seedFor({});
+    expect(seed).toContain('The previous step has been completed and handed step `report`');
+  });
+});

@@ -40,6 +40,32 @@ export const WorkspacePathNormalizer: McpToolWrapper = {
     return isGezelMcp(spec);
   },
   async preProcess(toolName, args) {
+    if (toolName === 'read_files') {
+      let changed = false;
+      const nextArgs = { ...args };
+      if (Array.isArray(args.files)) {
+        nextArgs.files = args.files.map((item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+          const record = item as Record<string, unknown>;
+          if (typeof record.path !== 'string') return item;
+          const path = normalizeWorkspaceToolPath(record.path);
+          if (path === record.path || path.length === 0) return item;
+          changed = true;
+          return { ...record, path };
+        });
+      }
+      if (Array.isArray(args.paths)) {
+        nextArgs.paths = args.paths.map((item) => {
+          if (typeof item !== 'string') return item;
+          const path = normalizeWorkspaceToolPath(item);
+          if (path === item || path.length === 0) return item;
+          changed = true;
+          return path;
+        });
+      }
+      return changed ? { kind: 'allow', args: nextArgs } : { kind: 'allow' };
+    }
+
     const fields = PATH_FIELDS_BY_TOOL[toolName];
     if (!fields) return { kind: 'allow' };
     if (toolName === 'validate' && args.where === 'artifact') return { kind: 'allow' };

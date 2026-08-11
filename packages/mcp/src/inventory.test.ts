@@ -35,7 +35,18 @@ import ts from 'typescript';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
-import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from './tool-inventory.js';
+import {
+  ALWAYS_REGISTERED_TOOLS,
+  BUILTIN_TOOL_NAMES,
+  CANONICAL_TOOL_NAMES,
+  CONDITIONALLY_REGISTERED_TOOLS,
+  LEGACY_TOOL_NAMES,
+  RENAMED_TOOLS,
+  RESERVED_TOOL_NAMES,
+  TOOL_NAME_TOMBSTONES,
+  TOOL_REGISTRY,
+  normalizeToolNameSpelling,
+} from './tool-inventory.js';
 
 interface RegisteredTool {
   description?: string;
@@ -129,6 +140,49 @@ function readBuiltinToolsetGroups(): Map<string, string[]> {
   return groups;
 }
 
+/**
+ * Discover every literal `server.tool("name", …)` registration directly
+ * from the implementation, including registrations nested behind env gates.
+ * Runtime `tools/list` cannot reveal a newly added conditional whose env var
+ * is not yet known to the inventory; this source projection closes that gap.
+ */
+function readStaticServerToolRegistrations(): string[] {
+  const sourcePath = resolve(__dirname, 'server.ts');
+  const text = readFileSync(sourcePath, 'utf8');
+  const source = ts.createSourceFile(sourcePath, text, ts.ScriptTarget.Latest, true);
+  const names: string[] = [];
+  function visit(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'DELEGATION_ROLE_SPECS' &&
+      node.initializer &&
+      ts.isArrayLiteralExpression(node.initializer)
+    ) {
+      for (const element of node.initializer.elements) {
+        if (!ts.isObjectLiteralExpression(element)) continue;
+        const slugProperty = element.properties.find(
+          (property): property is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(property) && propNameText(property.name) === 'slug',
+        );
+        const slug = slugProperty ? stringLiteralText(slugProperty.initializer) : undefined;
+        if (slug) names.push(`delegate_${slug}`, `consult_${slug}`);
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'tool'
+    ) {
+      const name = node.arguments[0];
+      if (name && ts.isStringLiteralLike(name)) names.push(name.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return names;
+}
+
 async function loadServer(env: Record<string, string> = {}): Promise<InspectableServer> {
   // Belt-and-suspenders: even with GEZEL_MCP_NO_MAIN=1 the module still
   // constructs a GezelClient at top level. A real fetch attempt would
@@ -188,6 +242,88 @@ describe('MCP tool inventory', () => {
     expect(Object.keys(server._registeredTools)).toHaveLength(
       platformAvailableAlwaysRegisteredTools.length,
     );
+  });
+});
+
+describe('MCP canonical tool registry', () => {
+  it('matches every literal server registration, including gated tools', () => {
+    const registrations = readStaticServerToolRegistrations();
+    expect(new Set(registrations).size, 'duplicate literal server.tool registrations').toBe(
+      registrations.length,
+    );
+    expect(new Set(registrations)).toEqual(new Set(CANONICAL_TOOL_NAMES));
+  });
+
+  it('unifies every canonical always and conditional registration exactly once', () => {
+    const expected = [...ALWAYS_REGISTERED_TOOLS, ...Object.keys(CONDITIONALLY_REGISTERED_TOOLS)];
+    expect(CANONICAL_TOOL_NAMES).toEqual(expected);
+    expect(new Set(CANONICAL_TOOL_NAMES).size).toBe(CANONICAL_TOOL_NAMES.length);
+    expect(Object.keys(TOOL_REGISTRY)).toEqual(expected);
+
+    for (const name of ALWAYS_REGISTERED_TOOLS) {
+      expect(TOOL_REGISTRY[name]).toMatchObject({
+        canonicalName: name,
+        registration: 'always',
+        advertisedByDefault: true,
+        modelFacing: true,
+      });
+      expect(TOOL_REGISTRY[name].gate).toBeUndefined();
+    }
+    for (const [name, gate] of Object.entries(CONDITIONALLY_REGISTERED_TOOLS)) {
+      expect(TOOL_REGISTRY[name as keyof typeof TOOL_REGISTRY]).toMatchObject({
+        canonicalName: name,
+        registration: 'conditional',
+        advertisedByDefault: false,
+        modelFacing: gate.modelFacing,
+        gate: { envVar: gate.envVar, envValue: gate.envValue },
+      });
+    }
+  });
+
+  it('classifies every hidden alias with its exact canonical replacement', () => {
+    expect(LEGACY_TOOL_NAMES).toEqual(Object.keys(RENAMED_TOOLS));
+    expect(new Set(LEGACY_TOOL_NAMES).size).toBe(LEGACY_TOOL_NAMES.length);
+
+    for (const [alias, canonical] of Object.entries(RENAMED_TOOLS)) {
+      expect(CANONICAL_TOOL_NAMES).not.toContain(alias);
+      expect(TOOL_REGISTRY[canonical].aliases).toContain(alias);
+    }
+    for (const entry of Object.values(TOOL_REGISTRY)) {
+      for (const alias of entry.aliases) {
+        expect(RENAMED_TOOLS[alias]).toBe(entry.canonicalName);
+      }
+    }
+  });
+
+  it('reserves canonical and hidden names for dynamic registration', () => {
+    expect(BUILTIN_TOOL_NAMES).toEqual([...CANONICAL_TOOL_NAMES, ...LEGACY_TOOL_NAMES]);
+    expect(new Set(BUILTIN_TOOL_NAMES).size).toBe(BUILTIN_TOOL_NAMES.length);
+    expect(RESERVED_TOOL_NAMES).toEqual([
+      ...BUILTIN_TOOL_NAMES,
+      ...Object.keys(TOOL_NAME_TOMBSTONES),
+    ]);
+    expect(normalizeToolNameSpelling('WriteFile')).toBe(normalizeToolNameSpelling('write-file'));
+    expect(normalizeToolNameSpelling('write-file')).toBe(normalizeToolNameSpelling('write_file'));
+    expect(TOOL_REGISTRY.draft_connector_action).toMatchObject({
+      registration: 'conditional',
+      modelFacing: true,
+      gate: { envVar: 'GEZEL_CONNECTORS_ENABLED', envValue: '1' },
+    });
+  });
+
+  it('keeps removed and foreign model spellings outside the callable registry', () => {
+    for (const [name, tombstone] of Object.entries(TOOL_NAME_TOMBSTONES)) {
+      expect(BUILTIN_TOOL_NAMES).not.toContain(name);
+      expect(CANONICAL_TOOL_NAMES).not.toContain(name);
+      if (tombstone.replacement) expect(CANONICAL_TOOL_NAMES).toContain(tombstone.replacement);
+    }
+    expect(TOOL_NAME_TOMBSTONES).toMatchObject({
+      update_task_step: { reason: 'no such MCP tool' },
+      commitProjectGit: { reason: 'UI/client method, not an MCP tool' },
+      listAudioVoices: { reason: 'UI/client method, not an MCP tool' },
+      AskUserQuestion: { replacement: 'ask_user_question' },
+      Grep: { replacement: 'grep_files' },
+    });
   });
 });
 
@@ -297,13 +433,20 @@ describe('MCP tool exclusion', () => {
 
   it('GEZEL_MCP_EXCLUDE accepts legacy spellings (canonicalized matching)', async () => {
     const server = await loadServer({
-      GEZEL_MCP_EXCLUDE: 'readFile,writeFile,readdir',
+      GEZEL_MCP_EXCLUDE: 'readFile,writeFile,readdir,search_files',
     });
     const registered = new Set(Object.keys(server._registeredTools));
     expect(registered.has('read_file')).toBe(false);
     expect(registered.has('write_file')).toBe(false);
     expect(registered.has('list_dir')).toBe(false);
+    expect(registered.has('grep_files')).toBe(false);
     expect(registered.has('stat')).toBe(true);
+  });
+
+  it('GEZEL_MCP_ALLOW accepts the hidden search_files alias', async () => {
+    const server = await loadServer({ GEZEL_MCP_ALLOW: 'search_files' });
+    const registered = new Set(Object.keys(server._registeredTools));
+    expect([...registered]).toEqual(['grep_files']);
   });
 
   it('GEZEL_MCP_ALLOW restricts registration to the named tools', async () => {
@@ -357,7 +500,16 @@ describe('MCP tool input schemas', () => {
     },
     { tool: 'list_memories', valid: { scope: 'project' }, invalid: {} },
     { tool: 'list_dir', valid: { path: 'src' }, invalid: { path: 123 } },
-    { tool: 'read_file', valid: { path: 'README.md' }, invalid: {} },
+    {
+      tool: 'read_file',
+      valid: { path: 'README.md', startLine: 10, endLine: 20 },
+      invalid: {},
+    },
+    {
+      tool: 'read_files',
+      valid: { files: [{ path: 'README.md' }, { path: 'src/app.ts', startLine: 4, endLine: 9 }] },
+      invalid: { paths: [] },
+    },
     { tool: 'write_file', valid: { path: 'a.txt', content: 'hi' }, invalid: { path: 'a.txt' } },
     { tool: 'stat', valid: { path: 'package.json' }, invalid: {} },
     { tool: 'delete_path', valid: { path: 'tmp.txt' }, invalid: {} },
@@ -375,6 +527,19 @@ describe('MCP tool input schemas', () => {
     { tool: 'list_projects', valid: {} },
     { tool: 'list_tasks', valid: {} },
     { tool: 'search_history', valid: {} },
+    {
+      tool: 'grep_files',
+      valid: {
+        pattern: 'needle',
+        literal: true,
+        includeGlobs: ['**/*.ts'],
+        excludeGlobs: ['**/*.test.ts'],
+        contextLines: 2,
+        resultMode: 'matches',
+        maxResults: 50,
+      },
+      invalid: { pattern: 'needle', maxResults: 201 },
+    },
     {
       tool: 'delegate_developer',
       valid: {
@@ -423,6 +588,26 @@ describe('MCP tool input schemas', () => {
       });
     }
   }
+
+  it('grep_files rejects inputs outside its bounded search contract', () => {
+    const schema = server._registeredTools.grep_files!.inputSchema;
+    const parser =
+      schema && typeof (schema as { safeParse?: unknown }).safeParse === 'function'
+        ? (schema as z.ZodTypeAny)
+        : z.object(schema as unknown as z.ZodRawShape);
+    const invalidPayloads = [
+      { pattern: '' },
+      { pattern: 'x'.repeat(4001) },
+      { pattern: 'x', contextLines: 6 },
+      { pattern: 'x', maxResults: 201 },
+      { pattern: 'x', includeGlobs: Array.from({ length: 33 }, (_, i) => `file-${i}`) },
+      { pattern: 'x', excludeGlobs: Array.from({ length: 33 }, (_, i) => `file-${i}`) },
+    ];
+
+    for (const payload of invalidPayloads) {
+      expect(parser.safeParse(payload).success, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });
 
 describe('MCP tool name alias dispatch', () => {
@@ -441,11 +626,19 @@ describe('MCP tool name alias dispatch', () => {
     const registered = new Set(Object.keys(server._registeredTools));
     expect(registered.has('writeFile')).toBe(false);
     expect(registered.has('readdir')).toBe(false);
+    expect(registered.has('grep_files')).toBe(true);
+    expect(registered.has('search_files')).toBe(false);
+    expect(registered.has('read_files')).toBe(true);
+    expect(registered.has('read_multiple_files')).toBe(false);
 
     const call = callToolHandler(server);
     expect(await call('writeFile', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
     expect(await call('readdir', { path: 'src' })).not.toMatch(/not found/);
     expect(await call('rm', { path: 'tmp.txt' })).not.toMatch(/not found/);
+    expect(await call('search_files', { pattern: 'needle', literal: true })).not.toMatch(
+      /not found/,
+    );
+    expect(await call('read_multiple_files', { paths: ['README.md'] })).not.toMatch(/not found/);
   });
 
   it('dispatches case/punctuation variants of registered names', async () => {
@@ -460,6 +653,13 @@ describe('MCP tool name alias dispatch', () => {
     const server = await loadServer();
     const call = callToolHandler(server);
     expect(await call('definitely_not_a_tool', {})).toMatch(/not found/);
+  });
+
+  it('does not turn non-callable tombstones into aliases through spelling normalization', async () => {
+    const server = await loadServer();
+    const call = callToolHandler(server);
+    expect(await call('AskUserQuestion', { questions: [] })).toMatch(/not found/);
+    expect(await call('WebSearch', { query: 'test' })).toMatch(/not found/);
   });
 });
 
@@ -478,6 +678,10 @@ describe('MCP legacy naming mode (GEZEL_MCP_TOOL_NAMING=legacy)', () => {
     expect(registered.has('read_file')).toBe(false);
     expect(registered.has('write_file')).toBe(false);
     expect(registered.has('list_dir')).toBe(false);
+    expect(registered.has('search_files')).toBe(true);
+    expect(registered.has('grep_files')).toBe(false);
+    expect(registered.has('read_multiple_files')).toBe(true);
+    expect(registered.has('read_files')).toBe(false);
     // Never-renamed tools keep their canonical names.
     expect(registered.has('search_memory')).toBe(true);
     expect(registered.has('stat')).toBe(true);
@@ -490,6 +694,8 @@ describe('MCP legacy naming mode (GEZEL_MCP_TOOL_NAMING=legacy)', () => {
     const call = callToolHandler(server);
     expect(await call('write_file', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
     expect(await call('list_dir', { path: 'src' })).not.toMatch(/not found/);
+    expect(await call('grep_files', { pattern: 'needle', literal: true })).not.toMatch(/not found/);
+    expect(await call('read_files', { paths: ['README.md'] })).not.toMatch(/not found/);
   });
 });
 
@@ -516,6 +722,41 @@ describe('MCP dynamic script tools (GEZEL_SCRIPT_TOOLS)', () => {
       description: 'collides with a builtin',
       script: 'application-store',
     },
+    {
+      name: 'search_files',
+      description: 'collides with a hidden semantic alias',
+      script: 'application-store',
+    },
+    {
+      name: 'read_multiple_files',
+      description: 'collides with a hidden compatibility alias',
+      script: 'application-store',
+    },
+    {
+      name: 'run_script',
+      description: 'collides with a hidden semantic alias',
+      script: 'application-store',
+    },
+    {
+      name: 'draft_connector_action',
+      description: 'collides with a conditional builtin',
+      script: 'application-store',
+    },
+    {
+      name: 'writefile',
+      description: 'normalizes to a canonical builtin',
+      script: 'application-store',
+    },
+    {
+      name: 'searchfiles',
+      description: 'normalizes to a hidden alias',
+      script: 'application-store',
+    },
+    {
+      name: 'exitplanmode',
+      description: 'normalizes to a non-callable tombstone',
+      script: 'application-store',
+    },
   ]);
 
   it('registers declared tools with schemas and keeps the builtin on a name collision', async () => {
@@ -528,6 +769,13 @@ describe('MCP dynamic script tools (GEZEL_SCRIPT_TOOLS)', () => {
     expect(server._registeredTools.run_installed_script?.description).toContain(
       'ALREADY-INSTALLED project script',
     );
+    expect(server._registeredTools.search_files).toBeUndefined();
+    expect(server._registeredTools.read_multiple_files).toBeUndefined();
+    expect(server._registeredTools.run_script).toBeUndefined();
+    expect(server._registeredTools.draft_connector_action).toBeUndefined();
+    expect(server._registeredTools.writefile).toBeUndefined();
+    expect(server._registeredTools.searchfiles).toBeUndefined();
+    expect(server._registeredTools.exitplanmode).toBeUndefined();
   });
 
   it('does not disturb the frozen inventory contract for builtins', async () => {

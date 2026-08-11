@@ -75,9 +75,14 @@ export interface RemoteGezelProviderOpts {
 export class RemoteGezelProvider implements LLMProvider {
   readonly name = 'remote' as const;
   readonly queue: ProviderQueue;
-  /** A's RemoteSession runs its OWN local tool loop, so this provider is not
-   *  in capture-and-return mode from the caller's perspective. */
-  readonly supportsExternalTools = false;
+  /**
+   * The remote wire already carries caller tool schemas to B and returns the
+   * model's captured calls to A. RemoteSession either executes its ordinary
+   * Gezel bridge tools locally or, when SessionOpts.externalTools is present,
+   * halts on the first model tool-call turn and exposes every call to Responses
+   * facade. B never executes tools in either mode.
+   */
+  readonly supportsExternalTools = true;
   readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
   private readonly admittedContextWindows = new Map<
@@ -124,7 +129,7 @@ export class RemoteGezelProvider implements LLMProvider {
       : remoteLocal;
   }
 
-  async prepareContextWindow(model?: string): Promise<number | undefined> {
+  async prepareContextWindow(model?: string, signal?: AbortSignal): Promise<number | undefined> {
     const bLocal = this.brokerModel(model);
     if (!bLocal) return undefined;
     const connection = this.opts.resolveConnection?.() ?? this.opts;
@@ -150,6 +155,7 @@ export class RemoteGezelProvider implements LLMProvider {
           Authorization: `Bearer ${latestConnection.token}`,
         },
         body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
+        ...(signal ? { signal } : {}),
       });
       if (res.ok) {
         const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
@@ -179,6 +185,7 @@ export class RemoteGezelProvider implements LLMProvider {
         }
         await waitForRemoteCapacity(
           remoteBackpressureDelayMs(res.headers.get('retry-after'), backpressureAttempt++),
+          signal,
         );
         continue;
       }
@@ -199,12 +206,13 @@ export class RemoteGezelProvider implements LLMProvider {
     }
   }
 
-  async listModels(): Promise<ModelInfo[]> {
+  async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
     if (this.opts.models) return this.opts.models;
     try {
       const connection = this.opts.resolveConnection?.() ?? this.opts;
       const res = await connection.fetch(`${connection.baseUrl}/v1/remote/models`, {
         headers: { Authorization: `Bearer ${connection.token}` },
+        ...(signal ? { signal } : {}),
       });
       if (!res.ok) return [];
       const parsed = RemoteModelsResponseSchema.parse(await res.json());
@@ -221,7 +229,9 @@ export class RemoteGezelProvider implements LLMProvider {
           ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
         }));
     } catch (err) {
-      this.log.warn(`[remote-provider] listModels(${this.opts.label}) failed: ${String(err)}`);
+      if (!signal?.aborted) {
+        this.log.warn(`[remote-provider] listModels(${this.opts.label}) failed: ${String(err)}`);
+      }
       return [];
     }
   }
@@ -249,6 +259,9 @@ export class RemoteGezelProvider implements LLMProvider {
       ...(opts.volatileContext ? { volatileContext: opts.volatileContext } : {}),
       ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
       ...(opts.tuning ? { tuning: opts.tuning as unknown as Record<string, unknown> } : {}),
+      ...(opts.externalTools && opts.externalTools.length > 0
+        ? { externalTools: opts.externalTools }
+        : {}),
       priorMessages: opts.priorMessages ?? [],
       numCtx,
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),

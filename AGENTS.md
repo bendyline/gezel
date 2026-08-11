@@ -128,7 +128,7 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 | `packages/ui` | React/Vite web app. Served by the service at `/`. |
 | `packages/app` | Electron shell. Holds the supervisor (machine-service adoption on every packaged platform, per-user spawn, and embedded fallback), loads the UI, and ships platform installer/autostart scaffolding. |
 | `packages/cli` | `gezel` command-line for headless scenarios. |
-| `packages/catalog` | Catalog *loader* (sources, install pipeline, authoring/generation scripts). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
+| `packages/catalog` | Catalog *loader* (sources, install pipeline, schema-aware compilers). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
 | `packages/plugin-sdk` | Helpers for writing gezel plugins (legacy surface, kept for compatibility). |
 | `packages/sdk` | Newer extension surface — typed entry points for external integrations and embedders. The plugin-sdk is the historical equivalent; treat `sdk` as the preferred surface for new work. |
 | `packages/vscode` | VSCode extension that surfaces gezel features inside the editor. |
@@ -142,14 +142,15 @@ Catalog **content** is not in this repo. It lives across three repos:
 
 - **gezel** (this repo) — the app plus the catalog *loader*
   (`packages/catalog`: `CatalogService`, sources, npm-toolset install
-  pipeline) and the content *authoring* scripts
-  (`packages/catalog/scripts/`: `build-manifest`, `generate-craftbooks`,
-  `pin-revisions`, `import-mcp-registry`), which stay here because they
-  import unpublished core Zod schemas.
+  pipeline) and schema-aware compilers that genuinely depend on unpublished
+  core APIs. It contains no chat-model authoring recipes or generator.
 - **[`bendyline/gilde`](https://github.com/bendyline/gilde)** — the
   content: `data/` (chat/image/video models, toolsets, connector types,
   project types, gezel role templates, craftbooks + `test.json` eval
-  sidecars, and the bot-managed `data/community/` MCP-registry tier).
+  sidecars, and the bot-managed `data/community/` MCP-registry tier), plus
+  `authoring/` source material for generated catalog families, including
+  every chat-model recipe and `tools/build-chat-model.mjs`. A model can be
+  introduced and released entirely in Gilde without a Gezel source change.
   Repo root **is** the npm package root of `@bendyline/gilde`, so the
   published package and the checkout are interchangeable. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation
@@ -167,12 +168,12 @@ Gezel consumes the content as an **exact-pinned registry dep** of
 at runtime through `gildeDataDir()` in
 [packages/catalog/src/gilde-data.ts](packages/catalog/src/gilde-data.ts).
 `GEZEL_GILDE_DATA_DIR` overrides resolution for tests/evals/operators;
-authoring scripts locate the sibling checkout via `GILDE_DIR` (default
-`../gilde`).
+Gezel-side schema-aware compilers locate the sibling checkout via `GILDE_DIR`
+(default `../gilde`).
 
-The content-change dance: edit or generate into the sibling `../gilde`
-checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) →
-`pnpm --filter @bendyline/gezel-catalog build-index` → gilde PR → CI
+The content-change dance: edit or generate in the sibling `../gilde`
+checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) → run
+Gilde's `npm run fix && npm run check` → gilde PR → CI
 validates → merge → the pipeline publishes → bump the pin in
 `packages/catalog/package.json` **and** the `minimumReleaseAgeExclude`
 entry in `pnpm-workspace.yaml` → `pnpm unlink:gilde`. Content regressions
@@ -381,7 +382,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 
 ## Development
 
-- `pnpm install` — bootstrap.
+- **Never run a bare `pnpm install` in this shared checkout.** Multiple Codex tasks can run here at once, while pnpm rewrites the same live `node_modules` tree non-atomically. Use `pnpm deps:install` for every intentional install; its checkout-scoped cross-process lock serializes dependency mutations. `verifyDepsBeforeRun: warn` is deliberate: build/test/exec commands may report stale dependencies, but must never silently turn into competing installers.
+- `pnpm deps:install` — serialized dependency bootstrap. Extra install flags pass through after `--` (for example, `pnpm deps:install -- --frozen-lockfile`). The Gilde/Squisq link helpers and `gilde:update` use the same lock around both their config edits and their install, so those operations cannot expose a half-updated override/lockfile pair to another task.
 - `pnpm build` — full workspace build; required before `pnpm test:e2e` or `pnpm app`.
 - `pnpm build:bundle` — build the relocatable service bundle via `pnpm deploy --prod`. Output at `packages/app/dist/service-bundle/`. Needed before packaging a distributable.
 - `pnpm build:packaged` — shortcut: `build` + `build:bundle`.
@@ -442,12 +444,12 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 - **Copilot SDK needs time on first call.** Cold-start ~30–90s. Timeouts below 120s flake. The SDK also sometimes rejects `sendAndWait` with "Timeout waiting for session.idle" *after* the model has already streamed a full response — we buffer deltas and fall back to the buffered content when that happens. See `copilot.ts`/`openai.ts` `CopilotSession.sendAndWait`.
 - **OpenAI's native MCP is HTTP-only.** The OpenAI Responses API's `tools: [{type: 'mcp', ...}]` shape only accepts HTTP remote servers, so it can't talk to stdio MCP servers like `@bendyline/gezel-mcp`. We work around this by running the bridge ourselves: [packages/service/src/providers/mcp-bridge.ts](packages/service/src/providers/mcp-bridge.ts) is a unified MCP client that dispatches between `StdioClientTransport` and `StreamableHTTPClientTransport` (plus SSE for older servers) via the `isHttpSpec()` discriminator on the spec. Both `OpenAIProvider` and `AnthropicProvider` consume the same `McpBridgePool` — there's no per-provider bridge ownership. Don't try to plug stdio specs into OpenAI's native MCP tool shape; route everything through the pool.
 - **`quotaSnapshots` from Copilot is a map, not a single value.** Pro+ users have multiple quota buckets (chat = unlimited, premium interactions = limited). Picking `Object.values(snapshots)[0]` hides the limited one. We surface all buckets and sort most-constrained first.
-- **Squisq editor is an external package** ([`bendyline/squisq`](https://github.com/bendyline/squisq)) — some integration points live in that repository, whose local checkout location is not fixed. Use `pnpm link:squisq` when testing a sibling checkout. When a new capability belongs in Squisq (for example, the chat composer's `submitOnEnter` prop), change it there and rebuild before updating Gezel's pinned package versions. One caveat while linked: `pnpm build:bundle` lifts the squisq/gilde `link:` overrides out of `pnpm-workspace.yaml` for the duration of the `pnpm deploy` and restores them afterwards — pnpm cannot materialize a `link:` dep into a deployed tree, so the bundle always reflects the registry pins, not your sibling checkout.
+- **Squisq editor is an external package** ([`bendyline/squisq`](https://github.com/bendyline/squisq)) — some integration points live in that repository, whose local checkout location is not fixed. Use `pnpm link:squisq` when testing a sibling checkout. When a new capability belongs in Squisq (for example, the chat composer's `submitOnEnter` prop), change it there and rebuild before updating Gezel's pinned package versions. One caveat while linked: `pnpm build:bundle` uses pnpm's dedicated-lockfile deploy, so the bundle reflects the registry resolutions recorded in `pnpm-lock.yaml`, not your sibling checkout. Never reintroduce an in-place edit/restore of `pnpm-workspace.yaml`; another task can observe that transient file.
 - **Gilde content is external** ([`bendyline/gilde`](https://github.com/bendyline/gilde)) — same shape as squisq: sibling checkout at `../gilde` and `pnpm link:gilde` / `pnpm unlink:gilde`. CI and release workflows run `pnpm check:local-links` before dependency installation so a committed `link:` override fails with a clear message. That guard only *enforces* when `CI` is set (or `GEZEL_ENFORCE_LOCAL_LINKS=1`) — a local `pnpm validate` / `pnpm all` just warns, so the full gate stays runnable while linked, and hard-fails only when a link points at a checkout that is not on disk. Content correctness gates run in gezel CI against the *pinned* `@bendyline/gilde` version (the catalog package's data-contract tests), so a bad content release fails here at bump time, before it ships.
 - **`@bendyline/gilde` must keep `./package.json` exported.** The catalog loader locates the content root via `createRequire(...).resolve('@bendyline/gilde/package.json')` ([gilde-data.ts](packages/catalog/src/gilde-data.ts)). If a gilde release ships an `exports` map without that subpath, resolution throws and the service boots with an **empty catalog** — no error, just no models/templates/craftbooks. Guarded by `packages/catalog/src/gilde-data.test.ts` (mirror of the mcp `./dist/server.js` gotcha).
 - **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. Gilde CI validation is deliberately *looser* than the runtime (Zod refinements don't survive `z.toJSONSchema`); gezel's `.parse()` of the pinned content stays authoritative. The exporter throws on unrepresentable constructs (e.g. `z.transform`) rather than silently weakening gilde CI. **Forgetting to regenerate has a silent failure mode:** a manifest that uses a newly-added enum value (family/behavior/format) fails the stale generated schema's ajv identity check, so `build-index` drops it from the index with no error (`--verbose` → `skip … invalid-identity`) and the daemon serves it with default tuning. Regenerate before `build-index` whenever a content edit depends on a core-schema change — see the content-change dance above.
 - **The MCP server runs as a child process** with a fresh Node environment. Env variables we pass are its only connection to the running service — don't rely on anything else being inherited implicitly.
-- **The embedded fallback loads from the unpacked service-bundle, not from `app.asar/node_modules/`.** [supervisor/index.ts](packages/app/src/supervisor/index.ts)'s `startEmbeddedRaw` dynamic-imports `app.asar.unpacked/dist/service-bundle/dist/index.js` via a `file://` URL when that file exists (packaged mode), and only falls back to bare-specifier `import('@bendyline/gezel-service')` for dev (workspace symlink). The reason: electron-builder's pnpm dep walker copies `@bendyline/gezel-service` into `app.asar` but doesn't follow its transitive deps — about 100 packages get silently dropped, so any embedded boot from there crashes with `ERR_MODULE_NOT_FOUND` on whichever transitive (zod-to-json-schema, @octokit/endpoint, etc.) is imported first. The service-bundle (built by `pnpm deploy --prod --legacy`) has a complete pnpm tree and is the same source the spawned daemon uses. Net effect: one canonical service tree on disk, consumed by both spawn and embedded paths.
+- **The embedded fallback loads from the unpacked service-bundle, not from `app.asar/node_modules/`.** [supervisor/index.ts](packages/app/src/supervisor/index.ts)'s `startEmbeddedRaw` dynamic-imports `app.asar.unpacked/dist/service-bundle/dist/index.js` via a `file://` URL when that file exists (packaged mode), and only falls back to bare-specifier `import('@bendyline/gezel-service')` for dev (workspace symlink). The reason: electron-builder's pnpm dep walker copies `@bendyline/gezel-service` into `app.asar` but doesn't follow its transitive deps — about 100 packages get silently dropped, so any embedded boot from there crashes with `ERR_MODULE_NOT_FOUND` on whichever transitive (zod-to-json-schema, @octokit/endpoint, etc.) is imported first. The service-bundle (built by the dedicated-lockfile `pnpm deploy --prod` path) has a complete pnpm tree and is the same source the spawned daemon uses. Net effect: one canonical service tree on disk, consumed by both spawn and embedded paths.
 
   Practical implication: **don't add `@bendyline/gezel-service` (or its transitive deps) to [packages/app/package.json](packages/app/package.json)**. Doing so would re-introduce a parallel tree in `app.asar` that the embedded path no longer reads from, just bloating the installer.
 

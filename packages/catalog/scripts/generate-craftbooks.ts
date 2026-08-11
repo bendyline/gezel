@@ -4,7 +4,7 @@
  *
  * Reads `SEED_ARCHETYPES`, turns each into a bundled craftbook under
  * `data/craftbook-templates/{shard}/{id}/` (identity manifest + 1.0.0
- * version manifest + about.md), and reports what it wrote. Each book is
+ * immutable version document), and reports what it wrote. Each book is
  * schema-validated inside `archetypeToFiles` before it touches disk, so a
  * malformed spec fails the run loudly instead of poisoning the catalog.
  *
@@ -14,6 +14,7 @@
  *
  * Usage:
  *   pnpm --filter @bendyline/gezel-catalog generate-craftbooks
+ *   pnpm --filter @bendyline/gezel-catalog generate-craftbooks -- --only=foo,bar
  *   # then refresh the index so the new books are discoverable:
  *   pnpm --filter @bendyline/gezel-catalog build-index --kind=craftbook-template
  */
@@ -28,8 +29,9 @@ import { SEED_ARCHETYPES } from './craftbook-archetypes.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 import { MAINTENANCE_REVIEW_ARCHETYPES } from './maintenance-review-archetypes.js';
 
-// Fixed release date so re-running is byte-stable (no git churn on identical
-// input — same rationale as build-index dropping its generatedAt stamp).
+// Default release date for legacy specs. Revised seeds carry their own
+// explicit release metadata so regeneration creates a new immutable version
+// rather than rewriting their released 1.0.0 document.
 const RELEASED_AT = '2026-06-05T00:00:00Z';
 
 /**
@@ -111,9 +113,26 @@ async function main(): Promise<void> {
   }
 
   const all = [...authored, ...galleryToWrite];
+  const onlyArg = process.argv.slice(2).find((arg) => arg.startsWith('--only='));
+  const onlyIds = onlyArg
+    ? new Set(
+        onlyArg
+          .slice('--only='.length)
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      )
+    : null;
+  const selected = onlyIds ? all.filter((spec) => onlyIds.has(spec.id)) : all;
+  if (onlyIds) {
+    const missing = [...onlyIds].filter((id) => !selected.some((spec) => spec.id === id));
+    if (missing.length > 0) {
+      throw new Error(`unknown --only craftbook id(s): ${missing.join(', ')}`);
+    }
+  }
   let written = 0;
   const failures: { id: string; error: string }[] = [];
-  for (const spec of all) {
+  for (const spec of selected) {
     try {
       const gen = archetypeToFiles(spec, RELEASED_AT);
       const bookDir = join(root, gen.shard, gen.id);
@@ -130,7 +149,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `\nGenerated ${written} craftbook(s) (${authored.length} authored + ${galleryToWrite.length} gallery; ${skippedDup} dup-id skipped) into ${root}`,
+    `\nGenerated ${written} craftbook(s)${onlyIds ? ` selected by --only (${[...onlyIds].join(', ')})` : ` (${authored.length} authored + ${galleryToWrite.length} gallery; ${skippedDup} dup-id skipped)`} into ${root}`,
   );
   if (failures.length > 0) {
     console.warn(`\n${failures.length} spec(s) failed validation and were skipped:`);

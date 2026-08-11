@@ -42,6 +42,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { deployMlRuntime } from './deploy-ml-runtime.mjs';
 import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
+import { runIsolatedPnpmDeploy } from './pnpm-deploy.mjs';
 import {
   pruneRuntimeFilesWithReport,
   verifyRuntimeDeclarationAssets,
@@ -68,45 +69,15 @@ async function main() {
     rmSync(target, { recursive: true, force: true });
   }
 
-  // Deploy the CLI. Its prod dep on @bendyline/gezel-service drags the
-  // daemon + UI + all transitive deps into one hoisted tree. `--legacy` +
-  // `--node-linker=hoisted` for the same Windows/symlink reasons as the
-  // Electron service bundle (see scripts/build-service-bundle.mjs).
-  const args = [
-    '--filter',
-    '@bendyline/gezel-cli',
-    'deploy',
-    '--prod',
-    '--legacy',
-    '--node-linker=hoisted',
-    '--config.allow-unused-patches=true',
+  // The CLI's prod dependency on @bendyline/gezel-service pulls the daemon,
+  // UI, and transitive graph into a target-local hoisted tree. Dedicated-
+  // lockfile deploy avoids touching this checkout's node_modules state.
+  await runIsolatedPnpmDeploy({
+    repoRoot,
+    filter: '@bendyline/gezel-cli',
     target,
-  ];
-  console.log(`[build-node-bundle] pnpm ${args.join(' ')}`);
-  const workspaceStatePath = join(repoRoot, 'node_modules', '.pnpm-workspace-state-v1.json');
-  const workspaceStateBefore = existsSync(workspaceStatePath)
-    ? await readFile(workspaceStatePath)
-    : null;
-  let stdout = '';
-  let stderr = '';
-  try {
-    ({ stdout, stderr } = await exec('pnpm', args, {
-      cwd: repoRoot,
-      env: process.env,
-      maxBuffer: 64 * 1024 * 1024,
-      // Windows: `pnpm` on PATH is `pnpm.cmd`; child_process needs a shell to
-      // launch a .cmd. Args are 100% internal, so no injection concern.
-      shell: process.platform === 'win32',
-    }));
-  } finally {
-    if (workspaceStateBefore) {
-      await writeFile(workspaceStatePath, workspaceStateBefore);
-    } else if (existsSync(workspaceStatePath)) {
-      await unlink(workspaceStatePath);
-    }
-  }
-  if (stdout.trim()) process.stdout.write(stdout);
-  if (stderr.trim()) process.stderr.write(stderr);
+    label: 'build-node-bundle',
+  });
 
   // Like the Electron artifact, the relocatable Node bundle is a complete
   // distribution even though the public service package keeps ML optional.
@@ -144,7 +115,7 @@ async function main() {
     }
   }
 
-  // `pnpm deploy --legacy` can leave bookkeeping symlinks pointing back to
+  // `pnpm deploy` can leave bookkeeping symlinks pointing back to
   // the workspace; prune any that escape the bundle so `tar` doesn't follow
   // them out of the tree.
   await pruneEscapingSymlinks(target);

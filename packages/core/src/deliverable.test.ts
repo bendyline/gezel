@@ -297,6 +297,49 @@ describe('deliverableKindForStep — inverse inference (D4)', () => {
     ).toBe('data-file');
   });
 
+  it('a tableShape check over a prose report keeps it a document, not a data file', () => {
+    // Wild-caught (Pull Request Review v1.2.0): the findings table made
+    // `pr-review.md` read as data, which handed the step the
+    // transform-by-execution kit and dropped every tool its procedure
+    // named. A Markdown table inside prose is still prose.
+    expect(
+      deliverableKindForStep({
+        advanceWhen: { file: 'pr-review.md', minBytes: 500 },
+        gate: {
+          at: 'completion',
+          checks: [
+            {
+              kind: 'tableShape',
+              file: 'pr-review.md',
+              requiredColumns: ['Severity', 'File', 'Finding'],
+            },
+          ],
+        },
+      }),
+    ).toBe('markdown-doc');
+
+    // A real tabular target is unaffected, and the stricter data checks
+    // still classify by shape whatever the extension.
+    expect(
+      deliverableKindForStep({
+        advanceWhen: { file: 'out/rows.csv' },
+        gate: {
+          at: 'completion',
+          checks: [{ kind: 'tableShape', file: 'out/rows.csv', requiredColumns: ['a'] }],
+        },
+      }),
+    ).toBe('data-file');
+    expect(
+      deliverableKindForStep({
+        advanceWhen: { file: 'out/rows.md' },
+        gate: {
+          at: 'completion',
+          checks: [{ kind: 'csvShape', file: 'out/rows.md', requiredColumns: ['a'] }],
+        },
+      }),
+    ).toBe('data-file');
+  });
+
   it('a step with no file signal yields null; stepDeliverablePath finds gate-check files', () => {
     expect(deliverableKindForStep({})).toBeNull();
     expect(

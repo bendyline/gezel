@@ -49,6 +49,36 @@ describe('GpuArbiter', () => {
     expect(status).toHaveBeenCalledTimes(1);
   });
 
+  it('signals memory pressure when free VRAM falls below the release threshold', async () => {
+    const status = vi.fn(async () => ({
+      state: 'healthy' as const,
+      mode: 'observe' as const,
+      sampledAt: '2026-08-10T00:00:00.000Z',
+      sources: ['amd-adl'],
+      readings: [
+        {
+          vendor: 'amd' as const,
+          deviceId: '0',
+          memoryUsedMb: 31 * 1024,
+          memoryTotalMb: 32 * 1024,
+        },
+      ],
+      reasons: [],
+      summary: 'healthy',
+    }));
+    const arb = new GpuArbiter({
+      policy: 'coexist',
+      log: () => {},
+      healthGate: { admit: vi.fn(), setPolicy: vi.fn(), status } as never,
+    });
+
+    await expect(arb.getMemoryPressureStatus()).resolves.toMatchObject({
+      pressured: true,
+      freeBytes: 1024 ** 3,
+      totalBytes: 32 * 1024 ** 3,
+    });
+  });
+
   it('swap policy evicts the other slot when image acquires', async () => {
     const arb = new GpuArbiter({ policy: 'swap', log: () => {} });
     const llmEvict = vi.fn(async () => {});

@@ -7,6 +7,7 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('./ModelBundleControls.js', () => ({
   ExportModelBundleButton: () => null,
   ImportModelBundleButton: () => <button type="button">Import .gezmodel</button>,
+  useExportModelBundle: () => ({ run: async () => {}, busy: false, error: null }),
 }));
 
 const { MlxModelManager } = await import('./MlxModelManager.js');
@@ -75,7 +76,11 @@ describe('MlxModelManager fitness column', () => {
     expect(await screen.findByText('short prompt · 62 t/s')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('128K')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Re-run' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-run' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for gemma4-12b-q4' }));
+    expect(
+      await screen.findByRole('menuitem', { name: 'Re-run fitness check' }),
+    ).toBeInTheDocument();
   });
 
   it('offers a manual probe for an unchecked model and posts it against the mlx engine', async () => {
@@ -84,9 +89,9 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
-    const button = await screen.findByRole('button', { name: 'Run fitness check' });
-    expect(screen.getByText('not checked yet')).toBeInTheDocument();
-    await userEvent.click(button);
+    expect(await screen.findByText('not checked yet')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for gemma4-12b-q4' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Run fitness check' }));
 
     await waitFor(() => {
       expect(api.runModelFitnessProbe).toHaveBeenCalledWith('mlx', 'gemma4-12b-q4');
@@ -117,11 +122,11 @@ describe('MlxModelManager fitness column', () => {
 
     render(<MlxModelManager />);
 
-    const memory = await screen.findByText(/~18\.0 GB in memory/);
-    expect(screen.queryByText(/30\.0 GB in memory/)).not.toBeInTheDocument();
+    const memory = await screen.findByText(/~16\.8 GB in memory/);
+    expect(screen.queryByText(/27\.9 GB in memory/)).not.toBeInTheDocument();
     const title = memory.closest('td')?.getAttribute('title') ?? '';
-    expect(title).toMatch(/about 18\.0 GB of memory to serve one chat/);
-    expect(title).toMatch(/Serving 2 chats at once reserves about 30\.0 GB/);
+    expect(title).toMatch(/about 16\.8 GB of memory to serve one chat/);
+    expect(title).toMatch(/Serving 2 chats at once reserves about 27\.9 GB/);
   });
 
   it('shows a live pill while a probe is running', async () => {
@@ -133,6 +138,10 @@ describe('MlxModelManager fitness column', () => {
     render(<MlxModelManager />);
 
     expect(await screen.findByText('checking fitness…')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for gemma4-12b-q4' }));
+    expect(await screen.findByRole('menuitem', { name: 'Checking fitness…' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   });
 });

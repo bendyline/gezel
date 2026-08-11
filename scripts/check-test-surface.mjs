@@ -6,20 +6,23 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageThresholds = {
-  core: 53.3,
-  service: 66.9,
-  ui: 30.7,
-  app: 47.6,
-  catalog: 80,
-  mcp: 92.9,
-  client: 57.1,
-  cli: 7.7,
+  // Ratchet at the checked-in baseline. These are direct-test-surface floors,
+  // not statement/branch coverage; they prevent an untested source file from
+  // landing silently while the richer behavior-oriented strategy evolves.
+  core: 54.8,
+  service: 71.7,
+  ui: 49.9,
+  app: 69.7,
+  catalog: 88.9,
+  mcp: 95.5,
+  client: 66.7,
+  cli: 82.6,
   sdk: 100,
-  'app-sdk': 33.3,
+  'app-sdk': 50,
   'plugin-sdk': 100,
   'connectors-spectral': 33.3,
   vscode: 66.7,
-  'eval-viewer': 6.7,
+  'eval-viewer': 12.5,
 };
 
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx']);

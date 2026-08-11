@@ -47,12 +47,14 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   'ab-test-readout': {
     timeoutMs: 25 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates. Now carries a harness-owned arithmetic oracle: data/stats.json is checked field-by-field with jsonPathEquals against figures derived from the seeded CSV, including the discriminating case where a significant positive lift still yields do_not_ship because the refund guardrail regresses 0.23pp against a 0.20pp limit. Needs a re-run under the new gates.',
+        'The previous local run used obsolete keyword gates and no longer qualifies as validation. The scenario now carries a harness-owned arithmetic oracle: data/stats.json is checked field-by-field with jsonPathEquals against figures derived from the seeded CSV, including the discriminating case where a significant positive lift still yields do_not_ship because the refund guardrail regresses 0.23pp against a 0.20pp limit. Needs a local-model re-run under the current gates.',
     },
-    gaps: ['Add a custom numeric oracle for significance and confidence interval calculations.'],
+    gaps: [
+      'Re-run the scenario on a local model under the current arithmetic oracle.',
+      'Require task attribution before treating a passing artifact as proof that the craftbook workflow ran.',
+    ],
   },
   'accessibility-retrofit': {
     coverage: {
@@ -208,13 +210,16 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
   },
   'branding-website': {
+    runAsCraftbookTask: true,
+    timeoutMs: 30 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8. The direct-worker run wrote a complete Lumina Ledger marketing page in one write and passed HTML/CSS, brand, CTA, pricing/fit, palette, and footer gates. Needs a seeded brand brief plus visual/runtime review.',
+        'The 1.1 scenario now runs a real craftbook task and requires attributed task notes, gated brand/copy artifacts, and the final workspace page. The prior direct-worker artifact pass does not validate this stronger workflow and must be rerun.',
     },
     gaps: [
+      'Run the 1.1 workflow on local models before restoring validated status.',
       'Add screenshot-based visual checks for palette consistency and first-viewport hierarchy.',
     ],
   },
@@ -228,12 +233,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add word/character-count gates for each channel section.'],
   },
   'browser-qa-audit': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic html-page smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real seven-step craftbook and grades its QA plan, browser evidence, baseline, final report, gated steps, terminal review path, and browser calls through a loopback Playwright simulator. Keep this as workflow-quality coverage: the fast tool-routing-browser scenario owns primitive discovery/choreography, while the run-playwright route test owns real Chromium execution.',
     },
-    gaps: ['Add Playwright behavior checks for the class-specific controls.'],
+    gaps: [
+      'The 2026-08-10 gemma4-e4b-q4 trial reached 10/20 browser calls but stalled in the multi-step report workflow before resize, type, console, or screenshot completion; tune the craftbook only for users who need the full QA process.',
+      'Add a separately scheduled real managed-Playwright/Chromium smoke rail; do not make the long craftbook the browser-plumbing gate.',
+    ],
   },
   'bug-fix-tdd': {
     coverage: {
@@ -274,12 +285,16 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright/canvas pixel checks for nonblank animation and working controls.'],
   },
   'careful-mode': {
+    runAsCraftbookTask: true,
+    timeoutMs: 20 * 60_000,
+    progressTimeoutMs: 8 * 60_000,
     coverage: {
-      status: 'implemented',
+      status: 'validated',
+      localModels: ['gemma4-e4b-q4'],
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'Validated locally with gemma4-e4b-q8 after fixing the hook input contract. The real craftbook-task probe passed all 12 checks, including task attribution, an auditable tool.gated ask for delete_path, an auto-denied permission card, an intact sentinel, and a written evidence report.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: ['Run the hook-backed workflow scenario across the remaining local model tiers.'],
   },
   'case-study': {
     coverage: {
@@ -424,13 +439,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add exact claim extraction coverage and source-citation matching.'],
   },
   'content-deck': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8. The run read the seeded field notes, wrote an 11 KB HTML slide deck in one pass, and passed source-fact, deck-structure, takeaways, CSS, JS-parse, and navigation-affordance gates. Needs browser navigation assertions.',
+        'The 1.1 scenario now runs a real craftbook task and requires attributed task notes, gated outline/design artifacts, and a source-grounded navigable workspace deck. The prior direct-worker artifact pass does not validate this stronger workflow.',
     },
-    gaps: ['Add Playwright checks for slide count and keyboard/button navigation.'],
+    gaps: [
+      'Run the 1.1 workflow on local models before restoring validated status.',
+      'Add Playwright checks for slide count and keyboard/button navigation.',
+    ],
   },
   'contract-template': {
     coverage: {
@@ -451,13 +471,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add negative checks for banned hype phrases once gate support includes not-contains.'],
   },
   'corpus-email-digest': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8. The run read all three corpus files, wrote digest.html in one pass, and passed subject, section, citation, fact, CSS, and no-invention gates. Needs stricter per-source attribution and no-hallucination checks.',
+        'The 1.1 scenario now runs a real craftbook task and requires attributed task notes, gated scope/draft artifacts, all source reads, and the final email-ready workspace output. The old direct-worker pass does not validate the new workflow.',
     },
-    gaps: ['Add a negative assertion layer that flags uncited digest items.'],
+    gaps: [
+      'Run the 1.1 workflow on local models before restoring validated status.',
+      'Add a structural checker that pairs every digest item with exactly one source citation.',
+    ],
   },
   'corpus-synthesis': {
     coverage: {
@@ -649,12 +674,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'design-system-consultation': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook and grades the grounded design audit, brief, DESIGN.md, lintable HTML preview, bounded gates, and reviewer loop.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: [
+      'Add screenshot assertions for hierarchy, responsive layout, contrast, focus, and representative component states.',
+      'Run the task-attributed workflow across local model tiers.',
+    ],
   },
   'diagram-from-text': {
     coverage: {
@@ -759,12 +790,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'engineering-retrospective': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook over a seeded repository-history brief and grades reproducible scope, evidence, balanced synthesis, gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: [
+      'Add a deterministic temporary git-repository fixture and recompute the expected activity/hotspot figures in the harness.',
+      'Run the task-attributed workflow across local model tiers.',
+    ],
   },
   'escalation-playbook': {
     coverage: {
@@ -785,12 +822,15 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
   },
   'executive-level-review': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook and grades evidence separation, alternative comparison, scorecard structure, verdict constraints, bounded gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: ['Run the task-attributed workflow across local model tiers.'],
   },
   'expense-categorize': {
     coverage: {
@@ -868,10 +908,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'forecast-model': {
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates, which were satisfiable by accident (contains "40" matched the raw revenue cell 1440). Now carries a harness-owned arithmetic oracle over data/model.json. Needs a re-run under the new gates.',
+        'The previous local run used obsolete keyword gates that were satisfiable by accident (contains "40" matched the raw revenue cell 1440), so it no longer qualifies as validation. The scenario now carries a harness-owned arithmetic oracle over data/model.json and needs a local-model re-run under the current gates.',
     },
     gaps: [
       'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
@@ -898,12 +937,15 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'freeze-scope': {
+    runAsCraftbookTask: true,
+    timeoutMs: 20 * 60_000,
+    progressTimeoutMs: 8 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic corpus smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'Replaced the unrelated prose smoke with a real craftbook-task boundary probe. It now requires task attribution, an allowed write inside safe-zone, an auditable tool.gated deny event for write_file outside the boundary, and sentinel evidence. Needs a local-model run.',
     },
-    gaps: ['Add citation-resolution and word-band gates for this prose class.'],
+    gaps: ['Run the new hook-backed workflow scenario across the local model tiers.'],
   },
   'game-with-screens': {
     coverage: {
@@ -971,15 +1013,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
   },
   'html-arcade-game': {
-    scenarioId: 'arcade-deluxe',
-    existingScenarioId: 'arcade-deluxe',
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8 against the hand-authored arcade-deluxe scenario. The grader passed sniff and six runtime assertions. A/B support exists through GEZEL_DISABLE_CRAFTBOOK_HINT.',
+        'The 1.1 sidecar now runs the actual craftbook task and requires attributed task notes plus gated game-design, visual-design, and game outputs. The separate arcade-deluxe scenario retains browser runtime coverage, but its old artifact pass did not prove this craftbook workflow ran.',
     },
-    gaps: ['Record whether the voorman actually invoked html-arcade-game in the run summary.'],
+    gaps: [
+      'Run the new workflow scenario on local models before restoring validated status.',
+      'Add the arcade-deluxe Playwright assertions as a reusable generic HTML-game adapter.',
+    ],
   },
   'html-puzzle-game': {
     coverage: {
@@ -1002,12 +1047,15 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
   },
   'idea-office-hours': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook and grades the evidence/assumption split, three-option pressure test, decision record, bounded gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: ['Run the task-attributed workflow across local model tiers.'],
   },
   'idle-clicker-game': {
     coverage: {
@@ -1057,15 +1105,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
   },
   'image-set-index': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8. The sidecar media descriptions produced index.json and passed all 9 filename, tag, color, text/quality-flag, and no-invented-image gates. Future work should add actual tiny image fixtures plus a vision/MCP stub.',
+        'The 1.1 scenario now runs a real craftbook task and requires attributed task notes, a gated schema artifact, valid staged/final JSON, and an executable exact-coverage/type oracle. The old direct-worker artifact pass does not validate this stronger workflow.',
     },
     gaps: [
+      'Run the 1.1 workflow on local models before restoring validated status.',
       'Add fixture images and a non-vision sidecar path for text-only local models.',
-      'Run a JSON property checker against row count, required fields, and controlled tag vocabulary.',
+      'Add a vision/MCP simulator path that verifies calls on real tiny image fixtures.',
     ],
   },
   'inbox-triage': {
@@ -1795,12 +1846,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
   },
   'root-cause-investigation': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic html-page smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook against a seeded failing module and grades reproduction, competing experiments, causal diagnosis, fix evidence, gates, and terminal review.',
     },
-    gaps: ['Add Playwright behavior checks for the class-specific controls.'],
+    gaps: [
+      'Add a custom executable oracle that proves the seeded regression test fails before and passes after the repair.',
+      'Run the task-attributed workflow across local model tiers.',
+    ],
   },
   runbook: {
     coverage: {
@@ -1861,12 +1918,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
   },
   'security-architecture-review': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook over a seeded architecture/code fixture and grades trust-boundary coverage, evidence-backed findings, redaction, remediation, gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: [
+      'Add parser-backed assertions for the exact seeded authorization and secret-handling defects.',
+      'Run the task-attributed workflow across local model tiers.',
+    ],
   },
   'seo-meta-pack': {
     coverage: {
@@ -1907,12 +1970,15 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'spec-authoring': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook and grades project evidence, explicit decisions, implementation-ready interfaces, acceptance criteria, rollback, bounded gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: ['Run the task-attributed workflow across local model tiers.'],
   },
   'spec-doc': {
     coverage: {
@@ -1928,10 +1994,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   'spreadsheet-model': {
     timeoutMs: 30 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8 against the OLD keyword gates, which were satisfiable by accident (contains "40" matched the raw revenue cell 1440). Now carries a harness-owned arithmetic oracle over data/model.json. Needs a re-run under the new gates.',
+        'The previous local run used obsolete keyword gates that were satisfiable by accident (contains "40" matched the raw revenue cell 1440), so it no longer qualifies as validation. The scenario now carries a harness-owned arithmetic oracle over data/model.json and needs a local-model re-run under the current gates.',
     },
     gaps: [
       'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
@@ -2042,12 +2107,18 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'technical-documentation': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic external smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The 2.0.0 sidecar dispatches the real craftbook against a seeded code/docs fixture and grades inventory, quadrant plan, linked documentation index, source grounding, gates, and terminal review.',
     },
-    gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
+    gaps: [
+      'Add a link resolver and executable-example oracle spanning every generated documentation page.',
+      'Run the task-attributed workflow across local model tiers.',
+    ],
   },
   'test-coverage-review': {
     coverage: {
@@ -2103,6 +2174,17 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after relaxing the 18-SKU grounding gate to allow natural modifiers.',
     },
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
+  },
+  'translate-content': {
+    runAsCraftbookTask: true,
+    timeoutMs: 30 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Upgraded to a real craftbook-task scenario. The 1.1 workflow has a completion gate over mirrored translation files and the artifact run note; the eval requires craftbook attribution, source preservation, and an approving task.step.gated History event. Needs a local-model run.',
+    },
+    gaps: ['Run the new workflow-backed scenario across the local model tiers.'],
   },
   'transcribe-audio': {
     coverage: {

@@ -120,6 +120,47 @@ describe('ZodErrorTranslator', () => {
     expect(out).toBe(raw);
   });
 
+  // The verbatim failure from the wild: DocBlocks `convert_document` on
+  // qwen3.6-27b via MLX. The model's JSON was correct; the Hermes markup
+  // it had to emit flattened `source`/`targets` into strings. The generic
+  // "retry with corrected args" tail turned that into 19 consecutive
+  // identical attempts before the gezel gave up and shipped a stale file.
+  const FLATTENED_RAW = `MCP error -32602: Input validation error: Invalid arguments for tool convert_document: [
+  {"code":"invalid_type","expected":"object","received":"string","path":["source"],"message":"Expected object, received string"},
+  {"code":"invalid_type","expected":"array","received":"string","path":["targets"],"message":"Expected array, received string"}
+]`;
+
+  it('tells the model the transport flattened its args, not that it got them wrong', async () => {
+    const out = await ZodErrorTranslator.postProcessError!(
+      'convert_document',
+      {
+        source: '{"kind":"file","rootId":"root-cec43","path":"deck.md"}',
+        targets: '[{"format":"pptx","fidelity":"editable-native"}]',
+      },
+      FLATTENED_RAW,
+      ctx,
+    );
+    expect(out).toContain('`source`');
+    expect(out).toContain('`targets`');
+    expect(out).toContain('JSON text instead of a real object/array');
+    expect(out).toContain('cannot carry nested structure');
+    expect(out).toContain('structured tool call');
+    // The loop generator must be gone: never invite the identical retry.
+    expect(out).not.toContain('Retry the call with all listed fields supplied');
+  });
+
+  it('still gives ordinary wrong-type guidance when the value is not flattened JSON', async () => {
+    const out = await ZodErrorTranslator.postProcessError!(
+      'convert_document',
+      { source: 'deck.md', targets: 'pptx' },
+      FLATTENED_RAW,
+      ctx,
+    );
+    expect(out).toContain('Wrong type');
+    expect(out).toContain('Retry the call with all listed fields supplied');
+    expect(out).not.toContain('cannot carry nested structure');
+  });
+
   it('handles nested paths', async () => {
     const raw = `Invalid arguments for tool create_task: [
   {"code":"invalid_type","expected":"string","received":"undefined","path":["assignee","gezelId"],"message":"Required"}

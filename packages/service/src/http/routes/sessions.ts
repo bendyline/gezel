@@ -79,6 +79,62 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     return c.json({ version: 1, capturedAt: Date.now(), sessions });
   });
 
+  // Install-wide panic stop. Register before `/:id` so Hono does not treat
+  // `emergency-stop` as a session id. This remains on the per-user product
+  // daemon: the machine engine broker deliberately has no chat or config
+  // authority. ChatManager switches its runtime gate to reactive before its
+  // first await; this route then persists the same mode while cancellations
+  // unwind, preventing autonomous work from racing back in.
+  app.post('/emergency-stop', async (c) => {
+    const stopPromise = ctx.chat.emergencyStop();
+    try {
+      const previous = await ctx.store.readConfig();
+      if (previous.aiEngagementMode !== 'reactive') {
+        await ctx.store.writeConfig({ aiEngagementMode: 'reactive' });
+        await ctx.history
+          .log({
+            kind: 'config.engagementMode.changed',
+            summary: `AI engagement mode: ${previous.aiEngagementMode ?? 'proactive'} → reactive`,
+            details: { previous: previous.aiEngagementMode ?? 'proactive', next: 'reactive' },
+          })
+          .catch((err) => {
+            log.warn(
+              `[sessions] emergency-stop history write failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+      }
+      // Re-assert after disk I/O as well as at emergencyStop entry. This
+      // closes the narrow startup race where ChatManager's constructor-time
+      // config read could resolve with the old mode while this request was
+      // persisting the new one.
+      ctx.chat.setEngagementMode('reactive');
+      const stopped = await stopPromise;
+      return c.json({
+        ok: true,
+        engagementMode: 'reactive' as const,
+        persisted: true,
+        ...stopped,
+      });
+    } catch (err) {
+      // The runtime stop still wins even if config persistence fails. Report
+      // the partial outcome explicitly: Gezel is reactive for this daemon
+      // lifetime, but the user must know the mode may not survive a restart.
+      const stopped = await stopPromise;
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`[sessions] emergency-stop mode persistence failed: ${message}`);
+      return c.json(
+        {
+          ok: false,
+          engagementMode: 'reactive' as const,
+          persisted: false,
+          ...stopped,
+          error: 'Chats were stopped, but Reactive mode could not be saved.',
+        },
+        500,
+      );
+    }
+  });
+
   app.get('/:id', async (c) => {
     const id = c.req.param('id');
     const record = await ctx.chat.getSessionRecord(id);

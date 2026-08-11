@@ -238,14 +238,46 @@ export const ResidentEngineModelSchema = z.object({
 });
 export type ResidentEngineModel = z.infer<typeof ResidentEngineModelSchema>;
 
+export const GpuProcessOwnerSchema = z.enum([
+  'machine-engine',
+  'app-engine',
+  'development-engine',
+  'gezel-engine',
+  'external',
+]);
+export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
+
+/** Windows driver accounting for one process holding dedicated GPU memory. */
+export const GpuProcessMemorySchema = z.object({
+  pid: z.number().int().positive(),
+  name: z.string().optional(),
+  dedicatedBytes: z.number().nonnegative(),
+  owner: GpuProcessOwnerSchema,
+});
+export type GpuProcessMemory = z.infer<typeof GpuProcessMemorySchema>;
+
+/** Live unload policy for one supervised local-model replica. */
+export const LocalEngineLifecycleSchema = z.object({
+  provider: z.string(),
+  modelId: z.string(),
+  replicaIdx: z.number().int().nonnegative(),
+  running: z.boolean(),
+  active: z.boolean(),
+  pid: z.number().int().positive().optional(),
+  lastUsedAt: z.number().nonnegative().nullable(),
+  unloadAt: z.number().nonnegative().nullable(),
+  idleTimeoutMs: z.number().nonnegative(),
+  releaseReason: z.enum(['idle', 'memory-pressure']).nullable(),
+});
+export type LocalEngineLifecycle = z.infer<typeof LocalEngineLifecycleSchema>;
+
 /**
  * Lightweight, authenticated machine-memory telemetry for status surfaces.
  *
  * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
  * and same-home engine processes — the metric Activity Monitor uses, including
- * Metal-backed allocations. Other platforms expose no consistent per-process
- * accelerator accounting, so the Gezel attribution stays zero there unless the
- * driver reports pool-wide use.
+ * Metal-backed allocations. On Windows, the bundled device-health helper uses
+ * the OS GPU Process Memory counters to attribute dedicated VRAM to processes.
  *
  * `engineReservedBytes` stays separate: it is capacity planning, not observed
  * use, and it is NOT a quantity of this pool. Attributing it to the pool once
@@ -258,7 +290,7 @@ export const MachineMemoryUsageSchema = z.object({
   usedBytes: z.number().nonnegative().nullable(),
   /** Portable reservation + daemon-RSS fallback estimate. */
   gezelBytesEstimated: z.number().nonnegative(),
-  /** Observed same-home process footprint when the platform exposes it. */
+  /** Observed Gezel process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
   /** Gezel daemon + local-engine runtime overhead within the attributed total. */
   gezelInfraBytes: z.number().nonnegative(),
@@ -291,8 +323,25 @@ export const MachineMemoryUsageSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * Whether co-resident models may use the system-RAM share of a discrete
+   * GPU host's combined budget. Optional for compatibility with older engine
+   * owners; when false, additional models serialize at coResidencyBytes.
+   */
+  engineRamSpillover: z
+    .object({
+      allowed: z.boolean(),
+      auto: z.boolean(),
+      overridden: z.boolean(),
+      coResidencyBytes: z.number().nonnegative(),
+    })
+    .optional(),
   /** The resident models behind `engineReservedBytes`. */
   residentModels: z.array(ResidentEngineModelSchema),
+  /** Running supervised replicas and their next policy deadline. */
+  engineLifecycles: z.array(LocalEngineLifecycleSchema).optional(),
+  /** Actual dedicated-VRAM owners, when the OS exposes them. */
+  gpuProcesses: z.array(GpuProcessMemorySchema).optional(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
@@ -629,6 +678,28 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
 /**
+ * Wire shapes for the per-model context override surface
+ * (`/api/engines/:engine/model-context`). The response map is keyed by the
+ * installed model id (engine is already in the route); values are per-turn
+ * tokens.
+ */
+export const ModelContextOverridesResponseSchema = z.object({
+  overrides: z.record(z.string(), z.number().int().positive()),
+});
+export type ModelContextOverridesResponse = z.infer<typeof ModelContextOverridesResponseSchema>;
+
+/**
+ * `contextTokens: null` returns the model to automatic sizing. The lower
+ * bound matches the smallest window Gezel serves its tool surface with
+ * (the constrained-host floor); the upper bound is a sanity cap of 4M —
+ * launch-time resolution clamps to the model's native window regardless.
+ */
+export const ModelContextOverrideUpdateSchema = z.object({
+  contextTokens: z.number().int().min(32_768).max(4_194_304).nullable(),
+});
+export type ModelContextOverrideUpdate = z.infer<typeof ModelContextOverrideUpdateSchema>;
+
+/**
  * Remote model execution — serving a device's models to paired client devices
  * over the LAN. Named schema (not inline in {@link GezelConfigSchema}) because
  * the machine-engine broker's manage surface parses it standalone: the broker
@@ -668,6 +739,9 @@ export const RemoteServingConfigSchema = z.object({
 });
 export type RemoteServingConfig = z.infer<typeof RemoteServingConfigSchema>;
 
+/** Balanced local-model retention: warm enough for follow-ups, short enough to return VRAM. */
+export const DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS = 5 * 60_000;
+
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
@@ -699,13 +773,12 @@ export const GezelConfigSchema = z.object({
   service: z.object({ url: z.string(), token: z.string() }).optional(),
   /**
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
-   * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`
-   * instances; the freeze stage fires at half this value when set. Default
-   * 30 min — matches `OLLAMA_TURN_TIMEOUT_MS`, the accepted ceiling for a
-   * single local-engine turn. Users running on 27B+ models who legitimately
-   * generate for longer (e.g. one-shot large-artifact Builder turns) can
-   * raise the cap; users on tight memory who prefer aggressive reclaim can
-   * drop it. Floor is 60s — anything lower starts thrashing the engine.
+   * (llama-cpp, mlx, ds4) to free accelerator memory. Applied to local native
+   * supervisors; the freeze stage fires at half this value when set. Default
+   * 5 min. This clock measures time since the engine's last native request,
+   * not the duration of the surrounding tool loop, so long generations remain
+   * protected while turns parked on tools or a person can release VRAM. Floor
+   * is 60s — anything lower starts thrashing the engine.
    */
   localEngineIdleTimeoutMs: z.number().int().min(60_000).optional(),
   /**
@@ -1032,8 +1105,9 @@ export const GezelConfigSchema = z.object({
    */
   keurmeesterGezelId: z.string().optional(),
   /**
-   * The public OpenAI-compatible facade (`/v1/*` + `/ollama/v1/*`) that
-   * third-party apps (VS Code, browser tools) call. Managed from
+   * The public OpenAI-compatible facade (`/v1/responses`, `/v1/chat/*`,
+   * the rest of `/v1/*`, and `/ollama/v1/*`) that third-party apps
+   * (Codex, VS Code, browser tools) call. Managed from
    * Settings → Connected Apps.
    *
    *   - `enabled` — master switch. `false` gates the inference routes
@@ -1046,7 +1120,7 @@ export const GezelConfigSchema = z.object({
    *     `gezel:<id>` target: persona + provider/model tuning apply.
    *     Unset or stale → the Meester (then the first available gezel),
    *     so public inference always has a gezel-backed fallback.
-   *   - `supportingBehaviors` — whether `/v1` sessions get the resolved
+   *   - `supportingBehaviors` — whether `/v1` inference sessions get the resolved
    *     per-model behavior PROFILE (ramble detection, preamble folding,
    *     transcript shaping, family-specific fixes). Unset/`true` → on.
    *     `false` → plain serving: persona + model + TUNING (sampling,
@@ -1166,6 +1240,17 @@ export const GezelConfigSchema = z.object({
    * machine-engine broker and an in-process/dev engine use identical policy.
    */
   llamaCppContextSizing: LlamaCppContextSizingSchema.optional(),
+  /**
+   * Per-model per-turn context override (tokens), keyed
+   * `"<engine>:<modelId>"` for the machine engines (llama-cpp, mlx, ds4) —
+   * the same key convention as `modelFitness`. Engine-owner state written
+   * only through `PUT /api/engines/:engine/model-context/:modelId` (the
+   * machine broker in packaged installs), never through `/api/config`. An
+   * override wins over the engine-wide numCtx setting and the sizing policy
+   * for that model; launch resolution still clamps it to the model's native
+   * window, and memory admission may grant less.
+   */
+  modelContextOverrides: z.record(z.string(), z.number().int().positive()).optional(),
   /**
    * ds4-only: base URL of an already-running `ds4-server` to talk to
    * instead of supervising the bundled binary. Mirrors `llamaCppBaseUrl`
@@ -3983,29 +4068,158 @@ export const WebSearchResponseSchema = z.object({
 });
 export type WebSearchResponse = z.infer<typeof WebSearchResponseSchema>;
 
+/**
+ * Bounds for the model-facing workspace read tools. The ordinary project
+ * file API remains byte-for-byte compatible for the UI and internal callers;
+ * these limits apply to `read_file` ranges and `read_files` batches crossing
+ * the MCP boundary.
+ */
+export const WORKSPACE_READ_MAX_FILES = 8;
+export const WORKSPACE_READ_MAX_RANGE_LINES = 400;
+export const WORKSPACE_READ_MAX_RESULT_BYTES = 32 * 1024;
+export const WORKSPACE_READ_MAX_BATCH_RESULT_BYTES = 48 * 1024;
+export const WORKSPACE_READ_MAX_BATCH_LINES = 800;
+export const WORKSPACE_READ_MAX_SCAN_BYTES = 8 * 1024 * 1024;
+export const WORKSPACE_READ_MAX_BATCH_SCAN_BYTES = 32 * 1024 * 1024;
+export const WORKSPACE_READ_DEADLINE_MS = 5_000;
+
+export const WorkspaceReadFileRequestSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    /** Inclusive, 1-based first line. Defaults to 1. */
+    startLine: z.number().int().min(1).max(10_000_000).optional(),
+    /** Inclusive, 1-based last line. Omit to read a bounded next chunk. */
+    endLine: z.number().int().min(1).max(10_000_000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const start = value.startLine ?? 1;
+    if (value.endLine !== undefined && value.endLine < start) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endLine'],
+        message: 'endLine must be greater than or equal to startLine',
+      });
+    }
+    if (value.endLine !== undefined && value.endLine - start + 1 > WORKSPACE_READ_MAX_RANGE_LINES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endLine'],
+        message: `a read range may contain at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines`,
+      });
+    }
+  });
+export type WorkspaceReadFileRequest = z.infer<typeof WorkspaceReadFileRequestSchema>;
+
+export const ReadWorkspaceFilesRequestSchema = z.object({
+  files: z.array(WorkspaceReadFileRequestSchema).min(1).max(WORKSPACE_READ_MAX_FILES),
+});
+export type ReadWorkspaceFilesRequest = z.infer<typeof ReadWorkspaceFilesRequestSchema>;
+
+export const WorkspaceReadFileSuccessSchema = z.object({
+  status: z.literal('ok'),
+  path: z.string(),
+  content: z.string(),
+  startLine: z.number().int().positive(),
+  endLine: z.number().int().nonnegative(),
+  linesReturned: z.number().int().nonnegative(),
+  bytesReturned: z.number().int().nonnegative(),
+  scannedBytes: z.number().int().nonnegative(),
+  /** Known only when the reader reached EOF. */
+  totalLines: z.number().int().nonnegative().optional(),
+  totalBytes: z.number().int().nonnegative(),
+  eof: z.boolean(),
+  completeFile: z.boolean(),
+  hasMore: z.boolean(),
+  nextStartLine: z.number().int().positive().optional(),
+  truncated: z.boolean(),
+  truncationReason: z.enum(['line-limit', 'output-limit']).optional(),
+});
+export type WorkspaceReadFileSuccess = z.infer<typeof WorkspaceReadFileSuccessSchema>;
+
+export const WorkspaceReadFileErrorSchema = z.object({
+  status: z.literal('error'),
+  path: z.string(),
+  code: z.enum([
+    'path-not-found',
+    'path-safety',
+    'not-file',
+    'binary-file',
+    'unsupported-encoding',
+    'range-out-of-bounds',
+    'line-too-long',
+    'scan-limit',
+    'deadline',
+    'read-failed',
+    'aggregate-limit',
+  ]),
+  error: z.string(),
+  scannedBytes: z.number().int().nonnegative().optional(),
+});
+export type WorkspaceReadFileError = z.infer<typeof WorkspaceReadFileErrorSchema>;
+
+export const WorkspaceReadFileResultSchema = z.discriminatedUnion('status', [
+  WorkspaceReadFileSuccessSchema,
+  WorkspaceReadFileErrorSchema,
+]);
+export type WorkspaceReadFileResult = z.infer<typeof WorkspaceReadFileResultSchema>;
+
+export const ReadWorkspaceFilesResponseSchema = z.object({
+  results: z.array(WorkspaceReadFileResultSchema),
+  truncated: z.boolean(),
+  totalBytesReturned: z.number().int().nonnegative(),
+  totalScannedBytes: z.number().int().nonnegative(),
+});
+export type ReadWorkspaceFilesResponse = z.infer<typeof ReadWorkspaceFilesResponseSchema>;
+
 export const SearchFilesRequestSchema = z.object({
-  pattern: z.string().min(1),
-  /** Path prefix (relative to project workspace). Defaults to project root. */
-  path: z.string().optional(),
-  /** Glob filter for filenames (e.g. `**\/*.ts`). Applied post-walk. */
-  glob: z.string().optional(),
+  pattern: z.string().min(1).max(4000),
+  /** File or directory path relative to the project workspace. Defaults to project root. */
+  path: z.string().max(4096).optional(),
+  /** Legacy single include glob. Prefer `includeGlobs` for new callers. */
+  glob: z.string().min(1).max(512).optional(),
+  /** Include files matching at least one of these globs, relative to the search root. */
+  includeGlobs: z.array(z.string().min(1).max(512)).max(32).optional(),
+  /** Exclude files matching any of these globs, relative to the search root. */
+  excludeGlobs: z.array(z.string().min(1).max(512)).max(32).optional(),
+  /** Perform case-insensitive matching. */
   caseInsensitive: z.boolean().optional(),
   /** When true, treat pattern as a literal string (escape regex metacharacters). */
   literal: z.boolean().optional(),
-  maxResults: z.number().int().positive().max(1000).optional(),
+  /** Number of surrounding lines to return on each side of a match. */
+  contextLines: z.number().int().min(0).max(5).optional(),
+  /** Return matching lines, unique file paths, or only a bounded match count. */
+  resultMode: z.enum(['matches', 'files', 'count']).optional(),
+  /** Zero-based continuation cursor returned by a previous search. */
+  cursor: z.number().int().min(0).max(10_000).optional(),
+  maxResults: z.number().int().positive().max(200).optional(),
+  /** Inner search deadline. The HTTP/MCP transport timeout is intentionally longer. */
+  timeoutMs: z.number().int().min(100).max(30_000).optional(),
 });
 export type SearchFilesRequest = z.infer<typeof SearchFilesRequestSchema>;
+
+export const SearchFilesContextLineSchema = z.object({
+  line: z.number().int().positive(),
+  text: z.string(),
+});
+export type SearchFilesContextLine = z.infer<typeof SearchFilesContextLineSchema>;
 
 export const SearchFilesMatchSchema = z.object({
   path: z.string(),
   line: z.number().int().positive(),
   text: z.string(),
+  before: z.array(SearchFilesContextLineSchema).optional(),
+  after: z.array(SearchFilesContextLineSchema).optional(),
 });
 export type SearchFilesMatch = z.infer<typeof SearchFilesMatchSchema>;
 
 export const SearchFilesResponseSchema = z.object({
+  mode: z.enum(['matches', 'files', 'count']).default('matches'),
   matches: z.array(SearchFilesMatchSchema),
+  files: z.array(z.string()).default([]),
+  count: z.number().int().nonnegative().default(0),
   truncated: z.boolean(),
+  truncationReason: z.enum(['limit', 'output']).optional(),
+  nextCursor: z.number().int().nonnegative().optional(),
   engine: z.enum(['ripgrep', 'javascript']),
 });
 export type SearchFilesResponse = z.infer<typeof SearchFilesResponseSchema>;
@@ -4816,12 +5030,11 @@ export const ArchiveExtractResponseSchema = z.object({
 export type ArchiveExtractResponse = z.infer<typeof ArchiveExtractResponseSchema>;
 
 /**
- * `run_git` supports a narrow allowlist of read-only subcommands. Write
- * ops (add, commit, push, reset, rebase) are deliberately excluded —
- * gezels that need to commit should use the github workflow or ask the
- * user. The extended arg list is validated server-side against a
- * per-subcommand allowlist so `git log --format=%H | sh` style
- * injection paths are blocked at parse time.
+ * `run_git` supports a narrow, inspection-oriented subcommand allowlist.
+ * Broad write operations (add, commit, push, reset, rebase) are excluded,
+ * but arguments to `branch` can still mutate local refs, so callers must
+ * treat the tool as potentially mutating. Arguments are always passed as a
+ * structured argv array; shell metacharacters are never evaluated.
  */
 export const RunGitRequestSchema = z.object({
   subcommand: z.enum(['status', 'log', 'diff', 'show', 'blame', 'branch', 'rev-parse', 'ls-files']),

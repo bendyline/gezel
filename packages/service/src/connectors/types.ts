@@ -96,12 +96,37 @@ export interface NormalizedRecord {
   quarantineNamespace: string;
   /** Human prefix for the quarantine stub (mail: `Message from <sender>`). */
   quarantineLabel: string;
-  attachments?: { filename: string; content: Uint8Array }[];
+  /**
+   * Binary payloads belonging to this record. Small sources may keep bytes in
+   * memory; large sources should stream to a private temporary file and pass a
+   * verified digest. The shared writer atomically copies file-backed payloads
+   * into the corpus before the adapter removes its staging directory.
+   */
+  attachments?: NormalizedAttachment[];
   /** Mutable per-record flags → the `_flags.json` sidecar. */
   flags?: string[];
   /** Read/seen state for the sidecar (mail: `\Seen` present). */
   seen?: boolean;
 }
+
+export type NormalizedAttachment =
+  | {
+      filename: string;
+      content: Uint8Array;
+      /** Optional precomputed digest; the writer computes it when omitted. */
+      sha256?: string;
+      size?: number;
+      sourcePath?: never;
+    }
+  | {
+      filename: string;
+      /** Absolute path owned by the native adapter for the duration of a sync. */
+      sourcePath: string;
+      /** Digest of the staged bytes, required for idempotency without rereading. */
+      sha256: string;
+      size: number;
+      content?: never;
+    };
 
 /**
  * The adapter contract. Constructed per sync pass (connect on first call,

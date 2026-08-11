@@ -113,6 +113,68 @@ def test_hermes(model_dir):
     )
 
 
+STRUCTURAL_TOOLS = TOOLS + [
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_document",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "object", "properties": {"path": {"type": "string"}}},
+                    "targets": {"type": "array", "items": {"type": "object"}},
+                },
+            },
+        },
+    },
+]
+
+
+def test_hermes_json_escape(model_dir):
+    """A tool with object/array parameters must be CALLABLE.
+
+    The `<parameter=KEY>text</parameter>` shape is a flat KEY→text map, so
+    a nested `source`/`targets` value cannot be expressed in it at all —
+    the model emits correct JSON, the markup flattens it to a string, the
+    validator rejects `got string, expected object`, and the model retries
+    the identical call forever. Observed in the wild for 19 consecutive
+    attempts. The grammar must therefore also admit the JSON envelope,
+    while keeping name/key pinning on the markup branch.
+    """
+    import json
+
+    from llguidance import LLMatcher
+
+    tok, llg = _load(model_dir)
+    grammar = tg.build_grammar_string(STRUCTURAL_TOOLS, {"format": "hermes"})
+    assert grammar is not None
+    assert LLMatcher.validate_grammar(grammar, llg) == "", "escape grammar invalid on tokenizer"
+    accepts = _accepts_fn(tok, llg, grammar)
+    think = "<think>\nplanning\n</think>\n"
+    TC = lambda body: think + "<tool_call>\n" + body + "\n</tool_call>"
+    nested = json.dumps(
+        {
+            "name": "convert_document",
+            "arguments": {
+                "source": {"kind": "file", "rootId": "root-1", "path": "deck.md"},
+                "targets": [{"format": "pptx", "fidelity": "editable-native"}],
+            },
+        }
+    )
+    flat_call = TC("<function=create_project>\n<parameter=name>\nX\n</parameter>\n</function>")
+    bad_key = TC("<function=create_project>\n<parameter=bogus>\nX\n</parameter>\n</function>")
+    return _report(
+        "hermes-json-escape",
+        [
+            ("JSON envelope carrying nested args accepted", accepts(TC(nested)), True),
+            ("markup branch still accepted", accepts(flat_call), True),
+            ("markup branch still pins names", accepts(TC("<function=nope>\n</function>")), False),
+            ("markup branch still pins param keys", accepts(bad_key), False),
+            ("plain text, no call accepted", accepts("Just a normal answer."), True),
+        ],
+    )
+
+
 def test_gemma(model_dir):
     from llguidance import LLMatcher
 
@@ -202,6 +264,9 @@ def main():
     for qwen in qwens:
         print(f"== hermes / tokenizer: {qwen} ==")
         f, t = test_hermes(qwen)
+        failed += f
+        total += t
+        f, t = test_hermes_json_escape(qwen)
         failed += f
         total += t
     if not qwens:

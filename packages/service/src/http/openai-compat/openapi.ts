@@ -3,7 +3,7 @@
  *
  * Generating from Zod would be lovely but the existing route schemas
  * are inline rather than registered under a Zod-to-OpenAPI converter,
- * and the public contract is small enough (5 endpoints in 4 groups)
+ * and the public contract is small enough
  * that the hand-authored doc is easier to keep accurate as the surface
  * evolves than a converter wired across every route file.
  *
@@ -27,7 +27,7 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
       title: 'Gezel Public API',
       version,
       description:
-        'OpenAI-compatible chat / embeddings / models facade plus gezel-specific consent ' +
+        'OpenAI-compatible Responses / chat / embeddings / models facade plus gezel-specific consent ' +
         '(`/v1/apps/*`) and ensure-model (`/v1/models/ensure`) endpoints. Loopback only ' +
         '(`https://127.0.0.1:<port>`); auth via per-app bearer tokens issued through the ' +
         'consent flow.',
@@ -177,9 +177,8 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
         post: {
           summary: 'OpenAI-compatible chat completion (streaming + non-streaming).',
           description:
-            'Tool calling and structured outputs are not supported in v1 — requests carrying ' +
-            '`tools`, `tool_choice`, or `response_format` return 400. Stream via Accept: ' +
-            'text/event-stream + `stream: true` body field.',
+            'Stateless inference with caller-executed function tools, per-request tuning, ' +
+            'structured outputs, and streaming via `stream: true`.',
           security: [{ bearerAuth: ['openai'] }],
           requestBody: {
             required: true,
@@ -199,7 +198,41 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                 'text/event-stream': { schema: { type: 'string' } },
               },
             },
-            '400': { description: 'Bad request (tool calling / structured outputs).' },
+            '400': { description: 'Bad request or unsupported provider capability.' },
+            '404': { description: 'Unknown model.' },
+          },
+        },
+      },
+      '/v1/responses': {
+        post: {
+          summary: 'OpenAI Responses-compatible inference for Codex and other agent harnesses.',
+          description:
+            'Stateless, inference-only Responses facade. The caller owns its tool loop, ' +
+            'sandbox, transcript, and compaction; Gezel routes each request to the selected ' +
+            'local or configured model. Supports text messages, function/custom tools, ' +
+            'Codex namespace tools, function/custom call outputs, SSE streaming, usage, and ' +
+            '`store: false`. Model ids must be explicit; stored response ids, nested CLI-agent ' +
+            'providers, and hosted OpenAI tools are not supported.',
+          security: [{ bearerAuth: ['openai'] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResponsesRequest' },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Response object or Responses SSE stream.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ResponsesResponse' },
+                },
+                'text/event-stream': { schema: { type: 'string' } },
+              },
+            },
+            '400': { description: 'Bad request or unsupported Responses feature.' },
             '404': { description: 'Unknown model.' },
           },
         },
@@ -503,6 +536,76 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
               properties: {
                 prompt_tokens: { type: 'integer' },
                 completion_tokens: { type: 'integer' },
+                total_tokens: { type: 'integer' },
+              },
+            },
+          },
+        },
+        ResponsesRequest: {
+          type: 'object',
+          required: ['model', 'input'],
+          properties: {
+            model: {
+              type: 'string',
+              description: 'Qualified `<provider>:<model>` or `gezel:<id-or-name>`.',
+            },
+            instructions: { type: ['string', 'null'] },
+            input: {
+              oneOf: [
+                { type: 'string' },
+                {
+                  type: 'array',
+                  minItems: 1,
+                  items: {
+                    type: 'object',
+                    description:
+                      'Message, function/custom tool call, or function/custom tool output item.',
+                  },
+                },
+              ],
+            },
+            tools: {
+              type: 'array',
+              items: { type: 'object' },
+              description:
+                'Caller-executed function/custom tools. Codex namespace tools are flattened for local providers and restored on output.',
+            },
+            tool_choice: {
+              description: 'auto / required / none, or a pinned function/custom tool.',
+            },
+            parallel_tool_calls: { type: ['boolean', 'null'] },
+            max_output_tokens: { type: ['integer', 'null'], minimum: 1 },
+            reasoning: { type: ['object', 'null'] },
+            stream: { type: ['boolean', 'null'] },
+            store: {
+              type: ['boolean', 'null'],
+              description: 'Gezel is stateless; omit or set false.',
+            },
+          },
+        },
+        ResponsesResponse: {
+          type: 'object',
+          required: ['id', 'object', 'created_at', 'status', 'model', 'output', 'usage'],
+          properties: {
+            id: { type: 'string' },
+            object: { type: 'string', enum: ['response'] },
+            created_at: { type: 'integer' },
+            completed_at: { type: ['integer', 'null'] },
+            status: { type: 'string', enum: ['completed', 'incomplete', 'failed'] },
+            model: { type: 'string' },
+            output_text: { type: 'string' },
+            output: {
+              type: 'array',
+              items: {
+                type: 'object',
+                description: 'Assistant message, function_call, or custom_tool_call item.',
+              },
+            },
+            usage: {
+              type: 'object',
+              properties: {
+                input_tokens: { type: 'integer' },
+                output_tokens: { type: 'integer' },
                 total_tokens: { type: 'integer' },
               },
             },

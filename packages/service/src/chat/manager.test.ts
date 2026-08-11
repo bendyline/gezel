@@ -1652,6 +1652,59 @@ describe('ChatManager — inflight visibility + cancel', () => {
     expect(res.cancelled).toBe(false);
   });
 
+  it('emergencyStop flips to reactive before cancelling turns and clears restart queues', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const queuedReject = vi.fn();
+    let parkedRan = false;
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+      pendingSends: Map<
+        string,
+        Array<{
+          id: string;
+          userText: string;
+          enqueuedAt: number;
+          waiters: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }>;
+        }>
+      >;
+      afterSessionIdle: Map<string, Array<() => void>>;
+    };
+    internals.inflight.set(session.id, {
+      userText: 'keep working until stopped',
+      startedAt: Date.now(),
+    });
+    internals.pendingSends.set(session.id, [
+      {
+        id: 'queued-after-current',
+        userText: 'run this next',
+        enqueuedAt: Date.now(),
+        waiters: [{ resolve: vi.fn(), reject: queuedReject }],
+      },
+    ]);
+    internals.afterSessionIdle.set(session.id, [
+      () => {
+        parkedRan = true;
+      },
+    ]);
+    manager.setEngagementMode('proactive');
+
+    const result = await manager.emergencyStop();
+
+    expect(result).toEqual({
+      cancelledTurns: 1,
+      clearedQueuedMessages: 1,
+      clearedDeferredActions: 1,
+    });
+    expect(manager.getEngagementMode()).toBe('reactive');
+    expect(manager.inflightInfo(session.id)).toBeNull();
+    expect(manager.listQueued()).toHaveLength(0);
+    expect(internals.afterSessionIdle.size).toBe(0);
+    expect(queuedReject).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.any(String) }),
+    );
+    expect(parkedRan).toBe(false);
+  });
+
   it('beginShutdown cancels live turns, drops parked handoffs, and rejects new sends', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     let parkedRan = false;
@@ -4828,7 +4881,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const allow = create!.opts!.toolAllowlist!;
       // Investigation + the broader craftbook, memory, and document kit
       // survive because medium is not count-capped.
-      expect(allow.has('search_files')).toBe(true);
+      expect(allow.has('grep_files')).toBe(true);
       expect(allow.has('read_file')).toBe(true);
       // Code-intelligence is no longer in the voorman's roster:
       // symbol-level navigation is the developer's surface; she reads-to-
@@ -5752,9 +5805,21 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
     it('does not trim an orchestrator role even when the behavior is forced ON', async () => {
       // Role gate: isExecutorRole is false for a delegation role, so the
-      // trim never fires regardless of the flag.
+      // trim never fires regardless of the flag. Asserted on the shared
+      // documents listing rather than the GitHub sentence: that sentence
+      // now also requires the role to actually hold GitHub tools, which a
+      // pure delegation role does not, so it can no longer isolate the
+      // role gate from the roster.
+      await store.writeDocument('guidelines.md', 'House style.');
       const sys = await sysFor({ role: 'voorman', force: true, github: true });
-      expect(sys).toContain('Use the GitHub toolset');
+      expect(sys).toContain('Shared documents library');
+      expect(sys).toContain('guidelines.md');
+    });
+
+    it('trims the shared-documents listing for an executor under the behavior', async () => {
+      await store.writeDocument('guidelines.md', 'House style.');
+      const trimmed = await sysFor({ role: 'developer', force: true });
+      expect(trimmed).not.toContain('Shared documents library');
     });
   });
 });

@@ -53,6 +53,7 @@ import { ProviderQueue, runInQueue } from './queue.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import { terminalToolClosingText } from './terminal-tool-policy.js';
+import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from './tool-failure-tracker.js';
 import { ToolRepeatTracker } from './tool-repeat-tracker.js';
 import type {
@@ -201,10 +202,10 @@ export class OllamaProvider implements LLMProvider {
     });
   }
 
-  async initialize(): Promise<void> {
+  async initialize(signal?: AbortSignal): Promise<void> {
     // Probe /api/tags so a misconfigured URL surfaces early with a usable
     // error instead of on the first chat turn.
-    await this.fetchTags();
+    await this.fetchTags(signal);
   }
 
   async shutdown(): Promise<void> {
@@ -323,8 +324,8 @@ export class OllamaProvider implements LLMProvider {
     return this.defaultModel;
   }
 
-  async listModels(): Promise<ModelInfo[]> {
-    const tags = await this.fetchTags();
+  async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const tags = await this.fetchTags(signal);
     const models: ModelInfo[] = tags.models.map((m) => ({
       id: m.name,
       name: m.name,
@@ -337,8 +338,8 @@ export class OllamaProvider implements LLMProvider {
   }
 
   /** Exposed so the HTTP routes can reuse the same base URL + parsing. */
-  async fetchTags(): Promise<OllamaTagsResponse> {
-    const res = await fetch(`${this.baseUrl}/api/tags`);
+  async fetchTags(signal?: AbortSignal): Promise<OllamaTagsResponse> {
+    const res = await fetch(`${this.baseUrl}/api/tags`, signal ? { signal } : undefined);
     if (!res.ok) {
       throw new Error(`[ollama] ${this.baseUrl}/api/tags returned ${res.status} ${res.statusText}`);
     }
@@ -687,6 +688,16 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       bridgeTools.length + externalAsOllama.length > 0
         ? [...bridgeTools, ...externalAsOllama]
         : undefined;
+    // Tool-name → declared input schema, for repairing salvaged calls
+    // whose structural arguments the markup formats flattened into
+    // strings. See tool-arg-schema-coercion.ts.
+    const toolArgSchemas = new Map<string, Record<string, unknown>>();
+    for (const t of tools ?? []) {
+      const fn = (t as { function?: { name?: unknown; parameters?: unknown } }).function;
+      if (typeof fn?.name === 'string' && fn.parameters && typeof fn.parameters === 'object') {
+        toolArgSchemas.set(fn.name, fn.parameters as Record<string, unknown>);
+      }
+    }
     const debugOn = this.deps.debug?.isEnabled() === true;
     // Reset captured reasoning at the top of each turn — the manager
     // reads `getLastTurnReasoning()` after this call resolves and
@@ -1279,6 +1290,24 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           }
         }
       }
+      // Every markup salvage format above is a flat KEY→text map, so a
+      // parameter declared `object`/`array` arrives as a string. Repair
+      // against the declared schema at the one point all salvage paths
+      // converge. Schema-gated: a genuine string argument (a JSON
+      // file's `content`) is never reinterpreted.
+      if (toolCalls && toolCalls.length > 0) {
+        toolCalls = toolCalls.map((tc) => {
+          const { args, repaired } = coerceArgsToSchema(
+            tc.function.arguments,
+            toolArgSchemas.get(tc.function.name),
+          );
+          if (repaired.length === 0) return tc;
+          log.info(
+            `[ollama] repaired flattened arg(s) on ${tc.function.name}: ${repaired.join(', ')}`,
+          );
+          return { ...tc, function: { ...tc.function, arguments: args } };
+        });
+      }
       // Always pull `<think>…</think>` reasoning tags out of the visible
       // commit. Accumulate the captured trace into `lastTurnReasoning`
       // so ChatManager can stash it on the assistant message and the
@@ -1471,7 +1500,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           (fn.name === 'start_project' || fn.name === 'start_job') &&
           startedProjectOrJobThisTurn
         ) {
-          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call \`start_project\` or \`start_job\` again to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
+          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
         } else if (this.deps.bridges.hasTool(fn.name)) {
           try {
             // Adaptive cap — compute how many chars of tool output

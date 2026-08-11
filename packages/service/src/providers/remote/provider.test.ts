@@ -16,6 +16,21 @@ function doneResponse(): Response {
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+function toolCallResponse(): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          'data: {"type":"tool_call","calls":[{"id":"shell-1","name":"shell","arguments":"{\\"command\\":\\"pwd\\"}"}]}\n\n',
+        ),
+      );
+      controller.enqueue(new TextEncoder().encode('data: {"type":"done"}\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
 function admissionResponse(model: string, contextWindow = 35_840): Response {
   return Response.json({ model, contextWindow });
 }
@@ -32,6 +47,41 @@ describe('RemoteGezelProvider', () => {
 
     expect(provider.queue.concurrency).toBe(DEFAULT_REMOTE_CONCURRENCY);
     expect(provider.queue.backgroundConcurrency).toBe(DEFAULT_REMOTE_CONCURRENCY - 1);
+    expect(provider.supportsExternalTools).toBe(true);
+  });
+
+  it('forwards external tool definitions into the remote capture session', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/remote/admit')) {
+        return admissionResponse('llama-cpp:qwen.gguf');
+      }
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return toolCallResponse();
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+    });
+    const session = await provider.createSession({
+      systemMessage: 'system',
+      model: 'qwen.gguf',
+      externalTools: [
+        { name: 'shell', description: 'Run a command', parameters: { type: 'object' } },
+      ],
+    });
+
+    await session.sendAndWait('hello');
+
+    expect(requests[0]).toMatchObject({ tools: [{ name: 'shell' }] });
+    expect(session.capturedToolCalls?.()).toEqual([
+      { id: 'shell-1', name: 'shell', arguments: '{"command":"pwd"}' },
+    ]);
+    await session.disconnect();
   });
 
   it('re-reads broker inventory so a completed pull appears without reconnecting', async () => {
@@ -60,6 +110,33 @@ describe('RemoteGezelProvider', () => {
       expect.objectContaining({ id: 'remote:this-machine/llama-cpp:gemma.gguf' }),
     ]);
     expect(requests).toBe(2);
+  });
+
+  it('forwards cancellation to remote model discovery', async () => {
+    const requestSignal: { value: AbortSignal | undefined } = { value: undefined };
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestSignal.value = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal.value?.addEventListener('abort', () => reject(requestSignal.value?.reason), {
+          once: true,
+        });
+      });
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+    });
+    const controller = new AbortController();
+
+    const pending = provider.listModels(controller.signal);
+    expect(requestSignal.value).toBe(controller.signal);
+    controller.abort(new DOMException('setup discovery timed out', 'AbortError'));
+
+    await expect(pending).resolves.toEqual([]);
+    expect(requestSignal.value?.aborted).toBe(true);
   });
 
   it('adds the local engine namespace for automatic machine-broker sessions', async () => {
@@ -218,5 +295,33 @@ describe('RemoteGezelProvider', () => {
 
     await expect(provider.prepareContextWindow()).resolves.toBe(24_576);
     expect(calls).toBe(2);
+  });
+
+  it('forwards cancellation to remote context admission', async () => {
+    const requestSignal: { value: AbortSignal | undefined } = { value: undefined };
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestSignal.value = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal.value?.addEventListener('abort', () => reject(requestSignal.value?.reason), {
+          once: true,
+        });
+      });
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+    });
+    const controller = new AbortController();
+
+    const pending = provider.prepareContextWindow('qwen.gguf', controller.signal);
+    expect(requestSignal.value).toBe(controller.signal);
+    controller.abort(new DOMException('setup admission timed out', 'AbortError'));
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requestSignal.value?.aborted).toBe(true);
   });
 });

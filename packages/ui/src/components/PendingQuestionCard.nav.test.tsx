@@ -8,6 +8,12 @@ import { createMockApi } from '../test-utils/mockApi.js';
 // DocumentsView / DocumentDetail specs use.
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 
+const REPORT = [
+  '# Night Shift Oversight Report',
+  '',
+  ...Array.from({ length: 30 }, (_, i) => `Line ${i}`),
+].join('\n');
+
 vi.mock('../api.js', () => ({
   api: createMockApi({
     getTaskByRef: vi.fn().mockResolvedValue({
@@ -15,6 +21,7 @@ vi.mock('../api.js', () => ({
       title: 'historical-battle-report',
       status: 'paused',
     }),
+    readDocument: vi.fn().mockResolvedValue({ content: REPORT, kind: 'artifact' }),
   }),
 }));
 
@@ -90,6 +97,36 @@ describe('PendingQuestionCard navigation', () => {
 
     await screen.findByRole('button', { name: 'Open task' });
     expect(screen.queryByRole('button', { name: 'Open in chat' })).toBeNull();
+  });
+
+  // An attached document is lifted out of the card's context strip into
+  // its own column — once, never twice — and reads as a full portrait
+  // page, so the ten-line teaser's expand toggle has nothing to do.
+  it('lifts an attached document into its own panel', async () => {
+    const { container } = render(
+      <PendingQuestionCard
+        question={question({ documentPath: 'artifacts/night-shift-report.md' })}
+      />,
+    );
+
+    const heading = await screen.findByText('Night Shift Oversight Report');
+    expect(heading.closest('.pending-question-document-panel')).not.toBeNull();
+    expect(container.querySelectorAll('.pending-question-document')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Show full document' })).toBeNull();
+  });
+
+  // The collapsed one-line "Answered" form has nothing to sit beside.
+  it('keeps an answered card single-column', async () => {
+    const { container } = render(
+      <PendingQuestionCard
+        question={question({
+          documentPath: 'artifacts/night-shift-report.md',
+          answer: { selectedChoices: [0], at: '2026-01-01T00:01:00.000Z' },
+        })}
+      />,
+    );
+
+    expect(container.querySelector('.pending-question-splitwrap')).toBeNull();
   });
 
   it('opens the attached task as a tab', async () => {

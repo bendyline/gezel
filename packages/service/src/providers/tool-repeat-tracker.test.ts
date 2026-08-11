@@ -258,6 +258,22 @@ describe('ToolRepeatTracker', () => {
     expect(msg).toContain('advance_task_step');
   });
 
+  it('uses the canonical installed-script tool in craftbook-step correctives', () => {
+    const msg = ToolRepeatTracker.buildAbortMessage({
+      providerLabel: 'llama.cpp',
+      toolName: 'read_task_notes',
+      count: 5,
+      registeredTools: ['read_task_notes', 'run_installed_script', 'ask_user_question'],
+      activeStep: {
+        name: 'Load PR context',
+        onExitScriptName: 'pr-context',
+      },
+    });
+
+    expect(msg).toContain('run_installed_script({ name: "pr-context" })');
+    expect(msg).not.toContain('`run_script');
+  });
+
   it('filters action-tool suggestions to what is actually registered', () => {
     // Voorman loadout: no `write_file`, no `write_artifact` (read-only
     // workspace) — just `message_gezel`, `set_task_status`, etc.

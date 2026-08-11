@@ -892,6 +892,11 @@ describe('Branch 5 — local-spawn-dev', () => {
     } as unknown as Awaited<ReturnType<typeof discoverOrSpawn>>);
     const svc = await connectOrStart(baseOpts({ devSpawn: true }));
     expect(svc.mode).toBe('local-spawn-dev');
+    expect(discoverOrSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({ GEZEL_DISABLE_MACHINE_ENGINE: '1' }),
+      }),
+    );
     await svc.shutdown();
   });
 
@@ -920,6 +925,10 @@ describe('Branch 3 — embedded', () => {
     expect(svc.fallbackReason).toBeNull();
     expect(process.env.GEZEL_SHARED_ASSETS_DIR).toBe('/mock/shared-assets');
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBeUndefined();
+    const { startService } = await import('@bendyline/gezel-service');
+    expect(startService).toHaveBeenCalledWith(
+      expect.objectContaining({ machineEngineDiscovery: false }),
+    );
     await svc.shutdown();
   });
 

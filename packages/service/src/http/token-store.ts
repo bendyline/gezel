@@ -49,6 +49,14 @@ export type GezelScope = (typeof KNOWN_SCOPES)[number];
  */
 export const APP_GRANTABLE_SCOPES = ['openai', 'remote-inference', 'product', 'cli'] as const;
 
+/**
+ * App id owned by the Settings-managed Codex bridge. TokenStore.issue()
+ * intentionally accepts this id because the first-party setup manager mints
+ * its credential directly; the public grant flow must reject it so an
+ * unauthenticated caller cannot squat the identity before setup runs.
+ */
+export const CODEX_SETUP_RESERVED_APP_ID = 'gezel.codex.local-model-bridge';
+
 /** App ids owned by the daemon itself rather than the public grant flow. */
 export function isReservedTokenAppId(appId: string): boolean {
   return (
@@ -58,6 +66,18 @@ export function isReservedTokenAppId(appId: string): boolean {
     appId === 'web-ui' ||
     appId.startsWith('session:')
   );
+}
+
+/** App ids that callers of the public `/v1/apps` consent flow cannot claim. */
+export function isReservedPublicGrantAppId(appId: string): boolean {
+  return isReservedTokenAppId(appId) || appId === CODEX_SETUP_RESERVED_APP_ID;
+}
+
+export class ReservedPublicGrantAppIdError extends Error {
+  constructor(readonly appId: string) {
+    super(`token-store: appId is reserved for a first-party integration: ${appId}`);
+    this.name = 'ReservedPublicGrantAppIdError';
+  }
 }
 
 /**
@@ -78,6 +98,17 @@ export function assertGrantableAppToken(input: { appId: string; scopes: readonly
       `token-store: invalid app scopes; allowed scopes are ${APP_GRANTABLE_SCOPES.join(', ')}`,
     );
   }
+}
+
+/** Validate authority requested specifically through the public consent flow. */
+export function assertPublicGrantableAppToken(input: {
+  appId: string;
+  scopes: readonly string[];
+}): void {
+  if (isReservedPublicGrantAppId(input.appId)) {
+    throw new ReservedPublicGrantAppIdError(input.appId);
+  }
+  assertGrantableAppToken(input);
 }
 
 function isGrantableAppToken(input: { appId: string; scopes: readonly string[] }): boolean {

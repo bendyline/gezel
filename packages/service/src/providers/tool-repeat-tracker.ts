@@ -183,7 +183,7 @@ export class ToolRepeatTracker {
      * then points them at `write_file` (wrong for a review task) and
      * they fabricate. Wild-caught on the review craftbook spin
      * (gemma4-26B): `read_task_notes` × 5 on a "Load PR
-     * context" step whose right action was `run_script({ name:
+     * context" step whose right action was `run_installed_script({ name:
      * 'pr-context' })`.
      */
     activeStep?: {
@@ -247,7 +247,7 @@ export class ToolRepeatTracker {
     // read.
     const stepHint = opts.activeStep
       ? opts.activeStep.onExitScriptName
-        ? ` You are mid-craftbook step **${opts.activeStep.name}** — the right next call is \`run_script({ name: "${opts.activeStep.onExitScriptName}" })\`. The script is already installed in the project.`
+        ? ` You are mid-craftbook step **${opts.activeStep.name}** — the right next call is \`run_installed_script({ name: "${opts.activeStep.onExitScriptName}" })\`. The script is already installed in the project.`
         : ` You are mid-craftbook step **${opts.activeStep.name}** — re-read the step procedure in your system prompt and call the tool it names. Do NOT call \`read_task_notes\` again; the procedure is in the prompt, not the notes.`
       : '';
     // Branch the corrective on tool class. Read loops are "you already
@@ -347,10 +347,10 @@ function filterActionToolSuggestions(
   registered?: ReadonlySet<string> | readonly string[],
 ): string[] {
   // Order signals priority: file-writes first (the "ship code" arc),
-  // then craftbook-procedure tools (run_script, github_*), then task
+  // then craftbook-procedure tools (run_installed_script, github_*), then task
   // mechanics, then escape valves (ask). Previously this list was
   // file-write + task-mechanics only — which is exactly wrong inside a
-  // craftbook step whose next action is `run_script` or `github_pr_*`,
+  // craftbook step whose next action is `run_installed_script` or `github_pr_*`,
   // and pointed gemma4-26B at fabricated `write_file` calls when it
   // should have been running the step's onExit script. Wild-caught on
   // the review-craftbook spin: `read_task_notes` × 5 because the
@@ -363,7 +363,7 @@ function filterActionToolSuggestions(
     'ensure_gezel',
     'write_artifact',
     'write_file',
-    'run_script',
+    'run_installed_script',
     'github_pr_list',
     'github_pr_view',
     'github_pr_diff',

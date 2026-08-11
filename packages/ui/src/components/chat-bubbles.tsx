@@ -80,6 +80,8 @@ export interface ToolActivity {
   errorMessage?: string;
   /** File path the tool touched, when the tool carries one. */
   path?: string;
+  /** Ordered file paths touched by a batched filesystem tool. */
+  paths?: string[];
   /** Compact, human one-liner — rendered inline with the name. */
   argsSummary?: string;
   /** Full, readable args (every field, untruncated) for the expand + copy affordance. */

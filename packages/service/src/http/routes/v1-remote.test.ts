@@ -144,6 +144,53 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text.indexOf('"type":"reasoning_delta"')).toBeLessThan(text.indexOf('"type":"done"'));
   });
 
+  it('advertises caller-owned tools on B and streams captured calls back to A', async () => {
+    const token = await pairDevice('device-external-tool');
+    const provider = (await svc.context.chat.getProviderForModel(
+      'copilot',
+      'mock-fast',
+    )) as MockProvider;
+    const callStart = provider.calls.length;
+    provider.scriptExternalToolCalls([
+      { id: 'shell-1', name: 'shell', arguments: '{"command":"pwd"}' },
+    ]);
+
+    const res = await httpFetch(`${baseUrl}/v1/remote/infer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        model: 'copilot:mock-fast',
+        systemMessage: 'You are a test.',
+        prompt: 'Inspect this repository.',
+        priorMessages: [],
+        tools: [
+          {
+            name: 'shell',
+            description: 'Run a shell command',
+            parameters: { type: 'object', properties: { command: { type: 'string' } } },
+          },
+        ],
+        queue: { lane: 'interactive', affinity: true, sessionId: 's-tool-call' },
+      }),
+    });
+
+    expect(res.ok).toBe(true);
+    const text = await res.text();
+    expect(text).toContain(
+      '"type":"tool_call","calls":[{"id":"shell-1","name":"shell","arguments":"{\\"command\\":\\"pwd\\"}"}]',
+    );
+    expect(text.indexOf('"type":"tool_call"')).toBeLessThan(text.indexOf('"type":"done"'));
+    const create = provider.calls.slice(callStart).find((call) => call.kind === 'create');
+    expect(create?.opts?.externalTools).toEqual([
+      expect.objectContaining({ name: 'shell', parameters: expect.any(Object) }),
+    ]);
+  });
+
   it('marks a trailing tool-result request as a continuation, not an empty user turn', async () => {
     const token = await pairDevice('device-tool-continuation');
     const provider = (await svc.context.chat.getProviderForModel(

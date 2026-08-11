@@ -38,10 +38,14 @@ export class CatalogService {
    *   bundled + community tiers, re-read on every disk access. The live
    *   gilde update mechanism flips it without reconstructing this service
    *   (which is built once at boot and held by many subsystems).
+   * @param opts.gezelVersion the running app's version, compared against
+   *   content `minGezelVersion` floors. Defaults to `GEZEL_VERSION`
+   *   inside each source; injectable so tests can exercise gating (dev
+   *   checkouts report `0.0.0`, which bypasses all filtering).
    */
   constructor(
     sources?: CatalogSource[],
-    opts?: { localRoot?: string; contentRoot?: () => string },
+    opts?: { localRoot?: string; contentRoot?: () => string; gezelVersion?: string },
   ) {
     this.contentRootProvider = opts?.contentRoot ?? null;
     if (sources && sources.length > 0) {
@@ -49,12 +53,19 @@ export class CatalogService {
       return;
     }
     const contentRoot = opts?.contentRoot;
-    const local = opts?.localRoot ? [new LocalCatalogSource(opts.localRoot)] : [];
+    const gezelVersion = opts?.gezelVersion;
+    const local = opts?.localRoot ? [new LocalCatalogSource(opts.localRoot, gezelVersion)] : [];
     this.sources = [
       new BuiltinToolsetsSource(),
       ...local,
-      new BundledSource(contentRoot ? { dataDir: contentRoot } : {}),
-      new CommunitySource(contentRoot ? () => join(contentRoot(), 'community') : undefined),
+      new BundledSource({
+        ...(contentRoot ? { dataDir: contentRoot } : {}),
+        ...(gezelVersion !== undefined ? { gezelVersion } : {}),
+      }),
+      new CommunitySource(
+        contentRoot ? () => join(contentRoot(), 'community') : undefined,
+        gezelVersion,
+      ),
     ];
   }
 

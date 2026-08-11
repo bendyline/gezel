@@ -28,6 +28,10 @@ export interface ModelScore {
   claim: string;
   /** Scenarios with zero attributable trials — measured nothing. */
   unmeasuredScenarios: string[];
+  /** Fewest trials any measured scenario received; gates rate-quoting. */
+  weakestCellTrials: number;
+  /** Scenarios that ran fewer than MIN_TRIALS_FOR_RATE times. */
+  underRepeatedScenarios: string[];
 }
 
 /**
@@ -52,12 +56,20 @@ export function formatPassClaim(successes: number, trials: number): string {
 /**
  * Score one model.
  *
- * `trialsPerScenario` is the run's `count`, and it gates rate-quoting
- * independently of the aggregate. Three DIFFERENT tasks run once each is
- * not a sample of three — it is three samples of one, and it says nothing
- * about whether any of them reproduce. Without this, a `--count 1` sweep
- * over thirteen scenarios printed a confident percentage off thirteen
- * unrepeated attempts. Wild-caught on the first verify run.
+ * Rate-quoting is gated on the WEAKEST cell, not on the run's requested
+ * count. Three different tasks run once each is three samples of one, and
+ * says nothing about whether any result reproduces.
+ *
+ * The requested count is not sufficient evidence that repeats happened:
+ * the matrix caps per-scenario trials at `suggestedTrials`, so a
+ * `--count 3` sweep silently runs ONE trial for every craftbook scenario.
+ * On the first real sweep that was six of thirteen productivity tasks —
+ * and reading the requested count would have published a confident
+ * percentage over a suite that was nearly half unrepeated. The recorded
+ * per-cell `trials` is the only honest source.
+ *
+ * `trialsPerScenario` remains an upper bound the caller may impose (the
+ * run's count); the effective gate is the minimum of it and every cell.
  */
 export function scoreModel(
   result: ScorecardModelResult,
@@ -76,7 +88,12 @@ export function scoreModel(
     if (attributable === 0) unmeasuredScenarios.push(cell.scenarioId);
   }
 
-  const repeated = trialsPerScenario >= MIN_TRIALS_FOR_RATE;
+  const measuredCells = result.cells.filter((cell) => cell.trials > 0);
+  const weakestCellTrials = measuredCells.length
+    ? Math.min(...measuredCells.map((cell) => cell.trials))
+    : 0;
+  const effectiveRepeats = Math.min(trialsPerScenario, weakestCellTrials);
+  const repeated = effectiveRepeats >= MIN_TRIALS_FOR_RATE;
   const quotable = repeated && attributableTrials >= MIN_TRIALS_FOR_RATE;
   return {
     result,
@@ -84,6 +101,10 @@ export function scoreModel(
     successes,
     discardedTrials,
     passRate: quotable ? successes / attributableTrials : null,
+    weakestCellTrials,
+    underRepeatedScenarios: measuredCells
+      .filter((cell) => cell.trials < MIN_TRIALS_FOR_RATE)
+      .map((cell) => cell.scenarioId),
     claim:
       attributableTrials === 0
         ? 'not measured'
@@ -91,7 +112,11 @@ export function scoreModel(
           ? formatPassClaim(successes, attributableTrials)
           : repeated
             ? formatPassClaim(successes, attributableTrials)
-            : `${successes}/${attributableTrials} (each task run once — count not rate)`,
+            : `${successes}/${attributableTrials} (${
+                effectiveRepeats <= 1
+                  ? 'some tasks run once'
+                  : `some tasks run ${effectiveRepeats}×`
+              } — count not rate)`,
     unmeasuredScenarios,
   };
 }
@@ -177,10 +202,15 @@ export function buildSuiteScoreboard(
  * a score without its device, date, and code version is not a measurement,
  * it is a rumour.
  */
-export function describeProvenance(run: ScorecardRun): string {
+export function describeProvenance(run: ScorecardRun, engines: readonly string[] = []): string {
   const p = run.provenance;
+  const unique = [...new Set(engines)].sort();
   const parts = [
     p.device.label,
+    // The engine is part of what a number MEANS: the same model scores
+    // differently on llama.cpp and MLX, and a sweep may deliberately run a
+    // non-default engine. Omitting it invites the reader to assume their own.
+    ...(unique.length > 0 ? [unique.join(' + ')] : []),
     `${p.count} trial${p.count === 1 ? '' : 's'} per task`,
     p.startedAt.slice(0, 10),
     `gezel ${p.harnessCommit}`,
