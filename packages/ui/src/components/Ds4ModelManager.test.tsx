@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -7,6 +7,22 @@ vi.mock('./ModelBundleControls.js', () => ({
   ExportModelBundleButton: () => null,
   ImportModelBundleButton: () => <button type="button">Import .gezmodel</button>,
   useExportModelBundle: () => ({ run: async () => {}, busy: false, error: null }),
+}));
+vi.mock('./ModelContextControls.js', () => ({
+  contextSliderMax: () => undefined,
+  ModelContextSliderPanel: () => null,
+  ModelActionsMenu: ({
+    model,
+    onUpdate,
+  }: {
+    model: { updateAvailable?: boolean };
+    onUpdate?: () => void;
+  }) =>
+    model.updateAvailable && onUpdate ? (
+      <button type="button" onClick={onUpdate}>
+        Update
+      </button>
+    ) : null,
 }));
 
 const { Ds4ModelManager } = await import('./Ds4ModelManager.js');
@@ -55,6 +71,7 @@ function catalogModel(opts: {
 
 describe('Ds4ModelManager', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(api.listDs4Models).mockResolvedValue({ models: [] });
     vi.mocked(api.listDs4ActiveInstalls).mockResolvedValue({ installs: [] });
     vi.mocked(api.listCatalogItems).mockResolvedValue({
@@ -182,5 +199,39 @@ describe('Ds4ModelManager', () => {
 
     await waitFor(() => expect(screen.getAllByText('needs more memory')).toHaveLength(2));
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('signals an installed catalog update and offers an in-place update action', async () => {
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [
+        {
+          id: 'deepseek-v4-flash-284b-q4',
+          name: 'DeepSeek V4 Flash (FP4)',
+          approxSizeBytes: 153 * GiB,
+          installedAt: '2026-07-23T00:00:00.000Z',
+          weightsPath: '/models/deepseek-v4-flash-284b-q4/model.gguf',
+          chatTemplatePresent: true,
+          updateAvailable: true,
+          availableVersion: '1.1.0',
+        },
+      ],
+    });
+
+    render(<Ds4ModelManager />);
+
+    const signal = await screen.findByText('update available');
+    expect(signal).toHaveAttribute(
+      'title',
+      expect.stringContaining('→ v1.1.0'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() =>
+      expect(api.installDs4Model).toHaveBeenCalledWith(
+        'deepseek-v4-flash-284b-q4',
+        expect.any(Function),
+      ),
+    );
   });
 });

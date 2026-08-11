@@ -82,9 +82,10 @@ case "$os" in
     ;;
 esac
 
-# The pinned upstream CUDA source uses FLT_MAX without including the header
-# that defines it. Apply a visible, pin-scoped patch only for the Linux build,
-# then restore the ignored upstream checkout so later pin bumps stay clean.
+# Older pinned upstream CUDA sources used FLT_MAX without including the header
+# that defines it. Apply the compatibility patch only when the include is still
+# absent, then restore the ignored upstream checkout so later pin bumps stay
+# clean.
 cuda_float_patch_applied=false
 truncation_finish_patch_applied=false
 prefill_cancel_patch_applied=false
@@ -125,14 +126,17 @@ git -C "$src" apply "$truncation_finish_patch"
 truncation_finish_patch_applied=true
 echo "[build] applied ds4 repaired-truncation finish_reason patch"
 
-# Upstream never arms ds4_session_set_cancel during prefill, so a turn whose
-# client already disconnected kept prefilling the whole prompt (~150s on a large
-# SSD-streamed context) before the closed socket was noticed, blocking the next
-# turn behind a zombie. Wire the socket half-close into the cooperative-cancel
-# hook so prefill unwinds at the next chunk boundary (all platforms).
-git -C "$src" apply "$prefill_cancel_patch"
-prefill_cancel_patch_applied=true
-echo "[build] applied ds4 prefill client-cancel patch"
+# Older upstream pins never armed ds4_session_set_cancel during prefill, so a
+# disconnected client could leave a zombie prefill blocking the next turn. New
+# pins install job_cancelled for the whole request and carry focused disconnect
+# tests; retain the pin-scoped compatibility patch only for older sources.
+if grep -Fq 'ds4_session_set_cancel(slot->session, job_cancelled, j);' "$src/ds4_server.c"; then
+  echo "[build] ds4 upstream provides request-wide client cancellation"
+else
+  git -C "$src" apply "$prefill_cancel_patch"
+  prefill_cancel_patch_applied=true
+  echo "[build] applied ds4 prefill client-cancel patch"
+fi
 
 # ── 3. Build (make-based; one GPU backend per platform) ────────────
 make_args=(ds4-server)
