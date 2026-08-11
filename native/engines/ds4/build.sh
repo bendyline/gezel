@@ -9,15 +9,15 @@
 # backend per platform and no `-<backend>` output suffix:
 #   - darwin-arm64: Metal      (`make ds4-server`)
 #   - linux-x64:    CUDA        (`make ds4-server CUDA_ARCH=<arch>`)
-#   - linux-arm64:  CUDA / DGX Spark (`make ds4-server CUDA_ARCH=`)
+#   - linux-arm64:  CUDA / DGX Spark (`make ds4-server CUDA_ARCH=sm_121`)
 #   - darwin-x64 / win32: UNSUPPORTED (no artifact produced)
 #
 # CUDA arch: local dev defaults to `native` (nvcc detects the present GPU).
 # CI cross-builds (no GPU) MUST set DS4_CUDA_ARCH to an explicit value, e.g.
 #   DS4_CUDA_ARCH=sm_90        (H100-class)
 #   DS4_CUDA_ARCH=sm_121       (GB10 / DGX Spark)
-# For the Spark, antirez's own `make cuda-spark` uses an empty CUDA_ARCH;
-# pass DS4_CUDA_ARCH=spark here to reproduce that (empty -arch).
+# DS4_CUDA_ARCH=spark remains a legacy escape hatch for an empty CUDA_ARCH;
+# release builds use sm_121 so the pinned Makefile can apply feature promotion.
 
 set -euo pipefail
 
@@ -186,21 +186,19 @@ case "$platform" in
     backend="cuda"
     cuda_arch="${DS4_CUDA_ARCH:-native}"
     if [[ "$cuda_arch" == "spark" ]]; then
-      make_args+=("CUDA_ARCH=")          # antirez cuda-spark style (empty -arch)
+      make_args+=("CUDA_ARCH=")          # legacy empty-architecture escape hatch
     else
       make_args+=("CUDA_ARCH=$cuda_arch")
     fi
     # Upstream defaults CUDA release builds to `-g -lineinfo`, which embeds
     # hosted-runner source paths and ships debug metadata we do not consume.
-    # Keep the release optimization/architecture flags while passing prefix
-    # maps to nvcc's host compiler for __FILE__ and debug-path hygiene.
-    # Overriding NVCCFLAGS wholesale drops the Makefile's own
+    # Keep upstream's NVCC_ARCH_FLAGS recursive make reference intact. It owns
+    # architecture-specific promotion and feature defines (for example,
+    # sm_121 -> sm_121a plus DS4_CUDA_HAVE_MXF4=1) as the pinned source evolves.
+    # Overriding NVCCFLAGS wholesale also drops the Makefile's own
     # `-Xcompiler $(NATIVE_CPU_FLAG)`, so re-apply the resolved CPU floor
     # here — the make_args entry above only reaches CFLAGS/OBJCFLAGS.
-    nvcc_flags="-O3 --use_fast_math"
-    if [[ "$cuda_arch" != "spark" && -n "$cuda_arch" ]]; then
-      nvcc_flags+=" -arch=$cuda_arch"
-    fi
+    nvcc_flags='-O3 --use_fast_math $(NVCC_ARCH_FLAGS)'
     nvcc_flags+=" -Xcompiler=$native_cpu_flag -Xcompiler=-pthread"
     nvcc_flags+=" -Xcompiler=-ffile-prefix-map=$src=ds4"
     nvcc_flags+=" -Xcompiler=-fmacro-prefix-map=$src=ds4"

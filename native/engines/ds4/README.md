@@ -29,7 +29,7 @@ kernel), so there is exactly one shippable backend per platform:
 |---------------|---------|-----------------------------------|-------|
 | darwin-arm64  | Metal   | `make ds4-server`                 | ✅    |
 | linux-x64     | CUDA    | `make ds4-server CUDA_ARCH=<sm>`  | ✅    |
-| linux-arm64   | CUDA    | `make ds4-server CUDA_ARCH=` (Spark/GB10) | ✅ |
+| linux-arm64   | CUDA    | `make ds4-server CUDA_ARCH=sm_121` (Spark/GB10) | ✅ |
 | darwin-x64    | —       | —                                 | ❌ no unified-memory Metal target |
 | win32-x64     | —       | —                                 | ❌ no upstream MSVC build (use WSL2) |
 
@@ -46,8 +46,12 @@ native/engines/ds4/build.sh
 native/engines/ds4/build.sh
 # Linux CUDA — CI cross-build (no GPU present): pin an explicit arch
 DS4_CUDA_ARCH=sm_90  native/engines/ds4/build.sh   # H100-class
-DS4_CUDA_ARCH=spark  native/engines/ds4/build.sh   # GB10 / DGX Spark
+DS4_CUDA_ARCH=sm_121 native/engines/ds4/build.sh   # GB10 / DGX Spark
 ```
+
+The wrapper retains upstream's `NVCC_ARCH_FLAGS` expansion. This lets the
+pinned Makefile promote base capabilities such as `sm_121` to `sm_121a` and
+add matching feature defines such as `DS4_CUDA_HAVE_MXF4=1` automatically.
 
 Output: `native/build/<platform>/gezel-ds4-server`. **On macOS the binary is NOT
 self-contained** — it compiles its Metal shaders from `./metal/*.metal` (19
