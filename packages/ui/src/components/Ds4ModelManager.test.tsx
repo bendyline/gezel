@@ -220,10 +220,7 @@ describe('Ds4ModelManager', () => {
     render(<Ds4ModelManager />);
 
     const signal = await screen.findByText('update available');
-    expect(signal).toHaveAttribute(
-      'title',
-      expect.stringContaining('→ v1.1.0'),
-    );
+    expect(signal).toHaveAttribute('title', expect.stringContaining('→ v1.1.0'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Update' }));
 

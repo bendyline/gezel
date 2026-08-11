@@ -190,7 +190,8 @@ export function resolveLlamaBinary(explicitPath?: string): ResolvedBinary {
         tried.push(path);
         if (!existsSync(path)) continue;
         if (!shouldProbeLlamaBackend(variant)) {
-          tried[tried.length - 1] = `${path} (exists but the NVIDIA driver is unavailable — skipped)`;
+          tried[tried.length - 1] =
+            `${path} (exists but the NVIDIA driver is unavailable — skipped)`;
           skipped.push(`${variant} (${path}; NVIDIA driver unavailable)`);
           continue;
         }

@@ -47,14 +47,7 @@ describe('familyToToolGrammarHint', () => {
 
   it('returns null for families whose MLX grammar is not yet token-verified', () => {
     // Unmapped families fall back to the TS salvage layer (no regression).
-    for (const f of [
-      'llama',
-      'mistral',
-      'deepseek',
-      'gpt-oss',
-      'phi',
-      'other',
-    ] as const) {
+    for (const f of ['llama', 'mistral', 'deepseek', 'gpt-oss', 'phi', 'other'] as const) {
       expect(familyToToolGrammarHint(style(f))).toBeNull();
     }
   });

@@ -146,7 +146,7 @@ function tokenFileCandidates(token: string, base: string, workspace: string): st
   if (
     !candidate ||
     candidate === '--' ||
-    candidate.startsWith('-') ||
+    candidate[0] === '-' ||
     candidate.includes('\0') ||
     /[*?{}[\]`]/.test(candidate) ||
     /^(?:https?|data):/i.test(candidate) ||
@@ -158,7 +158,7 @@ function tokenFileCandidates(token: string, base: string, workspace: string): st
   const out: string[] = [];
   const looksLikePath =
     isAbsolute(candidate) ||
-    candidate.startsWith('.') ||
+    candidate[0] === '.' ||
     candidate.includes('/') ||
     candidate.includes('\\') ||
     extname(candidate).length > 0;
