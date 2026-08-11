@@ -6,8 +6,8 @@
 #   engine-name: a directory under native/engines/, e.g. "sd-cpp".
 #
 # Side effects:
-#   - Writes / updates native/engines/<engine>/.upstream/ (a shallow-ish
-#     git checkout).
+#   - Writes / updates native/engines/<engine>/.upstream/ (a shallow
+#     checkout of the exact pinned commit).
 #   - Leaves that directory at the pinned commit. Build scripts take it
 #     from there.
 #
@@ -16,6 +16,47 @@
 # to refuse to build unpinned versions.
 
 set -euo pipefail
+
+max_attempts="${GEZEL_FETCH_MAX_ATTEMPTS:-3}"
+retry_delay_seconds="${GEZEL_FETCH_RETRY_DELAY_SECONDS:-2}"
+git_bin="${GEZEL_FETCH_GIT_BIN:-git}"
+
+if [[ ! "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: GEZEL_FETCH_MAX_ATTEMPTS must be a positive integer: $max_attempts" >&2
+  exit 2
+fi
+if [[ ! "$retry_delay_seconds" =~ ^[0-9]+$ ]]; then
+  echo "error: GEZEL_FETCH_RETRY_DELAY_SECONDS must be a non-negative integer: $retry_delay_seconds" >&2
+  exit 2
+fi
+
+retry_git() {
+  local operation="$1"
+  shift
+  local attempt=1
+  local delay="$retry_delay_seconds"
+  local status
+
+  while true; do
+    if "$git_bin" "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+
+    if (( attempt >= max_attempts )); then
+      echo "[fetch-upstream] $operation failed after $attempt attempt(s) (exit $status)" >&2
+      return "$status"
+    fi
+
+    echo "[fetch-upstream] $operation failed on attempt $attempt/$max_attempts (exit $status); retrying in ${delay}s" >&2
+    if (( delay > 0 )); then
+      sleep "$delay"
+    fi
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
 
 engine="${1:-}"
 if [[ -z "$engine" ]]; then
@@ -57,14 +98,26 @@ fi
 
 target="$engine_dir/.upstream"
 
+# Do not use a partial-clone filter here. A filtered clone turns checkout into
+# another hidden network operation for promised objects; Windows Schannel has
+# intermittently rejected that later request even after clone/fetch succeeded.
+# Fetching the exact shallow pin transfers the same build tree in one explicit,
+# retryable operation and leaves checkout local for every fresh build.
 if [[ ! -d "$target/.git" ]]; then
-  echo "[fetch-upstream] cloning $upstream into $target"
-  git clone --filter=tree:0 "$upstream" "$target"
+  echo "[fetch-upstream] initializing $target for $upstream"
+  mkdir -p "$target"
+  "$git_bin" -C "$target" init
+fi
+
+if "$git_bin" -C "$target" remote get-url origin >/dev/null 2>&1; then
+  "$git_bin" -C "$target" remote set-url origin "$upstream"
+else
+  "$git_bin" -C "$target" remote add origin "$upstream"
 fi
 
 echo "[fetch-upstream] pinning $engine to $commit (tag $tag)"
-git -C "$target" fetch --tags origin "$commit"
-git -C "$target" checkout --detach "$commit"
-git -C "$target" submodule update --init --recursive --depth 1
+retry_git "fetching pinned $engine commit" -C "$target" fetch --force --tags --depth 1 origin "$commit"
+retry_git "checking out pinned $engine commit" -C "$target" checkout --detach "$commit"
+retry_git "updating $engine submodules" -C "$target" submodule update --init --recursive --depth 1
 
-echo "[fetch-upstream] $engine ready at $(git -C "$target" rev-parse HEAD)"
+echo "[fetch-upstream] $engine ready at $("$git_bin" -C "$target" rev-parse HEAD)"
