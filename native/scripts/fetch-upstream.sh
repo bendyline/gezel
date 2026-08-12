@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# fetch-upstream.sh — clone or update a single engine's upstream repo
+# fetch-upstream.sh — fetch or update a single engine's upstream repo
 # at the commit pinned in its VERSION file.
 #
 # Usage: native/scripts/fetch-upstream.sh <engine-name>
 #   engine-name: a directory under native/engines/, e.g. "sd-cpp".
 #
 # Side effects:
-#   - Writes / updates native/engines/<engine>/.upstream/ (a shallow
-#     checkout of the exact pinned commit).
+#   - Writes / updates native/engines/<engine>/.upstream/ (a filtered
+#     checkout of the exact pinned commit with complete commit ancestry).
 #   - Leaves that directory at the pinned commit. Build scripts take it
 #     from there.
 #
@@ -98,11 +98,11 @@ fi
 
 target="$engine_dir/.upstream"
 
-# Do not use a partial-clone filter here. A filtered clone turns checkout into
-# another hidden network operation for promised objects; Windows Schannel has
-# intermittently rejected that later request even after clone/fetch succeeded.
-# Fetching the exact shallow pin transfers the same build tree in one explicit,
-# retryable operation and leaves checkout local for every fresh build.
+# Preserve the full commit graph because llama.cpp and whisper.cpp embed
+# `git rev-list --count HEAD` as their build number. Filtering trees keeps the
+# transfer close to a shallow checkout: fetch downloads ancestry, then the
+# retried checkout hydrates only the pinned working tree. This also avoids the
+# old unguarded partial-clone checkout that exposed Windows Schannel failures.
 if [[ ! -d "$target/.git" ]]; then
   echo "[fetch-upstream] initializing $target for $upstream"
   mkdir -p "$target"
@@ -115,9 +115,37 @@ else
   "$git_bin" -C "$target" remote add origin "$upstream"
 fi
 
+"$git_bin" -C "$target" config remote.origin.promisor true
+"$git_bin" -C "$target" config remote.origin.partialclonefilter tree:0
+
 echo "[fetch-upstream] pinning $engine to $commit (tag $tag)"
-retry_git "fetching pinned $engine commit" -C "$target" fetch --force --tags --depth 1 origin "$commit"
+if [[ "$("$git_bin" -C "$target" rev-parse --is-shallow-repository)" == "true" ]]; then
+  retry_git "unshallowing pinned $engine commit" -C "$target" fetch --force --tags --unshallow --filter=tree:0 origin "$commit"
+else
+  retry_git "fetching pinned $engine commit" -C "$target" fetch --force --tags --filter=tree:0 origin "$commit"
+fi
 retry_git "checking out pinned $engine commit" -C "$target" checkout --detach "$commit"
 retry_git "updating $engine submodules" -C "$target" submodule update --init --recursive --depth 1
 
-echo "[fetch-upstream] $engine ready at $("$git_bin" -C "$target" rev-parse HEAD)"
+if [[ "$("$git_bin" -C "$target" rev-parse --is-shallow-repository)" != "false" ]]; then
+  echo "error: $engine checkout is still shallow; upstream build metadata would be incorrect" >&2
+  exit 1
+fi
+
+head_commit="$("$git_bin" -C "$target" rev-parse HEAD)"
+if [[ "$head_commit" != "$commit" ]]; then
+  echo "error: $engine checkout resolved to $head_commit instead of pinned commit $commit" >&2
+  exit 1
+fi
+
+if [[ "$engine" == "llama-cpp" && "$tag" =~ ^b([0-9]+)$ ]]; then
+  expected_build_number="${BASH_REMATCH[1]}"
+  actual_build_number="$("$git_bin" -C "$target" rev-list --count HEAD)"
+  if [[ "$actual_build_number" != "$expected_build_number" ]]; then
+    echo "error: llama.cpp tag $tag requires build number $expected_build_number, but git ancestry reports $actual_build_number" >&2
+    exit 1
+  fi
+  echo "[fetch-upstream] llama.cpp build number verified: $actual_build_number ($tag)"
+fi
+
+echo "[fetch-upstream] $engine ready at $head_commit"

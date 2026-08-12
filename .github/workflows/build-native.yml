@@ -705,6 +705,14 @@ jobs:
             echo "tag=${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Assert llama executable version identity
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp'
+        shell: bash
+        run: |
+          node scripts/assert-llama-version.mjs \
+            --binary "${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}" \
+            --version-file native/engines/llama-cpp/VERSION
+
       # ── Post-build sanity ─────────────────────────────────────
       - name: Stage native redistribution licenses
         if: steps.preflight.outputs.pinned == 'true'
