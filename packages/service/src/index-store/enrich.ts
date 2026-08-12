@@ -1,5 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import { GEZEL_VERSION, type GezelSummary, type ProviderName, createLogger } from '@bendyline/gezel';
+import {
+  GEZEL_VERSION,
+  type GezelSummary,
+  type ProviderName,
+  createLogger,
+} from '@bendyline/gezel';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
@@ -269,7 +274,9 @@ export async function buildEnrichDeps(
   );
   const review = withPolicyFallback(
     oneShot({ providerName, model }, reviewTimeoutMs, 'index review'),
-    fallbackTarget ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)') : null,
+    fallbackTarget
+      ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)')
+      : null,
     'review',
   );
   // Guarded for test fakes that stub ChatManager structurally.
