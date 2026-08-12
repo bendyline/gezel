@@ -2977,6 +2977,39 @@ export class ChatManager {
     });
   }
 
+  /**
+   * Resolve the active session for one exact task step. Scheduler re-drives
+   * use this path so task tools inherit GEZEL_TASK_REF / GEZEL_STEP_ID and
+   * continue the original work thread instead of landing in lobby chat.
+   */
+  private async ensureOrCreateTaskSession(args: {
+    gezelId: string;
+    projectId: string;
+    taskRef: string;
+    stepId?: string;
+  }): Promise<ChatSession> {
+    const existing = await this.store.listSessions({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+    });
+    const active = existing.find(
+      (session) =>
+        !session.archived &&
+        session.taskRef === args.taskRef &&
+        (args.stepId === undefined || session.stepId === args.stepId),
+    );
+    if (active) {
+      const full = await this.store.getSession(args.gezelId, active.id);
+      if (full) return full;
+    }
+    return this.createSession({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+      taskRef: args.taskRef,
+      ...(args.stepId ? { stepId: args.stepId } : {}),
+    });
+  }
+
   /** Late-bind the fitness manager (see the field's docblock). */
   setModelFitness(manager: import('../fitness/manager.js').ModelFitnessManager): void {
     this.modelFitness = manager;
@@ -3343,7 +3376,8 @@ export class ChatManager {
    * (which is anchored to a task + phase and always opens a fresh session),
    * `messageGezel` drops a message into the target gezel's *active* project
    * session via `ensureOrCreateSession`, so the continuity of their thread
-   * is preserved.
+   * is preserved. Internal task re-drives may also pass `taskRef` + `stepId`
+   * to resume that exact task-step session with its MCP context intact.
    *
    * When the target's turn completes, its reply is injected back into the
    * sender's session as its own handoff-styled message (role=user, `from`
@@ -3363,6 +3397,10 @@ export class ChatManager {
     toGezelIdOrName: string;
     projectId?: string;
     text: string;
+    /** Internal task context for scheduler re-drives. */
+    taskRef?: string;
+    /** Exact step paired with taskRef when re-driving task work. */
+    stepId?: string;
     /**
      * Provider-queue lane for the target's reply turn. Defaults to
      * `interactive`. The scheduler passes `background` for ambient
@@ -3472,10 +3510,20 @@ export class ChatManager {
       : undefined;
     if (pendingHandoff) return { ...pendingHandoff, deduplicated: true };
 
-    const session = await this.ensureOrCreateSession({
-      gezelId: target.id,
-      projectId,
-    });
+    if (args.stepId && !args.taskRef) {
+      throw new Error('messageGezel stepId requires taskRef');
+    }
+    const session = args.taskRef
+      ? await this.ensureOrCreateTaskSession({
+          gezelId: target.id,
+          projectId,
+          taskRef: args.taskRef,
+          ...(args.stepId ? { stepId: args.stepId } : {}),
+        })
+      : await this.ensureOrCreateSession({
+          gezelId: target.id,
+          projectId,
+        });
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const fromConfigPre = await this.store.readConfig();
@@ -6820,6 +6868,15 @@ export class ChatManager {
             type: 'warning',
             message: gateWarning,
           });
+          break;
+        }
+        // A successful question card is the response for this turn. The
+        // user's answer will arrive as a fresh user message, so every
+        // automatic continuation must stop here — including recovery for an
+        // earlier failed tool in the same turn and inspector escalation after
+        // an exhausted continuation budget.
+        if (drained.some((call) => call.name === 'ask_user_question' && call.success)) {
+          log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
           break;
         }
         if (

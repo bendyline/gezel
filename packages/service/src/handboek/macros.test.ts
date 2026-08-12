@@ -83,7 +83,7 @@ const stubCatalog: HandboekCatalog = {
 };
 
 const stubReleases: ReleaseNoteEntry[] = [
-  { id: 'whats-new/1.26223', title: '1.26223 — 11 August 2026', summary: 'Newer things.' },
+  { id: 'whats-new/1.26224', title: '1.26224 — 12 August 2026', summary: 'Newer things.' },
   { id: 'whats-new/1.26219', title: '1.26219 — 7 August 2026' },
 ];
 
@@ -285,7 +285,7 @@ describe('whats-new-list macro', () => {
     const { markdown } = await expandMacros('::handboek-whats-new-list', { ...ctx('app') });
     expect(markdown).toBe(
       [
-        '- **[1.26223 — 11 August 2026](whats-new/1.26223)** — Newer things.',
+        '- **[1.26224 — 12 August 2026](whats-new/1.26224)** — Newer things.',
         '- **[1.26219 — 7 August 2026](whats-new/1.26219)**',
       ].join('\n'),
     );
@@ -303,7 +303,7 @@ describe('whats-new-list macro', () => {
     const { markdown } = await expandMacros('::handboek-whats-new-list{limit=1}', {
       ...ctx('app'),
     });
-    expect(markdown).toContain('1.26223');
+    expect(markdown).toContain('1.26224');
     expect(markdown).not.toContain('1.26219');
   });
 

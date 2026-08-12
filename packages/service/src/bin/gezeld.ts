@@ -1,8 +1,50 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  type FatalProcessErrorSource,
+  installProcessErrorHandlers,
+  writeProcessOutput,
+} from '@bendyline/gezel';
 import { startService } from '../service.js';
 import { applyAutostartRuntimeArguments } from './runtime-args.js';
+
+let stopRunningService: (() => Promise<void>) | null = null;
+let fatalExitInFlight = false;
+
+async function stopServiceOnce(): Promise<void> {
+  const stop = stopRunningService;
+  stopRunningService = null;
+  await stop?.();
+}
+
+async function exitAfterFatalError(error: Error, source: FatalProcessErrorSource | 'startup') {
+  if (fatalExitInFlight) {
+    process.exit(1);
+    return;
+  }
+  fatalExitInFlight = true;
+  try {
+    writeProcessOutput(process.stderr, `gezeld ${source}: ${error.stack ?? error.message}\n`);
+    await stopServiceOnce();
+  } catch (shutdownError) {
+    try {
+      writeProcessOutput(
+        process.stderr,
+        `gezeld failed while stopping after a fatal error: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}\n`,
+      );
+    } catch {
+      /* there may be no usable stderr left */
+    }
+  } finally {
+    process.exit(1);
+  }
+}
+
+// The standalone daemon is headless, but it still needs a top-level boundary:
+// stop the HTTP listener and exit deterministically instead of leaving an
+// unhandled rejection or a partially alive process behind.
+installProcessErrorHandlers(process, exitAfterFatalError);
 
 async function main() {
   applyAutostartRuntimeArguments(process.argv.slice(2));
@@ -23,6 +65,7 @@ async function main() {
     preferCanonicalPort: explicitPort === undefined,
     uiDir,
   });
+  stopRunningService = () => running.stop();
 
   // More than one channel can request a stop (the service host closes
   // stdin *and* may send CTRL_BREAK), and `running.stop()` is not safe to
@@ -31,8 +74,8 @@ async function main() {
   const shutdown = async (signal: string) => {
     if (stopping) return;
     stopping = true;
-    process.stderr.write(`\ngezeld received ${signal}, shutting down\n`);
-    await running.stop();
+    writeProcessOutput(process.stderr, `\ngezeld received ${signal}, shutting down\n`);
+    await stopServiceOnce();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -59,7 +102,8 @@ async function main() {
   }
 
   const scheme = running.cert ? 'https' : 'http';
-  process.stderr.write(
+  writeProcessOutput(
+    process.stderr,
     `gezeld listening on ${scheme}://127.0.0.1:${running.port} (home=${running.context.home})\n`,
   );
   // Web mode: surface the one-time browser URL on the daemon's own
@@ -67,7 +111,8 @@ async function main() {
   // directly. The detached CLI path reads the same token from
   // `runtime/web-ui-token` to print + optionally open a browser.
   if (running.webUiToken) {
-    process.stderr.write(
+    writeProcessOutput(
+      process.stderr,
       `\n  Gezel web UI →  ${scheme}://127.0.0.1:${running.port}/?token=${running.webUiToken}\n\n`,
     );
   }
@@ -95,9 +140,9 @@ main().catch((err) => {
   // SingleInstanceError is an expected, actionable refusal (another daemon
   // already owns this home) — print just its message, not a stack.
   if (err instanceof Error && err.name === 'SingleInstanceError') {
-    process.stderr.write(`${err.message}\n`);
+    writeProcessOutput(process.stderr, `${err.message}\n`);
+    process.exit(1);
   } else {
-    process.stderr.write(`gezeld failed to start: ${err?.stack ?? err}\n`);
+    void exitAfterFatalError(err instanceof Error ? err : new Error(String(err)), 'startup');
   }
-  process.exit(1);
 });

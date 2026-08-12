@@ -116,7 +116,7 @@ export function loadCuratedArticles(contentDir: string): CuratedArticle[] {
 
 /**
  * Release-note articles, newest first. Release `order` is the negated
- * calendar line (`1.26223` → `-26223`), so the area's own ascending sort
+ * calendar line (`1.26224` → `-26224`), so the area's own ascending sort
  * already puts the newest release on top; this only drops the section
  * index out of the list it introduces.
  */

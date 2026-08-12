@@ -92,6 +92,7 @@ import {
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
+import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
 import { reanchorAfterEdit, withLineNumbers } from './reanchor.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
 import {
@@ -5994,8 +5995,16 @@ server.tool(
     // Common slip-ups some models reach for when they see an
     // "ask-a-question" tool — accept them so a naming mistake doesn't
     // surface as "technical error" to the user.
-    prompt: z.string().optional().describe('Alias for `question`.'),
-    description: z.string().optional().describe('Alias for `question`.'),
+    prompt: z
+      .string()
+      .optional()
+      .describe(
+        'Alias for `question`; when both are supplied, this explanatory text is preserved.',
+      ),
+    description: z
+      .string()
+      .optional()
+      .describe('Alias for `question`; distinct text is preserved below the question.'),
     choices: coerceJsonArray(
       z
         .array(z.string())
@@ -6014,7 +6023,7 @@ server.tool(
       .optional()
       .describe('Let the user pick more than one choice. Default false.'),
     taskRef: TaskRefSchema.optional().describe(
-      'Approval-flow context: a task this question is about, in `projectId/num` form. The UI renders the task header above the prompt with an "Open task" link.',
+      'Approval-flow context: a task this question is about, in `projectId/num` form. The current task is attached automatically in task sessions; pass this only to override it. The UI renders the task header above the prompt with an "Open task" link.',
     ),
     documentPath: z
       .string()
@@ -6033,7 +6042,7 @@ server.tool(
     taskRef,
     documentPath,
   }) => {
-    const body = (question ?? prompt ?? description ?? '').trim();
+    const body = composeQuestionPrompt({ question, prompt, description });
     if (!body) {
       return {
         content: [
@@ -6055,6 +6064,7 @@ server.tool(
       };
     }
     try {
+      const effectiveTaskRef = resolveQuestionTaskRef(taskRef, sessionTaskRef);
       const res = await api.askUserQuestion({
         projectId,
         gezelId,
@@ -6063,7 +6073,7 @@ server.tool(
         ...(choices ? { choices } : {}),
         ...(allowWriteIn !== undefined ? { allowWriteIn } : {}),
         ...(multiSelect !== undefined ? { multiSelect } : {}),
-        ...(taskRef ? { taskRef } : {}),
+        ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
       if (res.deduped) {
