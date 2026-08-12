@@ -5,6 +5,7 @@ import {
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
+  isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 
@@ -107,6 +108,18 @@ describe('Electron boundary policies', () => {
     expect(isAllowedPreviewResourceRequest('file:///tmp/secret', origin, true)).toBe(false);
     expect(isAllowedPreviewResourceRequest('javascript:alert(1)', origin, true)).toBe(false);
     expect(isAllowedPreviewResourceRequest('custom://handler', origin, true)).toBe(false);
+  });
+
+  it('classifies only off-daemon network traffic as external renderer egress', () => {
+    const origin = 'https://127.0.0.1:4312';
+    expect(isExternalRendererNetworkRequest(`${origin}/api/config`, origin)).toBe(false);
+    expect(isExternalRendererNetworkRequest('wss://127.0.0.1:4312/events', origin)).toBe(false);
+    expect(isExternalRendererNetworkRequest('https://example.com/pixel', origin)).toBe(true);
+    expect(isExternalRendererNetworkRequest('ws://127.0.0.1:9999/events', origin)).toBe(true);
+    expect(isExternalRendererNetworkRequest('data:image/png;base64,AA==', origin)).toBe(false);
+    expect(isExternalRendererNetworkRequest('blob:null/id', origin)).toBe(false);
+    expect(isExternalRendererNetworkRequest('file:///tmp/secret', origin)).toBe(false);
+    expect(isExternalRendererNetworkRequest('https://example.com', null)).toBe(true);
   });
 
   it('approves exact roots, not their parents or children', () => {

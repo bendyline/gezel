@@ -1,6 +1,7 @@
 import type {
   FileContextResponse,
   FileMapResponse,
+  FileReviewWire,
   MapBlock,
   MapBuilding,
   SecurityFindingWire,
@@ -67,10 +68,15 @@ const monacoEditor = {
 };
 vi.mock('@bendyline/squisq-editor-react', () => ({
   useEditorContext: () => ({ monacoEditor }),
+  // The file viewer passes `fileName`; the review card's read-only
+  // MarkdownField does not — distinct testids keep the two tellable apart.
   EditorShell: (props: RecordedShellProps) => {
     shellProps.push(props);
     return (
-      <div data-testid="editor-stub" data-sections={props.codeContext?.sections.length ?? -1}>
+      <div
+        data-testid={props.fileName ? 'editor-stub' : 'markdown-stub'}
+        data-sections={props.codeContext?.sections.length ?? -1}
+      >
         {props.toolbarSlotLeft}
         <button
           type="button"
@@ -153,6 +159,22 @@ const CONTEXT: FileContextResponse = {
   engine: 'index',
 };
 
+const REVIEW: FileReviewWire = {
+  notesMd: 'Solid parser module with clear error paths.',
+  issues: [
+    { severity: 'major', category: 'bug', message: 'Off-by-one in the range clamp', line: 4 },
+    { severity: 'info', category: 'clarity', message: 'Alias the long generic type' },
+  ],
+  health: 7,
+  healthReason: 'Well structured, one real bug.',
+  model: 'qwen3-4b',
+  provider: 'llama-cpp',
+  gezelId: 'g-boek',
+  gezelName: 'Noor',
+  appVersion: '1.2.3',
+  reviewedAt: '2026-08-11T09:00:00.000Z',
+};
+
 const FINDING: SecurityFindingWire = {
   fingerprint: 'sink.eval:src/a.ts:2',
   path: 'src/a.ts',
@@ -177,6 +199,7 @@ beforeEach(() => {
     content: 'export function run() {}\n',
   }));
   vi.mocked(api.toolFileContext).mockResolvedValue(CONTEXT);
+  vi.mocked(api.toolFileReview).mockResolvedValue({ path: 'src/a.ts', found: false });
   vi.mocked(api.toolScanFindings).mockResolvedValue({
     findings: [],
     counts: { total: 0, bySeverity: {}, byCategory: {}, bySource: {} },
@@ -325,6 +348,92 @@ describe('FileMapView code context', () => {
       expect(screen.queryByText(FINDING.title)).toBeNull();
       expect(api.toolFileMap).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('renders the boekwachter review card with notes, issues, and provenance', async () => {
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'src/a.ts',
+      found: true,
+      review: REVIEW,
+    });
+    await openBlock('src/a.ts');
+
+    expect(await screen.findByText('Boekwachter review · 7/10')).toBeInTheDocument();
+    expect(screen.getByText('Well structured, one real bug.')).toBeInTheDocument();
+    // notes render through the shared read-only markdown field
+    await screen.findByTestId('markdown-stub');
+    expect(shellProps.some((p) => p.initialMarkdown === REVIEW.notesMd)).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '[major] bug — Off-by-one in the range clamp (Line 4)' }),
+    ).toBeInTheDocument();
+    // an issue without a line is plain text, not a button
+    expect(screen.getByText('[info] clarity — Alias the long generic type')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '[info] clarity — Alias the long generic type' }),
+    ).toBeNull();
+    expect(screen.getByText(/its opinion, not a verdict/)).toBeInTheDocument();
+    expect(
+      screen.getByText('Reviewed by qwen3-4b (llama-cpp) · Noor · gezel 1.2.3 · 2026-08-11'),
+    ).toBeInTheDocument();
+  });
+
+  it('clicking an issue row with a line reveals that line in the source', async () => {
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'src/a.ts',
+      found: true,
+      review: REVIEW,
+    });
+    await openBlock('src/a.ts');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '[major] bug — Off-by-one in the range clamp (Line 4)',
+      }),
+    );
+    await waitFor(() => {
+      expect(monacoEditor.setPosition).toHaveBeenLastCalledWith({ lineNumber: 4, column: 1 });
+      expect(monacoEditor.revealLineInCenter).toHaveBeenLastCalledWith(4);
+    });
+  });
+
+  it('shows the not-reviewed-yet line for an indexed file awaiting review', async () => {
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'src/a.ts',
+      found: false,
+      pending: true,
+    });
+    await openBlock('src/a.ts');
+
+    expect(
+      await screen.findByText(
+        'Not reviewed yet — the boekwachter studies files when idle or during Night Shift.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+  });
+
+  it('says a rubric-less file type is never reviewed, without the idle promise', async () => {
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'src/a.ts',
+      found: false,
+      eligible: false,
+    });
+    await openBlock('src/a.ts');
+
+    expect(await screen.findByText('This file type isn’t reviewed.')).toBeInTheDocument();
+    expect(screen.queryByText(/Not reviewed yet/)).toBeNull();
+    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+  });
+
+  it('treats a failed review fetch as no review at all', async () => {
+    vi.mocked(api.toolFileReview).mockRejectedValue(new Error('index offline'));
+    await openBlock('src/a.ts');
+
+    await waitFor(() =>
+      expect(api.toolFileReview).toHaveBeenCalledWith('p1', { path: 'src/a.ts' }),
+    );
+    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+    expect(screen.queryByText(/Not reviewed yet/)).toBeNull();
   });
 
   it('delegates a finding to a developer gezel task', async () => {

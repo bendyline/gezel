@@ -14,8 +14,10 @@ export interface AutostartModule {
 export interface AutostartInstallOptions {
   /** Absolute path to `gezeld.js` (or a wrapper binary) in the user's install dir. */
   gezeldPath: string;
-  /** Absolute path to the node binary to launch gezeld with. */
+  /** Absolute path to the supervisor-installed, manifest-verified Node binary. */
   nodePath: string;
+  /** Bundled ordinary pnpm package entrypoint; required by packaged Electron. */
+  pnpmPath?: string;
   /** `GEZEL_HOME` to pass to the child as an env var. */
   gezelHome: string;
 }

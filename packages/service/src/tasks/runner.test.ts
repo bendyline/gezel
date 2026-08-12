@@ -939,6 +939,36 @@ describe('TaskRunner — night-shift gating + priority', () => {
     expect(runner.snapshot().pendingCount).toBe(1); // the night task is held
   });
 
+  it('holds night-shift handoffs while the index catch-up sweep runs, then releases', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, { nightShift: true });
+    await writeStepTask(2, {});
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    let catchUp = true;
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      isIndexCatchUpActive: () => catchUp,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    runner.enqueueHandoff({ taskRef: 'p1/2', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    // Interactive work flows; the night task waits for a current index.
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/2']);
+    expect(runner.snapshot().pendingCount).toBe(1);
+
+    catchUp = false;
+    await runner.tick();
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/2', 'p1/1']);
+    expect(runner.snapshot().pendingCount).toBe(0);
+  });
+
   it('prioritizes interactive work over a queued night-shift handoff for a scarce slot', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

@@ -641,6 +641,9 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
             usage: {
               model: opts.model,
               inputTokens: event.inputTokens,
+              ...(event.cachedInputTokens > 0
+                ? { cachedInputTokens: event.cachedInputTokens }
+                : {}),
               outputTokens: event.outputTokens,
               durationMs: 0, // overwritten in the close handler
               at: new Date().toISOString(),

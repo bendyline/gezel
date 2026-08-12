@@ -22,6 +22,13 @@ interface LocalTurnStream {
   accepted: boolean;
 }
 
+interface ComposerDraftSnapshot {
+  /** Exact editor source, including attachment markup and surrounding whitespace. */
+  source: string;
+  /** User/programmatic edit generation when the submission started. */
+  editVersion: number;
+}
+
 /**
  * Module-level queue for prefill payloads. A view elsewhere in the
  * app (e.g. the "Complain about this" preview-error button) calls
@@ -231,6 +238,12 @@ export function ChatComposer({
   // composer never regresses to a misleading Send button.
   const [serverInflight, setServerInflight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Session resolution and the send/interrupt POST happen before the daemon
+  // accepts ownership of the draft. Keep a synchronous ref as the actual
+  // double-submit lock (React state does not update until the event returns)
+  // and state only for button feedback.
+  const draftSubmissionPendingRef = useRef(false);
+  const [draftSubmissionPending, setDraftSubmissionPending] = useState(false);
   /**
    * How many turns are ahead of this one on the provider queue, when
    * we're in the `queued` state. The service only emits the `queued`
@@ -250,6 +263,14 @@ export function ChatComposer({
     sessionId: string;
   } | null>(null);
   const draftRef = useRef<string>('');
+  const draftEditVersionRef = useRef(0);
+  // Tracks the length of the previous draft so we can detect "the
+  // user just started typing a new draft" — the signal for the
+  // terminal escape. Only the first transition out of an essentially-
+  // empty draft (≤ 2 chars: empty, or a lone `>`) is a candidate.
+  // After that, the user is mid-composition and a `> ` later in the
+  // text is just a blockquote.
+  const prevDraftLenRef = useRef(0);
   // Render-triggering shadow of `draftRef.current.trim().length > 0`.
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
@@ -277,6 +298,8 @@ export function ChatComposer({
     const existing = draftRef.current.trim();
     const merged = existing ? `${existing}\n\n${queued}` : queued;
     draftRef.current = merged;
+    draftEditVersionRef.current += 1;
+    prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
     setEditorRevision((revision) => revision + 1);
   }, [projectId]);
@@ -532,13 +555,6 @@ export function ChatComposer({
     onTurnStateChange?.(state, error ?? undefined);
   }, [turnActive, queuedAhead, error, onTurnStateChange]);
 
-  // Tracks the length of the previous draft so we can detect "the
-  // user just started typing a new draft" — the signal for the
-  // terminal escape. Only the first transition out of an essentially-
-  // empty draft (≤ 2 chars: empty, or a lone `>`) is a candidate.
-  // After that, the user is mid-composition and a `> ` later in the
-  // text is just a blockquote.
-  const prevDraftLenRef = useRef(0);
   // Stable identity so Squisq's [markdownSource, onChange] effect doesn't
   // re-fire every render. Refs aren't sufficient on their own (the parent
   // still re-renders) — the useState bail-out via the functional updater
@@ -547,7 +563,9 @@ export function ChatComposer({
     (source: string) => {
       const prevLen = prevDraftLenRef.current;
       prevDraftLenRef.current = source.length;
+      const sourceChanged = draftRef.current !== source;
       draftRef.current = source;
+      if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
@@ -567,6 +585,40 @@ export function ChatComposer({
     },
     [onTerminalEscape],
   );
+
+  const beginDraftSubmission = useCallback((): ComposerDraftSnapshot | null => {
+    if (draftSubmissionPendingRef.current) return null;
+    const source = draftRef.current;
+    if (!source.trim()) return null;
+    draftSubmissionPendingRef.current = true;
+    setDraftSubmissionPending(true);
+    return { source, editVersion: draftEditVersionRef.current };
+  }, []);
+
+  const finishDraftSubmission = useCallback(() => {
+    draftSubmissionPendingRef.current = false;
+    setDraftSubmissionPending(false);
+  }, []);
+
+  /**
+   * Clear only the exact draft the daemon accepted. The editor stays mounted
+   * throughout session creation and POST, so failures preserve its source,
+   * attachment nodes, selection, and undo history without a lossy rebuild.
+   * If the user edits while the request is pending, that newer draft wins.
+   */
+  const clearAcceptedDraft = useCallback((snapshot: ComposerDraftSnapshot) => {
+    if (
+      draftEditVersionRef.current !== snapshot.editVersion ||
+      draftRef.current !== snapshot.source
+    ) {
+      return;
+    }
+    draftRef.current = '';
+    prevDraftLenRef.current = 0;
+    setDraftNonEmpty(false);
+    setEditorRevision((revision) => revision + 1);
+    setMentioned([]);
+  }, []);
 
   // Project-chat pivot. When the draft picks up an @-mention for a gezel
   // OTHER than the current primary, fire `onPivotToMention(firstOther.id)`
@@ -597,26 +649,11 @@ export function ChatComposer({
   }, [mentioned, gezelId, projectId, onPivotToMention]);
 
   const send = useCallback(async () => {
-    const userText = draftRef.current.trim();
-    if (!gezelId || !userText || turnActive) return;
+    if (!gezelId || turnActive) return;
     if (engagementOff) return;
-    // Sticky @-mentions tried to reconstitute `@[Label](gezel:id)`
-    // markdown as the next composer's `initialMarkdown` so the chip
-    // would persist across sends. It doesn't work because the squisq
-    // bridge's HTML writes `<span data-mention="true">` while Tiptap's
-    // mention extension parses `span[data-type="mention"]` — different
-    // attribute names, so the chip silently degrades to plain text on
-    // re-mount, the TO row loses the mention, and the next send
-    // doesn't fan out to the mentioned gezel. Until squisq grows an
-    // imperative `insertMention` API (or we patch the parseHTML
-    // mismatch), the only honest behavior is to clear the editor and
-    // make the user re-pick on the next turn — exactly the original
-    // pre-feature flow. Re-introduce sticky behavior when there's a
-    // way to insert a Tiptap mention node directly post-mount.
-    draftRef.current = '';
-    setDraftNonEmpty(false);
-    setEditorRevision((revision) => revision + 1);
-    setMentioned([]);
+    const draftSnapshot = beginDraftSubmission();
+    if (!draftSnapshot) return;
+    const userText = draftSnapshot.source.trim();
     setError(null);
     setQueuedAhead(null);
 
@@ -625,10 +662,9 @@ export function ChatComposer({
       activeSessionId = await ensureSessionId();
     } catch (err) {
       setError(humanizeTransportError((err as Error).message));
+      finishDraftSubmission();
       return;
     }
-
-    setStreaming(true);
 
     const localTurnId = ++localTurnSequenceRef.current;
     const ctrl = new AbortController();
@@ -754,6 +790,7 @@ export function ChatComposer({
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
         acceptedTurn.accepted = true;
+        setStreaming(true);
         // Fast mock/local turns can finish before their `done` frame reaches
         // this renderer. Reconcile immediately instead of waiting 2s for the
         // periodic poll.
@@ -761,6 +798,7 @@ export function ChatComposer({
           /* the periodic poll remains the recovery path */
         });
       }
+      clearAcceptedDraft(draftSnapshot);
       publishOptimisticUserMessage({
         sessionId: activeSessionId,
         gezelId,
@@ -799,6 +837,8 @@ export function ChatComposer({
         // as a broken event stream.
         setError(humanizeTransportError(raw));
       }
+    } finally {
+      finishDraftSubmission();
     }
     await streamPromise;
   }, [
@@ -806,7 +846,10 @@ export function ChatComposer({
     projectId,
     turnActive,
     engagementOff,
+    beginDraftSubmission,
+    clearAcceptedDraft,
     ensureSessionId,
+    finishDraftSubmission,
     settleLocalTurn,
     syncInflight,
     onToolActivity,
@@ -861,7 +904,14 @@ export function ChatComposer({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!turnActiveRef.current || event.key !== 'Escape' || event.defaultPrevented) return;
+      if (
+        !turnActiveRef.current ||
+        draftSubmissionPendingRef.current ||
+        event.key !== 'Escape' ||
+        event.defaultPrevented
+      ) {
+        return;
+      }
       event.preventDefault();
       void stopActiveTurn();
     };
@@ -879,24 +929,21 @@ export function ChatComposer({
    * "busy" through the merged turn via the inflight poll.
    */
   const queueNudge = useCallback(async () => {
-    const userText = draftRef.current.trim();
     const sid = liveSessionIdRef.current;
-    if (!gezelId || !userText || !sid || engagementOff) return;
-    draftRef.current = '';
-    setDraftNonEmpty(false);
-    setEditorRevision((revision) => revision + 1);
-    setMentioned([]);
+    if (!gezelId || !sid || engagementOff) return;
+    const draftSnapshot = beginDraftSubmission();
+    if (!draftSnapshot) return;
+    const userText = draftSnapshot.source.trim();
     setError(null);
     try {
       await api.sendToChatSession(sid, { message: userText, nudge: true });
+      clearAcceptedDraft(draftSnapshot);
     } catch (err) {
-      // Restore the draft so the user's text isn't lost.
-      draftRef.current = userText;
-      setDraftNonEmpty(true);
-      setEditorRevision((revision) => revision + 1);
       setError(humanizeChatError((err as Error).message ?? String(err)));
+    } finally {
+      finishDraftSubmission();
     }
-  }, [gezelId, engagementOff]);
+  }, [gezelId, engagementOff, beginDraftSubmission, clearAcceptedDraft, finishDraftSubmission]);
 
   /**
    * Interrupt: stop the running turn (partial reply is salvaged, same
@@ -907,34 +954,43 @@ export function ChatComposer({
    * replacement turn.
    */
   const interruptWithDraft = useCallback(async () => {
-    const userText = draftRef.current.trim();
     const sid = liveSessionIdRef.current;
-    if (!gezelId || !userText || !sid || engagementOff) return;
-    draftRef.current = '';
-    setDraftNonEmpty(false);
-    setEditorRevision((revision) => revision + 1);
-    setMentioned([]);
+    if (!gezelId || !sid || engagementOff) return;
+    const draftSnapshot = beginDraftSubmission();
+    if (!draftSnapshot) return;
+    const userText = draftSnapshot.source.trim();
     setError(null);
     setServerInflight(true);
     try {
       await api.interruptChatSession(sid, { message: userText });
+      clearAcceptedDraft(draftSnapshot);
       void syncInflight(sid).catch(() => {
         /* the periodic poll remains the recovery path */
       });
     } catch (err) {
-      draftRef.current = userText;
-      setDraftNonEmpty(true);
-      setEditorRevision((revision) => revision + 1);
       setError(humanizeChatError((err as Error).message ?? String(err)));
+    } finally {
+      finishDraftSubmission();
     }
-  }, [gezelId, engagementOff, syncInflight]);
+  }, [
+    gezelId,
+    engagementOff,
+    beginDraftSubmission,
+    clearAcceptedDraft,
+    finishDraftSubmission,
+    syncInflight,
+  ]);
 
   // Enter routing. Squisq reads `submitOnEnter` when the editor mounts;
   // the mid-turn/idle decision must be made at keypress time, not
   // capture time, so the stable closure dereferences this ref. Mid-turn
   // Enter queues a nudge — previously it silently did nothing.
   const submitRef = useRef<() => void>(() => {});
-  submitRef.current = turnActive ? () => void queueNudge() : () => void send();
+  submitRef.current = draftSubmissionPending
+    ? () => {}
+    : turnActive
+      ? () => void queueNudge()
+      : () => void send();
 
   return (
     <div ref={composerRef} className="chat-composer" data-testid="chat-composer">
@@ -1093,6 +1149,7 @@ export function ChatComposer({
                       className="chat-send-btn chat-nudge-btn"
                       data-testid="chat-nudge"
                       onClick={() => void queueNudge()}
+                      disabled={draftSubmissionPending}
                       title="Queue for after this turn (Enter)"
                     >
                       Nudge
@@ -1102,6 +1159,7 @@ export function ChatComposer({
                       className="chat-interrupt-btn"
                       data-testid="chat-interrupt"
                       onClick={() => void interruptWithDraft()}
+                      disabled={draftSubmissionPending}
                       title="Stop this turn and send now"
                     >
                       Interrupt
@@ -1112,6 +1170,7 @@ export function ChatComposer({
                   type="button"
                   className="chat-stop-btn"
                   onClick={() => void stopActiveTurn()}
+                  disabled={draftSubmissionPending}
                   title="Stop generating (Escape)"
                 >
                   ■ Stop
@@ -1123,14 +1182,14 @@ export function ChatComposer({
                 className="chat-send-btn"
                 data-testid="chat-send"
                 onClick={send}
-                disabled={!gezelId || engagementOff}
+                disabled={!gezelId || engagementOff || draftSubmissionPending}
                 title={
                   engagementOff
                     ? 'AI is disabled in Settings → General'
                     : `Enter to send, ${newlineShortcutLabel()} for newline`
                 }
               >
-                Send
+                {draftSubmissionPending ? 'Sending…' : 'Send'}
               </button>
             )
           }

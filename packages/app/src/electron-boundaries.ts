@@ -74,6 +74,25 @@ function isSameDaemonEndpoint(candidate: URL, allowedOrigin: URL): boolean {
 }
 
 /**
+ * Identify outbound renderer traffic that must pass the live daemon policy.
+ * Same-daemon HTTP(S)/WebSocket requests are product IPC, not external egress;
+ * inert and non-network schemes are handled by their existing boundaries.
+ */
+export function isExternalRendererNetworkRequest(
+  candidate: string,
+  allowedOrigin: string | null,
+): boolean {
+  try {
+    const parsed = new URL(candidate);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return false;
+    if (!allowedOrigin) return true;
+    return !isSameDaemonEndpoint(parsed, new URL(allowedOrigin));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Defense-in-depth request policy for resources initiated by a preview frame.
  * CSP is the primary browser boundary; this Electron hook also cancels a
  * request before it can leave the process. Inert data/blob URLs never reach an

@@ -230,7 +230,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' data: blob: https:",
+          "img-src 'self' data: blob:",
           "font-src 'self' data:",
           "media-src 'self' blob: data:",
           "worker-src 'self' blob:",
@@ -240,12 +240,14 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           "frame-src 'self'",
           "frame-ancestors 'none'",
           "form-action 'self'",
+          "webrtc 'block'",
         ].join('; '),
       );
       c.res.headers.set('x-frame-options', 'DENY');
     }
     c.res.headers.set('x-content-type-options', 'nosniff');
     c.res.headers.set('referrer-policy', 'no-referrer');
+    c.res.headers.set('x-dns-prefetch-control', 'off');
   });
 
   // Strip HTTP/2-illegal hop-by-hop headers from every response BEFORE

@@ -93,6 +93,7 @@ import {
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
+  DEFAULT_CLAUDE_POOL_SIZE,
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
@@ -9355,6 +9356,21 @@ export class ChatManager {
   }
 
   /**
+   * Concurrent one-shot width for a provider: its queue's configured
+   * concurrency once initialized (singleton or pooled local engine), else 1.
+   * Bulk callers (index drives) dispatch width-many one-shots to keep the
+   * queue full — the queue still arbitrates its interactive/background lanes.
+   * Live value: an uninitialized provider reports 1 and widens after the
+   * first call spins it up, so callers should re-read between dispatches.
+   */
+  oneShotQueueWidth(name: ProviderName): number {
+    const singleton = this.providers.get(name)?.queue?.describe().concurrency;
+    if (singleton && singleton > 0) return singleton;
+    const pooled = this.localEngineQueueSummaries().get(name as LocalProviderName)?.concurrency;
+    return pooled && pooled > 0 ? pooled : 1;
+  }
+
+  /**
    * Snapshot of the Claude CLI worker pool, enriched with gezel + project
    * display names so the UI pill can render "Maya · Atari Adventure
    * Game" alongside each warm worker. Returns null when the
@@ -9406,8 +9422,8 @@ export class ChatManager {
         claudeSessionId: w.claudeSessionId,
       });
     }
-    // Read the configured cap so the pill can show "2 / 4 warm".
-    const poolSize = config.anthropicCli?.poolSize ?? 4;
+    // Read the configured cap so the pill can show "2 / 10 warm".
+    const poolSize = config.anthropicCli?.poolSize ?? DEFAULT_CLAUDE_POOL_SIZE;
     return {
       size: snap.size,
       poolSize,

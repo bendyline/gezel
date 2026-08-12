@@ -68,12 +68,14 @@ describe('installPnpmIfNeeded', () => {
     const res = await installPnpmIfNeeded({ home, bundleDir });
     expect(res.action).toBe('no-bundle');
     expect(res.entryPath).toBeNull();
+    expect(res.verified).toBe(false);
   });
 
   it('returns no-bundle when the bundle dir exists but has no entrypoint', async () => {
     const res = await installPnpmIfNeeded({ home, bundleDir });
     expect(res.action).toBe('no-bundle');
     expect(res.entryPath).toBeNull();
+    expect(res.verified).toBe(false);
   });
 
   it('installs the JavaScript package on a fresh home dir', async () => {
@@ -83,6 +85,7 @@ describe('installPnpmIfNeeded', () => {
     expect(res.version).toBe('11.15.1');
     expect(res.entryPath).toBeTruthy();
     expect(existsSync(res.entryPath!)).toBe(true);
+    expect(res.verified).toBe(false);
   });
 
   it('reports up-to-date on a subsequent call with same version', async () => {
@@ -117,6 +120,34 @@ describe('installPnpmIfNeeded', () => {
     await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(entryDigest), 'utf8');
     const res = await installPnpmIfNeeded({ home, bundleDir });
     expect(res.action).toBe('fresh-install');
+    expect(res.verified).toBe(true);
+  });
+
+  it('repairs installed pnpm files changed behind matching markers', async () => {
+    await writeBundle('11.15.1');
+    const entryDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(entryDigest), 'utf8');
+    const first = await installPnpmIfNeeded({ home, bundleDir });
+    await writeFile(first.entryPath!, '// tampered pnpm entry\n');
+
+    const next = await installPnpmIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('upgraded');
+    expect(next.verified).toBe(true);
+    await expect(readFile(next.entryPath!, 'utf8')).resolves.toBe('// fake pnpm entry\n');
+  });
+
+  it('does not bypass a broken source manifest for an up-to-date install', async () => {
+    await writeBundle('11.15.1');
+    const entryDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(entryDigest), 'utf8');
+    await installPnpmIfNeeded({ home, bundleDir });
+    const wrongDigest = createHash('sha256').update('different bytes').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(wrongDigest), 'utf8');
+
+    const next = await installPnpmIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('no-bundle');
+    expect(next.entryPath).toBeNull();
+    expect(next.verified).toBe(false);
   });
 
   it('upgrades the same pnpm version when the staged bundle manifest changes', async () => {

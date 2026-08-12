@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
@@ -294,10 +295,11 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   }
 
   async deleteModel(id: string): Promise<void> {
+    const itemDir = resolveModelDirectory(this.modelsRoot, id);
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+    await rm(itemDir, { recursive: true, force: true });
   }
 
   async health(): Promise<AudioEngineHealth> {

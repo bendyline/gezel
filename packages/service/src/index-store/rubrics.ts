@@ -5,8 +5,9 @@ import { sha256 } from './hash.js';
  * Per-file-kind health rubrics for the boekwachter review pass. Rubric
  * presence drives eligibility: a file kind (classify.ts `kind`) with no
  * resolved rubric is never reviewed. Built-ins ship for code / markdown /
- * doc / config; `~/.gezel/rubrics/<kind>.md` replaces a built-in or ADDS a
- * kind (e.g. `text.md` enables reviews for plain-text files).
+ * doc / config / text; `~/.gezel/rubrics/<kind>.md` replaces a built-in or
+ * ADDS a kind. `data` and `other` stay deliberately rubric-less — CSVs and
+ * unknown formats have nothing editorial to judge.
  *
  * The rubric hash folds in REVIEW_PROMPT_VERSION and is stamped on every
  * review row, so editing a rubric — or bumping the version when the prompt
@@ -62,6 +63,17 @@ export const BUILTIN_RUBRICS: Readonly<Record<string, string>> = {
     '- 5-6: works but has redundancy, unclear keys, or questionable values.',
     '- 3-4: contradictory or risky settings.',
     '- 1-2: malformed, or contains plaintext credentials.',
+  ].join('\n'),
+  // Plain text (.txt/.rst/.log). Without this, "documents get editorial
+  // review" was silently false for reStructuredText and text notes. `.log`
+  // noise has an escape hatch: `fileReviews.disabledKinds: ['text']`.
+  text: [
+    'Health rubric for plain-text documents (1-10):',
+    '- 9-10: publication quality — clear, well-organized, correct grammar, accurate and current.',
+    '- 7-8: good — minor wording nits only.',
+    '- 5-6: serviceable — understandable but with clarity, grammar, or structure problems.',
+    '- 3-4: rough — hard to follow, error-ridden, or visibly outdated.',
+    '- 1-2: broken — incoherent, mostly placeholder, or garbled.',
   ].join('\n'),
 };
 

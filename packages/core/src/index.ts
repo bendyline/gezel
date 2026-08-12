@@ -40,6 +40,7 @@ export * from './pnpm-invocation.js';
 export * from './net-retry.js';
 export * from './gezel-version.js';
 export * from './outside-in-paths.js';
+export * from './shadow-paths.js';
 export * from './thread-title.js';
 
 /**

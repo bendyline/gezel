@@ -100,6 +100,11 @@ export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | 
   let db: NodeDb | undefined;
   try {
     db = new DatabaseSync(dbPath, { allowExtension: true });
+    // Arm the busy timeout BEFORE the first file-touching statement: the
+    // header probe below otherwise fails instantly with SQLITE_BUSY whenever
+    // the static worker holds a momentary write lock, and that spurious
+    // failure used to cascade into the home-dir fallback path.
+    setBusyTimeout(db);
     assertReadableHeader(db);
   } catch (error) {
     if (dbPath === ':memory:' || !isCorruptDatabaseError(error)) {
@@ -118,6 +123,7 @@ export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | 
     await quarantineCorruptDatabase(dbPath);
     log.warn(`[sqlite] quarantined corrupt rebuildable index ${dbPath}`);
     db = new DatabaseSync(dbPath, { allowExtension: true });
+    setBusyTimeout(db);
   }
   if (!db) throw new Error('failed to open sqlite index');
 
@@ -181,6 +187,14 @@ function assertReadableHeader(db: NodeDb): void {
   db.prepare('PRAGMA schema_version').get();
 }
 
+function setBusyTimeout(db: NodeDb): void {
+  try {
+    db.exec('PRAGMA busy_timeout=5000;');
+  } catch {
+    /* pragma refusal is not fatal — the open proceeds without the grace */
+  }
+}
+
 function isCorruptDatabaseError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /SQLITE_CORRUPT|SQLITE_NOTADB|database disk image is malformed|file is not a database/i.test(
@@ -188,11 +202,26 @@ function isCorruptDatabaseError(error: unknown): boolean {
   );
 }
 
+/**
+ * Placement errors — this database location cannot be used at all (read-only
+ * tree, permissions, missing parent). Callers may switch to a fallback
+ * location. Deliberately EXCLUDES busy/locked: see `isTransientIndexError`.
+ */
 export function isUnavailableIndexError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /SQLITE_READONLY|SQLITE_CANTOPEN|SQLITE_BUSY|SQLITE_LOCKED|EACCES|EPERM|read-only/i.test(
-    message,
-  );
+  return /SQLITE_READONLY|SQLITE_CANTOPEN|EACCES|EPERM|read-only/i.test(message);
+}
+
+/**
+ * Transient contention — the database EXISTS and works, another connection
+ * just holds it right now (e.g. the static-index worker mid-transaction).
+ * Never treat this as a placement failure: falling back to an alternate
+ * location mints an empty database that then serves zeros. Skip the tick
+ * instead.
+ */
+export function isTransientIndexError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /SQLITE_BUSY|SQLITE_LOCKED/i.test(message);
 }
 
 async function quarantineCorruptDatabase(dbPath: string): Promise<void> {

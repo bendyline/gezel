@@ -18,9 +18,9 @@ afterEach(async () => {
 });
 
 describe('resolveRubrics', () => {
-  it('ships built-ins for code/markdown/doc/config and nothing else', async () => {
+  it('ships built-ins for code/markdown/doc/config/text and nothing else', async () => {
     const rubrics = await resolveRubrics(store);
-    expect([...rubrics.keys()].sort()).toEqual(['code', 'config', 'doc', 'markdown']);
+    expect([...rubrics.keys()].sort()).toEqual(['code', 'config', 'doc', 'markdown', 'text']);
     for (const r of rubrics.values()) {
       expect(r.source).toBe('builtin');
       expect(r.hash).toMatch(/^[0-9a-f]{64}$/);
@@ -40,10 +40,10 @@ describe('resolveRubrics', () => {
 
   it('an override for an uncovered kind ADDS eligibility', async () => {
     await mkdir(join(home, 'rubrics'), { recursive: true });
-    await writeFile(join(home, 'rubrics', 'text.md'), 'Plain-text rubric.\n');
+    await writeFile(join(home, 'rubrics', 'data.md'), 'CSV quality rubric.\n');
     const rubrics = await resolveRubrics(store);
-    expect(rubrics.get('text')?.source).toBe('override');
-    expect(rubrics.size).toBe(5);
+    expect(rubrics.get('data')?.source).toBe('override');
+    expect(rubrics.size).toBe(6);
   });
 
   it('blank override files are ignored', async () => {
@@ -75,6 +75,6 @@ describe('resolveRubrics', () => {
 
   it('degrades to built-ins on a half-mocked Store', async () => {
     const rubrics = await resolveRubrics({});
-    expect(rubrics.size).toBe(4);
+    expect(rubrics.size).toBe(5);
   });
 });

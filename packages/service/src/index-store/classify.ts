@@ -60,6 +60,16 @@ const CODE_LANGS: Record<string, string> = {
   zsh: 'bash',
   lua: 'lua',
   sql: 'sql',
+  // Web-source formats. Without these a project's index.html fell through to
+  // kind 'other' — no review rubric, no security scan, excluded from every
+  // coverage denominator — while the status popover read "complete". Symbol
+  // extraction still gates on GRAMMAR_FILE separately, so a lang here without
+  // a wired grammar degrades to zero symbols, not an error.
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  vue: 'vue',
+  svelte: 'svelte',
 };
 
 const MARKDOWN_EXTS = new Set(['md', 'mdx', 'markdown']);
@@ -114,14 +124,17 @@ const BINARY_EXTS = new Set([
   'avi',
   'mkv',
   'webm',
-  'mp3',
-  'wav',
-  'flac',
-  'ogg',
   'db',
   'sqlite',
   'lock',
 ]);
+
+/**
+ * Audio gets its own modality (was lumped into trivial binary): the AI-shadow
+ * tier can transcribe these via the local STT stack, making recordings
+ * searchable and summarizable like any document.
+ */
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'flac', 'ogg', 'oga', 'm4a', 'aac', 'opus']);
 
 /** Anything larger than this in the text/code tiers is treated as trivial. */
 export const MAX_INDEXABLE_BYTES = 512 * 1024;
@@ -161,6 +174,7 @@ export function classifyFile(path: string, size: number): FileClass {
   }
   if (DOC_EXTS.has(ext)) return { lang: null, kind: 'doc', modality: 'doc', trivial: false };
   if (IMAGE_EXTS.has(ext)) return { lang: null, kind: 'image', modality: 'image', trivial: false };
+  if (AUDIO_EXTS.has(ext)) return { lang: null, kind: 'audio', modality: 'audio', trivial: false };
   if (CONFIG_EXTS.has(ext)) {
     return { lang: ext, kind: 'config', modality: 'text', trivial: size > MAX_INDEXABLE_BYTES };
   }

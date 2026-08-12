@@ -12,7 +12,7 @@ export interface BundleManifestResult {
   reason?: string;
 }
 
-async function sha256File(path: string): Promise<string> {
+export async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((res, rej) => {
     createReadStream(path)

@@ -21,6 +21,7 @@ beforeEach(async () => {
     {
       projectIndexingEnabled: async () => true,
       projectWorkspaceDir: async () => dir,
+      projectArtifactsDir: () => join(home, 'artifacts'),
     } as unknown as Store,
     home,
   );

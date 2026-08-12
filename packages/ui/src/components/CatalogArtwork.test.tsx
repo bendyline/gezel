@@ -38,10 +38,7 @@ afterEach(() => {
 describe('CatalogArtwork', () => {
   it('keeps the caller fallback visible until the image has loaded', async () => {
     const { container } = render(
-      <CatalogArtwork
-        logoUrl="https://cdn.example/logo.webp"
-        fallback={<span>category mark</span>}
-      />,
+      <CatalogArtwork logoUrl="blob:catalog-logo" fallback={<span>category mark</span>} />,
     );
 
     const image = container.querySelector('img');
@@ -57,24 +54,19 @@ describe('CatalogArtwork', () => {
 
   it('retains the fallback after an image fails and tries a new URL', () => {
     const { container, rerender } = render(
-      <CatalogArtwork logoUrl="https://cdn.example/first.webp" fallback={<span>fallback</span>} />,
+      <CatalogArtwork logoUrl="blob:first" fallback={<span>fallback</span>} />,
     );
     fireEvent.error(container.querySelector('img')!);
 
     expect(screen.getByText('fallback')).toBeVisible();
     expect(container.querySelector('img')).toBeNull();
 
-    rerender(
-      <CatalogArtwork logoUrl="https://cdn.example/second.webp" fallback={<span>fallback</span>} />,
-    );
+    rerender(<CatalogArtwork logoUrl="blob:second" fallback={<span>fallback</span>} />);
 
-    expect(container.querySelector('img')).toHaveAttribute(
-      'src',
-      'https://cdn.example/second.webp',
-    );
+    expect(container.querySelector('img')).toHaveAttribute('src', 'blob:second');
   });
 
-  it('passes absolute and data URLs straight to the image without fetching', () => {
+  it('passes inert data URLs straight to the image without fetching', () => {
     const { container } = render(
       <CatalogArtwork logoUrl="data:image/svg+xml,%3Csvg%2F%3E" fallback={<span>fb</span>} />,
     );
@@ -83,6 +75,21 @@ describe('CatalogArtwork', () => {
       'src',
       'data:image/svg+xml,%3Csvg%2F%3E',
     );
+    expect(fetchCatalogFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://cdn.example/logo.webp',
+    'http://cdn.example/logo.webp',
+    '//cdn.example/logo.webp',
+    'javascript:alert(1)',
+  ])('suppresses remote or unsafe catalog artwork %s', (logoUrl) => {
+    const { container } = render(
+      <CatalogArtwork logoUrl={logoUrl} fallback={<span>safe fallback</span>} />,
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('safe fallback')).toBeVisible();
     expect(fetchCatalogFile).not.toHaveBeenCalled();
   });
 
@@ -143,16 +150,39 @@ describe('CatalogArtwork', () => {
     expect(fetchCatalogFile).toHaveBeenCalledTimes(1);
   });
 
-  it('prefers sanitized iconSvg over any logo fetch', () => {
+  it('sanitizes iconSvg and renders it as an isolated image instead of live DOM', () => {
     const { container } = render(
       <CatalogArtwork
-        iconSvg="<svg data-testid='inline'></svg>"
+        iconSvg={
+          '<svg xmlns="http://www.w3.org/2000/svg" onload="steal()"><script>steal()</script><image href="https://attacker.test/pixel"/><path d="M0 0h1v1z" style="fill:red"/></svg>'
+        }
         logoUrl="/api/catalog/toolset/x/file/logo.webp"
         fallback={<span>fb</span>}
       />,
     );
 
-    expect(container.querySelector('svg')).not.toBeNull();
+    const image = container.querySelector('img');
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
+    expect(container.querySelector('svg')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    const isolatedSvg = decodeURIComponent(image!.getAttribute('src')!.split(',')[1]!);
+    expect(isolatedSvg).toContain('<path d="M0 0h1v1z"/>');
+    expect(isolatedSvg).not.toContain('onload');
+    expect(isolatedSvg).not.toContain('script');
+    expect(isolatedSvg).not.toContain('image');
+    expect(isolatedSvg).not.toContain('attacker.test');
     expect(fetchCatalogFile).not.toHaveBeenCalled();
+  });
+
+  it('falls back when iconSvg contains no permitted presentation geometry', () => {
+    const { container } = render(
+      <CatalogArtwork
+        iconSvg={'<svg xmlns="http://www.w3.org/2000/svg"><script>only content</script></svg>'}
+        fallback={<span>safe fallback</span>}
+      />,
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('safe fallback')).toBeVisible();
   });
 });

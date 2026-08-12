@@ -36,7 +36,11 @@ function legacyUnitPath(deps?: LinuxAutostartDeps): string {
   return join(userUnitDir(deps), LEGACY_UNIT_NAME);
 }
 
-function buildUnit(opts: AutostartInstallOptions): string {
+function quoteSystemd(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+export function buildUnit(opts: AutostartInstallOptions): string {
   // user-level unit — `systemctl --user`. No `After=network-online.target`
   // because user-level services start before that target.
   return `[Unit]
@@ -45,8 +49,10 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=${opts.nodePath} ${opts.gezeldPath}
-Environment=GEZEL_HOME=${opts.gezelHome}
+ExecStart=${quoteSystemd(opts.nodePath)} ${quoteSystemd(opts.gezeldPath)}
+Environment=${quoteSystemd(`GEZEL_HOME=${opts.gezelHome}`)}
+Environment=${quoteSystemd(`GEZEL_NODE_PATH=${opts.nodePath}`)}
+${opts.pnpmPath ? `Environment=${quoteSystemd(`GEZEL_PNPM_PATH=${opts.pnpmPath}`)}` : ''}
 Restart=on-failure
 RestartSec=3
 

@@ -21,7 +21,7 @@ import type {
   TaskHandoffBucket,
   TaskRunnerState,
 } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GezelIcon } from './GezelIcon.js';
 import { NightShiftMoonGlyph } from './night-shift-glyph.js';
@@ -29,6 +29,7 @@ import { queueOpenSession } from './pending-open-session.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
 /** Every provider queue the service exposes through `/api/queues`. */
 type QueueProviderName = keyof QueueStatusResponse['providers'];
@@ -443,6 +444,7 @@ export function QueueMeter() {
   // Mirrors EngineStatusPill, which stays visible across the same gap.
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const popoverStyle = useStableHeaderPopoverPosition(rootRef, open, 8);
   const gezelRefreshSeqRef = useRef(0);
   const boringMode = useRoleBasedNameOnlyMode();
 
@@ -672,6 +674,7 @@ export function QueueMeter() {
       </button>
       {open && status && (
         <QueueMeterPanel
+          style={popoverStyle}
           status={status}
           gezels={gezels}
           projects={projects}
@@ -688,6 +691,7 @@ export function QueueMeter() {
 }
 
 function QueueMeterPanel({
+  style,
   status,
   gezels,
   projects,
@@ -698,6 +702,7 @@ function QueueMeterPanel({
   onClose,
   onItemChanged,
 }: {
+  style?: CSSProperties;
   status: QueueStatusResponse;
   gezels: Map<string, GezelSummary>;
   projects: Map<string, Project>;
@@ -758,7 +763,7 @@ function QueueMeterPanel({
   );
 
   return (
-    <div className="queue-meter-panel" aria-label="AI chat queue">
+    <div className="queue-meter-panel" style={style} aria-label="AI chat queue">
       <div className="queue-meter-panel-header">
         <strong>AI chat queue</strong>
         <button

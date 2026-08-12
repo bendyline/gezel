@@ -62,6 +62,16 @@ describe('machine-engine service boundary', () => {
     expect((await machineFetch('/v1/remote/manage/model-fitness')).status).toBe(200);
   });
 
+  it.each([
+    '/v1/remote/manage/image-gen/models',
+    '/v1/remote/manage/audio/stt/models',
+    '/v1/remote/manage/audio/tts/models',
+  ])('rejects encoded model-id traversal on %s', async (modelsPath) => {
+    const response = await machineFetch(`${modelsPath}/..%2F..`, { method: 'DELETE' });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'invalid-model-id' });
+  });
+
   it('does not let an ordinary paired-inference token administer machine models', async () => {
     const paired = await service.context.tokenStore.issue({
       appId: 'paired-test-device',

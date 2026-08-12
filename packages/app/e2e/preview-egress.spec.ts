@@ -24,6 +24,11 @@ test.describe('preview network boundary', () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-preview-egress-'));
     sink = createServer((req, res) => {
       requests.push(req.url ?? '/');
+      if (req.url?.endsWith('-redirect')) {
+        res.writeHead(302, { location: `${req.url}-target` });
+        res.end();
+        return;
+      }
       res.writeHead(200, {
         'access-control-allow-origin': '*',
         'content-type': 'text/plain; charset=utf-8',
@@ -50,12 +55,18 @@ test.describe('preview network boundary', () => {
 
     const workspace = join(home, 'projects', 'default', 'workspace');
     await mkdir(workspace, { recursive: true });
-    for (const mode of ['strict', 'free'] as const) {
+    for (const mode of ['strict', 'free', 'app-off'] as const) {
       await writeFile(
         join(workspace, `${mode}.html`),
         `<!doctype html><body><script>
 fetch(${JSON.stringify(`${sinkOrigin}/${mode}-fetch`)}, { mode: 'no-cors' }).catch(() => {});
+fetch(${JSON.stringify(`${sinkOrigin}/${mode}-redirect`)}, { mode: 'no-cors' }).catch(() => {});
 var image = new Image(); image.src = ${JSON.stringify(`${sinkOrigin}/${mode}-image`)}; document.body.append(image);
+var cssImage = document.createElement('div'); cssImage.style.backgroundImage = ${JSON.stringify(`url(${sinkOrigin}/${mode}-css-image)`)}; cssImage.style.width = '10px'; cssImage.style.height = '10px'; document.body.append(cssImage);
+var stylesheet = document.createElement('link'); stylesheet.rel = 'stylesheet'; stylesheet.href = ${JSON.stringify(`${sinkOrigin}/${mode}-stylesheet`)}; document.head.append(stylesheet);
+var media = document.createElement('video'); media.src = ${JSON.stringify(`${sinkOrigin}/${mode}-media`)}; media.preload = 'auto'; document.body.append(media);
+var frame = document.createElement('iframe'); frame.src = ${JSON.stringify(`${sinkOrigin}/${mode}-frame`)}; document.body.append(frame);
+try { new Worker(${JSON.stringify(`${sinkOrigin}/${mode}-worker`)}); } catch (_) {}
 setTimeout(function(){ location.href = ${JSON.stringify(`${sinkOrigin}/${mode}-navigate`)}; }, 250);
 </script></body>`,
         'utf8',
@@ -111,7 +122,29 @@ setTimeout(function(){ location.href = ${JSON.stringify(`${sinkOrigin}/${mode}-n
     }, lease.url);
   }
 
-  test('blocks strict egress and permits resources—not navigation—when enabled', async () => {
+  test('enforces both network switches at the renderer request sink', async () => {
+    await page.evaluate((origin) => {
+      const image = new Image();
+      image.id = 'ordinary-egress-probe';
+      image.src = `${origin}/ordinary-image`;
+      document.body.append(image);
+      const stylesheet = document.createElement('link');
+      stylesheet.rel = 'stylesheet';
+      stylesheet.href = `${origin}/ordinary-stylesheet`;
+      document.head.append(stylesheet);
+      const frame = document.createElement('iframe');
+      frame.src = `${origin}/ordinary-frame`;
+      document.body.append(frame);
+      void fetch(`${origin}/ordinary-fetch`).catch(() => {});
+      const nested = new Image();
+      nested.src = `data:image/svg+xml,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg"><image href="${origin}/ordinary-svg-nested"/></svg>`,
+      )}`;
+      document.body.append(nested);
+    }, sinkOrigin);
+    await page.waitForTimeout(300);
+    expect(requests.filter((path) => path.startsWith('/ordinary-'))).toEqual([]);
+
     const strictUrl = await mountPreview('strict.html');
     await page.waitForTimeout(700);
     expect(requests.filter((path) => path.startsWith('/strict-'))).toEqual([]);
@@ -134,8 +167,23 @@ setTimeout(function(){ location.href = ${JSON.stringify(`${sinkOrigin}/${mode}-n
     const freeUrl = await mountPreview('free.html');
     await expect.poll(() => requests.includes('/free-fetch')).toBe(true);
     await expect.poll(() => requests.includes('/free-image')).toBe(true);
+    await expect.poll(() => requests.includes('/free-redirect')).toBe(true);
+    await expect.poll(() => requests.includes('/free-redirect-target')).toBe(true);
     await page.waitForTimeout(400);
     expect(requests).not.toContain('/free-navigate');
     await expect(page.locator('#egress-preview')).toHaveAttribute('src', freeUrl);
+
+    const appNetworkOff = await authenticatedRequest('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify({
+        securityPolicy: { ...freePolicy, level: 'custom', allowAppNetwork: false },
+      }),
+    });
+    expect(appNetworkOff.ok).toBe(true);
+
+    const blockedUrl = await mountPreview('app-off.html');
+    await page.waitForTimeout(700);
+    expect(requests.filter((path) => path.startsWith('/app-off-'))).toEqual([]);
+    await expect(page.locator('#egress-preview')).toHaveAttribute('src', blockedUrl);
   });
 });

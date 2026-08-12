@@ -49,6 +49,30 @@ export const FileReviewWireSchema = z.object({
   healthReason: z.string(),
   /** Model that produced the review, null when unrecorded. */
   model: z.string().nullable(),
+  /** Provider the model ran on; null on rows written before provenance landed. */
+  provider: z.string().nullable().optional(),
+  /** The Boekwachter gezel whose persona ran the review, when one was on the roster. */
+  gezelId: z.string().nullable().optional(),
+  gezelName: z.string().nullable().optional(),
+  /** Gezel app version that wrote the row (release-stamped; `0.0.0` in dev). */
+  appVersion: z.string().nullable().optional(),
   reviewedAt: z.string().nullable(),
 });
 export type FileReviewWire = z.infer<typeof FileReviewWireSchema>;
+
+/**
+ * One-line provenance rendering shared by the MCP tools and the UI review
+ * card: `Reviewed by <model> (<provider>) · <gezel> · gezel <version> · <date>`.
+ * Null segments drop out; null when even the model is unrecorded.
+ */
+export function formatReviewProvenance(
+  r: Pick<FileReviewWire, 'model' | 'reviewedAt'> &
+    Partial<Pick<FileReviewWire, 'provider' | 'gezelName' | 'appVersion'>>,
+): string | null {
+  if (!r.model) return null;
+  const parts = [`Reviewed by ${r.model}${r.provider ? ` (${r.provider})` : ''}`];
+  if (r.gezelName) parts.push(r.gezelName);
+  if (r.appVersion) parts.push(r.appVersion === '0.0.0' ? 'gezel dev' : `gezel ${r.appVersion}`);
+  if (r.reviewedAt) parts.push(r.reviewedAt.slice(0, 10));
+  return parts.join(' · ');
+}

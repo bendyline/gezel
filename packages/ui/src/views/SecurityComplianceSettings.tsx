@@ -31,7 +31,7 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowExternalServices',
     label: 'External services',
-    help: 'Let gezellen reach the open web — search, page fetches, and downloading third-party toolsets. Off keeps everything local; manual GitHub pulls and model downloads are unaffected.',
+    help: 'Let gezellen reach the open web and let project previews load external resources. Off blocks those paths; cloud chat has its own switch, and manual GitHub pulls and model downloads are unaffected.',
   },
   {
     key: 'allowScriptExecution',
@@ -40,8 +40,8 @@ const TOGGLES: ReadonlyArray<{
   },
   {
     key: 'allowAppNetwork',
-    label: 'App background network',
-    help: 'Allow the desktop app to check for updates in the background. Off when you need to guarantee the app makes no network calls of its own.',
+    label: 'App network',
+    help: 'Allow desktop-owned network traffic, including update checks and external resources in project previews. Off blocks background traffic and automatic renderer egress.',
   },
 ];
 

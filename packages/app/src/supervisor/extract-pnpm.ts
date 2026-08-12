@@ -19,6 +19,8 @@ export interface PnpmInstallResult {
   /** Shipped version from bundle's `version.txt`, or null when absent. */
   version: string | null;
   action: 'fresh-install' | 'upgraded' | 'up-to-date' | 'no-bundle';
+  /** True only when the shipped manifest authenticated the installed files. */
+  verified: boolean;
 }
 
 /**
@@ -36,14 +38,15 @@ export function defaultPnpmBundleDir(mainMetaUrl: string): string {
  * `<home>/bin/pnpm-runtime/` on first launch, or upgrade it when a newer
  * bundle lands with a later Gezel release. The JavaScript entrypoint is
  * invoked with Gezel's bundled Node runtime on every packaged platform.
- * A missing bundle is not fatal: callers fall back to pnpm on PATH.
+ * A missing bundle is not fatal. Packaged callers fail closed; development
+ * callers may explicitly fall back to pnpm on PATH.
  */
 export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<PnpmInstallResult> {
   const { home, bundleDir, logger } = opts;
 
   if (!existsSync(bundleDir)) {
-    logger?.info?.(`[supervisor] no pnpm bundle at ${bundleDir}; will fall back to system pnpm`);
-    return { entryPath: null, version: null, action: 'no-bundle' };
+    logger?.info?.(`[supervisor] no pnpm bundle at ${bundleDir}`);
+    return { entryPath: null, version: null, action: 'no-bundle', verified: false };
   }
 
   const versionFilePath = join(bundleDir, 'version.txt');
@@ -60,10 +63,8 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     !existsSync(bundleReflinkCompat) ||
     !existsSync(versionFilePath)
   ) {
-    logger?.info?.(
-      '[supervisor] pnpm bundle dir exists but is incomplete; falling back to system pnpm',
-    );
-    return { entryPath: null, version: null, action: 'no-bundle' };
+    logger?.info?.('[supervisor] pnpm bundle dir exists but is incomplete');
+    return { entryPath: null, version: null, action: 'no-bundle', verified: false };
   }
 
   const shippedVersion = (await readFile(versionFilePath, 'utf8')).trim();
@@ -89,36 +90,48 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     /* older or development install */
   }
 
+  const requiredFiles = [
+    'bin/pnpm.mjs',
+    'dist/pnpm.mjs',
+    'dist/worker.js',
+    'dist/gezel-reflink-compat.cjs',
+  ];
+
+  // Validate the source before the up-to-date shortcut. A version and copied
+  // manifest marker alone cannot authenticate installed files that changed
+  // after the first launch.
+  const integrity = await verifyBundleManifest(bundleDir, requiredFiles);
+  if (!integrity.ok) {
+    logger?.warn?.(
+      `[supervisor] pnpm bundle failed integrity check (${integrity.reason}); refusing to install`,
+    );
+    return { entryPath: null, version: null, action: 'no-bundle', verified: false };
+  }
+
+  const installedRuntimeManifest = existsSync(join(installedRuntimeDir, 'sha256.txt'))
+    ? (await readFile(join(installedRuntimeDir, 'sha256.txt'), 'utf8')).trim()
+    : null;
+  const installedIntegrity =
+    shippedManifest !== null &&
+    installedManifest === shippedManifest &&
+    installedRuntimeManifest === shippedManifest
+      ? await verifyBundleManifest(installedRuntimeDir, requiredFiles)
+      : null;
+
   if (
     installedVersion === shippedVersion &&
     existsSync(installedEntry) &&
     existsSync(join(installedRuntimeDir, 'dist', 'pnpm.mjs')) &&
     existsSync(join(installedRuntimeDir, 'dist', 'worker.js')) &&
     existsSync(join(installedRuntimeDir, 'dist', 'gezel-reflink-compat.cjs')) &&
-    (shippedManifest === null || installedManifest === shippedManifest)
+    (shippedManifest === null || installedIntegrity?.ok === true)
   ) {
     return {
       entryPath: installedEntry,
       version: installedVersion,
       action: 'up-to-date',
+      verified: !integrity.skipped,
     };
-  }
-
-  // Re-hash the load-bearing bundle files against the bundle's sha256.txt
-  // (written by fetch-pnpm.mjs) before installing. A
-  // corrupted or tampered bundle must not land in <home>/bin — fall
-  // back to system pnpm.
-  const integrity = await verifyBundleManifest(bundleDir, [
-    'bin/pnpm.mjs',
-    'dist/pnpm.mjs',
-    'dist/worker.js',
-    'dist/gezel-reflink-compat.cjs',
-  ]);
-  if (!integrity.ok) {
-    logger?.warn?.(
-      `[supervisor] pnpm bundle failed integrity check (${integrity.reason}); refusing to install — falling back to system pnpm`,
-    );
-    return { entryPath: null, version: null, action: 'no-bundle' };
   }
 
   await mkdir(installDir, { recursive: true });
@@ -146,10 +159,20 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
   if (!st.isFile()) {
     throw new Error(`[supervisor] post-copy verify failed: ${installedEntry} missing`);
   }
+  const copiedIntegrity = await verifyBundleManifest(installedRuntimeDir, requiredFiles);
+  if (!copiedIntegrity.ok || copiedIntegrity.skipped !== integrity.skipped) {
+    await rm(installedRuntimeDir, { recursive: true, force: true });
+    await rm(installedVersionFile, { force: true });
+    await rm(installedManifestFile, { force: true });
+    throw new Error(
+      `[supervisor] post-copy verify failed: ${copiedIntegrity.reason ?? 'pnpm manifest state changed during installation'}`,
+    );
+  }
 
   return {
     entryPath: installedEntry,
     version: shippedVersion,
     action: installedVersion ? 'upgraded' : 'fresh-install',
+    verified: !integrity.skipped,
   };
 }

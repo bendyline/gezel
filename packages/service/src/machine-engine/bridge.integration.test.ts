@@ -82,6 +82,17 @@ describe('split user + machine services', () => {
     expect((await api('/api/model-fitness')).status).toBe(200);
   });
 
+  it.each([
+    '/api/image-gen/models',
+    '/api/audio/stt/models',
+    '/api/audio/tts/models',
+    '/api/recognition/models',
+  ])('rejects encoded model-id traversal through %s', async (modelsPath) => {
+    const response = await api(`${modelsPath}/..%2F..`, { method: 'DELETE' });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'invalid-model-id' });
+  });
+
   it('sources memory reservations and pool boundaries from the machine engine', async () => {
     const GiB = 1024 ** 3;
     const machineChat = machine.context.chat;

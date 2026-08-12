@@ -162,6 +162,7 @@ describe('QueueMeter — preparing window', () => {
       ).not.toBeNull();
     });
     const panel = await screen.findByLabelText('AI chat queue');
+    expect(panel).toHaveStyle({ position: 'fixed' });
     expect(within(panel).getByText('Alejandro')).toBeInTheDocument();
     expect(within(panel).getByText('Language Trainer · Spanish lessons')).toBeInTheDocument();
     expect(within(panel).queryByText(/project-7/)).not.toBeInTheDocument();

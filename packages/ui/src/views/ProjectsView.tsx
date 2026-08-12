@@ -2,11 +2,14 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
   CodexPermissionMode,
+  FileReviewResponse,
   GezelSummary,
+  ListFileIssuesResponse,
   Project,
   ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
+  WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import {
   getProjectType,
@@ -14,7 +17,11 @@ import {
   normalizeCodexPermissionMode,
   resolveProjectTypeId,
 } from '@bendyline/gezel';
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
@@ -52,6 +59,12 @@ import {
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
+import {
+  WorkspaceIndexPane,
+  WorkspaceIndexToggle,
+  indexTone,
+  workspaceIndexLabel,
+} from '../components/WorkspaceIndexPane.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
@@ -153,6 +166,18 @@ function parentDir(path: string): string {
 function basenameOf(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash === -1 ? path : path.slice(slash + 1);
+}
+
+function indexedIssueCountForEntry(
+  entry: FileEntry,
+  issues: ListFileIssuesResponse | null,
+): number {
+  if (!issues) return 0;
+  if (!entry.isDirectory) {
+    return issues.issues.filter((issue) => issue.path === entry.path).length;
+  }
+  const prefix = `${entry.path.replace(/\/$/, '')}/`;
+  return issues.issues.filter((issue) => issue.path.startsWith(prefix)).length;
 }
 
 type FileTab = 'workspace' | 'artifacts';
@@ -512,6 +537,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     source: FileTab;
     outsideIn?: OutsideInOpenFile;
   } | null>(null);
+  const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus | null>(
+    null,
+  );
+  const [workspaceIssues, setWorkspaceIssues] = useState<ListFileIssuesResponse | null>(null);
+  const [workspaceIndexError, setWorkspaceIndexError] = useState<string | null>(null);
+  const [workspaceReview, setWorkspaceReview] = useState<FileReviewResponse | null>(null);
+  const [workspaceReviewLoading, setWorkspaceReviewLoading] = useState(false);
+  const [workspaceReviewError, setWorkspaceReviewError] = useState<string | null>(null);
+  const [workspaceIndexPaneOpen, setWorkspaceIndexPaneOpen] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   // Output-pane visibility override. `null` = follow the auto default
   // (visible when the workspace has a previewable index.html); an
@@ -787,6 +821,73 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     void refreshProjectFiles(selected.id);
   }, [fileTab, selected, refreshProjectFiles]);
 
+  // The workspace tree is an index surface as well as a file browser. Poll
+  // the cheap status endpoint and the current review-issue rollup together;
+  // both are derived data, so a failed request never blocks file access.
+  useEffect(() => {
+    if (fileTab !== 'workspace' || !selectedProjectId) return;
+    let cancelled = false;
+    setWorkspaceIndexStatus(null);
+    setWorkspaceIssues(null);
+    setWorkspaceIndexError(null);
+
+    const refreshWorkspaceIndexData = async () => {
+      const [statusResult, issuesResult] = await Promise.allSettled([
+        api.getProjectIndexStatus(selectedProjectId),
+        api.toolListFileIssues(selectedProjectId, { maxResults: 1000 }),
+      ]);
+      if (cancelled) return;
+      if (statusResult.status === 'fulfilled') setWorkspaceIndexStatus(statusResult.value);
+      if (issuesResult.status === 'fulfilled') setWorkspaceIssues(issuesResult.value);
+      if (statusResult.status === 'rejected' && issuesResult.status === 'rejected') {
+        const reason = statusResult.reason;
+        setWorkspaceIndexError(reason instanceof Error ? reason.message : String(reason));
+      } else {
+        setWorkspaceIndexError(null);
+      }
+    };
+
+    void refreshWorkspaceIndexData();
+    const timer = window.setInterval(() => void refreshWorkspaceIndexData(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [fileTab, selectedProjectId]);
+
+  const workspaceReviewPath =
+    fileTab === 'workspace' && openFile?.source === 'workspace' ? openFile.path : null;
+  const reviewedFileCount = workspaceIndexStatus?.enrichment?.reviews?.reviewed;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a completed background review should refresh the selected file even when its path is unchanged.
+  useEffect(() => {
+    if (!selectedProjectId || !workspaceReviewPath) {
+      setWorkspaceReview(null);
+      setWorkspaceReviewLoading(false);
+      setWorkspaceReviewError(null);
+      return;
+    }
+    let cancelled = false;
+    setWorkspaceReview(null);
+    setWorkspaceReviewLoading(true);
+    setWorkspaceReviewError(null);
+    api
+      .toolFileReview(selectedProjectId, { path: workspaceReviewPath })
+      .then((response) => {
+        if (!cancelled) setWorkspaceReview(response);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setWorkspaceReviewError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceReviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId, workspaceReviewPath, reviewedFileCount]);
+
   useEffect(() => {
     if (tab !== 'packages' || !selected) {
       setPackageScripts({});
@@ -931,6 +1032,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
+      setWorkspaceIndexPaneOpen(false);
       setTab('chat');
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
@@ -1019,6 +1121,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
+      setWorkspaceIndexPaneOpen(false);
       setTab('chat');
       setWorkingDirDraft('');
       setGitHubUrlDraft('');
@@ -1490,6 +1593,19 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const isReadOnly = openFile?.outsideIn
     ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
     : fileTab === 'workspace';
+  const selectedWorkspaceIssueCount = workspaceReviewPath
+    ? indexedIssueCountForEntry(
+        { name: basenameOf(workspaceReviewPath), path: workspaceReviewPath, isDirectory: false },
+        workspaceIssues,
+      )
+    : 0;
+  const workspaceIndexToggle: ReactNode = workspaceReviewPath ? (
+    <WorkspaceIndexToggle
+      open={workspaceIndexPaneOpen}
+      issueCount={selectedWorkspaceIssueCount}
+      onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
+    />
+  ) : null;
 
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the
@@ -2590,7 +2706,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   )}
 
                   {fileTab !== null && (
-                    <div className="project-files-layout">
+                    <div
+                      className={`project-files-layout project-files-layout-${fileTab}${fileTab === 'workspace' && workspaceIndexPaneOpen ? ' has-index-pane' : ''}`}
+                    >
                       <div className="file-tree-panel">
                         <div className="file-tree-header">
                           <span className="file-tree-title">
@@ -2604,6 +2722,33 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           >
                             Open
                           </button>
+                          {fileTab === 'workspace' && (
+                            <div
+                              className="workspace-tree-index-summary"
+                              aria-live="polite"
+                              title={
+                                workspaceIndexError ??
+                                (workspaceIssues
+                                  ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed`
+                                  : workspaceIndexLabel(workspaceIndexStatus))
+                              }
+                            >
+                              <span
+                                className={`workspace-index-state workspace-index-state-${indexTone(workspaceIndexStatus)}`}
+                              >
+                                <span aria-hidden="true" />
+                                {workspaceIndexError
+                                  ? 'Index unavailable'
+                                  : workspaceIndexLabel(workspaceIndexStatus)}
+                              </span>
+                              {workspaceIssues && workspaceIssues.counts.total > 0 && (
+                                <span className="workspace-tree-issue-total">
+                                  {workspaceIssues.counts.total} issue
+                                  {workspaceIssues.counts.total === 1 ? '' : 's'}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         {fileTab === 'artifacts' && (
                           <div style={{ padding: '0.35rem 0.5rem' }}>
@@ -2640,6 +2785,22 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             selectedPath={openFile?.path}
                             onSelect={(e) => void openFileEntry(e, fileTab)}
                             onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
+                            trailingForEntry={
+                              fileTab === 'workspace'
+                                ? (entry) => {
+                                    const count = indexedIssueCountForEntry(entry, workspaceIssues);
+                                    return count > 0 ? (
+                                      <span
+                                        className="workspace-tree-issue-count"
+                                        title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
+                                        aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
+                                      >
+                                        {count}
+                                      </span>
+                                    ) : null;
+                                  }
+                                : undefined
+                            }
                             actionsForEntry={(entry) => {
                               if (
                                 entry.isDirectory ||
@@ -2681,6 +2842,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               editorTheme={editorTheme}
                               onChange={handleEditorContentChange}
                               onSave={saveArtifact}
+                              toolbarIndexToggle={workspaceIndexToggle}
                             />
                           ) : openFile.content === MEDIA_IMAGE ? (
                             <div className="image-preview">
@@ -2735,6 +2897,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               onEditorChange={handleEditorContentChange}
                               onSave={saveArtifact}
                               onComplainAboutPreviewError={complainAboutPreviewError}
+                              toolbarIndexToggle={workspaceIndexToggle}
                             />
                           ) : isMarkdown(openFile.path) && openFile.source === 'artifacts' ? (
                             <ProjectMarkdownArtifactEditor
@@ -2759,15 +2922,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 showPlayTab={false}
                                 fullWidth
                                 toolbarSlotRight={
-                                  !isReadOnly ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void saveArtifact()}
-                                      style={{ marginLeft: '0.5rem' }}
-                                    >
-                                      Save
-                                    </button>
-                                  ) : undefined
+                                  <>
+                                    {workspaceIndexToggle}
+                                    {!isReadOnly && (
+                                      <button
+                                        type="button"
+                                        onClick={() => void saveArtifact()}
+                                        style={{ marginLeft: '0.5rem' }}
+                                      >
+                                        Save
+                                      </button>
+                                    )}
+                                  </>
                                 }
                               />
                             </div>
@@ -2779,6 +2945,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </p>
                         )}
                       </div>
+                      {fileTab === 'workspace' && workspaceIndexPaneOpen && (
+                        <WorkspaceIndexPane
+                          path={workspaceReviewPath}
+                          status={workspaceIndexStatus}
+                          issues={workspaceIssues}
+                          review={workspaceReview}
+                          loading={workspaceReviewLoading}
+                          error={workspaceReviewError}
+                          onClose={() => setWorkspaceIndexPaneOpen(false)}
+                        />
+                      )}
                     </div>
                   )}
 
@@ -2862,6 +3039,7 @@ function ProjectOutsideInEditor({
   editorTheme,
   onChange,
   onSave,
+  toolbarIndexToggle,
 }: {
   projectId: string;
   file: {
@@ -2874,6 +3052,7 @@ function ProjectOutsideInEditor({
   editorTheme: 'light' | 'dark';
   onChange: (source: string) => void;
   onSave: (content?: string) => void | Promise<void>;
+  toolbarIndexToggle?: ReactNode;
 }) {
   const { layout, sourcePath } = outsideIn;
   const autosave = useSerializedAutosave({
@@ -2933,6 +3112,7 @@ function ProjectOutsideInEditor({
         }
         toolbarSlotRight={
           <>
+            {toolbarIndexToggle}
             {!isReadOnly && <AutosaveStatus autosave={autosave} />}
             {!isReadOnly && (
               <button
@@ -3154,6 +3334,7 @@ function HtmlFileViewer({
   onEditorChange,
   onSave,
   onComplainAboutPreviewError,
+  toolbarIndexToggle,
 }: {
   projectId: string;
   file: { path: string; content: string; source: FileTab };
@@ -3161,6 +3342,7 @@ function HtmlFileViewer({
   editorTheme: 'light' | 'dark';
   onEditorChange: (source: string) => void;
   onSave: () => void | Promise<void>;
+  toolbarIndexToggle?: ReactNode;
   /**
    * Optional "Complain about this" handler — rendered per-entry on
    * the preview-error panel. The parent seeds a project-chat
@@ -3275,15 +3457,18 @@ function HtmlFileViewer({
             showPlayTab={false}
             fullWidth
             toolbarSlotRight={
-              !isReadOnly ? (
-                <button
-                  type="button"
-                  onClick={() => void onSave()}
-                  style={{ marginLeft: '0.5rem' }}
-                >
-                  Save
-                </button>
-              ) : undefined
+              <>
+                {toolbarIndexToggle}
+                {!isReadOnly && (
+                  <button
+                    type="button"
+                    onClick={() => void onSave()}
+                    style={{ marginLeft: '0.5rem' }}
+                  >
+                    Save
+                  </button>
+                )}
+              </>
             }
           />
         </div>

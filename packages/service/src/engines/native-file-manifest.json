@@ -1,56 +1,56 @@
 {
   "schemaVersion": 2,
-  "release": "0.1.31",
+  "release": "0.1.36",
   "platforms": {
     "darwin-arm64": {
       "files": {
         "gezel-ds4-server": {
-          "sha256": "3becf2b73f5bed99d4eaaab1d3d02c02fa0013d13244589cfbad2a096f7fbef0",
-          "sizeBytes": 2132368,
+          "sha256": "d0c243c6437c01fa8477cae282f937b7d2b8e56b1541608aee4b8f25521b31a5",
+          "sizeBytes": 2206544,
           "signature": "bendyline"
         },
         "gezel-sd-server": {
-          "sha256": "88ebdcb7ea526b7e80a0cd52e55c4512c43d6d723b1afdece78c2fc461b90867",
+          "sha256": "8863aeb1f0e65dfb80a7aa9e7127b52d683604ad150d703e1b24dbb6b51e2f62",
           "sizeBytes": 57789840,
           "signature": "bendyline"
         },
         "gezel-whisper-server": {
-          "sha256": "6f39d25e4f6e804f48991eda9cb2c7a2dd2428630a188056e87378a0de814691",
+          "sha256": "d19697a2c3a84296bb2c2a2d608493604975a336a4544895d87219bd5a6416ea",
           "sizeBytes": 1241648,
           "signature": "bendyline"
         },
         "libggml-base.0.15.1.dylib": {
-          "sha256": "dd5878f9a648b942162ab539d8e6eab19e805ea210ec9a84809a033384ca8a53",
+          "sha256": "d6f899b3a3a4f811e829e10ef3db5ff68a2bd01414ffdcc5c5a7e1afab5f8f85",
           "sizeBytes": 724176,
           "signature": "bendyline"
         },
         "libggml-blas.0.15.1.dylib": {
-          "sha256": "ec135c155933b80dd1190ac4a351473dcb72f39f5bf363a27a62097868506bfe",
+          "sha256": "a4617fd69de063bcbead386adf6d233f52a44ba8cf65f81ea312586fd72caf72",
           "sizeBytes": 76688,
           "signature": "bendyline"
         },
         "libggml-cpu.0.15.1.dylib": {
-          "sha256": "7fd97791f863164a7685f682d0cd42cd15fd0a05ce285d7795a568ba8df38725",
+          "sha256": "5ef72cdaf89a243617203fcdab6fbcb844677018bf88a45dada134ec33643c5a",
           "sizeBytes": 842736,
           "signature": "bendyline"
         },
         "libggml-metal.0.15.1.dylib": {
-          "sha256": "5384350e691aa2739b51afe4c5c908a92c7e519443aa0a4a828b6111b551d4d3",
+          "sha256": "ca91d95f8f303a796346d608158a22d295095b5ba4a915755584dc70e802c1a9",
           "sizeBytes": 847200,
           "signature": "bendyline"
         },
         "libggml.0.15.1.dylib": {
-          "sha256": "9ed14fd149cbdba695463655992e24eda0768cf49caa8187e72dcc297780fb77",
+          "sha256": "5e033d22caec6dc541093e3b338e5f74db20414d1214344be69ed625386e5811",
           "sizeBytes": 77728,
           "signature": "bendyline"
         },
         "libwhisper.1.9.1.dylib": {
-          "sha256": "04cf2ee077f21ab06aa28c8ead1b1573cdf0d102fe2e288329f7017b4e7c52dd",
+          "sha256": "633f7d875a089bcf3d63d7d76d0c075ced02aea1828b007c48fa3478baec46c9",
           "sizeBytes": 439520,
           "signature": "bendyline"
         },
         "uv": {
-          "sha256": "03f63dc1f7f14cd881904e5923d033122b3bf165284a8b6f2edbec032166351f",
+          "sha256": "38f73e879600f28dc7fe0e5b708df9cc2fa9f13b79cd663edb50f23396484405",
           "sizeBytes": 51993360,
           "signature": "bendyline"
         }
@@ -73,84 +73,84 @@
     "darwin-arm64-metal": {
       "files": {
         "gezel-llama-server": {
-          "sha256": "eb76e14d198921773ffd4866deb124256d896d1bc9e88f9dc908d7f7acd6b6e5",
+          "sha256": "b47cce3d50b391c62605a672986ee4648ee951ea34e174b0799d5e9e9f805029",
           "sizeBytes": 51568,
           "signature": "bendyline"
         },
-        "libggml-base.0.17.0.dylib": {
-          "sha256": "70150092cb0a1a32f82c98ab1aab32bf5cc79255d3c5161c095afafba84ee804",
-          "sizeBytes": 743728,
+        "libggml-base.0.19.0.dylib": {
+          "sha256": "8ed72a76521dd00034acbfa11c528a0beec282fa7429caf163a155f477ee0b82",
+          "sizeBytes": 744000,
           "signature": "bendyline"
         },
         "libggml-blas.so": {
-          "sha256": "d55e583454f6c2f17eed98e84d14d6255e160f048b7904fa7d817950ba361f8e",
+          "sha256": "5fea8f86b5c4cc17c3957154dbc6eb6c36591019b536d9259983140c97448a30",
           "sizeBytes": 76752,
           "signature": "bendyline"
         },
         "libggml-cpu-apple_m1.so": {
-          "sha256": "6f6920331a33128247d124fabeaf5389a12beb82e77696e98aa34fbf3c823acd",
+          "sha256": "8d4ff74f1386a72e83e399f2c388a9d86770a4afb3cb9dba7c20c0d4262ad5fe",
           "sizeBytes": 947568,
           "signature": "bendyline"
         },
         "libggml-cpu-apple_m2_m3.so": {
-          "sha256": "a33e7d972d7f7df6da3d94b3ba48fc8289b194cf2965fd7a0d91cbc3edae60bb",
+          "sha256": "d9b4cf65f6febc6968d34ac0d2dd552418b55bb932d005d38dc0f24b20500d63",
           "sizeBytes": 963984,
           "signature": "bendyline"
         },
         "libggml-cpu-apple_m4.so": {
-          "sha256": "8f3a24fd41d22685bffd4ffed52a5a312eb1e8bc1212045ea61621aa0f692fd4",
+          "sha256": "1889047d079bca123600c8482ac84750cce53bf66a58a3bacda4cd1045a2f63f",
           "sizeBytes": 963984,
           "signature": "bendyline"
         },
         "libggml-metal.so": {
-          "sha256": "44c43d5129044f20d98eefae3e3a4c73d6a1dde2adc8006b805008481bf31389",
-          "sizeBytes": 880640,
+          "sha256": "31a8c879ada8e8375065e27b2794d752c05eccb58b41de03aa619c14e4b8e183",
+          "sizeBytes": 897632,
           "signature": "bendyline"
         },
-        "libggml.0.17.0.dylib": {
-          "sha256": "f8861ce60dcf1debe68e748c73fb9d102127465cf0ddf2270cdea4971b459093",
+        "libggml.0.19.0.dylib": {
+          "sha256": "dabf50ea5732723c9d4b774360db8b7c5f950da3f83b6700ae6b26a8336fa520",
           "sizeBytes": 77984,
           "signature": "bendyline"
         },
-        "libllama-common.0.0.10099.dylib": {
-          "sha256": "ebb21146d4a2b1749751f7cf73aa77222feed9e629cfc0bb3330fb98d2a98d27",
-          "sizeBytes": 5009856,
+        "libllama-common.0.0.10353.dylib": {
+          "sha256": "0e8f316215cf34dde1d145f0727cc7d80527b746ab2bee9ff91e96284b70ad36",
+          "sizeBytes": 5187984,
           "signature": "bendyline"
         },
         "libllama-server-impl.dylib": {
-          "sha256": "70c32c1382ad0ccf5e2476a06879814251e2b3f0f426780e31375d5db1b921a9",
-          "sizeBytes": 6598864,
+          "sha256": "7ac029bb1c4b9de791fe5e02e7ad9b7434416695f6604be27c29c1202aaef529",
+          "sizeBytes": 6853600,
           "signature": "bendyline"
         },
-        "libllama.0.0.10099.dylib": {
-          "sha256": "034fcc448bd306de7a9cd7bf4a61c71b8cf52325b48afd1da81257a4209d1170",
-          "sizeBytes": 2668048,
+        "libllama.0.0.10353.dylib": {
+          "sha256": "5a08a431639bc8c1e243654b839b0499c276b985c2f455cfc7352e08d41de1d1",
+          "sizeBytes": 2834400,
           "signature": "bendyline"
         },
-        "libmtmd.0.0.10099.dylib": {
-          "sha256": "a5b1b461b9a7d920217908158c1eb224c274b261fc6df438c0c7c2e00b805679",
-          "sizeBytes": 1042400,
+        "libmtmd.0.0.10353.dylib": {
+          "sha256": "ef6efc7a7f60188f372035cd25bb9f874a08288dd0ffba33c50907588c3b9209",
+          "sizeBytes": 1252384,
           "signature": "bendyline"
         }
       },
       "symlinks": {
-        "libggml-base.0.dylib": "libggml-base.0.17.0.dylib",
+        "libggml-base.0.dylib": "libggml-base.0.19.0.dylib",
         "libggml-base.dylib": "libggml-base.0.dylib",
-        "libggml.0.dylib": "libggml.0.17.0.dylib",
+        "libggml.0.dylib": "libggml.0.19.0.dylib",
         "libggml.dylib": "libggml.0.dylib",
-        "libllama-common.0.dylib": "libllama-common.0.0.10099.dylib",
+        "libllama-common.0.dylib": "libllama-common.0.0.10353.dylib",
         "libllama-common.dylib": "libllama-common.0.dylib",
-        "libllama.0.dylib": "libllama.0.0.10099.dylib",
+        "libllama.0.dylib": "libllama.0.0.10353.dylib",
         "libllama.dylib": "libllama.0.dylib",
-        "libmtmd.0.dylib": "libmtmd.0.0.10099.dylib",
+        "libmtmd.0.dylib": "libmtmd.0.0.10353.dylib",
         "libmtmd.dylib": "libmtmd.0.dylib"
       }
     },
     "linux-arm64": {
       "files": {
         "gezel-device-health": {
-          "sha256": "c4bcb9ec40f65f422a66acc434f58c0df3d6eccfb80540e77bb93b3b68cf87e7",
-          "sizeBytes": 67600,
+          "sha256": "bb64ed8c120b160c94692c350ed9b47ae734cdf5fdae28ed28371ff56b6742ae",
+          "sizeBytes": 67672,
           "signature": "hash-only"
         },
         "gezel-sd-server": {
@@ -203,103 +203,103 @@
     "linux-arm64-cpu": {
       "files": {
         "gezel-llama-server": {
-          "sha256": "6dc67428fb0b2a9c13650e36a1566d2795f295a93c304f5e1666312763ad5ff3",
+          "sha256": "233c882386b9add32a9b90a0b38a8e60e302f9796293268ea75bad3a2fb3a10c",
           "sizeBytes": 67624,
           "signature": "hash-only"
         },
-        "libggml-base.so.0.17.0": {
-          "sha256": "bb499baaa2c544d67b918dde73174c68f2996b5bd2e404af8042c2ea344f197e",
-          "sizeBytes": 820185,
+        "libggml-base.so.0.19.0": {
+          "sha256": "79d6f1ebaf4264e7c6673669741415fb779e85bcdfd3131f8ecc0a32d49b53a6",
+          "sizeBytes": 820201,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.0_1.so": {
-          "sha256": "835b11cce6ccecbbd180cd280f852bcea4eb7cf27777f2a36969876b2e05251d",
+          "sha256": "8b5610037281bbb20efa4fca9999a84452127fe0edc4f945d515e5bef6d20ce8",
           "sizeBytes": 857936,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_1.so": {
-          "sha256": "72f5353db68d7c35549adb09b5044af9b8fb41099f0b936cc00b4116a3ecac73",
+          "sha256": "358f8de1041aa7998db34f4aefab173562299dc03849fa1aa7c28d01416d0108",
           "sizeBytes": 923312,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_2.so": {
-          "sha256": "5596f3078b400aa1413231dc74c60e1f474a6a13def442532c7df2a36ae1c624",
+          "sha256": "a06e101748e76dc522f99cf6978ed5830adef02abb26a94abaf8ec588f96dd62",
           "sizeBytes": 923312,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_3.so": {
-          "sha256": "86652330ac0397acc5dca43497c5c17fff8831d3d26312ef93483ad12a820f02",
+          "sha256": "2016ae50e7839e69336737ece0ab5afff1d9c2deed18e41e40a8c1859bfac967",
           "sizeBytes": 857760,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.6_1.so": {
-          "sha256": "f0f73c038f83652d4a74a6ca355962716fc50968343936a479b79297dd580233",
+          "sha256": "6f3d78958e81a3ed9071c7513544bcf40fc63cdfa92986027e041b84b2acd028",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.6_2.so": {
-          "sha256": "a3856be62bd2967a6e84d285085d379be7cae621e5b92e471d8c9b3374dbf53a",
+          "sha256": "b34a4152f37cb371da7e13a1f75b47616e0e3b31bba332d45999f6cf98dfbc95",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv9.2_1.so": {
-          "sha256": "f6b7d9c57a4c778ebd8ff87fe361abba492b0e46ab309cc8cb916f908099bccc",
+          "sha256": "1177a0f740d8bac895028e6c8648e8e4b3364053cff71f2bceae6a93157536ba",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv9.2_2.so": {
-          "sha256": "8eed347e6494c4494c9196c7084fdc9259722407168a294ade382a4ba7945031",
+          "sha256": "fa3826b2a3a0539bb244b6a6ef545049e40a7637dd26408c8bb3e36518002b83",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
-        "libggml.so.0.17.0": {
+        "libggml.so.0.19.0": {
           "sha256": "fc8e7be8606b8075a98e6f0ddff07d6d93d8ceb8e23deedb7b72b41abe5af28f",
           "sizeBytes": 68096,
           "signature": "hash-only"
         },
-        "libllama-common.so.0.0.10099": {
-          "sha256": "822255c8b53a2b637a1d9f21d538470b1fc74c7744a3f4d5a70c1a8f0278426b",
-          "sizeBytes": 4148344,
+        "libllama-common.so.0.0.10353": {
+          "sha256": "163ac7b8d9d9d4c7c5ea02c8054284e593ab0c021e3d281ed8b82de39111be74",
+          "sizeBytes": 4214520,
           "signature": "hash-only"
         },
         "libllama-server-impl.so": {
-          "sha256": "af17fdcada7856d55432c27be921fff7de34d61486b38b461f4c4cae6287e82a",
-          "sizeBytes": 6046128,
+          "sha256": "9c50deb8b94534b40885f67b3e15c1c4a736619bf095249e64651dc4b3f7aeca",
+          "sizeBytes": 6309120,
           "signature": "hash-only"
         },
-        "libllama.so.0.0.10099": {
-          "sha256": "3ed28bed2cdb6b12ae4a344ff8371bb99a1be115b0403090a07f8f8e2b2e5fc4",
-          "sizeBytes": 3296880,
+        "libllama.so.0.0.10353": {
+          "sha256": "0670744ec3665a0327ce67715e1e5a513d8d80dc81abfe3567ca1ed801e1a012",
+          "sizeBytes": 3493928,
           "signature": "hash-only"
         },
-        "libmtmd.so.0.0.10099": {
-          "sha256": "0efcb21592145e4b22e0bf838d68dcb36c1419e6f84ac8f6292529b3f462bedc",
-          "sizeBytes": 1251720,
+        "libmtmd.so.0.0.10353": {
+          "sha256": "1b9b66fc3684156583a1df157e5745556bfb2ad9f71e93a053b63cad0c570f78",
+          "sizeBytes": 1449080,
           "signature": "hash-only"
         }
       },
       "symlinks": {
         "libggml-base.so": "libggml-base.so.0",
-        "libggml-base.so.0": "libggml-base.so.0.17.0",
+        "libggml-base.so.0": "libggml-base.so.0.19.0",
         "libggml.so": "libggml.so.0",
-        "libggml.so.0": "libggml.so.0.17.0",
+        "libggml.so.0": "libggml.so.0.19.0",
         "libllama-common.so": "libllama-common.so.0",
-        "libllama-common.so.0": "libllama-common.so.0.0.10099",
+        "libllama-common.so.0": "libllama-common.so.0.0.10353",
         "libllama.so": "libllama.so.0",
-        "libllama.so.0": "libllama.so.0.0.10099",
+        "libllama.so.0": "libllama.so.0.0.10353",
         "libmtmd.so": "libmtmd.so.0",
-        "libmtmd.so.0": "libmtmd.so.0.0.10099"
+        "libmtmd.so.0": "libmtmd.so.0.0.10353"
       }
     },
     "linux-arm64-cuda": {
       "files": {
         "gezel-ds4-server": {
-          "sha256": "3e609011cc87655a2e5335e50916bd4f958cf008be24e046e948538578048f5e",
-          "sizeBytes": 10495777,
+          "sha256": "53e087f951fef06280e40ee34cedc90e8ef141502acb6910efa0e93f76afcf9d",
+          "sizeBytes": 20000097,
           "signature": "hash-only"
         },
         "gezel-llama-server": {
-          "sha256": "ca1a8e79fe23bdfd4e5c55abc56bf9de16037858ae284d4d5d902aca40647564",
+          "sha256": "6957fbdac45fbf7050ad0bbdf676dd72d07d2420708fb8dbda7af35d39db75c7",
           "sizeBytes": 67624,
           "signature": "hash-only"
         },
@@ -318,79 +318,79 @@
           "sizeBytes": 804401,
           "signature": "hash-only"
         },
-        "libggml-base.so.0.17.0": {
-          "sha256": "bb499baaa2c544d67b918dde73174c68f2996b5bd2e404af8042c2ea344f197e",
-          "sizeBytes": 820185,
+        "libggml-base.so.0.19.0": {
+          "sha256": "79d6f1ebaf4264e7c6673669741415fb779e85bcdfd3131f8ecc0a32d49b53a6",
+          "sizeBytes": 820201,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.0_1.so": {
-          "sha256": "08e13ada296b0623d3ef3d257cf291968f179134d8c86b533198056687b338e8",
+          "sha256": "b7fe72220619ef3939fcfb86ae7936937e48952899744201767f17693f9b6337",
           "sizeBytes": 857936,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_1.so": {
-          "sha256": "68a6a9069826d4e89e765da9ba5f45f75d9aae1b9e8f0a847013decf26d600cd",
+          "sha256": "02b7c2c3269c745a5796573754e0aa98b65cbcc20d058548fab01dcfb5d21244",
           "sizeBytes": 923312,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_2.so": {
-          "sha256": "edc08ee2773c339572f413726108e12a1d8c6aca6a075fdf9952d092e897f2cf",
+          "sha256": "77e986a101f40bb2faf0d9f0c99d8a10ea4722792fefc62e9e433568d9e76ab1",
           "sizeBytes": 923312,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.2_3.so": {
-          "sha256": "397eafed742f13020b45228ba71e35ffc498845ab60833c95e8033d268677020",
+          "sha256": "16da6835a3c9daa6b7ac634934e4504960e5a176a480041e0683a9869d5fb3bd",
           "sizeBytes": 857760,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.6_1.so": {
-          "sha256": "5884b385087d6511d2cd8015215ea5866a2eecd9762b66c8915eed145fbe90b6",
+          "sha256": "c5dfa76cbc251a0c3861a1d386a7117ab92594bd65566dded200fd5ccc6cc86e",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv8.6_2.so": {
-          "sha256": "486faf3102c9345843ca435e99da7cd3f4c122e9ddf210966a8832617e4c693c",
+          "sha256": "4baa7bbc10265143663a01d3e00c4481db4844121d8978319a1205b891f57aa7",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv9.2_1.so": {
-          "sha256": "156fb58971e6e58095e5179c9e52408b1f6c319818a84bef915a7b748f4f6a9d",
+          "sha256": "5652635cd0538d05a75d1a06e04fd126576466ac29c815bf18b4e0cf3b502b5d",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cpu-armv9.2_2.so": {
-          "sha256": "4a98251d7b7b73c0f7412e5196a286560b828e9a99b93f5edffcf9ce219295de",
+          "sha256": "fe962f939dd608b11a5cf5ac7a12b814dfb82aecf5fe710bb13a8455aaac980d",
           "sizeBytes": 923256,
           "signature": "hash-only"
         },
         "libggml-cuda.so": {
-          "sha256": "d456ba05534ad217dd39b1ae9abf8a01d421ac01502bf8447808dfff3d01808d",
-          "sizeBytes": 34878272,
+          "sha256": "d44514d4e438488a82f5ea56609cc9e515238ce7c5415b37a4a573a5ab64683c",
+          "sizeBytes": 34943840,
           "signature": "hash-only"
         },
-        "libggml.so.0.17.0": {
+        "libggml.so.0.19.0": {
           "sha256": "def9b796c829b563f9a0b61c41094d965541c19ff6992e19002add920bfe0993",
           "sizeBytes": 68096,
           "signature": "hash-only"
         },
-        "libllama-common.so.0.0.10099": {
-          "sha256": "8b021695fde2209afb5f9586e54eae934a4459bd542465c840c962d44bd221f0",
-          "sizeBytes": 4148344,
+        "libllama-common.so.0.0.10353": {
+          "sha256": "64ddfe455a919c03ae5fd8a4802d32aa395bfa9bedeb423328cad969b653b383",
+          "sizeBytes": 4214520,
           "signature": "hash-only"
         },
         "libllama-server-impl.so": {
-          "sha256": "ff3232d36c7d5e97a27a6ef3a6a8fcb20327faf0411d7839c8b94736289f56ca",
-          "sizeBytes": 6046128,
+          "sha256": "45dadace512979f8d4fefc1bb0953078736a5d547e8a054521e00d622533d5d4",
+          "sizeBytes": 6309120,
           "signature": "hash-only"
         },
-        "libllama.so.0.0.10099": {
-          "sha256": "e5213e7c2010d77d0cf5e58f3008afea311a854477678f8f70fd10298a0e0f4d",
-          "sizeBytes": 3296880,
+        "libllama.so.0.0.10353": {
+          "sha256": "4072da7a5d2b0da2a23aad2f0ab5bdaf1e435366c46fbbc67041d12fbebc4f1a",
+          "sizeBytes": 3493928,
           "signature": "hash-only"
         },
-        "libmtmd.so.0.0.10099": {
-          "sha256": "49f39e636c52d8e531fc019a24e7a08ca8988872cc68dd0009b0f132260813b9",
-          "sizeBytes": 1251720,
+        "libmtmd.so.0.0.10353": {
+          "sha256": "0f2e400bc87c9a7297cbca0011483ecfe11c63e598ed2ea69c6bf49838d73679",
+          "sizeBytes": 1449080,
           "signature": "hash-only"
         }
       },
@@ -402,22 +402,22 @@
         "libcudart.so": "libcudart.so.12",
         "libcudart.so.12": "libcudart.so.12.9.79",
         "libggml-base.so": "libggml-base.so.0",
-        "libggml-base.so.0": "libggml-base.so.0.17.0",
+        "libggml-base.so.0": "libggml-base.so.0.19.0",
         "libggml.so": "libggml.so.0",
-        "libggml.so.0": "libggml.so.0.17.0",
+        "libggml.so.0": "libggml.so.0.19.0",
         "libllama-common.so": "libllama-common.so.0",
-        "libllama-common.so.0": "libllama-common.so.0.0.10099",
+        "libllama-common.so.0": "libllama-common.so.0.0.10353",
         "libllama.so": "libllama.so.0",
-        "libllama.so.0": "libllama.so.0.0.10099",
+        "libllama.so.0": "libllama.so.0.0.10353",
         "libmtmd.so": "libmtmd.so.0",
-        "libmtmd.so.0": "libmtmd.so.0.0.10099"
+        "libmtmd.so.0": "libmtmd.so.0.0.10353"
       }
     },
     "linux-x64": {
       "files": {
         "gezel-device-health": {
-          "sha256": "3558dd3c33be6ece60b8b0ddb2abc8ab092bec45a808977af24c3ca295bf3cd3",
-          "sizeBytes": 59704,
+          "sha256": "86d97ee60ccf8d3212eac57d927582ee101a9ac5886db36389196fda33dc6271",
+          "sizeBytes": 67896,
           "signature": "hash-only"
         },
         "gezel-sd-server": {
@@ -475,133 +475,133 @@
     "linux-x64-cpu": {
       "files": {
         "gezel-llama-server": {
-          "sha256": "0fed8f08c1a5797797d137b36d5317e54b9f493cda260cb2a68d67353b68b554",
+          "sha256": "75f0fa1b91b28c64ed62ab12c6033a0315c7210fbdcdfa13dc983c779f0514c0",
           "sizeBytes": 14600,
           "signature": "hash-only"
         },
-        "libggml-base.so.0.17.0": {
-          "sha256": "7bc9937545d9e183f2adb64e9b2ccdd1a22fa0ecf9cbaa60c80c88be9e3919a4",
-          "sizeBytes": 875241,
+        "libggml-base.so.0.19.0": {
+          "sha256": "45c6f8381dd4de1f80a28a28d52fb33e24bb0974d672af4b2d9e011f9ca06bde",
+          "sizeBytes": 875441,
           "signature": "hash-only"
         },
         "libggml-cpu-alderlake.so": {
-          "sha256": "71f9c874125242327963436a50e003f0127b48cd268a111ba0a771ff91713c0d",
+          "sha256": "5a94a9d11bd6c01bda403f7e8925c3378130231c2509bacc515adc6efc61ad1f",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-cannonlake.so": {
-          "sha256": "e848e532833c9074a0bf0a12e8f5a215b7edafed6a9ed18dc838bf0b084a3fbe",
+          "sha256": "762eb8e93de1faa8ce5b8ea0a0bbf5d19599298bd69fbaf8a1a3036710afcb2c",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-cascadelake.so": {
-          "sha256": "30c7f1b43757c4cac0488af865801f034b757fee71ffe6830e58ab8351e73339",
+          "sha256": "002e74c2b4332690a15ec86e3ed9856156da8e6478be5dc4b6285b7cc174b779",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-cooperlake.so": {
-          "sha256": "492b100573d5b2075eb615d11e1b724cda8f62b59ba4bd705a4a6b1590cf19cb",
+          "sha256": "c78ef5f2e400043361a99fab4597a98e8d04eab06836892633388a88edf5605c",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-haswell.so": {
-          "sha256": "400e1f80fedd6572da8e6f297becea079ad079f8f5c2b984bf549edc179bf394",
+          "sha256": "683df44375ac32e2724d43324d18c9f2866fb86211350262a97ec8058750fb93",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-icelake.so": {
-          "sha256": "570b2a5afe8f0eadc1cbeacff96eb9c3958bab8406845fd485f8a4371b273e6b",
+          "sha256": "839d96b4698db0f3b4f617ea9684779fee905a0a61bb3f1e8303446bca181638",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-ivybridge.so": {
-          "sha256": "09d4721b8c53b1ca562f8cb01dfbdfe59ffe076dd2bc53683d6dcb9929c3c681",
-          "sizeBytes": 1005520,
+          "sha256": "f9d6bd5c2f877a6d3334cc5411267558351311e164fea1abb8525a3a96989c34",
+          "sizeBytes": 1009616,
           "signature": "hash-only"
         },
         "libggml-cpu-piledriver.so": {
-          "sha256": "31a876c618099143d2a4fd46f8509727152211e36d9aaa1fb466bccb55473cfd",
+          "sha256": "9216afd51ac761cb8f363a9b156d88b41d60c63ed1e355971e04f64502a49940",
           "sizeBytes": 1005520,
           "signature": "hash-only"
         },
         "libggml-cpu-sandybridge.so": {
-          "sha256": "40ceea418f9d81a9445aba48d869173ea23808f3034c3de385414eb40a7b12f0",
+          "sha256": "47b574f6e08818770f6f91446e7ac1ebb226c3152715a08907b7f7f3925d6fd0",
           "sizeBytes": 1001424,
           "signature": "hash-only"
         },
         "libggml-cpu-sapphirerapids.so": {
-          "sha256": "01c67aec470457d6d84b4db000b09ec0a4d88081ef20482d0b7125f20c47cca2",
+          "sha256": "96a5a01bd8cfe64c74b91266f05662110b336297a09e67ae44ee55833259ae8f",
           "sizeBytes": 1546392,
           "signature": "hash-only"
         },
         "libggml-cpu-skylakex.so": {
-          "sha256": "59e1fbbb9da3d46b8a55e5d35f8ff3768cdd527d209bdc1cf6cc9c914f88439b",
+          "sha256": "22158848e9e56786ab0f6c7c99985f90b5d66597ba658bd8f2c8ff5672cb235b",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-sse42.so": {
-          "sha256": "607fc8420090faf9b034c47f41301ba5b4ccfb07ede81f6be267b8c560562299",
+          "sha256": "162c3ab1b99328260b08c284b1324f2d6c9dedf35dbf9c448c92042bc79db8c9",
           "sizeBytes": 837712,
           "signature": "hash-only"
         },
         "libggml-cpu-x64.so": {
-          "sha256": "ede43f7c7cea98a93f9202448e9a4e376ce1d4482c9f24499cfe8e96f7d6b96a",
+          "sha256": "0242c7a92719899497d002804dfb645c5d31ad0e1e7063cbc6533412275d76c1",
           "sizeBytes": 833648,
           "signature": "hash-only"
         },
         "libggml-cpu-zen4.so": {
-          "sha256": "678376a3b8f52ddd007c5f8bae21a6e750241ca673d5110fc120762706a3cfa0",
+          "sha256": "20bd2bfb7e2f746c10ca76432300e70657dd91bb44a91418a6fbb91fa86e3a71",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
-        "libggml.so.0.17.0": {
+        "libggml.so.0.19.0": {
           "sha256": "1f3cca5cf89883367a8024dff6631720e74996b3fe16b52503f9383dc8a59b20",
           "sizeBytes": 47832,
           "signature": "hash-only"
         },
-        "libllama-common.so.0.0.10099": {
-          "sha256": "60da1fb003cd8644aae27557d0dfbf42c0fe47cbf7d06ae309632729ae14dc87",
-          "sizeBytes": 4551392,
+        "libllama-common.so.0.0.10353": {
+          "sha256": "6537c6ef69581c905d8c3057e47e416a90f041881d7fe4782e8a06afc643b564",
+          "sizeBytes": 4683104,
           "signature": "hash-only"
         },
         "libllama-server-impl.so": {
-          "sha256": "a64cad4dcb59b0ea7b327a0c2eb369518a43129e3afab4da71221ac5461f4897",
-          "sizeBytes": 6382736,
+          "sha256": "108deaa05b723c81fdf1eed66190e6794223a87c64d4df1d56551bc2f7d5885c",
+          "sizeBytes": 6666208,
           "signature": "hash-only"
         },
-        "libllama.so.0.0.10099": {
-          "sha256": "f010d2450999c10c9a878e80b5b7fc9dba60fb8dd662e06fc4a9ad85692484cc",
-          "sizeBytes": 3515616,
+        "libllama.so.0.0.10353": {
+          "sha256": "818d24160c1795e7f08f408acbb4ac79270d8c32de90f23bb5abc87f9d6342c2",
+          "sizeBytes": 3708512,
           "signature": "hash-only"
         },
-        "libmtmd.so.0.0.10099": {
-          "sha256": "bf452e93f74b84928610a622c86a3df055a8492e495e08afbe7aac1ccab67cf8",
-          "sizeBytes": 1305584,
+        "libmtmd.so.0.0.10353": {
+          "sha256": "f57e88098e2e638dad6200f5a54914c5d8eaae7456838d6909524d493f9cf04e",
+          "sizeBytes": 1593104,
           "signature": "hash-only"
         }
       },
       "symlinks": {
         "libggml-base.so": "libggml-base.so.0",
-        "libggml-base.so.0": "libggml-base.so.0.17.0",
+        "libggml-base.so.0": "libggml-base.so.0.19.0",
         "libggml.so": "libggml.so.0",
-        "libggml.so.0": "libggml.so.0.17.0",
+        "libggml.so.0": "libggml.so.0.19.0",
         "libllama-common.so": "libllama-common.so.0",
-        "libllama-common.so.0": "libllama-common.so.0.0.10099",
+        "libllama-common.so.0": "libllama-common.so.0.0.10353",
         "libllama.so": "libllama.so.0",
-        "libllama.so.0": "libllama.so.0.0.10099",
+        "libllama.so.0": "libllama.so.0.0.10353",
         "libmtmd.so": "libmtmd.so.0",
-        "libmtmd.so.0": "libmtmd.so.0.0.10099"
+        "libmtmd.so.0": "libmtmd.so.0.0.10353"
       }
     },
     "linux-x64-cuda": {
       "files": {
         "gezel-ds4-server": {
-          "sha256": "476e28c06b3c9f7fb3beece66d91324035a93f19cd989e35b7da058d7ff9c961",
-          "sizeBytes": 8714065,
+          "sha256": "6f462e4ed7f786ed4ccc51fefd9b8982587fe43b760e28c50b40334fc1f80a77",
+          "sizeBytes": 29429169,
           "signature": "hash-only"
         },
         "gezel-llama-server": {
-          "sha256": "fbb308d8e087df9dca3e5de72af20ea199502c6cdb4a89175b1274b3b6162397",
+          "sha256": "4cae6cc4d382513b8966ac71f5b7aa8889c759f93c5ec86ec2bdbbd012cd26e9",
           "sizeBytes": 14600,
           "signature": "hash-only"
         },
@@ -620,109 +620,109 @@
           "sizeBytes": 746033,
           "signature": "hash-only"
         },
-        "libggml-base.so.0.17.0": {
-          "sha256": "7bc9937545d9e183f2adb64e9b2ccdd1a22fa0ecf9cbaa60c80c88be9e3919a4",
-          "sizeBytes": 875241,
+        "libggml-base.so.0.19.0": {
+          "sha256": "45c6f8381dd4de1f80a28a28d52fb33e24bb0974d672af4b2d9e011f9ca06bde",
+          "sizeBytes": 875441,
           "signature": "hash-only"
         },
         "libggml-cpu-alderlake.so": {
-          "sha256": "ff50dd24b4872443f7a68642b579be5bd7e84717f85a33fc5e324faa4c83f3ff",
+          "sha256": "55660f455155d3595d85d0d1a869f6ea33e394bb0c89870e04bb44aa0067b357",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-cannonlake.so": {
-          "sha256": "1ecca179374bd9d4fbea0d60445313ed2010828b052da6fa428e68192021793a",
+          "sha256": "9cdee3c891a774cec55e55f46da014750829b97808ecaabc2c3fad88d39a469a",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-cascadelake.so": {
-          "sha256": "371e46ca38981ab4d9831a0b1dd8d7d86a286cde9eeb8c1fa20c019b1c78b744",
+          "sha256": "b85fc5a8d1fa7f0b5b357bb7adf566875667f95775f563561b33b04271297dcb",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-cooperlake.so": {
-          "sha256": "3f9c526910bfa850372bb9c498988320b9f3526869c4bc7602211b3066f914b2",
+          "sha256": "42c8ebbfa328c62cd02e66f8d86e53f99b0b2fec635ed0d9a7b9456553acc171",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-haswell.so": {
-          "sha256": "82436e2f30a27a943a3d6fdcfd45b0c3fc19d60d1390d561d8b790ffe430e0b4",
+          "sha256": "a7e0f1eeaf3fb4c3d6fbee7f2111c514da56c5c5d8d58a26fe5e246fb7d040be",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-icelake.so": {
-          "sha256": "7cc76cfe2e97eb8583f72da8ef82f885e8a00f9fb4f1d6c46e57ed8dd3633949",
+          "sha256": "dba12ac9a99ab8870728b2817c5470a9f22943baa7e69afcf5a376ae96bbb3fa",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-ivybridge.so": {
-          "sha256": "8307f17d0a0b88a49a4a85d2c463812ede3164e7fa5bcfb614de40532e216391",
-          "sizeBytes": 1005520,
+          "sha256": "a95fa130d0aa9e8b5f6fc1f2c4ce7f71e8de6ac3bf2d4f76921e718cc8579530",
+          "sizeBytes": 1009616,
           "signature": "hash-only"
         },
         "libggml-cpu-piledriver.so": {
-          "sha256": "9af0f0e6c276bb5eb01c23c9b8943e5d2d87e106f5e3e52e267d07f30d1d3f9a",
+          "sha256": "952c3c56ee3ab9deffc5f6c82960de2237bd510f00790775b062202c70166038",
           "sizeBytes": 1005520,
           "signature": "hash-only"
         },
         "libggml-cpu-sandybridge.so": {
-          "sha256": "1dc467821cbde2e18da237256b49f64e4809ddde7574ed9e6a9c0a7ca3b66a8b",
+          "sha256": "59189680c79f23d925a5b3af6d301f389d7e7dab547a933a393a28817c32700f",
           "sizeBytes": 1001424,
           "signature": "hash-only"
         },
         "libggml-cpu-sapphirerapids.so": {
-          "sha256": "a6e831bb1bbab31fff33607ab5aae49fb89c13594a74f4f1383c643df5897273",
+          "sha256": "70f4f3dde5ac4697df2c845d4936fd5b2bd9aea020dc29e22f7f4fd60220462d",
           "sizeBytes": 1546392,
           "signature": "hash-only"
         },
         "libggml-cpu-skylakex.so": {
-          "sha256": "78bddab8fc56a491dbe2413d92afe859cd56f0fd7bcff7b53f9defc88fc824e8",
+          "sha256": "ba64c4ac689d004eef8568ff6e611a438a80cc4d80cabfca1f4ab8e85e1e79ef",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-sse42.so": {
-          "sha256": "84713b55d42dc2d5a1608de0a85d706c2545bc94d637222efe78640c68ca295b",
+          "sha256": "1465683f579e238bb3c8e89a88df1d5c6b04ce7f5e80076ae12e800bea064d44",
           "sizeBytes": 837712,
           "signature": "hash-only"
         },
         "libggml-cpu-x64.so": {
-          "sha256": "bd79929e8f1200f753fac52088daefb312e5219b532f3693ed60fa2f72a1e643",
+          "sha256": "782fbe52c430736db5ff67ee7757bd620b8c89d47c3863f73a97e00c77fef18a",
           "sizeBytes": 833648,
           "signature": "hash-only"
         },
         "libggml-cpu-zen4.so": {
-          "sha256": "4b8f9d3f392dd6178b6ff8486679ee1041466d646f84a1c191702501aefe614c",
+          "sha256": "900c90c06b11960f241e215976feaa2c9568583f82f85b7ca5f16d2a8a71edc9",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cuda.so": {
-          "sha256": "36c2d2a0ff1a0c4997b39dc0bb27a98597ee69f9ac1e1ba4b074d18944dba414",
-          "sizeBytes": 187413472,
+          "sha256": "ae688daf0177a5155a2e8fc70be2424487ab36f33382bbc6ebd347e0d9672b18",
+          "sizeBytes": 187507680,
           "signature": "hash-only"
         },
-        "libggml.so.0.17.0": {
+        "libggml.so.0.19.0": {
           "sha256": "77f3b6a6ce76533937d434ce4e5194e1e61fca2e5cf72133667c1e32146c6068",
           "sizeBytes": 47832,
           "signature": "hash-only"
         },
-        "libllama-common.so.0.0.10099": {
-          "sha256": "d82b26ed9880541f32b278fc0c88f09e7a88419488caa9bab218a8bfe3918de8",
-          "sizeBytes": 4551392,
+        "libllama-common.so.0.0.10353": {
+          "sha256": "c81e1ec20334f2d589572adb9085408db5c089efe259904e0a3080abbd96c2a3",
+          "sizeBytes": 4683104,
           "signature": "hash-only"
         },
         "libllama-server-impl.so": {
-          "sha256": "35b02bdb30bf9625d463557fc32f180f34b29cda4e88b197df2f69f18a9550ec",
-          "sizeBytes": 6382736,
+          "sha256": "fb91febb842a63c7e7438767ca60fa9514dd92a874b1ad07b6a971b90cfa68b1",
+          "sizeBytes": 6666208,
           "signature": "hash-only"
         },
-        "libllama.so.0.0.10099": {
-          "sha256": "1607d290c8697406cd80f3da1c141fef7d34672591dd747d5993b4a0f8d6fc73",
-          "sizeBytes": 3515616,
+        "libllama.so.0.0.10353": {
+          "sha256": "35d80a49831a0abc5cfea6054bef81e6e8d80eedec89cea242cc1b71b98f5667",
+          "sizeBytes": 3708512,
           "signature": "hash-only"
         },
-        "libmtmd.so.0.0.10099": {
-          "sha256": "42c402491bfddfdf37610a2d0ce3e23e4f6b634b4b6d832a953cd0f1f69e011a",
-          "sizeBytes": 1305584,
+        "libmtmd.so.0.0.10353": {
+          "sha256": "4b66a8fb6552917a7b527788be5639283b7d56c6d55dcd711d7f1173f41f0121",
+          "sizeBytes": 1593104,
           "signature": "hash-only"
         }
       },
@@ -734,177 +734,177 @@
         "libcudart.so": "libcudart.so.12",
         "libcudart.so.12": "libcudart.so.12.8.90",
         "libggml-base.so": "libggml-base.so.0",
-        "libggml-base.so.0": "libggml-base.so.0.17.0",
+        "libggml-base.so.0": "libggml-base.so.0.19.0",
         "libggml.so": "libggml.so.0",
-        "libggml.so.0": "libggml.so.0.17.0",
+        "libggml.so.0": "libggml.so.0.19.0",
         "libllama-common.so": "libllama-common.so.0",
-        "libllama-common.so.0": "libllama-common.so.0.0.10099",
+        "libllama-common.so.0": "libllama-common.so.0.0.10353",
         "libllama.so": "libllama.so.0",
-        "libllama.so.0": "libllama.so.0.0.10099",
+        "libllama.so.0": "libllama.so.0.0.10353",
         "libmtmd.so": "libmtmd.so.0",
-        "libmtmd.so.0": "libmtmd.so.0.0.10099"
+        "libmtmd.so.0": "libmtmd.so.0.0.10353"
       }
     },
     "linux-x64-vulkan": {
       "files": {
         "gezel-llama-server": {
-          "sha256": "b295dabdaad0e181a6d8f0d2e5cd0e3269364272fce9917c271f00d39be1b822",
+          "sha256": "72e7cca128461160369e68cb9ec7b4ace4aca1bec7f6f294ee58a97cc94760da",
           "sizeBytes": 14600,
           "signature": "hash-only"
         },
-        "libggml-base.so.0.17.0": {
-          "sha256": "7bc9937545d9e183f2adb64e9b2ccdd1a22fa0ecf9cbaa60c80c88be9e3919a4",
-          "sizeBytes": 875241,
+        "libggml-base.so.0.19.0": {
+          "sha256": "45c6f8381dd4de1f80a28a28d52fb33e24bb0974d672af4b2d9e011f9ca06bde",
+          "sizeBytes": 875441,
           "signature": "hash-only"
         },
         "libggml-cpu-alderlake.so": {
-          "sha256": "4a04f14d37d8a6d92088a273230882468e3131a08618035432f0263d7a6b6811",
+          "sha256": "3ac036f1f80981b2bf4142df4e85fd0ddd5a9d4e33811f6290ca39be2095f88d",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-cannonlake.so": {
-          "sha256": "c23ac1d53c85b2eac94930620a5fdd236acb95199556bc3361527154e7864284",
+          "sha256": "7a7527c30d603c024e27648bd3bb34055fa0ae812fcb3ebdb366cacca6559f88",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-cascadelake.so": {
-          "sha256": "c0b2ada962725b3474fba04a8854576295ff1118df421cd80dfa5166897b3d10",
+          "sha256": "259403d29b4f33c941d7bc2322408471eb9498b8ba1578d02c7e1d7332326644",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-cooperlake.so": {
-          "sha256": "1d00fedffcdb82a366658a325fb3303c0bdea2a21f0c2109619159c1f299ab0e",
+          "sha256": "673b96d02780ae7b9d58082d263c83970537bdbd3093bf4ba98160ac9212d2d8",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-haswell.so": {
-          "sha256": "62441e4c1b6b9ccc0faa82f3b08eee7f8deb6b784634ca012972b3aa0d5b50ce",
+          "sha256": "be98dbd449fe2c6946c12bcb7e569f46671a22ec2b6fe8b989a8a3cfa767e238",
           "sizeBytes": 1075056,
           "signature": "hash-only"
         },
         "libggml-cpu-icelake.so": {
-          "sha256": "56eb5c946d609af8176f0f51be7d7f463094898c72238669920ca43369134b0b",
+          "sha256": "b086f2b36b067e9338f6be50c17ab6e67471b32ea672eb801a48f71defddef80",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-cpu-ivybridge.so": {
-          "sha256": "af7dd625e79332398785b5d91ad511a71fe9bba8684cf483e198e1b3e51a644e",
-          "sizeBytes": 1005520,
+          "sha256": "33a0ac5ef9fb0b2919f0d8b7e154af212ffdbd088ca729fe6cea8445b6b4caa3",
+          "sizeBytes": 1009616,
           "signature": "hash-only"
         },
         "libggml-cpu-piledriver.so": {
-          "sha256": "86ebe543dd1013c99186083b6a83c95ff90aa37d54786838654e9c031345cc25",
+          "sha256": "a49e9fafbacb6f09b5363a74b60900113c8f062ed4ea6b0e1b8031456efd4ce7",
           "sizeBytes": 1005520,
           "signature": "hash-only"
         },
         "libggml-cpu-sandybridge.so": {
-          "sha256": "a688b4a69f5391ff6de1cb8ff48247f90163cea5a3ec4074c0587a83886c9b18",
+          "sha256": "47fdac011c5505e2ced95854583d80c9056df85b4eaa55d040b89798f850299b",
           "sizeBytes": 1001424,
           "signature": "hash-only"
         },
         "libggml-cpu-sapphirerapids.so": {
-          "sha256": "750e2ef992dd7c0d8d146ac8b572f058581b2caa281762e16ce7d7a575c2f77c",
+          "sha256": "789e6cb614bbf4e9643ec923aaea29fa72688f880bca0e44f9b7792d4998dd8f",
           "sizeBytes": 1546392,
           "signature": "hash-only"
         },
         "libggml-cpu-skylakex.so": {
-          "sha256": "8150b46bf569725c2236ae1f239f9c70de2a6d464fefb8ce05c010c297f53489",
+          "sha256": "49ea600fb07d76f004887c46e9ed9ff5467b1487c0e73f34993a39bf7a98d9e0",
           "sizeBytes": 1300336,
           "signature": "hash-only"
         },
         "libggml-cpu-sse42.so": {
-          "sha256": "86c5ab37223eeaec6064c853a80e58ee76212a0aa049f2d0a88ee7ea4c3d813f",
+          "sha256": "fef41829dff2efbbb89a94fe28d67e4b45a65691933db76e22fc60cb1366f378",
           "sizeBytes": 837712,
           "signature": "hash-only"
         },
         "libggml-cpu-x64.so": {
-          "sha256": "1128b0f6774039a410681900598ce172c8e1efa90bdb12dd19cc9bc7e228bee4",
+          "sha256": "f745a08986aa065a2de450715d0f83d5b01a9d11eb7c5726c154a95606d17cb6",
           "sizeBytes": 833648,
           "signature": "hash-only"
         },
         "libggml-cpu-zen4.so": {
-          "sha256": "9c37b994b9b1282132d1206ea9581e7c9e235dc51b8a26e09285ba91c0d5cf13",
+          "sha256": "fe9892232288cc99fcfb8a1394f9d9340cdfe921ff6426957d3a3cd19f492153",
           "sizeBytes": 1296240,
           "signature": "hash-only"
         },
         "libggml-vulkan.so": {
-          "sha256": "c8af5a95832057cf1f89b3d95907f762b4c68eb97639afedfbea56f7111c81e9",
-          "sizeBytes": 50991728,
+          "sha256": "d5118c6635b9fe8b70000470bdf72a92b1c255cf7c6e435a98d1614ebbd61ca5",
+          "sizeBytes": 51126928,
           "signature": "hash-only"
         },
-        "libggml.so.0.17.0": {
+        "libggml.so.0.19.0": {
           "sha256": "79c4b79885c569d7f81259265afecd77e0c6023af05bf2148cc055fdc2a40175",
           "sizeBytes": 47832,
           "signature": "hash-only"
         },
-        "libllama-common.so.0.0.10099": {
-          "sha256": "c42e54fcbf9998bd2c0a25932fce9e4808257a62208171f0380c3f9e53031e2b",
-          "sizeBytes": 4551392,
+        "libllama-common.so.0.0.10353": {
+          "sha256": "1dae26d7581541d21c72f4143ce2000a2b53d57721115f5d3c9afa49d55a6043",
+          "sizeBytes": 4683104,
           "signature": "hash-only"
         },
         "libllama-server-impl.so": {
-          "sha256": "ccbe39e1be315f8a5880af97a5fab3beee2441c5ba59878b9b0573c0b9d6132d",
-          "sizeBytes": 6382736,
+          "sha256": "3866769142b6d0bd2e3eb338939d9357e03fad70a53e87c2e6095c4823d8e552",
+          "sizeBytes": 6666208,
           "signature": "hash-only"
         },
-        "libllama.so.0.0.10099": {
-          "sha256": "dcef3a3fa883f5b9434d18d102dcb0b73dfa26dc3afbe5a5739997a364e8adb4",
-          "sizeBytes": 3515616,
+        "libllama.so.0.0.10353": {
+          "sha256": "56468c9e2e65e4b7294b119a4166c85bb6238d5ddb077e1385612002a935a583",
+          "sizeBytes": 3708512,
           "signature": "hash-only"
         },
-        "libmtmd.so.0.0.10099": {
-          "sha256": "d4dbb7777d078ac79ef935ca6eaa34677e79905c2903e1ca887ee747d112ea2e",
-          "sizeBytes": 1305584,
+        "libmtmd.so.0.0.10353": {
+          "sha256": "b14d867cc59c583b346b301bd1b493938801c6f1ed8c56a01829cee0e92131bf",
+          "sizeBytes": 1593104,
           "signature": "hash-only"
         }
       },
       "symlinks": {
         "libggml-base.so": "libggml-base.so.0",
-        "libggml-base.so.0": "libggml-base.so.0.17.0",
+        "libggml-base.so.0": "libggml-base.so.0.19.0",
         "libggml.so": "libggml.so.0",
-        "libggml.so.0": "libggml.so.0.17.0",
+        "libggml.so.0": "libggml.so.0.19.0",
         "libllama-common.so": "libllama-common.so.0",
-        "libllama-common.so.0": "libllama-common.so.0.0.10099",
+        "libllama-common.so.0": "libllama-common.so.0.0.10353",
         "libllama.so": "libllama.so.0",
-        "libllama.so.0": "libllama.so.0.0.10099",
+        "libllama.so.0": "libllama.so.0.0.10353",
         "libmtmd.so": "libmtmd.so.0",
-        "libmtmd.so.0": "libmtmd.so.0.0.10099"
+        "libmtmd.so.0": "libmtmd.so.0.0.10353"
       }
     },
     "win32-x64": {
       "files": {
         "gezel-device-health.exe": {
-          "sha256": "4242d7760fd187e54ab97bb2a2061e2598601032fa86a1e5f732e549d7b69b14",
-          "sizeBytes": 354592,
+          "sha256": "a6dde733456d6cef426b115f5657aab8ea29124783c37f7fa06e622b8683a3ba",
+          "sizeBytes": 383776,
           "signature": "bendyline"
         },
         "gezel-sd-server.exe": {
-          "sha256": "6ea5e985d974b22ff1f7c570bcf100b6628b857887770cad1d81abe2928748e0",
-          "sizeBytes": 102400288,
+          "sha256": "f9ffcf94af155af92cf7942828d30132bde0a605a460d35e0bf9425d5e887197",
+          "sizeBytes": 102442784,
           "signature": "bendyline"
         },
         "gezel-service-host.exe": {
-          "sha256": "73126432ad701f9a6bee4dd773e5e24b5d799877b536b273f60ff0460ebf0dcd",
+          "sha256": "3711a6ca17401ccfb104b0f8fb020c73a6c6dda9149852a3be65e1a9833e2333",
           "sizeBytes": 378144,
           "signature": "bendyline"
         },
         "gezel-whisper-server.exe": {
-          "sha256": "f84fbe510eb11b4234fdff3672499b26ff628892031c030b12dcbe84d5b8c31e",
+          "sha256": "cf56618975b539cf081653fbe3457e9a8b16311ae1a4dd4257a03f6feded29f8",
           "sizeBytes": 741152,
           "signature": "bendyline"
         },
         "ggml-base.dll": {
-          "sha256": "51e38e6bc53d79b40d5f264805e5cae5a63927685fcfb593a864ae9285cbfde7",
+          "sha256": "89912264559d038145723de899b6a6273f75afca684bc646276196ff7dea6de2",
           "sizeBytes": 669984,
           "signature": "bendyline"
         },
         "ggml-cpu.dll": {
-          "sha256": "0bd37fb78ebd7e97c361d44c992f57895f3f9c84e18eb55f973fdb33e9a59ca0",
-          "sizeBytes": 848672,
+          "sha256": "c1e4cdef46a81f8b2bb2def440177a0651ef76b50b03f1db6d1f7debb9f06686",
+          "sizeBytes": 806688,
           "signature": "bendyline"
         },
         "ggml.dll": {
-          "sha256": "da14cd900202463147003b9370144ea4b399679d36f5d804f2f88a3be959519b",
+          "sha256": "61717568b4bbaea77041e55b816d985546bea40cf73d656e68f690590898a8f3",
           "sizeBytes": 84256,
           "signature": "bendyline"
         },
@@ -914,7 +914,7 @@
           "signature": "vendor-hash-only"
         },
         "whisper.dll": {
-          "sha256": "425e2cfd01bc426a8d4698518c74110f1af5b3687109db8dec44376e7ea9567b",
+          "sha256": "03003a5e4b0b20809d4b0d344864353fe2a1d0588fc819ab77bc1e225ca2080c",
           "sizeBytes": 1381664,
           "signature": "bendyline"
         }
@@ -924,83 +924,83 @@
     "win32-x64-cpu": {
       "files": {
         "gezel-llama-server.exe": {
-          "sha256": "a38a32f39be2dadd1148f2a7c1b6b6115309151dedd822fb275021ad585d8a8c",
+          "sha256": "2cd41c9b418b1697300efc83ad5f0a39c6466b8648ab5413f7481768cc5f9232",
           "sizeBytes": 25888,
           "signature": "bendyline"
         },
         "ggml-base.dll": {
-          "sha256": "8804130edb5f1d99e7f8756f7fa84c4eba88fbe7486378df1334dd38c1932a40",
-          "sizeBytes": 679200,
+          "sha256": "a5386e1ed80458cad0efb1640e5cdef43d43fa097cf949a434bc4637858ddd86",
+          "sizeBytes": 680736,
           "signature": "bendyline"
         },
         "ggml-cpu-alderlake.dll": {
-          "sha256": "6a728dd5b8a8a7b989cf3dc9a1b2f1a30d862dc986648740a7304200a60396e8",
+          "sha256": "b78a48ccd333bbf735044ce0192c06f4b9bdd3ad666dd6c8d75de9309bd861f6",
           "sizeBytes": 943392,
           "signature": "bendyline"
         },
         "ggml-cpu-cannonlake.dll": {
-          "sha256": "e25ea4e6416cf17a1db0bbc2843c5c3d1a252f229370e07221957eb41d032e09",
+          "sha256": "00b141abe46fa1a7c62c8ee9e0f0eab9c77eb077ce3fed386707101b562f6a77",
           "sizeBytes": 1053984,
           "signature": "bendyline"
         },
         "ggml-cpu-cascadelake.dll": {
-          "sha256": "f773aab5fcb9ea6fec51222dc838b3fa8a6a9aec5e5bd0c51615d43c847017ac",
+          "sha256": "944457f5c187a409bce971d84a0ff50a6003a56b858d4ff7c0a0542a6a3d68e8",
           "sizeBytes": 1050400,
           "signature": "bendyline"
         },
         "ggml-cpu-haswell.dll": {
-          "sha256": "2b60112dc247515c94db40b4229417054c54d839f1af0f3cd6bac866ae429e57",
+          "sha256": "4e36c13b256fd7b48c7d1e5ae53bee5735ea120fbedebfa3465da049bd46dde3",
           "sizeBytes": 945440,
           "signature": "bendyline"
         },
         "ggml-cpu-icelake.dll": {
-          "sha256": "a24924b525b5f224fb21f791e125f057aa26e5d744968fbd190dc87a7c068124",
+          "sha256": "b188a03bba640f5e2022ffb92c48154dcc52e008f16f596ec809215f28b31ae1",
           "sizeBytes": 1050400,
           "signature": "bendyline"
         },
         "ggml-cpu-sandybridge.dll": {
-          "sha256": "a92e3ad1641a6663cf44fbf7ba69b58c7ee2ea28da1b99de5cbf858515f4471a",
+          "sha256": "eaab58d081df7615054f41101abd18d439a260663365e91dff16039995f00a64",
           "sizeBytes": 907040,
           "signature": "bendyline"
         },
         "ggml-cpu-skylakex.dll": {
-          "sha256": "c01905e041c8f480485454e57a2c27e7b20b76fa5f3d7f92fa855f97c8300f4a",
+          "sha256": "cf70933f7fd27ca8fd9b4599309ae8003967b470a6b40e8337d828ef650fcc7e",
           "sizeBytes": 1053984,
           "signature": "bendyline"
         },
         "ggml-cpu-sse42.dll": {
-          "sha256": "8103a2bdf013d0349ec0311c1232cccfd331847cc47be91b835eebe4e28e77d4",
+          "sha256": "97c22a11105b7b219b90f9c259a26ca7e97539e360e7834d70c2a91c7bf7cccd",
           "sizeBytes": 808736,
           "signature": "bendyline"
         },
         "ggml-cpu-x64.dll": {
-          "sha256": "69667fb78242d0f1772bf932ae8c81b45e3e7f7491890b0c025f3a856319c4e4",
+          "sha256": "8e40ca6cae78a92768b9c58cc19e489b9f0fb736ff38648c6486a13895e2c8b3",
           "sizeBytes": 812320,
           "signature": "bendyline"
         },
         "ggml.dll": {
-          "sha256": "51f0ef827d0d7aae4fa1c9fec56352c8323d6dd81d8e593d4b9457c327ae79d9",
+          "sha256": "720fbffcd1b18efb62902d096b817ee0de498358e6ea4f6296053c852ba485b2",
           "sizeBytes": 83232,
           "signature": "bendyline"
         },
         "llama-common.dll": {
-          "sha256": "383930aa635e22c273f497102169d16293703ea3f8f25f13c2aa818de143d49d",
-          "sizeBytes": 9435424,
+          "sha256": "5e8289e258426ed86ba5454e364439c1a6b42fa129c9954ffb74f94c9bf629fb",
+          "sizeBytes": 9599264,
           "signature": "bendyline"
         },
         "llama-server-impl.dll": {
-          "sha256": "60100410df3fc723eb8cd75faa85c0e0525f3aefbaae0e4a1c73910ff5a02ab5",
-          "sizeBytes": 7203104,
+          "sha256": "0bfe2f4f3c0861f63e7aac4e4cfdae81d7d87a0ffa2777191e77bdba40974246",
+          "sizeBytes": 7464736,
           "signature": "bendyline"
         },
         "llama.dll": {
-          "sha256": "02d4c3cc9a8acbf71370475c2e22b7467d9793074f1be98b38351bd921d30b93",
-          "sizeBytes": 2283296,
+          "sha256": "d9cb2c96d18c133fe633e7c3bcc0ff9606e988c214506ed42521d5ec0149e23a",
+          "sizeBytes": 2412320,
           "signature": "bendyline"
         },
         "mtmd.dll": {
-          "sha256": "5263bdbfe7fa83753dfa7fc7663070ce493c79b2791b5a435e78febdab60cbe7",
-          "sizeBytes": 999712,
+          "sha256": "ea22c4db41d4a7801349cd813ffcb762f5e13ef729bf2d9a5c92df7e338cdcec",
+          "sizeBytes": 1187616,
           "signature": "bendyline"
         }
       },
@@ -1024,88 +1024,88 @@
           "signature": "vendor-hash-only"
         },
         "gezel-llama-server.exe": {
-          "sha256": "4e6072c70bcb6e7e416ffc8e19ae8010e423a85b71ef6b04225988969f2638c3",
+          "sha256": "e3a03a82520c2b9f21eed014eda4a66e9b0de8a74ffdcb59a58219992ecb1174",
           "sizeBytes": 26400,
           "signature": "bendyline"
         },
         "ggml-base.dll": {
-          "sha256": "093df67e2cf5a3f29e42170f570199eae80e6d64dd03c4af730536e3770a1e8e",
-          "sizeBytes": 662816,
+          "sha256": "cfe4bd31747d4eefa8132b4adc5dd10e799452d083e31ccd227560b81e94f1dc",
+          "sizeBytes": 663328,
           "signature": "bendyline"
         },
         "ggml-cpu-alderlake.dll": {
-          "sha256": "772114bd7a44a57ea594ab4a2eee7e03709795e9c17dae6cc3fbfe841e74b907",
+          "sha256": "cf5a0bc29a1abfb65720539f9efaadfcdc9dc2641b693de08aa8fdb65f32b91b",
           "sizeBytes": 920352,
           "signature": "bendyline"
         },
         "ggml-cpu-cannonlake.dll": {
-          "sha256": "e6a92f470d2942b50cda6fb1a41cd88f17df09fcab29a8613d61ce0f139e6bf9",
+          "sha256": "b16f315113ad8f70f306cfa0982a6350b4806cc3260380972af0e95149b7e584",
           "sizeBytes": 1023776,
           "signature": "bendyline"
         },
         "ggml-cpu-cascadelake.dll": {
-          "sha256": "63298e7313245152ef99a368326c8db88c9631673c20dfc8f48fa0084e067361",
+          "sha256": "ac475b817167c294db9ff439aff4335b438b79d299e1b7ebc77228fcf7ebaed1",
           "sizeBytes": 1022752,
           "signature": "bendyline"
         },
         "ggml-cpu-haswell.dll": {
-          "sha256": "6470a036535d2580be49998fc6761de139e53b12a5782876dde8afb7b19ca4f7",
+          "sha256": "e8f0ceb1cd44acb459a217ae0c1f9ee1d1607608c87840d32f1c6b0e43b897a5",
           "sizeBytes": 921888,
           "signature": "bendyline"
         },
         "ggml-cpu-icelake.dll": {
-          "sha256": "2c6a21eb29985c68be775f395b2aba9fa0bed1c8e6177b00f356ab6e414da85b",
+          "sha256": "5eab978455b040d952945a80992a6184c7a032f4212c72bc23152a151071bd7d",
           "sizeBytes": 1022752,
           "signature": "bendyline"
         },
         "ggml-cpu-sandybridge.dll": {
-          "sha256": "d6e43d0b10bd71b7a67999e12f094e9337309ee1c5dd2ab41043e2442ea136e8",
+          "sha256": "682d739f80631a2b9d952b7f52545bec24d513e4cd4d8b7d991eb3f0be57dce4",
           "sizeBytes": 864032,
           "signature": "bendyline"
         },
         "ggml-cpu-skylakex.dll": {
-          "sha256": "6f894ccdbab05a40c4aa3538daaf29a9431503939db887b9d6ed72e92c768d47",
+          "sha256": "d224e254042fe6bdf0655a399b0aa4e99c6a037a7fb97a55d541fc114244b5c5",
           "sizeBytes": 1023776,
           "signature": "bendyline"
         },
         "ggml-cpu-sse42.dll": {
-          "sha256": "a469c5dff7311b0d09245d4c5bcd9c3d3780a06162afb59144c87b937769be3a",
+          "sha256": "800d28c48e1a424f69505312ace3d7cba8fbc0d98d961e48d3ebc3a5342dec68",
           "sizeBytes": 750368,
           "signature": "bendyline"
         },
         "ggml-cpu-x64.dll": {
-          "sha256": "fb11b7a9ea2780e631835bf916722fc4a4035c211aee40f20538c8ac1d827726",
+          "sha256": "8aa504494999ed872b9bb2192829b46b22e4f00ada9ac0aee106a7d5a3822ae5",
           "sizeBytes": 751392,
           "signature": "bendyline"
         },
         "ggml-cuda.dll": {
-          "sha256": "a523caaa7398cbe637bb1f2cd8c1171b776072c078e8253de45e4915f8a800c7",
-          "sizeBytes": 777141024,
+          "sha256": "81c815eee53e13b97a754607867b481e7666cf82bb7948c2ee4cb858d1cb5e04",
+          "sizeBytes": 776122656,
           "signature": "bendyline"
         },
         "ggml.dll": {
-          "sha256": "4e37f29d3c937fc0d167252048c491f3b78fa862148616a7d8922e2459bbd899",
+          "sha256": "a44a41bacc3a01df5133b150b74ad1605660069682cf0c90c47378a831ff8bad",
           "sizeBytes": 82208,
           "signature": "bendyline"
         },
         "llama-common.dll": {
-          "sha256": "87324d0c90134ef9e3420cefe7f7614c7fcaa8b21b540d88657346d144ffe399",
-          "sizeBytes": 3641632,
+          "sha256": "9c5f5c8b2084c0aabba95fda8858f83146d114d00740418189119e6318cc94a2",
+          "sizeBytes": 3743512,
           "signature": "bendyline"
         },
         "llama-server-impl.dll": {
-          "sha256": "310c3d6d7024c720bcf09bca144738381fd89c5d27029e450026034a420277b7",
-          "sizeBytes": 5367584,
+          "sha256": "ebb9d4f4484bb96a774f5924b9a44d1aca21c7a72bb545e81a19a8783af30721",
+          "sizeBytes": 5546784,
           "signature": "bendyline"
         },
         "llama.dll": {
-          "sha256": "c399048911258966c689ea27f27fd0b58ea559652599c6d53084a91dd76e1530",
-          "sizeBytes": 2274592,
+          "sha256": "8754d16891855d9d16cfa14a24cb3a786b30848d372911ee115f92bdc876a76e",
+          "sizeBytes": 2404640,
           "signature": "bendyline"
         },
         "mtmd.dll": {
-          "sha256": "fc9de0ff330d9ce252b12d8c7e41da84a6638b8442f27e222521cef9e5e7fb4a",
-          "sizeBytes": 1007904,
+          "sha256": "4e5ad8b70f99d23b807af511e179e4c39a6e41b06751d742ded1c1fc5f2cd4c1",
+          "sizeBytes": 1161504,
           "signature": "bendyline"
         }
       },
@@ -1114,88 +1114,88 @@
     "win32-x64-vulkan": {
       "files": {
         "gezel-llama-server.exe": {
-          "sha256": "0e182f1af04244d95ff58e7eaecdafd3008e39312f637f1c26d768f80cc42917",
+          "sha256": "2b35a5961c4d5ae52bddd280a7489e7eff0f2fa349f7d8cb330bb1a453dc4724",
           "sizeBytes": 25888,
           "signature": "bendyline"
         },
         "ggml-base.dll": {
-          "sha256": "7e1bf20d5e80d723c78aff734c2f08b9c6a578b91614f6250fd6398120067180",
-          "sizeBytes": 679200,
+          "sha256": "bc0d9b6db8341ba5d35902b589521cf26740d773e525b40b390ed2e2572082e5",
+          "sizeBytes": 680736,
           "signature": "bendyline"
         },
         "ggml-cpu-alderlake.dll": {
-          "sha256": "14a8555fd3adb86ffe4c3f7b0ab971fb3623cc81cda24d75735aa9ac0bc3934a",
+          "sha256": "e344866075a4187a83615607423d9a708c0f12af024335a74d59f2edfddf8039",
           "sizeBytes": 943392,
           "signature": "bendyline"
         },
         "ggml-cpu-cannonlake.dll": {
-          "sha256": "3bb2259303d7f8a8bd9a70ac90829e39a224641ac5b90f3f15d2759039a492f2",
+          "sha256": "2b1373e1eae64fdc466022625a2bc2f6765b13c8d6087998b6020ecd4d2a7b6a",
           "sizeBytes": 1053984,
           "signature": "bendyline"
         },
         "ggml-cpu-cascadelake.dll": {
-          "sha256": "663c24440edec2b3da6701876b6979d98b1913b44bf3718e8a04c3998255516f",
+          "sha256": "19bfc742e8f9287c6a0d9fe259d41455b1a5bc0fd6e0a858233eec7bcc034467",
           "sizeBytes": 1050400,
           "signature": "bendyline"
         },
         "ggml-cpu-haswell.dll": {
-          "sha256": "8bed391dbe9fbdb17819a4ab9ff157140fb68831aaafd93e73562ad68eb4bbc9",
+          "sha256": "67e3aee761130f07031cbada1b979ce917c84665c090289b76dfdfc79b00b069",
           "sizeBytes": 945440,
           "signature": "bendyline"
         },
         "ggml-cpu-icelake.dll": {
-          "sha256": "346e1b714a13e52f61ab695bcc3e549676573f1696965f9d75db3b013eca8c50",
+          "sha256": "8136fea917411af68214070480f4b7021db6a271f71404749c7ecd53913055bf",
           "sizeBytes": 1050400,
           "signature": "bendyline"
         },
         "ggml-cpu-sandybridge.dll": {
-          "sha256": "8f45e858ab7f8686a96b000b62d4176fed2176ef1bf59572ea31a5c0f7f7cae0",
+          "sha256": "cb250443bb6cf9b1637e676bd799e205c6d70199d86f2c0e3e31da8ea5da6d70",
           "sizeBytes": 907040,
           "signature": "bendyline"
         },
         "ggml-cpu-skylakex.dll": {
-          "sha256": "5902d7f7e5184a8abd44e809e82468d03b1ae2a6373af2ae9c4d04ea657969af",
+          "sha256": "ccf61e20a51e195cc9514c4fa1e0131683fb5d103af97d7b08daed4ff59ff8d4",
           "sizeBytes": 1053984,
           "signature": "bendyline"
         },
         "ggml-cpu-sse42.dll": {
-          "sha256": "3469b0f467bc7e650f4ffbd07da4a059df4908a3098f621d7454cae29186746d",
+          "sha256": "329f60ab6cb81deea0bb1b2a8c06d250a6bb5b6f5c586bc97277aadbad5a975e",
           "sizeBytes": 808736,
           "signature": "bendyline"
         },
         "ggml-cpu-x64.dll": {
-          "sha256": "ee032a17dccdd6cb5e491d76c102b58681a040be8064fb20c3aceda8c813fa70",
+          "sha256": "4de4cc70927c1cc8320993a71e4f71984bbac3a945526c9b66ecfe85223db6aa",
           "sizeBytes": 812320,
           "signature": "bendyline"
         },
         "ggml-vulkan.dll": {
-          "sha256": "43894e17461e1da9d7472a94bea3e6fec598ae459c01e440dc8ee8469bdb86ed",
-          "sizeBytes": 50633504,
+          "sha256": "ef25c40021be195f975fa3d42e9be39cd66af3949448ea259982d10bb01f3573",
+          "sizeBytes": 50752800,
           "signature": "bendyline"
         },
         "ggml.dll": {
-          "sha256": "caeca121c2b3f33c71359c4f59eb2bdf267bef2fd2991b0f280763062b3df4b7",
+          "sha256": "27e223d3110a6331afe82e3789aa1e3f587ca5434b254f5b26d5a9e764cd2c00",
           "sizeBytes": 83232,
           "signature": "bendyline"
         },
         "llama-common.dll": {
-          "sha256": "174aeb9d37a3d5fd000a254c72b4501af2c441f92287d12b8a28987b6afdfc51",
-          "sizeBytes": 9435424,
+          "sha256": "2ca1aa83d43235e42c72b4ba85650817edb2fbee9517baf006ee3f0fca0fe7f2",
+          "sizeBytes": 9599264,
           "signature": "bendyline"
         },
         "llama-server-impl.dll": {
-          "sha256": "c0043b5d4106145c83fdc4a81f8684084c800adc2edf45104b1a726016a72365",
-          "sizeBytes": 7203104,
+          "sha256": "dce915503932ac4a331af208c8d9142d4c1148bedbb0b9558c96c5dd133f06d8",
+          "sizeBytes": 7464736,
           "signature": "bendyline"
         },
         "llama.dll": {
-          "sha256": "9933078d3c1d98af58396b5e9b92a1ccd14d97c9537fa7369432df8d46f8d42b",
-          "sizeBytes": 2283296,
+          "sha256": "7b0076f9632160491593f74dfc6937f6800ae5bf165ab927a232950daa7b505c",
+          "sizeBytes": 2412320,
           "signature": "bendyline"
         },
         "mtmd.dll": {
-          "sha256": "8221cd6d684709be614dc056a43b9682aafb4c82f7418b7f9658af81b14f1ead",
-          "sizeBytes": 999712,
+          "sha256": "7a18f5916c67f947cbe85cf79b24f8c07bd1a269a95c44b76d07f2b312a1f14d",
+          "sizeBytes": 1187616,
           "signature": "bendyline"
         }
       },

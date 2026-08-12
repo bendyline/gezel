@@ -5,8 +5,8 @@ import { Hono } from 'hono';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import {
   adjacentDocFilesPaths,
-  docFilesPaths,
   ensureConvertedMarkdownSidecar,
+  ensureShadowDocSidecar,
   isConvertibleDoc,
 } from '../../index-store/docs.js';
 import type { ServiceContext } from '../context.js';
@@ -95,10 +95,27 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
     }
 
     if (isConvertibleDoc(extname(request.path))) {
-      const paths =
-        request.kind === 'workspace'
-          ? docFilesPaths(base, request.path)
-          : adjacentDocFilesPaths(base, request.path);
+      if (request.kind === 'workspace') {
+        // Workspace sources share the indexer's shadow cache under
+        // artifacts/shadow — one sidecar per doc, wherever it's requested
+        // from, and nothing written into a possibly read-only workspace.
+        const converted = await ensureShadowDocSidecar(
+          sourcePath,
+          ctx.store.projectArtifactsDir(projectId),
+          request.path,
+        );
+        if (converted?.markdown != null) {
+          return c.json(
+            ReferencePreviewResponseSchema.parse({
+              mode: 'markdown',
+              content: converted.markdown,
+              sidecarPath: `artifacts/${converted.paths.mdRel}`,
+            }),
+          );
+        }
+        return c.json(ReferencePreviewResponseSchema.parse({ mode: 'binary' }));
+      }
+      const paths = adjacentDocFilesPaths(base, request.path);
       if (!(await realpathContained(base, paths.mdPath))) {
         return c.json({ error: 'sidecar path traversal' }, 400);
       }

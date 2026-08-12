@@ -196,6 +196,13 @@ export interface TaskRunnerOptions {
    * to "always pending" (only the active-shift gate applies).
    */
   isNightShiftPending?: (task: Task) => boolean;
+  /**
+   * True while the night-shift index catch-up sweep runs. Night-shift
+   * handoffs stay held on the queue until it finishes, so batch work starts
+   * against a current static + AI index instead of racing the indexer for
+   * the engine. Defaults to never-active.
+   */
+  isIndexCatchUpActive?: () => boolean;
 }
 
 export class TaskRunner {
@@ -205,6 +212,7 @@ export class TaskRunner {
   private readonly now: () => number;
   private readonly isNightShiftActive: () => boolean;
   private readonly isNightShiftPending: (task: Task) => boolean;
+  private readonly isIndexCatchUpActive: () => boolean;
   private readonly pending: PendingHandoff[] = [];
   private readonly activeDispatches = new Map<
     string,
@@ -230,6 +238,7 @@ export class TaskRunner {
     this.now = opts.now ?? Date.now;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
     this.isNightShiftPending = opts.isNightShiftPending ?? (() => true);
+    this.isIndexCatchUpActive = opts.isIndexCatchUpActive ?? (() => false);
   }
 
   start(): void {
@@ -518,13 +527,18 @@ export class TaskRunner {
     for (const handoff of [...normalItems, ...nightItems]) {
       const task = taskByHandoffId.get(handoff.id)!;
       const isNight = nightItems.includes(handoff);
-      // Night-shift task: hold on the queue unless the shift is ON and the
-      // task still has work to do today (a `onceADay` task that already ran
-      // is held until tomorrow). Already-dispatched night turns are
-      // unaffected — the runner only controls queue admission — so in-flight
-      // work wraps up while queued night work waits for the shift /
-      // interactive work to drain.
-      if (isNight && (!nightShiftOn || !this.isNightShiftPending(task))) {
+      // Night-shift task: hold on the queue unless the shift is ON, the
+      // index catch-up sweep has finished (activation brings static + AI
+      // indexes current BEFORE batch work), and the task still has work to
+      // do today (a `onceADay` task that already ran is held until
+      // tomorrow). Already-dispatched night turns are unaffected — the
+      // runner only controls queue admission — so in-flight work wraps up
+      // while queued night work waits for the shift / interactive work to
+      // drain.
+      if (
+        isNight &&
+        (!nightShiftOn || this.isIndexCatchUpActive() || !this.isNightShiftPending(task))
+      ) {
         handoff.heldFor = 'night-shift';
         keep.push(handoff);
         continue;

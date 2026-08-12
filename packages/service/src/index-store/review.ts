@@ -1,25 +1,43 @@
 import { FileReviewReplySchema } from '@bendyline/gezel';
 import type { FileReviewIssue, FileReviewReply } from '@bendyline/gezel';
+import {
+  CompletionBlockedError,
+  type ContentWindow,
+  completionBudgetChars,
+  runLargeContentCompletion,
+} from '../chat/large-content.js';
 import { type EnrichDeps, readEnrichableText } from './enrich.js';
 import type { FileRecord, IndexStore } from './index-store.js';
 import type { ResolvedRubric } from './rubrics.js';
 
 /**
- * The boekwachter review pass (one file per LLM call): type-specific cliffs
- * notes, a structured issue list, and a 1-10 health score judged against the
- * file kind's rubric. Runs strictly AFTER the enrichment tier drains — the
- * summary/embedding pipeline feeds search coverage (the benchmarked metric)
- * and must never wait behind reviews.
+ * The boekwachter review pass: type-specific cliffs notes, a structured issue
+ * list, and a 1-10 health score judged against the file kind's rubric. Runs
+ * strictly AFTER the enrichment tier drains — the summary/embedding pipeline
+ * feeds search coverage (the benchmarked metric) and must never wait behind
+ * reviews.
+ *
+ * Content sizing is owned by the large-content layer, not a caller-side cap:
+ * a file that fits the resolved target's budget is reviewed WHOLE in one call
+ * (cloud/Night Shift targets take almost everything whole), and a larger file
+ * is reviewed in line-aligned windows whose numbered lines carry ABSOLUTE
+ * file line numbers, merged into one stored review. Partial coverage (the
+ * window cost bound) is recorded in the notes, never silent — the old
+ * first-6,000-chars slice made mid-file issues structurally invisible.
  *
  * Failure semantics differ from the summary pass on purpose:
- *   - empty reply (engine down / timeout)     → no gate write, retried freely
- *   - non-empty but unparseable/invalid reply → capped attempt (retried up to
+ *   - every reply empty (engine down / timeout) → no gate write, retried freely
+ *   - non-empty but unparseable/invalid replies → capped attempt (retried up to
  *     MAX_REVIEW_ATTEMPTS per rubric, budget resets when the rubric changes)
- *   - success                                 → row upserted, attempts reset
+ *   - any window parsed                         → row upserted, attempts reset
  */
 
 export const MAX_REVIEW_ATTEMPTS = 3;
-const REVIEW_CONTENT_CAP = 6000;
+/** Prompt scaffold (rubric + contract + rules) allowance inside the budget. */
+const REVIEW_SCAFFOLD_CHARS = 2500;
+const MIN_WINDOW_CHARS = 2000;
+const REVIEW_WINDOW_OVERLAP_LINES = 12;
+const DEFAULT_REVIEW_MAX_WINDOWS = 4;
 const NOTES_MD_CAP = 4000;
 const HEALTH_REASON_CAP = 200;
 const ISSUE_MESSAGE_CAP = 300;
@@ -33,6 +51,10 @@ const KIND_RULES: Record<string, string> = {
   code: [
     '- notes_md: what this file does and its key flows — 1 sentence for a tiny file, up to 3 short paragraphs for a complex one. Plain markdown, no headings.',
     '- Look for: likely bugs, code smells, unhandled errors, syntax mistakes a linter would miss, misleading names, dead code. Categories like: bug, smell, error-handling, naming, dead-code, complexity.',
+  ].join('\n'),
+  text: [
+    '- notes_md: a textual summary of what this document covers — 1 sentence to 2 short paragraphs. No diagrams.',
+    '- Look for: grammar and spelling errors, unclear or ambiguous sentences, disorganized flow, stale or contradictory statements. Categories like: grammar, clarity, structure, accuracy. This is plain text — do not flag missing markdown formatting.',
   ].join('\n'),
   markdown: [
     '- notes_md: a textual summary of what this document covers and its structure — 1 sentence to 2 short paragraphs. No diagrams.',
@@ -60,27 +82,32 @@ const DIAGRAM_RULE =
 /**
  * Build the review prompt: rubric, strict JSON contract, shared rules,
  * kind-specific rules, then the line-numbered body (numbering is what keeps
- * `issues[].line` non-hallucinated on small models). Returns the shown line
- * count so callers can drop line refs the model never saw.
+ * `issues[].line` non-hallucinated on small models). When a window of a
+ * larger file is passed, the numbering carries the window's ABSOLUTE file
+ * line numbers and the header says which part this is. Returns the numbered
+ * range so callers can drop line refs the model never saw.
  */
 export function buildReviewPrompt(
   file: FileRecord,
   content: string,
   rubric: ResolvedRubric,
-  opts: { inviteDiagram?: boolean } = {},
-): { prompt: string; shownLines: number } {
-  const capped =
-    content.length > REVIEW_CONTENT_CAP ? content.slice(0, REVIEW_CONTENT_CAP) : content;
-  const lines = capped.split('\n');
-  const numbered = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
-  const truncated =
-    content.length > REVIEW_CONTENT_CAP
-      ? '\n(file truncated here — review only the lines shown)'
-      : '';
+  opts: {
+    inviteDiagram?: boolean;
+    window?: Pick<ContentWindow, 'index' | 'count' | 'lineStart' | 'lineEnd' | 'totalLines'>;
+  } = {},
+): { prompt: string; lineStart: number; shownLines: number } {
+  const lineStart = opts.window?.lineStart ?? 1;
+  const lines = content.split('\n');
+  const numbered = lines.map((l, i) => `${lineStart + i}: ${l}`).join('\n');
   const kindRules = KIND_RULES[file.kind ?? ''] ?? GENERIC_RULES;
   const diagram = opts.inviteDiagram && file.kind === 'code' ? `\n${DIAGRAM_RULE}` : '';
+  const w = opts.window;
+  const partHeader =
+    w && w.count > 1
+      ? `\nThis is part ${w.index + 1} of ${w.count} — lines ${w.lineStart}-${w.lineEnd} of a ${w.totalLines}-line file. Review ONLY the lines shown; judge health for this part alone.`
+      : '';
   const prompt = [
-    'You are reviewing one file for a code-intelligence index. Score it against this rubric:',
+    `You are reviewing one file for a code-intelligence index. Score it against this rubric:${partHeader}`,
     '',
     rubric.text,
     '',
@@ -99,9 +126,9 @@ export function buildReviewPrompt(
     `${kindRules}${diagram}`,
     '',
     `File: ${file.path}`,
-    `${numbered}${truncated}`,
+    numbered,
   ].join('\n');
-  return { prompt, shownLines: lines.length };
+  return { prompt, lineStart, shownLines: lines.length };
 }
 
 /**
@@ -215,60 +242,148 @@ export interface ReviewOutcome {
   attempted: boolean;
   /** True when the model returned nothing at all (engine down / timeout). */
   emptyReply: boolean;
+  /**
+   * True when this content genuinely cannot be reviewed (blocked/failed doc
+   * conversion, empty file, vanished source) and was terminally skipped.
+   * Costs no LLM call; counts toward neither batch progress nor the
+   * empty-reply breaker.
+   */
+  unavailable?: boolean;
+}
+
+function reviewMaxWindows(): number {
+  const env = Number(process.env.GEZEL_REVIEW_MAX_WINDOWS);
+  if (Number.isFinite(env) && env >= 1) return Math.floor(env);
+  return DEFAULT_REVIEW_MAX_WINDOWS;
 }
 
 /** Review one file against its kind's rubric; see module doc for semantics. */
 export async function reviewFile(
   store: IndexStore,
   workspaceDir: string,
+  artifactsDir: string,
   file: FileRecord,
   rubric: ResolvedRubric,
   deps: EnrichDeps,
 ): Promise<ReviewOutcome> {
   const skipped: ReviewOutcome = { reviewed: false, attempted: false, emptyReply: false };
   if (!file.hash || !deps.review) return skipped;
-  const content = await readEnrichableText(workspaceDir, file);
-  if (!content?.trim()) return skipped;
+  const content = await readEnrichableText(workspaceDir, artifactsDir, file);
+  if (!content?.trim()) {
+    store.markReviewUnavailable(file.hash, file.path, rubric.hash, MAX_REVIEW_ATTEMPTS);
+    return { ...skipped, unavailable: true };
+  }
 
   const inviteDiagram =
     file.kind === 'code' && ((file.loc ?? 0) >= 60 || store.symbolsForFile(file.path).length >= 5);
-  const { prompt, shownLines } = buildReviewPrompt(file, content, rubric, { inviteDiagram });
-
-  let raw = '';
+  const complete = deps.review;
+  let run: Awaited<ReturnType<typeof runLargeContentCompletion>>;
   try {
-    raw = await deps.review(prompt);
-  } catch {
-    raw = '';
+    run = await runLargeContentCompletion(
+      (prompt) => complete(prompt),
+      content,
+      (window) =>
+        buildReviewPrompt(file, window.text, rubric, {
+          inviteDiagram,
+          ...(window.count > 1 ? { window } : {}),
+        }).prompt,
+      {
+        budgetChars: Math.max(
+          MIN_WINDOW_CHARS,
+          completionBudgetChars(deps.provenance?.provider) - REVIEW_SCAFFOLD_CHARS,
+        ),
+        maxWindows: reviewMaxWindows(),
+        overlapLines: REVIEW_WINDOW_OVERLAP_LINES,
+      },
+    );
+  } catch (err) {
+    if (err instanceof CompletionBlockedError) {
+      // Provider policy-blocked the file's content — deterministic, so an
+      // "engine down, retry later" emptyReply would re-queue it every batch
+      // forever (and each pass would count toward the wedge breaker).
+      store.markReviewUnavailable(file.hash, file.path, rubric.hash, MAX_REVIEW_ATTEMPTS);
+      return { ...skipped, unavailable: true };
+    }
+    throw err;
   }
-  if (!raw.trim()) {
+  if (run.refused) {
+    store.markReviewUnavailable(file.hash, file.path, rubric.hash, MAX_REVIEW_ATTEMPTS);
+    return { ...skipped, unavailable: true };
+  }
+  if (run.replies.every((r) => !r.raw.trim())) {
     // Engine down or timed out — burn no retry budget; the file stays listed.
     return { reviewed: false, attempted: false, emptyReply: true };
   }
 
-  const reply = parseFileReviewReply(raw);
-  if (!reply) {
+  const parsed: Array<{ window: ContentWindow; reply: FileReviewReply }> = [];
+  for (const { window, raw } of run.replies) {
+    if (!raw.trim()) continue;
+    const reply = parseFileReviewReply(raw);
+    if (reply) parsed.push({ window, reply });
+  }
+  if (parsed.length === 0) {
     store.recordReviewAttempt(file.hash, file.path, rubric.hash);
     return { reviewed: false, attempted: true, emptyReply: false };
   }
 
-  // Line refs past what the prompt showed are hallucinated — keep the issue,
-  // drop its anchor.
-  const issues = reply.issues.map((i) => {
-    if (i.line !== undefined && i.line > shownLines) {
-      const { line: _dropped, ...rest } = i;
-      return rest;
-    }
-    return i;
-  });
   store.upsertFileReview({
     contentHash: file.hash,
     filePath: file.path,
     rubricHash: rubric.hash,
-    notesMd: sanitizeMermaid(reply.notes_md, file.kind === 'code'),
-    issues,
-    health: reply.health,
-    healthReason: reply.health_reason,
+    ...mergeWindowReplies(parsed, run, file.kind === 'code'),
     model: deps.model ?? 'unknown',
+    ...(deps.provenance ? { provenance: deps.provenance } : {}),
   });
   return { reviewed: true, attempted: true, emptyReply: false };
+}
+
+/**
+ * Fold per-window replies into one stored review: issues keep their absolute
+ * anchors (clamped to the lines their window actually showed, then deduped
+ * across overlaps), health is the WORST window (a file with one broken part
+ * is a file with a problem), and the notes come from the first window plus an
+ * honest coverage marker whenever the file was reviewed in parts.
+ */
+function mergeWindowReplies(
+  parsed: Array<{ window: ContentWindow; reply: FileReviewReply }>,
+  run: { totalWindows: number; truncated: boolean },
+  allowMermaid: boolean,
+): { notesMd: string; issues: FileReviewIssue[]; health: number; healthReason: string } {
+  const issues: FileReviewIssue[] = [];
+  const seen = new Set<string>();
+  for (const { window, reply } of parsed) {
+    for (const issue of reply.issues) {
+      const inWindow =
+        issue.line === undefined ||
+        (issue.line >= window.lineStart &&
+          issue.line < window.lineStart + window.text.split('\n').length);
+      const kept = inWindow ? issue : stripLine(issue);
+      const key = `${kept.line ?? ''}:${kept.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (issues.length < MAX_ISSUES) issues.push(kept);
+    }
+  }
+  let worst = parsed[0]!;
+  for (const p of parsed) {
+    if (p.reply.health < worst.reply.health) worst = p;
+  }
+  let notesMd = sanitizeMermaid(parsed[0]!.reply.notes_md, allowMermaid);
+  if (run.totalWindows > 1) {
+    const marker = run.truncated
+      ? `_(reviewed in ${parsed.length} of ${run.totalWindows} parts — the remainder was not reviewed)_`
+      : `_(reviewed in ${run.totalWindows} parts)_`;
+    notesMd = `${notesMd}\n\n${marker}`.slice(0, NOTES_MD_CAP);
+  }
+  return {
+    notesMd,
+    issues,
+    health: worst.reply.health,
+    healthReason: worst.reply.health_reason,
+  };
+}
+
+function stripLine(issue: FileReviewIssue): FileReviewIssue {
+  const { line: _dropped, ...rest } = issue;
+  return rest;
 }

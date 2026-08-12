@@ -87,10 +87,15 @@ describe('POST /v1/apps/register', () => {
     expect(body.status).toBe('pending');
     expect(body.token).toBeUndefined();
     expect(body.verificationCode).toBeUndefined();
-    expect(res.headers.get('content-security-policy')).toContain("default-src 'self'");
+    const csp = res.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).not.toContain('https:');
+    expect(csp).toContain("webrtc 'block'");
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(res.headers.get('x-dns-prefetch-control')).toBe('off');
   });
 
   it('rejects an appId that already has an issued token with 409', async () => {

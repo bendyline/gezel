@@ -195,6 +195,12 @@ export const FileReviewResponseSchema = z.object({
   /** True when the file is indexed but its current hash has no review yet. */
   pending: z.boolean().optional(),
   review: FileReviewWireSchema.optional(),
+  /**
+   * False when no rubric covers this file's kind — it will NEVER be reviewed,
+   * as opposed to `pending` ("not yet"). Absent on found responses and on
+   * older daemons.
+   */
+  eligible: z.boolean().optional(),
 });
 export type FileReviewResponse = z.infer<typeof FileReviewResponseSchema>;
 
@@ -228,6 +234,17 @@ export const ListFileIssuesResponseSchema = z.object({
    *  very differently from "3 issues"; keep the tool honest mid-sweep. */
   reviewedFiles: z.number().int().nonnegative(),
   eligibleFiles: z.number().int().nonnegative(),
+  /** Distinct reviewer identities over the filtered set (provenance line). */
+  reviewers: z
+    .array(
+      z.object({
+        model: z.string().nullable(),
+        provider: z.string().nullable(),
+        gezelName: z.string().nullable(),
+        files: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
 });
 export type ListFileIssuesResponse = z.infer<typeof ListFileIssuesResponseSchema>;
 

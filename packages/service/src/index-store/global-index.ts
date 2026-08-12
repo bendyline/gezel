@@ -1,6 +1,7 @@
 import type { HistoryEvent, HistoryFilter } from '@bendyline/gezel';
 import { globalIndexDbFile } from '@bendyline/gezel/paths';
 import { type CollectionKind, IndexStore } from './index-store.js';
+import { isTransientIndexError } from './sqlite-driver.js';
 
 /**
  * Read facade over the home-scoped `~/.gezel/index/global.db` — the first
@@ -51,11 +52,18 @@ export async function openGlobalCollection(
   home: string,
   collection: GlobalCollectionId,
 ): Promise<IndexStore | null> {
-  return IndexStore.open(globalIndexDbFile(home), {
-    collectionId: collection,
-    kind: collection as CollectionKind,
-    rootPath: home,
-  });
+  try {
+    return await IndexStore.open(globalIndexDbFile(home), {
+      collectionId: collection,
+      kind: collection as CollectionKind,
+      rootPath: home,
+    });
+  } catch (error) {
+    // The global db has one fixed home — a transient lock just means "no
+    // search this call", same graceful degrade as an unavailable driver.
+    if (isTransientIndexError(error)) return null;
+    throw error;
+  }
 }
 
 export class GlobalIndex {

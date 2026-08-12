@@ -9,6 +9,7 @@ import type {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog, Tabs } from '../primitives/index.js';
+import { CatalogArtwork } from './CatalogArtwork.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ToolsetConfigForm, type ToolsetConfigFormValue } from './ToolsetConfigForm.js';
 
@@ -41,10 +42,9 @@ interface RoleDefault {
 }
 
 /**
- * Renders a toolset icon. Built-in toolsets ship inline SVG via
- * `iconSvg` (rendered with `dangerouslySetInnerHTML` since the
- * source is trusted catalog data). Third-party toolsets fall back
- * to `<img src={logoUrl}>`. Either path lands in the same square
+ * Renders a toolset icon. Built-in toolsets ship SVG markup through the
+ * shared sanitizer + isolated-image boundary; other toolsets use a resolved
+ * logo. Either path lands in the same square
  * frame so the tile grid stays aligned. Final fallback is a
  * lettered placeholder.
  */
@@ -59,14 +59,17 @@ function ToolsetIcon({
   name: string;
   className: string;
 }) {
-  if (iconSvg) {
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: toolset icon SVGs are server-sanitized before delivery
-    return <span className={className} dangerouslySetInnerHTML={{ __html: iconSvg }} />;
-  }
-  if (logoUrl) {
-    return <img className={className} src={logoUrl} alt="" />;
-  }
-  return <div className={`${className} toolsets-tile-icon-placeholder`}>{name.slice(0, 1)}</div>;
+  return (
+    <CatalogArtwork
+      iconSvg={iconSvg}
+      logoUrl={logoUrl}
+      svgClassName={className}
+      imageClassName={className}
+      fallback={
+        <div className={`${className} toolsets-tile-icon-placeholder`}>{name.slice(0, 1)}</div>
+      }
+    />
+  );
 }
 
 /**

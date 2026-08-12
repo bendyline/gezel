@@ -47,7 +47,18 @@ export type IgnorePathResolver = (paths: readonly string[]) => Promise<ReadonlyS
  */
 export async function walkDirDetailed(
   base: string,
-  opts: { maxEntries?: number; maxDepth?: number; withStats?: boolean } = {},
+  opts: {
+    maxEntries?: number;
+    maxDepth?: number;
+    withStats?: boolean;
+    /**
+     * Root-level directory names to skip entirely, checked before enqueue so a
+     * large excluded subtree never consumes the entry budget. Scoped to depth
+     * 0 on purpose: the artifacts walk must hide its reserved `shadow/` cache
+     * without hiding a user folder that happens to share the name deeper in.
+     */
+    skipRootDirs?: ReadonlySet<string>;
+  } = {},
 ): Promise<WalkDirResult> {
   const maxEntries = opts.maxEntries ?? 500;
   const maxDepth = opts.maxDepth ?? 6;
@@ -69,6 +80,7 @@ export async function walkDirDetailed(
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
       if (skipDirs.has(e.name)) continue;
+      if (item.depth === 0 && e.isDirectory() && opts.skipRootDirs?.has(e.name)) continue;
       if (results.length >= maxEntries) {
         return { entries: results, truncated: true };
       }
@@ -98,7 +110,7 @@ export async function walkDirDetailed(
 /** {@link walkDirDetailed} for callers that only need the entries. */
 export async function walkDir(
   base: string,
-  opts: { maxEntries?: number; maxDepth?: number; withStats?: boolean } = {},
+  opts: Parameters<typeof walkDirDetailed>[1] = {},
 ): Promise<ProjectFileEntry[]> {
   return (await walkDirDetailed(base, opts)).entries;
 }

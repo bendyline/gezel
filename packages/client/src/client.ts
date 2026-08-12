@@ -400,10 +400,18 @@ export interface ProviderUsage {
   quotaBuckets: QuotaBucket[];
   todayTurns: number;
   todayTokensIn: number;
+  /**
+   * Portion of `todayTokensIn` the provider reported as prompt-cache reads.
+   * Zero when nothing was cached OR when the provider reports no breakdown,
+   * so render 0 as "no cache info", never "0% hit rate". Optional so an
+   * older daemon that predates the field still typechecks.
+   */
+  todayTokensCached?: number;
   todayTokensOut: number;
   todayCost: number;
   totalTurns: number;
   totalTokensIn: number;
+  totalTokensCached?: number;
   totalTokensOut: number;
   totalCost: number;
   /**
@@ -5792,7 +5800,13 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/index/refresh`);
   }
 
-  /** One bounded on-demand enrichment pass ("study now") — loop until `drained`. */
+  /**
+   * On-demand enrichment drive ("study now"). Without `intensity`: one
+   * bounded synchronous pass — loop until `drained`. With `intensity`
+   * (`background` | `full`): starts a server-side job (static refresh first,
+   * then every AI tier to drain) and returns immediately with
+   * `started: true`; poll `/index/status` or watch `index_progress` events.
+   */
   driveIndexEnrichment(
     id: string,
     body: DriveIndexEnrichmentRequest = {},

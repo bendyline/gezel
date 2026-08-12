@@ -40,7 +40,10 @@ import {
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
-import { ConnectorCorpusWriteDeniedError } from '../../fs/project-artifacts-store.js';
+import {
+  ConnectorCorpusWriteDeniedError,
+  ShadowPathWriteDeniedError,
+} from '../../fs/project-artifacts-store.js';
 import {
   PathSafetyError,
   intoWorkspaceRelative,
@@ -633,7 +636,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/index/status', async (c) => {
     const id = c.req.param('id');
     const status = await ctx.workspaceIndex.statusForUi(id);
-    return c.json(status);
+    // Drive state rides along so every window shows "scan running" whether
+    // this client, another window, or the night-shift catch-up started it.
+    const aiDrive = ctx.indexEnrichment.driveMode(id);
+    return c.json(aiDrive ? { ...status, aiDrive } : status);
   });
 
   app.post('/:id/index/refresh', async (c) => {
@@ -684,6 +690,37 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         drained: false,
       });
     }
+    if (body.intensity) {
+      // Job mode: start the drive (static refresh + every AI tier to drain)
+      // and return immediately — a full-bore drain can outlive any HTTP
+      // timeout. Progress flows over `index_progress` + `/index/status`.
+      const { alreadyRunning } = ctx.indexEnrichment.drive(id, {
+        intensity: body.intensity,
+        reviews: body.reviews !== false,
+      });
+      const pending = await ctx.contentIndex.countNeedingEnrichment(id);
+      const reviewCounts = await ctx.contentIndex.reviewCounts(id).catch(() => null);
+      return c.json({
+        paused: false,
+        files: 0,
+        summarized: 0,
+        embedded: 0,
+        pending,
+        areasUpdated: 0,
+        architectureUpdated: false,
+        ...(body.reviews !== false
+          ? { reviewed: 0, reviewPending: reviewCounts?.pending ?? 0 }
+          : {}),
+        drained: false,
+        started: true,
+        alreadyRunning,
+        mode: body.intensity,
+      });
+    }
+    // Legacy bounded pass — but current-files first: enriching against a
+    // stale walk misses new files, so the AI budget clock starts AFTER the
+    // awaited static refresh.
+    await ctx.workspaceIndex.refreshAndWait(id).catch(() => {});
     const maxFiles = body.maxFiles ?? 10;
     const deadline = Date.now() + (body.budgetMs ?? 45_000);
     const deps = await buildEnrichDeps(ctx.store, ctx.chat, { boekwachter });
@@ -941,7 +978,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path: body.path });
     } catch (err) {
-      if (err instanceof ConnectorCorpusWriteDeniedError) {
+      if (
+        err instanceof ConnectorCorpusWriteDeniedError ||
+        err instanceof ShadowPathWriteDeniedError
+      ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       throw err;
@@ -963,6 +1003,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path: written });
     } catch (err) {
+      if (err instanceof ShadowPathWriteDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 403);
+      }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         return c.json({ error: 'backup already exists' }, 409);
       }

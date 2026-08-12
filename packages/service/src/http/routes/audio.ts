@@ -5,6 +5,11 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import {
+  INVALID_MODEL_ID_CODE,
+  INVALID_MODEL_ID_MESSAGE,
+  isSafeModelId,
+} from '../../models/model-id.js';
 import { KOKORO_DEFAULT_MODEL_ID, KOKORO_DEFAULT_VOICES } from '../../providers/audio/kokoro.js';
 import type { AudioModelPullSpec } from '../../providers/audio/types.js';
 import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
@@ -252,6 +257,9 @@ export function audioRoutes(ctx: ServiceContext): Hono {
 
   app.delete('/stt/models/:id', async (c) => {
     const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
     const provider = await ctx.stt.current();
     await provider.deleteModel(id);
     return c.json({ ok: true as const });
@@ -309,6 +317,9 @@ export function audioRoutes(ctx: ServiceContext): Hono {
 
   app.delete('/tts/models/:id', async (c) => {
     const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
     const provider = await ctx.tts.current();
     await provider.deleteModel(id);
     return c.json({ ok: true as const });

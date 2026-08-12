@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,6 +29,13 @@ async function writeBundle(version: string, content = 'fake-node-binary'): Promi
   await writeFile(join(bundleDir, 'version.txt'), `${version}\n`, 'utf8');
 }
 
+async function writeVerifiedBundle(version: string, content = 'fake-node-binary'): Promise<void> {
+  await writeBundle(version, content);
+  const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+  const digest = createHash('sha256').update(content).digest('hex');
+  await writeFile(join(bundleDir, 'sha256.txt'), `${digest}  ${binary}\n`, 'utf8');
+}
+
 describe('installNodeIfNeeded', () => {
   it('resolves packaged ASAR paths to the real unpacked directory', () => {
     const packagedMain =
@@ -48,6 +55,7 @@ describe('installNodeIfNeeded', () => {
     const res = await installNodeIfNeeded({ home, bundleDir });
     expect(res.action).toBe('no-bundle');
     expect(res.binaryPath).toBeNull();
+    expect(res.verified).toBe(false);
   });
 
   it('returns no-bundle when the bundle dir exists but has no binary', async () => {
@@ -55,6 +63,7 @@ describe('installNodeIfNeeded', () => {
     const res = await installNodeIfNeeded({ home, bundleDir });
     expect(res.action).toBe('no-bundle');
     expect(res.binaryPath).toBeNull();
+    expect(res.verified).toBe(false);
   });
 
   it('installs the binary on a fresh home dir', async () => {
@@ -64,6 +73,7 @@ describe('installNodeIfNeeded', () => {
     expect(res.version).toBe('24.18.0');
     expect(res.binaryPath).toBeTruthy();
     expect(existsSync(res.binaryPath!)).toBe(true);
+    expect(res.verified).toBe(false);
   });
 
   it('reports up-to-date on a subsequent call with same version', async () => {
@@ -102,12 +112,52 @@ describe('installNodeIfNeeded', () => {
   });
 
   it('installs when the bundle sha256 manifest matches', async () => {
-    await writeBundle('24.18.0');
-    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
-    const digest = createHash('sha256').update('fake-node-binary').digest('hex');
-    await writeFile(join(bundleDir, 'sha256.txt'), `${digest}  ${binary}\n`, 'utf8');
+    await writeVerifiedBundle('24.18.0');
     const res = await installNodeIfNeeded({ home, bundleDir });
     expect(res.action).toBe('fresh-install');
+    expect(res.verified).toBe(true);
+  });
+
+  it('repairs an installed binary whose bytes changed behind the version marker', async () => {
+    await writeVerifiedBundle('24.18.0');
+    const first = await installNodeIfNeeded({ home, bundleDir });
+    await writeFile(first.binaryPath!, 'tampered-installed-node');
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('refreshed');
+    expect(next.verified).toBe(true);
+    await expect(readFile(next.binaryPath!, 'utf8')).resolves.toBe('fake-node-binary');
+  });
+
+  it('replaces a corrupt destination symlink without overwriting its target', async () => {
+    if (process.platform === 'win32') return;
+    await writeVerifiedBundle('24.18.0');
+    const installDir = join(home, 'bin');
+    const installedBinary = join(installDir, 'node');
+    const victim = join(workRoot, 'do-not-overwrite');
+    await mkdir(installDir, { recursive: true });
+    await writeFile(victim, 'private user data');
+    await symlink(victim, installedBinary);
+    await writeFile(join(installDir, 'node.version'), '24.18.0\n');
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('refreshed');
+    await expect(readFile(victim, 'utf8')).resolves.toBe('private user data');
+    expect((await lstat(installedBinary)).isSymbolicLink()).toBe(false);
+    await expect(readFile(installedBinary, 'utf8')).resolves.toBe('fake-node-binary');
+  });
+
+  it('does not bypass a broken source manifest for an up-to-date install', async () => {
+    await writeVerifiedBundle('24.18.0');
+    await installNodeIfNeeded({ home, bundleDir });
+    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+    const wrongDigest = createHash('sha256').update('different-bytes').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), `${wrongDigest}  ${binary}\n`, 'utf8');
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('no-bundle');
+    expect(next.binaryPath).toBeNull();
+    expect(next.verified).toBe(false);
   });
 
   it('refuses to install a bundle whose binary fails the sha256 manifest', async () => {

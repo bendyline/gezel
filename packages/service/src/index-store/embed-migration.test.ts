@@ -136,7 +136,7 @@ describe('v7 → v8 schema migration (file_reviews)', () => {
     const version = raw
       .prepare("SELECT value FROM meta WHERE key = 'schema_version'")
       .get<{ value: string }>();
-    expect(version?.value).toBe('9');
+    expect(version?.value).toBe('10');
     raw.close();
 
     const reopened = (await open())!;
@@ -145,5 +145,110 @@ describe('v7 → v8 schema migration (file_reviews)', () => {
     expect(reopened.getSummary('h1')).toBe('kept');
     expect(reopened.filesNeedingReview('code', 'r1', 10, 3)).toHaveLength(1);
     reopened.close();
+  });
+});
+
+describe('v9 → v10 schema migration (provenance columns)', () => {
+  it('adds provenance columns to a pre-v10 db, keeps old rows, forces no re-review', async () => {
+    const s1 = (await open())!;
+    s1.upsertFile({
+      path: 'a.ts',
+      hash: 'h1',
+      size: 10,
+      mtimeMs: 1,
+      lang: 'typescript',
+      kind: 'code',
+      modality: 'code',
+      trivial: false,
+      indexedAt: 'now',
+      loc: 5,
+    });
+    s1.upsertFileReview({
+      contentHash: 'h1',
+      filePath: 'a.ts',
+      rubricHash: 'r1',
+      notesMd: 'kept notes',
+      issues: [],
+      health: 7,
+      healthReason: 'solid',
+      model: 'm',
+    });
+    s1.close();
+
+    // Simulate a pre-v10 db: drop the provenance columns through a raw handle.
+    const raw = (await openIndexDatabase(join(dir, 'index.db')))!;
+    for (const col of ['provider', 'gezel_id', 'gezel_name', 'app_version']) {
+      raw.exec(`ALTER TABLE file_reviews DROP COLUMN ${col}`);
+      raw.exec(`ALTER TABLE summaries DROP COLUMN ${col}`);
+    }
+    raw.close();
+
+    const reopened = (await open())!;
+    const review = reopened.getFileReview('h1');
+    // The old review survives with NULL provenance (no backfill is possible)…
+    expect(review?.notesMd).toBe('kept notes');
+    expect(review?.provider).toBeNull();
+    expect(review?.gezelName).toBeNull();
+    expect(review?.appVersion).toBeNull();
+    // …and the migration alone must not re-admit reviewed files to the queue.
+    expect(reopened.filesNeedingReview('code', 'r1', 10, 3)).toHaveLength(0);
+    reopened.upsertFileReview({
+      contentHash: 'h1',
+      filePath: 'a.ts',
+      rubricHash: 'r1',
+      notesMd: 'new notes',
+      issues: [],
+      health: 8,
+      healthReason: 'better',
+      model: 'm2',
+      provenance: { provider: 'llama-cpp', gezelName: 'Wachter', appVersion: '1.2.3' },
+    });
+    expect(reopened.getFileReview('h1')?.provider).toBe('llama-cpp');
+    reopened.close();
+  });
+
+  it('stamps provenance on summaries, symbol one-liners, and area rollups', async () => {
+    const provenance = {
+      provider: 'mlx',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+      appVersion: '1.2.3',
+    };
+    const s1 = (await open())!;
+    s1.upsertSummary({
+      contentHash: 'h1',
+      filePath: 'a.ts',
+      summaryMd: 'sums',
+      model: 'm',
+      provenance,
+    });
+    s1.putSymbolSummaries('a.ts', 'h1', [{ name: 'alpha', summary: 'does x' }], 'm', provenance);
+    s1.upsertAreaSummary({
+      areaPath: 'src',
+      inputHash: 'i1',
+      summaryMd: 'area',
+      model: 'm',
+      provenance,
+    });
+    s1.close();
+
+    const raw = (await openIndexDatabase(join(dir, 'index.db')))!;
+    for (const table of ['summaries', 'symbol_summaries', 'area_summaries']) {
+      const row = raw
+        .prepare(`SELECT provider, gezel_id, gezel_name, app_version FROM ${table}`)
+        .get<{
+          provider: string | null;
+          gezel_id: string | null;
+          gezel_name: string | null;
+          app_version: string | null;
+        }>();
+      expect(row).toMatchObject({
+        provider: 'mlx',
+        gezel_id: 'noor',
+        gezel_name: 'Noor',
+        app_version: '1.2.3',
+      });
+    }
+    raw.close();
   });
 });

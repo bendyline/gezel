@@ -623,7 +623,7 @@ export const SecurityPolicySchema = z.object({
   allowExternalServices: z.boolean(),
   /** Allow model-initiated script execution — `script.run`, the code-execution tools, and craftbook script steps. App-driven npm/node/CLI/MCP runs are exempt. */
   allowScriptExecution: z.boolean(),
-  /** Allow the desktop app's background network — currently the Electron auto-update check. */
+  /** Desktop-shell network gate: updater/background traffic and renderer-originated off-daemon requests. */
   allowAppNetwork: z.boolean(),
 });
 export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
@@ -2273,7 +2273,8 @@ export const GezelConfigSchema = z.object({
        * least-recently-used worker is evicted (skipping any worker
        * mid-turn). More slots = lower per-turn latency for parallel
        * gezel-to-gezel work; more memory (each `claude` process can be
-       * 100–200 MB resident). Default 4.
+       * 100–200 MB resident). Workers spawn on demand and idle-reap, so
+       * the cap prices burst width, not resident cost. Default 10.
        */
       poolSize: z.number().int().min(1).max(32).optional(),
       /**
@@ -5354,6 +5355,13 @@ export const WorkspaceIndexStatusSchema = z.object({
    */
   aiScanPending: z.boolean().optional(),
   /**
+   * Present while an AI indexing drive is running for this project — `full`
+   * occupies the local engine, `background` stays ambient behind live chat.
+   * Server truth for "scan running" affordances: a drive may have been
+   * started by another window, the night-shift catch-up, or the API.
+   */
+  aiDrive: z.enum(['background', 'full']).optional(),
+  /**
    * Enrichment coverage. `summarized` counts real summaries (summaries
    * table), not the enrichment gate — the gate also carries failed-attempt
    * rows awaiting a capped retry. Present when a content index exists on
@@ -5365,6 +5373,19 @@ export const WorkspaceIndexStatusSchema = z.object({
       summarized: z.number().int().nonnegative(),
       embedded: z.number().int().nonnegative(),
       pending: z.number().int().nonnegative(),
+      /**
+       * Files whose summarize failed MAX_ENRICH_ATTEMPTS times for the
+       * current content hash — off the work list until the file changes.
+       * Surfaced so `summarized` stalling short of `eligible` reads as
+       * "skipped after repeated failures", not a scan that never finishes.
+       */
+      skipped: z.number().int().nonnegative().optional(),
+      /**
+       * Images/audio still awaiting an AI shadow description. The drive works
+       * this tier BEFORE summaries, so a fresh full scan can be busy here
+       * while `summarized` sits still — surface it, or the scan looks stuck.
+       */
+      shadowsPending: z.number().int().nonnegative().optional(),
       /** The embedding model that built these vectors (index `meta` stamp). */
       embedModel: z.string().optional(),
       /**
@@ -5388,9 +5409,15 @@ export const WorkspaceIndexStatusSchema = z.object({
 export type WorkspaceIndexStatus = z.infer<typeof WorkspaceIndexStatusSchema>;
 
 /**
- * On-demand enrichment drive ("study now"): one bounded pass per request —
- * the caller loops until `drained`. Complements the idle-gated background
- * loop; still respects the boekwachter task's pause.
+ * On-demand enrichment drive ("study now"). Two shapes:
+ *   - legacy (no `intensity`): one bounded synchronous pass per request — the
+ *     caller loops until `drained`.
+ *   - `intensity` set: starts a server-side drive job (static refresh first,
+ *     then every AI tier to drain) and returns immediately with
+ *     `started: true`; progress flows over `index_progress` events and
+ *     `/index/status` polling.
+ * Both ensure the static index is current before AI work and respect the
+ * boekwachter task's pause.
  */
 export const DriveIndexEnrichmentRequestSchema = z.object({
   maxFiles: z.number().int().positive().max(25).optional(),
@@ -5399,6 +5426,13 @@ export const DriveIndexEnrichmentRequestSchema = z.object({
   areas: z.boolean().optional(),
   /** Run the review pass (cliffs notes + issues + health) once drained. */
   reviews: z.boolean().optional(),
+  /**
+   * Start a drive JOB instead of one bounded pass. `background` = start now
+   * but stay polite (ambient one-shots the local engine holds behind live
+   * chat, small batches). `full` = occupy the engine (non-ambient, night-size
+   * batches, run to drain).
+   */
+  intensity: z.enum(['background', 'full']).optional(),
 });
 export type DriveIndexEnrichmentRequest = z.infer<typeof DriveIndexEnrichmentRequestSchema>;
 
@@ -5416,6 +5450,10 @@ export const DriveIndexEnrichmentResponseSchema = z.object({
   reviewPending: z.number().int().nonnegative().optional(),
   /** True when the file tier had no work left at the end of this pass. */
   drained: z.boolean(),
+  /** Job mode only: a drive was started (or was already running). */
+  started: z.boolean().optional(),
+  alreadyRunning: z.boolean().optional(),
+  mode: z.enum(['background', 'full']).optional(),
 });
 export type DriveIndexEnrichmentResponse = z.infer<typeof DriveIndexEnrichmentResponseSchema>;
 

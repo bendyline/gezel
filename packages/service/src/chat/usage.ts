@@ -28,6 +28,8 @@ export type QuotaSnapshot = QuotaBucket;
 export interface UsageTurn {
   model: string;
   inputTokens: number;
+  /** Portion of `inputTokens` served from the provider's prompt cache; absent when unreported. */
+  cachedInputTokens?: number;
   outputTokens: number;
   cost: number;
   durationMs: number;
@@ -41,10 +43,18 @@ export interface ProviderUsage {
   quotaBuckets: QuotaBucket[];
   todayTurns: number;
   todayTokensIn: number;
+  /**
+   * Portion of `todayTokensIn` the provider reported as prompt-cache reads.
+   * Zero both when nothing was cached and when the provider reports no
+   * breakdown (e.g. Copilot) — absence of data and absence of hits are
+   * indistinguishable here, so render 0 as "no cache info", not "0% hit".
+   */
+  todayTokensCached: number;
   todayTokensOut: number;
   todayCost: number;
   totalTurns: number;
   totalTokensIn: number;
+  totalTokensCached: number;
   totalTokensOut: number;
   totalCost: number;
   /**
@@ -92,6 +102,9 @@ export class UsageTracker {
     state.turns.push({
       model: turn.model,
       inputTokens: turn.inputTokens,
+      ...(turn.cachedInputTokens !== undefined
+        ? { cachedInputTokens: turn.cachedInputTokens }
+        : {}),
       outputTokens: turn.outputTokens,
       cost: turn.cost ?? 0,
       durationMs: turn.durationMs,
@@ -137,10 +150,12 @@ export class UsageTracker {
         quotaBuckets: state.latestQuotaBuckets,
         todayTurns: todayTurns.length,
         todayTokensIn: todayTurns.reduce((s, t) => s + t.inputTokens, 0),
+        todayTokensCached: todayTurns.reduce((s, t) => s + (t.cachedInputTokens ?? 0), 0),
         todayTokensOut: todayTurns.reduce((s, t) => s + t.outputTokens, 0),
         todayCost: todayTurns.reduce((s, t) => s + t.cost, 0),
         totalTurns: state.turns.length,
         totalTokensIn: state.turns.reduce((s, t) => s + t.inputTokens, 0),
+        totalTokensCached: state.turns.reduce((s, t) => s + (t.cachedInputTokens ?? 0), 0),
         totalTokensOut: state.turns.reduce((s, t) => s + t.outputTokens, 0),
         totalCost: state.turns.reduce((s, t) => s + t.cost, 0),
         medianOutputTokensPerSec: medianOf(

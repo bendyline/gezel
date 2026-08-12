@@ -1451,19 +1451,11 @@ function ReferenceViewer({
               title={reference.path}
               className="chat-rail-viewer-iframe"
             />
-          ) : isHtml(reference.path) ? (
-            // Document HTML has no project-scoped preview route (the
-            // documents library is global). Fall back to `srcDoc` with
-            // the same sandbox attributes — loses relative-asset
-            // resolution but stays isolated.
-            <iframe
-              title={reference.path}
-              srcDoc={content}
-              sandbox="allow-scripts"
-              referrerPolicy="no-referrer"
-              className="chat-rail-viewer-iframe"
-            />
           ) : (
+            // Global-library HTML has no scoped preview capability. Render it
+            // as inert source instead of srcDoc: CSP cannot reliably prevent
+            // every document-navigation channel (for example meta refresh)
+            // in a normal browser shell.
             <ReferenceCodePreview path={reference.path} content={content} />
           ))}
       </div>

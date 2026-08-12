@@ -29,6 +29,7 @@ import {
   parseCraftbookTestSpec,
   satisfiesMinGezelVersion,
 } from '@bendyline/gezel';
+import { sanitizePresentationSvg } from '@bendyline/gezel/svg';
 import { gildeDataDir } from './gilde-data.js';
 
 /**
@@ -274,11 +275,12 @@ export class BundledSource implements CatalogSource {
       // Re-stamp source id + logo URL — the index is source-agnostic so
       // multiple sources can share one on-disk index file with each
       // applying its own routing.
+      const iconSvg = typeof e.iconSvg === 'string' ? sanitizePresentationSvg(e.iconSvg) : null;
       const item: CatalogItemSummary = {
         sourceId: this.id,
         kind,
         manifest,
-        ...(typeof e.iconSvg === 'string' ? { iconSvg: e.iconSvg } : {}),
+        ...(iconSvg ? { iconSvg } : {}),
       };
       const logo = this.logoUrlFor(kind, manifest.id, manifest);
       if (logo) item.logoUrl = logo;

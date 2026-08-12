@@ -17,6 +17,7 @@ interface StaticIndexWorkerRequest {
   id: number;
   dbPath: string;
   workspaceDir: string;
+  artifactsDir: string;
   collectionId: string;
 }
 
@@ -32,7 +33,11 @@ port.on('message', (request: StaticIndexWorkerRequest) => {
       });
       if (!index) throw new Error(`content index unavailable at ${request.dbPath}`);
       try {
-        const stats = await indexWorkspaceContent(index, request.workspaceDir);
+        const stats = await indexWorkspaceContent(
+          index,
+          request.workspaceDir,
+          request.artifactsDir,
+        );
         port.postMessage({ id: request.id, stats });
       } finally {
         index.close();

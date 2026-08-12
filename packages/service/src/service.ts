@@ -1,9 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createSecureServer as createSecureHttp2Server } from 'node:http2';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import {
   type GezelConfig,
   type ServiceRole,
@@ -53,6 +53,7 @@ import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { ensurePrivateUserHome } from './fs/home-permissions.js';
+import { mimeTypeForFilename } from './fs/media-types.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
 import { GildeUpdateManager } from './gilde-updates/manager.js';
@@ -84,6 +85,7 @@ import { ContentIndex } from './index-store/content-index.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
+import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
@@ -101,6 +103,7 @@ import {
   modelStorageRoots,
   reclaimAbandonedModelDownloads,
 } from './models/storage-roots.js';
+import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
@@ -112,6 +115,7 @@ import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 import { LlamaCppModelManager } from './providers/llama-cpp/index.js';
 import { MLX_VENV_NAME, MlxModelManager, mlxVenvPackages } from './providers/mlx/index.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
+import { resolveAutoMode } from './providers/recognition/prompts.js';
 import type { LLMProvider } from './providers/types.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
@@ -318,6 +322,8 @@ function ensureBundledNodeOnPath(): void {
 }
 
 export async function startService(opts: StartServiceOptions = {}): Promise<RunningService> {
+  const home = opts.home ?? gezelHome();
+  discoverManagedScriptRuntimes(home);
   // Make sure shell-shim child processes can find `node` on PATH (see
   // helper above). Has to run before anything spawns a child — the
   // first-run bootstrap downstream of `startService` is the most
@@ -338,7 +344,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // an attempt is genuinely stuck.
   setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
-  const home = opts.home ?? gezelHome();
   const serviceRole = await resolveEffectiveServiceRole(opts.role, process.env, home);
   const privateUserHome = process.env.GEZEL_SYSTEM_SCOPE !== '1';
   // Secure the home before the runtime lock or config probe creates/reads any
@@ -938,6 +943,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // provider queue depth for backpressure. `tickIntervalMs` is
   // configurable; defaults to 5s.
   const config = await store.readConfig();
+  // Late-bound: IndexEnrichmentManager is constructed after the runner; the
+  // closure reads through this ref so night dispatch can hold on catch-up.
+  let indexEnrichmentRef: IndexEnrichmentManager | null = null;
   const taskRunner = new TaskRunner({
     store,
     dispatcher: {
@@ -950,11 +958,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),
+    isIndexCatchUpActive: () => indexEnrichmentRef?.isCatchUpActive() ?? false,
     ...(config.taskRunner?.tickIntervalMs
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
   nightShift.setOnActivated(async () => {
+    // Index first, tasks second: the catch-up flag is raised synchronously,
+    // so the runner's night dispatch holds until static + AI indexing is
+    // current across projects, then the queued shift work proceeds. Not
+    // awaited — a manual start must respond immediately, and a full drain
+    // can take a while on a big repo.
+    void indexEnrichmentRef?.catchUpAll();
     await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
     await taskRunner.wake();
   });
@@ -1811,7 +1826,50 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     isNightShiftActive: () => nightShift.isActive(),
     isPaused: () => indexingJob.isPaused(),
     events: chatEvents,
+    history,
+    refreshStatic: (projectId) => workspaceIndex.refreshAndWait(projectId),
+    // AI-shadow producers: availability is probed per call (cheap health
+    // checks; a missing vision/STT model degrades to null, and the shadow
+    // gate's attempt cap stops per-file retries).
+    shadowProducers: {
+      describeImage: async (absPath) => {
+        try {
+          if (!(await recognition.isAvailable())) return null;
+          const bytes = await readFile(absPath);
+          const meta = readImageStaticMeta(bytes);
+          const result = await recognition.recognize({
+            bytes,
+            mimeType: mimeTypeForFilename(absPath),
+            mode: resolveAutoMode(meta, basename(absPath)),
+          });
+          if (result.status !== 'ok' && result.status !== 'partial') return null;
+          const parts = [
+            result.description,
+            result.ocrText ? `Text in the image:\n\n${result.ocrText}` : null,
+          ].filter((s): s is string => Boolean(s?.trim()));
+          if (parts.length === 0) return null;
+          return { body: parts.join('\n\n'), model: result.modelId };
+        } catch {
+          return null;
+        }
+      },
+      transcribeAudio: async (absPath) => {
+        try {
+          const provider = await stt.providerForModel();
+          if ((await provider.health()).status !== 'ok') return null;
+          const bytes = await readFile(absPath);
+          const out = await provider.transcribe({
+            audio: { data: bytes, mimeType: mimeTypeForFilename(absPath) },
+          });
+          const text = out.text.trim();
+          return text ? { body: text } : null;
+        } catch {
+          return null;
+        }
+      },
+    },
   });
+  indexEnrichmentRef = indexEnrichment;
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.
   const workspaceWatch = new WorkspaceWatchManager({

@@ -1,10 +1,22 @@
 import { readFile } from 'node:fs/promises';
-import type { GezelSummary, ProviderName } from '@bendyline/gezel';
+import {
+  GEZEL_VERSION,
+  type GezelSummary,
+  type ProviderName,
+  createLogger,
+} from '@bendyline/gezel';
+import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { docFilesPaths } from './docs.js';
-import type { FileRecord, IndexStore } from './index-store.js';
+import { shadowDocFilesPaths } from './docs.js';
+import { parseFrontmatter } from './frontmatter.js';
+import {
+  type FileRecord,
+  type IndexProvenance,
+  type IndexStore,
+  MAX_ENRICH_ATTEMPTS,
+} from './index-store.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -18,6 +30,8 @@ import type { FileRecord, IndexStore } from './index-store.js';
  *   - `embed(texts)`      → one vector per text
  */
 
+const log = createLogger('enrich');
+
 export interface EnrichDeps {
   summarize: (prompt: string) => Promise<string>;
   embed: (texts: string[]) => Promise<number[][]>;
@@ -29,6 +43,20 @@ export interface EnrichDeps {
    * configured; the review pass skips entirely then.
    */
   review?: (prompt: string) => Promise<string>;
+  /**
+   * Stamped onto every row this deps object writes. Built once in
+   * `buildEnrichDeps` from the SAME resolved target that builds the
+   * completions, so it reflects reality (env overrides, Night Shift) —
+   * output-only, never a routing input.
+   */
+  provenance?: IndexProvenance;
+  /**
+   * Live concurrent-one-shot width of the resolved target's queue. Full
+   * drives dispatch this many per-file scans at once instead of one; the
+   * value is re-read as slots free because a lazily-initialized provider
+   * reports 1 until its first call spins it up.
+   */
+  oneShotWidth?: () => number;
 }
 
 export interface EnrichResult {
@@ -46,8 +74,10 @@ export interface EnrichTargetOptions {
 }
 
 /**
- * Resolve the local-first model used by autonomous indexing work. A cloud
- * target is accepted only through the explicit Night Shift override.
+ * Resolve the model used by autonomous indexing work. Local-first: absent an
+ * explicit choice, only local engines are considered. A cloud target is
+ * accepted through exactly two explicit acts — the Night Shift override, or
+ * a provider AND model both pinned on the Boekwachter's own frontmatter.
  */
 export async function resolveEnrichTarget(
   store: Store,
@@ -64,16 +94,12 @@ export async function resolveEnrichTarget(
       model = nightModel;
     }
   }
-  // A Boekwachter may pin their own small local model. Never silently send
-  // workspace indexing to a cloud provider: cloud use remains an explicit
-  // Night Shift override, while the gezel's about.md still supplies the
-  // personality on whichever local engine is selected.
-  if (
-    (!providerName || !model) &&
-    opts.boekwachter?.provider &&
-    ENRICH_LOCAL_PROVIDERS.includes(opts.boekwachter.provider) &&
-    opts.boekwachter.model
-  ) {
+  // A Boekwachter with BOTH provider and model pinned in frontmatter gets
+  // exactly what the user configured — cloud included. Writing both fields
+  // on the gezel IS the explicit opt-in; what stays forbidden is silently
+  // routing workspace indexing to a cloud default the user never chose for
+  // this work, which is why an incomplete pin falls through to local-first.
+  if ((!providerName || !model) && opts.boekwachter?.provider && opts.boekwachter.model) {
     providerName = opts.boekwachter.provider;
     model = opts.boekwachter.model;
   }
@@ -98,10 +124,45 @@ export async function resolveEnrichTarget(
 }
 
 /**
+ * The first configured local engine — the blocked-content fallback target
+ * when a cloud enricher refuses a file on policy grounds. Same resolution as
+ * resolveEnrichTarget's local-first branch.
+ */
+async function resolveLocalFallbackTarget(
+  store: Store,
+): Promise<{ providerName: ProviderName; model: string } | null> {
+  const cfg = await store.readConfig().catch(() => null);
+  for (const name of ENRICH_LOCAL_PROVIDERS) {
+    const model = cfg?.defaultModel?.[name];
+    if (model) return { providerName: name, model };
+  }
+  return null;
+}
+
+/**
+ * Does this error message look like a request-level content-policy refusal?
+ * Wild-caught: OpenAI's backend answers "Request blocked." for prompts whose
+ * CONTENT contains injection-looking markup (`<think>`, `<function=...>`
+ * fixtures — the exact corpus of gezel's own salvage/strip modules), which
+ * made three source files fail summarize 3-for-3 deterministically.
+ * Deliberately narrow: timeouts and transport faults must keep their normal
+ * retry semantics.
+ */
+function isPolicyBlockMessage(message: string): boolean {
+  return /request blocked|content policy|content_filter|invalid_prompt/i.test(message);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
  * Resolve a summarizer (if one is configured) + the local embedder — shared
  * by the background enrichment loop and the on-demand drive route. During
- * Night Shift an enabled provider/model override wins; otherwise the
- * summarizer is the first configured local provider's default model.
+ * Night Shift an enabled provider/model override wins; then a Boekwachter
+ * frontmatter pin (provider + model, cloud allowed — see
+ * `resolveEnrichTarget`); otherwise the first configured local provider's
+ * default model.
  *
  * `GEZEL_ENRICH_MODEL` (with optional `GEZEL_ENRICH_PROVIDER`) decouples the
  * enricher from the chat default: enrichment is a bulk background chore where
@@ -137,39 +198,93 @@ export async function buildEnrichDeps(
     return { summarize: async () => '', embed };
   }
   const { providerName, model } = target;
-  const summarize = (prompt: string) =>
-    chat
-      .oneShotCompletion(prompt, 30_000, {
-        providerName,
-        model,
-        ...(opts.boekwachter
-          ? {
-              gezelId: opts.boekwachter.id,
-              useGezelPersona: true,
-              actorLabel: opts.boekwachter.name,
-            }
-          : { actorLabel: 'Boekwachter' }),
-        jobLabel: 'index enrichment',
+  const provenance: IndexProvenance = {
+    provider: providerName,
+    ...(opts.boekwachter ? { gezelId: opts.boekwachter.id, gezelName: opts.boekwachter.name } : {}),
+    appVersion: GEZEL_VERSION,
+  };
+  // A cloud/CLI target (explicit Boekwachter pin or Night Shift override)
+  // needs room for session cold starts — the Copilot-family CLIs take
+  // 30-90s on the first call, and deadlines under 120s flake. Local engines
+  // keep the tight deadlines that protect the shared engine queue.
+  const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
+  const summarizeTimeoutMs = local ? 30_000 : 120_000;
+  const reviewTimeoutMs = local ? 60_000 : 180_000;
+  const gezelOpts = opts.boekwachter
+    ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
+    : { actorLabel: 'Boekwachter' };
+  const oneShot =
+    (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
+    (prompt: string) =>
+      chat.oneShotCompletion(prompt, timeoutMs, {
+        providerName: target.providerName,
+        model: target.model,
+        ...gezelOpts,
+        jobLabel,
         ...(opts.ambient ? { ambient: true } : {}),
-      })
-      .catch(() => '');
-  const review = (prompt: string) =>
-    chat
-      .oneShotCompletion(prompt, 60_000, {
-        providerName,
-        model,
-        ...(opts.boekwachter
-          ? {
-              gezelId: opts.boekwachter.id,
-              useGezelPersona: true,
-              actorLabel: opts.boekwachter.name,
+      });
+  // Blocked-content fallback: a cloud enricher can refuse a file outright on
+  // policy grounds (isPolicyBlockMessage). Local engines carry no such filter,
+  // so when one is configured it takes over exactly those files. Provenance
+  // still stamps the primary provider — a per-file override isn't worth the
+  // plumbing for this edge.
+  const fallbackTarget = local ? null : await resolveLocalFallbackTarget(store);
+  // A thrown one-shot logs nothing on its own — surface the reason here or a
+  // repeatedly-failing file is undiagnosable (the 3157-of-3160 incident:
+  // three markup-heavy files burned their attempt caps with zero log lines).
+  const withPolicyFallback =
+    (
+      primary: (prompt: string) => Promise<string>,
+      fallback: ((prompt: string) => Promise<string>) | null,
+      label: string,
+    ) =>
+    async (prompt: string): Promise<string> => {
+      try {
+        return await primary(prompt);
+      } catch (err) {
+        const message = errorMessage(err);
+        if (isPolicyBlockMessage(message)) {
+          if (fallback && fallbackTarget) {
+            log.warn(
+              `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
+            );
+            try {
+              return await fallback(prompt);
+            } catch (fallbackErr) {
+              // Local-engine failure is transient (deferred, cold, busy) —
+              // burn a normal retry attempt instead of giving up on the hash.
+              log.warn(`blocked-content local fallback failed: ${errorMessage(fallbackErr)}`);
+              return '';
             }
-          : { actorLabel: 'Boekwachter' }),
-        jobLabel: 'index review',
-        ...(opts.ambient ? { ambient: true } : {}),
-      })
-      .catch(() => '');
-  return { summarize, embed, model, review };
+          }
+          // No local engine to fall back to: the block is deterministic for
+          // this content, so tell callers to stop spending retries on it.
+          throw new CompletionBlockedError(message);
+        }
+        log.warn(`${label} one-shot failed: ${message}`);
+        return '';
+      }
+    };
+  const summarize = withPolicyFallback(
+    oneShot({ providerName, model }, summarizeTimeoutMs, 'index enrichment'),
+    fallbackTarget
+      ? oneShot(fallbackTarget, 30_000, 'index enrichment (blocked-content fallback)')
+      : null,
+    'summarize',
+  );
+  const review = withPolicyFallback(
+    oneShot({ providerName, model }, reviewTimeoutMs, 'index review'),
+    fallbackTarget
+      ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)')
+      : null,
+    'review',
+  );
+  // Guarded for test fakes that stub ChatManager structurally.
+  const oneShotWidth =
+    typeof chat.oneShotQueueWidth === 'function'
+      ? () => chat.oneShotQueueWidth(providerName)
+      : undefined;
+  return { summarize, embed, model, review, provenance, ...(oneShotWidth ? { oneShotWidth } : {}) };
 }
 
 const PROMPT_CONTENT_CAP = 6000;
@@ -296,14 +411,19 @@ export function parseSymbolSummaryJson(
   return out;
 }
 
-/** Read the text we should summarize/embed for a file (converted md for docs). */
+/** Read the text we should summarize/embed for a file (shadow md for docs,
+ *  descriptions/transcripts for images/audio — frontmatter stripped). */
 export async function readEnrichableText(
   workspaceDir: string,
+  artifactsDir: string,
   file: FileRecord,
 ): Promise<string | null> {
-  if (file.modality === 'doc') {
-    const md = docFilesPaths(workspaceDir, file.path).mdPath;
-    return readFile(md, 'utf8').catch(() => null);
+  if (file.modality === 'doc' || file.modality === 'image' || file.modality === 'audio') {
+    const md = shadowDocFilesPaths(artifactsDir, file.path)?.mdPath;
+    if (!md) return null;
+    const raw = await readFile(md, 'utf8').catch(() => null);
+    if (raw === null) return null;
+    return file.modality === 'doc' ? raw : parseFrontmatter(raw).body;
   }
   const abs = safeJoin(workspaceDir, file.path);
   if (!abs) return null;
@@ -313,13 +433,14 @@ export async function readEnrichableText(
 export async function enrichFile(
   store: IndexStore,
   workspaceDir: string,
+  artifactsDir: string,
   file: FileRecord,
   deps: EnrichDeps,
 ): Promise<EnrichResult> {
   const result: EnrichResult = { summarized: false, embedded: 0 };
   if (!file.hash) return result;
 
-  const content = await readEnrichableText(workspaceDir, file);
+  const content = await readEnrichableText(workspaceDir, artifactsDir, file);
 
   // 1. LLM summary — reuse the existing one for this content hash if present.
   //    Reuse makes an embed-model migration cheap: clearing `enrichments` (not
@@ -327,13 +448,15 @@ export async function enrichFile(
   //    the re-embed pays embedding cost only. Also spares the summarizer when a
   //    file's content is unchanged but its enrichment was invalidated.
   let summary = store.getSummary(file.hash) ?? '';
+  let blockedByPolicy = false;
   if (summary) {
     result.summarized = true;
   } else if (content?.trim()) {
     try {
       summary = (await deps.summarize(buildSummaryPrompt(file, content))).trim();
-    } catch {
+    } catch (err) {
       summary = '';
+      if (err instanceof CompletionBlockedError) blockedByPolicy = true;
     }
     if (summary) {
       store.upsertSummary({
@@ -341,6 +464,7 @@ export async function enrichFile(
         filePath: file.path,
         summaryMd: summary,
         model: deps.model ?? 'unknown',
+        ...(deps.provenance ? { provenance: deps.provenance } : {}),
       });
       result.summarized = true;
     }
@@ -349,7 +473,9 @@ export async function enrichFile(
   // 1b. Per-symbol one-liners (code only, LLM configured, not yet covered for
   //     this hash). One batched call per file; a parse failure stores nothing
   //     and is not retried for this hash — same semantics as the file summary.
-  if (file.kind === 'code' && deps.model && content?.trim()) {
+  //     Skipped when the file summary was policy-blocked: this prompt carries
+  //     the same content, so it would just burn another refused request.
+  if (!blockedByPolicy && file.kind === 'code' && deps.model && content?.trim()) {
     if (store.symbolSummariesFor(file.path, file.hash).size === 0) {
       const all = store.symbolsForFile(file.path);
       // Top-level symbols first; methods fill any remaining budget.
@@ -366,7 +492,7 @@ export async function enrichFile(
         }
         const entries = parseSymbolSummaryJson(raw, new Set(picked.map((s) => s.name)));
         if (entries.length > 0) {
-          store.putSymbolSummaries(file.path, file.hash, entries, deps.model);
+          store.putSymbolSummaries(file.path, file.hash, entries, deps.model, deps.provenance);
         }
       }
     }
@@ -427,7 +553,28 @@ export async function enrichFile(
   // no local model consume the gate as before: there is nothing to retry, and
   // embeddings-only coverage is the intended steady state there.
   const summaryFailed = !result.summarized && Boolean(deps.model) && Boolean(content?.trim());
-  if (summaryFailed) store.markEnrichAttempt(file.hash);
-  else store.markEnriched(file.hash);
+  if (summaryFailed) {
+    if (blockedByPolicy) {
+      // Deterministic refusal with no fallback engine — retrying the same
+      // content is pure waste, so consume the whole attempt budget at once.
+      store.markEnrichSkipped(file.hash);
+      log.warn(
+        `skipping ${file.path}: the provider blocked its content (policy filter) — it stays unsummarized until its content changes`,
+      );
+    } else {
+      const attempts = store.markEnrichAttempt(file.hash);
+      if (attempts >= MAX_ENRICH_ATTEMPTS) {
+        log.warn(
+          `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,
+        );
+      } else {
+        log.warn(
+          `summarize produced nothing for ${file.path} (attempt ${attempts}/${MAX_ENRICH_ATTEMPTS})`,
+        );
+      }
+    }
+  } else {
+    store.markEnriched(file.hash);
+  }
   return result;
 }

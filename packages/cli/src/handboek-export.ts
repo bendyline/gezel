@@ -72,6 +72,7 @@ const AREA_BLURBS: Record<HandboekArea, string> = {
   craftbooks: 'Step-by-step recipes your crew can run — one per job.',
   'project-types': 'Ready-made project setups, each with a crew and a bench.',
   technical: 'Architecture, file layout, providers, security, and the CLI.',
+  'whats-new': 'What changed in each release, in plain language.',
 };
 
 const START_HERE = ['welcome', 'the-crew', 'projects-and-threads', 'craftbooks-overview'];

@@ -1,15 +1,16 @@
-import { readFile } from 'node:fs/promises';
-import { extname } from 'node:path';
+import type { Dirent } from 'node:fs';
+import { readFile, readdir, rm, stat } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { nowIso } from '@bendyline/gezel';
-import { projectLocalIndexDbFile } from '@bendyline/gezel/paths';
+import { PROJECT_SHADOW_DIR_NAME, projectLocalIndexDbFile } from '@bendyline/gezel/paths';
 import { indexFileSecurity } from '../security/extract.js';
 import { discoverWorkspaceFiles } from '../workspace/file-walk.js';
 import { classifyFile, isDenseBlob } from './classify.js';
 import {
   chunkMarkdown,
-  docFilesPaths,
-  ensureConvertedMarkdownSidecar,
+  ensureShadowDocSidecar,
   isConvertibleDoc,
+  shadowDocFilesPaths,
 } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { ensureIndexGitignore } from './gitignore.js';
@@ -41,8 +42,11 @@ const MAX_FILES = 50_000;
  * written only after a complete walk, so an interrupted pass redoes next tick
  * (idempotent: all per-file writes are replace-by-file).
  * v2: named import bindings on dependency edges.
+ * v3: html/css/vue/svelte classify as code — existing rows hold the old
+ *     'other' kind, and only this bump re-extracts them (the mtime/size gate
+ *     would otherwise keep an unchanged index.html unreviewable forever).
  */
-const EXTRACTOR_VERSION = 2;
+const EXTRACTOR_VERSION = 3;
 
 /**
  * PNG text keys worth putting in the search index, in priority order. Skips
@@ -76,11 +80,14 @@ export interface ContentIndexStats {
 
 /**
  * Index (or refresh) one already-open collection store against `workspaceDir`.
- * Returns stats. Pure structural tier: files + symbols.
+ * Returns stats. Pure structural tier: files + symbols. `artifactsDir` is the
+ * project's artifacts root — converted-document shadows land under its
+ * reserved `shadow/` subtree, never inside the (possibly read-only) workspace.
  */
 export async function indexWorkspaceContent(
   store: IndexStore,
   workspaceDir: string,
+  artifactsDir: string,
 ): Promise<ContentIndexStats> {
   const stats: ContentIndexStats = {
     scanned: 0,
@@ -195,9 +202,10 @@ export async function indexWorkspaceContent(
       continue;
     }
 
-    if (cls.modality === 'doc') {
-      // Binary document: hash the bytes (gate on content), convert to markdown
-      // via squisq into the `_files` folder, and chunk the markdown for FTS.
+    if (cls.modality === 'audio') {
+      // Deterministic audio tier: hash the bytes and index a filename-derived
+      // chunk so recordings are findable by name immediately. The transcript
+      // shadow is added later by the AI-shadow tier when STT is available.
       let bytes: Buffer;
       try {
         bytes = await readFile(file.abs);
@@ -224,15 +232,74 @@ export async function indexWorkspaceContent(
       }
       stats.changed++;
       store.upsertFile(record);
-      if (isConvertibleDoc(extname(file.path))) {
-        const conv = await ensureConvertedMarkdownSidecar(
-          file.abs,
-          docFilesPaths(workspaceDir, file.path),
-        );
-        if (conv.markdown != null) {
+      const nameWords = file.path
+        .replace(/\.[^.]+$/, '')
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .join(' ');
+      store.putChunks(file.path, hash, [
+        { kind: 'audio', lineStart: 1, lineEnd: 1, text: `${nameWords} audio recording` },
+      ]);
+      continue;
+    }
+
+    if (cls.modality === 'doc') {
+      // Binary document: hash the bytes (gate on content), convert to markdown
+      // via squisq into the artifacts `shadow/` tree, and chunk the markdown
+      // for FTS. `doc:convert` metadata remembers the last outcome so a
+      // blocked/unconvertible doc is not re-attempted every pass, while a
+      // successful conversion whose sidecar vanished (deleted cache, pre-shadow
+      // install) self-heals here.
+      let bytes: Buffer;
+      try {
+        bytes = await readFile(file.abs);
+      } catch {
+        stats.skipped++;
+        continue;
+      }
+      const hash = sha256(bytes);
+      const record = {
+        path: file.path,
+        hash,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        lang: cls.lang,
+        kind: cls.kind,
+        modality: cls.modality,
+        trivial: cls.trivial,
+        indexedAt,
+        loc: null,
+      };
+      const convertible = isConvertibleDoc(extname(file.path));
+      if (existing && existing.hash === hash) {
+        store.upsertFile(record);
+        if (!convertible) continue;
+        const paths = shadowDocFilesPaths(artifactsDir, file.path);
+        const sidecarPresent = paths
+          ? await stat(paths.mdPath).then(
+              (s) => s.isFile(),
+              () => false,
+            )
+          : true;
+        if (sidecarPresent) continue;
+        const state = store.getMetadata(file.path)['doc:convert'];
+        if (state && state !== 'ok') continue;
+        const conv = await ensureShadowDocSidecar(file.abs, artifactsDir, file.path);
+        // Chunks stay untouched: same content hash, and re-chunking would
+        // orphan the existing chunk embeddings.
+        store.setMetadata(file.path, [{ key: 'doc:convert', value: convState(conv) }]);
+        if (conv?.markdown != null) stats.docsConverted++;
+        continue;
+      }
+      stats.changed++;
+      store.upsertFile(record);
+      if (convertible) {
+        const conv = await ensureShadowDocSidecar(file.abs, artifactsDir, file.path);
+        store.setMetadata(file.path, [{ key: 'doc:convert', value: convState(conv) }]);
+        if (conv?.markdown != null) {
           store.putChunks(file.path, hash, chunkMarkdown(conv.markdown));
           stats.docsConverted++;
-        } else if (conv.blocked) {
+        } else if (conv?.blocked) {
           // Refused for safety — index a stub so the file is visible/searchable
           // as "held" without its (unconverted) content entering the index.
           store.putChunks(file.path, hash, [
@@ -327,18 +394,68 @@ export async function indexWorkspaceContent(
     }
   }
 
-  // Prune files that disappeared.
+  // Prune files that disappeared; their shadow companions go with them.
   for (const f of store.allFiles()) {
     if (!seen.has(f.path)) {
       store.deleteFile(f.path);
       stats.removed++;
+      if (isConvertibleDoc(extname(f.path))) {
+        const paths = shadowDocFilesPaths(artifactsDir, f.path);
+        if (paths) await rm(paths.dir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
+  await sweepShadowOrphans(artifactsDir, seen);
 
   // Stamp only after a complete walk so an interrupted forced pass retries.
   if (forceCode) store.setMeta('extractor_version', String(EXTRACTOR_VERSION));
 
   return stats;
+}
+
+const SHADOW_SWEEP_MAX_DIRS = 50_000;
+
+/**
+ * Delete shadow companion dirs whose source no longer exists — renames, a
+ * crash between DB prune and dir delete, or sources dropped by the walk cap.
+ * `seen` is this pass's live source set; a companion dir's name IS its source
+ * basename plus `_files`, so the reverse map is lossless. Own walk, no depth
+ * cap (GC must reach what the budgeted listing walker never shows), and
+ * Dirents never follow symlinks so a planted link cannot recurse the sweep
+ * outside the shadow root.
+ */
+async function sweepShadowOrphans(artifactsDir: string, seen: ReadonlySet<string>): Promise<void> {
+  const shadowRoot = join(artifactsDir, PROJECT_SHADOW_DIR_NAME);
+  const queue: string[] = [''];
+  let visited = 0;
+  while (queue.length > 0) {
+    const rel = queue.shift()!;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(join(shadowRoot, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (++visited > SHADOW_SWEEP_MAX_DIRS) return;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.name.endsWith('_files')) {
+        const sourceRel = childRel.slice(0, -'_files'.length);
+        if (!seen.has(sourceRel)) {
+          await rm(join(shadowRoot, childRel), { recursive: true, force: true }).catch(() => {});
+        }
+      } else {
+        queue.push(childRel);
+      }
+    }
+  }
+}
+
+function convState(conv: { markdown: string | null; blocked?: string } | null): string {
+  if (conv?.markdown != null) return 'ok';
+  if (conv?.blocked) return 'blocked';
+  return 'failed';
 }
 
 /**
@@ -348,6 +465,7 @@ export async function indexWorkspaceContent(
 export async function runWorkspaceContentIndex(
   workspaceDir: string,
   collectionId: string,
+  artifactsDir: string,
 ): Promise<ContentIndexStats | null> {
   await ensureIndexGitignore(workspaceDir);
   const store = await IndexStore.open(projectLocalIndexDbFile(workspaceDir), {
@@ -357,7 +475,7 @@ export async function runWorkspaceContentIndex(
   });
   if (!store) return null;
   try {
-    return await indexWorkspaceContent(store, workspaceDir);
+    return await indexWorkspaceContent(store, workspaceDir, artifactsDir);
   } finally {
     store.close();
   }

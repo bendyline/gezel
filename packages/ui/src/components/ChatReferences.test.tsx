@@ -22,6 +22,30 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
 
+// The global-HTML preview test exercises the inert source-code branch, not
+// Squisq itself. Mounting the real EditorShell starts Monaco's uncancellable
+// dynamic import, which can outlive this jsdom environment and race teardown.
+vi.mock('@bendyline/squisq-editor-react', () => ({
+  EditorShell: ({
+    initialMarkdown,
+    fileName,
+    readOnly,
+  }: {
+    initialMarkdown: string;
+    fileName?: string;
+    readOnly?: boolean;
+  }) => (
+    <pre
+      data-testid="reference-code-preview"
+      data-file={fileName}
+      data-readonly={String(Boolean(readOnly))}
+    >
+      {initialMarkdown}
+    </pre>
+  ),
+}));
+vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
+
 // Capture the props: `data-section` and `data-stageable` are what stop the
 // rail silently regaining commands/craftbooks or the terminal-staging hook.
 vi.mock('./CommandsPanel.js', () => ({
@@ -409,6 +433,45 @@ describe('ChatReferences task picker', () => {
 });
 
 describe('ChatReferences reference picker', () => {
+  it('renders global HTML documents as inert source rather than srcDoc', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({
+      mode: 'text',
+      content: '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
+    });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() =>
+              onToolActivity({
+                name: 'read_document',
+                path: 'remote.html',
+                success: true,
+                durationMs: 1,
+              })
+            }
+          >
+            Open global HTML
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open global HTML' }));
+    await waitFor(() => expect(container.querySelector('.chat-rail-viewer-code')).not.toBeNull());
+    const source = screen.getByTestId('reference-code-preview');
+    expect(source).toHaveAttribute('data-file', 'remote.html');
+    expect(source).toHaveAttribute('data-readonly', 'true');
+    expect(source).toHaveTextContent(
+      '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
+    );
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
   it('offers native save-copy and containing-folder actions for the active file', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

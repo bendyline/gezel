@@ -24,7 +24,7 @@ import {
  * ripgrep/live-read when `IndexStore.open` returns null (sqlite unavailable).
  */
 
-export type Modality = 'text' | 'code' | 'doc' | 'image' | 'email';
+export type Modality = 'text' | 'code' | 'doc' | 'image' | 'audio' | 'email';
 export type CollectionKind =
   | 'workspace'
   | 'documents'
@@ -190,6 +190,19 @@ export interface VectorHit {
   distance: number;
 }
 
+/**
+ * Who produced an LLM-written index row. Output-only bookkeeping — never an
+ * input to model routing. Absent fields stay NULL (rows written before the
+ * v10 migration, or deps built without a boekwachter) and renderers degrade
+ * to whatever segments exist.
+ */
+export interface IndexProvenance {
+  provider?: string;
+  gezelId?: string;
+  gezelName?: string;
+  appVersion?: string;
+}
+
 /** A successful boekwachter review as served per file (hash-keyed). */
 export interface FileReviewRow {
   notesMd: string;
@@ -198,6 +211,10 @@ export interface FileReviewRow {
   healthReason: string;
   rubricHash: string;
   model: string | null;
+  provider: string | null;
+  gezelId: string | null;
+  gezelName: string | null;
+  appVersion: string | null;
   reviewedAt: string | null;
 }
 
@@ -586,7 +603,9 @@ export class IndexStore {
         `SELECT f.* FROM files f
          LEFT JOIN enrichments e ON e.content_hash = f.hash
          WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
-           AND f.modality IN ('code','text','doc')
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))
            AND (e.content_hash IS NULL
                 OR (e.embedded_at IS NULL AND COALESCE(e.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))
          ORDER BY f.path LIMIT ?`,
@@ -604,12 +623,55 @@ export class IndexStore {
         `SELECT COUNT(*) AS n FROM files f
          LEFT JOIN enrichments e ON e.content_hash = f.hash
          WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
-           AND f.modality IN ('code','text','doc')
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))
            AND (e.content_hash IS NULL
                 OR (e.embedded_at IS NULL AND COALESCE(e.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))`,
       )
       .get<{ n: number }>(this.collectionId);
     return row?.n ?? 0;
+  }
+
+  /**
+   * Image/audio files whose AI shadow (description / transcript) is missing
+   * or stale for the current content hash. Same capped-retry discipline as
+   * {@link filesNeedingEnrichment}; an 'ok' row is the terminal success.
+   */
+  filesNeedingAiShadow(limit = 5, maxAttempts = MAX_ENRICH_ATTEMPTS): FileRecord[] {
+    return this.db
+      .prepare(
+        `SELECT f.* FROM files f
+         LEFT JOIN shadow_state s ON s.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+           AND f.modality IN ('image','audio')
+           AND (s.content_hash IS NULL
+                OR (s.state <> 'ok' AND COALESCE(s.attempts, 0) < ?))
+         ORDER BY f.path LIMIT ?`,
+      )
+      .all<FileRow>(this.collectionId, maxAttempts, limit)
+      .map(rowToFile);
+  }
+
+  markAiShadowOk(contentHash: string, filePath: string, model?: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO shadow_state (content_hash, collection_id, file_path, state, attempts, model, updated_at)
+         VALUES (?, ?, ?, 'ok', 0, ?, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, model ?? null, nowIso());
+  }
+
+  markAiShadowAttempt(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO shadow_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'failed', 1, ?)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           state='failed', attempts=COALESCE(shadow_state.attempts, 0) + 1,
+           updated_at=excluded.updated_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
   }
 
   /**
@@ -623,6 +685,8 @@ export class IndexStore {
     summarized: number;
     embedded: number;
     pending: number;
+    skipped: number;
+    shadowsPending: number;
     embedModel?: string;
   } {
     const ELIGIBLE = `f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
@@ -637,14 +701,44 @@ export class IndexStore {
       `SELECT COUNT(*) AS n FROM files f JOIN enrichments e ON e.content_hash = f.hash
        WHERE e.embedded_at IS NOT NULL AND ${ELIGIBLE}`,
     );
+    // Attempt-capped files: dropped from the work list but never summarized,
+    // so `summarized` can never reach `eligible` while these exist. Counted
+    // separately or the status reads as forever-pending with no explanation.
+    const skipped = count(
+      `SELECT COUNT(*) AS n FROM files f JOIN enrichments e ON e.content_hash = f.hash
+       WHERE e.embedded_at IS NULL AND COALESCE(e.attempts, 0) >= ${MAX_ENRICH_ATTEMPTS}
+         AND ${ELIGIBLE}`,
+    );
     const embedModel = this.getMeta('embed_model');
     return {
       eligible,
       summarized,
       embedded,
       pending: this.countNeedingEnrichment(),
+      skipped,
+      shadowsPending: this.countNeedingAiShadow(),
       ...(embedModel ? { embedModel } : {}),
     };
+  }
+
+  /**
+   * COUNT twin of `filesNeedingAiShadow` — media files still awaiting an AI
+   * description, attempt-capped ones excluded. The drive works this tier
+   * before summaries, so status must surface it or a fresh scan looks stuck.
+   */
+  countNeedingAiShadow(maxAttempts = MAX_ENRICH_ATTEMPTS): number {
+    return Number(
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM files f
+           LEFT JOIN shadow_state s ON s.content_hash = f.hash
+           WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+             AND f.modality IN ('image','audio')
+             AND (s.content_hash IS NULL
+                  OR (s.state <> 'ok' AND COALESCE(s.attempts, 0) < ?))`,
+        )
+        .get<{ n: number }>(this.collectionId, maxAttempts)?.n ?? 0,
+    );
   }
 
   /** Mark a content hash as enriched (vectors built) so it isn't reprocessed. */
@@ -660,11 +754,33 @@ export class IndexStore {
    * `attempts` reaches MAX_ENRICH_ATTEMPTS. A later success (markEnriched's
    * INSERT OR REPLACE) resets the row.
    */
-  markEnrichAttempt(contentHash: string): void {
+  markEnrichAttempt(contentHash: string): number {
     this.db
       .prepare(
         `INSERT INTO enrichments (content_hash, embedded_at, attempts) VALUES (?, NULL, 1)
          ON CONFLICT(content_hash) DO UPDATE SET attempts = COALESCE(enrichments.attempts, 0) + 1`,
+      )
+      .run(contentHash);
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM enrichments WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  /**
+   * Jump a hash straight to the attempt cap — for deterministic failures
+   * (a provider policy-blocking the file's content) where every retry would
+   * fail identically. The file drops off the work list and counts as
+   * `skipped` in {@link enrichmentCounts} until its content changes.
+   */
+  markEnrichSkipped(contentHash: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO enrichments (content_hash, embedded_at, attempts)
+         VALUES (?, NULL, ${MAX_ENRICH_ATTEMPTS})
+         ON CONFLICT(content_hash) DO UPDATE
+           SET attempts = MAX(COALESCE(enrichments.attempts, 0), ${MAX_ENRICH_ATTEMPTS})`,
       )
       .run(contentHash);
   }
@@ -876,15 +992,20 @@ export class IndexStore {
     summaryMd: string;
     tags?: string;
     model: string;
+    provenance?: IndexProvenance;
   }): void {
     this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO summaries (content_hash, collection_id, file_path, summary_md, tags, model, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO summaries (content_hash, collection_id, file_path, summary_md, tags, model,
+                                  provider, gezel_id, gezel_name, app_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(content_hash) DO UPDATE SET
              file_path=excluded.file_path, summary_md=excluded.summary_md,
-             tags=excluded.tags, model=excluded.model, created_at=excluded.created_at`,
+             tags=excluded.tags, model=excluded.model,
+             provider=excluded.provider, gezel_id=excluded.gezel_id,
+             gezel_name=excluded.gezel_name, app_version=excluded.app_version,
+             created_at=excluded.created_at`,
         )
         .run(
           rec.contentHash,
@@ -893,6 +1014,10 @@ export class IndexStore {
           rec.summaryMd,
           rec.tags ?? null,
           rec.model,
+          rec.provenance?.provider ?? null,
+          rec.provenance?.gezelId ?? null,
+          rec.provenance?.gezelName ?? null,
+          rec.provenance?.appVersion ?? null,
           nowIso(),
         );
       if (this.caps.fts) {
@@ -939,18 +1064,32 @@ export class IndexStore {
     fileHash: string,
     entries: Array<{ name: string; summary: string }>,
     model?: string,
+    provenance?: IndexProvenance,
   ): void {
     this.db.transaction(() => {
       this.db
         .prepare('DELETE FROM symbol_summaries WHERE collection_id = ? AND file_path = ?')
         .run(this.collectionId, filePath);
       const ins = this.db.prepare(
-        `INSERT OR REPLACE INTO symbol_summaries (collection_id, file_path, file_hash, symbol_name, summary, model, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO symbol_summaries (collection_id, file_path, file_hash, symbol_name, summary, model,
+                                                  provider, gezel_id, gezel_name, app_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const at = nowIso();
       for (const e of entries) {
-        ins.run(this.collectionId, filePath, fileHash, e.name, e.summary, model ?? null, at);
+        ins.run(
+          this.collectionId,
+          filePath,
+          fileHash,
+          e.name,
+          e.summary,
+          model ?? null,
+          provenance?.provider ?? null,
+          provenance?.gezelId ?? null,
+          provenance?.gezelName ?? null,
+          provenance?.appVersion ?? null,
+          at,
+        );
       }
     });
   }
@@ -979,18 +1118,22 @@ export class IndexStore {
     health: number;
     healthReason: string;
     model: string;
+    provenance?: IndexProvenance;
   }): void {
     this.db
       .prepare(
         `INSERT INTO file_reviews (content_hash, collection_id, file_path, rubric_hash, notes_md,
-                                   issues, health, health_reason, model, reviewed_at,
+                                   issues, health, health_reason, model,
+                                   provider, gezel_id, gezel_name, app_version, reviewed_at,
                                    attempt_rubric_hash, attempts, last_attempt_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL)
          ON CONFLICT(content_hash) DO UPDATE SET
            collection_id=excluded.collection_id, file_path=excluded.file_path,
            rubric_hash=excluded.rubric_hash, notes_md=excluded.notes_md,
            issues=excluded.issues, health=excluded.health,
            health_reason=excluded.health_reason, model=excluded.model,
+           provider=excluded.provider, gezel_id=excluded.gezel_id,
+           gezel_name=excluded.gezel_name, app_version=excluded.app_version,
            reviewed_at=excluded.reviewed_at,
            attempt_rubric_hash=NULL, attempts=0, last_attempt_at=NULL`,
       )
@@ -1004,8 +1147,39 @@ export class IndexStore {
         rec.health,
         rec.healthReason,
         rec.model,
+        rec.provenance?.provider ?? null,
+        rec.provenance?.gezelId ?? null,
+        rec.provenance?.gezelName ?? null,
+        rec.provenance?.appVersion ?? null,
         nowIso(),
       );
+  }
+
+  /**
+   * Terminal skip for content that CANNOT be reviewed under its current hash
+   * — a doc whose conversion was blocked/failed, an empty file, a source
+   * deleted between scan and review. Burns the whole attempt budget in one
+   * write (success fields untouched) so `filesNeedingReview` stops selecting
+   * the file; without this, one blocked doc permanently steals a batch slot
+   * from its kind on every sweep. A content change (new hash) or a rubric
+   * edit re-admits it exactly like any capped-out attempt.
+   */
+  markReviewUnavailable(
+    contentHash: string,
+    filePath: string,
+    rubricHash: string,
+    maxAttempts: number,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO file_reviews (content_hash, collection_id, file_path, attempt_rubric_hash, attempts, last_attempt_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           attempts = excluded.attempts,
+           attempt_rubric_hash = excluded.attempt_rubric_hash,
+           last_attempt_at = excluded.last_attempt_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, rubricHash, maxAttempts, nowIso());
   }
 
   /**
@@ -1032,7 +1206,8 @@ export class IndexStore {
   getFileReview(contentHash: string): FileReviewRow | undefined {
     const row = this.db
       .prepare(
-        `SELECT notes_md, issues, health, health_reason, rubric_hash, model, reviewed_at
+        `SELECT notes_md, issues, health, health_reason, rubric_hash, model,
+                provider, gezel_id, gezel_name, app_version, reviewed_at
          FROM file_reviews
          WHERE content_hash = ? AND notes_md IS NOT NULL AND health IS NOT NULL`,
       )
@@ -1043,6 +1218,10 @@ export class IndexStore {
         health_reason: string | null;
         rubric_hash: string | null;
         model: string | null;
+        provider: string | null;
+        gezel_id: string | null;
+        gezel_name: string | null;
+        app_version: string | null;
         reviewed_at: string | null;
       }>(contentHash);
     if (!row) return undefined;
@@ -1053,6 +1232,10 @@ export class IndexStore {
       healthReason: row.health_reason ?? '',
       rubricHash: row.rubric_hash ?? '',
       model: row.model,
+      provider: row.provider,
+      gezelId: row.gezel_id,
+      gezelName: row.gezel_name,
+      appVersion: row.app_version,
       reviewedAt: row.reviewed_at,
     };
   }
@@ -1244,6 +1427,12 @@ export class IndexStore {
       bySeverity: Record<string, number>;
       byCategory: Record<string, number>;
     };
+    reviewers: Array<{
+      model: string | null;
+      provider: string | null;
+      gezelName: string | null;
+      files: number;
+    }>;
   } {
     const where: string[] = [
       `f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
@@ -1294,6 +1483,28 @@ export class IndexStore {
       return out;
     };
     const bySeverity = tally(`COALESCE(json_extract(j.value, '$.severity'), 'info')`);
+    // Distinct reviewer identities over the same filtered row set — the
+    // provenance line for list_file_issues. DISTINCT content_hash (not the
+    // json_each product) so a 10-issue file still counts as one file.
+    const reviewers = this.db
+      .prepare(
+        `SELECT r.model, r.provider, r.gezel_name, COUNT(DISTINCT r.content_hash) AS files
+         ${FROM}
+         GROUP BY r.model, r.provider, r.gezel_name
+         ORDER BY files DESC LIMIT 5`,
+      )
+      .all<{
+        model: string | null;
+        provider: string | null;
+        gezel_name: string | null;
+        files: number;
+      }>(...params)
+      .map((r) => ({
+        model: r.model,
+        provider: r.provider,
+        gezelName: r.gezel_name,
+        files: Number(r.files),
+      }));
     return {
       issues: rows
         .filter((r) => r.message)
@@ -1309,6 +1520,7 @@ export class IndexStore {
         bySeverity,
         byCategory: tally(`COALESCE(json_extract(j.value, '$.category'), 'general')`),
       },
+      reviewers,
     };
   }
 
@@ -1319,16 +1531,32 @@ export class IndexStore {
     inputHash: string;
     summaryMd: string;
     model: string;
+    provenance?: IndexProvenance;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO area_summaries (collection_id, area_path, input_hash, summary_md, model, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO area_summaries (collection_id, area_path, input_hash, summary_md, model,
+                                     provider, gezel_id, gezel_name, app_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(collection_id, area_path) DO UPDATE SET
            input_hash=excluded.input_hash, summary_md=excluded.summary_md,
-           model=excluded.model, created_at=excluded.created_at`,
+           model=excluded.model,
+           provider=excluded.provider, gezel_id=excluded.gezel_id,
+           gezel_name=excluded.gezel_name, app_version=excluded.app_version,
+           created_at=excluded.created_at`,
       )
-      .run(this.collectionId, rec.areaPath, rec.inputHash, rec.summaryMd, rec.model, nowIso());
+      .run(
+        this.collectionId,
+        rec.areaPath,
+        rec.inputHash,
+        rec.summaryMd,
+        rec.model,
+        rec.provenance?.provider ?? null,
+        rec.provenance?.gezelId ?? null,
+        rec.provenance?.gezelName ?? null,
+        rec.provenance?.appVersion ?? null,
+        nowIso(),
+      );
   }
 
   getAreaSummary(areaPath: string): { summaryMd: string; inputHash: string } | undefined {

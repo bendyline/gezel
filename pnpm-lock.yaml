@@ -317,6 +317,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@xmldom/xmldom':
+        specifier: ^0.9.10
+        version: 0.9.10
       yaml:
         specifier: ^2.9.0
         version: 2.9.0

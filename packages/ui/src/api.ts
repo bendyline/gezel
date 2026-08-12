@@ -1,4 +1,4 @@
-import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
+import type { GezmodelEngine, GezmodelImportReview, SecurityPolicy } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
@@ -162,6 +162,7 @@ declare global {
         aiEngagementMode?: 'proactive' | 'scheduled' | 'reactive' | 'off';
         showSystemTray?: boolean;
         quitOnClose?: boolean;
+        securityPolicy?: SecurityPolicy;
       }) => void;
       /**
        * Register a callback fired when the engagement mode is changed from

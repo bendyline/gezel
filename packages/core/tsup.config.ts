@@ -22,6 +22,9 @@ export default defineConfig({
     // via @bendyline/gezel-sdk/checks), and the eval harness. Must stay
     // dependency-free.
     'src/checks/index.ts',
+    // Parser-backed, presentation-only SVG sanitizer shared by service,
+    // catalog ingestion, and the UI's final rendering boundary.
+    'src/svg/index.ts',
   ],
   format: ['esm'],
   dts: true,

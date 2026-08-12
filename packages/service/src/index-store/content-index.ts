@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   DescribeFolderResponse,
@@ -38,6 +38,7 @@ import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
   projectContentIndexDbFile,
+  projectLocalFilesDir,
   projectLocalIndexDbFile,
   projectLocalVillageFile,
   projectStorageScope,
@@ -52,10 +53,11 @@ import { VillageFileStore } from '../filemap/village-file.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
+import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
-import { docFilesPaths, ensureConvertedMarkdownSidecar } from './docs.js';
+import { ensureShadowDocSidecar, shadowDocFilesPaths } from './docs.js';
 import { type EnrichDeps, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
@@ -69,6 +71,7 @@ import {
 } from './index-store.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
 
@@ -87,12 +90,87 @@ import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from 
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 
+/** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
+const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
+
 // file-context caps — keep worst-case responses small and bounded.
 const CTX_MAX_SYMBOLS = 200;
 const CTX_MAX_IMPORTED_BY_PER_SYMBOL = 25;
 const CTX_MAX_FILE_IMPORTED_BY = 100;
 const CTX_MAX_USES = 50;
 const CTX_MAX_USED_IN_FILE_BY = 50;
+
+/**
+ * Run `fn` over a work source keeping up to `width()` calls in flight. The
+ * source is either a fixed array or a pull supplier (`undefined` = no more
+ * work) — the supplier form lets a caller re-query its work-list as slots
+ * open, so the pool never drains to zero between what used to be fixed
+ * batches. Width is re-read as slots free, so a lazily-initialized provider
+ * (reporting 1 until its first call spins it up) widens mid-batch. `stop`
+ * halts NEW dispatches; in-flight calls always finish. sqlite writes inside
+ * `fn` stay safe under this interleaving: the driver is synchronous, so
+ * statements never actually overlap — only the awaited model calls do.
+ */
+async function runPooled<T>(
+  source: readonly T[] | (() => Promise<T | undefined> | T | undefined),
+  width: () => number,
+  fn: (item: T) => Promise<void>,
+  stop?: () => boolean,
+): Promise<void> {
+  let next: () => Promise<T | undefined> | T | undefined;
+  if (typeof source === 'function') {
+    next = source;
+  } else {
+    let i = 0;
+    next = () => (i < source.length ? (source[i++] as T) : undefined);
+  }
+  const state: { failure: { error: unknown } | null } = { failure: null };
+  const active = new Set<Promise<void>>();
+  let exhausted = false;
+  const dispatch = async () => {
+    while (
+      !exhausted &&
+      active.size < Math.max(1, width()) &&
+      !stop?.() &&
+      state.failure === null
+    ) {
+      const item = await next();
+      if (item === undefined) {
+        exhausted = true;
+        break;
+      }
+      const p: Promise<void> = fn(item)
+        .catch((error) => {
+          state.failure ??= { error };
+        })
+        .finally(() => active.delete(p));
+      active.add(p);
+    }
+  };
+  await dispatch();
+  while (active.size > 0) {
+    await Promise.race(active);
+    await dispatch();
+  }
+  if (state.failure) throw state.failure.error;
+}
+
+/**
+ * Pool options for the AI passes. `concurrency` is the live width of the
+ * summarizer target's queue (full drives pass it; background stays serial).
+ * `drain` switches a call from "one fixed batch" to "run to empty": the
+ * work-list is re-queried as slots open so the pool never sits idle at a
+ * batch tail. `shouldStop` (the indexing job's pause switch) is checked and
+ * `onProgress` fired at each refill — the same cadence the caller's old
+ * per-batch loop provided.
+ */
+export interface EnrichDriveOpts {
+  concurrency?: () => number;
+  drain?: {
+    shouldStop?: () => Promise<boolean> | boolean;
+    onProgress?: (progress: { files: number }) => void;
+  };
+}
 
 export class ContentIndex {
   /** Per-project village-file stores (they cache last-written content so
@@ -122,7 +200,7 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { workspaceDir, dbPath } = opened;
+    const { workspaceDir, artifactsDir, dbPath } = opened;
     try {
       if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
         await ensureIndexGitignore(workspaceDir);
@@ -134,7 +212,22 @@ export class ContentIndex {
       opened.index.close();
     }
 
-    const stats = await runStaticIndex({ dbPath, workspaceDir, collectionId: projectId });
+    const stats = await runStaticIndex({
+      dbPath,
+      workspaceDir,
+      artifactsDir,
+      collectionId: projectId,
+    });
+    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+      // Conversions now live under artifacts/shadow; the old in-workspace
+      // cache is stranded stale content and doubled disk. Regenerable and
+      // deny-all-gitignored, so removal is safe. Machine-shared workspaces are
+      // skipped: an older daemon on another account would recreate the tree,
+      // and cross-daemon churn is worse than a stale cache.
+      await rm(projectLocalFilesDir(workspaceDir), { recursive: true, force: true }).catch(
+        () => {},
+      );
+    }
     const post = await this.open(projectId);
     if (!post) return stats;
     try {
@@ -1027,6 +1120,8 @@ export class ContentIndex {
     summarized: number;
     embedded: number;
     pending: number;
+    skipped: number;
+    shadowsPending: number;
     embedModel?: string;
   } | null> {
     const opened = await this.open(projectId);
@@ -1042,20 +1137,80 @@ export class ContentIndex {
     projectId: string,
     deps: EnrichDeps,
     limit = 5,
+    opts?: EnrichDriveOpts,
   ): Promise<{ files: number; summarized: number; embedded: number } | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { index, workspaceDir } = opened;
+    const { index, workspaceDir, artifactsDir } = opened;
     try {
-      const files = index.filesNeedingEnrichment(limit);
+      let files = 0;
       let summarized = 0;
       let embedded = 0;
-      for (const file of files) {
-        const r = await enrichFile(index, workspaceDir, file, deps);
+      const drain = opts?.drain;
+      // `seen` guards the refill re-query: in-flight files still match the
+      // needing-enrichment predicate (they're marked only on completion), and
+      // a failed file stays on the list until its attempt cap — without the
+      // guard one drive could dispatch the same file twice.
+      const seen = new Set<string>();
+      let queue = index.filesNeedingEnrichment(limit);
+      for (const f of queue) if (f.hash) seen.add(f.hash);
+      let exhausted = false;
+      const next = async (): Promise<(typeof queue)[number] | undefined> => {
+        if (queue.length === 0 && drain && !exhausted) {
+          if (await drain.shouldStop?.()) return undefined;
+          const fresh = index
+            .filesNeedingEnrichment(limit + seen.size)
+            .filter((f) => f.hash !== null && !seen.has(f.hash));
+          if (fresh.length === 0) {
+            exhausted = true;
+            return undefined;
+          }
+          queue = fresh.slice(0, limit);
+          for (const f of queue) if (f.hash) seen.add(f.hash);
+          drain.onProgress?.({ files });
+        }
+        return queue.shift();
+      };
+      await runPooled(next, opts?.concurrency ?? (() => 1), async (file) => {
+        const r = await enrichFile(index, workspaceDir, artifactsDir, file, deps);
+        files++;
         if (r.summarized) summarized++;
         embedded += r.embedded;
+      });
+      return { files, summarized, embedded };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Run one batch of the AI-shadow tier: describe images / transcribe audio
+   * into `artifacts/shadow/` sidecars. Runs BEFORE the summary tier so a
+   * produced shadow immediately joins the enrichment work-list. No-op when
+   * neither producer is wired (no vision model / no STT configured).
+   */
+  async aiShadows(
+    projectId: string,
+    deps: AiShadowDeps,
+    limit = 3,
+  ): Promise<{ files: number; produced: number; called: number } | null> {
+    if (!deps.describeImage && !deps.transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir, artifactsDir } = opened;
+    try {
+      const files = index.filesNeedingAiShadow(limit);
+      let produced = 0;
+      let called = 0;
+      let handled = 0;
+      for (const file of files) {
+        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, deps);
+        if (r.skipped) continue;
+        handled++;
+        if (r.produced) produced++;
+        if (r.called) called++;
       }
-      return { files: files.length, summarized, embedded };
+      return { files: handled, produced, called };
     } finally {
       index.close();
     }
@@ -1122,36 +1277,66 @@ export class ContentIndex {
     deps: EnrichDeps,
     limit = 5,
     rubrics?: Map<string, ResolvedRubric>,
+    opts?: EnrichDriveOpts,
   ): Promise<{ files: number; reviewed: number } | null> {
     if (!deps.review || !deps.model) return { files: 0, reviewed: 0 };
     const resolved = rubrics ?? (await resolveRubrics(this.store));
     if (resolved.size === 0) return { files: 0, reviewed: 0 };
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { index, workspaceDir } = opened;
+    const { index, workspaceDir, artifactsDir } = opened;
     try {
       let files = 0;
       let reviewed = 0;
-      let consecutiveEmpty = 0;
+      // Wedged-model breaker: three empty replies with no success in
+      // between (completion order under concurrency, dispatch order when
+      // serial) stop NEW dispatches; in-flight reviews finish.
+      let emptySinceSuccess = 0;
+      let wedged = false;
+      const drain = opts?.drain;
       for (const rubric of resolved.values()) {
-        if (files >= limit) break;
-        const batch = index.filesNeedingReview(
-          rubric.kind,
-          rubric.hash,
-          limit - files,
-          MAX_REVIEW_ATTEMPTS,
-        );
-        for (const file of batch) {
-          const r = await reviewFile(index, workspaceDir, file, rubric, deps);
-          if (r.reviewed || r.attempted) files++;
-          if (r.reviewed) reviewed++;
-          if (r.emptyReply) {
-            consecutiveEmpty++;
-            if (consecutiveEmpty >= 3) return { files, reviewed };
-          } else {
-            consecutiveEmpty = 0;
+        if ((!drain && files >= limit) || wedged) break;
+        // Same in-flight/retry guard as enrich: a file is only marked after
+        // its review completes, so drain refills must not re-select it.
+        const seen = new Set<string>();
+        const select = (n: number) =>
+          index
+            .filesNeedingReview(rubric.kind, rubric.hash, n, MAX_REVIEW_ATTEMPTS)
+            .filter((f) => f.hash !== null && !seen.has(f.hash));
+        let queue = select(drain ? limit : limit - files);
+        for (const f of queue) if (f.hash) seen.add(f.hash);
+        let exhausted = false;
+        const next = async (): Promise<(typeof queue)[number] | undefined> => {
+          if (queue.length === 0 && drain && !exhausted) {
+            if (await drain.shouldStop?.()) return undefined;
+            const fresh = select(limit + seen.size);
+            if (fresh.length === 0) {
+              exhausted = true;
+              return undefined;
+            }
+            queue = fresh.slice(0, limit);
+            for (const f of queue) if (f.hash) seen.add(f.hash);
+            drain.onProgress?.({ files });
           }
-        }
+          return queue.shift();
+        };
+        await runPooled(
+          next,
+          opts?.concurrency ?? (() => 1),
+          async (file) => {
+            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
+            if (r.reviewed || r.attempted) files++;
+            if (r.reviewed) reviewed++;
+            if (r.emptyReply) {
+              emptySinceSuccess++;
+              if (emptySinceSuccess >= 3) wedged = true;
+            } else {
+              emptySinceSuccess = 0;
+            }
+          },
+          () => wedged,
+        );
+        if (wedged) return { files, reviewed };
       }
       return { files, reviewed };
     } finally {
@@ -1184,8 +1369,18 @@ export class ContentIndex {
       const fileRec = opened.index.getFile(relPath);
       if (!fileRec?.hash) return { path: relPath, found: false };
       const row = opened.index.getFileReview(fileRec.hash);
-      if (!row) return { path: relPath, found: false, pending: true };
-      return { path: relPath, found: true, review: toReviewWire(row) };
+      if (row) return { path: relPath, found: true, review: toReviewWire(row) };
+      // `pending` is a promise ("the boekwachter studies files when idle") —
+      // only make it for files a rubric will actually reach. Everything else
+      // (data/other kinds, images, trivial blobs, reviews disabled) reports
+      // eligible:false so surfaces stop implying a review that never comes.
+      const rubrics = await resolveRubrics(this.store);
+      const eligible =
+        !fileRec.trivial &&
+        REVIEWABLE_MODALITIES.has(fileRec.modality ?? '') &&
+        rubrics.has(fileRec.kind ?? '');
+      if (!eligible) return { path: relPath, found: false, eligible: false };
+      return { path: relPath, found: false, pending: true, eligible: true };
     } finally {
       opened.index.close();
     }
@@ -1210,7 +1405,7 @@ export class ContentIndex {
     const { index } = opened;
     try {
       const limit = Math.min(req.maxResults ?? 200, 1000);
-      const { issues, counts } = index.fileIssues({
+      const { issues, counts, reviewers } = index.fileIssues({
         ...(req.severity ? { severity: req.severity } : {}),
         ...(req.category ? { category: req.category } : {}),
         ...(req.path ? { pathPrefix: req.path } : {}),
@@ -1230,6 +1425,7 @@ export class ContentIndex {
         indexed: index.fileCount() > 0,
         reviewedFiles: rc.reviewed,
         eligibleFiles: rc.eligible,
+        ...(reviewers.length > 0 ? { reviewers } : {}),
       };
     } finally {
       index.close();
@@ -1241,18 +1437,21 @@ export class ContentIndex {
   async searchDocs(projectId: string, query: string, maxResults = 20): Promise<SearchDocsResponse> {
     const opened = await this.open(projectId);
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
-    const { index, workspaceDir } = opened;
+    const { index, artifactsDir } = opened;
     try {
       if (!index.ftsAvailable) return { results: [], engine: 'unavailable', truncated: false };
       const hits = index.searchDocs(query, maxResults + 1);
       const truncated = hits.length > maxResults;
       return {
-        results: hits.slice(0, maxResults).map((h) => ({
-          sourcePath: h.filePath,
-          markdownPath: docFilesPaths(workspaceDir, h.filePath).mdRel,
-          lineStart: h.lineStart,
-          snippet: h.snippet,
-        })),
+        results: hits.slice(0, maxResults).map((h) => {
+          const shadow = shadowDocFilesPaths(artifactsDir, h.filePath);
+          return {
+            sourcePath: h.filePath,
+            markdownPath: shadow ? `artifacts/${shadow.mdRel}` : h.filePath,
+            lineStart: h.lineStart,
+            snippet: h.snippet,
+          };
+        }),
         engine: 'fts',
         truncated,
       };
@@ -1272,16 +1471,17 @@ export class ContentIndex {
     const absSource = safeJoin(workspaceDir, relPath);
     if (!absSource) return { found: false, truncated: false };
 
-    const paths = docFilesPaths(workspaceDir, relPath);
     // Reuse the same freshness + sandboxed-conversion path as indexing and
     // the References viewer so every document consumer agrees on sidecars.
-    const md = (await ensureConvertedMarkdownSidecar(absSource, paths)).markdown;
-    if (md == null) return { found: false, sourcePath: relPath, truncated: false };
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
+    const ensured = await ensureShadowDocSidecar(absSource, artifactsDir, relPath);
+    const md = ensured?.markdown ?? null;
+    if (md == null || !ensured) return { found: false, sourcePath: relPath, truncated: false };
     const truncated = md.length > MAX_READ_BYTES;
     return {
       found: true,
       sourcePath: relPath,
-      markdownPath: paths.mdRel,
+      markdownPath: `artifacts/${ensured.paths.mdRel}`,
       markdown: truncated ? `${md.slice(0, MAX_READ_BYTES)}\n…(truncated)` : md,
       truncated,
     };
@@ -1488,9 +1688,12 @@ export class ContentIndex {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  private async open(
-    projectId: string,
-  ): Promise<{ index: IndexStore; workspaceDir: string; dbPath: string } | null> {
+  private async open(projectId: string): Promise<{
+    index: IndexStore;
+    workspaceDir: string;
+    artifactsDir: string;
+    dbPath: string;
+  } | null> {
     let workspaceDir: string;
     try {
       workspaceDir = await this.store.projectWorkspaceDir(projectId);
@@ -1498,26 +1701,37 @@ export class ContentIndex {
       return null;
     }
     if (!workspaceDir) return null;
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
 
     const open = (dbPath: string) =>
       IndexStore.open(dbPath, {
         collectionId: projectId,
         kind: 'workspace',
         rootPath: workspaceDir,
-      }).catch(() => null);
+      });
 
     // A machine-shared workspace is a collaborative content tree, not a safe
     // home for a mutable SQLite database opened by every account daemon.
     // Build the same derived index independently in each account's sidecar.
     let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
-    let index = await open(dbPath);
+    let index: IndexStore | null;
+    try {
+      index = await open(dbPath);
+    } catch (error) {
+      // A busy/locked primary EXISTS and is mid-write (the static worker
+      // holds long transactions during a full pass). Falling back would mint
+      // an empty home-side db whose zero counts masquerade as real status —
+      // report "unavailable this call" and let the next poll succeed.
+      if (isTransientIndexError(error)) return null;
+      index = null;
+    }
     if (!index) {
       // Workspace `.gezel/` not writable — fall back to the home-local dir.
       dbPath = join(fallbackProjectIndexDir(this.home, projectId), 'index.db');
-      index = await open(dbPath);
+      index = await open(dbPath).catch(() => null);
     }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir, dbPath } : null;
+    return index ? { index, workspaceDir, artifactsDir, dbPath } : null;
   }
 
   private async syncFindingLifecycle(
@@ -1702,6 +1916,10 @@ function toReviewWire(row: FileReviewRow): FileReviewWire {
     health: row.health,
     healthReason: row.healthReason,
     model: row.model,
+    provider: row.provider,
+    gezelId: row.gezelId,
+    gezelName: row.gezelName,
+    appVersion: row.appVersion,
     reviewedAt: row.reviewedAt,
   };
 }

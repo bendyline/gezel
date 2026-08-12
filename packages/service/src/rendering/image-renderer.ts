@@ -94,7 +94,8 @@ export class ImageRenderer {
     if (!Resvg) throw new Error('resvg not available');
     const layer = req.layers[0];
     if (!layer || layer.kind !== 'svg') throw new Error('unreachable');
-    const svg = sanitizeSvg(layer.svg) || layer.svg;
+    const svg = sanitizeSvg(layer.svg);
+    if (!svg) throw new Error('invalid SVG layer');
     const background = req.background ? toCssRgba(parseColor(req.background)) : undefined;
     const resvg = new Resvg(svg, {
       fitTo: { mode: 'width', value: req.width },

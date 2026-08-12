@@ -21,6 +21,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
@@ -583,10 +584,10 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   async deleteModel(id: string): Promise<void> {
+    const itemDir = resolveModelDirectory(this.modelsRoot, id);
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    const itemDir = join(this.modelsRoot, id);
     await rm(itemDir, { recursive: true, force: true });
   }
 

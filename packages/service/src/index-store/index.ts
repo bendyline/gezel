@@ -50,7 +50,7 @@ export { enrichFile, buildSummaryPrompt, type EnrichDeps, type EnrichResult } fr
 export {
   convertDocToMarkdown,
   isConvertibleDoc,
-  docFilesPaths,
-  writeConvertedMarkdown,
+  shadowDocFilesPaths,
+  ensureShadowDocSidecar,
   chunkMarkdown,
 } from './docs.js';

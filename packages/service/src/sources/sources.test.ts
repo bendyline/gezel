@@ -60,10 +60,13 @@ describe('EmlMailAdapter', () => {
     const out = await materializeSource(new EmlMailAdapter(), join(src, 'msg1.eml'), mirror);
     expect(out).not.toBeNull();
 
-    await runWorkspaceContentIndex(mirror, 'mail');
+    await runWorkspaceContentIndex(mirror, 'mail', join(home, 'artifacts'));
 
     const ci = new ContentIndex(
-      { projectWorkspaceDir: async () => mirror } as unknown as Store,
+      {
+        projectWorkspaceDir: async () => mirror,
+        projectArtifactsDir: () => join(home, 'artifacts'),
+      } as unknown as Store,
       home,
     );
     const search = await ci.searchDocs('mail', 'frobnication');

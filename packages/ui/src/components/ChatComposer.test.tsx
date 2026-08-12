@@ -6,6 +6,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 vi.mock('@bendyline/gezel-client', () => ({ streamChatEvents: vi.fn() }));
 vi.mock('../api.js', async () => {
   const { createMockApi } = await import('../test-utils/mockApi.js');
@@ -40,7 +50,15 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       const [draft, setDraft] = useState(initialMarkdown);
       return (
         <div>
-          <textarea className="squisq-wysiwyg-editor" aria-label="Message" value={draft} readOnly />
+          <textarea
+            className="squisq-wysiwyg-editor"
+            aria-label="Message"
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              onChange?.(event.target.value);
+            }}
+          />
           <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
           <span data-testid="editor-draft">{draft}</span>
           <button
@@ -115,6 +133,153 @@ describe('ChatComposer keyboard hints', () => {
     );
 
     await waitFor(() => expect(document.activeElement).toBe(editor));
+  });
+});
+
+describe('ChatComposer lossless draft submission', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(streamChatEvents).mockImplementation(() =>
+      (async function* completedTurn() {
+        yield { type: 'done' as const };
+      })(),
+    );
+  });
+
+  it('keeps the exact editor draft mounted until the daemon accepts it', async () => {
+    const request = deferred<{ accepted: true; sessionId: string }>();
+    vi.mocked(api.sendToChatSession).mockReturnValue(request.promise);
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Message');
+    const source = '  Review this\n@[Ada](gezel:ada)\n![diagram](attachments/diagram.png)\n  ';
+    fireEvent.change(editor, { target: { value: source } });
+    editor.setSelectionRange(4, 10);
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(screen.getByRole('button', { name: /sending/i })).toBeDisabled();
+    expect(screen.getByLabelText('Message')).toBe(editor);
+    expect(editor.value).toBe(source);
+    expect(editor.selectionStart).toBe(4);
+    expect(editor.selectionEnd).toBe(10);
+
+    await act(async () => {
+      request.resolve({ accepted: true, sessionId: 'session-1' });
+      await request.promise;
+    });
+
+    await waitFor(() => expect(screen.getByTestId('editor-draft').textContent).toBe(''));
+    expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
+      message: source.trim(),
+      mentions: ['ada'],
+    });
+  });
+
+  it('preserves the draft and editor instance when session creation fails', async () => {
+    vi.mocked(api.createChatSession).mockRejectedValue(new Error('Failed to fetch'));
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId={undefined} />,
+    );
+
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Message');
+    const source = 'A carefully written prompt for @[Ada](gezel:ada)';
+    fireEvent.change(editor, { target: { value: source } });
+    expect(screen.getByTitle('@Ada')).toBeTruthy();
+    editor.setSelectionRange(2, 12);
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    expect(await screen.findByText(/lost the connection to the gezel service/i)).toBeTruthy();
+    expect(screen.getByLabelText('Message')).toBe(editor);
+    expect(editor.value).toBe(source);
+    expect(screen.getByTitle('@Ada')).toBeTruthy();
+    expect(editor.selectionStart).toBe(2);
+    expect(editor.selectionEnd).toBe(12);
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['transport failure', new TypeError('Failed to fetch')],
+    ['non-2xx response', new Error('Gezel API POST failed (503): service unavailable')],
+    [
+      'request cancellation',
+      Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }),
+    ],
+  ])('preserves exact source after a %s', async (_label, failure) => {
+    vi.mocked(api.sendToChatSession).mockRejectedValue(failure);
+    vi.mocked(streamChatEvents).mockImplementation((opts) =>
+      (async function* waitForAbort() {
+        await new Promise<void>((_, reject) => {
+          const abort = () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (opts.signal?.aborted) abort();
+          else opts.signal?.addEventListener('abort', abort, { once: true });
+        });
+      })(),
+    );
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    const source = 'Draft with attachment ![x](attachments/x.png)  ';
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: source } });
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^send$/i })).toBeEnabled());
+    expect(screen.getByTestId('editor-draft').textContent).toBe(source);
+  });
+
+  it('does not clear text typed while the acceptance response is pending', async () => {
+    const request = deferred<{ accepted: true; sessionId: string }>();
+    vi.mocked(api.sendToChatSession).mockReturnValue(request.promise);
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Original draft' } });
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'New text typed while sending' },
+    });
+
+    await act(async () => {
+      request.resolve({ accepted: true, sessionId: 'session-1' });
+      await request.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('editor-draft').textContent).toBe('New text typed while sending');
+    });
+  });
+
+  it('locks synchronously so a double submission creates and sends only once', async () => {
+    const creation = deferred<{ id: string }>();
+    vi.mocked(api.createChatSession).mockReturnValue(creation.promise as never);
+    vi.mocked(api.sendToChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'created-session',
+    });
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId={undefined} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Send exactly once' } });
+    const sendButton = screen.getByRole('button', { name: /^send$/i });
+    fireEvent.click(sendButton);
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(api.createChatSession).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      creation.resolve({ id: 'created-session' });
+      await creation.promise;
+    });
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -373,6 +538,28 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
       });
     });
     expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Nudge', 'sendToChatSession'],
+    ['Interrupt', 'interruptChatSession'],
+  ] as const)('keeps the live draft when %s submission fails', async (buttonName, method) => {
+    vi.mocked(api[method]).mockRejectedValue(new Error('service unavailable'));
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    await screen.findByRole('button', { name: /stop/i });
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Message');
+    fireEvent.change(editor, { target: { value: 'Do not lose this steering note' } });
+    editor.setSelectionRange(3, 11);
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${buttonName}$`, 'i') }));
+
+    expect(await screen.findByText('service unavailable')).toBeTruthy();
+    expect(screen.getByLabelText('Message')).toBe(editor);
+    expect(editor.value).toBe('Do not lose this steering note');
+    expect(editor.selectionStart).toBe(3);
+    expect(editor.selectionEnd).toBe(11);
   });
 });
 

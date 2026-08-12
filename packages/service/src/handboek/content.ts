@@ -14,6 +14,7 @@ export const HANDBOEK_AREAS: readonly HandboekArea[] = [
   'craftbooks',
   'project-types',
   'technical',
+  'whats-new',
 ];
 
 export const HANDBOEK_AREA_TITLES: Record<HandboekArea, string> = {
@@ -22,7 +23,24 @@ export const HANDBOEK_AREA_TITLES: Record<HandboekArea, string> = {
   craftbooks: 'Craftbooks',
   'project-types': 'Project Types',
   technical: 'Technical',
+  'whats-new': "What's New",
 };
+
+/**
+ * The `whats-new` section index. Excluded from its own release list, and
+ * the one article in that area whose `order` is not a negated calendar
+ * line — see `docs/handboek/README.md`.
+ */
+export const WHATS_NEW_INDEX_ID = 'whats-new-index';
+
+/** One release, as the `whats-new-list` macro renders it. */
+export interface ReleaseNoteEntry {
+  /** Article id — link targets resolve ids directly in app and site. */
+  id: string;
+  title: string;
+  /** The tweet-sized line. Absent only if an author forgot one. */
+  summary?: string;
+}
 
 export interface CuratedArticle {
   id: string;
@@ -94,6 +112,19 @@ export function loadCuratedArticles(contentDir: string): CuratedArticle[] {
   }
   out.sort((a, b) => (a.area === b.area ? a.order - b.order : 0));
   return out;
+}
+
+/**
+ * Release-note articles, newest first. Release `order` is the negated
+ * calendar line (`1.26223` → `-26223`), so the area's own ascending sort
+ * already puts the newest release on top; this only drops the section
+ * index out of the list it introduces.
+ */
+export function listReleaseNotes(articles: CuratedArticle[]): ReleaseNoteEntry[] {
+  return articles
+    .filter((a) => a.area === 'whats-new' && a.id !== WHATS_NEW_INDEX_ID)
+    .sort((a, b) => a.order - b.order)
+    .map((a) => ({ id: a.id, title: a.title, summary: a.summary }));
 }
 
 export function parseCuratedArticle(

@@ -50,6 +50,7 @@ import {
 } from './engine-pill-stats.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
+import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
 type LiveTurn = LiveTurnState;
 type TurnStats = TurnStatsEntry;
@@ -372,6 +373,7 @@ function EngineStatusPillForProvider({
   const [, setTick] = useState(0);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const popoverStyle = useStableHeaderPopoverPosition(rootRef, open, 6);
   const popoverId = onDeviceProvider ?? 'media';
 
   // Click-outside closes the dropdown. Same pattern as QueueMeter.
@@ -882,7 +884,7 @@ function EngineStatusPillForProvider({
         </span>
       </button>
       {open && (
-        <div className="engine-pill-popover">
+        <div className="engine-pill-popover" style={popoverStyle}>
           <div className="engine-pill-popover-header">
             {activeMedia ? `${platformPillLabel} engine` : `${chatPillLabel} AI engine`}
           </div>

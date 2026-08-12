@@ -4,7 +4,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { SystemIdleState } from '../system/idle-state.js';
 import type { ContentIndex } from './content-index.js';
-import { buildEnrichDeps } from './enrich.js';
+import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
 import { IndexEnrichmentManager } from './enrichment-manager.js';
 
 const BOOK = {
@@ -222,6 +222,269 @@ describe('review tier scheduling', () => {
   });
 });
 
+describe('AI-shadow tier + review drain event', () => {
+  function makeShadowFixture(opts: { withProducers?: boolean; pendingAfter?: number } = {}) {
+    const enrich = vi.fn().mockResolvedValue({ files: 0, summarized: 0, embedded: 0 });
+    const enrichAreas = vi.fn().mockResolvedValue({ areasUpdated: 0, architectureUpdated: false });
+    const review = vi
+      .fn()
+      .mockResolvedValueOnce({ files: 2, reviewed: 2 })
+      .mockResolvedValue({ files: 0, reviewed: 0 });
+    const aiShadows = vi.fn().mockResolvedValue({ files: 1, produced: 1, called: 1 });
+    const reviewCounts = vi.fn().mockResolvedValue({
+      eligible: 2,
+      reviewed: 2,
+      stale: 0,
+      pending: opts.pendingAfter ?? 0,
+    });
+    const listFileIssues = vi.fn().mockResolvedValue({
+      issues: [],
+      counts: { total: 3, bySeverity: {}, byCategory: {} },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 2,
+      eligibleFiles: 2,
+    });
+    const historyLog = vi.fn().mockResolvedValue(undefined);
+    const chat = {
+      isAnyActive: () => false,
+      isProjectActive: () => false,
+      oneShotCompletion: vi.fn().mockResolvedValue('ok'),
+    } as unknown as ChatManager;
+    const store = {
+      listProjects: async () => [{ id: 'p1' }],
+      readConfig: async () => ({ defaultModel: { mlx: 'enricher' } }),
+      listIndexRubrics: async () => ({}),
+    } as unknown as Store;
+    const contentIndex = {
+      enrich,
+      enrichAreas,
+      review,
+      aiShadows,
+      reviewCounts,
+      listFileIssues,
+    } as unknown as ContentIndex;
+    const mgr = new IndexEnrichmentManager({
+      store,
+      chat,
+      contentIndex,
+      idle: agedIdleState(),
+      resolveBoekwachter: async () => BOOK,
+      history: { log: historyLog },
+      ...(opts.withProducers
+        ? { shadowProducers: { describeImage: async () => ({ body: 'x' }) } }
+        : {}),
+    });
+    return { mgr, aiShadows, review, historyLog };
+  }
+
+  it('runs the shadow tier before enrichment when producers are wired', async () => {
+    const { mgr, aiShadows } = makeShadowFixture({ withProducers: true });
+    await mgr.tick();
+    expect(aiShadows).toHaveBeenCalledTimes(1);
+    const deps = aiShadows.mock.calls[0]![1] as { describeImage?: unknown; provenance?: unknown };
+    expect(deps.describeImage).toBeDefined();
+    expect(deps.provenance).toMatchObject({ provider: 'mlx', gezelName: 'Noor' });
+  });
+
+  it('skips the shadow tier entirely without producers', async () => {
+    const { mgr, aiShadows } = makeShadowFixture({ withProducers: false });
+    await mgr.tick();
+    expect(aiShadows).not.toHaveBeenCalled();
+  });
+
+  it('logs project.index.reviewed once on the drain transition', async () => {
+    const { mgr, historyLog } = makeShadowFixture();
+    await mgr.tick();
+    expect(historyLog).toHaveBeenCalledTimes(1);
+    expect(historyLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'project.index.reviewed',
+        projectId: 'p1',
+        gezelId: 'noor',
+        details: expect.objectContaining({ files: 2, issues: 3 }),
+      }),
+    );
+    // A later tick that stores nothing must not re-emit.
+    await mgr.tick();
+    expect(historyLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not log while reviews are still pending', async () => {
+    const { mgr, historyLog } = makeShadowFixture({ pendingAfter: 4 });
+    await mgr.tick();
+    expect(historyLog).not.toHaveBeenCalled();
+  });
+});
+
+describe('on-demand drives + night catch-up', () => {
+  function makeDriveFixture(
+    opts: { projects?: Array<{ id: string; indexingEnabled?: boolean }> } = {},
+  ) {
+    const calls: string[] = [];
+    const refreshStatic = vi.fn(async (_id: string) => {
+      calls.push('static');
+    });
+    const oneShotCompletion = vi.fn().mockResolvedValue('a summary');
+    // First enrich batch invokes the summarizer once so the test can observe
+    // the ambient flag the drive built its deps with, then drains.
+    const enrich = vi
+      .fn()
+      .mockImplementationOnce(async (_id: string, deps: EnrichDeps) => {
+        calls.push('enrich');
+        await deps.summarize('probe');
+        return { files: 1, summarized: 1, embedded: 1 };
+      })
+      .mockImplementation(async () => {
+        calls.push('enrich');
+        return { files: 0, summarized: 0, embedded: 0 };
+      });
+    const enrichAreas = vi.fn(async () => {
+      calls.push('areas');
+      return { areasUpdated: 1, architectureUpdated: false };
+    });
+    const review = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        calls.push('review');
+        return { files: 2, reviewed: 2 };
+      })
+      .mockImplementation(async () => {
+        calls.push('review');
+        return { files: 0, reviewed: 0 };
+      });
+    const aiShadows = vi.fn(async () => {
+      calls.push('shadow');
+      return { files: 0, produced: 0, called: 0 };
+    });
+    const reviewCounts = vi.fn(async () => ({ eligible: 2, reviewed: 2, stale: 0, pending: 0 }));
+    const listFileIssues = vi.fn(async () => ({
+      issues: [],
+      counts: { total: 0, bySeverity: {}, byCategory: {} },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 2,
+      eligibleFiles: 2,
+    }));
+    const chat = {
+      isAnyActive: () => false,
+      isProjectActive: () => false,
+      oneShotCompletion,
+      oneShotQueueWidth: vi.fn(() => 4),
+    } as unknown as ChatManager;
+    const store = {
+      listProjects: async () => opts.projects ?? [{ id: 'p1' }],
+      projectIndexingEnabled: async (id: string) =>
+        (opts.projects ?? [{ id: 'p1' }]).find((p) => p.id === id)?.indexingEnabled !== false,
+      readConfig: async () => ({ defaultModel: { mlx: 'enricher' } }),
+      listIndexRubrics: async () => ({}),
+    } as unknown as Store;
+    const contentIndex = {
+      enrich,
+      enrichAreas,
+      review,
+      aiShadows,
+      reviewCounts,
+      listFileIssues,
+    } as unknown as ContentIndex;
+    const mgr = new IndexEnrichmentManager({
+      store,
+      chat,
+      contentIndex,
+      idle: agedIdleState(),
+      resolveBoekwachter: async () => BOOK,
+      refreshStatic,
+      shadowProducers: { describeImage: async () => ({ body: 'x' }) },
+    });
+    return { mgr, calls, refreshStatic, enrich, review, oneShotCompletion };
+  }
+
+  it('full drive: static first, then shadows → enrich → areas → reviews, non-ambient night batches', async () => {
+    const { mgr, calls, enrich, review, oneShotCompletion } = makeDriveFixture();
+    const started = mgr.drive('p1', { intensity: 'full' });
+    expect(started).toEqual({ started: true, alreadyRunning: false });
+    expect(mgr.isDriving('p1')).toBe(true);
+    await vi.waitFor(() => expect(mgr.isDriving('p1')).toBe(false));
+
+    expect(calls[0]).toBe('static');
+    expect(calls.indexOf('shadow')).toBeLessThan(calls.indexOf('enrich'));
+    expect(calls.indexOf('enrich')).toBeLessThan(calls.indexOf('areas'));
+    expect(calls.indexOf('areas')).toBeLessThan(calls.indexOf('review'));
+    // Full-bore fills the target's queue — width-many per-file scans at once.
+    expect(enrich).toHaveBeenCalledWith(
+      'p1',
+      expect.anything(),
+      25,
+      expect.objectContaining({ concurrency: expect.any(Function) }),
+    );
+    const enrichOpts = enrich.mock.calls[0]?.[3] as { concurrency: () => number };
+    expect(enrichOpts.concurrency()).toBe(4);
+    expect(review).toHaveBeenCalledWith(
+      'p1',
+      expect.anything(),
+      25,
+      expect.anything(),
+      expect.objectContaining({ concurrency: expect.any(Function) }),
+    );
+    // Full-bore competes like interactive work — no ambient hold.
+    const opts = oneShotCompletion.mock.calls[0]?.[2] as { ambient?: boolean };
+    expect(opts.ambient).toBeUndefined();
+  });
+
+  it('background drive stays ambient with day batches', async () => {
+    const { mgr, enrich, oneShotCompletion } = makeDriveFixture();
+    mgr.drive('p1', { intensity: 'background' });
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    // Background stays serial — no concurrency opt is passed.
+    expect(enrich).toHaveBeenCalledWith('p1', expect.anything(), 5, undefined);
+    const opts = oneShotCompletion.mock.calls[0]?.[2] as { ambient?: boolean };
+    expect(opts.ambient).toBe(true);
+  });
+
+  it('a second drive request joins the running one', async () => {
+    const { mgr } = makeDriveFixture();
+    expect(mgr.drive('p1', { intensity: 'full' }).started).toBe(true);
+    expect(mgr.drive('p1', { intensity: 'full' })).toEqual({
+      started: false,
+      alreadyRunning: true,
+    });
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+  });
+
+  it('driveMode reports the running mode and clears when the drive ends', async () => {
+    const { mgr } = makeDriveFixture();
+    expect(mgr.driveMode('p1')).toBeNull();
+    mgr.drive('p1', { intensity: 'full' });
+    expect(mgr.driveMode('p1')).toBe('full');
+    expect(mgr.driveMode('other')).toBeNull();
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    expect(mgr.driveMode('p1')).toBeNull();
+  });
+
+  it('the background loop stands down while a drive runs', async () => {
+    const { mgr, enrich } = makeDriveFixture();
+    mgr.drive('p1', { intensity: 'full' });
+    await mgr.tick();
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    // Every enrich call came from the drive ('p1', deps, 25) — none from the
+    // tick's day-batch path ('p1', deps, 5).
+    expect(enrich.mock.calls.every((c) => c[2] === 25)).toBe(true);
+  });
+
+  it('catchUpAll raises the dispatch gate synchronously and sweeps projects in order', async () => {
+    const { mgr, calls, refreshStatic } = makeDriveFixture({
+      projects: [{ id: 'a' }, { id: 'b', indexingEnabled: false }, { id: 'c' }],
+    });
+    const run = mgr.catchUpAll();
+    expect(mgr.isCatchUpActive()).toBe(true);
+    await run;
+    expect(mgr.isCatchUpActive()).toBe(false);
+    // b opted out of indexing entirely; a and c each got a static-first drive.
+    expect(refreshStatic.mock.calls.map((c) => c[0])).toEqual(['a', 'c']);
+    expect(calls.filter((c) => c === 'static')).toHaveLength(2);
+  });
+});
+
 describe('buildEnrichDeps enricher override', () => {
   const priorModel = process.env.GEZEL_ENRICH_MODEL;
   const priorProvider = process.env.GEZEL_ENRICH_PROVIDER;
@@ -352,5 +615,35 @@ describe('buildEnrichDeps enricher override', () => {
     const deps = await buildEnrichDeps(store, chat);
     expect(deps.model).toBeUndefined();
     expect(deps.review).toBeUndefined();
+    expect(deps.provenance).toBeUndefined();
+  });
+
+  it('provenance reflects the ACTUAL resolved target and boekwachter identity', async () => {
+    process.env.GEZEL_ENRICH_MODEL = 'small-enricher';
+    process.env.GEZEL_ENRICH_PROVIDER = 'llama-cpp';
+    const { chat, store } = makeDepsFixture();
+    const deps = await buildEnrichDeps(store, chat, { boekwachter: BOOK });
+    expect(deps.provenance).toMatchObject({
+      provider: 'llama-cpp',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+    });
+    expect(typeof deps.provenance?.appVersion).toBe('string');
+  });
+
+  it('provenance carries the Night Shift override target when active', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const chat = { oneShotCompletion: vi.fn() } as unknown as ChatManager;
+    const store = {
+      readConfig: async () => ({
+        defaultModel: { mlx: 'day-model' },
+        nightShift: {
+          modelOverride: { enabled: true, provider: 'openai', model: 'slow-night-model' },
+        },
+      }),
+    } as unknown as Store;
+    const deps = await buildEnrichDeps(store, chat, { nightShift: true });
+    expect(deps.provenance?.provider).toBe('openai');
   });
 });

@@ -13,9 +13,10 @@ import { api } from '../api.js';
  * no logo at all, which is how 283 craftbook `logo.webp` files could land in
  * the catalog and change nothing on screen.
  *
- * So we fetch through the authed client and hand `<img>` an object URL.
- * Absolute (`http(s)://`), `data:`, and `blob:` URLs are already loadable
- * and pass straight through.
+ * So we fetch local paths through the authed client and hand `<img>` an
+ * object URL. In-memory `data:` and `blob:` URLs pass through. Remote and
+ * custom-scheme URLs are suppressed: catalog metadata must never create an
+ * automatic renderer request merely because a card was displayed.
  */
 
 /** Resolved object URLs, keyed by the original logo path. */
@@ -52,10 +53,11 @@ function release(): void {
   active -= 1;
 }
 
-function needsAuthedFetch(url: string): boolean {
-  // Anything with a scheme or protocol-relative prefix is already loadable;
-  // only same-origin paths route through the bearer-gated API.
-  return !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url);
+function artworkUrlKind(url: string): 'inline' | 'local' | 'blocked' {
+  const normalized = url.trim();
+  if (/^(?:data|blob):/i.test(normalized)) return 'inline';
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(normalized)) return 'blocked';
+  return 'local';
 }
 
 function resolveViaFetch(path: string): Promise<string | null> {
@@ -88,13 +90,13 @@ function resolveViaFetch(path: string): Promise<string | null> {
  * full craftbook set at ~17 KB each.
  */
 export function useCatalogArtworkUrl(logoUrl?: string): string | undefined {
-  const passthrough = !!logoUrl && !needsAuthedFetch(logoUrl);
-  const initial = !logoUrl ? undefined : passthrough ? logoUrl : resolved.get(logoUrl);
+  const kind = logoUrl ? artworkUrlKind(logoUrl) : 'blocked';
+  const initial = !logoUrl ? undefined : kind === 'inline' ? logoUrl : resolved.get(logoUrl);
   const [url, setUrl] = useState<string | undefined>(initial);
 
   useEffect(() => {
-    if (!logoUrl || passthrough) {
-      setUrl(logoUrl);
+    if (!logoUrl || kind !== 'local') {
+      setUrl(kind === 'inline' ? logoUrl : undefined);
       return;
     }
     const hit = resolved.get(logoUrl);
@@ -111,7 +113,7 @@ export function useCatalogArtworkUrl(logoUrl?: string): string | undefined {
     return () => {
       alive = false;
     };
-  }, [logoUrl, passthrough]);
+  }, [logoUrl, kind]);
 
   return url;
 }

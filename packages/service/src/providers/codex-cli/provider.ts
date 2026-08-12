@@ -154,7 +154,10 @@ export class CodexCliProvider implements LLMProvider {
     this.runtimeDir = opts.runtimeDir;
     this.manageRuntimeFiles = opts.manageRuntimeFiles ?? true;
     if (opts.extraConfigOverrides) this.extraConfigOverrides = opts.extraConfigOverrides;
-    const concurrency = opts.concurrency ?? 4;
+    // Each turn is its own `codex exec` subprocess, so width costs nothing
+    // while idle — 10 matches Copilot's default and lets bulk work (full
+    // index drives, parallel gezel turns) fan out on the cloud quota.
+    const concurrency = opts.concurrency ?? 10;
     this.queue = new ProviderQueue({
       concurrency,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),

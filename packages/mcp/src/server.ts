@@ -51,7 +51,9 @@ import {
   craftbookDocFormatFromEnv,
   deliverableStep,
   expandStepDeliverable,
+  formatReviewProvenance,
   inferDeliverableKind,
+  isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
   pickRandomNameWithGender,
   removeStepAndCleanEdges,
@@ -3448,6 +3450,17 @@ server.tool(
   },
   async ({ path, content, force }) => {
     const clean = normalizeArtifactPath(path);
+    if (isReservedShadowArtifactPath(clean)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: "artifacts/shadow/ is gezel's derived shadow-file cache (converted documents, image descriptions, transcripts), regenerated automatically by indexing — anything written there would be overwritten or swept. Write your artifact elsewhere, e.g. at the artifacts root or under reports/.",
+          },
+        ],
+        isError: true,
+      };
+    }
     if (isProtectedConnectorArtifactPath(clean)) {
       return {
         content: [
@@ -9560,9 +9573,12 @@ server.tool(
     try {
       const res = await api.toolFileReview(projectId, args);
       if (!res.found || !res.review) {
-        const why = res.pending
-          ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
-          : 'file is not in the index';
+        const why =
+          res.eligible === false
+            ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
+            : res.pending
+              ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
+              : 'file is not in the index';
         return {
           content: [{ type: 'text' as const, text: `file_review: no review — ${why}.` }],
         };
@@ -9571,12 +9587,14 @@ server.tool(
       const issues = r.issues.map(
         (i) => `[${i.severity}] ${i.category} — ${i.message}${i.line ? ` (L${i.line})` : ''}`,
       );
+      const provenance = formatReviewProvenance(r);
       const text = [
         `${res.path} — health ${r.health}/10 — ${r.healthReason}`,
         '',
         r.notesMd,
         '',
         issues.length ? `issues:\n${issues.join('\n')}` : 'issues: none',
+        ...(provenance ? ['', provenance] : []),
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
@@ -9922,11 +9940,18 @@ server.tool(
         res.reviewedFiles < res.eligibleFiles
           ? '\n(review sweep still in progress — coverage grows when the machine is idle or during Night Shift)'
           : '';
+      const reviewers = (res.reviewers ?? [])
+        .filter((r) => r.model)
+        .map(
+          (r) =>
+            `${r.model}${r.provider ? ` (${r.provider})` : ''}${r.gezelName ? ` · ${r.gezelName}` : ''} ×${r.files} file${r.files === 1 ? '' : 's'}`,
+        );
+      const reviewerLine = reviewers.length ? `\nReviewed by ${reviewers.join(', ')}` : '';
       return {
         content: [
           {
             type: 'text' as const,
-            text: `${head}\n${lines.join('\n') || '(none matched)'}${tail}`,
+            text: `${head}\n${lines.join('\n') || '(none matched)'}${reviewerLine}${tail}`,
           },
         ],
       };

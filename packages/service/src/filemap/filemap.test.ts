@@ -337,7 +337,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     }))!;
     expect(store).not.toBeNull();
     try {
-      await indexWorkspaceContent(store, dir);
+      await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
       const map = await buildFileMap(store, dir, { persist: true });
 
       expect(map.indexed).toBe(true);
@@ -533,7 +533,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
         rootPath: dir,
       }))!;
       try {
-        await indexWorkspaceContent(store, dir);
+        await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
         const beforeIgnore = await buildFileMap(store, dir, { persist: true });
         expect(beforeIgnore.blocks.some((block) => block.id === 'generated/hidden.ts')).toBe(true);
         expect(
@@ -578,7 +578,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
         rootPath: dir,
       }))!;
       try {
-        await indexWorkspaceContent(store, dir);
+        await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
         await refreshGitStats(store, dir, { now: () => Date.parse('2026-07-01T00:00:00Z') });
         const map = await buildFileMap(store, dir, { persist: false });
         expect(map.signals?.gitAvailable).toBe(true);
@@ -625,7 +625,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     await seedWorkspace();
     const store = await openIndex('index.db');
     try {
-      await indexWorkspaceContent(store, dir);
+      await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
       const map = await buildFileMap(store, dir, { persist: true });
 
       const live = map.blocks.filter((b) => b.state !== 'tombstoned' && !b.phantom);
@@ -658,7 +658,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     const city = makeCityStore();
     const store = await openIndex('index.db');
     try {
-      await indexWorkspaceContent(store, dir);
+      await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
       const first = await buildFileMap(store, dir, {
         persist: true,
         villageFile: city,
@@ -713,7 +713,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     let firstBlocks: Map<string, { x: number; y: number }>;
     let firstStreets: string[];
     try {
-      await indexWorkspaceContent(store1, dir);
+      await indexWorkspaceContent(store1, dir, join(dir, '.gezel', 'artifacts'));
       // user-facing build → creates .gezel/village.json with anchors + journal
       const map = await buildFileMap(store1, dir, {
         persist: true,
@@ -734,7 +734,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     // "Delete" the index db: a fresh store with no layout rows at all.
     const store2 = await openIndex('rebuilt.db');
     try {
-      await indexWorkspaceContent(store2, dir);
+      await indexWorkspaceContent(store2, dir, join(dir, '.gezel', 'artifacts'));
       const rebuilt = await buildFileMap(store2, dir, {
         persist: true,
         villageFile: city,
@@ -758,7 +758,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     await seedWorkspace();
     const store = await openIndex('index.db');
     try {
-      await indexWorkspaceContent(store, dir);
+      await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
       // Fake a v4-era layout: src far NW, docs far SE, old version stamp.
       const oldPlaced = '2025-11-01T00:00:00.000Z';
       store.replaceLayout('code', [
@@ -830,7 +830,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     await seedWorkspace();
     const store = await openIndex('index.db');
     try {
-      await indexWorkspaceContent(store, dir);
+      await indexWorkspaceContent(store, dir, join(dir, '.gezel', 'artifacts'));
       const city = makeCityStore();
       await buildFileMap(store, dir, { persist: true, villageFile: city, userFacing: false });
       await expect(readFile(join(dir, '.gezel', 'village.json'), 'utf8')).rejects.toThrow();

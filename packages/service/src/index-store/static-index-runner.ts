@@ -9,6 +9,8 @@ const log = createLogger('index:static-worker');
 export interface StaticIndexRequest {
   dbPath: string;
   workspaceDir: string;
+  /** Project artifacts root — converted-doc shadows land under its `shadow/`. */
+  artifactsDir: string;
   collectionId: string;
 }
 
@@ -63,7 +65,7 @@ async function runStaticIndexInProcess(request: StaticIndexRequest): Promise<Con
   });
   if (!index) throw new Error(`content index unavailable at ${request.dbPath}`);
   try {
-    return await indexWorkspaceContent(index, request.workspaceDir);
+    return await indexWorkspaceContent(index, request.workspaceDir, request.artifactsDir);
   } finally {
     index.close();
   }

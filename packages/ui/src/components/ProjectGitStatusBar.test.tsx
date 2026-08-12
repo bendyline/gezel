@@ -72,7 +72,7 @@ describe('ProjectGitStatusBar', () => {
     });
   });
 
-  it('shows detailed AI indexing progress in a fast tooltip', async () => {
+  it('shows detailed AI indexing progress in a click-open status panel', async () => {
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
       state: 'fresh',
       aiScanPending: true,
@@ -99,18 +99,38 @@ describe('ProjectGitStatusBar', () => {
     } as never);
 
     render(<ProjectGitStatusBar projectId="pj-1" />);
+    // Composite across the pipeline: (12 summarized + 15 embedded +
+    // 7 reviewed) / (20 + 20 + 20) → 57%.
     const trigger = await screen.findByRole('button', {
-      name: /AI indexing 75% complete/,
+      name: /AI indexing 57% complete/,
     });
-    await userEvent.hover(trigger);
+    await userEvent.click(trigger);
 
-    const tooltip = await screen.findByRole('tooltip');
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
     expect(api.getProjectIndexStatus).toHaveBeenCalledTimes(2);
-    expect(tooltip).toHaveTextContent('AI indexing 75% complete');
-    expect(tooltip).toHaveTextContent('15 of 20 files ready · 5 waiting');
-    expect(tooltip).toHaveTextContent('24 files · 3 commands');
-    expect(tooltip).toHaveTextContent('12 of 20 files');
-    expect(tooltip).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
+    expect(panel).toHaveTextContent('AI indexing 57% complete');
+    expect(panel).toHaveTextContent('Indexing progress');
+    expect(screen.getByRole('progressbar', { name: 'Indexing progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '57',
+    );
+    expect(panel).toHaveTextContent('15 of 20 files searchable · 5 waiting');
+    expect(panel).toHaveTextContent('24 files · 3 commands');
+    expect(panel).toHaveTextContent('12 of 20 files');
+    expect(panel).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
+  });
+
+  it('waits for the panel action before updating the index', async () => {
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+
+    await userEvent.click(trigger);
+    expect(api.refreshProjectIndex).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Update index now' }));
+    await waitFor(() => {
+      expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-1');
+    });
   });
 
   it('shows an intentional opt-out without offering a rescan', async () => {
@@ -120,10 +140,106 @@ describe('ProjectGitStatusBar', () => {
     const trigger = await screen.findByRole('button', {
       name: /Workspace indexing is off/,
     });
-    expect(trigger).toHaveAttribute('aria-disabled', 'true');
 
     await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Update index now' })).toBeDisabled();
+    // No full-bore offer either — opting out means no AI drive of any kind.
+    expect(screen.queryByRole('button', { name: 'Full AI scan now' })).toBeNull();
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
+  });
+
+  it('starts a full-intensity drive from the panel and shows it running', async () => {
+    vi.mocked(api.driveIndexEnrichment).mockResolvedValue({
+      paused: false,
+      files: 0,
+      summarized: 0,
+      embedded: 0,
+      pending: 3,
+      areasUpdated: 0,
+      architectureUpdated: false,
+      drained: false,
+      started: true,
+      alreadyRunning: false,
+      mode: 'full',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await waitFor(() => {
+      expect(api.driveIndexEnrichment).toHaveBeenCalledWith('pj-1', { intensity: 'full' });
+    });
+    const running = await screen.findByRole('button', { name: 'Full scan running…' });
+    expect(running).toBeDisabled();
+    // The polite refresh stays independently available.
+    expect(screen.getByRole('button', { name: 'Update index now' })).toBeEnabled();
+  });
+
+  it("surfaces the server's refusal message when the full scan cannot start", async () => {
+    const refusal = Object.assign(new Error('Gezel API error 409'), {
+      details: {
+        error: 'boekwachter-required',
+        message:
+          'Add a Boekwachter to this project crew to enable AI summaries, reviews, and semantic enrichment.',
+      },
+    });
+    vi.mocked(api.driveIndexEnrichment).mockRejectedValue(refusal);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await screen.findByText(/Add a Boekwachter to this project crew/);
+    // A refused start is not a running drive — the button re-arms.
+    expect(screen.getByRole('button', { name: 'Full AI scan now' })).toBeEnabled();
+  });
+
+  it('reflects a server-side drive: scan row, media tier, disabled button', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiScanPending: true,
+      aiDrive: 'full',
+      enrichment: {
+        eligible: 3158,
+        summarized: 0,
+        embedded: 0,
+        pending: 3158,
+        shadowsPending: 4,
+      },
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /AI indexing/ });
+    await userEvent.click(trigger);
+
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
+    expect(panel).toHaveTextContent('AI scan');
+    expect(panel).toHaveTextContent('Running at full speed');
+    // The media tier runs before summaries — without this row a fresh
+    // full scan reads as stuck at "0 of N files".
+    expect(panel).toHaveTextContent('Media scan');
+    expect(panel).toHaveTextContent('4 waiting');
+    // Started elsewhere (another window, catch-up) — the button still
+    // reads running and refuses a duplicate start.
+    expect(screen.getByRole('button', { name: 'Full scan running…' })).toBeDisabled();
+    expect(api.driveIndexEnrichment).not.toHaveBeenCalled();
+  });
+
+  it('labels a background drive distinctly', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiDrive: 'background',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole('button', { name: 'Background scan running…' })).toBeDisabled();
+    expect(screen.getByText('Running quietly in background')).toBeInTheDocument();
   });
 
   it('flags a waiting merge and clicks through to the GitHub tab', async () => {

@@ -30,16 +30,20 @@ import {
   streamAllChatEvents,
 } from '@bendyline/gezel-client/node';
 import { autostart } from './autostart/index.js';
+import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
 import {
   daemonEntrypointArgument,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
   isExactApprovedPath,
+  isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
+import { rendererConnectionSnapshot } from './renderer-connection.js';
+import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { splashStage } from './splash-stage.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
@@ -52,8 +56,6 @@ import {
   appReleaseFeedConfiguration,
   discoverLatestAppRelease,
 } from './updater/app-release.js';
-
-const execFileP = promisify(execFile);
 
 /**
  * Electron's OS-integration boundary. Product state and model execution stay
@@ -88,6 +90,39 @@ let trayActivityAbort: AbortController | null = null;
 // Cert-aware client for talking to the service from the main process —
 // rebuilt whenever the supervisor rotates the token/cert on restart.
 let apiClient: GezelClient | null = null;
+let rendererNetworkPolicyEpoch = 0;
+let rendererNetworkPermissionRead: {
+  epoch: number;
+  promise: ReturnType<typeof resolveRendererNetworkPermission>;
+} | null = null;
+
+function invalidateRendererNetworkPermission(): void {
+  rendererNetworkPolicyEpoch += 1;
+  rendererNetworkPermissionRead = null;
+}
+
+/**
+ * Read the authoritative daemon config at the request sink. Simultaneous
+ * subresource requests share one read, but settled decisions are not cached:
+ * the next batch observes policy changes even if renderer IPC is compromised.
+ */
+async function rendererExternalNetworkAllowed(): Promise<boolean> {
+  const epoch = rendererNetworkPolicyEpoch;
+  let pending = rendererNetworkPermissionRead;
+  if (!pending || pending.epoch !== epoch) {
+    const client = apiClient;
+    pending = {
+      epoch,
+      promise: resolveRendererNetworkPermission(client ? () => client.getConfig() : undefined),
+    };
+    rendererNetworkPermissionRead = pending;
+  }
+
+  const permission = await pending.promise;
+  if (rendererNetworkPermissionRead === pending) rendererNetworkPermissionRead = null;
+  if (rendererNetworkPolicyEpoch !== epoch) return rendererExternalNetworkAllowed();
+  return permission.allowed;
+}
 // OS-opened files are represented in the renderer by opaque random ids. Only
 // paths placed in this map by command-line/open-file handling can be scanned;
 // a compromised renderer cannot turn the IPC method into arbitrary file read.
@@ -435,8 +470,9 @@ function previewExternalServicesForFrame(
  * model-authored inline SVG icon): with `script-src 'self'` an injected
  * <script> or on*= handler cannot execute even if it slips past the SVG
  * sanitizer. Styles keep 'unsafe-inline' (React inline styles); images
- * allow data:/blob:/https: (icons, remote catalog logos) — images can't
- * execute. connect-src is 'self' (the API is same-origin).
+ * allow only self/data:/blob:. Remote passive resources are deliberately
+ * excluded: images and media can still disclose user state through URLs even
+ * when they cannot execute. connect-src is 'self' (the API is same-origin).
  *
  * `frame-src 'self'` lets the renderer embed the same-origin sandboxed
  * preview iframes (the output pane's live HTML preview, chat references).
@@ -449,7 +485,7 @@ const GEZEL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
@@ -459,6 +495,7 @@ const GEZEL_CSP = [
   "frame-src 'self'",
   "frame-ancestors 'none'",
   "form-action 'self'",
+  "webrtc 'block'",
 ].join('; ');
 
 /**
@@ -527,7 +564,9 @@ async function createWindow(): Promise<void> {
       // connection exists still resolves the right base URL once it loads the
       // UI — and picks up a rotated port on restart, which a baked-in argv
       // value could not.
-      ...(connection ? { additionalArguments: [`--gezel-url=${connection.baseUrl}`] } : {}),
+      ...(connection?.state === 'ready'
+        ? { additionalArguments: [`--gezel-url=${connection.baseUrl}`] }
+        : {}),
     },
   });
 
@@ -559,7 +598,7 @@ async function createWindow(): Promise<void> {
     // and start refusing the daemon's own URL. Null denies every http(s)
     // navigation and permits only the splash file, so the pre-connection
     // window is locked down rather than open.
-    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
     if (isAllowedTopLevelNavigation(url, allowedOrigin, allowedSplashUrl)) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
@@ -577,7 +616,7 @@ async function createWindow(): Promise<void> {
     preventDefault(): void;
   }) => {
     if (details.isMainFrame) return;
-    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
     const originatesInPreview =
       previewExternalServicesForFrame(details.frame, allowedOrigin) !== null ||
       previewExternalServicesForFrame(details.initiator, allowedOrigin) !== null;
@@ -696,7 +735,7 @@ async function createWindow(): Promise<void> {
  * so the window can be painted before the service exists.
  */
 async function navigateToApp(): Promise<void> {
-  if (!connection || !mainWindow || mainWindow.isDestroyed()) return;
+  if (connection?.state !== 'ready' || !mainWindow || mainWindow.isDestroyed()) return;
   await loadAppUrl(mainWindow, `${connection.baseUrl}/`);
   splashShowing = false;
   flushOpenedModelBundles();
@@ -833,20 +872,30 @@ async function showConnectionError(
   <button id="reconnect" type="button">Reconnect</button>
 </main>
 <script>
-  var APP_URL = ${JSON.stringify(url)};
   var btn = document.getElementById('reconnect');
   btn.addEventListener('click', function () {
     btn.disabled = true;
     btn.textContent = 'Reconnecting…';
     var bridge = window.__GEZEL__;
     if (bridge && typeof bridge.restartService === 'function') {
-      // The main-process onRestart listener reloads the window once the
-      // service is back; if the restart rejects, fall back to a direct nav.
-      Promise.resolve(bridge.restartService('reconnect from error page')).catch(function () {
-        window.location.href = APP_URL;
+      // The main-process onRestart listener reloads the window once a verified
+      // service is back. Keep this page persistent on failure: navigating to
+      // A direct URL load would revisit a dead generation without credentials.
+      Promise.resolve(bridge.restartService('reconnect from error page')).then(function (result) {
+        if (result && result.ok === true) return;
+        btn.disabled = false;
+        btn.textContent = 'Try again';
+        var detail = document.querySelector('.detail');
+        if (detail && result && result.error) detail.textContent = result.error;
+      }).catch(function (error) {
+        btn.disabled = false;
+        btn.textContent = 'Try again';
+        var detail = document.querySelector('.detail');
+        if (detail) detail.textContent = error && error.message ? error.message : String(error);
       });
     } else {
-      window.location.href = APP_URL;
+      btn.disabled = false;
+      btn.textContent = 'Reconnect unavailable';
     }
   });
 </script></body></html>`;
@@ -862,17 +911,7 @@ async function showConnectionError(
 // API client before any other code runs — keeps the app.ts "api" singleton
 // simple and avoids a first-render flicker.
 ipcMain.on('gezel:current-connection', (event) => {
-  event.returnValue = connection
-    ? {
-        token: connection.token,
-        baseUrl: connection.baseUrl,
-        fallbackReason: connection.fallbackReason?.message ?? null,
-        // The code, not just the message: some reasons need their own banner
-        // copy rather than the generic "background work is paused" framing.
-        fallbackCode: connection.fallbackReason?.code ?? null,
-        mode: connection.mode,
-      }
-    : null;
+  event.returnValue = rendererConnectionSnapshot(connection);
 });
 
 // Update IPC. `gezel:update-state` is pushed on every transition; this pull
@@ -892,7 +931,7 @@ ipcMain.handle('gezel:update:install', async () => {
 
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
 // level unit writes happen in `./autostart/<platform>.ts`; we just resolve
-// the `node` binary and the gezeld entry path from here.
+// the bundled runtime and the gezeld entry path from here.
 ipcMain.handle('gezel:autostart:status', async () => {
   try {
     return { ok: true as const, installed: await autostart.isInstalled() };
@@ -902,12 +941,23 @@ ipcMain.handle('gezel:autostart:status', async () => {
 });
 ipcMain.handle('gezel:autostart:install', async () => {
   try {
-    const nodePath = await resolveNodePath();
+    const gezelHome = process.env.GEZEL_HOME || join(homedir(), '.gezel');
+    const nodePath = await resolveAutostartNodePath({
+      packaged: app.isPackaged,
+      home: gezelHome,
+      bundledNodePath: process.env.GEZEL_NODE_PATH,
+    });
+    const pnpmPath = await resolveAutostartPnpmPath({
+      packaged: app.isPackaged,
+      home: gezelHome,
+      bundledPnpmPath: process.env.GEZEL_PNPM_PATH,
+    });
     const gezeldPath = resolveInstalledGezeld();
     await autostart.install({
       nodePath,
+      pnpmPath,
       gezeldPath,
-      gezelHome: process.env.GEZEL_HOME || join(homedir(), '.gezel'),
+      gezelHome,
     });
     return { ok: true as const };
   } catch (err) {
@@ -971,22 +1021,6 @@ ipcMain.handle('gezel:restart-service', async (_event, reason?: string) => {
     return { ok: false as const, error: (err as Error).message };
   }
 });
-
-async function resolveNodePath(): Promise<string> {
-  // `which node` / `where node` — if the user has Node in PATH (they do if
-  // Gezel's own service has been running), pick that up. Electron's bundled
-  // Node is inside the app bundle and doesn't survive reinstall, so we
-  // prefer the user-installed copy.
-  const tool = process.platform === 'win32' ? 'where' : 'which';
-  try {
-    const { stdout } = await execFileP(tool, ['node']);
-    const first = stdout.split(/\r?\n/).find((l) => l.trim());
-    if (first) return first.trim();
-  } catch {
-    /* fall through to error */
-  }
-  throw new Error('Node.js was not found in PATH. Install Node 20+ from nodejs.org and try again.');
-}
 
 function resolveInstalledGezeld(): string {
   const home = process.env.GEZEL_HOME || join(homedir(), '.gezel');
@@ -1317,9 +1351,15 @@ ipcMain.on(
   'gezel:tray:sync-config',
   (
     _event,
-    cfg?: { aiEngagementMode?: EngagementMode; showSystemTray?: boolean; quitOnClose?: boolean },
+    cfg?: {
+      aiEngagementMode?: EngagementMode;
+      showSystemTray?: boolean;
+      quitOnClose?: boolean;
+      securityPolicy?: unknown;
+    },
   ) => {
     if (!cfg) return;
+    if (Object.hasOwn(cfg, 'securityPolicy')) invalidateRendererNetworkPermission();
     quitOnClose = cfg.quitOnClose === true;
     if (cfg.showSystemTray === false) {
       teardownTray();
@@ -1406,7 +1446,7 @@ function flushMacUninstallDialogRequest(): void {
  * trusts exactly that CA. Returns null before the supervisor has connected.
  */
 function buildApiClient(): GezelClient | null {
-  if (!connection) return null;
+  if (connection?.state !== 'ready' || !connection.token) return null;
   return connection.cert
     ? new GezelClient({
         baseUrl: connection.baseUrl,
@@ -2049,23 +2089,36 @@ app.whenReady().then(async () => {
     callback(got === pinnedLoopbackFingerprint ? 0 : -2);
   });
 
-  // CSP is the first preview egress boundary. This request hook is a separate
-  // Electron-level sink: even if authored markup finds a browser CSP bypass,
-  // strict previews cannot emit HTTP(S)/WebSocket traffic off the daemon
-  // endpoint. Permissive previews admit ordinary network resources, while
-  // subframe document loads remain capability-pinned in every mode.
+  // CSP is the first renderer egress boundary. This hook is an independent,
+  // daemon-authorized sink: even if authored markup finds a CSP bypass, no
+  // renderer frame may emit off-daemon HTTP(S)/WebSocket traffic unless both
+  // External services and App network are enabled. Preview leases add a
+  // second, document-specific permission; navigation stays capability-pinned.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
     const allowExternalServices = previewExternalServicesForFrame(details.frame, allowedOrigin);
-    if (allowExternalServices === null) {
+
+    if (allowExternalServices !== null && details.resourceType === 'subFrame') {
+      callback(isAllowedPreviewNavigation(details.url, allowedOrigin) ? {} : { cancel: true });
+      return;
+    }
+
+    if (
+      allowExternalServices !== null &&
+      !isAllowedPreviewResourceRequest(details.url, allowedOrigin, allowExternalServices)
+    ) {
+      callback({ cancel: true });
+      return;
+    }
+
+    if (!isExternalRendererNetworkRequest(details.url, allowedOrigin)) {
       callback({});
       return;
     }
-    const allowed =
-      details.resourceType === 'subFrame'
-        ? isAllowedPreviewNavigation(details.url, allowedOrigin)
-        : isAllowedPreviewResourceRequest(details.url, allowedOrigin, allowExternalServices);
-    callback(allowed ? {} : { cancel: true });
+
+    void rendererExternalNetworkAllowed()
+      .then((allowed) => callback(allowed ? {} : { cancel: true }))
+      .catch(() => callback({ cancel: true }));
   });
 
   // Stamp the renderer CSP onto responses from the loopback origin. CSP
@@ -2079,7 +2132,7 @@ app.whenReady().then(async () => {
   // the preview's deliberate CDN/img allowances. Leave preview responses
   // to their route-set CSP.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
+    const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
     if (isPreviewDocumentUrl(details.url, allowedOrigin)) {
       if (details.resourceType === 'subFrame') {
         const policyHeader = responseHeaderValue(
@@ -2214,6 +2267,7 @@ app.whenReady().then(async () => {
   // Build the main-process API client (used by the tray to read/write the
   // engagement mode). Cert-aware, mirroring the supervisor's own client.
   apiClient = buildApiClient();
+  invalidateRendererNetworkPermission();
 
   // Reload the BrowserWindow when the supervisor swaps the child or falls
   // back to embedded. The preload re-runs on reload, re-reads the token via
@@ -2225,6 +2279,7 @@ app.whenReady().then(async () => {
     pinLoopbackCert(connection?.cert ?? null);
     // Token/cert rotated with the new daemon — rebuild the tray's client.
     apiClient = buildApiClient();
+    invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
@@ -2233,6 +2288,25 @@ app.whenReady().then(async () => {
     // miss, and this is also what lets the error page's Reconnect button climb
     // back out of the `data:` fallback once the service is healthy again.
     void loadAppUrl(mainWindow, `${connection?.baseUrl ?? ''}/`);
+  });
+
+  // If both the owned-daemon replacement and its embedded recovery fail, the
+  // supervisor has already invalidated its token. Drop every main-process
+  // consumer too, remove the TLS pin, and navigate to a persistent data: page.
+  // Its fresh preload receives `null` from current-connection, so the stopped
+  // daemon's bearer token cannot remain in the renderer generation.
+  connection.onFatal((failure) => {
+    pinLoopbackCert(null);
+    apiClient = null;
+    invalidateRendererNetworkPermission();
+    stopTrayActivityMonitoring();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    console.error(`[app] service restart became unrecoverable: ${failure.message}`);
+    void showConnectionError(
+      mainWindow,
+      `${connection?.baseUrl ?? ''}/`,
+      new Error(failure.message),
+    );
   });
 
   await navigateToApp();

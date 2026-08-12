@@ -81,6 +81,26 @@ describe('walkDirDetailed', () => {
 
     expect(entries.map((e) => e.path).sort()).toEqual(['one.txt', 'sub', 'sub/two.txt']);
   });
+
+  it('skipRootDirs prunes a root subtree during the walk, only at depth 0', async () => {
+    await Promise.all([
+      seed('report.md'),
+      // Big enough that post-hoc filtering would have burned the entry cap.
+      ...Array.from({ length: 30 }, (_, i) => seed(`shadow/docs/d${i}_files/d${i}.md`)),
+      seed('nested/shadow/keep.md'),
+    ]);
+
+    const { entries, truncated } = await walkDirDetailed(root, {
+      maxEntries: 10,
+      skipRootDirs: new Set(['shadow']),
+    });
+    const paths = entries.map((e) => e.path);
+
+    expect(truncated).toBe(false);
+    expect(paths).toContain('report.md');
+    expect(paths).toContain('nested/shadow/keep.md');
+    expect(paths.some((p) => p === 'shadow' || p.startsWith('shadow/'))).toBe(false);
+  });
 });
 
 describe('findHtmlPages', () => {

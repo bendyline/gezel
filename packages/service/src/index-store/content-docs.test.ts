@@ -8,10 +8,12 @@ import { runWorkspaceContentIndex } from './content-indexer.js';
 
 let dir: string;
 let home: string;
+let artifacts: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-docs-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-docs-home-'));
+  artifacts = join(home, 'artifacts');
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -42,28 +44,40 @@ describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + sear
     );
     await writeFile(join(dir, 'docs', 'spec.docx'), docx);
 
-    const stats = await runWorkspaceContentIndex(dir, 'c');
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
     expect(stats).not.toBeNull();
     expect(stats!.docsConverted).toBe(1);
 
-    const ci = new ContentIndex({ projectWorkspaceDir: async () => dir } as unknown as Store, home);
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => artifacts,
+      } as unknown as Store,
+      home,
+    );
 
     const search = await ci.searchDocs('c', 'frobnication');
     expect(search.engine).toBe('fts');
     expect(search.results.length).toBeGreaterThanOrEqual(1);
     expect(search.results[0]?.sourcePath).toBe('docs/spec.docx');
-    expect(search.results[0]?.markdownPath).toContain('spec_files');
+    expect(search.results[0]?.markdownPath).toBe('artifacts/shadow/docs/spec.docx_files/spec.md');
 
     const read = await ci.readDocAsMarkdown('c', 'docs/spec.docx');
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('frobnication');
-    expect(read.markdownPath).toContain('.gezel/files/docs/spec_files/spec.md');
+    expect(read.markdownPath).toBe('artifacts/shadow/docs/spec.docx_files/spec.md');
   });
 
   it('read_doc_as_markdown converts on demand when not yet indexed', async () => {
     const docx = await makeDocx('# OnDemand\n\nlazy conversion works.\n');
     await writeFile(join(dir, 'note.docx'), docx);
-    const ci = new ContentIndex({ projectWorkspaceDir: async () => dir } as unknown as Store, home);
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => artifacts,
+      } as unknown as Store,
+      home,
+    );
     const read = await ci.readDocAsMarkdown('c', 'note.docx');
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('lazy conversion works');

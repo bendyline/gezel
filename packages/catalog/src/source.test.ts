@@ -212,6 +212,8 @@ describe('BundledSource — versioned layout', () => {
       count: 2,
       entries: [
         {
+          iconSvg:
+            '<svg xmlns="http://www.w3.org/2000/svg" onload="steal()"><script>steal()</script><image href="https://attacker.test/pixel"/><path d="M0 0h1v1z" style="fill:url(https://attacker.test/paint)"/></svg>',
           manifest: {
             schemaVersion: 1,
             kind: 'toolset',
@@ -230,6 +232,7 @@ describe('BundledSource — versioned layout', () => {
           },
         },
         {
+          iconSvg: '<svg xmlns="http://www.w3.org/2000/svg"><script>only content</script></svg>',
           manifest: {
             schemaVersion: 1,
             kind: 'toolset',
@@ -260,6 +263,11 @@ describe('BundledSource — versioned layout', () => {
     const zz = items.find((i) => i.manifest.id === 'zz-from-index');
     if (!zz || zz.manifest.kind !== 'toolset') throw new Error('expected toolset');
     expect(zz.manifest.category).toBe('search');
+    expect(zz.iconSvg).toContain('<path d="M0 0h1v1z"/>');
+    expect(zz.iconSvg).not.toContain('script');
+    expect(zz.iconSvg).not.toContain('image');
+    expect(zz.iconSvg).not.toContain('attacker.test');
+    expect(items.find((item) => item.manifest.id === 'aa-from-index')?.iconSvg).toBeUndefined();
   });
 
   it('list with noIndex skips the index file even when present', async () => {

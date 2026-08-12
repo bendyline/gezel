@@ -20,6 +20,7 @@ export const HandboekAreaSchema = z.enum([
   'craftbooks',
   'project-types',
   'technical',
+  'whats-new',
 ]);
 export type HandboekArea = z.infer<typeof HandboekAreaSchema>;
 
