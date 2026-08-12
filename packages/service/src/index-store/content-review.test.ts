@@ -41,7 +41,7 @@ afterEach(async () => {
 
 const fakeEmbed = async (texts: string[]) => texts.map(() => [] as number[]);
 
-function deps(review: (prompt: string) => Promise<string>): EnrichDeps {
+function deps(review: NonNullable<EnrichDeps['review']>): EnrichDeps {
   return { summarize: async () => '', embed: fakeEmbed, model: 'test-model', review };
 }
 
@@ -241,6 +241,36 @@ describe('ContentIndex.review end-to-end', () => {
     );
     const bare = await ci.fileReview('c', 'src/a.ts');
     expect(bare.review).toMatchObject({ model: 'test-model', provider: null, gezelName: null });
+  });
+
+  it('persists the completion target instead of the deps-level primary target', async () => {
+    await seedCode();
+    const attributed = deps(async () => ({
+      text: VALID_REPLY,
+      model: 'local-fallback-model',
+      provenance: {
+        provider: 'mlx',
+        gezelId: 'noor',
+        gezelName: 'Noor',
+        appVersion: '1.2.3',
+      },
+    }));
+    attributed.model = 'cloud-primary-model';
+    attributed.provenance = {
+      provider: 'openai',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+      appVersion: '1.2.3',
+    };
+
+    await ci.review('c', attributed, 10, await builtinRubrics());
+
+    expect((await ci.fileReview('c', 'src/a.ts')).review).toMatchObject({
+      model: 'local-fallback-model',
+      provider: 'mlx',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+    });
   });
 
   it('never serves a stale review after an edit; re-review refills', async () => {

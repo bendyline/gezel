@@ -235,6 +235,44 @@ describe('detectLlamaBackend — caching', () => {
     expect(bumped.cached).toBe(false);
   });
 
+  it('re-probes when an NVIDIA driver appears after a cached Vulkan result', () => {
+    const vulkanOnly = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: {
+        ...probeWith(['/usr/lib/x86_64-linux-gnu/libvulkan.so.1']),
+        ...vendorSysfsProbe({ card0: '0x10de' }),
+        platform: 'linux',
+        arch: 'x64',
+      },
+    });
+    expect(vulkanOnly).toMatchObject({
+      backend: 'vulkan',
+      vendorHint: 'nvidia',
+      cached: false,
+    });
+
+    const afterDriverInstall = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: {
+        ...probeWith([
+          '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+          '/usr/lib/x86_64-linux-gnu/libvulkan.so.1',
+        ]),
+        ...vendorSysfsProbe({ card0: '0x10de' }),
+        platform: 'linux',
+        arch: 'x64',
+      },
+    });
+    expect(afterDriverInstall).toMatchObject({
+      backend: 'cuda',
+      detectedBackend: 'cuda',
+      vendorHint: 'nvidia',
+      cached: false,
+    });
+  });
+
   it('re-probes when the on-disk cache predates the current probeSchemaVersion', () => {
     // Simulate a cache file written by an older Gezel build that
     // didn't know about the linux-arm64 dispatch — same engineVersion,

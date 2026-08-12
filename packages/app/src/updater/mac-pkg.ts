@@ -29,8 +29,10 @@
  * Everything here is dependency-injected so the verification chain is testable
  * without a network, a spawn, or a real 450 MB package.
  */
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, rename, rm } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpStatusError, retryTransient } from '@bendyline/gezel';
 
@@ -219,33 +221,107 @@ export async function stageVerifiedMacPkg(version: string, deps: StageDeps): Pro
   // stale artifact".
   await rm(pkgPath, { force: true });
 
-  deps.logger?.info?.(`[updater] downloading ${assetName}`);
-  const bytes = await retryTransient(
-    async () => {
-      const pkgResponse = await deps.fetch(pkgUrl);
-      if (!pkgResponse.ok) {
-        throw new HttpStatusError(
-          pkgResponse.status,
-          `Could not download ${assetName} (HTTP ${pkgResponse.status})`,
-        );
-      }
-      return Buffer.from(await pkgResponse.arrayBuffer());
-    },
-    { attempts: DOWNLOAD_ATTEMPTS, onRetry: (info) => deps.logger?.info?.(retryLine(info)) },
-  );
-  await writeFile(pkgPath, bytes);
-  const actual = createHash('sha256').update(bytes).digest('hex');
-
+  let partialPath: string | undefined;
   try {
-    await verifyMacPkg(pkgPath, expected, actual, deps);
+    deps.logger?.info?.(`[updater] downloading ${assetName}`);
+    const downloaded = await retryTransient(
+      async () => {
+        // A unique, hidden, exclusive file makes every retry start from byte
+        // zero and keeps unverified packages out of the user-facing `.pkg`
+        // path. Same-directory rename below is the atomic publication step.
+        // Keep the real `.pkg` suffix so pkgutil/spctl classify it exactly as
+        // they classify the final asset. The leading dot keeps it hidden and
+        // the `partial-` marker keeps cleanup/tests unambiguous.
+        const attemptPath = join(deps.stagingDir, `.${randomUUID()}.partial-${assetName}`);
+        try {
+          const pkgResponse = await deps.fetch(pkgUrl);
+          if (!pkgResponse.ok) {
+            await pkgResponse.body?.cancel().catch(() => {});
+            throw new HttpStatusError(
+              pkgResponse.status,
+              `Could not download ${assetName} (HTTP ${pkgResponse.status})`,
+            );
+          }
+          const sha256 = await streamResponseToFile(pkgResponse, attemptPath);
+          return { path: attemptPath, sha256 };
+        } catch (err) {
+          await rm(attemptPath, { force: true }).catch(() => {});
+          throw err;
+        }
+      },
+      { attempts: DOWNLOAD_ATTEMPTS, onRetry: (info) => deps.logger?.info?.(retryLine(info)) },
+    );
+    partialPath = downloaded.path;
+
+    await verifyMacPkg(partialPath, expected, downloaded.sha256, deps);
+    await rename(partialPath, pkgPath);
+    partialPath = undefined;
+    return { path: pkgPath, version, sha256: downloaded.sha256 };
   } catch (err) {
     // Never leave an unverified installer on disk where a user could
-    // double-click it.
+    // double-click it. Hidden partials are removed by the per-attempt cleanup
+    // too; this covers failures during verification or atomic publication.
+    if (partialPath) await rm(partialPath, { force: true }).catch(() => {});
     await rm(pkgPath, { force: true }).catch(() => {});
     throw err;
   }
+}
 
-  return { path: pkgPath, version, sha256: actual };
+/**
+ * Stream one response to a newly-created file while hashing exactly the bytes
+ * successfully written. The durable file is synced and closed before it can
+ * be passed to signature verification. Any read/write/sync/close failure
+ * removes the partial.
+ */
+async function streamResponseToFile(response: Response, path: string): Promise<string> {
+  const file = await open(path, 'wx', 0o600);
+  const hash = createHash('sha256');
+  let fileClosed = false;
+  let complete = false;
+  try {
+    let position = 0;
+    const reader = response.body?.getReader();
+    if (reader) {
+      let fullyRead = false;
+      try {
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) {
+            fullyRead = true;
+            break;
+          }
+          if (!next.value || next.value.byteLength === 0) continue;
+          position = await writeAll(file, next.value, position);
+          hash.update(next.value);
+        }
+      } finally {
+        if (!fullyRead) await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    }
+    await file.sync();
+    await file.close();
+    fileClosed = true;
+    const digest = hash.digest('hex');
+    complete = true;
+    return digest;
+  } finally {
+    if (!fileClosed) await file.close().catch(() => {});
+    if (!complete) await rm(path, { force: true }).catch(() => {});
+  }
+}
+
+/** FileHandle.write may legally short-write; keep going until the chunk lands. */
+async function writeAll(file: FileHandle, bytes: Uint8Array, start: number): Promise<number> {
+  let offset = 0;
+  let position = start;
+  while (offset < bytes.byteLength) {
+    const { bytesWritten } = await file.write(bytes, offset, bytes.byteLength - offset, position);
+    if (bytesWritten <= 0) throw new Error('Package staging write made no progress');
+    offset += bytesWritten;
+    position += bytesWritten;
+  }
+  return position;
 }
 
 function retryLine(info: {
@@ -259,7 +335,7 @@ function retryLine(info: {
 
 /** Digest of a file already on disk. Split out so tests can reuse it. */
 export async function sha256File(path: string): Promise<string> {
-  return createHash('sha256')
-    .update(await readFile(path))
-    .digest('hex');
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
 }

@@ -662,7 +662,7 @@ export class IndexStore {
       .run(contentHash, this.collectionId, filePath, model ?? null, nowIso());
   }
 
-  markAiShadowAttempt(contentHash: string, filePath: string): void {
+  markAiShadowAttempt(contentHash: string, filePath: string): number {
     this.db
       .prepare(
         `INSERT INTO shadow_state (content_hash, collection_id, file_path, state, attempts, updated_at)
@@ -670,6 +670,26 @@ export class IndexStore {
          ON CONFLICT(content_hash) DO UPDATE SET
            state='failed', attempts=COALESCE(shadow_state.attempts, 0) + 1,
            updated_at=excluded.updated_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM shadow_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  /**
+   * Terminally skip a media hash the AI-shadow tier can never process — a
+   * format with no raster decoder in the vision stack (SVG is vector, ICO is
+   * multi-frame). Jumps straight to the attempt cap under a distinct state so
+   * the row reads as "wrong tool", not "engine flaked three times".
+   */
+  markAiShadowUnsupported(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO shadow_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'unsupported', ${MAX_ENRICH_ATTEMPTS}, ?)`,
       )
       .run(contentHash, this.collectionId, filePath, nowIso());
   }

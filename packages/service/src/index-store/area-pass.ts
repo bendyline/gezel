@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { EnrichDeps } from './enrich.js';
+import { type EnrichDeps, resolveEnrichCompletion } from './enrich.js';
 import type { IndexStore } from './index-store.js';
 
 /**
@@ -46,14 +46,18 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
     if (entries.length < MIN_AREA_FILES) continue;
     const inputHash = hashLines(entries.map((e) => `${e.path}:${e.hash}`));
     if (index.getAreaSummary(area)?.inputHash === inputHash) continue;
-    const summary = (await deps.summarize(buildAreaPrompt(area, entries))).trim();
+    const completion = resolveEnrichCompletion(
+      await deps.summarize(buildAreaPrompt(area, entries)),
+      deps,
+    );
+    const summary = completion.text.trim();
     if (!summary) continue;
     index.upsertAreaSummary({
       areaPath: area,
       inputHash,
       summaryMd: summary.slice(0, SUMMARY_CAP),
-      model: deps.model ?? 'unknown',
-      ...(deps.provenance ? { provenance: deps.provenance } : {}),
+      model: completion.model,
+      ...(completion.provenance ? { provenance: completion.provenance } : {}),
     });
     result.areasUpdated++;
   }
@@ -65,14 +69,18 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
   if (areas.length > 0) {
     const archHash = hashLines(areas.map((a) => `${a.areaPath}:${a.inputHash}`));
     if (index.getAreaSummary(ARCHITECTURE_KEY)?.inputHash !== archHash) {
-      const note = (await deps.summarize(buildArchitecturePrompt(areas))).trim();
+      const completion = resolveEnrichCompletion(
+        await deps.summarize(buildArchitecturePrompt(areas)),
+        deps,
+      );
+      const note = completion.text.trim();
       if (note) {
         index.upsertAreaSummary({
           areaPath: ARCHITECTURE_KEY,
           inputHash: archHash,
           summaryMd: note.slice(0, SUMMARY_CAP),
-          model: deps.model ?? 'unknown',
-          ...(deps.provenance ? { provenance: deps.provenance } : {}),
+          model: completion.model,
+          ...(completion.provenance ? { provenance: completion.provenance } : {}),
         });
         result.architectureUpdated = true;
       }
