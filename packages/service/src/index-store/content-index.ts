@@ -101,30 +101,44 @@ const CTX_MAX_USES = 50;
 const CTX_MAX_USED_IN_FILE_BY = 50;
 
 /**
- * Run `fn` over `items` keeping up to `width()` calls in flight. Width is
- * re-read as slots free, so a lazily-initialized provider (reporting 1 until
- * its first call spins it up) widens mid-batch. `stop` halts NEW dispatches;
- * in-flight calls always finish. sqlite writes inside `fn` stay safe under
- * this interleaving: the driver is synchronous, so statements never actually
- * overlap — only the awaited model calls do.
+ * Run `fn` over a work source keeping up to `width()` calls in flight. The
+ * source is either a fixed array or a pull supplier (`undefined` = no more
+ * work) — the supplier form lets a caller re-query its work-list as slots
+ * open, so the pool never drains to zero between what used to be fixed
+ * batches. Width is re-read as slots free, so a lazily-initialized provider
+ * (reporting 1 until its first call spins it up) widens mid-batch. `stop`
+ * halts NEW dispatches; in-flight calls always finish. sqlite writes inside
+ * `fn` stay safe under this interleaving: the driver is synchronous, so
+ * statements never actually overlap — only the awaited model calls do.
  */
 async function runPooled<T>(
-  items: readonly T[],
+  source: readonly T[] | (() => Promise<T | undefined> | T | undefined),
   width: () => number,
   fn: (item: T) => Promise<void>,
   stop?: () => boolean,
 ): Promise<void> {
-  let next = 0;
+  let next: () => Promise<T | undefined> | T | undefined;
+  if (typeof source === 'function') {
+    next = source;
+  } else {
+    let i = 0;
+    next = () => (i < source.length ? (source[i++] as T) : undefined);
+  }
   const state: { failure: { error: unknown } | null } = { failure: null };
   const active = new Set<Promise<void>>();
-  const dispatch = () => {
+  let exhausted = false;
+  const dispatch = async () => {
     while (
-      next < items.length &&
+      !exhausted &&
       active.size < Math.max(1, width()) &&
       !stop?.() &&
       state.failure === null
     ) {
-      const item = items[next++] as T;
+      const item = await next();
+      if (item === undefined) {
+        exhausted = true;
+        break;
+      }
       const p: Promise<void> = fn(item)
         .catch((error) => {
           state.failure ??= { error };
@@ -133,12 +147,29 @@ async function runPooled<T>(
       active.add(p);
     }
   };
-  dispatch();
+  await dispatch();
   while (active.size > 0) {
     await Promise.race(active);
-    dispatch();
+    await dispatch();
   }
   if (state.failure) throw state.failure.error;
+}
+
+/**
+ * Pool options for the AI passes. `concurrency` is the live width of the
+ * summarizer target's queue (full drives pass it; background stays serial).
+ * `drain` switches a call from "one fixed batch" to "run to empty": the
+ * work-list is re-queried as slots open so the pool never sits idle at a
+ * batch tail. `shouldStop` (the indexing job's pause switch) is checked and
+ * `onProgress` fired at each refill — the same cadence the caller's old
+ * per-batch loop provided.
+ */
+export interface EnrichDriveOpts {
+  concurrency?: () => number;
+  drain?: {
+    shouldStop?: () => Promise<boolean> | boolean;
+    onProgress?: (progress: { files: number }) => void;
+  };
 }
 
 export class ContentIndex {
@@ -1105,21 +1136,47 @@ export class ContentIndex {
     projectId: string,
     deps: EnrichDeps,
     limit = 5,
-    opts?: { concurrency?: () => number },
+    opts?: EnrichDriveOpts,
   ): Promise<{ files: number; summarized: number; embedded: number } | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir, artifactsDir } = opened;
     try {
-      const files = index.filesNeedingEnrichment(limit);
+      let files = 0;
       let summarized = 0;
       let embedded = 0;
-      await runPooled(files, opts?.concurrency ?? (() => 1), async (file) => {
+      const drain = opts?.drain;
+      // `seen` guards the refill re-query: in-flight files still match the
+      // needing-enrichment predicate (they're marked only on completion), and
+      // a failed file stays on the list until its attempt cap — without the
+      // guard one drive could dispatch the same file twice.
+      const seen = new Set<string>();
+      let queue = index.filesNeedingEnrichment(limit);
+      for (const f of queue) if (f.hash) seen.add(f.hash);
+      let exhausted = false;
+      const next = async (): Promise<(typeof queue)[number] | undefined> => {
+        if (queue.length === 0 && drain && !exhausted) {
+          if (await drain.shouldStop?.()) return undefined;
+          const fresh = index
+            .filesNeedingEnrichment(limit + seen.size)
+            .filter((f) => f.hash !== null && !seen.has(f.hash));
+          if (fresh.length === 0) {
+            exhausted = true;
+            return undefined;
+          }
+          queue = fresh.slice(0, limit);
+          for (const f of queue) if (f.hash) seen.add(f.hash);
+          drain.onProgress?.({ files });
+        }
+        return queue.shift();
+      };
+      await runPooled(next, opts?.concurrency ?? (() => 1), async (file) => {
         const r = await enrichFile(index, workspaceDir, artifactsDir, file, deps);
+        files++;
         if (r.summarized) summarized++;
         embedded += r.embedded;
       });
-      return { files: files.length, summarized, embedded };
+      return { files, summarized, embedded };
     } finally {
       index.close();
     }
@@ -1219,7 +1276,7 @@ export class ContentIndex {
     deps: EnrichDeps,
     limit = 5,
     rubrics?: Map<string, ResolvedRubric>,
-    opts?: { concurrency?: () => number },
+    opts?: EnrichDriveOpts,
   ): Promise<{ files: number; reviewed: number } | null> {
     if (!deps.review || !deps.model) return { files: 0, reviewed: 0 };
     const resolved = rubrics ?? (await resolveRubrics(this.store));
@@ -1235,16 +1292,35 @@ export class ContentIndex {
       // serial) stop NEW dispatches; in-flight reviews finish.
       let emptySinceSuccess = 0;
       let wedged = false;
+      const drain = opts?.drain;
       for (const rubric of resolved.values()) {
-        if (files >= limit || wedged) break;
-        const batch = index.filesNeedingReview(
-          rubric.kind,
-          rubric.hash,
-          limit - files,
-          MAX_REVIEW_ATTEMPTS,
-        );
+        if ((!drain && files >= limit) || wedged) break;
+        // Same in-flight/retry guard as enrich: a file is only marked after
+        // its review completes, so drain refills must not re-select it.
+        const seen = new Set<string>();
+        const select = (n: number) =>
+          index
+            .filesNeedingReview(rubric.kind, rubric.hash, n, MAX_REVIEW_ATTEMPTS)
+            .filter((f) => f.hash !== null && !seen.has(f.hash));
+        let queue = select(drain ? limit : limit - files);
+        for (const f of queue) if (f.hash) seen.add(f.hash);
+        let exhausted = false;
+        const next = async (): Promise<(typeof queue)[number] | undefined> => {
+          if (queue.length === 0 && drain && !exhausted) {
+            if (await drain.shouldStop?.()) return undefined;
+            const fresh = select(limit + seen.size);
+            if (fresh.length === 0) {
+              exhausted = true;
+              return undefined;
+            }
+            queue = fresh.slice(0, limit);
+            for (const f of queue) if (f.hash) seen.add(f.hash);
+            drain.onProgress?.({ files });
+          }
+          return queue.shift();
+        };
         await runPooled(
-          batch,
+          next,
           opts?.concurrency ?? (() => 1),
           async (file) => {
             const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);

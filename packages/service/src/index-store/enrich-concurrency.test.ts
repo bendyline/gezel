@@ -85,4 +85,38 @@ describe('ContentIndex.enrich concurrency', () => {
     expect(result.files).toBe(6);
     expect(maxInFlight()).toBe(1);
   });
+
+  it('drain mode refills past the batch size and keeps the pool full', async () => {
+    const { deps, gate, maxInFlight } = gatedDeps();
+    const progress: number[] = [];
+    // Batch of 2 with width 3: without refill the pool could never hold 3,
+    // and the call would stop after 2 files.
+    const run = ci.enrich('c', deps, 2, {
+      concurrency: () => 3,
+      drain: { onProgress: (p) => progress.push(p.files) },
+    });
+    await vi.waitFor(() => expect(gate.length).toBe(3));
+    const result = (await flushUntilDone(gate, run)) as { files: number; summarized: number };
+    expect(result.files).toBe(6);
+    expect(result.summarized).toBe(6);
+    expect(maxInFlight()).toBe(3);
+    expect(progress.length).toBeGreaterThan(0);
+  });
+
+  it('drain mode stops dispatching when shouldStop reports paused', async () => {
+    const { deps, gate, maxInFlight } = gatedDeps();
+    let paused = false;
+    const run = ci.enrich('c', deps, 2, {
+      concurrency: () => 2,
+      drain: { shouldStop: () => paused },
+    });
+    // Let the first refill happen, then pause; the drive must finish the
+    // in-flight work and return without draining all six files.
+    await vi.waitFor(() => expect(gate.length).toBe(2));
+    paused = true;
+    const result = (await flushUntilDone(gate, run)) as { files: number };
+    expect(result.files).toBeGreaterThan(0);
+    expect(result.files).toBeLessThan(6);
+    expect(maxInFlight()).toBe(2);
+  });
 });

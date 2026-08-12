@@ -296,10 +296,31 @@ export class IndexEnrichmentManager {
       const batch = full ? NIGHT_BATCH : BATCH;
       // Full-bore fills the target's queue: dispatch width-many per-file
       // scans at once (the live queue concurrency — 4 on a codex-style CLI
-      // pool, the batch width on a local engine). Background stays serial;
-      // the media tier below stays serial too — its producers are the local
-      // vision/STT stacks, not the summarizer target this width describes.
-      const driveOpts = full && deps.oneShotWidth ? { concurrency: deps.oneShotWidth } : undefined;
+      // pool, the batch width on a local engine) and drain-refill so the
+      // pool stays full instead of tapering to zero at each batch tail.
+      // Pause and progress keep their per-batch cadence via the drain
+      // callbacks. Background stays serial; the media tier below stays
+      // serial too — its producers are the local vision/STT stacks, not
+      // the summarizer target this width describes.
+      const drivePool = full && deps.oneShotWidth ? { concurrency: deps.oneShotWidth } : undefined;
+      const driveOpts = (phase: 'enrich' | 'review') =>
+        drivePool
+          ? {
+              ...drivePool,
+              drain: {
+                shouldStop: () => this.isPaused(),
+                onProgress: ({ files }: { files: number }) =>
+                  this.events?.publishGlobalEvent({
+                    type: 'index_progress',
+                    phase,
+                    state: 'progress',
+                    projectId,
+                    detail: `${files} files ${phase === 'enrich' ? 'enriched' : 'reviewed'}`,
+                    ...gezel,
+                  }),
+              },
+            }
+          : undefined;
       const rubrics: Map<string, ResolvedRubric> =
         deps.model && reviews
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
@@ -332,7 +353,7 @@ export class IndexEnrichmentManager {
       for (;;) {
         if (await this.isPaused()) return;
         const r = await this.contentIndex
-          .enrich(projectId, deps, batch, driveOpts)
+          .enrich(projectId, deps, batch, driveOpts('enrich'))
           .catch(() => null);
         if (!r || r.files === 0) break;
         this.events?.publishGlobalEvent({
@@ -350,7 +371,7 @@ export class IndexEnrichmentManager {
         for (;;) {
           if (await this.isPaused()) return;
           const r = await this.contentIndex
-            .review(projectId, deps, batch, rubrics, driveOpts)
+            .review(projectId, deps, batch, rubrics, driveOpts('review'))
             .catch(() => null);
           stored += r?.reviewed ?? 0;
           if (!r || r.files === 0) break;
