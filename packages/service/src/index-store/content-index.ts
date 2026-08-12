@@ -100,6 +100,47 @@ const CTX_MAX_FILE_IMPORTED_BY = 100;
 const CTX_MAX_USES = 50;
 const CTX_MAX_USED_IN_FILE_BY = 50;
 
+/**
+ * Run `fn` over `items` keeping up to `width()` calls in flight. Width is
+ * re-read as slots free, so a lazily-initialized provider (reporting 1 until
+ * its first call spins it up) widens mid-batch. `stop` halts NEW dispatches;
+ * in-flight calls always finish. sqlite writes inside `fn` stay safe under
+ * this interleaving: the driver is synchronous, so statements never actually
+ * overlap — only the awaited model calls do.
+ */
+async function runPooled<T>(
+  items: readonly T[],
+  width: () => number,
+  fn: (item: T) => Promise<void>,
+  stop?: () => boolean,
+): Promise<void> {
+  let next = 0;
+  const state: { failure: { error: unknown } | null } = { failure: null };
+  const active = new Set<Promise<void>>();
+  const dispatch = () => {
+    while (
+      next < items.length &&
+      active.size < Math.max(1, width()) &&
+      !stop?.() &&
+      state.failure === null
+    ) {
+      const item = items[next++] as T;
+      const p: Promise<void> = fn(item)
+        .catch((error) => {
+          state.failure ??= { error };
+        })
+        .finally(() => active.delete(p));
+      active.add(p);
+    }
+  };
+  dispatch();
+  while (active.size > 0) {
+    await Promise.race(active);
+    dispatch();
+  }
+  if (state.failure) throw state.failure.error;
+}
+
 export class ContentIndex {
   /** Per-project village-file stores (they cache last-written content so
    *  no-change builds skip touching the user's repo). */
@@ -1064,6 +1105,7 @@ export class ContentIndex {
     projectId: string,
     deps: EnrichDeps,
     limit = 5,
+    opts?: { concurrency?: () => number },
   ): Promise<{ files: number; summarized: number; embedded: number } | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
@@ -1072,11 +1114,11 @@ export class ContentIndex {
       const files = index.filesNeedingEnrichment(limit);
       let summarized = 0;
       let embedded = 0;
-      for (const file of files) {
+      await runPooled(files, opts?.concurrency ?? (() => 1), async (file) => {
         const r = await enrichFile(index, workspaceDir, artifactsDir, file, deps);
         if (r.summarized) summarized++;
         embedded += r.embedded;
-      }
+      });
       return { files: files.length, summarized, embedded };
     } finally {
       index.close();
@@ -1177,6 +1219,7 @@ export class ContentIndex {
     deps: EnrichDeps,
     limit = 5,
     rubrics?: Map<string, ResolvedRubric>,
+    opts?: { concurrency?: () => number },
   ): Promise<{ files: number; reviewed: number } | null> {
     if (!deps.review || !deps.model) return { files: 0, reviewed: 0 };
     const resolved = rubrics ?? (await resolveRubrics(this.store));
@@ -1187,26 +1230,36 @@ export class ContentIndex {
     try {
       let files = 0;
       let reviewed = 0;
-      let consecutiveEmpty = 0;
+      // Wedged-model breaker: three empty replies with no success in
+      // between (completion order under concurrency, dispatch order when
+      // serial) stop NEW dispatches; in-flight reviews finish.
+      let emptySinceSuccess = 0;
+      let wedged = false;
       for (const rubric of resolved.values()) {
-        if (files >= limit) break;
+        if (files >= limit || wedged) break;
         const batch = index.filesNeedingReview(
           rubric.kind,
           rubric.hash,
           limit - files,
           MAX_REVIEW_ATTEMPTS,
         );
-        for (const file of batch) {
-          const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
-          if (r.reviewed || r.attempted) files++;
-          if (r.reviewed) reviewed++;
-          if (r.emptyReply) {
-            consecutiveEmpty++;
-            if (consecutiveEmpty >= 3) return { files, reviewed };
-          } else {
-            consecutiveEmpty = 0;
-          }
-        }
+        await runPooled(
+          batch,
+          opts?.concurrency ?? (() => 1),
+          async (file) => {
+            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
+            if (r.reviewed || r.attempted) files++;
+            if (r.reviewed) reviewed++;
+            if (r.emptyReply) {
+              emptySinceSuccess++;
+              if (emptySinceSuccess >= 3) wedged = true;
+            } else {
+              emptySinceSuccess = 0;
+            }
+          },
+          () => wedged,
+        );
+        if (wedged) return { files, reviewed };
       }
       return { files, reviewed };
     } finally {

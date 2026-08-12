@@ -138,6 +138,19 @@ indexer for the engine. The catch-up flag is raised synchronously so the
 kick-then-wake activation sequence cannot race the first runner tick.
 Interactive work is never held.
 
+Full drives fill the target's queue instead of feeding it one file at a
+time: `buildEnrichDeps` exposes the resolved provider's live queue width
+(`ChatManager.oneShotQueueWidth` — the queue's configured concurrency, e.g.
+4 on a codex-style CLI pool), and the summary and review tiers dispatch
+width-many per-file one-shots through a small pool (`runPooled`). The width
+is re-read as slots free because a lazily-initialized provider reports 1
+until its first call spins it up. Background drives and the ambient tick
+stay strictly serial, and the media-shadow tier stays serial too — its
+producers are the local vision/STT stacks, not the summarizer target the
+width describes. The review tier's wedged-model breaker survives the
+fan-out as "three empty replies with no success in between": it stops new
+dispatches while in-flight reviews finish.
+
 Drive state is server truth, not client state: `/index/status` carries
 `aiDrive: 'background' | 'full'` (from `IndexEnrichmentManager.driveMode`)
 while a drive runs, so every window shows "scan running" whichever client —

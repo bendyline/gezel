@@ -99,15 +99,22 @@ describe('ProjectGitStatusBar', () => {
     } as never);
 
     render(<ProjectGitStatusBar projectId="pj-1" />);
+    // Composite across the pipeline: (12 summarized + 15 embedded +
+    // 7 reviewed) / (20 + 20 + 20) → 57%.
     const trigger = await screen.findByRole('button', {
-      name: /AI indexing 75% complete/,
+      name: /AI indexing 57% complete/,
     });
     await userEvent.click(trigger);
 
     const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
     expect(api.getProjectIndexStatus).toHaveBeenCalledTimes(2);
-    expect(panel).toHaveTextContent('AI indexing 75% complete');
-    expect(panel).toHaveTextContent('15 of 20 files ready · 5 waiting');
+    expect(panel).toHaveTextContent('AI indexing 57% complete');
+    expect(panel).toHaveTextContent('Indexing progress');
+    expect(screen.getByRole('progressbar', { name: 'Indexing progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '57',
+    );
+    expect(panel).toHaveTextContent('15 of 20 files searchable · 5 waiting');
     expect(panel).toHaveTextContent('24 files · 3 commands');
     expect(panel).toHaveTextContent('12 of 20 files');
     expect(panel).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');

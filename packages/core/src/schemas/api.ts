@@ -2273,7 +2273,8 @@ export const GezelConfigSchema = z.object({
        * least-recently-used worker is evicted (skipping any worker
        * mid-turn). More slots = lower per-turn latency for parallel
        * gezel-to-gezel work; more memory (each `claude` process can be
-       * 100–200 MB resident). Default 4.
+       * 100–200 MB resident). Workers spawn on demand and idle-reap, so
+       * the cap prices burst width, not resident cost. Default 10.
        */
       poolSize: z.number().int().min(1).max(32).optional(),
       /**

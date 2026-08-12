@@ -1221,12 +1221,9 @@ html.embedded-chat #root {
 }
 
 /* Quota popover extras. The slab, header, and stats grid come from the
-   shared header-popover recipe above (`.engine-pill-popover` et al.);
-   only these two pieces are quota-specific. */
-.quota-popover {
-  min-width: 15rem;
-}
-
+   shared header-popover recipe (`.engine-pill-popover` et al.); the
+   quota-specific sizing lives next to that recipe so the cascade order
+   is explicit. */
 .quota-popover-note {
   margin: 0.6rem 0 0;
   font-size: var(--text-xs);
@@ -1436,6 +1433,13 @@ html.embedded-chat #root {
   min-width: 33rem;
   max-width: 45rem;
 }
+/* Quota rows pair a long bucket label ("GPT 5 3 Codex Spark seven day")
+   with a full reset date; without this room the value column collapses
+   and wraps word-by-word. */
+.quota-popover {
+  min-width: 22rem;
+  max-width: 32rem;
+}
 /* The pill lives in the dark titlebar, but its popover floats over the
    page body — so it has to follow the app theme, not the titlebar. In
    light mode swap the dark slab for parchment. Mirrors the themed
@@ -1517,6 +1521,12 @@ html.embedded-chat #root {
   margin: 0;
   font-variant-numeric: tabular-nums;
   word-break: break-word;
+}
+/* A bucket label can outgrow an `auto` first column and starve the value
+   column into one-word-per-line wraps. Cap the label at roughly half the
+   slab so it wraps instead, keeping "Resets <date>" readable. */
+.quota-popover-stats {
+  grid-template-columns: fit-content(50%) 1fr;
 }
 .engine-pill-memory {
   min-width: 14rem;
@@ -9906,8 +9916,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   color: var(--text-muted);
 }
 
+/* The shell must clear the panel's 22rem design width plus its own padding,
+   or the panel's `max-width: 100%` squeezes the stat values into wrapping
+   ("3249 files · 186 commands", "Running at full speed"). */
 .gz-popover.project-index-popover {
-  width: 18rem;
+  width: 23.5rem;
 }
 
 .project-index-panel {

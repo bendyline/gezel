@@ -242,32 +242,6 @@ try {
     ok('npm audit reports no critical-severity vulnerabilities');
   }
 
-  if (process.platform === 'darwin') {
-    step('spawning a clean-install macOS PTY');
-    const ptyProbe = join(consumer, 'probe-pty.cjs');
-    writeFileSync(
-      ptyProbe,
-      [
-        "const pty = require('node-pty');",
-        "const shell = process.env.SHELL || '/bin/sh';",
-        "const terminal = pty.spawn(shell, ['-lc', 'printf GEZEL_PTY_OK'], { cols: 80, rows: 24 });",
-        "let output = '';",
-        'const timer = setTimeout(() => { terminal.kill(); throw new Error(`PTY timed out: ${output}`); }, 10000);',
-        'terminal.onData((data) => { output += data; });',
-        'terminal.onExit(({ exitCode }) => {',
-        '  clearTimeout(timer);',
-        "  if (exitCode !== 0 || !output.includes('GEZEL_PTY_OK')) {",
-        '    console.error(JSON.stringify({ exitCode, output }));',
-        '    process.exit(1);',
-        '  }',
-        '});',
-      ].join('\n'),
-    );
-    const ptyResult = run(process.execPath, [ptyProbe], { cwd: consumer });
-    if (ptyResult.status !== 0) fail(`node-pty spawn failed\n${ptyResult.stderr}`);
-    else ok('node-pty spawned a shell and captured output');
-  }
-
   // ── 3. Import every public subpath ─────────────────────────────────────
   step('importing every public subpath');
   const importProbe = join(consumer, 'probe-imports.mjs');
@@ -331,8 +305,9 @@ console.log('\npacked-consumer checks passed');
 
 /**
  * The end-to-end proof: the daemon a consumer installed from npm actually
- * boots, serves its API, and completes a chat turn with a tool call. Uses
- * the mock provider so no credentials and no network are involved.
+ * boots, serves its API, creates a gezel, and (on macOS) runs a terminal
+ * command through the installed node-pty. Uses the mock provider so no
+ * credentials and no network are involved.
  */
 async function daemonSmoke(consumerDir) {
   const home = mkdtempSync(join(tmpdir(), 'gezel-consumer-home-'));
@@ -396,6 +371,23 @@ async function daemonSmoke(consumerDir) {
     if (!gezel?.id) fail('could not create a gezel');
     else ok(`created gezel ${gezel.id}`);
 
+    // npm can install node-pty's macOS spawn-helper without its execute bit.
+    // Exercise the Gezel terminal path rather than raw node-pty: the service's
+    // lazy pre-spawn repair is the supported behavior for published consumers.
+    if (process.platform === 'darwin') {
+      step('spawning a clean-install macOS PTY through the daemon');
+      const { threadId } = await client.runTerminalCommand('default', {
+        workingDir: '',
+        input: 'printf GEZEL_PTY_OK',
+      });
+      const terminalOutput = await waitForTerminalOutput(client, 'default', threadId);
+      if (terminalOutput?.exitCode === 0 && terminalOutput.content.includes('GEZEL_PTY_OK')) {
+        ok('daemon terminal spawned node-pty and captured output');
+      } else {
+        fail(`daemon terminal PTY failed\n${JSON.stringify(terminalOutput)}`);
+      }
+    }
+
     // Assets staged into dist/ by a tsup onSuccess hook degrade silently when
     // the daemon cannot find them — it warns and serves less. In this repo the
     // source-checkout fallbacks mask that, so an installed tarball is the only
@@ -414,6 +406,18 @@ async function daemonSmoke(consumerDir) {
     child.kill('SIGTERM');
     rmSync(home, { recursive: true, force: true });
   }
+}
+
+/** Poll the durable terminal thread until its asynchronous output row lands. */
+async function waitForTerminalOutput(client, projectId, threadId) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const thread = await client.getTerminalThread(projectId, threadId);
+    const output = thread.messages.findLast((message) => message.kind === 'output');
+    if (output) return output;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return null;
 }
 
 /** Poll `<home>/runtime/` until the daemon publishes its port and token. */

@@ -532,6 +532,10 @@ export function ProjectGitStatusBar({
           : 'stale';
   const enrichment = indexStatus?.enrichment;
   const aiCoverage = enrichment ? coveragePercent(enrichment.embedded, enrichment.eligible) : null;
+  // The bar aggregates the totality of indexing (summaries + embeddings +
+  // quality review); `aiCoverage` keeps feeding the caption's search-ready
+  // count, which is a narrower question than "is all the work done".
+  const overallProgress = enrichment ? overallIndexingPercent(enrichment) : null;
   // Server truth for a running AI drive — set no matter which window, the
   // night-shift catch-up, or the API started it.
   const serverDrive = indexStatus?.aiDrive ?? null;
@@ -547,9 +551,9 @@ export function ProjectGitStatusBar({
             : indexState === 'stale'
               ? 'Workspace scan is out of date'
               : aiScanPending
-                ? aiCoverage === null
+                ? overallProgress === null
                   ? 'AI indexing is pending'
-                  : `AI indexing ${aiCoverage}% complete`
+                  : `AI indexing ${overallProgress}% complete`
                 : 'Workspace index is ready';
   const indexTriggerLabel = `Indexing status: ${indexHeadline}`;
   const indexUpdateDisabled =
@@ -756,25 +760,25 @@ export function ProjectGitStatusBar({
                 <strong>{indexHeadline}</strong>
               </div>
 
-              {enrichment && enrichment.eligible > 0 && aiCoverage !== null && (
+              {enrichment && enrichment.eligible > 0 && overallProgress !== null && (
                 <div className="project-index-panel-progress">
                   <div className="project-index-panel-progress-label">
-                    <span>AI search coverage</span>
-                    <strong>{aiCoverage}%</strong>
+                    <span>Indexing progress</span>
+                    <strong>{overallProgress}%</strong>
                   </div>
                   <div
                     className="project-index-panel-progress-track"
                     role="progressbar"
-                    aria-label="AI search coverage"
+                    aria-label="Indexing progress"
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-valuenow={aiCoverage}
+                    aria-valuenow={overallProgress}
                     tabIndex={-1}
                   >
-                    <span style={{ width: `${aiCoverage}%` }} />
+                    <span style={{ width: `${overallProgress}%` }} />
                   </div>
                   <span className="project-index-panel-caption">
-                    {enrichment.embedded} of {enrichment.eligible} files ready
+                    {enrichment.embedded} of {enrichment.eligible} files searchable
                     {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
                   </span>
                 </div>
@@ -1056,6 +1060,32 @@ function formatRelative(iso: string): string {
 function coveragePercent(complete: number, total: number): number | null {
   if (total <= 0) return null;
   return Math.round((Math.min(Math.max(complete, 0), total) / total) * 100);
+}
+
+/**
+ * Composite progress across the whole indexing pipeline the panel reports.
+ * The structural file scan is folded in by construction — enrichment counts
+ * only appear once that scan is fresh — so the aggregate spans the AI tiers:
+ * one unit per eligible file for summaries, one for embeddings, one per
+ * review-eligible file for the quality review. Media descriptions carry no
+ * eligible total on the wire; their pending row keeps that phase visible.
+ */
+function overallIndexingPercent(
+  enrichment: NonNullable<WorkspaceIndexStatus['enrichment']>,
+): number | null {
+  const phases: Array<[done: number, total: number]> = [
+    [enrichment.summarized, enrichment.eligible],
+    [enrichment.embedded, enrichment.eligible],
+  ];
+  if (enrichment.reviews) phases.push([enrichment.reviews.reviewed, enrichment.reviews.eligible]);
+  let done = 0;
+  let total = 0;
+  for (const [phaseDone, phaseTotal] of phases) {
+    if (phaseTotal <= 0) continue;
+    done += Math.min(Math.max(phaseDone, 0), phaseTotal);
+    total += phaseTotal;
+  }
+  return total > 0 ? Math.round((done / total) * 100) : null;
 }
 
 function indexStateLabel(state: WorkspaceIndexStatus['state']): string {

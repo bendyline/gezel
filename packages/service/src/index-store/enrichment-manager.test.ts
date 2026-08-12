@@ -370,6 +370,7 @@ describe('on-demand drives + night catch-up', () => {
       isAnyActive: () => false,
       isProjectActive: () => false,
       oneShotCompletion,
+      oneShotQueueWidth: vi.fn(() => 4),
     } as unknown as ChatManager;
     const store = {
       listProjects: async () => opts.projects ?? [{ id: 'p1' }],
@@ -399,7 +400,7 @@ describe('on-demand drives + night catch-up', () => {
   }
 
   it('full drive: static first, then shadows → enrich → areas → reviews, non-ambient night batches', async () => {
-    const { mgr, calls, enrich, oneShotCompletion } = makeDriveFixture();
+    const { mgr, calls, enrich, review, oneShotCompletion } = makeDriveFixture();
     const started = mgr.drive('p1', { intensity: 'full' });
     expect(started).toEqual({ started: true, alreadyRunning: false });
     expect(mgr.isDriving('p1')).toBe(true);
@@ -409,7 +410,22 @@ describe('on-demand drives + night catch-up', () => {
     expect(calls.indexOf('shadow')).toBeLessThan(calls.indexOf('enrich'));
     expect(calls.indexOf('enrich')).toBeLessThan(calls.indexOf('areas'));
     expect(calls.indexOf('areas')).toBeLessThan(calls.indexOf('review'));
-    expect(enrich).toHaveBeenCalledWith('p1', expect.anything(), 25);
+    // Full-bore fills the target's queue — width-many per-file scans at once.
+    expect(enrich).toHaveBeenCalledWith(
+      'p1',
+      expect.anything(),
+      25,
+      expect.objectContaining({ concurrency: expect.any(Function) }),
+    );
+    const enrichOpts = enrich.mock.calls[0]?.[3] as { concurrency: () => number };
+    expect(enrichOpts.concurrency()).toBe(4);
+    expect(review).toHaveBeenCalledWith(
+      'p1',
+      expect.anything(),
+      25,
+      expect.anything(),
+      expect.objectContaining({ concurrency: expect.any(Function) }),
+    );
     // Full-bore competes like interactive work — no ambient hold.
     const opts = oneShotCompletion.mock.calls[0]?.[2] as { ambient?: boolean };
     expect(opts.ambient).toBeUndefined();
@@ -419,7 +435,8 @@ describe('on-demand drives + night catch-up', () => {
     const { mgr, enrich, oneShotCompletion } = makeDriveFixture();
     mgr.drive('p1', { intensity: 'background' });
     await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
-    expect(enrich).toHaveBeenCalledWith('p1', expect.anything(), 5);
+    // Background stays serial — no concurrency opt is passed.
+    expect(enrich).toHaveBeenCalledWith('p1', expect.anything(), 5, undefined);
     const opts = oneShotCompletion.mock.calls[0]?.[2] as { ambient?: boolean };
     expect(opts.ambient).toBe(true);
   });

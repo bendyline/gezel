@@ -1,4 +1,4 @@
-export { AnthropicCliProvider } from './provider.js';
+export { AnthropicCliProvider, DEFAULT_CLAUDE_POOL_SIZE } from './provider.js';
 export type {
   AnthropicCliProviderOptions,
   ClaudePermissionMode,

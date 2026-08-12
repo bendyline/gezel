@@ -400,10 +400,18 @@ export interface ProviderUsage {
   quotaBuckets: QuotaBucket[];
   todayTurns: number;
   todayTokensIn: number;
+  /**
+   * Portion of `todayTokensIn` the provider reported as prompt-cache reads.
+   * Zero when nothing was cached OR when the provider reports no breakdown,
+   * so render 0 as "no cache info", never "0% hit rate". Optional so an
+   * older daemon that predates the field still typechecks.
+   */
+  todayTokensCached?: number;
   todayTokensOut: number;
   todayCost: number;
   totalTurns: number;
   totalTokensIn: number;
+  totalTokensCached?: number;
   totalTokensOut: number;
   totalCost: number;
   /**

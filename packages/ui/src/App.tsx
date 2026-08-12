@@ -1299,6 +1299,9 @@ function QuotaMeters({
             label={provider.label}
             buckets={limitedBuckets}
             todayTurns={providerUsage.todayTurns}
+            todayTokensIn={providerUsage.todayTokensIn}
+            todayTokensCached={providerUsage.todayTokensCached ?? 0}
+            todayTokensOut={providerUsage.todayTokensOut}
             onOpenSettings={() => onOpenSettings(provider.settingsSection)}
           />
         );
@@ -1312,12 +1315,18 @@ function ProviderQuotaMeter({
   label,
   buckets,
   todayTurns,
+  todayTokensIn,
+  todayTokensCached,
+  todayTokensOut,
   onOpenSettings,
 }: {
   providerKey: string;
   label: string;
   buckets: QuotaBucket[];
   todayTurns: number;
+  todayTokensIn: number;
+  todayTokensCached: number;
+  todayTokensOut: number;
   onOpenSettings: () => void;
 }) {
   // Clicking the pill opens the same numbers the tooltip carries, so they
@@ -1369,6 +1378,9 @@ function ProviderQuotaMeter({
     return [...buckets].sort((a, b) => a.remainingPercent - b.remainingPercent)[0] ?? null;
   }, [buckets]);
 
+  const tokensToValue = formatTokensWithCache(todayTokensIn, todayTokensCached);
+  const tokensFromValue = formatTokenCount(todayTokensOut);
+
   // Copilot may have turn usage before its SDK emits the first quota event.
   // Keep its existing lightweight "today" fallback; Codex and Claude only
   // mount after a real account window arrives.
@@ -1380,7 +1392,7 @@ function ProviderQuotaMeter({
           className="quota-meter"
           onClick={toggle}
           aria-expanded={open}
-          title={`${label}: ${todayTurns} turns today`}
+          title={`${label}: ${todayTurns} turns today in Gezel`}
         >
           <span className="quota-label quota-label-provider">{label}</span>
           <span className="quota-label">{todayTurns} today</span>
@@ -1389,10 +1401,12 @@ function ProviderQuotaMeter({
           <div className="quota-popover">
             <div className="quota-popover-header">{label} usage</div>
             <dl className="quota-popover-stats">
-              <dt>Today</dt>
-              <dd>
-                {todayTurns} {todayTurns === 1 ? 'turn' : 'turns'}
-              </dd>
+              <dt>Turns today in Gezel</dt>
+              <dd>{todayTurns}</dd>
+              <dt>Tokens to {label}</dt>
+              <dd>{tokensToValue}</dd>
+              <dt>Tokens from {label}</dt>
+              <dd>{tokensFromValue}</dd>
             </dl>
             <p className="quota-popover-note">
               No quota limit reported yet — it appears after {label} returns one.
@@ -1429,7 +1443,9 @@ function ProviderQuotaMeter({
         bucket.limit > 0 ? Math.round((bucket.used / bucket.limit) * 100) : 0;
       return `${humanizeBucketName(bucket.name)}: ${bucketUsedPercent}% used, ${Math.round(bucket.remainingPercent)}% left${bucket.resetDate ? `; resets ${formatResetDate(bucket.resetDate)}` : ''}`;
     }),
-    `${todayTurns} turns today`,
+    `${todayTurns} turns today in Gezel`,
+    `Tokens to ${label}: ${tokensToValue}`,
+    `Tokens from ${label}: ${tokensFromValue}`,
   ].join('\n');
 
   return (
@@ -1495,10 +1511,12 @@ function ProviderQuotaMeter({
                 </div>
               );
             })}
-            <dt>Today</dt>
-            <dd>
-              {todayTurns} {todayTurns === 1 ? 'turn' : 'turns'}
-            </dd>
+            <dt>Turns today in Gezel</dt>
+            <dd>{todayTurns}</dd>
+            <dt>Tokens to {label}</dt>
+            <dd>{tokensToValue}</dd>
+            <dt>Tokens from {label}</dt>
+            <dd>{tokensFromValue}</dd>
           </dl>
           <button
             type="button"
@@ -1518,6 +1536,32 @@ function ProviderQuotaMeter({
 
 function formatQuotaCount(value: number): string {
   return value.toLocaleString('en-US');
+}
+
+/**
+ * Compact token count for the quota popover: raw below 1K, then K/M with
+ * one decimal until the number is wide enough that the fraction is noise
+ * ("482", "12.4K", "310K", "1.2M").
+ */
+function formatTokenCount(value: number): string {
+  const scaled = (n: number, unit: string) =>
+    `${n >= 100 ? Math.round(n) : n.toFixed(1).replace(/\.0$/, '')}${unit}`;
+  if (value < 1000) return String(value);
+  if (value < 999_500) return scaled(value / 1000, 'K');
+  return scaled(value / 1_000_000, 'M');
+}
+
+/**
+ * Input-token count with its prompt-cache share: "27.7M (57% cached)".
+ * The cached note is omitted when zero, since providers without a cache
+ * breakdown report nothing and 0 would read as a 0% hit rate.
+ */
+function formatTokensWithCache(tokensIn: number, tokensCached: number): string {
+  if (tokensCached > 0 && tokensIn > 0) {
+    const pct = Math.round((tokensCached / tokensIn) * 100);
+    return `${formatTokenCount(tokensIn)} (${pct < 1 ? '<1' : pct}% cached)`;
+  }
+  return formatTokenCount(tokensIn);
 }
 
 /**

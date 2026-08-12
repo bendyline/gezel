@@ -294,6 +294,12 @@ export class IndexEnrichmentManager {
       });
       const gezel = { gezelId: boekwachter.id, gezelName: boekwachter.name };
       const batch = full ? NIGHT_BATCH : BATCH;
+      // Full-bore fills the target's queue: dispatch width-many per-file
+      // scans at once (the live queue concurrency — 4 on a codex-style CLI
+      // pool, the batch width on a local engine). Background stays serial;
+      // the media tier below stays serial too — its producers are the local
+      // vision/STT stacks, not the summarizer target this width describes.
+      const driveOpts = full && deps.oneShotWidth ? { concurrency: deps.oneShotWidth } : undefined;
       const rubrics: Map<string, ResolvedRubric> =
         deps.model && reviews
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
@@ -325,7 +331,9 @@ export class IndexEnrichmentManager {
       }
       for (;;) {
         if (await this.isPaused()) return;
-        const r = await this.contentIndex.enrich(projectId, deps, batch).catch(() => null);
+        const r = await this.contentIndex
+          .enrich(projectId, deps, batch, driveOpts)
+          .catch(() => null);
         if (!r || r.files === 0) break;
         this.events?.publishGlobalEvent({
           type: 'index_progress',
@@ -342,7 +350,7 @@ export class IndexEnrichmentManager {
         for (;;) {
           if (await this.isPaused()) return;
           const r = await this.contentIndex
-            .review(projectId, deps, batch, rubrics)
+            .review(projectId, deps, batch, rubrics, driveOpts)
             .catch(() => null);
           stored += r?.reviewed ?? 0;
           if (!r || r.files === 0) break;

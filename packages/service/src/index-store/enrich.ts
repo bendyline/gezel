@@ -37,6 +37,13 @@ export interface EnrichDeps {
    * output-only, never a routing input.
    */
   provenance?: IndexProvenance;
+  /**
+   * Live concurrent-one-shot width of the resolved target's queue. Full
+   * drives dispatch this many per-file scans at once instead of one; the
+   * value is re-read as slots free because a lazily-initialized provider
+   * reports 1 until its first call spins it up.
+   */
+  oneShotWidth?: () => number;
 }
 
 export interface EnrichResult {
@@ -189,7 +196,12 @@ export async function buildEnrichDeps(
         ...(opts.ambient ? { ambient: true } : {}),
       })
       .catch(() => '');
-  return { summarize, embed, model, review, provenance };
+  // Guarded for test fakes that stub ChatManager structurally.
+  const oneShotWidth =
+    typeof chat.oneShotQueueWidth === 'function'
+      ? () => chat.oneShotQueueWidth(providerName)
+      : undefined;
+  return { summarize, embed, model, review, provenance, ...(oneShotWidth ? { oneShotWidth } : {}) };
 }
 
 const PROMPT_CONTENT_CAP = 6000;

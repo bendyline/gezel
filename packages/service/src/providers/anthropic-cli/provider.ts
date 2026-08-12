@@ -74,6 +74,14 @@ const HARDCODED_MODELS: ModelInfo[] = [
 
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 
+/**
+ * Default worker-pool cap (= default queue concurrency). Workers spawn on
+ * demand and idle-reap after `workerIdleSec`, so this caps burst width, not
+ * resident cost. Shared with the pill snapshot in ChatManager so the
+ * displayed "N of M warm" default can't drift from the provider's.
+ */
+export const DEFAULT_CLAUDE_POOL_SIZE = 10;
+
 export interface AnthropicCliProviderOptions {
   /** Explicit override for the `claude` binary path. Defaults to PATH lookup. */
   binaryPath?: string;
@@ -176,14 +184,16 @@ export class AnthropicCliProvider implements LLMProvider {
     this.runtimeDir = opts.runtimeDir;
     this.manageRuntimeFiles = opts.manageRuntimeFiles ?? true;
     // Default `concurrency` matches `poolSize` so warm slots aren't
-    // wasted: pool size 4 + concurrency 2 means we keep four
+    // wasted: pool size 10 + concurrency 2 would keep ten
     // subprocesses warm but only ever exercise two of them in
     // parallel. Each `claude` subprocess is heavy (memory + MCP
     // children + Claude bundle), so keeping subprocesses around just
     // to gate parallelism would be paying for capacity we never use.
     // The pool's "concurrency > poolSize" warning at construction
-    // catches the inverse misconfiguration loudly.
-    const poolSize = opts.poolSize ?? 4;
+    // catches the inverse misconfiguration loudly. Workers spawn on
+    // demand and idle-reap, so the default caps burst width (full
+    // index drives, parallel gezel work) without idle cost.
+    const poolSize = opts.poolSize ?? DEFAULT_CLAUDE_POOL_SIZE;
     const concurrency = opts.concurrency ?? poolSize;
     this.queue = new ProviderQueue({
       concurrency,
