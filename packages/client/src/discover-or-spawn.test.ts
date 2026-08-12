@@ -225,7 +225,7 @@ describe('discoverOrSpawn', () => {
   });
 
   it('spawns when no runtime files exist, then adopts after health succeeds', async () => {
-    const spawnFn = vi.fn(() => makeFakeChild());
+    const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
     let reads = 0;
     const readRuntimeFn = vi.fn(async () => {
       reads += 1;

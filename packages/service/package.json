@@ -3,15 +3,7 @@
   "version": "1.0.0",
   "description": "The Gezel daemon: HTTP API, task runner, sandbox, agent runtime.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "daemon",
-    "server",
-    "llm"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"

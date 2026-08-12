@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { pickRandomNameWithGender, type HealthResponse, type ServiceRole } from '@bendyline/gezel';
+import { type HealthResponse, type ServiceRole, pickRandomNameWithGender } from '@bendyline/gezel';
 import {
   GezelSdkError,
   type LocalAuthorizedConnection,
@@ -713,8 +713,7 @@ export async function ensureCliProjectLead(
 
   const { gezels } = await client.listGezels();
   let voorman = gezels.find(
-    (gezel) =>
-      gezel.templateId === 'voorman' || gezel.role?.trim().toLowerCase() === 'voorman',
+    (gezel) => gezel.templateId === 'voorman' || gezel.role?.trim().toLowerCase() === 'voorman',
   );
   if (!voorman) {
     const { name, gender } = pickRandomNameWithGender();

@@ -87,14 +87,7 @@ test('bootstrap rechecks the dependency marker after taking the lock', async (t)
   await mkdir(join(root, 'packages', 'ui', 'node_modules', '.bin'), { recursive: true });
   await writeFile(vitePath, '');
   const electronBin = `electron${binSuffix}`;
-  const electronPath = join(
-    root,
-    'packages',
-    'app',
-    'node_modules',
-    '.bin',
-    electronBin,
-  );
+  const electronPath = join(root, 'packages', 'app', 'node_modules', '.bin', electronBin);
   await mkdir(join(root, 'packages', 'app', 'node_modules', '.bin'), { recursive: true });
   await writeFile(electronPath, '');
   const code = await runSerializedPnpmInstall({

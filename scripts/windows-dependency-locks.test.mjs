@@ -4,8 +4,8 @@ import { once } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   electronLockCandidates,
@@ -124,14 +124,10 @@ test(
       await new Promise((resolveReady, rejectReady) => {
         holder.once('error', rejectReady);
         holder.stdout.once('data', resolveReady);
-        holder.once('exit', (code) =>
-          rejectReady(new Error(`lock holder exited early: ${code}`)),
-        );
+        holder.once('exit', (code) => rejectReady(new Error(`lock holder exited early: ${code}`)));
       });
 
-      const probeScript = fileURLToPath(
-        new URL('./find-windows-file-locks.ps1', import.meta.url),
-      );
+      const probeScript = fileURLToPath(new URL('./find-windows-file-locks.ps1', import.meta.url));
       const result = spawnSync(
         'powershell.exe',
         [

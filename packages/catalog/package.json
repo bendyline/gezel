@@ -3,15 +3,7 @@
   "version": "1.0.0",
   "description": "Gezel catalog loader: sources, install pipeline, and authoring scripts over the external @bendyline/gilde content package.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "catalog",
-    "models",
-    "craftbooks"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "catalog", "models", "craftbooks"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -42,10 +34,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "!dist/**/*.map"
-  ],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

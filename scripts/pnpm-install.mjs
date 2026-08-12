@@ -149,9 +149,7 @@ export function workspaceDependenciesReady(repoRoot) {
     existsSync(join(repoRoot, 'node_modules', '.pnpm')) &&
     existsSync(join(repoRoot, 'node_modules', '.modules.yaml')) &&
     existsSync(join(repoRoot, 'packages', 'ui', 'node_modules', '.bin', `vite${binSuffix}`)) &&
-    existsSync(
-      join(repoRoot, 'packages', 'app', 'node_modules', '.bin', `electron${binSuffix}`),
-    )
+    existsSync(join(repoRoot, 'packages', 'app', 'node_modules', '.bin', `electron${binSuffix}`))
   );
 }
 

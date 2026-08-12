@@ -392,7 +392,7 @@ program
 program
   .command('run [prompt...]')
   .description('Run a prompt through a gezel and print the reply')
-  .option('-g, --gezel <ref>', 'gezel id or name (default: this project\'s voorman)')
+  .option('-g, --gezel <ref>', "gezel id or name (default: this project's voorman)")
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
     const prompt = (promptParts ?? []).join(' ').trim();
     if (!prompt) {
