@@ -20,6 +20,39 @@ describe('ToolRepeatTracker', () => {
     expect(r.output).toBe('contents');
   });
 
+  it('replaces the first duplicate craftbook suggestion with the selected invoke call', () => {
+    const t = new ToolRepeatTracker();
+    const output =
+      '{"recommendedCraftbook":{"id":"powerpoint-deck"},"nextCall":{"tool":"invoke_craftbook","arguments":{"craftbookId":"powerpoint-deck"}}}';
+    t.recordCall('suggest_craftbook', { query: 'PowerPoint about Honduras' }, output);
+    const duplicate = t.recordCall(
+      'suggest_craftbook',
+      { query: 'PowerPoint about Honduras' },
+      output,
+    );
+
+    expect(duplicate.count).toBe(2);
+    expect(duplicate.shouldAbort).toBe(false);
+    expect(duplicate.output).toContain('Already selected craftbook `powerpoint-deck`');
+    expect(duplicate.output).toContain('invoke_craftbook({ craftbookId: "powerpoint-deck" })');
+    expect(duplicate.output).toContain('Do not call `suggest_craftbook` again');
+    expect(duplicate.output).not.toContain('recommendedCraftbook');
+  });
+
+  it('extracts the selected id from the original verbose suggestion format', () => {
+    const t = new ToolRepeatTracker();
+    const output =
+      'Next call: invoke_craftbook({ craftbookId: "powerpoint-deck" }). Do not call suggest_craftbook again.';
+    t.recordCall('suggest_craftbook', { query: 'PowerPoint about Honduras' }, output);
+    const duplicate = t.recordCall(
+      'suggest_craftbook',
+      { query: 'PowerPoint about Honduras' },
+      output,
+    );
+
+    expect(duplicate.output).toContain('Already selected craftbook `powerpoint-deck`');
+  });
+
   it('annotates with a soft warning at the 3rd same-args call', () => {
     const t = new ToolRepeatTracker();
     t.recordCall('read_task_notes', { ref: 'a/3' }, 'notes...');
