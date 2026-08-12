@@ -23,6 +23,7 @@ afterAll(() => {
   if (priorEmbedModel === undefined) delete process.env.GEZEL_EMBED_MODEL;
   else process.env.GEZEL_EMBED_MODEL = priorEmbedModel;
 });
+import { CompletionBlockedError } from '../chat/large-content.js';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
@@ -286,6 +287,52 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     const deps: EnrichDeps = { summarize: async () => '', embed: fakeEmbed };
     expect((await ci.enrich('c', deps, 10))!.files).toBe(1);
     expect((await ci.enrich('c', deps, 10))!.files).toBe(0);
+  });
+
+  it('a policy-blocked summarize consumes the whole attempt budget at once', async () => {
+    await seed();
+    let calls = 0;
+    const deps: EnrichDeps = {
+      summarize: async () => {
+        calls++;
+        throw new CompletionBlockedError('Request blocked.');
+      },
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+    expect((await ci.enrich('c', deps, 10))!.files).toBe(1);
+    // One file-summary call only: the symbol pass is skipped for blocked
+    // content (same content, same deterministic refusal).
+    expect(calls).toBe(1);
+    expect((await ci.enrich('c', deps, 10))!.files).toBe(0); // off the list immediately
+    const counts = await ci.enrichmentCounts('c');
+    expect(counts!.summarized).toBe(0);
+    expect(counts!.pending).toBe(0);
+    expect(counts!.skipped).toBe(1);
+  });
+
+  it('a changed file re-queues after a policy-blocked skip', async () => {
+    await seed();
+    const blockedDeps: EnrichDeps = {
+      summarize: async () => {
+        throw new CompletionBlockedError('Request blocked.');
+      },
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+    expect((await ci.enrich('c', blockedDeps, 10))!.files).toBe(1);
+    expect((await ci.enrich('c', blockedDeps, 10))!.files).toBe(0);
+    await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1; // now benign\n');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const okDeps: EnrichDeps = {
+      summarize: async () => 'Defines the number one.',
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+    const after = await ci.enrich('c', okDeps, 10);
+    expect(after!.files).toBe(1);
+    expect(after!.summarized).toBe(1);
+    expect((await ci.enrichmentCounts('c'))!.skipped).toBe(0);
   });
 });
 

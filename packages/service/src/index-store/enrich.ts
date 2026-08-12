@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { GEZEL_VERSION, type GezelSummary, type ProviderName, createLogger } from '@bendyline/gezel';
+import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -118,6 +119,39 @@ export async function resolveEnrichTarget(
 }
 
 /**
+ * The first configured local engine — the blocked-content fallback target
+ * when a cloud enricher refuses a file on policy grounds. Same resolution as
+ * resolveEnrichTarget's local-first branch.
+ */
+async function resolveLocalFallbackTarget(
+  store: Store,
+): Promise<{ providerName: ProviderName; model: string } | null> {
+  const cfg = await store.readConfig().catch(() => null);
+  for (const name of ENRICH_LOCAL_PROVIDERS) {
+    const model = cfg?.defaultModel?.[name];
+    if (model) return { providerName: name, model };
+  }
+  return null;
+}
+
+/**
+ * Does this error message look like a request-level content-policy refusal?
+ * Wild-caught: OpenAI's backend answers "Request blocked." for prompts whose
+ * CONTENT contains injection-looking markup (`<think>`, `<function=...>`
+ * fixtures — the exact corpus of gezel's own salvage/strip modules), which
+ * made three source files fail summarize 3-for-3 deterministically.
+ * Deliberately narrow: timeouts and transport faults must keep their normal
+ * retry semantics.
+ */
+function isPolicyBlockMessage(message: string): boolean {
+  return /request blocked|content policy|content_filter|invalid_prompt/i.test(message);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
  * Resolve a summarizer (if one is configured) + the local embedder — shared
  * by the background enrichment loop and the on-demand drive route. During
  * Night Shift an enabled provider/model override wins; then a Boekwachter
@@ -171,50 +205,73 @@ export async function buildEnrichDeps(
   const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
   const summarizeTimeoutMs = local ? 30_000 : 120_000;
   const reviewTimeoutMs = local ? 60_000 : 180_000;
-  const summarize = (prompt: string) =>
-    chat
-      .oneShotCompletion(prompt, summarizeTimeoutMs, {
-        providerName,
-        model,
-        ...(opts.boekwachter
-          ? {
-              gezelId: opts.boekwachter.id,
-              useGezelPersona: true,
-              actorLabel: opts.boekwachter.name,
-            }
-          : { actorLabel: 'Boekwachter' }),
-        jobLabel: 'index enrichment',
+  const gezelOpts = opts.boekwachter
+    ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
+    : { actorLabel: 'Boekwachter' };
+  const oneShot =
+    (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
+    (prompt: string) =>
+      chat.oneShotCompletion(prompt, timeoutMs, {
+        providerName: target.providerName,
+        model: target.model,
+        ...gezelOpts,
+        jobLabel,
         ...(opts.ambient ? { ambient: true } : {}),
-      })
-      .catch((err) => {
-        // A thrown one-shot logs nothing on its own — surface the reason here
-        // or a repeatedly-failing file is undiagnosable (the 3157-of-3160
-        // incident: three markup-heavy files burned their attempt caps with
-        // zero log lines).
-        log.warn(
-          `summarize one-shot failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return '';
       });
-  const review = (prompt: string) =>
-    chat
-      .oneShotCompletion(prompt, reviewTimeoutMs, {
-        providerName,
-        model,
-        ...(opts.boekwachter
-          ? {
-              gezelId: opts.boekwachter.id,
-              useGezelPersona: true,
-              actorLabel: opts.boekwachter.name,
+  // Blocked-content fallback: a cloud enricher can refuse a file outright on
+  // policy grounds (isPolicyBlockMessage). Local engines carry no such filter,
+  // so when one is configured it takes over exactly those files. Provenance
+  // still stamps the primary provider — a per-file override isn't worth the
+  // plumbing for this edge.
+  const fallbackTarget = local ? null : await resolveLocalFallbackTarget(store);
+  // A thrown one-shot logs nothing on its own — surface the reason here or a
+  // repeatedly-failing file is undiagnosable (the 3157-of-3160 incident:
+  // three markup-heavy files burned their attempt caps with zero log lines).
+  const withPolicyFallback =
+    (
+      primary: (prompt: string) => Promise<string>,
+      fallback: ((prompt: string) => Promise<string>) | null,
+      label: string,
+    ) =>
+    async (prompt: string): Promise<string> => {
+      try {
+        return await primary(prompt);
+      } catch (err) {
+        const message = errorMessage(err);
+        if (isPolicyBlockMessage(message)) {
+          if (fallback && fallbackTarget) {
+            log.warn(
+              `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
+            );
+            try {
+              return await fallback(prompt);
+            } catch (fallbackErr) {
+              // Local-engine failure is transient (deferred, cold, busy) —
+              // burn a normal retry attempt instead of giving up on the hash.
+              log.warn(`blocked-content local fallback failed: ${errorMessage(fallbackErr)}`);
+              return '';
             }
-          : { actorLabel: 'Boekwachter' }),
-        jobLabel: 'index review',
-        ...(opts.ambient ? { ambient: true } : {}),
-      })
-      .catch((err) => {
-        log.warn(`review one-shot failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          // No local engine to fall back to: the block is deterministic for
+          // this content, so tell callers to stop spending retries on it.
+          throw new CompletionBlockedError(message);
+        }
+        log.warn(`${label} one-shot failed: ${message}`);
         return '';
-      });
+      }
+    };
+  const summarize = withPolicyFallback(
+    oneShot({ providerName, model }, summarizeTimeoutMs, 'index enrichment'),
+    fallbackTarget
+      ? oneShot(fallbackTarget, 30_000, 'index enrichment (blocked-content fallback)')
+      : null,
+    'summarize',
+  );
+  const review = withPolicyFallback(
+    oneShot({ providerName, model }, reviewTimeoutMs, 'index review'),
+    fallbackTarget ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)') : null,
+    'review',
+  );
   // Guarded for test fakes that stub ChatManager structurally.
   const oneShotWidth =
     typeof chat.oneShotQueueWidth === 'function'
@@ -384,13 +441,15 @@ export async function enrichFile(
   //    the re-embed pays embedding cost only. Also spares the summarizer when a
   //    file's content is unchanged but its enrichment was invalidated.
   let summary = store.getSummary(file.hash) ?? '';
+  let blockedByPolicy = false;
   if (summary) {
     result.summarized = true;
   } else if (content?.trim()) {
     try {
       summary = (await deps.summarize(buildSummaryPrompt(file, content))).trim();
-    } catch {
+    } catch (err) {
       summary = '';
+      if (err instanceof CompletionBlockedError) blockedByPolicy = true;
     }
     if (summary) {
       store.upsertSummary({
@@ -407,7 +466,9 @@ export async function enrichFile(
   // 1b. Per-symbol one-liners (code only, LLM configured, not yet covered for
   //     this hash). One batched call per file; a parse failure stores nothing
   //     and is not retried for this hash — same semantics as the file summary.
-  if (file.kind === 'code' && deps.model && content?.trim()) {
+  //     Skipped when the file summary was policy-blocked: this prompt carries
+  //     the same content, so it would just burn another refused request.
+  if (!blockedByPolicy && file.kind === 'code' && deps.model && content?.trim()) {
     if (store.symbolSummariesFor(file.path, file.hash).size === 0) {
       const all = store.symbolsForFile(file.path);
       // Top-level symbols first; methods fill any remaining budget.
@@ -486,13 +547,24 @@ export async function enrichFile(
   // embeddings-only coverage is the intended steady state there.
   const summaryFailed = !result.summarized && Boolean(deps.model) && Boolean(content?.trim());
   if (summaryFailed) {
-    const attempts = store.markEnrichAttempt(file.hash);
-    if (attempts >= MAX_ENRICH_ATTEMPTS) {
+    if (blockedByPolicy) {
+      // Deterministic refusal with no fallback engine — retrying the same
+      // content is pure waste, so consume the whole attempt budget at once.
+      store.markEnrichSkipped(file.hash);
       log.warn(
-        `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,
+        `skipping ${file.path}: the provider blocked its content (policy filter) — it stays unsummarized until its content changes`,
       );
     } else {
-      log.warn(`summarize produced nothing for ${file.path} (attempt ${attempts}/${MAX_ENRICH_ATTEMPTS})`);
+      const attempts = store.markEnrichAttempt(file.hash);
+      if (attempts >= MAX_ENRICH_ATTEMPTS) {
+        log.warn(
+          `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,
+        );
+      } else {
+        log.warn(
+          `summarize produced nothing for ${file.path} (attempt ${attempts}/${MAX_ENRICH_ATTEMPTS})`,
+        );
+      }
     }
   } else {
     store.markEnriched(file.hash);

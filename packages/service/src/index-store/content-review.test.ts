@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CompletionBlockedError } from '../chat/large-content.js';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
@@ -311,6 +312,23 @@ describe('ContentIndex.review end-to-end', () => {
     // Engine back up → the same files are still listed (no budget was burned).
     const alive = vi.fn(async () => VALID_REPLY);
     expect(await ci.review('c', deps(alive), 10, rubrics)).toEqual({ files: 5, reviewed: 5 });
+  });
+
+  it('a policy-blocked review terminally skips the file without tripping the breaker', async () => {
+    await seedCode();
+    const rubrics = await builtinRubrics();
+    const blocked = vi.fn(async () => {
+      throw new CompletionBlockedError('Request blocked.');
+    });
+    // Blocked ≠ empty: it burns the file's whole review budget (unavailable
+    // outcome, which counts as no work done) instead of re-queuing forever,
+    // and does not count toward the wedge breaker.
+    expect(await ci.review('c', deps(blocked), 10, rubrics)).toEqual({ files: 0, reviewed: 0 });
+    expect(blocked).toHaveBeenCalledTimes(1);
+    // Off the list — a later healthy pass finds nothing to do.
+    const alive = vi.fn(async () => VALID_REPLY);
+    expect(await ci.review('c', deps(alive), 10, rubrics)).toEqual({ files: 0, reviewed: 0 });
+    expect(alive).not.toHaveBeenCalled();
   });
 
   it('a rubric change lazily re-reviews while the old review keeps serving', async () => {

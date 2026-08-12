@@ -111,6 +111,20 @@ export function splitContentWindows(
 }
 
 /**
+ * A completion the provider refused on content-policy grounds ("Request
+ * blocked."). Deterministic for a given prompt — retrying is pure waste, so
+ * callers with retry budgets should treat it as a permanent failure for the
+ * current content. Thrown by completion closures (e.g. the enrichment deps)
+ * and deliberately NOT swallowed by {@link runLargeContentCompletion}.
+ */
+export class CompletionBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CompletionBlockedError';
+  }
+}
+
+/**
  * Run one completion per window, sequentially (the ambient/queue discipline
  * of the underlying completion is inherited — parallel windows would defeat
  * local-engine admission control). The caller merges the raw replies.
@@ -131,7 +145,11 @@ export async function runLargeContentCompletion(
     let raw = '';
     try {
       raw = await complete(buildPrompt(window));
-    } catch {
+    } catch (err) {
+      // A policy block is deterministic for this content — every remaining
+      // window would fail the same way, and an all-empty run would read as
+      // "engine down, retry later" to the caller. Let it propagate.
+      if (err instanceof CompletionBlockedError) throw err;
       raw = '';
     }
     replies.push({ window, raw });

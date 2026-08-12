@@ -1,6 +1,7 @@
 import { FileReviewReplySchema } from '@bendyline/gezel';
 import type { FileReviewIssue, FileReviewReply } from '@bendyline/gezel';
 import {
+  CompletionBlockedError,
   type ContentWindow,
   completionBudgetChars,
   runLargeContentCompletion,
@@ -276,23 +277,35 @@ export async function reviewFile(
   const inviteDiagram =
     file.kind === 'code' && ((file.loc ?? 0) >= 60 || store.symbolsForFile(file.path).length >= 5);
   const complete = deps.review;
-  const run = await runLargeContentCompletion(
-    (prompt) => complete(prompt),
-    content,
-    (window) =>
-      buildReviewPrompt(file, window.text, rubric, {
-        inviteDiagram,
-        ...(window.count > 1 ? { window } : {}),
-      }).prompt,
-    {
-      budgetChars: Math.max(
-        MIN_WINDOW_CHARS,
-        completionBudgetChars(deps.provenance?.provider) - REVIEW_SCAFFOLD_CHARS,
-      ),
-      maxWindows: reviewMaxWindows(),
-      overlapLines: REVIEW_WINDOW_OVERLAP_LINES,
-    },
-  );
+  let run: Awaited<ReturnType<typeof runLargeContentCompletion>>;
+  try {
+    run = await runLargeContentCompletion(
+      (prompt) => complete(prompt),
+      content,
+      (window) =>
+        buildReviewPrompt(file, window.text, rubric, {
+          inviteDiagram,
+          ...(window.count > 1 ? { window } : {}),
+        }).prompt,
+      {
+        budgetChars: Math.max(
+          MIN_WINDOW_CHARS,
+          completionBudgetChars(deps.provenance?.provider) - REVIEW_SCAFFOLD_CHARS,
+        ),
+        maxWindows: reviewMaxWindows(),
+        overlapLines: REVIEW_WINDOW_OVERLAP_LINES,
+      },
+    );
+  } catch (err) {
+    if (err instanceof CompletionBlockedError) {
+      // Provider policy-blocked the file's content — deterministic, so an
+      // "engine down, retry later" emptyReply would re-queue it every batch
+      // forever (and each pass would count toward the wedge breaker).
+      store.markReviewUnavailable(file.hash, file.path, rubric.hash, MAX_REVIEW_ATTEMPTS);
+      return { ...skipped, unavailable: true };
+    }
+    throw err;
+  }
   if (run.refused) {
     store.markReviewUnavailable(file.hash, file.path, rubric.hash, MAX_REVIEW_ATTEMPTS);
     return { ...skipped, unavailable: true };

@@ -769,6 +769,23 @@ export class IndexStore {
   }
 
   /**
+   * Jump a hash straight to the attempt cap — for deterministic failures
+   * (a provider policy-blocking the file's content) where every retry would
+   * fail identically. The file drops off the work list and counts as
+   * `skipped` in {@link enrichmentCounts} until its content changes.
+   */
+  markEnrichSkipped(contentHash: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO enrichments (content_hash, embedded_at, attempts)
+         VALUES (?, NULL, ${MAX_ENRICH_ATTEMPTS})
+         ON CONFLICT(content_hash) DO UPDATE
+           SET attempts = MAX(COALESCE(enrichments.attempts, 0), ${MAX_ENRICH_ATTEMPTS})`,
+      )
+      .run(contentHash);
+  }
+
+  /**
    * Keyword search over enrichment summaries. fts_summaries rows are
    * content-addressed and never pruned (same discipline as `summaries`), so
    * the join to `files` on the CURRENT hash both drops stale-content rows and
