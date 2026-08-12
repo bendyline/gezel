@@ -55,18 +55,18 @@ Create `docs/handboek/whats-new/<calver>.md`:
 
 ```markdown
 ---
-id: whats-new/1.26223
-title: 1.26223 — 11 August 2026
-order: -26223
+id: whats-new/1.26224
+title: 1.26224 — 12 August 2026
+order: -26224
 summary: One line naming the two or three things that matter most.
 ---
 
-# 1.26223 — 11 August 2026
+# 1.26224 — 12 August 2026
 
 Opening paragraph: the span covered, and the single sentence a reader could stop after.
 ```
 
-`order` is the **negated** calendar-line digits (`1.26223` → `-26223`) so newest sorts first. The section index (`whats-new-index.md`, `order: -999999`) always stays on top. **Do not edit the index** — it lists releases through `::handboek-whats-new-list`, which reads the article frontmatter, so a new article appears there the moment it lands.
+`order` is the **negated** calendar-line digits (`1.26224` → `-26224`) so newest sorts first. The section index (`whats-new-index.md`, `order: -999999`) always stays on top. **Do not edit the index** — it lists releases through `::handboek-whats-new-list`, which reads the article frontmatter, so a new article appears there the moment it lands.
 
 ### The summary is the headline, not an afterthought
 

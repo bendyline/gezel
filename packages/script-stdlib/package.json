@@ -1,9 +1,16 @@
 {
   "name": "@bendyline/gezel-script-stdlib",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Standard gate-script library packed into the app. Plain defineScript sources resolved in place by the script runner (scope: 'standard'); read-only, trusted, versioned with the app.",
   "license": "MIT",
-  "keywords": ["gezel", "ai", "agents", "local-first", "scripts", "stdlib"],
+  "keywords": [
+    "gezel",
+    "ai",
+    "agents",
+    "local-first",
+    "scripts",
+    "stdlib"
+  ],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -29,14 +36,17 @@
     "./package.json": "./package.json",
     "./scripts/*": "./scripts/*"
   },
-  "files": ["scripts", "!scripts/**/*.test.ts"],
+  "files": [
+    "scripts",
+    "!scripts/**/*.test.ts"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
-    "@bendyline/gezel-sdk": "workspace:*"
+    "@bendyline/gezel-sdk": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

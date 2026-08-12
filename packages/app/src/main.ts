@@ -21,8 +21,11 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
+  type FatalProcessErrorSource,
   type ReferenceFileLocationRequest,
   ReferenceFileLocationRequestSchema,
+  installProcessErrorHandlers,
+  writeProcessOutput,
 } from '@bendyline/gezel';
 import {
   GezelClient,
@@ -40,6 +43,7 @@ import {
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
+import { mainProcessIssueUrl } from './main-process-errors.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
@@ -95,6 +99,7 @@ let rendererNetworkPermissionRead: {
   epoch: number;
   promise: ReturnType<typeof resolveRendererNetworkPermission>;
 } | null = null;
+let fatalMainProcessErrorInFlight = false;
 
 function invalidateRendererNetworkPermission(): void {
   rendererNetworkPolicyEpoch += 1;
@@ -178,6 +183,12 @@ const packagedSmokeExpectedVersion =
     .find((arg) => arg.startsWith('--gezel-expected-version='))
     ?.slice('--gezel-expected-version='.length) || process.env.GEZEL_EXPECTED_VERSION;
 
+// Electron otherwise turns these into its stock "A JavaScript error occurred
+// in the main process" dialog, including a raw stack and internal paths. Keep
+// both Node failure channels on Gezel's own final-error surface. The handler is
+// installed before the ready/bootstrap chain so failures there are covered too.
+installProcessErrorHandlers(process, handleFatalMainProcessError);
+
 // Stable app identity. Set before app.whenReady() so platform shells
 // pick it up while the first window is being created — anything we
 // defer to ready will miss the initial taskbar/dock registration.
@@ -217,7 +228,7 @@ if (daemonEntryArgument) {
 }
 
 if (packagedSmoke) {
-  process.stderr.write('[packaged-smoke] main module imported\n');
+  writeProcessOutput(process.stderr, '[packaged-smoke] main module imported\n');
 }
 
 // Group every Gezel window under one taskbar button on Windows. Without
@@ -649,20 +660,24 @@ async function createWindow(): Promise<void> {
               ? 'INFO'
               : 'LOG';
       const location = event.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
-      process.stderr.write(`[renderer ${tag}] ${event.message}${location}\n`);
+      writeProcessOutput(process.stderr, `[renderer ${tag}] ${event.message}${location}\n`);
     });
     wc.on('render-process-gone', (_e, details) => {
-      process.stderr.write(
+      writeProcessOutput(
+        process.stderr,
         `[renderer CRASH] reason=${details.reason} exitCode=${details.exitCode}\n`,
       );
     });
     wc.on('preload-error', (_e, preloadPath, err) => {
-      process.stderr.write(`[renderer PRELOAD] ${preloadPath}: ${err.stack ?? err.message}\n`);
+      writeProcessOutput(
+        process.stderr,
+        `[renderer PRELOAD] ${preloadPath}: ${err.stack ?? err.message}\n`,
+      );
     });
     wc.on('did-fail-load', (_e, code, desc, url) => {
       // -3 = ERR_ABORTED, fires on the intentional splash→app handoff; skip it.
       if (code === -3) return;
-      process.stderr.write(`[renderer LOAD-FAIL] ${code} ${desc} url=${url}\n`);
+      writeProcessOutput(process.stderr, `[renderer LOAD-FAIL] ${code} ${desc} url=${url}\n`);
     });
     wc.on('did-finish-load', () => {
       // Hook window-level error events so unhandled exceptions /
@@ -807,7 +822,49 @@ async function loadAppUrl(win: Electron.BrowserWindow, url: string): Promise<voi
  * restart, and offering a button that cannot work would be worse than
  * offering none. Relaunching is the only real remedy, so the copy says that.
  */
-async function showStartupError(win: Electron.BrowserWindow, err: Error): Promise<void> {
+interface StartupErrorOptions {
+  kind?: 'service-startup' | 'main-process';
+  source?: FatalProcessErrorSource;
+}
+
+async function showStartupError(
+  win: Electron.BrowserWindow | null,
+  err: Error,
+  options: StartupErrorOptions = {},
+): Promise<void> {
+  if (options.kind === 'main-process') {
+    const messageBoxOptions: Electron.MessageBoxOptions = {
+      type: 'error',
+      title: 'Gezel hit a problem',
+      message: 'Gezel hit an unexpected problem and needs to close.',
+      detail:
+        'Nothing has been lost — your gezellen, projects, and chats are still on disk. ' +
+        'No report is sent automatically. “Report on GitHub…” only opens an editable issue in your browser.',
+      buttons: ['Close Gezel', 'Report on GitHub…'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const result =
+      win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, messageBoxOptions)
+        : await dialog.showMessageBox(messageBoxOptions);
+    if (result.response === 1) {
+      const issueUrl = mainProcessIssueUrl({
+        error: err,
+        source: options.source ?? 'uncaughtException',
+        version: app.getVersion(),
+        electronVersion: process.versions.electron ?? 'unknown',
+        nodeVersion: process.versions.node,
+        platform: process.platform,
+        arch: process.arch,
+      });
+      await shell.openExternal(issueUrl);
+    }
+    return;
+  }
+
+  if (!win || win.isDestroyed()) return;
   const escapeHtml = (s: string) => s.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -833,6 +890,47 @@ async function showStartupError(win: Electron.BrowserWindow, err: Error): Promis
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   } catch {
     /* nothing more we can do — the sage background remains */
+  }
+}
+
+/**
+ * Final main-process boundary. Node explicitly warns against resuming normal
+ * work after an uncaught exception, so the dialog is followed by a hard exit.
+ * The daemon's parent pipe closes with us and its ordinary EOF shutdown path
+ * performs service cleanup.
+ */
+async function handleFatalMainProcessError(
+  err: Error,
+  source: FatalProcessErrorSource,
+): Promise<void> {
+  if (fatalMainProcessErrorInFlight) {
+    app.exit(1);
+    return;
+  }
+  fatalMainProcessErrorInFlight = true;
+  isQuitting = true;
+
+  // Local diagnostics may retain the stack; the user-facing dialog and issue
+  // URL do not. This write is itself safe when a launcher closed the pipe.
+  try {
+    writeProcessOutput(process.stderr, `[app] ${source}: ${err.stack ?? err.message}\n`);
+  } catch {
+    /* the final error surface must not depend on a working terminal */
+  }
+
+  if (packagedSmoke) {
+    app.exit(1);
+    return;
+  }
+
+  try {
+    if (!app.isReady()) await app.whenReady();
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    await showStartupError(parent, err, { kind: 'main-process', source });
+  } catch {
+    /* Dialog or browser launch failed; exiting is still the safe recovery. */
+  } finally {
+    app.exit(1);
   }
 }
 

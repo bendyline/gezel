@@ -1291,6 +1291,8 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
       projectId: string;
       text: string;
       lane: string | undefined;
+      taskRef: string | undefined;
+      stepId: string | undefined;
     }> = [];
     let activeGezels = new Set<string>();
     let projectActive = false;
@@ -1312,12 +1314,16 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
         projectId: string;
         text: string;
         lane?: string;
+        taskRef?: string;
+        stepId?: string;
       }) => {
         delivered.push({
           toGezelIdOrName: args.toGezelIdOrName,
           projectId: args.projectId,
           text: args.text,
           lane: args.lane,
+          taskRef: args.taskRef,
+          stepId: args.stepId,
         });
         return {
           sessionId: 'mock',
@@ -1399,6 +1405,8 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered[0]!.toGezelIdOrName).toBe('freja');
     expect(chat.delivered[0]!.text).toContain(entryStepId);
     expect(chat.delivered[0]!.text).toMatch(/advance_task_step/);
+    expect(chat.delivered[0]!.taskRef).toBe(`cron/${num}`);
+    expect(chat.delivered[0]!.stepId).toBe(entryStepId);
     // Ambient re-drive rides the background lane.
     expect(chat.delivered[0]!.lane).toBe('background');
     // Re-drive bookkeeping bumped.

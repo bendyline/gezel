@@ -2464,6 +2464,33 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(session?.projectId).toBe('tic-tac-toe-game');
   });
 
+  it('reuses the exact task-step session for a scheduler re-drive', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const lobby = await manager.createSession({ gezelId: 'maya', projectId: 'default' });
+    const taskSession = await manager.createSession({
+      gezelId: 'maya',
+      projectId: 'default',
+      taskRef: 'default/7',
+      stepId: 'scope',
+    });
+    mock.script('I will finish the scope step.');
+
+    const result = await manager.messageGezel({
+      fromGezelId: 'ada',
+      toGezelIdOrName: 'maya',
+      projectId: 'default',
+      taskRef: 'default/7',
+      stepId: 'scope',
+      text: 'Resume the stalled scope step.',
+    });
+
+    expect(result.sessionId).toBe(taskSession.id);
+    const resumed = await store.getSession('maya', taskSession.id);
+    expect(resumed).toMatchObject({ taskRef: 'default/7', stepId: 'scope' });
+    const untouchedLobby = await store.getSession('maya', lobby.id);
+    expect(untouchedLobby?.messages).toEqual([]);
+  });
+
   it('does NOT auto-route when the target has sessions across multiple non-default projects', async () => {
     // Ambiguous: don't guess. Keep the caller's explicit/default
     // behavior so the model has to be specific.
@@ -3010,6 +3037,45 @@ describe('ChatManager — sendWithMentions (@-mention fan-out)', () => {
       // `done` MUST come after the last `complete` — the UI uses
       // it as the "all iterations finished, drop the slot" signal.
       expect(eventTypes.lastIndexOf('done')).toBeGreaterThan(eventTypes.lastIndexOf('complete'));
+    });
+
+    it('does not continue after a question posts, even when an earlier tool failed', async () => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      mock.scriptSendDelay(80);
+      mock.script('', 'THIS CONTINUATION MUST NOT RUN');
+
+      const sending = manager.send(session.id, 'advance the task or ask me what is blocking it');
+      await vi.waitFor(
+        () => expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1),
+        { timeout: 5000, interval: 10 },
+      );
+
+      const internals = manager as unknown as {
+        currentTurnTools: Map<
+          string,
+          Array<{ name: string; durationMs: number; success: boolean; errorMessage?: string }>
+        >;
+      };
+      internals.currentTurnTools.set(session.id, [
+        {
+          name: 'advance_task_step',
+          durationMs: 1,
+          success: false,
+          errorMessage: 'Completion gate rejected the step.',
+        },
+        { name: 'ask_user_question', durationMs: 1, success: true },
+      ]);
+
+      await sending;
+
+      expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+      const persisted = await store.getSession('ada', session.id);
+      expect(persisted?.messages.at(-1)?.toolCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'advance_task_step', success: false }),
+          expect.objectContaining({ name: 'ask_user_question', success: true }),
+        ]),
+      );
     });
 
     it('drops session affinity on continuation re-acquires so queued siblings win FIFO', async () => {

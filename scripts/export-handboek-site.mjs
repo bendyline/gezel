@@ -57,7 +57,10 @@ const run = (label, cmd, args) => {
   const result = spawnSync(cmd, args, {
     cwd: repoRoot,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    // Windows needs cmd.exe to resolve pnpm's .cmd shim. Keep direct
+    // executables (especially process.execPath under Program Files) out of
+    // the shell so paths containing spaces remain intact.
+    shell: process.platform === 'win32' && cmd === 'pnpm',
   });
   if (result.status !== 0) {
     console.error(`[handboek-site] ${label} failed`);

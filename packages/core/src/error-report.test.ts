@@ -1,4 +1,3 @@
-import type { SystemDiagnostics } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   type ErrorReportInput,
@@ -9,6 +8,7 @@ import {
   isUserCancelledTurnError,
   reportCursorOffset,
 } from './error-report.js';
+import type { SystemDiagnostics } from './schemas/index.js';
 
 const GB = 1024 ** 3;
 

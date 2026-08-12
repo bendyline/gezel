@@ -388,6 +388,10 @@ export class TaskScheduler {
       toGezelIdOrName: assignee,
       projectId: task.projectId,
       text: gateFrozen ? stuckStepGateNudgeText(task, step) : stuckStepNudgeText(task, step),
+      // Resume the exact task-step thread. Without these fields the nudge
+      // falls into lobby chat and task tools lose their step-scoped env.
+      taskRef: task.ref,
+      stepId: step.id,
       // Ambient re-drive — must yield to any user-driven turn on the same
       // provider, like the voorman nudge.
       lane: 'background',

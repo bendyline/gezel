@@ -1,9 +1,17 @@
 {
   "name": "@bendyline/gezel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Gezel core: types, schemas, path helpers, agent-markdown parser.",
   "license": "MIT",
-  "keywords": ["gezel", "ai", "agents", "local-first", "schemas", "zod", "types"],
+  "keywords": [
+    "gezel",
+    "ai",
+    "agents",
+    "local-first",
+    "schemas",
+    "zod",
+    "types"
+  ],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -58,7 +66,10 @@
       "import": "./dist/svg/index.js"
     }
   },
-  "files": ["dist", "!dist/**/*.map"],
+  "files": [
+    "dist",
+    "!dist/**/*.map"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

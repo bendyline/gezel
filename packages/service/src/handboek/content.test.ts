@@ -118,8 +118,8 @@ describe('listReleaseNotes', () => {
       article('technical-thing', 'technical', 1),
       article('whats-new/1.26219', 'whats-new', -26219),
       article(WHATS_NEW_INDEX_ID, 'whats-new', -999999),
-      article('whats-new/1.26223', 'whats-new', -26223),
+      article('whats-new/1.26224', 'whats-new', -26224),
     ]);
-    expect(notes.map((n) => n.id)).toEqual(['whats-new/1.26223', 'whats-new/1.26219']);
+    expect(notes.map((n) => n.id)).toEqual(['whats-new/1.26224', 'whats-new/1.26219']);
   });
 });

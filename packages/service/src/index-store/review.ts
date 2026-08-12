@@ -6,7 +6,13 @@ import {
   completionBudgetChars,
   runLargeContentCompletion,
 } from '../chat/large-content.js';
-import { type EnrichDeps, readEnrichableText } from './enrich.js';
+import {
+  type EnrichDeps,
+  type ResolvedEnrichCompletion,
+  mergeEnrichCompletionAttribution,
+  readEnrichableText,
+  resolveEnrichCompletion,
+} from './enrich.js';
 import type { FileRecord, IndexStore } from './index-store.js';
 import type { ResolvedRubric } from './rubrics.js';
 
@@ -277,10 +283,19 @@ export async function reviewFile(
   const inviteDiagram =
     file.kind === 'code' && ((file.loc ?? 0) >= 60 || store.symbolsForFile(file.path).length >= 5);
   const complete = deps.review;
+  const completions: Array<ResolvedEnrichCompletion | undefined> = [];
   let run: Awaited<ReturnType<typeof runLargeContentCompletion>>;
   try {
     run = await runLargeContentCompletion(
-      (prompt) => complete(prompt),
+      async (prompt) => {
+        // Preserve the slot even when the completion throws: the large-content
+        // runner converts ordinary failures to empty replies and continues.
+        const slot = completions.length;
+        completions.push(undefined);
+        const completion = resolveEnrichCompletion(await complete(prompt), deps);
+        completions[slot] = completion;
+        return completion.text;
+      },
       content,
       (window) =>
         buildReviewPrompt(file, window.text, rubric, {
@@ -315,24 +330,32 @@ export async function reviewFile(
     return { reviewed: false, attempted: false, emptyReply: true };
   }
 
-  const parsed: Array<{ window: ContentWindow; reply: FileReviewReply }> = [];
-  for (const { window, raw } of run.replies) {
+  const parsed: Array<{
+    window: ContentWindow;
+    reply: FileReviewReply;
+    completion?: ResolvedEnrichCompletion;
+  }> = [];
+  for (const [index, { window, raw }] of run.replies.entries()) {
     if (!raw.trim()) continue;
     const reply = parseFileReviewReply(raw);
-    if (reply) parsed.push({ window, reply });
+    if (reply) parsed.push({ window, reply, completion: completions[index] });
   }
   if (parsed.length === 0) {
     store.recordReviewAttempt(file.hash, file.path, rubric.hash);
     return { reviewed: false, attempted: true, emptyReply: false };
   }
 
+  const attribution = mergeEnrichCompletionAttribution(
+    parsed.flatMap((entry) => (entry.completion ? [entry.completion] : [])),
+    deps,
+  );
   store.upsertFileReview({
     contentHash: file.hash,
     filePath: file.path,
     rubricHash: rubric.hash,
     ...mergeWindowReplies(parsed, run, file.kind === 'code'),
-    model: deps.model ?? 'unknown',
-    ...(deps.provenance ? { provenance: deps.provenance } : {}),
+    model: attribution.model,
+    ...(attribution.provenance ? { provenance: attribution.provenance } : {}),
   });
   return { reviewed: true, attempted: true, emptyReply: false };
 }

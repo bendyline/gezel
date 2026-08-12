@@ -45,7 +45,7 @@ test.describe('tasks', () => {
     });
   });
 
-  test('new-task dialog: craftbook gallery → create draft → fire', async ({ page, world }) => {
+  test('new-task dialog: craftbook gallery → create and start', async ({ page, world }) => {
     test.skip(!world, 'requires the seeded world');
     await gotoHome(page);
 
@@ -80,15 +80,12 @@ test.describe('tasks', () => {
       description: 'New Task dialog — a selected craftbook previewing its recipe steps',
     });
 
-    await dialog.getByRole('button', { name: 'Create task' }).click();
+    await dialog.getByRole('button', { name: 'Create & start' }).click();
     await expect(dialog).not.toBeVisible();
 
-    // The created task lands ready to fire (an inert draft), and firing
-    // activates it — a catalog book needs no guardrail override.
+    // One-time catalog craftbooks start immediately and land active.
     const detail = page.getByTestId('task-detail');
     await expect(detail).toBeVisible();
-    await expect(detail.locator('.task-detail-status-badge')).toHaveText('ready');
-    await detail.getByRole('button', { name: 'Fire task' }).click();
     await expect(detail.locator('.task-detail-status-badge')).toHaveCount(0);
     const status = detail.getByRole('radiogroup', { name: 'Task status' });
     await expect(status.getByRole('radio', { name: 'Active' })).toBeChecked();

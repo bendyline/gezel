@@ -26382,10 +26382,21 @@ button.boekwachter-pill:focus-visible {
   min-height: 0;
 }
 
-/* Cap the reading measure so wide windows keep a book-like column. */
+/* Let wide document sections (tables, galleries, feature splits) use the
+   renderer's 1060px wide measure when the pane has room. Ordinary prose keeps
+   its own narrower 740px measure inside Squisq, so long-form reading remains
+   comfortable. */
 .handboek-doc > * {
-  max-width: 52rem;
+  max-width: 68rem;
   margin: 0 auto;
+}
+
+/* Markdown tables can live inside a prose section (the generated model
+   scorecard does), so Squisq would otherwise keep the whole section on its
+   narrower prose measure. Promote only table-bearing prose sections to the
+   wide measure; prose-only sections stay comfortably readable. */
+.handboek-doc .squisq-page-section--prose:has(.squisq-md-table) .squisq-page-section-inner {
+  max-width: var(--squisq-page-wide-max);
 }
 
 .handboek-player {
