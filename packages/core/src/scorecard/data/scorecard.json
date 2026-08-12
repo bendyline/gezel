@@ -125,6 +125,11 @@
         "contextTokens": 120832,
         "peakMemoryMb": 41876
       },
+      "judge": {
+        "meanScore": 6.4,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -221,6 +226,11 @@
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 44116
+      },
+      "judge": {
+        "meanScore": 6.7,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -319,6 +329,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 13786
       },
+      "judge": {
+        "meanScore": 4.7,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -407,9 +422,19 @@
       "parameterSize": "27B",
       "runId": "2026-08-11-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 198,
+        "decodeTokensPerSec": 18.5,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 26997
+      },
+      "judge": {
+        "meanScore": 8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -499,9 +524,19 @@
       "parameterSize": "35B",
       "runId": "2026-08-11-m4max-llamacpp",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1125,
+        "decodeTokensPerSec": 76.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 27152
+      },
+      "judge": {
+        "meanScore": 8.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -599,6 +634,11 @@
       "runtime": {
         "contextTokens": 120832,
         "peakMemoryMb": 41182
+      },
+      "judge": {
+        "meanScore": 6.1,
+        "artifacts": 20,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -711,6 +751,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 46208
       },
+      "judge": {
+        "meanScore": 6.1,
+        "artifacts": 20,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -822,6 +867,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 12649
       },
+      "judge": {
+        "meanScore": 5.4,
+        "artifacts": 25,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -924,9 +974,19 @@
       "parameterSize": "27B",
       "runId": "2026-08-11-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 198,
+        "decodeTokensPerSec": 18.5,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 27643
+      },
+      "judge": {
+        "meanScore": 5.6,
+        "artifacts": 24,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1030,9 +1090,19 @@
       "parameterSize": "35B",
       "runId": "2026-08-11-m4max-llamacpp",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1125,
+        "decodeTokensPerSec": 76.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 26234
+      },
+      "judge": {
+        "meanScore": 6.6,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {

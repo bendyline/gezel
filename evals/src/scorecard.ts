@@ -483,11 +483,17 @@ export function readModelPerformance(
   if (!existsSync(preflightRoot)) return null;
   const prefills: number[] = [];
   const decodes: number[] = [];
+  // The probe directory slugifies the model id — `qwen3.6-27b-q4` lands as
+  // `preflight-qwen3-6-27b-q4-...`. Matching the raw id silently yielded no
+  // performance for every dotted model id while the probes sat on disk, and
+  // a missing measurement is invisible: the column just stops rendering.
+  const prefixes = [`preflight-${modelId}-`, `preflight-${modelId.replace(/\./g, '-')}-`];
   for (const name of readdirSync(preflightRoot)) {
     // `preflight-<modelId>-<iso>-<suffix>`; the model id may itself contain
     // dashes, so anchor on the prefix rather than splitting.
-    if (!name.startsWith(`preflight-${modelId}-`)) continue;
-    const stamp = name.slice(`preflight-${modelId}-`.length).replace(/-[a-z0-9]+$/, '');
+    const prefix = prefixes.find((candidate) => name.startsWith(candidate));
+    if (!prefix) continue;
+    const stamp = name.slice(prefix.length).replace(/-[a-z0-9]+$/, '');
     const iso = stamp.replace(
       /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/,
       '$1T$2:$3:$4.$5Z',

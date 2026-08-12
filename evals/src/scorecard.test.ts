@@ -8,6 +8,7 @@ import {
   cellFromBatch,
   mergeScorecard,
   modelResultFromMatrix,
+  readModelPerformance,
   runIdFor,
 } from './scorecard.ts';
 import type { BatchSummary, MatrixSummary } from './types.ts';
@@ -233,5 +234,68 @@ describe('runIdFor', () => {
         arch: 'arm64',
       }),
     ).toBe('2026-08-09-mac-apple-m4-max');
+  });
+});
+
+describe('readModelPerformance', () => {
+  async function probe(
+    preflightRoot: string,
+    dirName: string,
+    report: { promptTokensPerSec: number; genTokensPerSec: number },
+  ): Promise<void> {
+    await mkdir(join(preflightRoot, dirName), { recursive: true });
+    await writeFile(
+      join(preflightRoot, dirName, 'preflight-report.json'),
+      JSON.stringify(report),
+      'utf8',
+    );
+  }
+
+  const WINDOW = { fromIso: '2026-08-11T00:00:00.000Z', toIso: '2026-08-13T00:00:00.000Z' };
+
+  it('finds probes for a dotted model id, whose directory slugifies the dot', async () => {
+    // Regression: the probe directory for `qwen3.6-27b-q4` is written as
+    // `preflight-qwen3-6-27b-q4-...`. Prefix-matching the raw id found
+    // nothing, and the failure was invisible — a model with no performance
+    // simply stops contributing the column rather than erroring.
+    root = await mkdtemp(join(tmpdir(), 'gezel-scorecard-perf-'));
+    await probe(root, 'preflight-qwen3-6-27b-q4-2026-08-11T23-31-52-491Z-qxi4', {
+      promptTokensPerSec: 400,
+      genTokensPerSec: 18.5,
+    });
+
+    expect(readModelPerformance(root, 'qwen3.6-27b-q4', WINDOW)).toEqual({
+      prefillTokensPerSec: 400,
+      decodeTokensPerSec: 18.5,
+      samples: 1,
+    });
+  });
+
+  it('still matches an undotted id directly, and averages repeat probes', async () => {
+    root = await mkdtemp(join(tmpdir(), 'gezel-scorecard-perf-'));
+    await probe(root, 'preflight-gemma4-31b-q4-2026-08-12T05-28-24-721Z-3ejs', {
+      promptTokensPerSec: 200,
+      genTokensPerSec: 23.3,
+    });
+    await probe(root, 'preflight-gemma4-31b-q4-2026-08-12T06-28-24-721Z-abcd', {
+      promptTokensPerSec: 210,
+      genTokensPerSec: 23.5,
+    });
+
+    expect(readModelPerformance(root, 'gemma4-31b-q4', WINDOW)).toEqual({
+      prefillTokensPerSec: 205,
+      decodeTokensPerSec: 23.4,
+      samples: 2,
+    });
+  });
+
+  it('excludes probes outside the sweep window rather than publishing a stale machine state', async () => {
+    root = await mkdtemp(join(tmpdir(), 'gezel-scorecard-perf-'));
+    await probe(root, 'preflight-qwen3-6-27b-q4-2026-07-30T10-51-53-649Z-qwxg', {
+      promptTokensPerSec: 999,
+      genTokensPerSec: 99,
+    });
+
+    expect(readModelPerformance(root, 'qwen3.6-27b-q4', WINDOW)).toBeNull();
   });
 });
