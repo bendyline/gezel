@@ -1,9 +1,17 @@
 {
   "name": "@bendyline/gezel-cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "The `gezel` command-line tool.",
   "license": "MIT",
-  "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
+  "keywords": [
+    "gezel",
+    "ai",
+    "agents",
+    "local-first",
+    "cli",
+    "terminal",
+    "tui"
+  ],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -31,7 +39,10 @@
   "exports": {
     "./package.json": "./package.json"
   },
-  "files": ["dist", "!dist/**/*.map"],
+  "files": [
+    "dist",
+    "!dist/**/*.map"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -40,11 +51,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bendyline/gezel": "workspace:*",
-    "@bendyline/gezel-app-sdk": "workspace:*",
-    "@bendyline/gezel-catalog": "workspace:*",
-    "@bendyline/gezel-client": "workspace:*",
-    "@bendyline/gezel-service": "workspace:*",
+    "@bendyline/gezel": "1.0.0",
+    "@bendyline/gezel-app-sdk": "1.0.0",
+    "@bendyline/gezel-catalog": "1.0.0",
+    "@bendyline/gezel-client": "1.0.0",
+    "@bendyline/gezel-service": "1.0.0",
     "@bendyline/squisq": "2.7.1",
     "@bendyline/squisq-formats": "2.4.3",
     "@bendyline/squisq-react": "2.7.1",
