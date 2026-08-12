@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { runUnderMacSandbox } from './macos.js';
 
 export interface SandboxRunOptions {
@@ -287,11 +287,9 @@ async function readNodeHelp(nodeBin: string): Promise<string> {
     const child = spawn(nodeBin, ['--help'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sandboxEnv(process.env),
-      // Bundled Node is a console-subsystem executable and the Session 0
-      // machine service can allocate no console — so even this capability
-      // probe starts with DETACHED_PROCESS. `windowsHide`
-      // (CREATE_NO_WINDOW) does not do that; it still allocates.
-      ...windowsDetachedSpawnOptions(),
+      // The capability probe is owned and awaited. Hide its Windows console
+      // rather than giving the short-lived process a detached one.
+      ...windowsHeadlessSpawnOptions(),
     });
     let stdout = '';
     let stderr = '';
@@ -318,16 +316,11 @@ async function runSandboxChild(
     const child = spawn(command, args, {
       cwd: opts.cwd,
       stdio: opts.rpcChannel ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
-      // Keep sandbox children out of the Vitest/service process
-      // group. Workspace commands already do this; doing the same
-      // here prevents an unrelated process-group kill from closing a
-      // short-lived derive/script child with a null exit code.
-      // On Windows the same option is DETACHED_PROCESS, which also keeps a
-      // console-subsystem child from asking the Session 0 service for a
-      // console it cannot allocate — `windowsHide` (CREATE_NO_WINDOW) does
-      // not, because it still allocates one. `taskkill /T` is unaffected:
-      // detaching changes console and process group, not the recorded parent.
-      detached: true,
+      // A separate process group is useful on POSIX for group termination.
+      // Windows tree cleanup follows parent PIDs instead, so detaching there
+      // only creates a new console window; keep it owned and hidden.
+      detached: process.platform !== 'win32',
+      ...windowsHeadlessSpawnOptions(),
       // Allowlist-scrub the env — inheriting everything leaked tokens
       // (GEZEL_TOKEN, OPENAI_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN,
       // etc.) into the sandboxed script, letting it `fetch` them

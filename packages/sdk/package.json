@@ -62,7 +62,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@bendyline/gezel": "1.0.0",
+    "@bendyline/gezel": "workspace:*",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

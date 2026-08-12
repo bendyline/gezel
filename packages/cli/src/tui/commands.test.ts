@@ -36,7 +36,7 @@ describe('suggestSlashCommands', () => {
       'clear',
     ]);
     expect(suggestSlashCommands('/pro').map((command) => command.name)).toEqual(['project']);
-    expect(suggestSlashCommands('/m').map((command) => command.name)).toEqual(['model']);
+    expect(suggestSlashCommands('/m').map((command) => command.name)).toEqual(['mode', 'model']);
     expect(suggestSlashCommands('/th').map((command) => command.name)).toEqual(['thread']);
     expect(suggestSlashCommands('/st').map((command) => command.name)).toEqual(['start']);
     expect(suggestSlashCommands('/n').map((command) => command.name)).toEqual(['nightshift']);
@@ -78,6 +78,20 @@ describe('suggestSlashWordwheel', () => {
       '/nightshift list',
     ]);
     expect(suggestSlashWordwheel('/nightshift l', CRAFTBOOKS)[0]?.submit).toBe('/nightshift list');
+  });
+
+  it('offers the four engagement modes after /mode', () => {
+    expect(suggestSlashWordwheel('/mode ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
+      '/mode read-only',
+      '/mode reactive',
+      '/mode reactive+tasks',
+      '/mode full-play',
+    ]);
+    expect(suggestSlashWordwheel('/mode rea', CRAFTBOOKS).map((item) => item.submit)).toEqual([
+      '/mode read-only',
+      '/mode reactive',
+      '/mode reactive+tasks',
+    ]);
   });
 });
 

@@ -28,13 +28,13 @@ afterEach(async () => {
 });
 
 describe('App interactions', () => {
-  it('loads the roster and project, then creates the Meester session', async () => {
+  it('loads the roster and project, then creates the project voorman session', async () => {
     const client = createClient();
     const harness = mountApp(client);
 
     await vi.waitFor(() => {
       expect(client.createChatSession).toHaveBeenCalledWith({
-        gezelId: 'meester',
+        gezelId: 'foreman',
         projectId: 'studio',
       });
     });
@@ -57,7 +57,7 @@ describe('App interactions', () => {
       expect.any(Function),
     );
     expect(harness.text()).toContain('Studio');
-    expect(harness.text()).toContain('Guildmaster');
+    expect(harness.text()).toContain('Voorman');
     expect(harness.text()).toContain('New thread');
   });
 
@@ -69,7 +69,7 @@ describe('App interactions', () => {
     await submit(harness, 'hello from the terminal');
     await vi.waitFor(() => {
       expect(client.sendToChatSession).toHaveBeenCalledWith(
-        'session-studio-meester',
+        'session-studio-foreman',
         'hello from the terminal',
       );
     });
@@ -88,11 +88,35 @@ describe('App interactions', () => {
     await submit(harness, 'back to chat');
     await vi.waitFor(() => {
       expect(client.sendToChatSession).toHaveBeenLastCalledWith(
-        'session-studio-meester',
+        'session-studio-foreman',
         'back to chat',
       );
     });
     expect(client.runTerminalCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('changes the install-wide engagement mode by name or through the picker', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/mode reactive+tasks');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' });
+    });
+    expect(harness.text()).toContain('AI mode → Reactive + tasks.');
+
+    await submit(harness, '/mode full-play');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenLastCalledWith({ aiEngagementMode: 'proactive' });
+    });
+
+    await submit(harness, '/mode');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Choose AI engagement mode');
+      expect(harness.text()).toContain('Read-only');
+      expect(harness.text()).toContain('Full play');
+    });
   });
 
   it('lists and invokes tools while rejecting malformed JSON before the client call', async () => {
@@ -102,12 +126,12 @@ describe('App interactions', () => {
 
     await submit(harness, '@tools');
     await vi.waitFor(() => {
-      expect(client.listSessionTools).toHaveBeenCalledWith('session-studio-meester');
+      expect(client.listSessionTools).toHaveBeenCalledWith('session-studio-foreman');
     });
 
     await submit(harness, '@tool read_file {"path":"README.md"}');
     await vi.waitFor(() => {
-      expect(client.invokeSessionTool).toHaveBeenCalledWith('session-studio-meester', 'read_file', {
+      expect(client.invokeSessionTool).toHaveBeenCalledWith('session-studio-foreman', 'read_file', {
         path: 'README.md',
       });
     });
@@ -136,7 +160,7 @@ describe('App interactions', () => {
 
     await vi.waitFor(() => {
       expect(client.createChatSession).toHaveBeenLastCalledWith({
-        gezelId: 'meester',
+        gezelId: 'archive-foreman',
         projectId: 'archive',
       });
     });
@@ -155,6 +179,7 @@ function mountApp(client: ReturnType<typeof createClient>): InkHarness {
       client={client as unknown as GezelClient}
       initialProjectId="studio"
       initialProjectName="Studio"
+      initialGezelId="foreman"
     />,
   );
   mounted.push(harness);
@@ -164,7 +189,7 @@ function mountApp(client: ReturnType<typeof createClient>): InkHarness {
 async function ready(client: ReturnType<typeof createClient>, harness: InkHarness): Promise<void> {
   await vi.waitFor(() => {
     expect(client.createChatSession).toHaveBeenCalledWith({
-      gezelId: 'meester',
+      gezelId: 'foreman',
       projectId: 'studio',
     });
   });
@@ -206,14 +231,36 @@ function createClient() {
       roleBasedName: 'Developer',
       updatedAt: '2026-08-09T00:00:00.000Z',
     },
+    {
+      id: 'foreman',
+      name: 'Oier',
+      role: 'Voorman',
+      roleBasedName: 'Voorman',
+      templateId: 'voorman',
+      updatedAt: '2026-08-09T00:00:00.000Z',
+    },
+    {
+      id: 'archive-foreman',
+      name: 'Ada',
+      role: 'Voorman',
+      roleBasedName: 'Voorman',
+      templateId: 'voorman',
+      updatedAt: '2026-08-09T00:00:00.000Z',
+    },
   ];
   const projects = [
-    { id: 'studio', name: 'Studio' },
-    { id: 'archive', name: 'Archive', workingDir: '/tmp/archive' },
+    { id: 'studio', name: 'Studio', voormanGezelId: 'foreman' },
+    {
+      id: 'archive',
+      name: 'Archive',
+      workingDir: '/tmp/archive',
+      voormanGezelId: 'archive-foreman',
+    },
   ];
 
   return {
     getConfig: vi.fn().mockResolvedValue(config),
+    updateConfig: vi.fn(async (patch: Partial<ConfigResponse>) => ({ ...config, ...patch })),
     listGezels: vi.fn().mockResolvedValue({ gezels }),
     listProjects: vi.fn().mockResolvedValue({ projects }),
     createChatSession: vi.fn(async ({ gezelId, projectId }) => ({

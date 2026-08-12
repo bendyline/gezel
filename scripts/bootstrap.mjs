@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { workspaceDependenciesReady } from './pnpm-install.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, '..');
 
-const marker = join(repoRoot, 'node_modules', '.pnpm');
-if (existsSync(marker)) process.exit(0);
+if (workspaceDependenciesReady(repoRoot)) process.exit(0);
 
 const probe = spawnSync('pnpm', ['--version'], {
   stdio: 'ignore',
@@ -27,7 +27,7 @@ if (probe.status !== 0) {
   process.exit(1);
 }
 
-console.log('[bootstrap] node_modules missing — waiting for the shared install lock');
+console.log('[bootstrap] dependencies missing or incomplete — waiting for the shared install lock');
 const result = spawnSync(process.execPath, [join(scriptsDir, 'pnpm-install.mjs'), '--if-missing'], {
   stdio: 'inherit',
   cwd: repoRoot,

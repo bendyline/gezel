@@ -23,6 +23,7 @@ import {
   connectForRun,
   connectOwned,
   describeMachineEngineBroker,
+  ensureCliProjectLead,
   findHealthySystemService,
   resolveDevHome,
   resolveRunProject,
@@ -31,6 +32,11 @@ import {
   shouldPreferCanonicalPort,
   validateGlobals,
 } from '../connection.js';
+import {
+  CLI_ENGAGEMENT_MODE_USAGE,
+  cliEngagementModeOption,
+  parseCliEngagementMode,
+} from '../engagement-mode.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import {
   formatNativeList,
@@ -54,7 +60,10 @@ program
     'Skip legacy full-product machine-service compatibility and use the per-user daemon.',
   )
   .option('--home <dir>', 'Use this user-owned Gezel home (default: $GEZEL_HOME or ~/.gezel).')
-  .option('--project [folder]', 'For `run`: ensure this folder is the project (bare flag = cwd).');
+  .option(
+    '--project [folder]',
+    'Use this folder as the active project (default and bare flag: cwd).',
+  );
 
 /** Global flags, read off the root program. */
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
@@ -78,6 +87,7 @@ program.action(async () => {
   resolveDevHome(globals);
   const client = await connectOwned(globals);
   const projectId = await resolveTuiProject(client, globals);
+  const gezelId = await ensureCliProjectLead(client, projectId);
   let projectName = basename(process.cwd()) || 'workspace';
   try {
     const { projects } = await client.listProjects();
@@ -86,7 +96,7 @@ program.action(async () => {
     /* fall back to the folder name */
   }
   const { launchTui } = await import('../tui/index.js');
-  await launchTui({ client, projectId, projectName });
+  await launchTui({ client, projectId, projectName, gezelId });
 });
 
 program
@@ -210,7 +220,11 @@ async function openInBrowser(url: string): Promise<void> {
     if (process.platform === 'win32') {
       // `start` is a cmd builtin; the empty "" is the window title so a
       // URL isn't mistaken for one.
-      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+      spawn('cmd', ['/c', 'start', '', url], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }).unref();
     } else if (process.platform === 'darwin') {
       spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
     } else {
@@ -352,9 +366,33 @@ program
   });
 
 program
+  .command('mode [mode]')
+  .description('Show or set AI activity (read-only, reactive, reactive+tasks, or full-play)')
+  .action(async (requested?: string) => {
+    const next = requested ? parseCliEngagementMode(requested) : null;
+    if (requested && !next) {
+      throw new CliError(
+        `Invalid mode: ${requested}. Usage: gezel mode <${CLI_ENGAGEMENT_MODE_USAGE}>`,
+      );
+    }
+
+    const client = await connectOwned(cliGlobals());
+    if (!next) {
+      const config = await client.getConfig();
+      const current = cliEngagementModeOption(config.aiEngagementMode);
+      console.log(`${current.name} — ${current.description}`);
+      return;
+    }
+
+    const updated = await client.updateConfig({ aiEngagementMode: next });
+    const current = cliEngagementModeOption(updated.aiEngagementMode);
+    console.log(`AI mode → ${current.name} — ${current.description}`);
+  });
+
+program
   .command('run [prompt...]')
   .description('Run a prompt through a gezel and print the reply')
-  .option('-g, --gezel <ref>', 'gezel id or name (default: the meester)')
+  .option('-g, --gezel <ref>', 'gezel id or name (default: this project\'s voorman)')
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
     const prompt = (promptParts ?? []).join(' ').trim();
     if (!prompt) {
@@ -365,11 +403,8 @@ program
     const conn = await connectForRun(cliGlobals());
     try {
       const { client } = conn;
-      const gezelId = opts.gezel ?? (await client.getConfig()).meesterGezelId;
-      if (!gezelId) {
-        throw new CliError('no --gezel given and no default meester is configured.');
-      }
       const projectId = await resolveRunProject(client, cliGlobals());
+      const gezelId = opts.gezel ?? (await ensureCliProjectLead(client, projectId));
       const session = await client.createChatSession({ gezelId, projectId });
       await client.sendToChatSession(session.id, prompt);
       let printed = false;

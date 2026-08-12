@@ -39,7 +39,7 @@ import {
 } from './dispatcher.js';
 import { validateScriptInput } from './input-validator.js';
 import { parseScriptMeta } from './meta.js';
-import { SDK_PACKAGE_NAME, resolveSdkDir } from './sdk.js';
+import { SDK_PACKAGE_NAME, resolveSdkDir, shouldVendorSdkPath } from './sdk.js';
 import { stdlibScriptFile } from './stdlib-source.js';
 
 const log = createLogger('scripts');
@@ -552,7 +552,10 @@ export class ScriptRunner {
     const sdkDir = await resolveSdkDir();
     const target = join(scratch, 'node_modules', SDK_PACKAGE_NAME);
     await mkdir(dirname(target), { recursive: true });
-    await cp(sdkDir, target, { recursive: true, filter: (src) => !src.includes('node_modules') });
+    await cp(sdkDir, target, {
+      recursive: true,
+      filter: (src) => shouldVendorSdkPath(sdkDir, src),
+    });
   }
 
   private async runSandbox(opts: {

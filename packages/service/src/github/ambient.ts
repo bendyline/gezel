@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 /**
  * Ambient GitHub credentials — consulted when the github toolset has no
@@ -132,10 +132,9 @@ function runGhAuthToken(bin: string): Promise<string | null> {
   return new Promise<string | null>((resolve, reject) => {
     const child = spawn(bin, ['auth', 'token', '--hostname', 'github.com'], {
       stdio: ['ignore', 'pipe', 'ignore'],
-      // `gh` is console-subsystem, and console allocation fails outright in
-      // the machine service's Session 0, so start it with DETACHED_PROCESS;
-      // `windowsHide` (CREATE_NO_WINDOW) still allocates one.
-      ...windowsDetachedSpawnOptions(),
+      // `gh` is a short-lived, owned console process. Suppress a Windows
+      // console window without changing its lifetime or process group.
+      ...windowsHeadlessSpawnOptions(),
     });
     let stdout = '';
     let timedOut = false;

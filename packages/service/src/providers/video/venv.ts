@@ -30,7 +30,7 @@ import { exec as nodeExec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { VideoAccelerator } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('video');
 const execAsync = promisify(nodeExec);
@@ -177,9 +177,8 @@ async function hasNvidiaGpu(): Promise<boolean> {
     // driver + device are present. We don't parse — presence is enough.
     const { stdout } = await execAsync('nvidia-smi -L', {
       timeout: 4_000,
-      // No console under the machine service's restricted SID; without this
-      // the probe throws and every Windows box looks CPU-only.
-      ...windowsDetachedSpawnOptions(),
+      // Keep the short-lived probe invisible in interactive Windows sessions.
+      ...windowsHeadlessSpawnOptions(),
     });
     return /GPU\s+\d+:/i.test(stdout);
   } catch {

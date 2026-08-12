@@ -73,9 +73,7 @@ describe('spawnPnpm', () => {
         cwd: workRoot,
         stdio: 'inherit',
         shell: false,
-        // DETACHED_PROCESS on Windows only; on POSIX `detached` means
-        // setsid() and the option is deliberately not applied.
-        ...(process.platform === 'win32' ? { detached: true } : {}),
+        ...(process.platform === 'win32' ? { windowsHide: true } : {}),
       },
     });
   });
@@ -111,7 +109,7 @@ describe('spawnPnpm', () => {
     expect(captured?.command).toBe('"C:\\Program Files\\nodejs\\pnpm.cmd" "install" "--prod"');
     expect(captured?.args).toEqual([]);
     expect(captured?.options).toMatchObject({ shell: true });
-    expect(captured?.options.windowsHide).toBeUndefined();
+    expect(captured?.options.windowsHide).toBe(process.platform === 'win32' ? true : undefined);
     expect(captured?.options.detached).toBeUndefined();
   });
 

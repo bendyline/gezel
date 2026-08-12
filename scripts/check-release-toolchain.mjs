@@ -65,11 +65,65 @@ try {
   );
 }
 
-const publishScript = resolve(repoRoot, 'scripts/publish-package.mjs');
+for (const relativePath of [
+  'scripts/prepare-package.mjs',
+  'scripts/publish-package.mjs',
+  'scripts/workspace-dependencies.mjs',
+  'scripts/check-workspace-dependencies.mjs',
+]) {
+  const path = resolve(repoRoot, relativePath);
+  try {
+    readFileSync(path);
+  } catch {
+    failures.push(`missing ${path} — required by the npm release dependency/version boundary`);
+  }
+}
+
 try {
-  readFileSync(publishScript);
-} catch {
-  failures.push(`missing ${publishScript} — .releaserc.json's exec publishCmd points at it`);
+  const config = JSON.parse(readFileSync(resolve(repoRoot, '.releaserc.json'), 'utf8'));
+  const npmIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/npm',
+  );
+  const execIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/exec',
+  );
+  const gitIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/git',
+  );
+  const exec = config.plugins[execIndex]?.[1] ?? {};
+
+  if (!/scripts\/prepare-package\.mjs \$\{nextRelease\.version\}/.test(exec.prepareCmd ?? '')) {
+    failures.push(
+      '.releaserc.json must run prepare-package.mjs so local dependencies return to workspace:* before commit',
+    );
+  }
+  if (!/scripts\/publish-package\.mjs/.test(exec.publishCmd ?? '')) {
+    failures.push('.releaserc.json must publish through publish-package.mjs / pnpm publish');
+  }
+  if (npmIndex < 0 || npmIndex >= execIndex) {
+    failures.push(
+      '.releaserc.json must run @semantic-release/npm before @semantic-release/exec so package versions are stamped before normalization',
+    );
+  }
+  if (execIndex < 0 || gitIndex < 0 || execIndex >= gitIndex) {
+    failures.push(
+      '.releaserc.json must run @semantic-release/exec before @semantic-release/git so concrete local versions are never committed',
+    );
+  }
+} catch (err) {
+  failures.push(`could not validate .releaserc.json: ${err.message}`);
+}
+
+try {
+  const workflow = readFileSync(resolve(repoRoot, '.github/workflows/publish-npm.yml'), 'utf8');
+  if (!workflow.includes('pnpm check:workspace-deps')) {
+    failures.push('publish-npm.yml must verify the workspace dependency invariant after release');
+  }
+  if (!workflow.includes('pnpm install --lockfile-only --frozen-lockfile')) {
+    failures.push('publish-npm.yml must verify frozen lockfile consistency after release');
+  }
+} catch (err) {
+  failures.push(`could not validate publish-npm.yml: ${err.message}`);
 }
 
 if (failures.length > 0) {

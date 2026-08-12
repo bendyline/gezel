@@ -8,8 +8,10 @@ import test from 'node:test';
 import {
   parsePnpmInstallArgs,
   pnpmInstallLockPath,
+  runPnpmInstallChild,
   runSerializedPnpmInstall,
   withPnpmInstallLock,
+  workspaceDependenciesReady,
 } from './pnpm-install.mjs';
 
 async function fixture(t) {
@@ -78,6 +80,23 @@ test('recovers an orphaned install lock', async (t) => {
 test('bootstrap rechecks the dependency marker after taking the lock', async (t) => {
   const root = await fixture(t);
   await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
+  await writeFile(join(root, 'node_modules', '.modules.yaml'), 'layoutVersion: 5\n');
+  const binSuffix = process.platform === 'win32' ? '.cmd' : '';
+  const viteBin = `vite${binSuffix}`;
+  const vitePath = join(root, 'packages', 'ui', 'node_modules', '.bin', viteBin);
+  await mkdir(join(root, 'packages', 'ui', 'node_modules', '.bin'), { recursive: true });
+  await writeFile(vitePath, '');
+  const electronBin = `electron${binSuffix}`;
+  const electronPath = join(
+    root,
+    'packages',
+    'app',
+    'node_modules',
+    '.bin',
+    electronBin,
+  );
+  await mkdir(join(root, 'packages', 'app', 'node_modules', '.bin'), { recursive: true });
+  await writeFile(electronPath, '');
   const code = await runSerializedPnpmInstall({
     repoRoot: root,
     ifMissing: true,
@@ -86,6 +105,31 @@ test('bootstrap rechecks the dependency marker after taking the lock', async (t)
     },
   });
   assert.equal(code, 0);
+});
+
+test('does not mistake a partial virtual store for a complete workspace install', async (t) => {
+  const root = await fixture(t);
+  await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
+  assert.equal(workspaceDependenciesReady(root), false);
+});
+
+test('stops before pnpm when Windows reports a locked dependency asset', async (t) => {
+  const root = await fixture(t);
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    dependencyLockProbeFn: () => [
+      {
+        appName: 'Visual Studio Code',
+        processName: 'Code',
+        processId: 123,
+        file: 'default_app.asar',
+      },
+    ],
+    spawnPnpmFn: () => {
+      throw new Error('pnpm must not start while a dependency file is locked');
+    },
+  });
+  assert.equal(code, 1);
 });
 
 test('observes a pnpm child that exits while lock metadata is being written', async (t) => {
@@ -102,6 +146,25 @@ test('observes a pnpm child that exits while lock metadata is being written', as
     },
   });
   assert.equal(code, 0);
+});
+
+test('marks pnpm children as serialized so the dev-preinstall guard admits them', async () => {
+  let childEnv;
+  const code = await runPnpmInstallChild({
+    env: { PATH: 'test-path' },
+    spawnPnpmFn: (_args, options) => {
+      childEnv = options.env;
+      const child = new EventEmitter();
+      child.pid = 2_147_483_647;
+      child.killed = false;
+      child.kill = () => true;
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    },
+  });
+  assert.equal(code, 0);
+  assert.equal(childEnv.GEZEL_SERIALIZED_PNPM_INSTALL, '1');
+  assert.equal(childEnv.PATH, 'test-path');
 });
 
 test('parses wrapper-only flags without leaking them to pnpm', () => {

@@ -40,6 +40,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { arch as nodeArch, platform as nodePlatform } from 'node:process';
+import { windowsHeadlessSpawnOptions } from './console-detach.js';
 
 export type LlamaBackend = 'cuda' | 'vulkan' | 'metal' | 'cpu';
 
@@ -301,7 +302,7 @@ function detectDriverBackend(
 
 function commandOkDefault(cmd: string): boolean {
   try {
-    execSync(cmd, { stdio: 'ignore' });
+    execSync(cmd, { stdio: 'ignore', ...windowsHeadlessSpawnOptions() });
     return true;
   } catch {
     return false;

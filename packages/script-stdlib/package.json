@@ -46,7 +46,7 @@
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
-    "@bendyline/gezel-sdk": "1.0.0"
+    "@bendyline/gezel-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

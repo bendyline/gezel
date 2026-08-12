@@ -73,7 +73,7 @@ if (remove) {
 
 if (!existsSync(iconPath)) {
   console.error(`error: icon not found at ${iconPath}`);
-  console.error('       run `pnpm install` from the repo root first.');
+  console.error('       run `pnpm deps:install` from the repo root first.');
   process.exit(1);
 }
 

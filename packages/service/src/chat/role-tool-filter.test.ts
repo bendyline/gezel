@@ -1822,6 +1822,7 @@ describe('computeToolAllowlist', () => {
     // (the team tools above survive), so her cross-project token scope is
     // unchanged.
     expect(crew!.has('start_project')).toBe(false);
+    expect(crew!.has('start_project_from_type')).toBe(false);
     expect(crew!.has('start_job')).toBe(false);
     expect(crew!.has('fetch_repo')).toBe(false);
     expect(crew!.has('create_gezel')).toBe(false);

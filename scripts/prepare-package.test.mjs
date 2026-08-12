@@ -18,11 +18,36 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'gezel-prepare-package-'));
   await mkdir(join(root, 'scripts'), { recursive: true });
   await mkdir(join(root, 'packages', 'core', 'src'), { recursive: true });
+  await mkdir(join(root, 'packages', 'client'), { recursive: true });
   await mkdir(join(root, 'packages', 'cli'), { recursive: true });
   await copyFile(join(here, 'prepare-package.mjs'), join(root, 'scripts', 'prepare-package.mjs'));
+  await copyFile(
+    join(here, 'workspace-dependencies.mjs'),
+    join(root, 'scripts', 'workspace-dependencies.mjs'),
+  );
   // prepare-package imports it to derive the content-compat calendar line.
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
   await writeFile(join(root, 'packages', 'core', 'src', 'index.ts'), DECLARATION);
+  await writeFile(
+    join(root, 'packages', 'core', 'package.json'),
+    `${JSON.stringify({ name: '@bendyline/gezel', version: '0.1.0' }, null, 2)}\n`,
+  );
+  await writeFile(
+    join(root, 'packages', 'client', 'package.json'),
+    `${JSON.stringify({ name: '@bendyline/gezel-client', version: '0.1.0' }, null, 2)}\n`,
+  );
+  await writeFile(
+    join(root, 'packages', 'cli', 'package.json'),
+    `${JSON.stringify(
+      {
+        name: '@bendyline/gezel-cli',
+        version: '0.1.0',
+        dependencies: { '@bendyline/gezel-client': 'workspace:*' },
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return root;
 }
 
@@ -42,6 +67,41 @@ test('does nothing for a package that is not core', async () => {
     const { stdout } = await run(root, 'packages/cli', ['1.2.3']);
     assert.equal(stdout.trim(), '');
     assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('restores workspace dependency specifiers before a non-core release commit', async () => {
+  const root = await fixture();
+  try {
+    const manifestPath = join(root, 'packages', 'cli', 'package.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.dependencies['@bendyline/gezel-client'] = '1.0.0';
+    manifest.dependencies.commander = '^15.0.0';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const { stdout } = await run(root, 'packages/cli', ['1.2.3']);
+    assert.match(stdout, /restored 1 workspace dependency specifier/);
+    const normalized = JSON.parse(await readFile(manifestPath, 'utf8'));
+    assert.equal(normalized.dependencies['@bendyline/gezel-client'], 'workspace:*');
+    assert.equal(normalized.dependencies.commander, '^15.0.0');
+    assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('dry run reports dependency normalization without changing the manifest', async () => {
+  const root = await fixture();
+  try {
+    const manifestPath = join(root, 'packages', 'cli', 'package.json');
+    const source = (await readFile(manifestPath, 'utf8')).replace('workspace:*', '1.0.0');
+    await writeFile(manifestPath, source);
+
+    const { stdout } = await run(root, 'packages/cli', ['1.2.3'], dryRun);
+    assert.match(stdout, /would restore 1 workspace dependency specifier/);
+    assert.equal(await readFile(manifestPath, 'utf8'), source);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -124,6 +184,21 @@ test('the release config still wires prepareCmd at this script', async () => {
     /scripts\/prepare-package\.mjs \$\{nextRelease\.version\}/,
   );
   assert.match(exec[1].publishCmd ?? '', /scripts\/publish-package\.mjs/);
+  const execIndex = config.plugins.indexOf(exec);
+  const npmIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/npm',
+  );
+  const gitIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/git',
+  );
+  assert.ok(
+    npmIndex < execIndex,
+    '@semantic-release/npm must stamp the package version before prepare-package runs',
+  );
+  assert.ok(
+    execIndex < gitIndex,
+    'prepare-package must normalize package.json before git commits it',
+  );
 });
 
 test('the real core source carries the declarations the script rewrites', async () => {

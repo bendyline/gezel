@@ -57,7 +57,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bendyline/gezel-client": "1.0.0",
+    "@bendyline/gezel-client": "workspace:*",
     "undici": "8.9.0"
   },
   "devDependencies": {

@@ -5,6 +5,7 @@ import type { GezelClient } from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   describeMachineEngineBroker,
+  ensureCliProjectLead,
   ensureProjectForFolder,
   fileTokenStorage,
   findHealthySystemService,
@@ -277,13 +278,15 @@ describe('project folder resolution', () => {
 
 describe('command project semantics', () => {
   it.each([undefined, false] as const)(
-    'uses the shared default project for run when --project is %s',
+    'uses the current directory for run when --project is %s',
     async (project) => {
-      const listProjects = vi.fn();
+      const listProjects = vi.fn().mockResolvedValue({
+        projects: [{ id: 'cwd-project', name: 'cwd', workingDir: process.cwd() }],
+      });
       const client = makeClient({ listProjects });
 
-      await expect(resolveRunProject(client, { project })).resolves.toBe('default');
-      expect(listProjects).not.toHaveBeenCalled();
+      await expect(resolveRunProject(client, { project })).resolves.toBe('cwd-project');
+      expect(listProjects).toHaveBeenCalledOnce();
     },
   );
 
@@ -316,5 +319,61 @@ describe('command project semantics', () => {
     const client = makeClient({ listProjects });
 
     await expect(resolveTuiProject(client, { project: folder })).resolves.toBe('explicit-project');
+  });
+});
+
+describe('CLI project lead', () => {
+  it('uses the project voorman instead of the install-wide Meester', async () => {
+    const client = makeClient({
+      getProject: vi.fn().mockResolvedValue({
+        id: 'cwd-project',
+        name: 'cwd',
+        voormanGezelId: 'foreman',
+      }),
+    });
+
+    await expect(ensureCliProjectLead(client, 'cwd-project')).resolves.toBe('foreman');
+  });
+
+  it('repairs an older project by assigning an existing voorman', async () => {
+    const updateProject = vi.fn().mockResolvedValue({
+      id: 'cwd-project',
+      name: 'cwd',
+      voormanGezelId: 'foreman',
+    });
+    const createGezelFromTemplate = vi.fn();
+    const client = makeClient({
+      getProject: vi.fn().mockResolvedValue({ id: 'cwd-project', name: 'cwd' }),
+      listGezels: vi.fn().mockResolvedValue({
+        gezels: [
+          { id: 'meester', name: 'Mira', role: 'Meester' },
+          { id: 'foreman', name: 'Oier', role: 'Voorman' },
+        ],
+      }),
+      createGezelFromTemplate,
+      updateProject,
+    });
+
+    await expect(ensureCliProjectLead(client, 'cwd-project')).resolves.toBe('foreman');
+    expect(updateProject).toHaveBeenCalledWith('cwd-project', {
+      voormanGezelId: 'foreman',
+    });
+    expect(createGezelFromTemplate).not.toHaveBeenCalled();
+  });
+
+  it('uses a solo project gezel without recruiting a second lead', async () => {
+    const listGezels = vi.fn();
+    const client = makeClient({
+      getProject: vi.fn().mockResolvedValue({
+        id: 'game',
+        name: 'Game',
+        mode: 'solo',
+        gezelIds: ['player'],
+      }),
+      listGezels,
+    });
+
+    await expect(ensureCliProjectLead(client, 'game')).resolves.toBe('player');
+    expect(listGezels).not.toHaveBeenCalled();
   });
 });

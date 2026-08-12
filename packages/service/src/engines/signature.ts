@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('engine-signature');
 const execFileAsync = promisify(execFile);
@@ -81,12 +81,10 @@ const defaultRun: Runner = async (cmd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       maxBuffer: 4 * 1024 * 1024,
-      // Signature tools (signtool/powershell/codesign) are console-subsystem,
-      // and the Session 0 machine service can allocate no console, so they
-      // start with DETACHED_PROCESS; `windowsHide` (CREATE_NO_WINDOW) still
-      // allocates one. A failure here would reject a perfectly good bundled
-      // engine as unverifiable.
-      ...windowsDetachedSpawnOptions(),
+      // Native installation verifies four toolkit executables in sequence.
+      // On Windows, detaching these short-lived PowerShell checks gives each
+      // one a new console window; hide the owned children instead.
+      ...windowsHeadlessSpawnOptions(),
     });
     return { code: 0, stdout: String(stdout), stderr: String(stderr) };
   } catch (err) {

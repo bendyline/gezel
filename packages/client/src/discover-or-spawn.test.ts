@@ -243,6 +243,9 @@ describe('discoverOrSpawn', () => {
       clientFactory: fakeClient,
     });
     expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(spawnFn.mock.calls[0]?.[2].windowsHide).toBe(
+      process.platform === 'win32' ? true : undefined,
+    );
     expect(result.outcome).toBe('spawned');
     expect(result.pid).toBe(sampleRuntime.pid);
     // Detached spawns don't return a child handle.

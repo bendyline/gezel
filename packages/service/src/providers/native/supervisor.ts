@@ -26,7 +26,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { listProcessSnapshots } from '@bendyline/gezel-client/node';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('native');
 
@@ -650,13 +650,10 @@ export class NativeEngineSupervisor {
         env: { ...process.env, ...(launch.env ?? {}) },
         ...(launch.cwd ? { cwd: launch.cwd } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Native engines are console-subsystem executables on Windows, so
-        // the loader allocates a console unless we opt out, and the Session 0
-        // service has none to give. DETACHED_PROCESS is the opt-out;
-        // `windowsHide` (CREATE_NO_WINDOW) is not — it still allocates.
-        // It is not what makes this spawn succeed, though: see the
-        // "what this does not fix" note on windowsDetachedSpawnOptions.
-        ...windowsDetachedSpawnOptions(),
+        // The supervisor owns this engine for its entire lifetime. Keep the
+        // Windows console hidden without detaching the process from its
+        // owner; detachment is what surfaces a new terminal window.
+        ...windowsHeadlessSpawnOptions(),
       });
     } catch (err) {
       throw nativeSpawnError(this.logPrefix, launch, err);

@@ -155,6 +155,7 @@ jobs:
       # literally `sharp@x.y.z` — it occupies the `sharp` dependency slot for
       # Transformers.js and is not a gezel release line.
       - name: Release
+        id: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
@@ -165,3 +166,13 @@ jobs:
             args+=(--dry-run)
           fi
           pnpm exec multi-semantic-release "${args[@]}"
+
+      # multi-semantic-release rewrites local dependency ranges during its
+      # prepare phase. prepare-package.mjs restores workspace:* before each
+      # package's release commit; this final gate proves both that invariant
+      # and the committed lockfile still agree after the complete release.
+      - name: Verify post-release workspace state
+        if: ${{ always() && steps.release.outcome != 'skipped' }}
+        run: |
+          pnpm check:workspace-deps
+          pnpm install --lockfile-only --frozen-lockfile

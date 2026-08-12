@@ -41,10 +41,8 @@ const defaultRegQuery: RegQuery = async (key, value) => {
   // NSIS process and brackets its write with `SetRegView 64`, so the value
   // lives in the native view; a redirected read would silently find nothing
   // and we would report "installed" for a machine that has no service.
-  // `windowsHide` is right HERE and nowhere in the daemon: this runs in the
-  // Electron main process, an ordinary interactive session where
-  // CREATE_NO_WINDOW just suppresses reg.exe's console flash. The daemon's
-  // Session 0 has no console to hide — see windowsDetachedSpawnOptions.
+  // This runs in the interactive Electron main process, where reg.exe would
+  // otherwise flash a console window.
   const { stdout } = await execFileAsync('reg.exe', ['query', key, '/v', value, '/reg:64'], {
     windowsHide: true,
   });

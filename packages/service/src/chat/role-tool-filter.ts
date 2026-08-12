@@ -183,6 +183,7 @@ const VOORMAN_STRIPPED_MEESTER_TOOLS: ReadonlySet<string> = new Set([
   'list_gilde',
   'list_projects',
   'start_project',
+  'start_project_from_type',
   'start_job',
   'fetch_repo',
   'fetch_diff',

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Stamp the product version into `packages/core/src/index.ts` and rebuild core,
- * invoked by `@semantic-release/exec`'s `prepareCmd` once multi-semantic-release
- * has computed a package's next version.
+ * Prepare one package after multi-semantic-release has computed its next
+ * version: restore local dependency declarations to `workspace:*`, then stamp
+ * the product version into `packages/core/src/index.ts` when preparing core.
  *
  * WHY THIS EXISTS: `GEZEL_VERSION` is a source constant, not a read of
  * `package.json`, because core is bundled for the browser too and cannot reach
@@ -14,9 +14,11 @@
  * `/api/health` (which the UI renders as "development build"), the system
  * diagnostics, the OpenAPI document, and the engine-download User-Agent.
  *
- * Only `packages/core` does anything here. semantic-release runs this with cwd
- * set to the package directory, once per package, so everything else is a
- * deliberate no-op rather than a second version surface to keep in sync.
+ * semantic-release runs this with cwd set to the package directory, once per
+ * package. Dependency normalization is required for every package because
+ * multi-semantic-release replaces workspace ranges with concrete versions
+ * before calling configured prepare plugins. Only `packages/core` performs
+ * the additional source stamp and rebuild.
  *
  * The stamped source is NOT committed — `.releaserc.json`'s git assets are
  * `CHANGELOG.md` and `package.json` only. That matches
@@ -31,17 +33,54 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
+import { normalizeWorkspaceManifest, readWorkspaceManifests } from './workspace-dependencies.mjs';
 
 const version = process.argv[2];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = process.cwd();
-
-if (basename(packageDir) !== 'core') process.exit(0);
+const dryRun = process.env.GEZEL_RELEASE_DRY_RUN === '1';
 
 if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\w.]+)?$/.test(version ?? '')) {
   console.error(`prepare-package: expected a version argument, got ${JSON.stringify(version)}`);
   process.exit(1);
 }
+
+// multi-semantic-release deliberately replaces local workspace ranges with
+// concrete versions before it calls semantic-release's prepare plugins. That
+// is correct for npm-oriented monorepos, but Gezel delegates this conversion
+// to `pnpm publish`, which rewrites workspace:* only in the packed manifest.
+// Restore the source invariant before @semantic-release/git commits this
+// package.json; sibling package versions remain stamped on disk, so pnpm still
+// resolves every tarball against the versions selected for this release.
+let currentRecord;
+let workspaceNames;
+try {
+  const workspace = readWorkspaceManifests(repoRoot);
+  currentRecord = workspace.records.find(
+    ({ path }) => resolve(path) === resolve(packageDir, 'package.json'),
+  );
+  workspaceNames = workspace.names;
+} catch (err) {
+  console.error(`prepare-package: could not inspect workspace manifests: ${err.message}`);
+  process.exit(1);
+}
+
+if (!currentRecord) {
+  console.error(`prepare-package: ${packageDir} is not a Gezel workspace package`);
+  process.exit(1);
+}
+
+const dependencyChanges = normalizeWorkspaceManifest(currentRecord, workspaceNames, {
+  write: !dryRun,
+});
+if (dependencyChanges.length > 0) {
+  const action = dryRun ? 'would restore' : 'restored';
+  console.log(
+    `prepare-package: ${action} ${dependencyChanges.length} workspace dependency specifier(s) in ${currentRecord.manifest.name}`,
+  );
+}
+
+if (basename(packageDir) !== 'core') process.exit(0);
 
 const sourcePath = resolve(repoRoot, 'packages/core/src/index.ts');
 const source = readFileSync(sourcePath, 'utf8');
@@ -65,7 +104,7 @@ if (!compatPattern.test(source)) {
 }
 const contentCompat = calVerPrefix();
 
-if (process.env.GEZEL_RELEASE_DRY_RUN === '1') {
+if (dryRun) {
   console.log(
     `prepare-package: [dry run] would stamp GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}' and rebuild core`,
   );

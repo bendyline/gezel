@@ -5,7 +5,7 @@ import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'n
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const execFileAsync = promisify(execFile);
 const log = createLogger('assets');
@@ -497,7 +497,7 @@ async function resetWindowsAclToInherited(target: string): Promise<void> {
   try {
     await execFileAsync('icacls.exe', [target, '/reset', '/T', '/L', '/Q'], {
       maxBuffer: 256 * 1024,
-      ...windowsDetachedSpawnOptions(),
+      ...windowsHeadlessSpawnOptions(),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

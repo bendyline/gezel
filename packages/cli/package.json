@@ -51,11 +51,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bendyline/gezel": "1.0.0",
-    "@bendyline/gezel-app-sdk": "1.0.0",
-    "@bendyline/gezel-catalog": "1.0.0",
-    "@bendyline/gezel-client": "1.0.0",
-    "@bendyline/gezel-service": "1.0.0",
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-app-sdk": "workspace:*",
+    "@bendyline/gezel-catalog": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-service": "workspace:*",
     "@bendyline/squisq": "2.7.1",
     "@bendyline/squisq-formats": "2.4.3",
     "@bendyline/squisq-react": "2.7.1",

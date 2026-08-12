@@ -11,6 +11,8 @@ confirmModulesPurge: false
 # Codex tasks share this checkout, and concurrent installers can rewrite the
 # live node_modules tree out from under running tests. Intentional installs go
 # through `pnpm deps:install`, which holds the cross-process checkout lock.
+# The root pnpm:devPreinstall hook rejects an accidental bare local install
+# before pnpm begins changing node_modules; CI is isolated and exempt.
 verifyDepsBeforeRun: warn
 
 # The packageManager pin in package.json is authoritative. Warn immediately

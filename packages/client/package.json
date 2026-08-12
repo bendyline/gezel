@@ -57,7 +57,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bendyline/gezel": "1.0.0",
+    "@bendyline/gezel": "workspace:*",
     "undici": "8.9.0",
     "zod": "^4.4.3"
   },

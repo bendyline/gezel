@@ -2,7 +2,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { type PnpmInvocation, resolvePnpmInvocation } from '@bendyline/gezel';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { winShellSafe } from './win-shell.js';
 
 /**
@@ -17,12 +17,8 @@ import { winShellSafe } from './win-shell.js';
  *     exact supply-chain vector we're eliminating. Any legitimate
  *     post-install work (e.g. Playwright's chromium download) is invoked
  *     explicitly by the service in its own dedicated step.
- *  3. **Console-free Windows launches** — the machine-wide daemon runs in
- *     non-interactive Session 0, where console allocation fails outright.
- *     Console-subsystem children are therefore started with
- *     DETACHED_PROCESS, which asks for none. This used to ask for
- *     CREATE_NO_WINDOW instead (Node's `windowsHide`), which still
- *     allocates a console.
+ *  3. **Console-free Windows launches** — package installs are owned by the
+ *     daemon, so their console windows are hidden without detaching them.
  */
 
 /** Buffered result of a pnpm run. */
@@ -93,7 +89,7 @@ export function normalizeBundledPnpmPath(): string | undefined {
 /**
  * Private spawn-ready `{ command, args }` for a resolved pnpm invocation.
  *
- * Kept behind `spawnPnpm` so cmd.exe-safe quoting and the Session 0
+ * Kept behind `spawnPnpm` so cmd.exe-safe quoting and the Windows
  * headless-launch invariant cannot drift apart. Node escapes nothing under
  * `shell: true`, so an unquoted command or argument containing a space is
  * split by cmd.exe — the failure mode being `'C:\Program' is not recognized`.
@@ -109,12 +105,11 @@ export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide' | 'det
 
 /**
  * The only supported way to spawn a resolved pnpm invocation from the
- * service. In addition to applying cmd.exe-safe quoting, direct executable
- * launches use DETACHED_PROCESS on Windows, which is what the Session 0
- * machine service needs. The shell fallback is development-only: Windows
- * drops piped stdout/stderr when cmd.exe is detached, so that path must stay
- * attached or callers receive a correct exit code with an empty log. Packaged
- * services use the bundled Node + pnpm script path and never need cmd.exe.
+ * service. In addition to applying cmd.exe-safe quoting, Windows launches
+ * hide their console window while staying attached to the daemon. This also
+ * works for the development-only shell fallback without dropping its piped
+ * stdout/stderr. Packaged services use the bundled Node + pnpm script path
+ * and normally never need cmd.exe.
  *
  * Keep `shell`, `windowsHide` and `detached` out of the caller-owned options:
  * all three are invocation/runtime invariants, not per-call policy.
@@ -128,7 +123,7 @@ export function spawnPnpm(
   return spawnImpl(target.command, target.args, {
     ...options,
     shell: invocation.shell,
-    ...(invocation.shell ? {} : windowsDetachedSpawnOptions()),
+    ...windowsHeadlessSpawnOptions(),
   });
 }
 

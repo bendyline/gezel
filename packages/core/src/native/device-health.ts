@@ -11,7 +11,7 @@
 
 import { execFile as nodeExecFile } from 'node:child_process';
 import { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
-import { windowsDetachedSpawnOptions } from './console-detach.js';
+import { windowsHeadlessSpawnOptions } from './console-detach.js';
 
 export { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
 
@@ -505,13 +505,10 @@ function defaultCommandRunner(
     nodeExecFile(
       command,
       args,
-      // nvidia-smi / amd-smi are console-subsystem, and the Session 0 service
-      // has no console for the loader to allocate from, so they start with
-      // DETACHED_PROCESS; `windowsHide` (CREATE_NO_WINDOW) still allocates
-      // one. When these probes fail the daemon sees no GPU at all and plans
-      // capacity against system RAM — the symptom that made a token-level
-      // spawn denial look like a GPU-detection bug.
-      { timeout: timeoutMs, ...windowsDetachedSpawnOptions() },
+      // Hardware CLIs are short-lived, owned children. Hide their Windows
+      // console instead of detaching them; detachment gives each probe its
+      // own console window and produces a visible terminal flash.
+      { timeout: timeoutMs, ...windowsHeadlessSpawnOptions() },
       (error, stdout, stderr) => {
         if (error) {
           reject(error);

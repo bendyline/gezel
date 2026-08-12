@@ -284,7 +284,7 @@ real model work.
 
 ## Prerequisites
 
-- A built workspace: `pnpm install && pnpm build`.
+- A built workspace: `pnpm deps:install && pnpm build`.
 - **For llama.cpp trials only** — a `gezel-llama-server` binary (legacy
   `llama-server` also resolves) at `native/build/<platform>-<backend>/` or
   `packages/app/native-bin/<platform>-<backend>/` (CUDA preferred, then Vulkan,

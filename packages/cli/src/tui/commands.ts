@@ -1,4 +1,5 @@
 import type { CraftbookSummary } from '@bendyline/gezel';
+import { CLI_ENGAGEMENT_MODES } from '../engagement-mode.js';
 
 /**
  * Parse a line of TUI input into an intent. Chat mode treats bare text as a
@@ -25,6 +26,7 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'help', description: 'show the command reference' },
   { name: 'project', description: 'switch active project' },
   { name: 'gezel', description: 'switch active gezel' },
+  { name: 'mode', description: 'set AI activity: read-only through full play' },
   { name: 'model', description: 'switch engine and model' },
   { name: 'thread', description: 'switch the active chat thread' },
   { name: 'task', description: 'list and manage project tasks' },
@@ -66,13 +68,25 @@ const NIGHT_SHIFT_SUBCOMMANDS = [
 
 /**
  * Suggestions for the prompt's slash-command wordwheel. `/start ` changes
- * the wheel to the active project's craftbook inventory; `/nightshift `
- * changes it to the three Night Shift actions.
+ * the wheel to the active project's craftbook inventory; `/mode ` and
+ * `/nightshift ` change it to their finite action lists.
  */
 export function suggestSlashWordwheel(
   input: string,
   craftbooks: ReadonlyArray<CraftbookSummary>,
 ): ReadonlyArray<SlashWordwheelSuggestion> {
+  const modeMatch = input.match(/^\/mode\s+(.*)$/i);
+  if (modeMatch) {
+    const query = (modeMatch[1] ?? '').trim().toLowerCase();
+    return CLI_ENGAGEMENT_MODES.filter((option) => option.name.startsWith(query)).map((option) => ({
+      key: `mode:${option.name}`,
+      label: `/mode ${option.name}`,
+      description: option.description,
+      submit: `/mode ${option.name}`,
+      completion: `/mode ${option.name}`,
+    }));
+  }
+
   const nightShiftMatch = input.match(/^\/nightshift\s+(.*)$/i);
   if (nightShiftMatch) {
     const query = (nightShiftMatch[1] ?? '').trim().toLowerCase();

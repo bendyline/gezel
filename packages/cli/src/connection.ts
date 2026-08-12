@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { HealthResponse, ServiceRole } from '@bendyline/gezel';
+import { pickRandomNameWithGender, type HealthResponse, type ServiceRole } from '@bendyline/gezel';
 import {
   GezelSdkError,
   type LocalAuthorizedConnection,
@@ -31,7 +31,7 @@ export interface CliGlobals {
   token?: string;
   /** Gezel home dir override (else $GEZEL_HOME / ~/.gezel). */
   home?: string;
-  /** For `run`: a folder to ensure as the project, or `true` for the cwd. */
+  /** A folder to ensure as the command project, or `true` for the cwd. */
   project?: string | boolean;
   /** Skip legacy full-product system-service compatibility and use the per-user daemon. */
   standalone?: boolean;
@@ -689,11 +689,48 @@ export async function ensureProjectForFolder(
   return created.id;
 }
 
-/** Resolve the project id for a `run`: `--project` folder/cwd ensured, else `default`. */
+/**
+ * Resolve (and, for an old/incomplete project record, repair) the lead the
+ * CLI should open on. The terminal is a project workspace, so its front door
+ * is the project's voorman rather than the install-wide Meester.
+ *
+ * New projects already get a voorman synchronously in the service. The
+ * recovery path here covers older projects and interrupted first-time setup
+ * without ever falling back to the Meester and silently regaining the
+ * cross-project `start_project` surface.
+ */
+export async function ensureCliProjectLead(
+  client: GezelClient,
+  projectId: string,
+): Promise<string> {
+  const project = await client.getProject(projectId);
+  if (project.voormanGezelId) return project.voormanGezelId;
+
+  // Solo projects intentionally have no separate voorman: their one gezel is
+  // the lead. This also keeps an explicit `/project` switch to a game/chat
+  // project from recruiting a confusing second character.
+  if (project.mode === 'solo' && project.gezelIds?.[0]) return project.gezelIds[0];
+
+  const { gezels } = await client.listGezels();
+  let voorman = gezels.find(
+    (gezel) =>
+      gezel.templateId === 'voorman' || gezel.role?.trim().toLowerCase() === 'voorman',
+  );
+  if (!voorman) {
+    const { name, gender } = pickRandomNameWithGender();
+    voorman = await client.createGezelFromTemplate('voorman', { name, gender });
+  }
+  const updated = await client.updateProject(projectId, { voormanGezelId: voorman.id });
+  if (!updated.voormanGezelId) {
+    throw new CliError(`project "${updated.name}" has no voorman`);
+  }
+  return updated.voormanGezelId;
+}
+
+/** Resolve the command project: the current directory unless explicitly overridden. */
 export async function resolveRunProject(client: GezelClient, globals: CliGlobals): Promise<string> {
   const p = globals.project;
-  if (p === undefined || p === false) return 'default';
-  const folder = p === true ? process.cwd() : p;
+  const folder = p === undefined || p === true || p === false ? process.cwd() : p;
   return ensureProjectForFolder(client, folder);
 }
 
