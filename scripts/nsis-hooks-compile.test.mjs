@@ -64,6 +64,13 @@ async function compileNsis({ makensis, script, defines, output }) {
         stderr: Buffer.concat(stderr).toString('utf8'),
       });
     });
+    // The script is written to a child that may already be gone: makensis
+    // closes stdin the moment it rejects its arguments, and a failed exec
+    // never opens it at all. That write races the `error`/`close` events, so
+    // an unhandled EPIPE here surfaced INSTEAD of makensis's own diagnostics —
+    // turning every early exit into an opaque `write EPIPE` stack. Swallow it
+    // and let the exit code plus stderr below say what actually went wrong.
+    child.stdin.on('error', () => {});
     child.stdin.end(script);
   });
 
@@ -85,6 +92,40 @@ function isMissingRosettaSpawnError(error) {
   );
 }
 
+/**
+ * Whether this host can actually execute the makensis electron-builder ships.
+ *
+ * electron-builder publishes macOS/Linux/Windows makensis binaries for **x64
+ * only**. On an arm64 Linux host (a DGX Spark workstation, an arm64 CI runner)
+ * the exec simply fails, which is a property of the toolchain rather than of
+ * Gezel's NSIS include — so the contract is unverifiable here, not violated.
+ * Probing beats an `arch === 'x64'` check because it also passes on arm64 hosts
+ * that do have qemu-user/binfmt wired up.
+ */
+async function makensisRunsOnThisHost(makensis) {
+  return await new Promise((resolve) => {
+    const child = spawn(makensis.path, ['-VERSION'], {
+      env: { ...process.env, ...(makensis.env ?? {}) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const out = [];
+    child.stdout.on('data', (chunk) => out.push(chunk));
+    child.stderr.on('data', (chunk) => out.push(chunk));
+    child.on('error', (err) => resolve({ ok: false, detail: err.message }));
+    child.on('close', () => {
+      // Keyed on the version string, not on exec success or exit code, because
+      // neither is trustworthy here. `execvp` falls back to /bin/sh when
+      // `execve` returns ENOEXEC, so a foreign-arch binary is handed to the
+      // shell, which chokes on the ELF bytes and exits non-zero — no `error`
+      // event is ever emitted. That looked exactly like a compile failure.
+      // A real makensis answers `-VERSION` with e.g. `v3.0.4.1`; nothing else
+      // does, so a match means the toolchain genuinely ran.
+      const detail = Buffer.concat(out).toString('utf8').trim();
+      resolve({ ok: /^v?\d+\.\d+/.test(detail), detail: detail.split('\n')[0] ?? '' });
+    });
+  });
+}
+
 test('custom NSIS hooks compile in electron-builder uninstaller and installer passes', async (t) => {
   const workDir = await mkdtemp(join(tmpdir(), 'gezel-nsis-contract-'));
   try {
@@ -92,6 +133,23 @@ test('custom NSIS hooks compile in electron-builder uninstaller and installer pa
       getMakeNsisPath(null, null),
       getNsisPluginsPath(null, null),
     ]);
+
+    const probe = await makensisRunsOnThisHost(makensis);
+    // On x64 the shipped binary is supposed to run, so a failed probe there is
+    // a real breakage (bad download, missing exec bit) and must fail loudly.
+    // This keeps the skip unreachable on CI's ubuntu-latest x64 runners — the
+    // contract can never quietly stop being enforced where it matters.
+    if (!probe.ok && process.arch !== 'x64') {
+      // Not a pass. CI runs this on ubuntu-latest (x64), which is where the
+      // contract is actually enforced; skipping keeps an arm64 workstation
+      // from reporting a toolchain gap as a Gezel regression. The probe output
+      // is included so a genuinely broken makensis is still diagnosable rather
+      // than quietly vanishing from the suite.
+      t.skip(
+        `electron-builder ships makensis for x64 only and it did not run on ${process.platform}/${process.arch} — needs an x64 host or qemu-user/binfmt. Probe said: ${probe.detail || '(no output)'}`,
+      );
+      return;
+    }
 
     const messagesDir = join(workDir, 'messages');
     const vcRedistDir = join(workDir, 'dist', 'vc-redist');
