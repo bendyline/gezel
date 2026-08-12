@@ -132,6 +132,18 @@ export class ToolRepeatTracker {
     if (count >= this.hardAbortAt) {
       return { output, shouldAbort: true, count };
     }
+    if (toolName === 'suggest_craftbook' && count >= 2) {
+      const craftbookId = recommendedCraftbookId(output);
+      const selected = craftbookId ? ` \`${craftbookId}\`` : '';
+      const call = craftbookId
+        ? ` Call \`invoke_craftbook({ craftbookId: ${JSON.stringify(craftbookId)} })\` now.`
+        : ' Call `invoke_craftbook` now with the craftbook id from the previous result.';
+      return {
+        output: `[runtime] Already selected craftbook${selected}.${call} Do not call \`suggest_craftbook\` again.`,
+        shouldAbort: false,
+        count,
+      };
+    }
     if (count >= this.softWarningAt) {
       const target = repeatTargetDescription(toolName, args, count);
       if (WRITE_TOOL_NAMES.has(toolName)) {
@@ -290,6 +302,19 @@ export class ToolRepeatTracker {
       ToolRepeatTracker.buildUserMessage(),
     );
   }
+}
+
+function recommendedCraftbookId(output: string): string | null {
+  const patterns = [
+    /"recommendedCraftbook"\s*:\s*\{[^}]*"id"\s*:\s*"([^"]+)"/,
+    /"recommendedCraftbookId"\s*:\s*"([^"]+)"/,
+    /invoke_craftbook\(\{\s*craftbookId:\s*"([^"]+)"/,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(output);
+    if (match?.[1]) return match[1];
+  }
+  return null;
 }
 
 function isSourceEditToolLoop(toolName: string, args: unknown): boolean {
