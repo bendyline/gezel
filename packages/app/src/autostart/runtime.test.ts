@@ -61,16 +61,19 @@ describe('resolveAutostartNodePath', () => {
     expect(lookupNodeOnPath).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the packaged runtime disappeared or lost execute permission', async () => {
+  it('fails closed when the packaged runtime disappeared', async () => {
     const bundledNodePath = installedNodePath(home);
     await expect(
       resolveAutostartNodePath({ packaged: true, home, bundledNodePath }),
     ).rejects.toThrow(/verified bundled Node runtime is unavailable/i);
+  });
 
+  it('fails closed when the packaged runtime lost execute permission on Unix', async () => {
+    const bundledNodePath = installedNodePath(home, 'linux');
     await mkdir(dirname(bundledNodePath), { recursive: true });
     await writeFile(bundledNodePath, 'node');
     await expect(
-      resolveAutostartNodePath({ packaged: true, home, bundledNodePath }),
+      resolveAutostartNodePath({ packaged: true, home, bundledNodePath, platform: 'linux' }),
     ).rejects.toThrow(/not executable/i);
   });
 

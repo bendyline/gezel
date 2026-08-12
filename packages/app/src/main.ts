@@ -495,7 +495,8 @@ const GEZEL_CSP = [
   "frame-src 'self'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  "webrtc 'block'",
+  // Chromium does not yet implement the draft CSP `webrtc` directive. Do not
+  // emit it: Chromium reports it as a renderer error and ignores it anyway.
 ].join('; ');
 
 /**

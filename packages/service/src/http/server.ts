@@ -240,7 +240,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           "frame-src 'self'",
           "frame-ancestors 'none'",
           "form-action 'self'",
-          "webrtc 'block'",
+          // Chromium does not yet implement the draft CSP `webrtc` directive.
+          // An unknown directive only produces console noise; it is not a guard.
         ].join('; '),
       );
       c.res.headers.set('x-frame-options', 'DENY');

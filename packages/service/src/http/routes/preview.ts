@@ -74,7 +74,8 @@ export function previewContentSecurityPolicy(allowExternalNetwork: boolean): str
     "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'none'",
-    `webrtc '${allowExternalNetwork ? 'allow' : 'block'}'`,
+    // Chromium does not yet implement the draft CSP `webrtc` directive. Keep
+    // it out of preview responses until it can be enforced instead of ignored.
     'sandbox allow-scripts',
   ].join('; ');
 }

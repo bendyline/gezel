@@ -24,6 +24,11 @@
       "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
       "craftbookId": "proj-skill-tune-model",
       "scriptNames": []
+    },
+    ".claude\\skills\\release-note\\SKILL.md": {
+      "hash": "b28bb7e6c844d1875e54c86752f78da36cf5a3bb19a2f645dfbd15a065bdf9b4",
+      "craftbookId": "proj-skill-release-note",
+      "scriptNames": []
     }
   }
 }
