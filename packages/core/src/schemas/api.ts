@@ -5374,6 +5374,13 @@ export const WorkspaceIndexStatusSchema = z.object({
       embedded: z.number().int().nonnegative(),
       pending: z.number().int().nonnegative(),
       /**
+       * Files whose summarize failed MAX_ENRICH_ATTEMPTS times for the
+       * current content hash — off the work list until the file changes.
+       * Surfaced so `summarized` stalling short of `eligible` reads as
+       * "skipped after repeated failures", not a scan that never finishes.
+       */
+      skipped: z.number().int().nonnegative().optional(),
+      /**
        * Images/audio still awaiting an AI shadow description. The drive works
        * this tier BEFORE summaries, so a fresh full scan can be busy here
        * while `summarized` sits still — surface it, or the scan looks stuck.

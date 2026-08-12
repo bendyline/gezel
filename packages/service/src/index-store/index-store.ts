@@ -685,6 +685,7 @@ export class IndexStore {
     summarized: number;
     embedded: number;
     pending: number;
+    skipped: number;
     shadowsPending: number;
     embedModel?: string;
   } {
@@ -700,12 +701,21 @@ export class IndexStore {
       `SELECT COUNT(*) AS n FROM files f JOIN enrichments e ON e.content_hash = f.hash
        WHERE e.embedded_at IS NOT NULL AND ${ELIGIBLE}`,
     );
+    // Attempt-capped files: dropped from the work list but never summarized,
+    // so `summarized` can never reach `eligible` while these exist. Counted
+    // separately or the status reads as forever-pending with no explanation.
+    const skipped = count(
+      `SELECT COUNT(*) AS n FROM files f JOIN enrichments e ON e.content_hash = f.hash
+       WHERE e.embedded_at IS NULL AND COALESCE(e.attempts, 0) >= ${MAX_ENRICH_ATTEMPTS}
+         AND ${ELIGIBLE}`,
+    );
     const embedModel = this.getMeta('embed_model');
     return {
       eligible,
       summarized,
       embedded,
       pending: this.countNeedingEnrichment(),
+      skipped,
       shadowsPending: this.countNeedingAiShadow(),
       ...(embedModel ? { embedModel } : {}),
     };
@@ -744,13 +754,18 @@ export class IndexStore {
    * `attempts` reaches MAX_ENRICH_ATTEMPTS. A later success (markEnriched's
    * INSERT OR REPLACE) resets the row.
    */
-  markEnrichAttempt(contentHash: string): void {
+  markEnrichAttempt(contentHash: string): number {
     this.db
       .prepare(
         `INSERT INTO enrichments (content_hash, embedded_at, attempts) VALUES (?, NULL, 1)
          ON CONFLICT(content_hash) DO UPDATE SET attempts = COALESCE(enrichments.attempts, 0) + 1`,
       )
       .run(contentHash);
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM enrichments WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
   }
 
   /**

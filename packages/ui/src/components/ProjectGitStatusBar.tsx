@@ -830,6 +830,9 @@ export function ProjectGitStatusBar({
                     <dt>AI summaries</dt>
                     <dd>
                       {enrichment.summarized} of {enrichment.eligible} files
+                      {(enrichment.skipped ?? 0) > 0
+                        ? ` · ${enrichment.skipped} skipped after repeated failures`
+                        : ''}
                     </dd>
                   </div>
                 )}

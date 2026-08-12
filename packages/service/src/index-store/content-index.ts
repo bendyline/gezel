@@ -1120,6 +1120,7 @@ export class ContentIndex {
     summarized: number;
     embedded: number;
     pending: number;
+    skipped: number;
     shadowsPending: number;
     embedModel?: string;
   } | null> {

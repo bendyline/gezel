@@ -1,11 +1,16 @@
 import { readFile } from 'node:fs/promises';
-import { GEZEL_VERSION, type GezelSummary, type ProviderName } from '@bendyline/gezel';
+import { GEZEL_VERSION, type GezelSummary, type ProviderName, createLogger } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
-import type { FileRecord, IndexProvenance, IndexStore } from './index-store.js';
+import {
+  type FileRecord,
+  type IndexProvenance,
+  type IndexStore,
+  MAX_ENRICH_ATTEMPTS,
+} from './index-store.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -18,6 +23,8 @@ import type { FileRecord, IndexProvenance, IndexStore } from './index-store.js';
  *   - `summarize(prompt)` → summary text, or '' to skip (e.g. no LLM)
  *   - `embed(texts)`      → one vector per text
  */
+
+const log = createLogger('enrich');
 
 export interface EnrichDeps {
   summarize: (prompt: string) => Promise<string>;
@@ -179,7 +186,16 @@ export async function buildEnrichDeps(
         jobLabel: 'index enrichment',
         ...(opts.ambient ? { ambient: true } : {}),
       })
-      .catch(() => '');
+      .catch((err) => {
+        // A thrown one-shot logs nothing on its own — surface the reason here
+        // or a repeatedly-failing file is undiagnosable (the 3157-of-3160
+        // incident: three markup-heavy files burned their attempt caps with
+        // zero log lines).
+        log.warn(
+          `summarize one-shot failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return '';
+      });
   const review = (prompt: string) =>
     chat
       .oneShotCompletion(prompt, reviewTimeoutMs, {
@@ -195,7 +211,10 @@ export async function buildEnrichDeps(
         jobLabel: 'index review',
         ...(opts.ambient ? { ambient: true } : {}),
       })
-      .catch(() => '');
+      .catch((err) => {
+        log.warn(`review one-shot failed: ${err instanceof Error ? err.message : String(err)}`);
+        return '';
+      });
   // Guarded for test fakes that stub ChatManager structurally.
   const oneShotWidth =
     typeof chat.oneShotQueueWidth === 'function'
@@ -466,7 +485,17 @@ export async function enrichFile(
   // no local model consume the gate as before: there is nothing to retry, and
   // embeddings-only coverage is the intended steady state there.
   const summaryFailed = !result.summarized && Boolean(deps.model) && Boolean(content?.trim());
-  if (summaryFailed) store.markEnrichAttempt(file.hash);
-  else store.markEnriched(file.hash);
+  if (summaryFailed) {
+    const attempts = store.markEnrichAttempt(file.hash);
+    if (attempts >= MAX_ENRICH_ATTEMPTS) {
+      log.warn(
+        `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,
+      );
+    } else {
+      log.warn(`summarize produced nothing for ${file.path} (attempt ${attempts}/${MAX_ENRICH_ATTEMPTS})`);
+    }
+  } else {
+    store.markEnriched(file.hash);
+  }
   return result;
 }
