@@ -5354,6 +5354,13 @@ export const WorkspaceIndexStatusSchema = z.object({
    */
   aiScanPending: z.boolean().optional(),
   /**
+   * Present while an AI indexing drive is running for this project — `full`
+   * occupies the local engine, `background` stays ambient behind live chat.
+   * Server truth for "scan running" affordances: a drive may have been
+   * started by another window, the night-shift catch-up, or the API.
+   */
+  aiDrive: z.enum(['background', 'full']).optional(),
+  /**
    * Enrichment coverage. `summarized` counts real summaries (summaries
    * table), not the enrichment gate — the gate also carries failed-attempt
    * rows awaiting a capped retry. Present when a content index exists on
@@ -5365,6 +5372,12 @@ export const WorkspaceIndexStatusSchema = z.object({
       summarized: z.number().int().nonnegative(),
       embedded: z.number().int().nonnegative(),
       pending: z.number().int().nonnegative(),
+      /**
+       * Images/audio still awaiting an AI shadow description. The drive works
+       * this tier BEFORE summaries, so a fresh full scan can be busy here
+       * while `summarized` sits still — surface it, or the scan looks stuck.
+       */
+      shadowsPending: z.number().int().nonnegative().optional(),
       /** The embedding model that built these vectors (index `meta` stamp). */
       embedModel: z.string().optional(),
       /**

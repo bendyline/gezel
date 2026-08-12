@@ -166,13 +166,14 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       },
       deviceSafety: { mode: 'guard' },
     } as ConfigResponse);
-    render(<EngineStatusPill />);
+    const { container } = render(<EngineStatusPill />);
 
     await user.click(
       await screen.findByRole('button', {
         name: /DwarfStar.*DeepSeek V4 Flash/i,
       }),
     );
+    expect(container.querySelector('.engine-pill-popover')).toHaveStyle({ position: 'fixed' });
     const policy = screen.getByRole('group', { name: 'Machine health policy' });
     expect(within(policy).getByRole('button', { name: 'Observe' })).toHaveAttribute(
       'aria-pressed',

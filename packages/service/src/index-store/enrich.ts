@@ -54,8 +54,10 @@ export interface EnrichTargetOptions {
 }
 
 /**
- * Resolve the local-first model used by autonomous indexing work. A cloud
- * target is accepted only through the explicit Night Shift override.
+ * Resolve the model used by autonomous indexing work. Local-first: absent an
+ * explicit choice, only local engines are considered. A cloud target is
+ * accepted through exactly two explicit acts — the Night Shift override, or
+ * a provider AND model both pinned on the Boekwachter's own frontmatter.
  */
 export async function resolveEnrichTarget(
   store: Store,
@@ -72,16 +74,12 @@ export async function resolveEnrichTarget(
       model = nightModel;
     }
   }
-  // A Boekwachter may pin their own small local model. Never silently send
-  // workspace indexing to a cloud provider: cloud use remains an explicit
-  // Night Shift override, while the gezel's about.md still supplies the
-  // personality on whichever local engine is selected.
-  if (
-    (!providerName || !model) &&
-    opts.boekwachter?.provider &&
-    ENRICH_LOCAL_PROVIDERS.includes(opts.boekwachter.provider) &&
-    opts.boekwachter.model
-  ) {
+  // A Boekwachter with BOTH provider and model pinned in frontmatter gets
+  // exactly what the user configured — cloud included. Writing both fields
+  // on the gezel IS the explicit opt-in; what stays forbidden is silently
+  // routing workspace indexing to a cloud default the user never chose for
+  // this work, which is why an incomplete pin falls through to local-first.
+  if ((!providerName || !model) && opts.boekwachter?.provider && opts.boekwachter.model) {
     providerName = opts.boekwachter.provider;
     model = opts.boekwachter.model;
   }
@@ -108,8 +106,10 @@ export async function resolveEnrichTarget(
 /**
  * Resolve a summarizer (if one is configured) + the local embedder — shared
  * by the background enrichment loop and the on-demand drive route. During
- * Night Shift an enabled provider/model override wins; otherwise the
- * summarizer is the first configured local provider's default model.
+ * Night Shift an enabled provider/model override wins; then a Boekwachter
+ * frontmatter pin (provider + model, cloud allowed — see
+ * `resolveEnrichTarget`); otherwise the first configured local provider's
+ * default model.
  *
  * `GEZEL_ENRICH_MODEL` (with optional `GEZEL_ENRICH_PROVIDER`) decouples the
  * enricher from the chat default: enrichment is a bulk background chore where
@@ -150,9 +150,16 @@ export async function buildEnrichDeps(
     ...(opts.boekwachter ? { gezelId: opts.boekwachter.id, gezelName: opts.boekwachter.name } : {}),
     appVersion: GEZEL_VERSION,
   };
+  // A cloud/CLI target (explicit Boekwachter pin or Night Shift override)
+  // needs room for session cold starts — the Copilot-family CLIs take
+  // 30-90s on the first call, and deadlines under 120s flake. Local engines
+  // keep the tight deadlines that protect the shared engine queue.
+  const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
+  const summarizeTimeoutMs = local ? 30_000 : 120_000;
+  const reviewTimeoutMs = local ? 60_000 : 180_000;
   const summarize = (prompt: string) =>
     chat
-      .oneShotCompletion(prompt, 30_000, {
+      .oneShotCompletion(prompt, summarizeTimeoutMs, {
         providerName,
         model,
         ...(opts.boekwachter
@@ -168,7 +175,7 @@ export async function buildEnrichDeps(
       .catch(() => '');
   const review = (prompt: string) =>
     chat
-      .oneShotCompletion(prompt, 60_000, {
+      .oneShotCompletion(prompt, reviewTimeoutMs, {
         providerName,
         model,
         ...(opts.boekwachter

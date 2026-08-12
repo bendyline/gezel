@@ -434,6 +434,16 @@ describe('on-demand drives + night catch-up', () => {
     await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
   });
 
+  it('driveMode reports the running mode and clears when the drive ends', async () => {
+    const { mgr } = makeDriveFixture();
+    expect(mgr.driveMode('p1')).toBeNull();
+    mgr.drive('p1', { intensity: 'full' });
+    expect(mgr.driveMode('p1')).toBe('full');
+    expect(mgr.driveMode('other')).toBeNull();
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    expect(mgr.driveMode('p1')).toBeNull();
+  });
+
   it('the background loop stands down while a drive runs', async () => {
     const { mgr, enrich } = makeDriveFixture();
     mgr.drive('p1', { intensity: 'full' });

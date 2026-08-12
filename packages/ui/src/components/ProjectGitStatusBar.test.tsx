@@ -136,7 +136,103 @@ describe('ProjectGitStatusBar', () => {
 
     await userEvent.click(trigger);
     expect(screen.getByRole('button', { name: 'Update index now' })).toBeDisabled();
+    // No full-bore offer either — opting out means no AI drive of any kind.
+    expect(screen.queryByRole('button', { name: 'Full AI scan now' })).toBeNull();
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
+  });
+
+  it('starts a full-intensity drive from the panel and shows it running', async () => {
+    vi.mocked(api.driveIndexEnrichment).mockResolvedValue({
+      paused: false,
+      files: 0,
+      summarized: 0,
+      embedded: 0,
+      pending: 3,
+      areasUpdated: 0,
+      architectureUpdated: false,
+      drained: false,
+      started: true,
+      alreadyRunning: false,
+      mode: 'full',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await waitFor(() => {
+      expect(api.driveIndexEnrichment).toHaveBeenCalledWith('pj-1', { intensity: 'full' });
+    });
+    const running = await screen.findByRole('button', { name: 'Full scan running…' });
+    expect(running).toBeDisabled();
+    // The polite refresh stays independently available.
+    expect(screen.getByRole('button', { name: 'Update index now' })).toBeEnabled();
+  });
+
+  it("surfaces the server's refusal message when the full scan cannot start", async () => {
+    const refusal = Object.assign(new Error('Gezel API error 409'), {
+      details: {
+        error: 'boekwachter-required',
+        message:
+          'Add a Boekwachter to this project crew to enable AI summaries, reviews, and semantic enrichment.',
+      },
+    });
+    vi.mocked(api.driveIndexEnrichment).mockRejectedValue(refusal);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await screen.findByText(/Add a Boekwachter to this project crew/);
+    // A refused start is not a running drive — the button re-arms.
+    expect(screen.getByRole('button', { name: 'Full AI scan now' })).toBeEnabled();
+  });
+
+  it('reflects a server-side drive: scan row, media tier, disabled button', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiScanPending: true,
+      aiDrive: 'full',
+      enrichment: {
+        eligible: 3158,
+        summarized: 0,
+        embedded: 0,
+        pending: 3158,
+        shadowsPending: 4,
+      },
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /AI indexing/ });
+    await userEvent.click(trigger);
+
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
+    expect(panel).toHaveTextContent('AI scan');
+    expect(panel).toHaveTextContent('Running at full speed');
+    // The media tier runs before summaries — without this row a fresh
+    // full scan reads as stuck at "0 of N files".
+    expect(panel).toHaveTextContent('Media scan');
+    expect(panel).toHaveTextContent('4 waiting');
+    // Started elsewhere (another window, catch-up) — the button still
+    // reads running and refuses a duplicate start.
+    expect(screen.getByRole('button', { name: 'Full scan running…' })).toBeDisabled();
+    expect(api.driveIndexEnrichment).not.toHaveBeenCalled();
+  });
+
+  it('labels a background drive distinctly', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiDrive: 'background',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole('button', { name: 'Background scan running…' })).toBeDisabled();
+    expect(screen.getByText('Running quietly in background')).toBeInTheDocument();
   });
 
   it('flags a waiting merge and clicks through to the GitHub tab', async () => {

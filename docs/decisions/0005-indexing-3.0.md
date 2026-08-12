@@ -66,11 +66,21 @@ All markdown "shadows" of workspace content live under the reserved
 `provider`, `gezel_id`, `gezel_name`, `app_version` (schema v10, additive, no
 backfill — old rows keep NULLs and renderers degrade). The stamp is built once
 in `buildEnrichDeps` from the SAME resolved target that builds the completions,
-so it reflects reality (env overrides, Night Shift cloud override). Provenance
-is output-only — it must never become a routing input — and the
-local-providers-only enrichment stance is untouched. `formatReviewProvenance`
-renders the shared user-facing line: `Reviewed by <model> (<provider>) ·
-<gezel> · gezel <version> · <date>`.
+so it reflects reality (env overrides, Night Shift cloud override, Boekwachter
+pin). Provenance is output-only — it must never become a routing input.
+`formatReviewProvenance` renders the shared user-facing line:
+`Reviewed by <model> (<provider>) · <gezel> · gezel <version> · <date>`.
+
+Enrichment targeting is local-FIRST, not local-only: a cloud target is
+reachable through exactly two explicit acts — the Night Shift override, or a
+provider AND model both pinned on the Boekwachter's frontmatter
+(`resolveEnrichTarget`). Writing both fields on the gezel is the opt-in; an
+incomplete pin and every implicit path (config defaults, provider fallback)
+stay local, so workspace content never drifts to a cloud model the user
+didn't choose for this work. Cloud/CLI targets get longer one-shot deadlines
+(120s/180s vs 30s/60s — CLI cold starts flake below 120s), and the `ambient`
+flag is a no-op there: only local-engine queues hold ambient work, so a
+background drive on a cloud Boekwachter starts immediately.
 
 ### Reviews take whole files; sizing lives in the completion layer
 
@@ -127,6 +137,24 @@ finishes — batch work starts against a current index instead of racing the
 indexer for the engine. The catch-up flag is raised synchronously so the
 kick-then-wake activation sequence cannot race the first runner tick.
 Interactive work is never held.
+
+Drive state is server truth, not client state: `/index/status` carries
+`aiDrive: 'background' | 'full'` (from `IndexEnrichmentManager.driveMode`)
+while a drive runs, so every window shows "scan running" whichever client —
+or the catch-up — started it, and the popover's button re-arms when the
+field disappears rather than inferring completion from counts.
+`enrichment.shadowsPending` rides along because the drive works the media
+tier before summaries; without it a fresh full scan reads as stuck at
+"0 of N files" for the entire describe phase.
+
+One placement rule made this honest: a transient sqlite failure
+(`SQLITE_BUSY`/`SQLITE_LOCKED` — the static worker holds long write
+transactions) must never trigger the home-dir index fallback. The fallback
+is for placement failures (read-only tree, permissions); minting an empty
+home-side db during a busy moment makes status flicker to zeros and can
+split readers from the writer. `isTransientIndexError` separates the two in
+the driver, and `ContentIndex.openProject` reports "unavailable this call"
+instead of falling back.
 
 ## Regression surface
 

@@ -71,6 +71,7 @@ import {
 } from './index-store.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
 
@@ -1047,6 +1048,7 @@ export class ContentIndex {
     summarized: number;
     embedded: number;
     pending: number;
+    shadowsPending: number;
     embedModel?: string;
   } | null> {
     const opened = await this.open(projectId);
@@ -1576,17 +1578,27 @@ export class ContentIndex {
         collectionId: projectId,
         kind: 'workspace',
         rootPath: workspaceDir,
-      }).catch(() => null);
+      });
 
     // A machine-shared workspace is a collaborative content tree, not a safe
     // home for a mutable SQLite database opened by every account daemon.
     // Build the same derived index independently in each account's sidecar.
     let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
-    let index = await open(dbPath);
+    let index: IndexStore | null;
+    try {
+      index = await open(dbPath);
+    } catch (error) {
+      // A busy/locked primary EXISTS and is mid-write (the static worker
+      // holds long transactions during a full pass). Falling back would mint
+      // an empty home-side db whose zero counts masquerade as real status —
+      // report "unavailable this call" and let the next poll succeed.
+      if (isTransientIndexError(error)) return null;
+      index = null;
+    }
     if (!index) {
       // Workspace `.gezel/` not writable — fall back to the home-local dir.
       dbPath = join(fallbackProjectIndexDir(this.home, projectId), 'index.db');
-      index = await open(dbPath);
+      index = await open(dbPath).catch(() => null);
     }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
     return index ? { index, workspaceDir, artifactsDir, dbPath } : null;

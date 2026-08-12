@@ -20,6 +20,7 @@
 import { join } from 'node:path';
 import {
   type SqliteDriver,
+  isTransientIndexError,
   isUnavailableIndexError,
   openIndexDatabase,
   vectorToBlob,
@@ -71,7 +72,9 @@ async function openMem(indexDir: string): Promise<SqliteDriver | null> {
     return db;
   } catch (error) {
     db.close();
-    if (isUnavailableIndexError(error)) return null;
+    // Memory search has a single fixed location — a busy db and an unusable
+    // one degrade the same way here: recall is skipped for this call.
+    if (isUnavailableIndexError(error) || isTransientIndexError(error)) return null;
     throw error;
   }
 }

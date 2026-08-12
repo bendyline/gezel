@@ -116,7 +116,7 @@ export class IndexEnrichmentManager {
   private readonly history: IndexEnrichmentManagerOptions['history'];
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
   /** In-flight on-demand drives, one per project (joiners get the same run). */
-  private readonly drives = new Map<string, Promise<void>>();
+  private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
 
@@ -213,6 +213,11 @@ export class IndexEnrichmentManager {
     return projectId ? this.drives.has(projectId) : this.drives.size > 0;
   }
 
+  /** Mode of the drive running for a project, or null when idle. */
+  driveMode(projectId: string): DriveIntensity | null {
+    return this.drives.get(projectId)?.mode ?? null;
+  }
+
   /**
    * Start an on-demand drive for one project: static refresh first, then the
    * AI tiers (shadows → summaries → areas → reviews) to drain. Returns
@@ -225,7 +230,7 @@ export class IndexEnrichmentManager {
     const run = this.runDrive(projectId, opts)
       .catch((err) => log.warn(`[enrich] drive ${projectId} failed: ${describe(err)}`))
       .finally(() => this.drives.delete(projectId));
-    this.drives.set(projectId, run);
+    this.drives.set(projectId, { mode: opts.intensity, run });
     return { started: true, alreadyRunning: false };
   }
 
@@ -243,13 +248,13 @@ export class IndexEnrichmentManager {
         if (p.indexingEnabled === false) continue;
         const existing = this.drives.get(p.id);
         if (existing) {
-          await existing.catch(() => {});
+          await existing.run.catch(() => {});
           continue;
         }
         const run = this.runDrive(p.id, { intensity: 'full' }).finally(() =>
           this.drives.delete(p.id),
         );
-        this.drives.set(p.id, run);
+        this.drives.set(p.id, { mode: 'full', run });
         await run.catch((err) => log.warn(`[enrich] catch-up ${p.id} failed: ${describe(err)}`));
       }
     } finally {

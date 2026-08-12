@@ -291,6 +291,8 @@ export function ProjectGitStatusBar({
   const [indexPanelOpen, setIndexPanelOpen] = useState(false);
   const [indexRefreshBusy, setIndexRefreshBusy] = useState(false);
   const [indexRefreshError, setIndexRefreshError] = useState<string | null>(null);
+  const [fullScanState, setFullScanState] = useState<'idle' | 'starting' | 'running'>('idle');
+  const [fullScanError, setFullScanError] = useState<string | null>(null);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   // Effective per-project writability — mirrors `projectWorkspaceWritable`
   // in core: explicit flag wins, else internal workspaces are writable and
@@ -326,6 +328,15 @@ export function ProjectGitStatusBar({
     }, 30_000);
     return () => window.clearInterval(id);
   }, [refresh, refreshIndex]);
+
+  // While an AI drive is running, poll the index status faster — the whole
+  // point of the drive is visible progress, and 30s gaps read as "stuck".
+  const drivePolling = indexStatus?.aiDrive != null || fullScanState !== 'idle';
+  useEffect(() => {
+    if (!drivePolling) return;
+    const id = window.setInterval(() => void refreshIndex(), 5_000);
+    return () => window.clearInterval(id);
+  }, [drivePolling, refreshIndex]);
 
   // Re-poll immediately when the GitHub tab (or this bar) mutates state.
   useEffect(() => {
@@ -363,6 +374,55 @@ export function ProjectGitStatusBar({
       setIndexRefreshBusy(false);
     }
   }, [indexRefreshBusy, indexStatus, projectId, refreshIndex]);
+
+  // Full-bore drive: one call starts a server-side job (static refresh, then
+  // every AI tier to drain) with non-ambient one-shots — it competes with
+  // chat for the model, which is exactly what the user asked for by clicking.
+  // The response returns immediately; the popover's polling tracks the drain.
+  const fullScanBaseline = useRef<typeof indexStatus>(null);
+  const onFullScan = useCallback(async () => {
+    if (
+      fullScanState !== 'idle' ||
+      indexStatus === null ||
+      indexStatus.state === 'disabled' ||
+      indexStatus.aiDrive != null
+    ) {
+      return;
+    }
+    setFullScanState('starting');
+    setFullScanError(null);
+    fullScanBaseline.current = indexStatus;
+    try {
+      await api.driveIndexEnrichment(projectId, { intensity: 'full' });
+      setFullScanState('running');
+      window.setTimeout(() => void refreshIndex(), 800);
+    } catch (err) {
+      // GezelApiError carries the server's body under `details` — the enrich
+      // route's 409s ("Add a Boekwachter to this project crew…") are
+      // actionable, unlike the generic retry line.
+      const detail =
+        err && typeof err === 'object' && 'details' in err
+          ? (err as { details?: { message?: string } }).details?.message
+          : undefined;
+      setFullScanError(detail ?? 'Couldn’t start the full scan. Try again.');
+      setFullScanState('idle');
+    }
+  }, [fullScanState, indexStatus, projectId, refreshIndex]);
+
+  // Re-arm the full-scan button once the server reports the drive gone —
+  // whether it drained, failed, or was paused. Only a status polled AFTER
+  // the drive started counts: the pre-drive snapshot carries no `aiDrive`
+  // and would re-arm before the server registered the run.
+  useEffect(() => {
+    if (
+      fullScanState === 'running' &&
+      indexStatus !== fullScanBaseline.current &&
+      indexStatus !== null &&
+      indexStatus.aiDrive == null
+    ) {
+      setFullScanState('idle');
+    }
+  }, [fullScanState, indexStatus]);
 
   // Outside-click dismisses the branch dropdown.
   useEffect(() => {
@@ -472,6 +532,9 @@ export function ProjectGitStatusBar({
           : 'stale';
   const enrichment = indexStatus?.enrichment;
   const aiCoverage = enrichment ? coveragePercent(enrichment.embedded, enrichment.eligible) : null;
+  // Server truth for a running AI drive — set no matter which window, the
+  // night-shift catch-up, or the API started it.
+  const serverDrive = indexStatus?.aiDrive ?? null;
   const indexHeadline =
     indexStatus === null
       ? 'Checking workspace index'
@@ -742,6 +805,22 @@ export function ProjectGitStatusBar({
                     </div>
                   </>
                 )}
+                {serverDrive && (
+                  <div>
+                    <dt>AI scan</dt>
+                    <dd>
+                      {serverDrive === 'full'
+                        ? 'Running at full speed'
+                        : 'Running quietly in background'}
+                    </dd>
+                  </div>
+                )}
+                {enrichment && (enrichment.shadowsPending ?? 0) > 0 && (
+                  <div>
+                    <dt>Media scan</dt>
+                    <dd>{enrichment.shadowsPending} waiting</dd>
+                  </div>
+                )}
                 {enrichment && enrichment.eligible > 0 && (
                   <div>
                     <dt>AI summaries</dt>
@@ -770,25 +849,55 @@ export function ProjectGitStatusBar({
                 <span className="project-index-panel-note">
                   {indexState === 'disabled'
                     ? 'Workspace indexing is off. Turn it on in Project Settings.'
-                    : indexState === 'indexing'
-                      ? 'The status updates automatically while the scan runs.'
-                      : aiScanPending
-                        ? 'AI indexing continues while the app is idle.'
-                        : 'Refresh the index whenever you need the latest workspace state.'}
+                    : serverDrive === 'full'
+                      ? 'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
+                      : serverDrive === 'background'
+                        ? 'Background scan in progress — it politely waits while you chat.'
+                        : indexState === 'indexing'
+                          ? 'The status updates automatically while the scan runs.'
+                          : aiScanPending
+                            ? 'AI indexing continues while the app is idle.'
+                            : 'Refresh the index whenever you need the latest workspace state.'}
                 </span>
-                <button
-                  type="button"
-                  className="project-index-update-button"
-                  disabled={indexUpdateDisabled}
-                  onClick={() => void onUpdateIndex()}
-                >
-                  {indexState === 'indexing' || indexRefreshBusy
-                    ? 'Updating index…'
-                    : 'Update index now'}
-                </button>
+                <div className="project-index-panel-actions">
+                  <button
+                    type="button"
+                    className="project-index-update-button"
+                    disabled={indexUpdateDisabled}
+                    onClick={() => void onUpdateIndex()}
+                  >
+                    {indexState === 'indexing' || indexRefreshBusy
+                      ? 'Updating index…'
+                      : 'Update index now'}
+                  </button>
+                  {indexState !== 'disabled' && (
+                    <button
+                      type="button"
+                      className="project-index-update-button project-index-full-scan-button"
+                      disabled={
+                        fullScanState !== 'idle' || serverDrive !== null || indexStatus === null
+                      }
+                      onClick={() => void onFullScan()}
+                      title="Bring the whole index up to date at full speed — file scan plus AI summaries, rollups, and reviews, run to completion. Shares the model with chat while it works."
+                    >
+                      {fullScanState === 'starting'
+                        ? 'Starting full scan…'
+                        : fullScanState === 'running' || serverDrive === 'full'
+                          ? 'Full scan running…'
+                          : serverDrive === 'background'
+                            ? 'Background scan running…'
+                            : 'Full AI scan now'}
+                    </button>
+                  )}
+                </div>
                 {indexRefreshError && (
                   <span className="project-index-panel-error" role="alert">
                     {indexRefreshError}
+                  </span>
+                )}
+                {fullScanError && (
+                  <span className="project-index-panel-error" role="alert">
+                    {fullScanError}
                   </span>
                 )}
               </div>

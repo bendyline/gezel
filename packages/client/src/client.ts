@@ -5792,7 +5792,13 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/index/refresh`);
   }
 
-  /** One bounded on-demand enrichment pass ("study now") — loop until `drained`. */
+  /**
+   * On-demand enrichment drive ("study now"). Without `intensity`: one
+   * bounded synchronous pass — loop until `drained`. With `intensity`
+   * (`background` | `full`): starts a server-side job (static refresh first,
+   * then every AI tier to drain) and returns immediately with
+   * `started: true`; poll `/index/status` or watch `index_progress` events.
+   */
   driveIndexEnrichment(
     id: string,
     body: DriveIndexEnrichmentRequest = {},

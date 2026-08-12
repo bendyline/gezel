@@ -636,7 +636,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/index/status', async (c) => {
     const id = c.req.param('id');
     const status = await ctx.workspaceIndex.statusForUi(id);
-    return c.json(status);
+    // Drive state rides along so every window shows "scan running" whether
+    // this client, another window, or the night-shift catch-up started it.
+    const aiDrive = ctx.indexEnrichment.driveMode(id);
+    return c.json(aiDrive ? { ...status, aiDrive } : status);
   });
 
   app.post('/:id/index/refresh', async (c) => {

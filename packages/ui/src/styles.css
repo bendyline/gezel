@@ -1410,9 +1410,10 @@ html.embedded-chat #root {
   line-height: 1.1;
 }
 
-/* Popover — anchored to the pill, opens on click. Mirrors the
-   layout of QueueMeter's popover so the header reads consistently
-   across the two status indicators. */
+/* Shared header popover slab. The engine surface starts with this absolute
+   anchor, then `useStableHeaderPopoverPosition` supplies a fixed viewport
+   snapshot while it is open so live pill-width changes cannot drag it sideways.
+   Quota keeps the ordinary absolute anchor. */
 .engine-pill-popover,
 .quota-popover {
   position: absolute;
@@ -2018,8 +2019,9 @@ button.machine-memory-unload-button {
   }
 }
 
-/* Popover: anchored below the button, aligned to its right edge so
-   it doesn't overflow the window on smaller headers. */
+/* Popover: starts below the button, then receives a fixed viewport position
+   from `useStableHeaderPopoverPosition`. That opening snapshot stays stable
+   while live queue text changes the trigger's width. */
 .queue-meter-panel {
   position: absolute;
   top: calc(100% + 0.5rem);
@@ -5055,6 +5057,7 @@ button.danger {
 .gz-dialog.project-add-gezel-dialog {
   width: min(42rem, calc(100vw - 2rem));
   min-width: 0;
+  overflow: hidden;
 }
 
 .project-add-gezel-dialog > .muted {
@@ -5074,8 +5077,15 @@ button.danger {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.8rem;
+  /* One discoverable scroll area keeps the title, search, and actions fixed;
+     separate scrolling lists made the remaining roles easy to miss. */
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  padding: 0.15rem 0.25rem 0.15rem 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .project-add-gezel-options > section {
@@ -5095,7 +5105,6 @@ button.danger {
 .project-add-gezel-suggestions .project-add-gezel-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-height: 10rem;
 }
 
 .project-add-gezel-options h4 {
@@ -5111,10 +5120,8 @@ button.danger {
   flex-direction: column;
   gap: 0.4rem;
   min-height: 0;
-  max-height: 21rem;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -5219,16 +5226,10 @@ button.danger {
 @media (max-width: 640px) {
   .project-add-gezel-options {
     grid-template-columns: minmax(0, 1fr);
-    overflow-y: auto;
-  }
-
-  .project-add-gezel-list {
-    max-height: 13rem;
   }
 
   .project-add-gezel-suggestions .project-add-gezel-list {
     grid-template-columns: minmax(0, 1fr);
-    max-height: 13rem;
   }
 
   .project-add-gezel-customize {
@@ -9910,7 +9911,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-index-panel {
-  width: 16.5rem;
+  /* Wide enough for the two-button action row and unwrapped stat labels. */
+  width: 22rem;
   max-width: 100%;
   display: flex;
   flex-direction: column;
@@ -9995,12 +9997,13 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .project-index-panel-details > div {
   display: grid;
-  grid-template-columns: 5.7rem minmax(0, 1fr);
+  grid-template-columns: 7.5rem minmax(0, 1fr);
   gap: 0.7rem;
 }
 
 .project-index-panel-details dt {
   color: color-mix(in srgb, currentColor 72%, transparent);
+  white-space: nowrap;
 }
 
 .project-index-panel-details dd {
@@ -10021,9 +10024,30 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   font-size: var(--text-sm);
 }
 
+/* The polite refresh and the full-bore drive sit side by side as one tray. */
+.project-index-panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.project-index-panel-actions > .project-index-update-button {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .project-index-update-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* The "occupy the engine" sibling under the polite refresh: same key shape,
+   quieter fill, so the pair reads as one tray of choices rather than two
+   competing calls to action. */
+.project-index-full-scan-button {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  color: inherit;
 }
 
 .project-index-panel-error {

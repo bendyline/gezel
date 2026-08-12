@@ -116,6 +116,16 @@ describe('ContentIndex.aiShadows', () => {
     expect(prompts.some((p) => p.includes('shipped the indexer'))).toBe(true);
   });
 
+  it('counts pending media in enrichmentCounts.shadowsPending until described', async () => {
+    await seedMedia();
+    expect((await ci.enrichmentCounts('c'))?.shadowsPending).toBe(2);
+
+    const describeImage = vi.fn(async (_abs: string) => ({ body: 'described' }));
+    const transcribeAudio = vi.fn(async (_abs: string) => ({ body: 'transcribed' }));
+    await ci.aiShadows('c', { describeImage, transcribeAudio }, 10);
+    expect((await ci.enrichmentCounts('c'))?.shadowsPending).toBe(0);
+  });
+
   it('adopts a fresh sidecar without paying a model call', async () => {
     await seedMedia();
     const describeImage = vi.fn(async (_abs: string) => ({ body: 'fresh description' }));

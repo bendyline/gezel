@@ -685,6 +685,7 @@ export class IndexStore {
     summarized: number;
     embedded: number;
     pending: number;
+    shadowsPending: number;
     embedModel?: string;
   } {
     const ELIGIBLE = `f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
@@ -705,8 +706,29 @@ export class IndexStore {
       summarized,
       embedded,
       pending: this.countNeedingEnrichment(),
+      shadowsPending: this.countNeedingAiShadow(),
       ...(embedModel ? { embedModel } : {}),
     };
+  }
+
+  /**
+   * COUNT twin of `filesNeedingAiShadow` — media files still awaiting an AI
+   * description, attempt-capped ones excluded. The drive works this tier
+   * before summaries, so status must surface it or a fresh scan looks stuck.
+   */
+  countNeedingAiShadow(maxAttempts = MAX_ENRICH_ATTEMPTS): number {
+    return Number(
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM files f
+           LEFT JOIN shadow_state s ON s.content_hash = f.hash
+           WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+             AND f.modality IN ('image','audio')
+             AND (s.content_hash IS NULL
+                  OR (s.state <> 'ok' AND COALESCE(s.attempts, 0) < ?))`,
+        )
+        .get<{ n: number }>(this.collectionId, maxAttempts)?.n ?? 0,
+    );
   }
 
   /** Mark a content hash as enriched (vectors built) so it isn't reprocessed. */
