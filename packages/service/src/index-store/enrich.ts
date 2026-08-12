@@ -32,6 +32,15 @@ import {
 
 const log = createLogger('enrich');
 
+// Indexing is a mechanical extraction task, not a reasoning task. Instruct
+// mode keeps thinking-capable local models from spending the whole request
+// budget in a hidden reasoning channel. We intentionally retain the model's
+// normal instruct-profile output allowance: the 2-3 sentence prompt is the
+// length control, not an artificially small max-token override.
+const INDEX_TUNING_PROFILE = 'instruct';
+const SUMMARIZE_TIMEOUT_MS = 120_000;
+const REVIEW_TIMEOUT_MS = 180_000;
+
 export interface EnrichDeps {
   summarize: (prompt: string) => Promise<string>;
   embed: (texts: string[]) => Promise<number[][]>;
@@ -203,13 +212,11 @@ export async function buildEnrichDeps(
     ...(opts.boekwachter ? { gezelId: opts.boekwachter.id, gezelName: opts.boekwachter.name } : {}),
     appVersion: GEZEL_VERSION,
   };
-  // A cloud/CLI target (explicit Boekwachter pin or Night Shift override)
-  // needs room for session cold starts — the Copilot-family CLIs take
-  // 30-90s on the first call, and deadlines under 120s flake. Local engines
-  // keep the tight deadlines that protect the shared engine queue.
+  // Give both local and cloud/CLI targets room to finish. Local engines can
+  // spend tens of seconds on model admission, prefill, or thermal cooling;
+  // Copilot-family CLIs take 30-90s on a cold first call. Instruct mode above
+  // bounds the expensive failure mode without relying on a brittle 30s wall.
   const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
-  const summarizeTimeoutMs = local ? 30_000 : 120_000;
-  const reviewTimeoutMs = local ? 60_000 : 180_000;
   const gezelOpts = opts.boekwachter
     ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
     : { actorLabel: 'Boekwachter' };
@@ -221,6 +228,7 @@ export async function buildEnrichDeps(
         model: target.model,
         ...gezelOpts,
         jobLabel,
+        tuningProfileId: INDEX_TUNING_PROFILE,
         ...(opts.ambient ? { ambient: true } : {}),
       });
   // Blocked-content fallback: a cloud enricher can refuse a file outright on
@@ -266,16 +274,16 @@ export async function buildEnrichDeps(
       }
     };
   const summarize = withPolicyFallback(
-    oneShot({ providerName, model }, summarizeTimeoutMs, 'index enrichment'),
+    oneShot({ providerName, model }, SUMMARIZE_TIMEOUT_MS, 'index enrichment'),
     fallbackTarget
-      ? oneShot(fallbackTarget, 30_000, 'index enrichment (blocked-content fallback)')
+      ? oneShot(fallbackTarget, SUMMARIZE_TIMEOUT_MS, 'index enrichment (blocked-content fallback)')
       : null,
     'summarize',
   );
   const review = withPolicyFallback(
-    oneShot({ providerName, model }, reviewTimeoutMs, 'index review'),
+    oneShot({ providerName, model }, REVIEW_TIMEOUT_MS, 'index review'),
     fallbackTarget
-      ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)')
+      ? oneShot(fallbackTarget, REVIEW_TIMEOUT_MS, 'index review (blocked-content fallback)')
       : null,
     'review',
   );

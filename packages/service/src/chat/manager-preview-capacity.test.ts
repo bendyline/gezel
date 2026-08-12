@@ -144,4 +144,18 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
       /Not enough memory/,
     );
   });
+
+  it('prices inventory projections as if the model were the only resident engine', async () => {
+    // Settings answers device fitness, not the transient question "can this
+    // model coexist with everything warm right now?". The live launch path
+    // retains the denial above and can evict the other model when it is idle.
+    useRouter(routerWithReservation({ otherModel: true }));
+
+    const plan = await manager.previewLocalEnginePlan('mlx', 'local-mlx', {
+      standalone: true,
+    });
+
+    expect(plan.contextWindow).toBeGreaterThanOrEqual(65_536);
+    expect(plan.plannedResidentBytes).toBeGreaterThan(0);
+  });
 });

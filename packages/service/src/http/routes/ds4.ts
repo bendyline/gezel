@@ -34,7 +34,9 @@ export function ds4Routes(ctx: ServiceContext): Hono {
         const overrideContextTokens = overrides[`ds4:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
-          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id);
+          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id, {
+            standalone: true,
+          });
           return {
             ...model,
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
@@ -98,6 +100,7 @@ export function ds4Routes(ctx: ServiceContext): Hono {
         try {
           const plan = await ctx.chat.previewLocalEnginePlan('ds4', manifest.id, {
             allowUninstalled: true,
+            standalone: true,
           });
           plans[manifest.id] = {
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),

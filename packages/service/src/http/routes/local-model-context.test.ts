@@ -18,7 +18,7 @@ const installed = {
 const emptyStore = { readConfig: async () => ({}) };
 
 describe('local model inventory context caps', () => {
-  it('adds the live llama.cpp admission cap without replacing the advertised window', async () => {
+  it('adds the standalone llama.cpp admission cap without replacing the advertised window', async () => {
     const previewLocalEnginePlan = vi.fn(async () => ({
       contextWindow: 65_536,
       plannedResidentBytes: 9_000_000_000,
@@ -43,7 +43,9 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model', {
+      standalone: true,
+    });
   });
 
   it('carries the slot reservation alongside the single-chat footprint', async () => {
@@ -142,7 +144,9 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('mlx', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('mlx', 'local-model', {
+      standalone: true,
+    });
   });
 
   it('marks a llama.cpp model whose selected context policy cannot fit', async () => {
@@ -273,6 +277,8 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('ds4', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('ds4', 'local-model', {
+      standalone: true,
+    });
   });
 });

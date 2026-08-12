@@ -9076,6 +9076,15 @@ export class ChatManager {
        */
       jobLabel?: string;
       /**
+       * Per-call catalog tuning profile. Used by tightly-scoped utility work
+       * whose inference shape differs from the owning gezel's conversational
+       * default (for example, index summaries should use an `instruct`
+       * profile rather than spend their deadline on hidden reasoning).
+       * The profile keeps its catalog-authored sampling/output allowance;
+       * this option does not impose an extra token cap.
+       */
+      tuningProfileId?: string;
+      /**
        * Truly-deferrable housekeeping (memory extraction, icon/about
        * generation, index enrichment, digests). On local engine queues
        * with ambient admission control the one-shot dispatches only
@@ -9206,10 +9215,19 @@ export class ChatManager {
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const sessionDefaults = opts.tuningProfileId
+      ? await this.resolveModelSessionDefaults(effectiveProviderName, model, {
+          tuningProfileId: opts.tuningProfileId,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        })
+      : null;
     const session = await provider.createSession({
       systemMessage,
       model,
       reasoningEffort,
+      ...(sessionDefaults
+        ? { profile: sessionDefaults.profile, tuning: sessionDefaults.tuning }
+        : {}),
     });
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),
@@ -10616,7 +10634,17 @@ export class ChatManager {
      * throwing {@link ModelNotInstalledError}: their plans read the real
      * header.
      */
-    opts: { allowUninstalled?: boolean } = {},
+    opts: {
+      allowUninstalled?: boolean;
+      /**
+       * Price the model as the only resident engine. Inventory/catalog rows
+       * answer "can this model run on this device?", so their estimate must
+       * not change merely because another model happens to be warm. Actual
+       * launch admission keeps the default live-reservation behavior and may
+       * evict an idle model (or report that a busy one is blocking the swap).
+       */
+      standalone?: boolean;
+    } = {},
   ): Promise<{
     contextWindow?: number;
     plannedResidentBytes?: number;
@@ -10702,7 +10730,9 @@ export class ChatManager {
       const fastBudget = brokerSnap?.enforced
         ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
         : liveBudget.fastBytes;
-      const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
+      const committedOtherBytes = opts.standalone
+        ? 0
+        : this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
       const concurrencySizingBudget = brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : liveBudget.concurrencySizingBytes;
@@ -10980,7 +11010,9 @@ export class ChatManager {
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
       : liveBudget.budgetBytes;
-    const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
+    const committedOtherBytes = opts.standalone
+      ? 0
+      : this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
     // A preview answers a policy question, so it drops the live-free-RAM half
     // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
     // card still gets a placement cap: pass 0 free RAM so the live term

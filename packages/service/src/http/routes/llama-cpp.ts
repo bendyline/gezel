@@ -29,7 +29,9 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
         const overrideContextTokens = overrides[`llama-cpp:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
-          const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id);
+          const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id, {
+            standalone: true,
+          });
           return {
             ...model,
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),

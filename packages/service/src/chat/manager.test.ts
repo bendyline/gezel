@@ -3563,6 +3563,34 @@ describe('ChatManager — one-shot attribution', () => {
     expect(send?.sendOpts?.queue?.signal).toBe(controller.signal);
   });
 
+  it('resolves and forwards an explicit one-shot tuning profile', async () => {
+    mock.script('done');
+    const defaults = vi.spyOn(manager, 'resolveModelSessionDefaults');
+
+    await manager.oneShotCompletion('summarize this', 1_000, {
+      tuningProfileId: 'instruct',
+    });
+
+    expect(defaults).toHaveBeenCalledWith(
+      'copilot',
+      undefined,
+      expect.objectContaining({ tuningProfileId: 'instruct' }),
+    );
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create?.opts?.profile).toBeDefined();
+    expect(create?.opts?.tuning).toBeDefined();
+  });
+
+  it('keeps Qwen instruct non-thinking without imposing a small output cap', async () => {
+    const defaults = await manager.resolveModelSessionDefaults('llama-cpp', 'qwen3.6-27b-q4', {
+      tuningProfileId: 'instruct',
+    });
+
+    expect(defaults.tuning.resolvedTuningProfile).toBe('instruct');
+    expect(defaults.tuning.reasoning.enableThinking).toBe(false);
+    expect(defaults.tuning.sampling.maxTokens).toBe(4096);
+  });
+
   it('does not apply user-daemon RAM pressure to broker-routed ambient work', () => {
     const denial = (
       manager as unknown as {

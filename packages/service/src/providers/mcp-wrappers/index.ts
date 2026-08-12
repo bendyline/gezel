@@ -7,6 +7,7 @@
  * No bridge-side changes required.
  */
 import type { McpServerSpec } from '../mcp-bridge.js';
+import { CraftbookSuggestionCompactor } from './craftbook-suggestion-compactor.js';
 import { OutboardStorage } from './outboard-storage.js';
 import { PlaywrightArgValidator } from './playwright-arg-validator.js';
 import { PlaywrightAutoScreenshot } from './playwright-auto-screenshot.js';
@@ -45,6 +46,7 @@ export const ALL_WRAPPERS: readonly McpToolWrapper[] = [
   TaskStepArgNormalizer,
   SourceWriteGuard,
   ZodErrorTranslator,
+  CraftbookSuggestionCompactor,
   PlaywrightToolDescriptions,
   PlaywrightArgValidator,
   PlaywrightSnapshotInliner,
