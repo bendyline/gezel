@@ -30,7 +30,13 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
         const overrideContextTokens = overrides[`mlx:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
-          const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id);
+          // Inventory is a stable device-fit projection: price this model as
+          // the only resident engine. Live co-residency belongs to the memory
+          // strip and actual launch admission, where idle models can be
+          // evicted and busy ones produce an actionable transient error.
+          const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id, {
+            standalone: true,
+          });
           return {
             ...model,
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),

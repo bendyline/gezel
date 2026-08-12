@@ -10616,7 +10616,17 @@ export class ChatManager {
      * throwing {@link ModelNotInstalledError}: their plans read the real
      * header.
      */
-    opts: { allowUninstalled?: boolean } = {},
+    opts: {
+      allowUninstalled?: boolean;
+      /**
+       * Price the model as the only resident engine. Inventory/catalog rows
+       * answer "can this model run on this device?", so their estimate must
+       * not change merely because another model happens to be warm. Actual
+       * launch admission keeps the default live-reservation behavior and may
+       * evict an idle model (or report that a busy one is blocking the swap).
+       */
+      standalone?: boolean;
+    } = {},
   ): Promise<{
     contextWindow?: number;
     plannedResidentBytes?: number;
@@ -10702,7 +10712,9 @@ export class ChatManager {
       const fastBudget = brokerSnap?.enforced
         ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
         : liveBudget.fastBytes;
-      const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
+      const committedOtherBytes = opts.standalone
+        ? 0
+        : this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
       const concurrencySizingBudget = brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : liveBudget.concurrencySizingBytes;
@@ -10980,7 +10992,9 @@ export class ChatManager {
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
       : liveBudget.budgetBytes;
-    const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
+    const committedOtherBytes = opts.standalone
+      ? 0
+      : this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
     // A preview answers a policy question, so it drops the live-free-RAM half
     // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
     // card still gets a placement cap: pass 0 free RAM so the live term
