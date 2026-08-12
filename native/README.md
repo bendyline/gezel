@@ -33,7 +33,7 @@ native/
 │       ├── README.md
 │       └── build.ps1
 ├── scripts/
-│   ├── fetch-upstream.sh       # shallow-fetch + pin one engine's upstream repo
+│   ├── fetch-upstream.sh       # filtered fetch + pin one engine's upstream repo
 │   └── bundle.sh               # assemble per-platform binaries into packages/app/native-bin/
 └── build/                      # generated per-platform staging tree
 ```
@@ -167,7 +167,7 @@ day-to-day iteration on a single engine:
 pwsh -File .\native\engines\sd-cpp\build.ps1
 ```
 
-Each script shallow-fetches upstream at the pinned commit into
+Each script fetches upstream's commit graph plus the pinned working tree into
 `native/engines/sd-cpp/.upstream/`, configures with the platform's
 preferred backend (Metal on Mac, CUDA/Vulkan on Linux+Win when the
 toolchain is present, CPU otherwise), builds, and drops the output
