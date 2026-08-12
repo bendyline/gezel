@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -229,6 +229,85 @@ describe('Ds4ModelManager', () => {
         'deepseek-v4-flash-284b-q4',
         expect.any(Function),
       ),
+    );
+  });
+
+  it('surfaces a legacy install as manageable disk use and updates it from the catalog', async () => {
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'linux',
+      totalRamBytes: 128 * GiB,
+      gpuVramBytes: 96 * GiB,
+      source: 'gpu-nvidia',
+      usableBytes: 96 * GiB,
+    });
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [],
+      unrecognized: [
+        {
+          id: 'deepseek-v4-flash-284b-q2',
+          name: 'DeepSeek V4 Flash (IQ2_XXS)',
+          bytes: 81 * GiB,
+          updatedAt: '2026-08-12T00:00:00.000Z',
+          reason:
+            'This model was installed by an older version of Gezel and its metadata needs updating.',
+          canUpdate: true,
+        },
+      ],
+    });
+
+    render(<Ds4ModelManager />);
+
+    const heading = await screen.findByText('Models needing attention');
+    const attention = heading.closest('.local-model-attention') as HTMLElement;
+    expect(within(attention).getByText('DeepSeek V4 Flash (IQ2_XXS)')).toBeInTheDocument();
+    expect(screen.getAllByText('DeepSeek V4 Flash (IQ2_XXS)')).toHaveLength(1);
+    expect(
+      within(attention).getByText(/81\.0 GB · This model was installed by an older version/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() =>
+      expect(api.installDs4Model).toHaveBeenCalledWith(
+        'deepseek-v4-flash-284b-q2',
+        expect.any(Function),
+      ),
+    );
+  });
+
+  it('requires confirmation before removing an unreadable legacy install', async () => {
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'linux',
+      totalRamBytes: 128 * GiB,
+      gpuVramBytes: 96 * GiB,
+      source: 'gpu-nvidia',
+      usableBytes: 96 * GiB,
+    });
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [],
+      unrecognized: [
+        {
+          id: 'deepseek-v4-flash-284b-q2',
+          name: 'DeepSeek V4 Flash (IQ2_XXS)',
+          bytes: 81 * GiB,
+          updatedAt: '2026-08-12T00:00:00.000Z',
+          reason: 'This model metadata is incomplete or does not match the current format.',
+          canUpdate: true,
+        },
+      ],
+    });
+
+    render(<Ds4ModelManager />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    expect(api.deleteDs4Model).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText('Remove deepseek-v4-flash-284b-q2?')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(api.deleteDs4Model).toHaveBeenCalledWith('deepseek-v4-flash-284b-q2'),
     );
   });
 });

@@ -17656,6 +17656,53 @@ button.timeline-session-divider-continuing::before {
   white-space: nowrap;
 }
 
+.local-model-attention {
+  background: color-mix(in srgb, var(--warning) 5%, var(--surface));
+}
+
+.local-model-attention-intro {
+  margin: 0;
+  max-width: 52rem;
+}
+
+.local-model-attention-row {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.local-model-attention-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  min-width: 12rem;
+}
+
+.local-model-attention-reason {
+  min-width: 12rem;
+}
+
+.ollama-pull-head > .local-model-attention-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  overflow: visible;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .local-model-attention-row .ollama-pull-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-model-attention-reason {
+    white-space: normal;
+  }
+}
+
 .ollama-pull-bar {
   position: relative;
   height: 6px;

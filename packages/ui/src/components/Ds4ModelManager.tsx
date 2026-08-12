@@ -4,6 +4,7 @@ import type {
   IncompleteModelDownload,
   LlamaCppInstallEvent,
   LlamaCppInstalledModel,
+  UnrecognizedLocalModel,
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -12,6 +13,7 @@ import {
   announceModelInventoryChanged,
   changedModelInventoryEngine,
 } from '../model-inventory.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import {
@@ -20,6 +22,7 @@ import {
   contextSliderMax,
 } from './ModelContextControls.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
 import { formatBytes } from './model-memory-copy.js';
 
@@ -105,6 +108,8 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // installed set. ds4 models run to hundreds of GB, so a stalled one is a lot
   // of hidden disk. Surfaced for resume/delete before the reclaim sweep.
   const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
+  const [unrecognized, setUnrecognized] = useState<UnrecognizedLocalModel[]>([]);
+  const [toRemove, setToRemove] = useState<string | null>(null);
 
   const refreshIncomplete = useCallback(async () => {
     try {
@@ -121,6 +126,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
       setInstalled(new Set(r.models.map((m) => m.id)));
       setInstalledModels(new Map(r.models.map((m) => [m.id, m])));
       setReadOnlyIds(new Set(r.models.filter((m) => m.readOnly).map((m) => m.id)));
+      setUnrecognized(r.unrecognized ?? []);
     } catch {
       /* the row's own error surfaces install failures */
     }
@@ -290,6 +296,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         return next;
       });
       setIncomplete((cur) => cur.filter((d) => d.id !== id));
+      setUnrecognized((cur) => cur.filter((model) => model.id !== id));
       try {
         await api.deleteDs4Model(id);
         announceModelInventoryChanged('ds4');
@@ -328,23 +335,37 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     return <p className="muted small">No DwarfStar models in the catalog.</p>;
   }
 
-  // Rank by what each model would actually occupy at its planned window, so
+  // A recovery row already owns the update/remove decision for an unreadable
+  // install. Hide its ordinary catalog row until an update starts; otherwise
+  // the same model appears twice with conflicting Update and Download actions.
+  // During the update, the catalog row returns to carry live progress.
+  const attentionIds = new Set(unrecognized.map((model) => model.id));
+  const visibleDs4Models = ds4Models.filter(
+    ({ m }) => !attentionIds.has(m.id) || installing.has(m.id),
+  );
+
+  // Rank by what each visible model would actually occupy at its planned window, so
   // "recommended on this device" tracks the same number the rows quote.
   const residentFor = (m: Ds4ChatModel): number | undefined =>
     plans.get(m.id)?.projectedResidentBytes ?? m.ds4.residentBytes;
   const lightestResidentBytes = Math.min(
-    ...ds4Models.map(({ m }) => residentFor(m) ?? Number.POSITIVE_INFINITY),
+    ...visibleDs4Models.map(({ m }) => residentFor(m) ?? Number.POSITIVE_INFINITY),
   );
 
   return (
     <div>
       <SharedModelMigrationPanel engine="ds4" onModelsChanged={onModelsChanged} />
+      <UnrecognizedModels
+        items={unrecognized.filter((model) => !installing.has(model.id))}
+        onUpdate={startInstall}
+        onRemove={setToRemove}
+      />
       <IncompleteDownloads
         items={incomplete.filter((d) => !installing.has(d.id))}
         onResume={(id) => startInstall(id)}
-        onDelete={(id) => void remove(id)}
+        onDelete={setToRemove}
       />
-      {ds4Models.map(({ m }) => {
+      {visibleDs4Models.map(({ m }) => {
         const plan = plans.get(m.id);
         // Fit is judged at the window this device would launch with, not at
         // whatever window the catalog footprint was authored against.
@@ -565,7 +586,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                         setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                       }
                       onUpdate={() => startInstall(m.id)}
-                      onDelete={readOnlyIds.has(m.id) ? undefined : () => void remove(m.id)}
+                      onDelete={readOnlyIds.has(m.id) ? undefined : () => setToRemove(m.id)}
                     />
                   </>
                 ) : canRunSafely ? (
@@ -589,6 +610,19 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
           Import from a gezel local model package
         </span>
       </div>
+      <ConfirmDialog
+        open={toRemove !== null}
+        title={`Remove ${toRemove ?? 'model'}?`}
+        message="This permanently removes the model files from this device. The model stays available in the catalog, so you can download a current build later."
+        confirmLabel="Remove"
+        danger
+        onConfirm={() => {
+          const id = toRemove;
+          setToRemove(null);
+          if (id) void remove(id);
+        }}
+        onCancel={() => setToRemove(null)}
+      />
     </div>
   );
 }

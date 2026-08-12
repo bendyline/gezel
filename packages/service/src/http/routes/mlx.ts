@@ -23,7 +23,10 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/mlx', '/v1/remote/manage/mlx'));
 
   app.get('/models', async (c) => {
-    const installed = await ctx.mlxModels.listInstalled();
+    const [installed, unrecognized] = await Promise.all([
+      ctx.mlxModels.listInstalled(),
+      ctx.mlxModels.listUnrecognized?.() ?? Promise.resolve([]),
+    ]);
     const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
     const models = await Promise.all(
       installed.map(async (model) => {
@@ -81,7 +84,7 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
         }
       }),
     );
-    return c.json({ models });
+    return c.json({ models, unrecognized });
   });
 
   /**

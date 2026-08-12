@@ -281,4 +281,38 @@ describe('local model inventory context caps', () => {
       standalone: true,
     });
   });
+
+  it('returns rejected ds4 directories as management-only inventory rows', async () => {
+    const ctx = {
+      ds4Models: {
+        listInstalled: vi.fn(async () => []),
+        listUnrecognized: vi.fn(async () => [
+          {
+            id: 'deepseek-v4-flash-284b-q2',
+            name: 'DeepSeek V4 Flash (IQ2_XXS)',
+            bytes: 86_720_111_488,
+            updatedAt: '2026-06-29T15:11:58.000Z',
+            reason: 'This model was installed by an older version of Gezel.',
+            canUpdate: true,
+          },
+        ]),
+      },
+      chat: { previewLocalEnginePlan: vi.fn() },
+      store: emptyStore,
+    } as unknown as ServiceContext;
+
+    const response = await ds4Routes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [],
+      unrecognized: [
+        {
+          id: 'deepseek-v4-flash-284b-q2',
+          bytes: 86_720_111_488,
+          canUpdate: true,
+        },
+      ],
+    });
+  });
 });

@@ -12,6 +12,7 @@ import type {
   LlamaCppInstallEvent,
   LlamaCppInstalledModel,
   ModelFitnessEntry,
+  UnrecognizedLocalModel,
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -28,6 +29,7 @@ import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
 import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
@@ -186,6 +188,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   // invisible to the installed list. Surfaced so the user can resume or
   // delete them before the daemon's 7-day reclaim sweep.
   const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
+  const [unrecognized, setUnrecognized] = useState<UnrecognizedLocalModel[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -242,6 +245,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       try {
         const res = await api.listLlamaCppModels();
         setModels(res.models);
+        setUnrecognized(res.unrecognized ?? []);
         setModelsError(null);
       } catch (err) {
         setModelsError(err instanceof Error ? err.message : String(err));
@@ -554,6 +558,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     // restores whatever still exists) and surface the error.
     setModels((cur) => cur.filter((m) => m.id !== id));
     setIncomplete((cur) => cur.filter((d) => d.id !== id));
+    setUnrecognized((cur) => cur.filter((model) => model.id !== id));
     try {
       await api.deleteLlamaCppModel(id);
       announceModelInventoryChanged('llama-cpp');
@@ -566,6 +571,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(models.map((m) => m.id)), [models]);
+  const attentionIds = useMemo(
+    () => new Set(unrecognized.map((model) => model.id)),
+    [unrecognized],
+  );
 
   // Catalog manifests keyed by id — the installed table joins tags
   // (MoE-ness) through this for the hardware hint pill.
@@ -606,6 +615,12 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           </div>
         </div>
       )}
+
+      <UnrecognizedModels
+        items={unrecognized.filter((model) => !installs.has(model.id))}
+        onUpdate={(id) => startInstall(id)}
+        onRemove={(id) => setToDelete(id)}
+      />
 
       <IncompleteDownloads
         items={incomplete.filter((d) => !installs.has(d.id))}
@@ -943,6 +958,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return null;
             const installed = installedIds.has(m.id);
+            const needsAttention = attentionIds.has(m.id);
             const inflight = installs.get(m.id);
             const pct =
               inflight && inflight.totalBytes > 0
@@ -1008,7 +1024,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 </div>
                 <button
                   type="button"
-                  disabled={installed || Boolean(inflight)}
+                  disabled={installed || needsAttention || Boolean(inflight)}
                   onClick={() => startInstall(m.id)}
                 >
                   {installed
@@ -1021,7 +1037,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                         : inflight.phase === 'verifying'
                           ? 'Verifying…'
                           : 'Reading metadata…'
-                      : 'Download'}
+                      : needsAttention
+                        ? 'Needs attention above'
+                        : 'Download'}
                 </button>
               </div>
             );

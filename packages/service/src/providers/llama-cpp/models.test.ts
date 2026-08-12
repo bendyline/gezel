@@ -1102,6 +1102,82 @@ describe('LlamaCppModelManager.listInstalled / delete / resolveDefaultModelPath'
     });
     const list = await mgr.listInstalled();
     expect(list).toEqual([]);
+    await expect(mgr.listUnrecognized()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'broken',
+        canUpdate: false,
+        reason: expect.stringContaining('not valid JSON'),
+      }),
+    ]);
+  });
+
+  it('keeps an old ds4 manifest visible for update or removal', async () => {
+    const id = 'deepseek-v4-flash-284b-q2';
+    const dir = join(home, 'engines', 'ds4', 'models', id);
+    require('node:fs').mkdirSync(dir, { recursive: true });
+    const weights = Buffer.from('GGUFlegacy-ds4-payload');
+    writeFileSync(join(dir, 'legacy.gguf'), weights);
+    // This is the pre-installed-manifest shape found on the user's device:
+    // enough provenance to identify the payload, but no current display /
+    // lifecycle fields. It must stay non-runnable without becoming invisible.
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({
+        id,
+        engine: 'ds4',
+        filename: 'legacy.gguf',
+        huggingfaceRepo: 'antirez/deepseek-v4-gguf',
+        revision: 'legacy-revision',
+        sha256: 'a'.repeat(64),
+        approxSizeBytes: weights.byteLength,
+        quantization: 'IQ2_XXS',
+      }),
+    );
+    const catalogManifest = {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id,
+      name: 'DeepSeek V4 Flash (IQ2_XXS)',
+      description: 'fixture',
+      tags: [],
+      maintainer: { name: 'antirez' },
+      version: '1.1.0',
+      releasedAt: '2026-08-01T00:00:00Z',
+      availableVersions: ['1.1.0'],
+      parameterSize: '284B',
+      approxSizeBytes: weights.byteLength,
+      supportsTools: true,
+      ds4: {
+        huggingfaceRepo: 'antirez/deepseek-v4-gguf',
+        filename: 'current-0731.gguf',
+        sha256: 'b'.repeat(64),
+        approxSizeBytes: weights.byteLength,
+        residentBytes: 36 * 1024 ** 3,
+        quantization: 'IQ2_XXS',
+        cacheExpertsBytes: 32 * 1024 ** 3,
+        ssdStreaming: true,
+      },
+    } as ChatModelManifest;
+    const mgr = new LlamaCppModelManager({
+      home,
+      engine: 'ds4',
+      catalog: fakeCatalog(new Map([[id, catalogManifest]])),
+      fetchImpl: streamingFetch(Buffer.alloc(0)),
+    });
+
+    expect(await mgr.listInstalled()).toEqual([]);
+    await expect(mgr.listUnrecognized()).resolves.toEqual([
+      expect.objectContaining({
+        id,
+        name: 'DeepSeek V4 Flash (IQ2_XXS)',
+        canUpdate: true,
+        bytes: expect.any(Number),
+        reason: expect.stringContaining('older version'),
+      }),
+    ]);
+
+    await mgr.delete(id);
+    expect(existsSync(dir)).toBe(false);
   });
 
   it('delete removes the model directory', async () => {

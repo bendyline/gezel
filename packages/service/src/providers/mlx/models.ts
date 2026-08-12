@@ -47,8 +47,10 @@ import {
   type IncompleteModelDownloadInfo,
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
+  type UnrecognizedModelInfo,
   findModelRoot,
   hashModelPayloadFiles,
+  inspectModelDirectory,
   listIncompleteModelDownloads,
   listOverlayModelIds,
   makeSharedModelReadable,
@@ -337,6 +339,51 @@ export class MlxModelManager {
       out.push({ ...row, resumable, ...(name ? { name } : {}) });
     }
     return out;
+  }
+
+  /** Management-only inventory for MLX directories whose manifest exists
+   * but no longer matches the current installed-manifest contract. */
+  async listUnrecognized(): Promise<UnrecognizedModelInfo[]> {
+    const rows: UnrecognizedModelInfo[] = [];
+    for (const id of await listOverlayModelIds(this.storageRoots)) {
+      if (!isSafeId(id)) continue;
+      const root = await findModelRoot(this.storageRoots, id);
+      if (!root) continue;
+      if (await this.loadInstalled(id)) continue;
+
+      const profile = await inspectModelDirectory(join(root, id));
+      if (!profile || profile.bytes === 0) continue;
+      const raw = await readFile(join(root, id, 'manifest.json'), 'utf8').catch(() => null);
+      let legacyName: string | undefined;
+      let reason = "Gezel couldn't read this model's metadata.";
+      if (raw !== null) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (typeof parsed.name === 'string' && parsed.name.trim()) legacyName = parsed.name;
+          reason = 'This model metadata is incomplete or does not match the current format.';
+        } catch {
+          reason = "This model's metadata file is not valid JSON.";
+        }
+      }
+
+      const detail = await this.catalog.get('chat-model', id).catch(() => null);
+      const catalogManifest = detail?.manifest.kind === 'chat-model' ? detail.manifest : undefined;
+      const canUpdate = Boolean(catalogManifest?.mlx && !catalogManifest.mlx.disabledReason);
+      const name = catalogManifest?.name ?? legacyName;
+      rows.push({
+        id,
+        ...(name ? { name } : {}),
+        bytes: profile.bytes,
+        updatedAt: profile.updatedAt,
+        reason,
+        canUpdate,
+        ...(resolvePath(root) !== resolvePath(this.storageRoots.writableRoot)
+          ? { readOnly: true }
+          : {}),
+      });
+    }
+    rows.sort((a, b) => b.bytes - a.bytes);
+    return rows;
   }
 
   async resolveDefaultModel(): Promise<InstalledMlxModel | null> {
@@ -870,7 +917,7 @@ export class MlxModelManager {
   private warnSkip(id: string, reason: string): void {
     if (this.skipWarned.has(id)) return;
     this.skipWarned.add(id);
-    log.warn(`[mlx] hiding model directory "${id}": ${reason}`);
+    log.warn(`[mlx] model directory "${id}" is not runnable: ${reason}`);
   }
 
   private async loadInstalled(id: string): Promise<InstalledMlxModel | null> {

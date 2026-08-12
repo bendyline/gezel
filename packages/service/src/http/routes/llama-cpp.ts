@@ -19,7 +19,10 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/llama-cpp', '/v1/remote/manage/llama-cpp'));
 
   app.get('/models', async (c) => {
-    const installed = await ctx.llamaCppModels.listInstalled();
+    const [installed, unrecognized] = await Promise.all([
+      ctx.llamaCppModels.listInstalled(),
+      ctx.llamaCppModels.listUnrecognized?.() ?? Promise.resolve([]),
+    ]);
     // Override state rides the row even when the preview throws (a stale
     // resident engine yields restart-required, and the slider still needs
     // to show the custom setting it should return to).
@@ -77,7 +80,7 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
         }
       }),
     );
-    return c.json({ models });
+    return c.json({ models, unrecognized });
   });
 
   /**

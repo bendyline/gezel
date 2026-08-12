@@ -602,6 +602,72 @@ export interface IncompleteModelDownload {
 }
 
 /**
+ * Cheap metadata-only profile of one model directory. Unlike
+ * {@link hashModelPayloadFiles}, this never reads payload contents — it only
+ * walks regular files and sums their stat sizes. Inventory surfaces use it to
+ * keep malformed/legacy installs visible without hashing a hundred-gigabyte
+ * model merely to say that the files exist.
+ */
+export interface ModelDirectoryProfile {
+  /** Total bytes on disk across payload, metadata, and partial files. */
+  bytes: number;
+  /** ISO timestamp of the newest directory/file write. */
+  updatedAt: string;
+  /** Whether any resumable download fragment is present. */
+  hasPartial: boolean;
+  /** Whether the directory tree contains model metadata. */
+  hasManifest: boolean;
+}
+
+/** Inventory row for a model directory whose manifest exists but is not
+ * loadable by the current engine manager. */
+export interface UnrecognizedModelInfo {
+  id: string;
+  name?: string;
+  bytes: number;
+  updatedAt: string;
+  reason: string;
+  canUpdate: boolean;
+  readOnly?: boolean;
+}
+
+export async function inspectModelDirectory(dir: string): Promise<ModelDirectoryProfile | null> {
+  try {
+    const rootInfo = await lstat(dir);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) return null;
+    let bytes = 0;
+    let newestMtimeMs = rootInfo.mtimeMs;
+    let hasPartial = false;
+    let hasManifest = false;
+    const visit = async (current: string): Promise<void> => {
+      for (const entry of await readdir(current, { withFileTypes: true })) {
+        const absolute = join(current, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+          await visit(absolute);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const info = await lstat(absolute);
+        newestMtimeMs = Math.max(newestMtimeMs, info.mtimeMs);
+        bytes += info.size;
+        if (entry.name.endsWith('.partial')) hasPartial = true;
+        if (entry.name === 'manifest.json') hasManifest = true;
+      }
+    };
+    await visit(dir);
+    return {
+      bytes,
+      updatedAt: new Date(newestMtimeMs).toISOString(),
+      hasPartial,
+      hasManifest,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * An incomplete download enriched with per-engine catalog context. Managers
  * return this from `listIncomplete()`; the route serializes it as-is.
  */
@@ -667,29 +733,13 @@ export async function listIncompleteModelDownloads(opts: {
 async function scanAbandonedCandidate(
   dir: string,
 ): Promise<{ hasPartial: boolean; newestMtimeMs: number; totalBytes: number } | null> {
-  let hasPartial = false;
-  let totalBytes = 0;
-  const dirInfo = await lstat(dir);
-  let newestMtimeMs = dirInfo.mtimeMs;
-  const visit = async (current: string): Promise<boolean> => {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absolute = join(current, entry.name);
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) {
-        if (!(await visit(absolute))) return false;
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (entry.name === 'manifest.json') return false;
-      const info = await lstat(absolute);
-      newestMtimeMs = Math.max(newestMtimeMs, info.mtimeMs);
-      totalBytes += info.size;
-      if (entry.name.endsWith('.partial')) hasPartial = true;
-    }
-    return true;
+  const profile = await inspectModelDirectory(dir);
+  if (!profile || profile.hasManifest) return null;
+  return {
+    hasPartial: profile.hasPartial,
+    newestMtimeMs: new Date(profile.updatedAt).getTime(),
+    totalBytes: profile.bytes,
   };
-  if (!(await visit(dir))) return null;
-  return { hasPartial, newestMtimeMs, totalBytes };
 }
 
 function isSafeModelPath(path: string): boolean {

@@ -1532,6 +1532,28 @@ export interface IncompleteModelDownload {
 }
 
 /**
+ * A model directory with a manifest that the current daemon cannot safely
+ * load. The files stay visible in Settings so an older install can be updated
+ * from today's catalog or explicitly removed instead of masquerading as an
+ * empty model slot.
+ */
+export interface UnrecognizedLocalModel {
+  id: string;
+  /** Catalog or legacy-manifest display name, when one can be recovered. */
+  name?: string;
+  /** Total bytes held by the model directory. */
+  bytes: number;
+  /** ISO timestamp of the newest file in the directory. */
+  updatedAt: string;
+  /** User-facing explanation of why the current daemon cannot load it. */
+  reason: string;
+  /** True when the same id still has a compatible source in today's catalog. */
+  canUpdate: boolean;
+  /** Machine/shared overlays cannot be removed by this user daemon. */
+  readOnly?: boolean;
+}
+
+/**
  * One installed llama.cpp model on disk. Returned by
  * {@link GezelClient.listLlamaCppModels}.
  */
@@ -2926,7 +2948,10 @@ export class GezelClient {
 
   // ── llama.cpp local model management ──
 
-  listLlamaCppModels(): Promise<{ models: LlamaCppInstalledModel[] }> {
+  listLlamaCppModels(): Promise<{
+    models: LlamaCppInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/llama-cpp/models');
   }
 
@@ -3022,7 +3047,10 @@ export class GezelClient {
 
   // ── ds4 (DeepSeek-V4) local model management — same shape as llama.cpp ──
 
-  listDs4Models(): Promise<{ models: LlamaCppInstalledModel[] }> {
+  listDs4Models(): Promise<{
+    models: LlamaCppInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/ds4/models');
   }
 
@@ -3214,7 +3242,10 @@ export class GezelClient {
 
   // ── MLX local model management (Apple Silicon only) ──
 
-  listMlxModels(): Promise<{ models: MlxInstalledModel[] }> {
+  listMlxModels(): Promise<{
+    models: MlxInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/mlx/models');
   }
 

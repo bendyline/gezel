@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -126,6 +126,40 @@ describe('MlxModelManager — concurrent multi-file install', () => {
   });
   afterEach(async () => {
     await rm(home, { recursive: true, force: true });
+  });
+
+  it('keeps an older manifest visible for catalog update or removal', async () => {
+    const id = 'legacy-mlx-model';
+    const dir = join(home, 'engines', 'mlx', 'models', id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'model.safetensors'), Buffer.from('legacy-weights'));
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({
+        id,
+        engine: 'mlx',
+        huggingfaceRepo: 'test/old-repo',
+        files: ['model.safetensors'],
+      }),
+    );
+    const { manager } = makeHarness({
+      home,
+      files: { 'model.safetensors': Buffer.from('current-weights') },
+    });
+
+    await expect(manager.listInstalled()).resolves.toEqual([]);
+    await expect(manager.listUnrecognized()).resolves.toEqual([
+      expect.objectContaining({
+        id,
+        name: 'Test MLX Model',
+        canUpdate: true,
+        bytes: expect.any(Number),
+        reason: expect.stringContaining('does not match the current format'),
+      }),
+    ]);
+
+    await manager.delete(id);
+    await expect(readdir(join(home, 'engines', 'mlx', 'models'))).resolves.toEqual([]);
   });
 
   it('downloads several files concurrently and completes', async () => {
