@@ -9076,6 +9076,15 @@ export class ChatManager {
        */
       jobLabel?: string;
       /**
+       * Per-call catalog tuning profile. Used by tightly-scoped utility work
+       * whose inference shape differs from the owning gezel's conversational
+       * default (for example, index summaries should use an `instruct`
+       * profile rather than spend their deadline on hidden reasoning).
+       * The profile keeps its catalog-authored sampling/output allowance;
+       * this option does not impose an extra token cap.
+       */
+      tuningProfileId?: string;
+      /**
        * Truly-deferrable housekeeping (memory extraction, icon/about
        * generation, index enrichment, digests). On local engine queues
        * with ambient admission control the one-shot dispatches only
@@ -9206,10 +9215,19 @@ export class ChatManager {
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const sessionDefaults = opts.tuningProfileId
+      ? await this.resolveModelSessionDefaults(effectiveProviderName, model, {
+          tuningProfileId: opts.tuningProfileId,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        })
+      : null;
     const session = await provider.createSession({
       systemMessage,
       model,
       reasoningEffort,
+      ...(sessionDefaults
+        ? { profile: sessionDefaults.profile, tuning: sessionDefaults.tuning }
+        : {}),
     });
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),

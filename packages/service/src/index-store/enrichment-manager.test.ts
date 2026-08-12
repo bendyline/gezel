@@ -513,11 +513,12 @@ describe('buildEnrichDeps enricher override', () => {
     await deps.summarize('p');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
-      expect.any(Number),
+      120_000,
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
         actorLabel: 'Boekwachter',
+        tuningProfileId: 'instruct',
       }),
     );
   });
@@ -598,12 +599,13 @@ describe('buildEnrichDeps enricher override', () => {
     await deps.review!('p');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
-      60_000,
+      180_000,
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
         actorLabel: 'Boekwachter',
         jobLabel: 'index review',
+        tuningProfileId: 'instruct',
       }),
     );
   });

@@ -17518,8 +17518,16 @@ button.timeline-session-divider-continuing::before {
   white-space: nowrap;
 }
 
+.model-actions-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
 .model-action-status {
-  min-height: 1.15rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
 }
 
 .model-fitness-badge {
