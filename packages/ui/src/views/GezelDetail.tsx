@@ -31,7 +31,6 @@ import { GrowthPanel } from '../components/GrowthPanel.js';
 import { LevelBadge } from '../components/LevelBadge.js';
 import { MemoriesTree } from '../components/MemoriesTree.js';
 import { EffortPicker } from '../components/ModelPicker.js';
-import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { ProviderModelSelect } from '../components/ProviderModelSelect.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useGenerationEngineLabel } from '../components/generation-engine-label.js';
@@ -46,13 +45,6 @@ type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memo
 
 interface GezelDetailProps {
   gezelId: string;
-  /**
-   * True when this detail is itself the active top-level tab (i.e.,
-   * rendered by TabContent for a `kind: 'gezel'` tab). Suppresses the
-   * "promote to tab" affordance — there's nothing to promote when
-   * we're already standing in the destination.
-   */
-  standalone?: boolean;
   onDeleted?: (gezelId: string) => void;
 }
 
@@ -60,7 +52,7 @@ function broadcastUpdate(detail: GezelDetailData) {
   window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail }));
 }
 
-export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDetailProps) {
+export function GezelDetail({ gezelId, onDeleted }: GezelDetailProps) {
   const editorTheme = useEffectiveTheme();
   const [selected, setSelected] = useState<GezelDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -307,7 +299,6 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
             {!isFixedFunction && <Tabs.Trigger value="memories">Memories</Tabs.Trigger>}
           </Tabs.List>
         </Tabs.Root>
-        {!standalone && <PromoteToTabButton target={{ kind: 'gezel', id: selected.id }} />}
       </div>
       {activeDetailTab === 'appearance' && (
         <AppearancePanel gezel={selected} onUpdated={applyUpdate} />

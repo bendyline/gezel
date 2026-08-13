@@ -72,9 +72,6 @@ vi.mock('./OutsideInDocumentDetail.js', () => ({
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => <span data-testid="ai-toolbar">ai</span>,
 }));
-vi.mock('../components/PromoteToTabButton.js', () => ({
-  PromoteToTabButton: () => <span data-testid="promote-btn">promote</span>,
-}));
 vi.mock('../theme.js', () => ({
   useEffectiveTheme: () => 'dark',
 }));
@@ -260,18 +257,5 @@ describe('DocumentDetail', () => {
     });
     expect(screen.getByTestId('ai-toolbar')).toBeInTheDocument();
     expect(screen.getByTestId('export-toolbar')).toBeInTheDocument();
-  });
-
-  it('renders the promote-to-tab button by default and hides it in standalone mode', async () => {
-    const { rerender } = render(<DocumentDetail path="mission.md" />);
-    await waitFor(() => {
-      expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('promote-btn')).toBeInTheDocument();
-
-    rerender(<DocumentDetail path="mission.md" standalone />);
-    await waitFor(() => {
-      expect(screen.queryByTestId('promote-btn')).not.toBeInTheDocument();
-    });
   });
 });

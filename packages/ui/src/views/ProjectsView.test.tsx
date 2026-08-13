@@ -158,7 +158,6 @@ vi.mock('../components/ProjectChat.js', () => ({
   ),
 }));
 vi.mock('../components/ProjectTimeline.js', () => ({ ProjectTimeline: () => null }));
-vi.mock('../components/PromoteToTabButton.js', () => ({ PromoteToTabButton: () => null }));
 vi.mock('../components/PromptDialog.js', () => ({ PromptDialog: () => null }));
 vi.mock('../components/ToolsetsEditor.js', () => ({
   ToolsetsEditor: () => <div data-testid="toolsets-editor" />,
@@ -214,6 +213,14 @@ describe('ProjectsView', () => {
     expect(screen.getByText('default')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Alpha' })).toHaveClass('project-rail-name');
     expect(screen.getByRole('button', { name: 'Alpha' })).toHaveAttribute('title', 'Alpha');
+  });
+
+  it('does not show an open-in-own-tab button in project details', async () => {
+    render(<ProjectsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+
+    await screen.findByTestId('project-chat');
+    expect(screen.queryByRole('button', { name: 'Open in own tab' })).not.toBeInTheDocument();
   });
 
   it('groups archived projects at the bottom of the full project list', async () => {

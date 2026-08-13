@@ -19223,9 +19223,7 @@ a.license-button:hover {
   background: transparent;
 }
 
-/* Wrapper that pairs an entity detail's inner tab row with a
-   right-aligned promote-to-tab button. The button visually lines up
-   under the top-bar hamburger. */
+/* Wrapper for an entity detail's inner tab row. */
 .entity-tabs-row {
   display: flex;
   align-items: stretch;
@@ -19583,19 +19581,6 @@ a.license-button:hover {
   padding-right: 140px;
 }
 
-/* Compact (auto-detected via useCompactLayout, or explicit prop)
-   layout adjustments. Driven by the `is-compact` class on
-   `.two-col.detail-only` — see ProjectsView. Add new responsive
-   tweaks here as we discover more narrow-form-factor pain points.
-
-   Hide the promote-to-tab affordance — the bar already runs out of
-   room for tab labels, and the promote button is mostly meaningful
-   on a multi-tab surface (which compact-mode hosts like the VS Code
-   sidebar don't have). */
-.two-col.detail-only.is-compact .promote-to-tab-btn {
-  display: none;
-}
-
 /* In compact mode, suppress the project-list sidebar even when the
    user previously hit the collapse toggle to expand it on a wider
    window. `detail-only` already hides the sidebar via JSX, but the
@@ -19607,32 +19592,6 @@ a.license-button:hover {
 }
 .two-col.is-compact:not(.detail-only) {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.promote-to-tab-btn {
-  flex: 0 0 auto;
-  align-self: center;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  padding: 0.25rem 0.4rem;
-  margin-bottom: 1px; /* keep the icon clear of the tab underline */
-  border-radius: 4px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.promote-to-tab-btn:hover {
-  color: var(--text);
-  background: var(--bg-subtle, rgba(0, 0, 0, 0.04));
-  border-color: var(--border);
-}
-
-.promote-to-tab-btn:focus-visible {
-  outline: 2px solid var(--accent, #6c8ed4);
-  outline-offset: 1px;
 }
 
 .gz-tabs-trigger {
@@ -21424,56 +21383,117 @@ a.license-button:hover {
 }
 
 .gz-connector-config-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: 0.7rem 0.9rem;
-  align-items: start;
-  max-width: 42rem;
-}
-
-/* This tray lives outside `.gz-dialog`, so it doesn't inherit the dialog's
-   stacked label/input rule — state it here or every field renders with its
-   caption inline and an intrinsically-sized input. */
-.gz-connector-config-fields label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
+  gap: 0.9rem;
+  max-width: 48rem;
 }
 
-.gz-connector-config-fields label > input {
+.gz-connector-setup-instructions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: 48rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.gz-connector-setup-instructions strong {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.gz-connector-setup-instructions p,
+.gz-connector-setup-instructions ol {
+  margin: 0;
+}
+
+.gz-connector-setup-instructions ol {
+  padding-left: 1.15rem;
+}
+
+.gz-connector-setup-instructions a,
+.gz-connector-field-help a {
+  font-family: var(--font-ui);
+}
+
+.gz-connector-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.gz-connector-field-group + .gz-connector-field-group {
+  padding-top: 0.8rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.gz-connector-field-group-heading {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Every connector uses one ledger-like name → control alignment. Keeping the
+   label column stable avoids the staggered baselines produced by auto-flowing
+   two-column cards when helper text and checkboxes have different heights. */
+.gz-connector-field {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  gap: 0.35rem 0.85rem;
+  align-items: start;
+}
+
+.gz-connector-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+  padding-top: calc(0.42rem - 3px);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.gz-connector-field-requirement {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+
+.gz-connector-field-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.gz-connector-field-control > input:not([type="checkbox"]) {
   width: 100%;
   min-width: 0;
   margin: 0;
 }
 
-.gz-connector-config-fields > .gz-connector-boolean-field,
-.gz-connector-config-fields .gz-imap-tls {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  align-self: end;
-  gap: 0.45rem;
-  min-height: 2.15rem;
-}
-
-.gz-connector-config-fields > .gz-connector-boolean-field > input,
-.gz-connector-config-fields .gz-imap-tls > input {
+.gz-connector-field-control > input[type="checkbox"] {
   width: auto;
-  margin: 0;
+  margin: 0.5rem 0 0;
 }
 
-/* Port and Use TLS join the field grid as their own cells instead of
-   sharing one cramped column. */
-.gz-connector-config-fields > .gz-imap-row {
-  display: contents;
+.gz-connector-field-help {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
 .gz-connector-oauth-note {
-  align-self: center;
-  margin: 0;
+  grid-column: 1 / -1;
+  margin: 0.15rem 0 0;
 }
 
 /* Bring-your-own OAuth app: the setup panel inside the connector config
@@ -21606,9 +21626,16 @@ a.license-button:hover {
 }
 
 @media (max-width: 700px) {
-  .gz-connector-grid,
-  .gz-connector-config-fields {
+  .gz-connector-grid {
     grid-template-columns: 1fr;
+  }
+
+  .gz-connector-field {
+    grid-template-columns: 1fr;
+  }
+
+  .gz-connector-field-label {
+    padding-top: 0;
   }
 
   .gz-connector-picker-heading {

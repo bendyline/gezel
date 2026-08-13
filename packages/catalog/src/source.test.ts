@@ -117,6 +117,42 @@ describe('BundledSource — versioned layout', () => {
     expect(m.availableVersions).toEqual(['1.1.0', '1.0.0']);
   });
 
+  it('preserves connector setup guidance when resolving identity and version layers', async () => {
+    const dir = await writeIdentity(root, 'connector-type', 'bluesky-posts', {
+      schemaVersion: 1,
+      kind: 'connector-type',
+      id: 'bluesky-posts',
+      name: 'Bluesky Posts',
+      description: 'Bluesky fixture',
+      tags: [],
+      maintainer: { name: 'Test' },
+    });
+    await writeVersion(dir, '1.0.0', {
+      schemaVersion: 1,
+      version: '1.0.0',
+      releasedAt: '2026-08-13T00:00:00Z',
+      driver: 'native',
+      source: { adapterId: 'bluesky-posts' },
+      setupInstructions: {
+        title: 'Create a Bluesky app password',
+        steps: ['Open Bluesky settings.', 'Create an app password for Gezel.'],
+        url: 'https://bsky.app/settings/app-passwords',
+        urlLabel: 'Open Bluesky settings',
+      },
+    });
+
+    const detail = await new BundledSource(root).get('connector-type', 'bluesky-posts');
+    if (!detail || detail.manifest.kind !== 'connector-type') {
+      throw new Error('expected connector-type detail');
+    }
+    expect(detail.manifest.setupInstructions).toEqual({
+      title: 'Create a Bluesky app password',
+      steps: ['Open Bluesky settings.', 'Create an app password for Gezel.'],
+      url: 'https://bsky.app/settings/app-passwords',
+      urlLabel: 'Open Bluesky settings',
+    });
+  });
+
   it('get with explicit version returns that version even when yanked', async () => {
     const dir = await writeIdentity(
       root,

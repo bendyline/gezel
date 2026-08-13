@@ -68,9 +68,6 @@ vi.mock('../components/MemoriesTree.js', () => ({
 vi.mock('../components/ModelPicker.js', () => ({
   EffortPicker: () => null,
 }));
-vi.mock('../components/PromoteToTabButton.js', () => ({
-  PromoteToTabButton: () => <span data-testid="promote">promote</span>,
-}));
 vi.mock('../components/ProviderModelSelect.js', () => ({
   ProviderModelSelect: () => null,
 }));
@@ -297,14 +294,6 @@ describe('GezelDetail', () => {
     await waitFor(() =>
       expect(screen.getByTestId('editor-initial')).toHaveTextContent('# Generated'),
     );
-  });
-
-  it('hides the promote-to-tab button in standalone mode', async () => {
-    render(<GezelDetail gezelId="gz-maya" standalone />);
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Maya' })).toBeInTheDocument();
-    });
-    expect(screen.queryByTestId('promote')).not.toBeInTheDocument();
   });
 
   it('toggles a worn item on through the accessories dialog', async () => {

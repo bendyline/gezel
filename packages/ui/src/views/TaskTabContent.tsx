@@ -5,19 +5,12 @@ import { TaskDetail } from './TaskDetail.js';
 
 interface TaskTabContentProps {
   taskRef: string;
-  /** Forwarded to TaskDetail — hides the "promote to tab" affordance
-   *  when this view is itself the active top-level tab. */
-  standalone?: boolean;
   /** Bubbles every task mutation up so an enclosing list can stay in sync
    *  without waiting for its next poll. */
   onTaskChanged?: (t: Task) => void;
 }
 
-export function TaskTabContent({
-  taskRef,
-  standalone = false,
-  onTaskChanged,
-}: TaskTabContentProps) {
+export function TaskTabContent({ taskRef, onTaskChanged }: TaskTabContentProps) {
   const [task, setTask] = useState<Task | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [projectName, setProjectName] = useState<string>('');
@@ -67,13 +60,5 @@ export function TaskTabContent({
   }
   if (!task) return <p className="placeholder">Loading task…</p>;
 
-  return (
-    <TaskDetail
-      task={task}
-      gezels={gezels}
-      projectName={projectName}
-      onChanged={onChanged}
-      standalone={standalone}
-    />
-  );
+  return <TaskDetail task={task} gezels={gezels} projectName={projectName} onChanged={onChanged} />;
 }

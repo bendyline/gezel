@@ -1118,6 +1118,19 @@ const ConnectorActionSchema = z.object({
   consentScope: z.string(),
 });
 
+/**
+ * Short, human-facing guidance shown before a connector's configuration
+ * fields. Catalog content owns this because the steps and destination belong
+ * to the external service, while the UI only owns their presentation.
+ */
+const ConnectorSetupInstructionsSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1).optional(),
+  steps: z.array(z.string().min(1)).optional(),
+  url: z.string().url().optional(),
+  urlLabel: z.string().min(1).optional(),
+});
+
 const ConnectorTypeCompositionShape = {
   /** Which driver executes the fetch. */
   driver: ConnectorDriverSchema,
@@ -1125,6 +1138,8 @@ const ConnectorTypeCompositionShape = {
   configSchema: z.record(z.string(), z.unknown()).optional(),
   /** Shape of the credential the binding stores in the SecretStore. */
   secretShape: z.record(z.string(), z.unknown()).optional(),
+  /** Concise setup guidance rendered above the binding form. */
+  setupInstructions: ConnectorSetupInstructionsSchema.optional(),
   /**
    * Driver-specific fetch config: `{adapterId}` (native) | `{server,list,fetch}`
    * (mcp) | `{fetch|cli}` (script) | `{component,action,...}` (spectral).

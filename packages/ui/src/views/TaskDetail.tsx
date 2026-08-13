@@ -15,7 +15,6 @@ import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GezelIcon } from '../components/GezelIcon.js';
-import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
@@ -145,15 +144,11 @@ export function TaskDetail({
   gezels,
   projectName,
   onChanged,
-  standalone = false,
 }: {
   task: Task;
   gezels: GezelSummary[];
   projectName: string;
   onChanged: (t: Task) => void | Promise<void>;
-  /** Hides the "promote to tab" affordance when this view is itself the
-   *  active top-level tab. */
-  standalone?: boolean;
 }) {
   const editorTheme = useEffectiveTheme();
   const [notes, setNotes] = useState<TaskNote[]>([]);
@@ -572,7 +567,6 @@ export function TaskDetail({
               </Select.Content>
             </Select.Root>
           )}
-          {!standalone && <PromoteToTabButton target={{ kind: 'task', ref: task.ref }} />}
         </div>
       </header>
 

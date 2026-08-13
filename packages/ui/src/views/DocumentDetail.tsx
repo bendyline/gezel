@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
-import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
   createDocumentLinkProvider,
   createDocumentsContentContainer,
@@ -27,12 +26,6 @@ function isMarkdown(name: string): boolean {
 
 interface DocumentDetailProps {
   path: string;
-  /**
-   * True when this view is itself the active top-level tab. Suppresses
-   * the "promote to tab" affordance — re-promoting would just activate
-   * the tab the user is already on.
-   */
-  standalone?: boolean;
 }
 
 /**
@@ -49,15 +42,15 @@ interface DocumentDetailProps {
  * embed `![](hero.jpg)` which resolves to `notes/hero.jpg` server-side.
  * Versions ride along under the same directory's `.versions/` sidecar.
  */
-export function DocumentDetail({ path, standalone = false }: DocumentDetailProps) {
+export function DocumentDetail({ path }: DocumentDetailProps) {
   const outsideInLayout = useMemo(() => resolveOutsideInLayout(path), [path]);
   if (outsideInLayout) {
-    return <OutsideInDocumentDetail path={path} layout={outsideInLayout} standalone={standalone} />;
+    return <OutsideInDocumentDetail path={path} layout={outsideInLayout} />;
   }
-  return <TextDocumentDetail path={path} standalone={standalone} />;
+  return <TextDocumentDetail path={path} />;
 }
 
-function TextDocumentDetail({ path, standalone = false }: DocumentDetailProps) {
+function TextDocumentDetail({ path }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
   const [content, setContent] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -142,12 +135,7 @@ function TextDocumentDetail({ path, standalone = false }: DocumentDetailProps) {
           allowVersioning={markdown}
           versionBasename={primaryDocumentFilename}
           toolbarSlotAfterActions={
-            markdown || !standalone ? (
-              <>
-                {markdown && <TransformToolbarButton context="generic" />}
-                {!standalone && <PromoteToTabButton target={{ kind: 'document', path }} />}
-              </>
-            ) : undefined
+            markdown ? <TransformToolbarButton context="generic" /> : undefined
           }
           toolbarSlotRight={
             markdown ? (

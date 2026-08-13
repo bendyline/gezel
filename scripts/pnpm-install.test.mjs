@@ -13,6 +13,7 @@ import {
   withPnpmInstallLock,
   workspaceDependenciesReady,
 } from './pnpm-install.mjs';
+import { parseWorkspaceValidationArgs, runWorkspaceValidation } from './validate-workspace.mjs';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-pnpm-install-test-'));
@@ -56,6 +57,25 @@ test('serializes dependency mutations for one checkout', async (t) => {
   releaseFirst();
   await Promise.all([first, second]);
   assert.deepEqual(events, ['first:start', 'first:end', 'second:start']);
+});
+
+test('allows a validation descendant to re-enter its live checkout lock', async (t) => {
+  const root = await fixture(t);
+  const events = [];
+
+  await withPnpmInstallLock(root, async ({ lockEnv }) => {
+    events.push('outer:start');
+    await withPnpmInstallLock(
+      root,
+      async () => {
+        events.push('inner');
+      },
+      { env: lockEnv, timeoutMs: 100, pollMs: 10 },
+    );
+    events.push('outer:end');
+  });
+
+  assert.deepEqual(events, ['outer:start', 'inner', 'outer:end']);
 });
 
 test('recovers an orphaned install lock', async (t) => {
@@ -165,6 +185,45 @@ test('parses wrapper-only flags without leaking them to pnpm', () => {
     ifMissing: true,
     args: ['--frozen-lockfile'],
   });
+});
+
+test('holds one checkout lock across install and validation', async (t) => {
+  const root = await fixture(t);
+  const events = [];
+  let competingMutation;
+
+  const code = await runWorkspaceValidation({
+    repoRoot: root,
+    install: true,
+    runInstallFn: async ({ env }) => {
+      events.push('install');
+      await withPnpmInstallLock(root, async () => events.push('install:locked'), { env });
+      return 0;
+    },
+    runValidationFn: async ({ env }) => {
+      events.push('validate');
+      await withPnpmInstallLock(root, async () => events.push('validate:locked'), { env });
+      competingMutation = withPnpmInstallLock(root, async () => events.push('competitor'), {
+        timeoutMs: 2_000,
+        pollMs: 10,
+      });
+      await new Promise((resolveWait) => setTimeout(resolveWait, 30));
+      assert.equal(events.includes('competitor'), false);
+      return 0;
+    },
+  });
+  await competingMutation;
+
+  assert.equal(code, 0);
+  assert.deepEqual(events, [
+    'install',
+    'install:locked',
+    'validate',
+    'validate:locked',
+    'competitor',
+  ]);
+  assert.deepEqual(parseWorkspaceValidationArgs([]), { install: false });
+  assert.deepEqual(parseWorkspaceValidationArgs(['--install']), { install: true });
 });
 
 test('link and release-update workflows lock config edits together with installs', async () => {

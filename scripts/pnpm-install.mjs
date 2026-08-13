@@ -14,6 +14,8 @@ const defaultRepoRoot = resolve(scriptsDir, '..');
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const OWNER_GRACE_MS = 30 * 1000;
 const SERIALIZED_INSTALL_ENV = 'GEZEL_SERIALIZED_PNPM_INSTALL';
+const INSTALL_LOCK_PATH_ENV = 'GEZEL_PNPM_INSTALL_LOCK_PATH';
+const INSTALL_LOCK_TOKEN_ENV = 'GEZEL_PNPM_INSTALL_LOCK_TOKEN';
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -82,6 +84,32 @@ async function quarantineStaleLock(lockDir, token) {
 /** Serialize every operation that can rewrite this checkout's dependency tree. */
 export async function withPnpmInstallLock(repoRoot, fn, options = {}) {
   const lockDir = await pnpmInstallLockPath(repoRoot);
+  const inheritedEnv = options.env ?? process.env;
+  const inheritedToken = inheritedEnv[INSTALL_LOCK_TOKEN_ENV];
+  const inheritedPath = inheritedEnv[INSTALL_LOCK_PATH_ENV];
+
+  // A checkout-wide workflow such as `pnpm validate` keeps this lock while it
+  // launches child pnpm commands. Some of those children perform an isolated
+  // deploy and use this helper themselves. Admit only descendants carrying the
+  // live owner's unguessable token; unrelated processes still have to wait.
+  if (inheritedToken && inheritedPath && resolve(inheritedPath) === resolve(lockDir)) {
+    const snapshot = await lockSnapshot(lockDir);
+    const ownerPids = [snapshot?.owner?.pid, snapshot?.owner?.childPid].filter(Number.isInteger);
+    if (
+      snapshot?.owner?.token === inheritedToken &&
+      resolve(snapshot.owner.repoRoot ?? '') === resolve(repoRoot) &&
+      ownerPids.some(processIsAlive)
+    ) {
+      return fn({
+        setChildPid: async () => {},
+        lockEnv: {
+          [INSTALL_LOCK_PATH_ENV]: lockDir,
+          [INSTALL_LOCK_TOKEN_ENV]: inheritedToken,
+        },
+      });
+    }
+  }
+
   const token = randomUUID();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const startedAt = Date.now();
@@ -128,6 +156,10 @@ export async function withPnpmInstallLock(repoRoot, fn, options = {}) {
       setChildPid: async (childPid) => {
         owner.childPid = childPid ?? null;
         await writeOwner();
+      },
+      lockEnv: {
+        [INSTALL_LOCK_PATH_ENV]: lockDir,
+        [INSTALL_LOCK_TOKEN_ENV]: token,
       },
     });
   } finally {

@@ -55,9 +55,6 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   withOutsideInMarkdownEditing: (content: string) => `${content}\neditable: true`,
   withOutsideInMetadata: (content: string) => content,
 }));
-vi.mock('../components/PromoteToTabButton.js', () => ({
-  PromoteToTabButton: () => <span>promote</span>,
-}));
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => <span>transform</span>,
 }));
@@ -119,7 +116,7 @@ describe('OutsideInDocumentDetail', () => {
   });
 
   it('edits the Markdown companion and regenerates the visible DOCX on autosave', async () => {
-    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} standalone={false} />);
+    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
     const editor = await screen.findByTestId('editor-shell');
     expect(editor).toHaveAttribute('data-file', 'brief.docx');
     expect(editor).toHaveAttribute('data-readonly', 'false');
@@ -141,7 +138,7 @@ describe('OutsideInDocumentDetail', () => {
       path: LAYOUT.markdownPath,
       content: '# Brief',
     } as never);
-    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} standalone />);
+    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
 
     expect(await screen.findByTestId('editor-shell')).toHaveAttribute('data-readonly', 'true');
     expect(screen.getByText('DOCX preview · read-only.')).toBeInTheDocument();
@@ -177,7 +174,7 @@ describe('OutsideInDocumentDetail', () => {
     ]);
     outsideInMocks.importContainer.readFile.mockResolvedValue(new Uint8Array([9, 8, 7]));
 
-    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} standalone />);
+    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
 
     expect(await screen.findByTestId('editor-shell')).toHaveAttribute('data-readonly', 'true');
     expect(screen.getByText('# Imported brief')).toBeInTheDocument();

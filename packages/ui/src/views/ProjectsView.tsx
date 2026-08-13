@@ -47,7 +47,6 @@ import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
-import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -2178,10 +2177,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     )}
                 </Tabs.List>
               </Tabs.Root>
-              {/* Hide the promote affordance when this view is itself
-                  the standalone tab — the project would just re-activate
-                  the tab the user is already on. */}
-              {!detailOnly && <PromoteToTabButton target={{ kind: 'project', id: selected.id }} />}
               {selected.archived && (
                 <span className="project-archived-badge" title="Hidden from primary navigation">
                   Archived
