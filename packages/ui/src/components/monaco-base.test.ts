@@ -1,4 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Worker routing is orthogonal to the contribution-order regression. Keeping
+// its five worker entry points out of this test also keeps the assertion from
+// waiting on unrelated Vite transforms while the full suite runs in parallel.
+vi.mock('../squisq-monaco-workers.js', () => ({}));
+
+Object.defineProperty(document, 'queryCommandSupported', {
+  configurable: true,
+  value: () => false,
+});
+
+// Monaco's large dependency graph is transformed while Vitest collects the
+// file, rather than consuming this regression assertion's execution timeout.
+const squisqMonaco = await import('@bendyline/squisq-editor-react/monaco');
 
 describe('shared Monaco runtime', () => {
   it('does not register full-editor contributions after Squisq initializes services', async () => {
@@ -6,10 +20,6 @@ describe('shared Monaco runtime', () => {
     // Squisq editor initializes Monaco first, then a Gezel editor loads its
     // shared base. Importing editor.main in the second step would register
     // contributions whose singleton services missed the one-time snapshot.
-    Object.defineProperty(document, 'queryCommandSupported', {
-      configurable: true,
-      value: () => false,
-    });
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: () => ({
@@ -25,7 +35,8 @@ describe('shared Monaco runtime', () => {
         measureText: () => ({ width: 8 }),
       }),
     });
-    const squisqMonaco = await import('@bendyline/squisq-editor-react/monaco');
+    // Keep the expensive Monaco module transform in Vitest's collection phase,
+    // outside this test's timeout; only service initialization must be ordered.
     const seedModel = squisqMonaco.editor.createModel('', 'plaintext');
     let editor: ReturnType<typeof squisqMonaco.editor.create> | null = null;
 

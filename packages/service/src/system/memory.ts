@@ -9,7 +9,7 @@ import type {
 } from '@bendyline/gezel';
 import {
   type DeviceHealthStatusSnapshot,
-  windowsDetachedSpawnOptions,
+  windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
 import {
   type LlamaGpuMemoryKind,
@@ -565,11 +565,9 @@ async function probeNvidiaMemory(): Promise<NvidiaMemoryProbe | null> {
     const { stdout } = await exec(
       'nvidia-smi',
       ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
-      // DETACHED_PROCESS: nvidia-smi is console-subsystem, and the machine
-      // service's restricted SID cannot allocate a console. Without this the
-      // probe throws, VRAM reads as unknown, and an NVIDIA box silently plans
-      // capacity as `system-ram-fallback`.
-      { timeout: 2000, ...windowsDetachedSpawnOptions() },
+      // Keep this short-lived console probe invisible without detaching it
+      // from the daemon that owns and awaits it.
+      { timeout: 2000, ...windowsHeadlessSpawnOptions() },
     );
     return parseNvidiaMemoryProbe(stdout);
   } catch {

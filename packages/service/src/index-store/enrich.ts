@@ -32,8 +32,17 @@ import {
 
 const log = createLogger('enrich');
 
+// Indexing is a mechanical extraction task, not a reasoning task. Instruct
+// mode keeps thinking-capable local models from spending the whole request
+// budget in a hidden reasoning channel. We intentionally retain the model's
+// normal instruct-profile output allowance: the 2-3 sentence prompt is the
+// length control, not an artificially small max-token override.
+const INDEX_TUNING_PROFILE = 'instruct';
+const SUMMARIZE_TIMEOUT_MS = 120_000;
+const REVIEW_TIMEOUT_MS = 180_000;
+
 export interface EnrichDeps {
-  summarize: (prompt: string) => Promise<string>;
+  summarize: (prompt: string) => Promise<EnrichCompletionResult>;
   embed: (texts: string[]) => Promise<number[][]>;
   model?: string;
   /**
@@ -42,12 +51,12 @@ export interface EnrichDeps {
    * output tokens than a 2-3 sentence summary. Absent when no local model is
    * configured; the review pass skips entirely then.
    */
-  review?: (prompt: string) => Promise<string>;
+  review?: (prompt: string) => Promise<EnrichCompletionResult>;
   /**
-   * Stamped onto every row this deps object writes. Built once in
-   * `buildEnrichDeps` from the SAME resolved target that builds the
-   * completions, so it reflects reality (env overrides, Night Shift) —
-   * output-only, never a routing input.
+   * Default/primary attribution for legacy bare-string completions and
+   * non-completion work. Runtime completions carry their own actual target so
+   * a fallback can override this per result. Output-only, never a routing
+   * input.
    */
   provenance?: IndexProvenance;
   /**
@@ -57,6 +66,82 @@ export interface EnrichDeps {
    * reports 1 until its first call spins it up.
    */
   oneShotWidth?: () => number;
+}
+
+/**
+ * One LLM completion plus the identity that actually produced it. Hand-built
+ * deps may still return a bare string; consumers resolve those through the
+ * deps-level defaults for backwards compatibility. Runtime deps always return
+ * this richer shape so a policy fallback cannot inherit the primary target's
+ * provenance.
+ */
+export interface EnrichCompletion {
+  text: string;
+  model: string;
+  provenance?: IndexProvenance;
+}
+
+export type EnrichCompletionResult = string | EnrichCompletion;
+
+export interface ResolvedEnrichCompletion {
+  text: string;
+  model: string;
+  provenance?: IndexProvenance;
+}
+
+/** Resolve legacy bare-string completions and runtime attributed completions. */
+export function resolveEnrichCompletion(
+  result: EnrichCompletionResult,
+  deps: Pick<EnrichDeps, 'model' | 'provenance'>,
+): ResolvedEnrichCompletion {
+  if (typeof result === 'string') {
+    return {
+      text: result,
+      model: deps.model ?? 'unknown',
+      ...(deps.provenance ? { provenance: deps.provenance } : {}),
+    };
+  }
+  return {
+    text: result.text,
+    model: result.model,
+    ...(result.provenance ? { provenance: result.provenance } : {}),
+  };
+}
+
+/**
+ * Attribution for a merged, windowed result. Normally every window has one
+ * identity. If routing changes mid-review, retain every actual provider/model
+ * instead of falsely choosing either one.
+ */
+export function mergeEnrichCompletionAttribution(
+  completions: readonly ResolvedEnrichCompletion[],
+  deps: Pick<EnrichDeps, 'model' | 'provenance'>,
+): Pick<ResolvedEnrichCompletion, 'model' | 'provenance'> {
+  if (completions.length === 0) {
+    return {
+      model: deps.model ?? 'unknown',
+      ...(deps.provenance ? { provenance: deps.provenance } : {}),
+    };
+  }
+  const models = distinct(completions.map((c) => c.model));
+  const providers = distinct(completions.map((c) => c.provenance?.provider));
+  const provenanceFields = ['gezelId', 'gezelName', 'appVersion'] as const;
+  const provenance: IndexProvenance = {};
+  if (providers.length > 0) provenance.provider = providers.join(' + ');
+  for (const field of provenanceFields) {
+    const values = distinct(completions.map((c) => c.provenance?.[field]));
+    // A merged artifact must not claim one actor/version when its contributing
+    // completions disagree. Runtime fallbacks normally retain all three.
+    if (values.length === 1) provenance[field] = values[0];
+  }
+  return {
+    model: models.join(' + ') || deps.model || 'unknown',
+    ...(Object.keys(provenance).length > 0 ? { provenance } : {}),
+  };
+}
+
+function distinct(values: ReadonlyArray<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 export interface EnrichResult {
@@ -198,47 +283,50 @@ export async function buildEnrichDeps(
     return { summarize: async () => '', embed };
   }
   const { providerName, model } = target;
-  const provenance: IndexProvenance = {
-    provider: providerName,
+  const provenanceFor = (actualProvider: ProviderName): IndexProvenance => ({
+    provider: actualProvider,
     ...(opts.boekwachter ? { gezelId: opts.boekwachter.id, gezelName: opts.boekwachter.name } : {}),
     appVersion: GEZEL_VERSION,
-  };
-  // A cloud/CLI target (explicit Boekwachter pin or Night Shift override)
-  // needs room for session cold starts — the Copilot-family CLIs take
-  // 30-90s on the first call, and deadlines under 120s flake. Local engines
-  // keep the tight deadlines that protect the shared engine queue.
+  });
+  const provenance = provenanceFor(providerName);
+  // Give both local and cloud/CLI targets room to finish. Local engines can
+  // spend tens of seconds on model admission, prefill, or thermal cooling;
+  // Copilot-family CLIs take 30-90s on a cold first call. Instruct mode above
+  // bounds the expensive failure mode without relying on a brittle 30s wall.
   const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
-  const summarizeTimeoutMs = local ? 30_000 : 120_000;
-  const reviewTimeoutMs = local ? 60_000 : 180_000;
   const gezelOpts = opts.boekwachter
     ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
     : { actorLabel: 'Boekwachter' };
   const oneShot =
     (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
-    (prompt: string) =>
-      chat.oneShotCompletion(prompt, timeoutMs, {
+    async (prompt: string): Promise<EnrichCompletion> => ({
+      text: await chat.oneShotCompletion(prompt, timeoutMs, {
         providerName: target.providerName,
         model: target.model,
         ...gezelOpts,
         jobLabel,
+        tuningProfileId: INDEX_TUNING_PROFILE,
         ...(opts.ambient ? { ambient: true } : {}),
-      });
+      }),
+      model: target.model,
+      provenance: provenanceFor(target.providerName),
+    });
   // Blocked-content fallback: a cloud enricher can refuse a file outright on
   // policy grounds (isPolicyBlockMessage). Local engines carry no such filter,
-  // so when one is configured it takes over exactly those files. Provenance
-  // still stamps the primary provider — a per-file override isn't worth the
-  // plumbing for this edge.
+  // so when one is configured it takes over exactly those files. Each
+  // completion carries its actual target so fallback output is never stamped
+  // with the primary cloud provider/model.
   const fallbackTarget = local ? null : await resolveLocalFallbackTarget(store);
   // A thrown one-shot logs nothing on its own — surface the reason here or a
   // repeatedly-failing file is undiagnosable (the 3157-of-3160 incident:
   // three markup-heavy files burned their attempt caps with zero log lines).
   const withPolicyFallback =
     (
-      primary: (prompt: string) => Promise<string>,
-      fallback: ((prompt: string) => Promise<string>) | null,
+      primary: (prompt: string) => Promise<EnrichCompletion>,
+      fallback: ((prompt: string) => Promise<EnrichCompletion>) | null,
       label: string,
     ) =>
-    async (prompt: string): Promise<string> => {
+    async (prompt: string): Promise<EnrichCompletionResult> => {
       try {
         return await primary(prompt);
       } catch (err) {
@@ -266,16 +354,16 @@ export async function buildEnrichDeps(
       }
     };
   const summarize = withPolicyFallback(
-    oneShot({ providerName, model }, summarizeTimeoutMs, 'index enrichment'),
+    oneShot({ providerName, model }, SUMMARIZE_TIMEOUT_MS, 'index enrichment'),
     fallbackTarget
-      ? oneShot(fallbackTarget, 30_000, 'index enrichment (blocked-content fallback)')
+      ? oneShot(fallbackTarget, SUMMARIZE_TIMEOUT_MS, 'index enrichment (blocked-content fallback)')
       : null,
     'summarize',
   );
   const review = withPolicyFallback(
-    oneShot({ providerName, model }, reviewTimeoutMs, 'index review'),
+    oneShot({ providerName, model }, REVIEW_TIMEOUT_MS, 'index review'),
     fallbackTarget
-      ? oneShot(fallbackTarget, 60_000, 'index review (blocked-content fallback)')
+      ? oneShot(fallbackTarget, REVIEW_TIMEOUT_MS, 'index review (blocked-content fallback)')
       : null,
     'review',
   );
@@ -452,8 +540,13 @@ export async function enrichFile(
   if (summary) {
     result.summarized = true;
   } else if (content?.trim()) {
+    let completion: ResolvedEnrichCompletion | undefined;
     try {
-      summary = (await deps.summarize(buildSummaryPrompt(file, content))).trim();
+      completion = resolveEnrichCompletion(
+        await deps.summarize(buildSummaryPrompt(file, content)),
+        deps,
+      );
+      summary = completion.text.trim();
     } catch (err) {
       summary = '';
       if (err instanceof CompletionBlockedError) blockedByPolicy = true;
@@ -463,8 +556,8 @@ export async function enrichFile(
         contentHash: file.hash,
         filePath: file.path,
         summaryMd: summary,
-        model: deps.model ?? 'unknown',
-        ...(deps.provenance ? { provenance: deps.provenance } : {}),
+        model: completion?.model ?? deps.model ?? 'unknown',
+        ...(completion?.provenance ? { provenance: completion.provenance } : {}),
       });
       result.summarized = true;
     }
@@ -485,14 +578,25 @@ export async function enrichFile(
       );
       if (picked.length > 0) {
         let raw = '';
+        let completion: ResolvedEnrichCompletion | undefined;
         try {
-          raw = await deps.summarize(buildSymbolSummaryPrompt(file, content, picked));
+          completion = resolveEnrichCompletion(
+            await deps.summarize(buildSymbolSummaryPrompt(file, content, picked)),
+            deps,
+          );
+          raw = completion.text;
         } catch {
           raw = '';
         }
         const entries = parseSymbolSummaryJson(raw, new Set(picked.map((s) => s.name)));
         if (entries.length > 0) {
-          store.putSymbolSummaries(file.path, file.hash, entries, deps.model, deps.provenance);
+          store.putSymbolSummaries(
+            file.path,
+            file.hash,
+            entries,
+            completion?.model ?? deps.model,
+            completion?.provenance,
+          );
         }
       }
     }

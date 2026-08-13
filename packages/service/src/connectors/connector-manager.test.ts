@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { SecretStore } from '../secrets/types.js';
-import { ConnectorManager } from './manager.js';
+import { ConnectorManager, resolveDeclaredOrigins } from './manager.js';
 import { registerNativeAdapter } from './registry.js';
 import type { ConnectorAdapter, NormalizedRecord, RecordRef } from './types.js';
 
@@ -58,6 +58,7 @@ interface FakeProject {
     lastSyncedAt?: string;
   }[];
   grantedCredentials?: string[];
+  credentialAllowedOrigins?: Record<string, string[]>;
 }
 type SecretKeyLike = { toolsetId: string; fieldId: string };
 
@@ -69,7 +70,9 @@ afterEach(async () => {
   await rm(ws, { recursive: true, force: true });
 });
 
-function harness() {
+function harness(extra?: {
+  scriptRunner?: ConstructorParameters<typeof ConnectorManager>[0]['scriptRunner'];
+}) {
   let project: FakeProject = { id: 'p1' };
   const store = {
     getProject: async () => project,
@@ -100,9 +103,35 @@ function harness() {
   const catalog = {
     get: async () => ({ manifest: MANIFEST, sourceId: 'bundled' }),
   } as unknown as ConstructorParameters<typeof ConnectorManager>[0]['catalog'];
-  const mgr = new ConnectorManager({ store, secrets, catalog });
+  const mgr = new ConnectorManager({ store, secrets, catalog, ...(extra ?? {}) });
   return { mgr, secretMap, getProject: () => project };
 }
+
+describe('resolveDeclaredOrigins', () => {
+  it('resolves literals, $config paths, dedupes, and drops invalid entries', () => {
+    const origins = resolveDeclaredOrigins(
+      {
+        id: 't',
+        allowedOrigins: [
+          'https://api.github.com',
+          'https://api.github.com/',
+          '$config.api.baseUrl',
+          '$config.missing',
+          'http://plain.example',
+          'https://user:pw@evil.example',
+          'https://path.example/api',
+          'not-a-url',
+        ],
+      },
+      { api: { baseUrl: 'https://ghe.corp.example' } },
+    );
+    expect(origins).toEqual(['https://api.github.com', 'https://ghe.corp.example']);
+  });
+
+  it('returns empty for an undeclared manifest', () => {
+    expect(resolveDeclaredOrigins({ id: 't' }, {})).toEqual([]);
+  });
+});
 
 describe('ConnectorManager', () => {
   it('binds a connector: stores the credential in the SecretStore, not on the project', async () => {
@@ -147,6 +176,75 @@ describe('ConnectorManager', () => {
       expect(h.secretMap.size).toBe(0);
     } finally {
       (MANIFEST as { driver: string }).driver = 'native';
+    }
+  });
+
+  it('bind writes the declared origin allowlist for a script connector; unbind removes it', async () => {
+    const h = harness();
+    const m = MANIFEST as { driver: string; allowedOrigins?: string[] };
+    m.driver = 'script';
+    m.allowedOrigins = [
+      'https://api.github.com',
+      '$config.apiBaseUrl',
+      '$config.unsetOptional',
+      'http://insecure.example',
+    ];
+    try {
+      const binding = await h.mgr.bind(h.getProject() as never, {
+        type: 'fake-conn',
+        config: { apiBaseUrl: 'https://ghe.corp.example' },
+      });
+      const credName = `connector-fake-conn.${binding.id}`;
+      // Literal + resolved $config origins land; the unset placeholder and
+      // the non-https literal are dropped, never written.
+      expect(h.getProject().credentialAllowedOrigins).toEqual({
+        [credName]: ['https://api.github.com', 'https://ghe.corp.example'],
+      });
+
+      await h.mgr.unbind(h.getProject() as never, binding.id);
+      expect(h.getProject().credentialAllowedOrigins).toEqual({});
+    } finally {
+      m.driver = 'native';
+      delete m.allowedOrigins;
+    }
+  });
+
+  it('native connectors never write origin allowlist entries', async () => {
+    const h = harness();
+    const m = MANIFEST as { allowedOrigins?: string[] };
+    m.allowedOrigins = ['https://api.example.test'];
+    try {
+      await h.mgr.bind(h.getProject() as never, { type: 'fake-conn', credential: '{}' });
+      expect(h.getProject().credentialAllowedOrigins).toBeUndefined();
+    } finally {
+      delete m.allowedOrigins;
+    }
+  });
+
+  it('sync heals a missing origin entry for an existing script binding', async () => {
+    const scriptRunner = {
+      run: async () => ({ status: 'ok', output: { records: [], cursor: null } }),
+    } as unknown as NonNullable<Parameters<typeof harness>[0]>['scriptRunner'];
+    const h = harness({ scriptRunner });
+    const m = MANIFEST as { driver: string; allowedOrigins?: string[]; source: unknown };
+    const priorSource = m.source;
+    m.driver = 'script';
+    m.allowedOrigins = ['https://api.github.com'];
+    m.source = { inlineFetch: 'gezel.output({ records: [] });' };
+    try {
+      const binding = await h.mgr.bind(h.getProject() as never, { type: 'fake-conn' });
+      const credName = `connector-fake-conn.${binding.id}`;
+      // Simulate a binding created before the type declared origins.
+      delete h.getProject().credentialAllowedOrigins;
+
+      await h.mgr.syncBinding(h.getProject() as never, binding.id);
+      expect(h.getProject().credentialAllowedOrigins).toEqual({
+        [credName]: ['https://api.github.com'],
+      });
+    } finally {
+      m.driver = 'native';
+      delete m.allowedOrigins;
+      m.source = priorSource;
     }
   });
 

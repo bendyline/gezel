@@ -235,7 +235,11 @@ function previewParentPath(path: string): string {
   return parent === '.' ? '' : parent;
 }
 
-function pathIsInScope(path: string, scopePath: string): boolean {
+/**
+ * Scope containment check shared by the capability store and the first-party
+ * page-read route (both enforce the same `pages.reads` shapes).
+ */
+export function pathIsInScope(path: string, scopePath: string): boolean {
   return scopePath === '' || path === scopePath || path.startsWith(`${scopePath}/`);
 }
 

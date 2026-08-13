@@ -225,7 +225,7 @@ describe('discoverOrSpawn', () => {
   });
 
   it('spawns when no runtime files exist, then adopts after health succeeds', async () => {
-    const spawnFn = vi.fn(() => makeFakeChild());
+    const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
     let reads = 0;
     const readRuntimeFn = vi.fn(async () => {
       reads += 1;
@@ -243,6 +243,9 @@ describe('discoverOrSpawn', () => {
       clientFactory: fakeClient,
     });
     expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(spawnFn.mock.calls[0]?.[2].windowsHide).toBe(
+      process.platform === 'win32' ? true : undefined,
+    );
     expect(result.outcome).toBe('spawned');
     expect(result.pid).toBe(sampleRuntime.pid);
     // Detached spawns don't return a child handle.

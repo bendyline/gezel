@@ -310,4 +310,27 @@ describe('preparePreviewHtml', () => {
       '<script src="https://cdn.example.test/widget.js" crossorigin="anonymous">',
     );
   });
+
+  it('injects the window.gezel page API only when a bootstrap is supplied', () => {
+    const html = '<html><head></head><body>page</body></html>';
+    const bootstrap = {
+      api: 1 as const,
+      projectId: 'p1',
+      source: 'type' as const,
+      entry: 'board/index.html',
+      typeName: 'Checkers',
+      params: {},
+      tools: ['user_move'],
+    };
+    const withApi = preparePreviewHtml(html, { pageApi: bootstrap });
+    expect(withApi).toContain("Object.defineProperty(window,'gezel'");
+    expect(withApi).toContain('"projectId":"p1"');
+    // Ordering: log shim first so page-api failures are captured.
+    expect(withApi.indexOf('__gezelPreviewLog')).toBeLessThan(
+      withApi.indexOf("Object.defineProperty(window,'gezel'"),
+    );
+
+    const without = preparePreviewHtml(html);
+    expect(without).not.toContain("Object.defineProperty(window,'gezel'");
+  });
 });

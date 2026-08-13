@@ -10,13 +10,8 @@
     "vscode": "^1.97.0"
   },
   "main": "./dist/extension.cjs",
-  "files": [
-    "dist",
-    "resources"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
+  "files": ["dist", "resources"],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -121,10 +116,10 @@
     "test:e2e": "pnpm run build && pnpm run build:e2e && node dist-e2e/runTests.cjs"
   },
   "dependencies": {
-    "@bendyline/gezel": "1.0.0",
-    "@bendyline/gezel-app-sdk": "1.0.0",
-    "@bendyline/gezel-client": "1.0.0",
-    "@bendyline/gezel-service": "1.0.0",
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-app-sdk": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-service": "workspace:*",
     "@bendyline/gezel-ui": "workspace:*"
   },
   "devDependencies": {

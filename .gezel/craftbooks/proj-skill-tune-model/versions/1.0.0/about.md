@@ -34,5 +34,5 @@ It works both directions:
 
 The whole skill is governed by [docs/eval-strategy.md](../../../docs/eval-strategy.md)'s frame: **a medium-tier model SHOULD pass the anchored scenarios; the answer is never "use a bigger model," it's "which specific tuning or framework lever closes the gap."** Tuning is lane #1 of that doc. This skill is how you work that lane systematically.
 
-> Converted from `.claude\skills\tune-model\SKILL.md` (skill "tune-model").
+> Converted from `.claude/skills/tune-model/SKILL.md` (skill "tune-model").
 > - 4 shell block(s) kept as prose (not statically convertible)

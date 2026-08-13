@@ -43,33 +43,28 @@ describe('machine-service child-process contract', () => {
     const body = source('./pnpm.ts');
     expect(body).toContain('function pnpmSpawnTarget(');
     expect(body).not.toContain('export function pnpmSpawnTarget(');
-    expect(body).toContain('windowsDetachedSpawnOptions()');
+    expect(body).toContain('windowsHeadlessSpawnOptions()');
   });
 
-  it('launches workspace and sandboxed Node children with no console at all', () => {
-    expect(source('../workspace/command.ts')).toContain('detached: true');
+  it('keeps workspace and sandboxed Node children hidden on Windows', () => {
+    const workspace = source('../workspace/command.ts');
+    expect(workspace).toContain("detached: process.platform !== 'win32'");
+    expect(workspace).toContain('windowsHeadlessSpawnOptions()');
 
     const sandbox = source('../sandbox/runner.ts');
-    const detached =
-      (sandbox.match(/windowsDetachedSpawnOptions\(\)/g)?.length ?? 0) +
-      (sandbox.match(/detached: true/g)?.length ?? 0);
-    expect(detached).toBeGreaterThanOrEqual(2);
+    expect(sandbox).toContain("detached: process.platform !== 'win32'");
+    expect(sandbox.match(/windowsHeadlessSpawnOptions\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(
+      2,
+    );
   });
 
-  // CREATE_NO_WINDOW reads like the headless flag and is not one: it still
-  // allocates a console, and the machine service's Session 0 can allocate
-  // none. DETACHED_PROCESS (`detached`) is the flag that asks for nothing.
-  //
-  // Note what this rule is not. It was adopted believing it fixed the
-  // `spawn EPERM` that killed every native launch under the machine service;
-  // v1.26215.31 shipped it and the failure continued, because the real cause
-  // was a write-restricted service token. Keep the rule — asking Session 0
-  // for a console it cannot give is still wrong — but do not read a passing
-  // test here as evidence that spawning works.
-  it('never asks for CREATE_NO_WINDOW in production service code', () => {
+  // Node documents Windows detachment as giving the child its own console.
+  // Owned service children must use the headless helper instead; detachment
+  // is reserved for the few processes intentionally allowed to outlive us.
+  it('does not use Windows detachment as the service headless policy', () => {
     for (const caller of productionTypeScriptFiles()) {
       const name = relative(serviceSrc, caller).replaceAll('\\', '/');
-      expect(readFileSync(caller, 'utf8'), name).not.toContain('windowsHide: true');
+      expect(readFileSync(caller, 'utf8'), name).not.toContain('windowsDetachedSpawnOptions');
     }
   });
 });

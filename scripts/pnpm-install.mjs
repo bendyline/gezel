@@ -7,11 +7,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { spawnPnpm } from './pnpm-cli.mjs';
+import { inspectWindowsDependencyLocks } from './windows-dependency-locks.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptsDir, '..');
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const OWNER_GRACE_MS = 30 * 1000;
+const SERIALIZED_INSTALL_ENV = 'GEZEL_SERIALIZED_PNPM_INSTALL';
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -141,6 +143,29 @@ function waitForChild(child) {
   });
 }
 
+export function workspaceDependenciesReady(repoRoot) {
+  const binSuffix = process.platform === 'win32' ? '.cmd' : '';
+  return (
+    existsSync(join(repoRoot, 'node_modules', '.pnpm')) &&
+    existsSync(join(repoRoot, 'node_modules', '.modules.yaml')) &&
+    existsSync(join(repoRoot, 'packages', 'ui', 'node_modules', '.bin', `vite${binSuffix}`)) &&
+    existsSync(join(repoRoot, 'packages', 'app', 'node_modules', '.bin', `electron${binSuffix}`))
+  );
+}
+
+function reportDependencyLockOwners(owners) {
+  if (owners.length === 0) return;
+  console.error('[pnpm-install] Windows has a generated dependency file open:');
+  for (const owner of owners) {
+    console.error(
+      `  ${owner.appName} (${owner.processName}, pid ${owner.processId}) holds ${owner.file}`,
+    );
+  }
+  console.error('');
+  console.error('Close the listed app or workspace, then rerun `pnpm deps:install`.');
+  console.error('The install was stopped before pnpm could rewrite node_modules.');
+}
+
 /** Run pnpm install after the caller has acquired the checkout mutation lock. */
 export async function runPnpmInstallChild(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
@@ -150,7 +175,10 @@ export async function runPnpmInstallChild(options = {}) {
   console.log(`[pnpm-install] ${command}`);
   const child = (options.spawnPnpmFn ?? spawnPnpm)(['install', ...args], {
     cwd: repoRoot,
-    env: options.env ?? process.env,
+    env: {
+      ...(options.env ?? process.env),
+      [SERIALIZED_INSTALL_ENV]: '1',
+    },
     stdio: 'inherit',
   });
   const completion = waitForChild(child);
@@ -179,15 +207,20 @@ export async function runPnpmInstallChild(options = {}) {
 export async function runSerializedPnpmInstall(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const args = options.args ?? [];
-  const marker = join(repoRoot, 'node_modules', '.pnpm');
   const command = `pnpm install${args.length > 0 ? ` ${args.join(' ')}` : ''}`;
 
   return withPnpmInstallLock(
     repoRoot,
     async ({ setChildPid }) => {
-      if (options.ifMissing && existsSync(marker)) {
+      if (options.ifMissing && workspaceDependenciesReady(repoRoot)) {
         console.log('[pnpm-install] dependencies already present');
         return 0;
+      }
+
+      const lockOwners = (options.dependencyLockProbeFn ?? inspectWindowsDependencyLocks)(repoRoot);
+      if (lockOwners.length > 0) {
+        reportDependencyLockOwners(lockOwners);
+        return 1;
       }
 
       return runPnpmInstallChild({

@@ -4,7 +4,10 @@ import {
   DEFAULT_SECURITY_LEVEL,
   SECURITY_PRESETS,
   classifySecurityLevel,
-  projectWorkspaceWritable,
+  projectManagedWorkspaceWritable,
+  projectManagedWorkspaceWritePolicy,
+  providerNativeWorkspaceAccess,
+  resolveGezelWorkspaceAccess,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   securityPolicyForLevel,
@@ -88,17 +91,17 @@ describe('resolveSecurityPolicy', () => {
   });
 });
 
-describe('projectWorkspaceWritable', () => {
+describe('projectManagedWorkspaceWritable', () => {
   it('is independent of the global file-adjacent capability gate', () => {
     const policy = resolveSecurityPolicy({
       securityPolicy: securityPolicyForLevel('super-lockdown'),
     });
 
     expect(policy.allowFileEdits).toBe(false);
-    expect(projectWorkspaceWritable({})).toBe(true);
-    expect(projectWorkspaceWritable({ workingDir: '/home/user/repo' })).toBe(false);
+    expect(projectManagedWorkspaceWritable({})).toBe(true);
+    expect(projectManagedWorkspaceWritable({ workingDir: '/home/user/repo' })).toBe(false);
     expect(
-      projectWorkspaceWritable({
+      projectManagedWorkspaceWritable({
         workingDir: '/home/user/repo',
         allowGezelWrites: true,
       }),
@@ -106,20 +109,91 @@ describe('projectWorkspaceWritable', () => {
   });
 
   it('defaults internal workspaces to writable', () => {
-    expect(projectWorkspaceWritable({})).toBe(true);
-    expect(projectWorkspaceWritable(undefined)).toBe(true);
-    expect(projectWorkspaceWritable(null)).toBe(true);
+    expect(projectManagedWorkspaceWritable({})).toBe(true);
+    expect(projectManagedWorkspaceWritable(undefined)).toBe(true);
+    expect(projectManagedWorkspaceWritable(null)).toBe(true);
   });
 
   it('defaults external working dirs to read-only (consent gate)', () => {
-    expect(projectWorkspaceWritable({ workingDir: '/home/user/repo' })).toBe(false);
+    expect(projectManagedWorkspaceWritable({ workingDir: '/home/user/repo' })).toBe(false);
   });
 
   it('lets the explicit flag win in both directions', () => {
     expect(
-      projectWorkspaceWritable({ workingDir: '/home/user/repo', allowGezelWrites: true }),
+      projectManagedWorkspaceWritable({
+        workingDir: '/home/user/repo',
+        managedWorkspaceWritePolicy: 'allow',
+      }),
     ).toBe(true);
-    expect(projectWorkspaceWritable({ allowGezelWrites: false })).toBe(false);
+    expect(projectManagedWorkspaceWritable({ managedWorkspaceWritePolicy: 'deny' })).toBe(false);
+  });
+
+  it('reads the legacy boolean but gives the named policy precedence', () => {
+    expect(projectManagedWorkspaceWritePolicy({ allowGezelWrites: true })).toBe('allow');
+    expect(projectManagedWorkspaceWritePolicy({ allowGezelWrites: false })).toBe('deny');
+    expect(
+      projectManagedWorkspaceWritePolicy({
+        managedWorkspaceWritePolicy: 'deny',
+        allowGezelWrites: true,
+      }),
+    ).toBe('deny');
+  });
+});
+
+describe('provider-native workspace access', () => {
+  it('resolves Codex posture independently from the managed-write policy', () => {
+    expect(
+      resolveGezelWorkspaceAccess({
+        project: { workingDir: '/repo', codexPermissionMode: 'edit' },
+        provider: 'codex-cli',
+      }),
+    ).toEqual({
+      managedWritable: false,
+      nativeAccess: 'edit',
+      effectiveWritable: true,
+    });
+    expect(
+      resolveGezelWorkspaceAccess({
+        project: { managedWorkspaceWritePolicy: 'deny', codexPermissionMode: 'plan' },
+        provider: 'codex-cli',
+      }),
+    ).toEqual({
+      managedWritable: false,
+      nativeAccess: 'read-only',
+      effectiveWritable: false,
+    });
+  });
+
+  it('centralizes Claude and Copilot native bypass behavior', () => {
+    expect(
+      providerNativeWorkspaceAccess({
+        provider: 'anthropic-cli',
+        gezel: {
+          id: 'claude',
+          name: 'Claude',
+          claudePermissionMode: 'bypassPermissions',
+          updatedAt: '2026-08-12T00:00:00.000Z',
+        },
+      }),
+    ).toBe('full');
+    expect(
+      providerNativeWorkspaceAccess({
+        provider: 'anthropic-cli',
+        projectClaudeMode: 'plan',
+        gezel: {
+          id: 'claude',
+          name: 'Claude',
+          claudePermissionMode: 'bypassPermissions',
+          updatedAt: '2026-08-12T00:00:00.000Z',
+        },
+      }),
+    ).toBe('read-only');
+    expect(
+      providerNativeWorkspaceAccess({ provider: 'copilot', config: { sandboxCopilot: true } }),
+    ).toBe('none');
+    expect(
+      providerNativeWorkspaceAccess({ provider: 'copilot', config: { sandboxCopilot: false } }),
+    ).toBe('edit');
   });
 });
 

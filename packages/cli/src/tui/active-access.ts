@@ -2,15 +2,20 @@ import {
   type GezelSummary,
   type Project,
   type ProviderName,
-  normalizeCodexPermissionMode,
-  projectWorkspaceWritable,
-  resolveSandboxCopilot,
+  resolveGezelWorkspaceAccess,
 } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
 
 export type ActiveAccessMode = 'read-only' | 'editable' | 'reviewed edits' | 'full access';
 
-type AccessProject = Pick<Project, 'workingDir' | 'allowGezelWrites' | 'codexPermissionMode'>;
+type AccessProject = Pick<
+  Project,
+  | 'workingDir'
+  | 'managedWorkspaceWritePolicy'
+  | 'allowGezelWrites'
+  | 'codexPermissionMode'
+  | 'claudePermissionMode'
+>;
 type AccessConfig = Pick<ConfigResponse, 'sandboxCopilot' | 'anthropicCli' | 'codexCli'>;
 
 /**
@@ -24,41 +29,8 @@ export function activeAccessMode(opts: {
   gezel: GezelSummary | undefined;
   config: AccessConfig | null | undefined;
 }): ActiveAccessMode {
-  const { provider, project, gezel, config } = opts;
-
-  if (provider === 'codex-cli') {
-    const mode = normalizeCodexPermissionMode(
-      project?.codexPermissionMode ??
-        gezel?.codexPermissionMode ??
-        gezel?.claudePermissionMode ??
-        config?.codexCli?.defaultPermissionMode,
-    );
-    switch (mode) {
-      case 'plan':
-        return 'read-only';
-      case 'edit':
-        return 'editable';
-      case 'reviewed':
-        return 'reviewed edits';
-      case 'full':
-        return 'full access';
-    }
-  }
-
-  if (provider === 'anthropic-cli') {
-    const mode =
-      gezel?.claudePermissionMode ?? config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits';
-    if (mode === 'plan') return 'read-only';
-    if (mode === 'bypassPermissions') return 'full access';
-    return 'editable';
-  }
-
-  if (
-    provider === 'copilot' &&
-    !resolveSandboxCopilot(config?.sandboxCopilot, gezel?.sandboxCopilot)
-  ) {
-    return 'editable';
-  }
-
-  return projectWorkspaceWritable(project) ? 'editable' : 'read-only';
+  const access = resolveGezelWorkspaceAccess(opts);
+  if (access.nativeAccess === 'reviewed') return 'reviewed edits';
+  if (access.nativeAccess === 'full') return 'full access';
+  return access.effectiveWritable ? 'editable' : 'read-only';
 }

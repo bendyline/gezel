@@ -218,6 +218,12 @@ export interface FileReviewRow {
   reviewedAt: string | null;
 }
 
+export interface CurrentFileReviewIssues {
+  path: string;
+  contentHash: string;
+  issues: FileReviewIssue[];
+}
+
 export interface OpenOptions {
   collectionId: string;
   kind: CollectionKind;
@@ -662,7 +668,7 @@ export class IndexStore {
       .run(contentHash, this.collectionId, filePath, model ?? null, nowIso());
   }
 
-  markAiShadowAttempt(contentHash: string, filePath: string): void {
+  markAiShadowAttempt(contentHash: string, filePath: string): number {
     this.db
       .prepare(
         `INSERT INTO shadow_state (content_hash, collection_id, file_path, state, attempts, updated_at)
@@ -670,6 +676,26 @@ export class IndexStore {
          ON CONFLICT(content_hash) DO UPDATE SET
            state='failed', attempts=COALESCE(shadow_state.attempts, 0) + 1,
            updated_at=excluded.updated_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM shadow_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  /**
+   * Terminally skip a media hash the AI-shadow tier can never process — a
+   * format with no raster decoder in the vision stack (SVG is vector, ICO is
+   * multi-frame). Jumps straight to the attempt cap under a distinct state so
+   * the row reads as "wrong tool", not "engine flaked three times".
+   */
+  markAiShadowUnsupported(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO shadow_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'unsupported', ${MAX_ENRICH_ATTEMPTS}, ?)`,
       )
       .run(contentHash, this.collectionId, filePath, nowIso());
   }
@@ -1238,6 +1264,28 @@ export class IndexStore {
       appVersion: row.app_version,
       reviewedAt: row.reviewed_at,
     };
+  }
+
+  /**
+   * Current file-hash review observations, including clean reviews. The
+   * durable Boekwachter registry consumes these so a later file edit cannot
+   * erase identity/lifecycle merely by invalidating `file_reviews`.
+   */
+  currentFileReviewIssues(): CurrentFileReviewIssues[] {
+    return this.db
+      .prepare(
+        `SELECT f.path, f.hash AS content_hash, r.issues
+         FROM files f
+         JOIN file_reviews r ON r.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.hash IS NOT NULL AND r.notes_md IS NOT NULL
+         ORDER BY f.path`,
+      )
+      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId)
+      .map((row) => ({
+        path: row.path,
+        contentHash: row.content_hash,
+        issues: parseIssuesJson(row.issues),
+      }));
   }
 
   /**

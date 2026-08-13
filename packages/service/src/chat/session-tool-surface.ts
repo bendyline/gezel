@@ -13,6 +13,7 @@ import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp
 import type { LocalModelTier } from './local-model-tier.js';
 import { promptMandatedTools } from './prompt-tool-contract.js';
 import {
+  EXTERNAL_SERVICE_TOOLS,
   type WebSearchBackendName,
   computeToolAllowlist,
   constrainAllowlistForDirectFileWork,
@@ -93,7 +94,7 @@ export interface ResolveSessionToolSurfaceOptions {
   isGitRepo: boolean;
   securityPolicy?: ResolvedSecurityPolicy;
   /**
-   * Effective per-project workspace writability (`projectWorkspaceWritable`
+   * Effective managed workspace writability (`projectManagedWorkspaceWritable`
    * in core). `false` strips the `workspace-fs-write` group — the
    * per-project replacement for the old global `allowFileEdits` ceiling.
    */
@@ -223,10 +224,14 @@ export async function resolveSessionToolSurface(
   });
   // Env-gated built-ins are absent from ordinary role kits. Grant only the
   // conditionals that the session/project actually enabled; the final cap and
-  // clamps below still apply to them.
+  // clamps below still apply to them. The security posture stays a hard
+  // ceiling: a grant never re-adds an external-service tool the policy
+  // stripped inside computeToolAllowlist.
   if (rawAllowlist && opts.contextualBuiltinTools?.length) {
     rawAllowlist = new Set(rawAllowlist);
+    const stripExternalServices = opts.securityPolicy?.allowExternalServices === false;
     for (const name of opts.contextualBuiltinTools) {
+      if (stripExternalServices && EXTERNAL_SERVICE_TOOLS.has(name)) continue;
       const entry = TOOL_REGISTRY[name as keyof typeof TOOL_REGISTRY];
       if (entry?.registration === 'conditional' && entry.modelFacing) rawAllowlist.add(name);
     }

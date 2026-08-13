@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -162,7 +162,13 @@ describe('stageVerifiedMacPkg', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  function fetchStub(sums: string, pkg: Buffer | null = PKG_BYTES): typeof globalThis.fetch {
+  function fetchStub(
+    sums: string,
+    pkg: Buffer | null = PKG_BYTES,
+    arrayBuffer = vi.fn(async () => {
+      throw new Error('arrayBuffer must not be used for package downloads');
+    }),
+  ): typeof globalThis.fetch {
     return vi.fn(async (url: string | URL | Request) => {
       const href = String(url instanceof Request ? url.url : url);
       if (href.endsWith('SHA256SUMS')) {
@@ -172,14 +178,18 @@ describe('stageVerifiedMacPkg', () => {
       return {
         ok: true,
         status: 200,
-        arrayBuffer: async () => pkg.buffer.slice(pkg.byteOffset, pkg.byteOffset + pkg.byteLength),
+        body: bufferStream(pkg),
+        arrayBuffer,
       } as unknown as Response;
     });
   }
 
   it('stages a verified package and returns its path', async () => {
+    const arrayBuffer = vi.fn(async () => {
+      throw new Error('arrayBuffer must not be used for package downloads');
+    });
     const result = await stageVerifiedMacPkg('1.2.3', {
-      fetch: fetchStub(`${PKG_SHA}  Gezel-1.2.3-mac-arm64.pkg\n`),
+      fetch: fetchStub(`${PKG_SHA}  Gezel-1.2.3-mac-arm64.pkg\n`, PKG_BYTES, arrayBuffer),
       execFile: execStub(),
       stagingDir: dir,
       logger: { info: vi.fn() },
@@ -188,6 +198,63 @@ describe('stageVerifiedMacPkg', () => {
     expect(result.path).toBe(join(dir, 'Gezel-1.2.3-mac-arm64.pkg'));
     expect(result.sha256).toBe(PKG_SHA);
     expect(await readFile(result.path)).toEqual(PKG_BYTES);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect((await readdir(dir)).filter((name) => name.includes('.partial-'))).toEqual([]);
+  });
+
+  it('verifies a hidden partial before atomically exposing the final package path', async () => {
+    const pkgPath = join(dir, 'Gezel-1.2.3-mac-arm64.pkg');
+    const checkedPaths: string[] = [];
+    const execFile = vi.fn(async (file: string, args: string[]) => {
+      const checkedPath = args.at(-1)!;
+      checkedPaths.push(checkedPath);
+      expect(checkedPath).not.toBe(pkgPath);
+      expect(checkedPath).toMatch(/\/\.[^/]+\.partial-Gezel-.*\.pkg$/);
+      await expect(readFile(pkgPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      return file.endsWith('pkgutil')
+        ? { stdout: goodSignature() }
+        : { stdout: '', stderr: 'accepted' };
+    });
+
+    const result = await stageVerifiedMacPkg('1.2.3', {
+      fetch: fetchStub(`${PKG_SHA}  Gezel-1.2.3-mac-arm64.pkg\n`),
+      execFile,
+      stagingDir: dir,
+    });
+
+    expect(checkedPaths).toHaveLength(2);
+    expect(result.path).toBe(pkgPath);
+    expect(await readFile(pkgPath)).toEqual(PKG_BYTES);
+  });
+
+  it('cleans a partial stream and retries the download from byte zero', async () => {
+    let pkgRequests = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url instanceof Request ? url.url : url);
+      if (href.endsWith('SHA256SUMS')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => `${PKG_SHA}  Gezel-1.2.3-mac-arm64.pkg\n`,
+        } as unknown as Response;
+      }
+      pkgRequests++;
+      return {
+        ok: true,
+        status: 200,
+        body: pkgRequests === 1 ? failingStream(PKG_BYTES.subarray(0, 8)) : bufferStream(PKG_BYTES),
+      } as unknown as Response;
+    }) as typeof globalThis.fetch;
+
+    const result = await stageVerifiedMacPkg('1.2.3', {
+      fetch,
+      execFile: execStub(),
+      stagingDir: dir,
+    });
+
+    expect(pkgRequests).toBe(2);
+    expect(await readFile(result.path)).toEqual(PKG_BYTES);
+    expect((await readdir(dir)).filter((name) => name.includes('.partial-'))).toEqual([]);
   });
 
   it('refuses a release that publishes no digest for our asset', async () => {
@@ -212,6 +279,7 @@ describe('stageVerifiedMacPkg', () => {
     ).rejects.toMatchObject({ step: 'digest' });
 
     await expect(readFile(pkgPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(dir)).filter((name) => name.includes('.partial-'))).toEqual([]);
   });
 
   it('does not leave a stale package behind when the signature check fails', async () => {
@@ -227,5 +295,38 @@ describe('stageVerifiedMacPkg', () => {
     ).rejects.toMatchObject({ step: 'team' });
 
     await expect(readFile(pkgPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(dir)).filter((name) => name.includes('.partial-'))).toEqual([]);
   });
 });
+
+/** Deliver a buffer in several chunks so the streaming path is exercised. */
+function bufferStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  const chunkSize = Math.max(1, Math.ceil(bytes.byteLength / 3));
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.byteLength) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(bytes.byteLength, offset + chunkSize);
+      controller.enqueue(bytes.subarray(offset, end));
+      offset = end;
+    },
+  });
+}
+
+/** Emit one partial chunk, then reproduce Undici's transient stream failure. */
+function failingStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  let emitted = false;
+  return new ReadableStream({
+    pull(controller) {
+      if (!emitted) {
+        emitted = true;
+        controller.enqueue(bytes);
+        return;
+      }
+      controller.error(new TypeError('terminated'));
+    },
+  });
+}

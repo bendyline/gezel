@@ -14,11 +14,13 @@ import { listStdlibScripts, resolveStdlibDir } from './stdlib-source.js';
 /**
  * Mechanical enforcement of the standard-library contract:
  *
- *  1. Every stdlib script parses, is a gate, matches its filename, and
- *     declares only allow-listed (read-mostly) capabilities — that is
- *     what justifies the trusted "runs under any security policy"
- *     carve-out.
- *  2. Every stdlib script delegates to `@bendyline/gezel-sdk/checks` —
+ *  1. Every stdlib script parses, matches its filename, declares its kind
+ *     explicitly (gates as `gate`, everything else as `action`), and stays
+ *     inside its tier's capability allowlist — gates are read-mostly, and
+ *     the action tier may mutate only through the sandboxed SDK workspace
+ *     surface. Those allowlists are what justify the trusted "runs under
+ *     any security policy" carve-out.
+ *  2. Every stdlib gate delegates to `@bendyline/gezel-sdk/checks` —
  *     the one-source-of-truth property between gates, the stdlib, and
  *     the eval harness is enforced, not aspirational.
  *  3. Every `scope: 'standard'` gate ref across the bundled craftbook
@@ -26,7 +28,7 @@ import { listStdlibScripts, resolveStdlibDir } from './stdlib-source.js';
  *     that script's meta — what makes 400+ generated books safe at scale.
  */
 
-const ALLOWED_STDLIB_CAPABILITIES = new Set([
+const ALLOWED_STDLIB_GATE_CAPABILITIES = new Set([
   'workspace.read',
   'artifacts.read',
   'tasks.read',
@@ -35,8 +37,13 @@ const ALLOWED_STDLIB_CAPABILITIES = new Set([
   'network',
 ]);
 
+// Action scripts are the stdlib's read-write tier (e.g. storeRecords).
+// Workspace writes go through the same sandboxed dispatcher as user
+// scripts; nothing here may reach network, llm, or credentials.
+const ALLOWED_STDLIB_ACTION_CAPABILITIES = new Set(['workspace.read', 'workspace.write']);
+
 describe('standard script library', () => {
-  it('every script parses, is a gate, matches its filename, and stays read-mostly', async () => {
+  it('every script parses, matches its filename, and stays inside its tier', async () => {
     const dir = join(await resolveStdlibDir(), 'scripts');
     const files = (await readdir(dir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     expect(files.length).toBeGreaterThanOrEqual(15);
@@ -45,18 +52,26 @@ describe('standard script library', () => {
       const source = await readFile(join(dir, file), 'utf8');
       const meta = parseScriptMeta(source, file);
       expect(meta.name, file).toBe(name);
-      expect(meta.kind, `${file} must declare kind: 'gate'`).toBe('gate');
-      for (const cap of meta.requires ?? []) {
-        expect(ALLOWED_STDLIB_CAPABILITIES.has(cap), `${file} requires "${cap}"`).toBe(true);
+      if (meta.kind === 'gate') {
+        for (const cap of meta.requires ?? []) {
+          expect(ALLOWED_STDLIB_GATE_CAPABILITIES.has(cap), `${file} requires "${cap}"`).toBe(true);
+        }
+        // The GateResult contract: declared outputs include decision + message.
+        expect(meta.outputs?.decision, `${file} must declare a decision output`).toBeDefined();
+        expect(meta.outputs?.message, `${file} must declare a message output`).toBeDefined();
+        // One source of truth: the check logic comes from the shared module.
+        expect(
+          source.includes("from '@bendyline/gezel-sdk/checks'"),
+          `${file} must import from @bendyline/gezel-sdk/checks`,
+        ).toBe(true);
+      } else {
+        expect(meta.kind, `${file} must declare kind: 'gate' or kind: 'action'`).toBe('action');
+        for (const cap of meta.requires ?? []) {
+          expect(ALLOWED_STDLIB_ACTION_CAPABILITIES.has(cap), `${file} requires "${cap}"`).toBe(
+            true,
+          );
+        }
       }
-      // The GateResult contract: declared outputs include decision + message.
-      expect(meta.outputs?.decision, `${file} must declare a decision output`).toBeDefined();
-      expect(meta.outputs?.message, `${file} must declare a message output`).toBeDefined();
-      // One source of truth: the check logic comes from the shared module.
-      expect(
-        source.includes("from '@bendyline/gezel-sdk/checks'"),
-        `${file} must import from @bendyline/gezel-sdk/checks`,
-      ).toBe(true);
     }
   });
 

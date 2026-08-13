@@ -817,27 +817,27 @@ describe('project workspace', () => {
       }
     });
 
-    it('agree on external workingDir + writes denied without allowGezelWrites', async () => {
+    it('agrees on external workingDir + writes denied without managed-write consent', async () => {
       await store.createProject({ name: 'PExternal', workingDir: '/tmp/some-user-folder' });
       const readDir = await store.projectWorkspaceDir('pexternal');
       const writeGate = await store.assertWorkspaceWritable('pexternal');
       expect(readDir).toBe('/tmp/some-user-folder');
       expect(writeGate.ok).toBe(false);
       if (!writeGate.ok) {
-        expect(writeGate.reason).toBe('missing-flag-external');
+        expect(writeGate.reason).toBe('external-consent-required');
         // The denial still names the same directory the reader sees, so
-        // the model can give the user actionable "enable allowGezelWrites
+        // the model can give the user actionable "enable managed writes
         // on /tmp/some-user-folder" guidance.
         expect(writeGate.workingDir).toBe(readDir);
       }
     });
 
-    it('agree on external workingDir with allowGezelWrites enabled', async () => {
+    it('agrees on external workingDir with managed writes allowed', async () => {
       await store.createProject({
         name: 'PExternalAllow',
         workingDir: '/tmp/blessed-folder',
       });
-      await store.updateProject('pexternalallow', { allowGezelWrites: true });
+      await store.updateProject('pexternalallow', { managedWorkspaceWritePolicy: 'allow' });
       const readDir = await store.projectWorkspaceDir('pexternalallow');
       const writeGate = await store.assertWorkspaceWritable('pexternalallow');
       expect(writeGate.ok).toBe(true);
@@ -847,9 +847,9 @@ describe('project workspace', () => {
       }
     });
 
-    it('denies gezel-initiated writes on an internal workspace set to allowGezelWrites: false', async () => {
+    it('denies gezel-initiated writes on an internal workspace with managed writes denied', async () => {
       await store.createProject({ name: 'PInternalOff' });
-      await store.updateProject('pinternaloff', { allowGezelWrites: false });
+      await store.updateProject('pinternaloff', { managedWorkspaceWritePolicy: 'deny' });
       const gate = await store.assertWorkspaceWritable('pinternaloff', {
         initiatedByGezel: true,
       });
@@ -859,6 +859,22 @@ describe('project workspace', () => {
       // gezel switch, not a filesystem lock.
       const userGate = await store.assertWorkspaceWritable('pinternaloff');
       expect(userGate.ok).toBe(true);
+    });
+
+    it('translates the legacy boolean update into the named policy', async () => {
+      await store.createProject({ name: 'PLegacyWriteFlag' });
+      const updated = await store.updateProject('plegacywriteflag', { allowGezelWrites: false });
+      expect(updated.managedWorkspaceWritePolicy).toBe('deny');
+      expect(updated.allowGezelWrites).toBeUndefined();
+    });
+
+    it('persists project-level Claude CLI permission posture', async () => {
+      await store.createProject({ name: 'PClaudeAccess' });
+      const updated = await store.updateProject('pclaudeaccess', {
+        claudePermissionMode: 'plan',
+      });
+      expect(updated.claudePermissionMode).toBe('plan');
+      expect((await store.getProject('pclaudeaccess'))?.claudePermissionMode).toBe('plan');
     });
 
     it('internal workspaces stay writable for gezels by default', async () => {

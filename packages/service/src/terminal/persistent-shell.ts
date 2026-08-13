@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
-import { type IPty, spawn as ptySpawn } from 'node-pty';
+import type { IPty } from 'node-pty';
 import { OutputRingBuffer } from '../fs/ring.js';
 import { ensureNodePtyExecutable } from '../node-pty-permissions.js';
 import { sandboxEnv } from '../sandbox/runner.js';
@@ -25,6 +25,48 @@ const PROMPT_PASSWORD_RE = /\b(password|passphrase)\b[^:?]*[:?]\s*$/i;
 const PROMPT_YESNO_RE =
   /\(\s*(y|yes)\s*[/|]\s*(n|no)\s*\)\s*\??\s*$|\[\s*y\s*[/|]\s*n\s*\]\s*\??\s*$|\[\s*Y\s*[/|]\s*n\s*\]\s*\??\s*$|\[\s*y\s*[/|]\s*N\s*\]\s*\??\s*$/i;
 const PROMPT_GENERIC_RE = /[:?]\s*$/;
+
+type NodePtyRuntime = Pick<typeof import('node-pty'), 'spawn'>;
+type NodePtyImporter = () => Promise<NodePtyRuntime>;
+
+/** Stable error surfaced by terminal clients when the optional PTY runtime is absent or broken. */
+export class NodePtyUnavailableError extends Error {
+  readonly code = 'GEZEL_NODE_PTY_UNAVAILABLE';
+
+  constructor(cause: unknown) {
+    super(
+      'Interactive terminal support is unavailable because the optional node-pty runtime could not be loaded. Reinstall Gezel with optional dependencies enabled.',
+      { cause },
+    );
+    this.name = 'NodePtyUnavailableError';
+  }
+}
+
+/**
+ * Load the native PTY bridge only when the first terminal shell starts.
+ *
+ * `node-pty` loads its native addon at module evaluation time. Keeping this a
+ * dynamic import is therefore the boundary that lets the rest of gezeld boot
+ * and run when optional dependencies were omitted or the addon cannot load on
+ * this machine. Node caches a successful module evaluation, so later terminal
+ * threads do not pay another native-load cost.
+ *
+ * The importer argument is a test seam for the unavailable-runtime path.
+ */
+export async function loadNodePty(
+  importer: NodePtyImporter = () => import('node-pty'),
+): Promise<NodePtyRuntime> {
+  try {
+    const runtime = await importer();
+    if (typeof runtime.spawn !== 'function') {
+      throw new TypeError('node-pty did not export spawn()');
+    }
+    return runtime;
+  } catch (cause) {
+    if (cause instanceof NodePtyUnavailableError) throw cause;
+    throw new NodePtyUnavailableError(cause);
+  }
+}
 
 /**
  * Match the ANSI escape sequences a shell or program emits — CSI
@@ -263,6 +305,11 @@ export class PersistentShell {
     // can land without its execute bit. Repair it here rather than from an
     // install hook, which npm 11.16 no longer runs by default.
     ensureNodePtyExecutable();
+
+    // Deliberately after every non-native setup step: importing node-pty loads
+    // its native addon immediately. A daemon that never opens a terminal never
+    // loads (or requires) that optional runtime.
+    const { spawn: ptySpawn } = await loadNodePty();
 
     log.info(`spawning shell ${spec.file} ${spec.args.join(' ')} (cwd=${options.cwd})`);
     const pty = ptySpawn(spec.file, spec.args, {

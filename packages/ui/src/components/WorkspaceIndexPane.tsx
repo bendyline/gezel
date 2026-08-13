@@ -1,9 +1,14 @@
 import {
+  type BoekwachterIssue,
+  type BoekwachterIssueDismissalReason,
+  type BoekwachterIssueStatus,
+  type FileReviewIssue,
   type FileReviewResponse,
   type ListFileIssuesResponse,
   type WorkspaceIndexStatus,
   formatReviewProvenance,
 } from '@bendyline/gezel';
+import { useState } from 'react';
 import { MarkdownField } from './MarkdownField.js';
 
 const noop = () => undefined;
@@ -90,6 +95,17 @@ export interface WorkspaceIndexPaneProps {
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  onSelectLine?: (line: number) => void;
+  onFixIssue?: (issue: BoekwachterIssue) => void;
+  onUpdateIssue?: (
+    issue: BoekwachterIssue,
+    patch: {
+      status?: BoekwachterIssueStatus;
+      seen?: boolean;
+      dismissalReason?: BoekwachterIssueDismissalReason;
+    },
+  ) => void | Promise<void>;
+  onOpenTask?: (taskRef: string) => void;
 }
 
 /** Selected-file results from the background Boekwachter review pass. */
@@ -101,17 +117,45 @@ export function WorkspaceIndexPane({
   loading,
   error,
   onClose,
+  onSelectLine,
+  onFixIssue,
+  onUpdateIssue,
+  onOpenTask,
 }: WorkspaceIndexPaneProps) {
+  const [showClosed, setShowClosed] = useState(false);
+  const [issueAction, setIssueAction] = useState<string | null>(null);
+  const [issueActionError, setIssueActionError] = useState<string | null>(null);
   const fileName = path ? (path.split('/').pop() ?? path) : null;
   const fileIssueCount = path
     ? (issues?.issues.filter((issue) => issue.path === path).length ?? 0)
     : 0;
   const result = review?.review;
+  const trackedIssues = review?.trackedIssues ?? [];
+  const legacyIssues = trackedIssues.length === 0 ? (result?.issues ?? []) : [];
+  const visibleTrackedIssues = trackedIssues.filter(
+    (issue) => showClosed || issue.status === 'open' || issue.status === 'in_progress',
+  );
   const provenance = result ? formatReviewProvenance(result) : null;
   const indexLabel = workspaceIndexLabel(status);
   const coverage = issues
     ? `${issues.reviewedFiles} of ${issues.eligibleFiles} eligible files reviewed`
     : null;
+  const runIssueAction = async (
+    issue: BoekwachterIssue,
+    action: string,
+    patch: Parameters<NonNullable<WorkspaceIndexPaneProps['onUpdateIssue']>>[1],
+  ) => {
+    if (!onUpdateIssue || issueAction) return;
+    setIssueAction(`${issue.ref}:${action}`);
+    setIssueActionError(null);
+    try {
+      await onUpdateIssue(issue, patch);
+    } catch (reason) {
+      setIssueActionError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setIssueAction(null);
+    }
+  };
 
   return (
     <aside className="workspace-index-pane" aria-label="Boekwachter index results">
@@ -156,23 +200,25 @@ export function WorkspaceIndexPane({
           <p className="workspace-index-pane-message">Select a workspace file to see its review.</p>
         ) : loading ? (
           <p className="workspace-index-pane-message">Opening the Boekwachter’s notes…</p>
-        ) : result ? (
+        ) : result || trackedIssues.length > 0 ? (
           <>
-            <section
-              className="workspace-index-health"
-              aria-label={`File health ${result.health} out of 10`}
-            >
-              <span className="workspace-index-health-score">
-                {result.health}
-                <small>/10</small>
-              </span>
-              <div>
-                <h3>File health</h3>
-                <p>{result.healthReason}</p>
-              </div>
-            </section>
+            {result && (
+              <section
+                className="workspace-index-health"
+                aria-label={`File health ${result.health} out of 10`}
+              >
+                <span className="workspace-index-health-score">
+                  {result.health}
+                  <small>/10</small>
+                </span>
+                <div>
+                  <h3>File health</h3>
+                  <p>{result.healthReason}</p>
+                </div>
+              </section>
+            )}
 
-            {result.notesMd && (
+            {result?.notesMd && (
               <section className="workspace-index-notes">
                 <h3>Notes</h3>
                 <MarkdownField
@@ -188,23 +234,169 @@ export function WorkspaceIndexPane({
 
             <section className="workspace-index-issues">
               <h3>
-                Issues <span>{result.issues.length}</span>
+                Issues <span>{trackedIssues.length || legacyIssues.length}</span>
               </h3>
-              {result.issues.length > 0 ? (
+              {trackedIssues.some(
+                (issue) => issue.status === 'resolved' || issue.status === 'dismissed',
+              ) && (
+                <button
+                  type="button"
+                  className="link-button workspace-index-show-closed"
+                  onClick={() => setShowClosed((shown) => !shown)}
+                >
+                  {showClosed ? 'Hide closed' : 'Show closed'}
+                </button>
+              )}
+              {visibleTrackedIssues.length > 0 || legacyIssues.length > 0 ? (
                 <ul>
-                  {result.issues.map((issue, index) => (
-                    <li key={`${issue.category}:${issue.message}:${index}`}>
-                      <div className="workspace-index-issue-meta">
-                        <span>{issue.severity}</span>
-                        <span>{issue.category}</span>
-                        {issue.line != null && <span>Line {issue.line}</span>}
-                      </div>
-                      <p>{issue.message}</p>
-                    </li>
+                  {visibleTrackedIssues.map((issue) => {
+                    const line = issue.line;
+                    const location =
+                      line == null
+                        ? null
+                        : issue.stale
+                          ? `Previously line ${line}`
+                          : `Line ${line}`;
+                    const content = (
+                      <>
+                        <div className="workspace-index-issue-meta">
+                          {!issue.seen && (
+                            <span className="workspace-index-issue-unread" title="Unread issue">
+                              New
+                            </span>
+                          )}
+                          <span className="workspace-index-issue-ref">{issue.ref}</span>
+                          <span>{issue.severity}</span>
+                          <span>{issue.category}</span>
+                          {location && <span>{location}</span>}
+                          {issue.stale && <span>Needs recheck</span>}
+                          {issue.status !== 'open' && <span>{issueStatusLabel(issue.status)}</span>}
+                        </div>
+                        <p>{issue.message}</p>
+                      </>
+                    );
+                    return (
+                      <li key={issue.id} data-status={issue.status}>
+                        {line != null && onSelectLine ? (
+                          <button
+                            type="button"
+                            className="workspace-index-issue-content workspace-index-issue-selectable"
+                            onClick={() => {
+                              onSelectLine(line);
+                              if (!issue.seen) void runIssueAction(issue, 'read', { seen: true });
+                            }}
+                            title={`${issue.stale ? 'Reveal the previous line' : 'Select line'} ${line} in ${fileName ?? 'the source file'}`}
+                          >
+                            {content}
+                          </button>
+                        ) : (
+                          <div className="workspace-index-issue-content">{content}</div>
+                        )}
+                        <div className="workspace-index-issue-actions">
+                          {issue.taskRef && issue.status === 'in_progress' && (
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => onOpenTask?.(issue.taskRef!)}
+                            >
+                              Working · {issue.taskRef}
+                            </button>
+                          )}
+                          {onUpdateIssue && (
+                            <button
+                              type="button"
+                              className="link-button"
+                              disabled={issueAction !== null}
+                              onClick={() =>
+                                void runIssueAction(issue, issue.seen ? 'unread' : 'read', {
+                                  seen: !issue.seen,
+                                })
+                              }
+                            >
+                              {issue.seen ? 'Mark unread' : 'Mark read'}
+                            </button>
+                          )}
+                          {onUpdateIssue && issue.status === 'open' && (
+                            <>
+                              <button
+                                type="button"
+                                className="link-button"
+                                disabled={issueAction !== null}
+                                onClick={() =>
+                                  void runIssueAction(issue, 'dismiss', {
+                                    status: 'dismissed',
+                                    seen: true,
+                                    dismissalReason: 'not_an_issue',
+                                  })
+                                }
+                              >
+                                Not an issue
+                              </button>
+                              <button
+                                type="button"
+                                className="link-button"
+                                disabled={issueAction !== null}
+                                onClick={() =>
+                                  void runIssueAction(issue, 'resolve', {
+                                    status: 'resolved',
+                                    seen: true,
+                                  })
+                                }
+                              >
+                                Mark resolved
+                              </button>
+                            </>
+                          )}
+                          {onUpdateIssue &&
+                            (issue.status === 'resolved' || issue.status === 'dismissed') && (
+                              <button
+                                type="button"
+                                className="link-button"
+                                disabled={issueAction !== null}
+                                onClick={() =>
+                                  void runIssueAction(issue, 'reopen', {
+                                    status: 'open',
+                                    seen: true,
+                                  })
+                                }
+                              >
+                                Reopen
+                              </button>
+                            )}
+                          {onFixIssue && issue.status === 'open' && (
+                            <button
+                              type="button"
+                              className="gz-key workspace-index-issue-fix"
+                              onClick={() => onFixIssue(issue)}
+                              title={`Create a tracked task for ${issue.ref}`}
+                            >
+                              Fix
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {legacyIssues.map((issue, index) => (
+                    <LegacyReviewIssue
+                      key={`${issue.category}:${issue.message}:${index}`}
+                      issue={issue}
+                      fileName={fileName}
+                      onSelectLine={onSelectLine}
+                    />
                   ))}
                 </ul>
               ) : (
-                <p className="workspace-index-clean-result">No issues found in this file.</p>
+                <p className="workspace-index-clean-result">
+                  {trackedIssues.length > 0
+                    ? 'No open issues in this file.'
+                    : 'No issues found in this file.'}
+                </p>
+              )}
+              {issueActionError && (
+                <p className="workspace-index-issue-error error" role="alert">
+                  Couldn’t update the issue: {issueActionError}
+                </p>
               )}
             </section>
 
@@ -227,6 +419,56 @@ export function WorkspaceIndexPane({
         )}
       </div>
     </aside>
+  );
+}
+
+function issueStatusLabel(status: BoekwachterIssueStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return 'In progress';
+    case 'resolved':
+      return 'Resolved';
+    case 'dismissed':
+      return 'Not an issue';
+    default:
+      return 'Open';
+  }
+}
+
+function LegacyReviewIssue({
+  issue,
+  fileName,
+  onSelectLine,
+}: {
+  issue: FileReviewIssue;
+  fileName: string | null;
+  onSelectLine?: (line: number) => void;
+}) {
+  const content = (
+    <>
+      <div className="workspace-index-issue-meta">
+        <span>{issue.severity}</span>
+        <span>{issue.category}</span>
+        {issue.line != null && <span>Line {issue.line}</span>}
+      </div>
+      <p>{issue.message}</p>
+    </>
+  );
+  return (
+    <li>
+      {issue.line != null && onSelectLine ? (
+        <button
+          type="button"
+          className="workspace-index-issue-content workspace-index-issue-selectable"
+          onClick={() => onSelectLine(issue.line!)}
+          title={`Select line ${issue.line} in ${fileName ?? 'the source file'}`}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="workspace-index-issue-content">{content}</div>
+      )}
+    </li>
   );
 }
 

@@ -61,6 +61,7 @@ describe('consolidated MCP tools', () => {
     vi.stubEnv('GEZEL_SESSION_ID', 'session-a');
     vi.stubEnv('GEZEL_HOME', '/tmp/gezel-consolidated-tools');
     vi.stubEnv('GEZEL_MAIL_ENABLED', '1');
+    vi.stubEnv('GEZEL_SOCIAL_ENABLED', '1');
     vi.stubEnv('GEZEL_CONNECTORS_ENABLED', '1');
 
     const { server } = await import('./server.js');
@@ -189,6 +190,66 @@ describe('consolidated MCP tools', () => {
     });
     expect(connector.isError).toBe(true);
     expect(JSON.stringify(connector.content)).toContain('action is not supported');
+  });
+
+  it('routes draft_post to the first social binding and keeps night-shift publish deferral structured', async () => {
+    handler = (url, method, body) => {
+      if (url.pathname === '/api/projects/project-a/connectors' && method === 'GET') {
+        return {
+          bindings: [
+            { id: 'mail-main', type: 'mail-imap' },
+            { id: 'bsky-main', type: 'bluesky-posts' },
+          ],
+        };
+      }
+      if (
+        url.pathname === '/api/projects/project-a/connectors/bsky-main/actions' &&
+        method === 'POST'
+      ) {
+        // Images flow through into the drafted action input untouched; the
+        // daemon resolves the paths (artifacts first, then workspace).
+        expect(body).toEqual({
+          action: 'publish',
+          input: {
+            text: 'Hello from gezel',
+            images: [{ path: 'shots/launch.png', alt: 'Launch-day chart' }],
+          },
+        });
+        return { draftId: 'post-1', relPath: 'data/bsky/_actions/_drafts/post-1.md' };
+      }
+      if (
+        url.pathname === '/api/projects/project-a/connectors/actions/post-1/commit' &&
+        method === 'POST'
+      ) {
+        return { status: 'queued-night-shift', relPath: 'data/bsky/_actions/_outbox/post-1.md' };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const draft = await client.callTool({
+      name: 'draft_post',
+      arguments: {
+        text: 'Hello from gezel',
+        images: [{ path: 'shots/launch.png', alt: 'Launch-day chart' }],
+      },
+    });
+    expect(draft.isError).not.toBe(true);
+    expect(draft.structuredContent).toMatchObject({
+      status: 'drafted',
+      draftId: 'post-1',
+      relPath: 'data/bsky/_actions/_drafts/post-1.md',
+    });
+
+    const publish = await client.callTool({
+      name: 'publish_post',
+      arguments: { draftId: 'post-1' },
+    });
+    expect(publish.isError).not.toBe(true);
+    expect(publish.structuredContent).toMatchObject({
+      status: 'queued-night-shift',
+      draftId: 'post-1',
+      relPath: 'data/bsky/_actions/_outbox/post-1.md',
+    });
   });
 
   it('keeps night-shift email deferral as a structured successful safety outcome', async () => {

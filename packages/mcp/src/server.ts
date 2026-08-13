@@ -92,6 +92,7 @@ import {
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
+import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
 import { reanchorAfterEdit, withLineNumbers } from './reanchor.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
 import {
@@ -660,6 +661,181 @@ function registerEmailTools() {
 
 if (process.env.GEZEL_MAIL_ENABLED === '1') {
   registerEmailTools();
+}
+
+// ── social posts (projects with a social-type connector binding) ──────────
+// Reading synced posts/mentions/stats is done by reading the corpus files.
+// These three tools are the WRITE path over the connector action surface:
+// drafting stages a `publish` action under the social binding's corpus, and
+// publish_post commits it through the daemon-enforced social-publish consent
+// scope (deny-by-default; night shift defers to the outbox). Registered only
+// when the chat manager set GEZEL_SOCIAL_ENABLED (i.e. the project has a
+// social-type connector binding).
+const SOCIAL_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'];
+
+/** Social-type bindings on the project (accountId narrows to one). */
+async function resolveSocialBinding(accountId?: string): Promise<string | null> {
+  const { ok, data } = await connectorActionApi('', 'GET');
+  if (!ok) throw new Error(String(data.error ?? 'failed to list connector bindings'));
+  const bindings = (data.bindings ?? []) as { id: string; type: string }[];
+  const social = bindings.filter(
+    (b) =>
+      typeof b.type === 'string' &&
+      SOCIAL_TYPE_PREFIXES.some((prefix) => b.type.startsWith(prefix)),
+  );
+  if (accountId) {
+    const match = social.find((b) => b.id === accountId)?.id;
+    if (!match) throw new Error(`social connector binding "${accountId}" was not found`);
+    return match;
+  }
+  return social[0]?.id ?? null;
+}
+
+function registerSocialTools() {
+  server.tool(
+    'draft_post',
+    "Compose a social post draft and save it for review. This does NOT publish — it stages a publish action under the social connector's corpus. Use queue_post to stage it for approval and publish_post to publish. Works with any connected social account: Bluesky, X, and LinkedIn publish directly once the user enables publishing on the connection; Instagram additionally requires a publicly hosted https image URL (Meta's servers fetch the media). Every publish clears the user's consent gate.",
+    {
+      text: z.string().describe('The post text (Bluesky limit: 300 characters)'),
+      replyToUri: z
+        .string()
+        .optional()
+        .describe('at:// URI of the post being replied to, to thread the reply'),
+      langs: z
+        .array(z.string())
+        .optional()
+        .describe('BCP-47 language codes for the post, e.g. ["en"]'),
+      images: z
+        .array(
+          z.object({
+            path: z
+              .string()
+              .describe(
+                "Project-relative image path, resolved against the project's artifacts directory first, then its workspace",
+              ),
+            alt: z.string().optional().describe('Alt text describing the image for accessibility'),
+          }),
+        )
+        .max(4)
+        .optional()
+        .describe(
+          'Up to 4 images to embed (png/jpg/jpeg/webp/gif, at most 1,000,000 bytes each; paths resolve against project artifacts first, then the workspace). ALWAYS write meaningful alt text for every image — never leave it blank.',
+        ),
+      accountId: z
+        .string()
+        .optional()
+        .describe('Which social connector binding to post from (defaults to the first)'),
+    },
+    async (args) => {
+      try {
+        const bindingId = await resolveSocialBinding(args.accountId);
+        if (!bindingId) return errorResult('This project has no linked social connector.');
+        const { accountId: _drop, ...input } = args;
+        const { ok, data } = await connectorActionApi(
+          `${encodeURIComponent(bindingId)}/actions`,
+          'POST',
+          { action: 'publish', input },
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Post draft failed.'));
+        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Draft saved${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. Review it, then call queue_post then publish_post.`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'drafted',
+            ...(draftId ? { draftId } : {}),
+            ...(relPath ? { relPath } : {}),
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`draft_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'queue_post',
+    'Stage a saved post draft for publishing by moving it to the outbox. Does not publish.',
+    { draftId: z.string().describe('The draft id returned by draft_post') },
+    async ({ draftId }) => {
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/queue`,
+          'POST',
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Post queue failed.'));
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Queued draft ${draftId}${relPath ? ` (${relPath})` : ''}.`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'queued',
+            draftId,
+            ...(relPath ? { relPath } : {}),
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`queue_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'publish_post',
+    'Publish a drafted/queued social post. The daemon enforces per-binding publish consent (publishing must be enabled on the connector, and each publish clears the social-publish consent scope) and will NOT publish during night shift (the post is staged for daytime approval instead).',
+    { draftId: z.string().describe('The draft id to publish') },
+    async ({ draftId }) => {
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/commit`,
+          'POST',
+        );
+        if (!ok) {
+          const message = String(data.error ?? 'Post publish failed.');
+          const hint = /publishing is disabled/i.test(message)
+            ? "Ask the user to enable 'Allow publishing' on the connector's settings."
+            : undefined;
+          return errorResult(message, { ...(hint ? { hint } : {}) });
+        }
+        if (data.status === 'queued-night-shift') {
+          const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+          const summary = `Night shift is active — not publishing unattended. The post is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
+          return okResult(
+            ActionToolOutputSchema,
+            {
+              summary,
+              status: 'queued-night-shift',
+              draftId,
+              ...(relPath ? { relPath } : {}),
+            },
+            { text: summary },
+          );
+        }
+        const result = (data.result ?? {}) as { uri?: string; permalink?: string };
+        const summary = `Published.${result.permalink ? ` ${result.permalink}` : result.uri ? ` ${result.uri}` : ''}`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'published',
+            draftId,
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`publish_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+}
+
+if (process.env.GEZEL_SOCIAL_ENABLED === '1') {
+  registerSocialTools();
 }
 
 // ── Project-type script tools (dynamic, per-session) ──
@@ -5994,8 +6170,16 @@ server.tool(
     // Common slip-ups some models reach for when they see an
     // "ask-a-question" tool — accept them so a naming mistake doesn't
     // surface as "technical error" to the user.
-    prompt: z.string().optional().describe('Alias for `question`.'),
-    description: z.string().optional().describe('Alias for `question`.'),
+    prompt: z
+      .string()
+      .optional()
+      .describe(
+        'Alias for `question`; when both are supplied, this explanatory text is preserved.',
+      ),
+    description: z
+      .string()
+      .optional()
+      .describe('Alias for `question`; distinct text is preserved below the question.'),
     choices: coerceJsonArray(
       z
         .array(z.string())
@@ -6014,7 +6198,7 @@ server.tool(
       .optional()
       .describe('Let the user pick more than one choice. Default false.'),
     taskRef: TaskRefSchema.optional().describe(
-      'Approval-flow context: a task this question is about, in `projectId/num` form. The UI renders the task header above the prompt with an "Open task" link.',
+      'Approval-flow context: a task this question is about, in `projectId/num` form. The current task is attached automatically in task sessions; pass this only to override it. The UI renders the task header above the prompt with an "Open task" link.',
     ),
     documentPath: z
       .string()
@@ -6033,7 +6217,7 @@ server.tool(
     taskRef,
     documentPath,
   }) => {
-    const body = (question ?? prompt ?? description ?? '').trim();
+    const body = composeQuestionPrompt({ question, prompt, description });
     if (!body) {
       return {
         content: [
@@ -6055,6 +6239,7 @@ server.tool(
       };
     }
     try {
+      const effectiveTaskRef = resolveQuestionTaskRef(taskRef, sessionTaskRef);
       const res = await api.askUserQuestion({
         projectId,
         gezelId,
@@ -6063,7 +6248,7 @@ server.tool(
         ...(choices ? { choices } : {}),
         ...(allowWriteIn !== undefined ? { allowWriteIn } : {}),
         ...(multiSelect !== undefined ? { multiSelect } : {}),
-        ...(taskRef ? { taskRef } : {}),
+        ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
       if (res.deduped) {
@@ -9573,6 +9758,20 @@ server.tool(
     try {
       const res = await api.toolFileReview(projectId, args);
       if (!res.found || !res.review) {
+        if (res.trackedIssues?.length) {
+          const tracked = res.trackedIssues.map(
+            (issue) =>
+              `${issue.ref} [${issue.status}]${issue.stale ? ' [needs recheck]' : ''} ${issue.category} — ${issue.message}${issue.line ? ` (${issue.stale ? 'previously ' : ''}L${issue.line})` : ''}${issue.taskRef ? ` — task ${issue.taskRef}` : ''}`,
+          );
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `${res.path} has no current review, but its durable tracked issues remain:\n${tracked.join('\n')}`,
+              },
+            ],
+          };
+        }
         const why =
           res.eligible === false
             ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
@@ -9584,9 +9783,14 @@ server.tool(
         };
       }
       const r = res.review;
-      const issues = r.issues.map(
-        (i) => `[${i.severity}] ${i.category} — ${i.message}${i.line ? ` (L${i.line})` : ''}`,
-      );
+      const issues = res.trackedIssues?.length
+        ? res.trackedIssues.map(
+            (i) =>
+              `${i.ref} [${i.status}]${i.stale ? ' [needs recheck]' : ''} [${i.severity}] ${i.category} — ${i.message}${i.line ? ` (${i.stale ? 'previously ' : ''}L${i.line})` : ''}${i.taskRef ? ` — task ${i.taskRef}` : ''}`,
+          )
+        : r.issues.map(
+            (i) => `[${i.severity}] ${i.category} — ${i.message}${i.line ? ` (L${i.line})` : ''}`,
+          );
       const provenance = formatReviewProvenance(r);
       const text = [
         `${res.path} — health ${r.health}/10 — ${r.healthReason}`,
@@ -9601,6 +9805,76 @@ server.tool(
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: 'text' as const, text: `file_review failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'get_file_issue',
+  'Retrieve the durable metadata for one Boekwachter issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
+  {
+    ref: z
+      .string()
+      .regex(/^BW-[1-9]\d*$/)
+      .describe('Project-scoped reference, e.g. BW-17.'),
+  },
+  async (args) => {
+    try {
+      const { issue } = await api.getBoekwachterIssue(projectId, args);
+      const location = issue.line
+        ? `${issue.path}:${issue.line}${issue.stale ? ' (previous anchor; needs recheck)' : ''}`
+        : issue.path;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: [
+              `${issue.ref} — ${issue.status} — ${location}`,
+              `[${issue.severity}] ${issue.category} — ${issue.message}`,
+              `read: ${issue.seen ? 'yes' : 'no'}${issue.taskRef ? ` — task: ${issue.taskRef}` : ''}`,
+            ].join('\n'),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `get_file_issue failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'set_file_issue_status',
+  'Update a tracked Boekwachter issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
+  {
+    ref: z
+      .string()
+      .regex(/^BW-[1-9]\d*$/)
+      .describe('Project-scoped reference, e.g. BW-17.'),
+    status: z.enum(['open', 'in_progress', 'resolved', 'dismissed']).optional(),
+    seen: z.boolean().optional().describe('true marks read; false marks unread.'),
+    dismissalReason: z.enum(['not_an_issue', 'duplicate', 'wont_fix']).optional(),
+  },
+  async (args) => {
+    try {
+      const { issue } = await api.updateBoekwachterIssue(projectId, args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `${issue.ref} is ${issue.status} and ${issue.seen ? 'read' : 'unread'}${issue.taskRef ? ` (task ${issue.taskRef})` : ''}.`,
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `set_file_issue_status failed: ${msg}` }],
         isError: true,
       };
     }
@@ -9921,12 +10195,14 @@ server.tool(
     severity: z.enum(['info', 'minor', 'major']).optional(),
     category: z.string().optional().describe('e.g. bug, smell, error-handling, grammar, clarity.'),
     path: z.string().optional().describe('Restrict to a path prefix.'),
+    status: z.enum(['open', 'in_progress', 'resolved', 'dismissed']).optional(),
+    includeClosed: z.boolean().optional().describe('Include resolved and dismissed history.'),
     maxResults: z.number().int().positive().max(1000).optional(),
   },
   async (args) => {
     try {
       const res = await api.toolListFileIssues(projectId, args);
-      if (!res.indexed) {
+      if (!res.indexed && res.counts.total === 0) {
         return {
           content: [{ type: 'text' as const, text: 'list_file_issues: index not built yet.' }],
         };
@@ -9934,7 +10210,7 @@ server.tool(
       const head = `${res.counts.total} issue${res.counts.total === 1 ? '' : 's'} across ${res.reviewedFiles}/${res.eligibleFiles} reviewed files${res.truncated ? ' (truncated)' : ''}`;
       const lines = res.issues.map(
         (i) =>
-          `${i.path}${i.line ? `:${i.line}` : ''}  [${i.severity}] ${i.category} — ${i.message}`,
+          `${i.ref}  ${i.path}${i.line ? `:${i.line}${i.stale ? ' (previous)' : ''}` : ''}  [${i.status}]${i.stale ? ' [needs recheck]' : ''} [${i.severity}] ${i.category} — ${i.message}${i.taskRef ? ` — task ${i.taskRef}` : ''}`,
       );
       const tail =
         res.reviewedFiles < res.eligibleFiles
@@ -10502,7 +10778,7 @@ server.tool(
 
 server.tool(
   'extract_archive',
-  'Extract a `.zip`, `.tar`, or `.tar.gz` archive into a directory inside the project workspace. Destination is created if it does not exist. Requires the workspace to be writable (internal workspace or `project.allowGezelWrites` on external).',
+  'Extract a `.zip`, `.tar`, or `.tar.gz` archive into a directory inside the project workspace. Destination is created if it does not exist. Requires Gezel-managed workspace writes to be allowed.',
   {
     path: z.string().min(1),
     outputPath: z.string().min(1),

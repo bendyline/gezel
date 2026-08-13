@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
 
@@ -135,6 +136,16 @@ export const ProjectTabVisibilitySchema = z
 export type ProjectTabVisibility = z.infer<typeof ProjectTabVisibilitySchema>;
 
 /**
+ * Policy for workspace mutations that pass through Gezel-managed sinks
+ * (builtin MCP tools, scripts, schedulers, and Store workspace routes).
+ * Provider-native harnesses such as Codex CLI have their own sandbox posture.
+ */
+export const ProjectManagedWorkspaceWritePolicySchema = z.enum(['auto', 'allow', 'deny']);
+export type ProjectManagedWorkspaceWritePolicy = z.infer<
+  typeof ProjectManagedWorkspaceWritePolicySchema
+>;
+
+/**
  * Provenance recorded on `project.json` when a custom project type is applied
  * (see docs/project-types.md). Captures which type + version + source
  * outfitted the project, and the param values collected at adoption (used to
@@ -261,22 +272,18 @@ export const ProjectSchema = z.object({
    */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
-   * Per-project switch for gezel workspace writes — resolved through
-   * `projectWorkspaceWritable` in core/security/policy.ts, the single
-   * gate for every workspace-write surface. Tri-state:
+   * Policy for Gezel-managed workspace mutations. `auto` (and an absent
+   * value) permits internal workspaces and denies external `workingDir`s;
+   * `allow` and `deny` are explicit user choices. Provider-native harnesses
+   * are resolved separately through their own permission posture.
+   */
+  managedWorkspaceWritePolicy: ProjectManagedWorkspaceWritePolicySchema.optional(),
+  /**
+   * Legacy persistence field. New writers use `managedWorkspaceWritePolicy`;
+   * readers retain this boolean so existing project.json files remain valid.
    *
-   *   - unset: **internal** workspaces (no `workingDir`) are writable —
-   *     it's our folder under `~/.gezel/projects/<id>/workspace/`;
-   *     **external** working dirs (user's real folder) are not.
-   *   - `true`: writable — for external dirs this is the explicit
-   *     consent (flipping it on prompts a confirmation dialog).
-   *   - `false`: read-only for gezels, even on internal workspaces.
-   *
-   * Deliberately NOT overridden by the global security policy: internal
-   * projects stay functional under super-lockdown, external folders keep
-   * their deny-by-default consent gate at every security level. Not
-   * exposed through the model-facing `update_project` MCP tool — only
-   * the user (UI / HTTP) can flip it.
+   * @deprecated Use `managedWorkspaceWritePolicy` and the centralized
+   * `projectManagedWorkspaceWritable` resolver.
    */
   allowGezelWrites: z.boolean().optional(),
   /**
@@ -285,6 +292,12 @@ export const ProjectSchema = z.object({
    * authoritative for every Codex session in this project.
    */
   codexPermissionMode: CodexPermissionModeSchema.optional(),
+  /**
+   * Per-project Claude CLI posture selected from the project status bar.
+   * It overrides per-gezel/install Claude defaults for every Claude session
+   * in this project.
+   */
+  claudePermissionMode: ClaudePermissionModeSchema.optional(),
   /**
    * Operational state for ambient gezel work on this project.
    *

@@ -1,10 +1,12 @@
+import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '@bendyline/gezel';
+
 /**
  * Thrown when a workspace-mutating op (`write_file`, `delete_path`, `make_dir`,
  * `rename`, `run_nodejs_script`, `npm_install`) is attempted against a
  * project whose per-project write contract denies it: an **external**
- * `workingDir` without the `allowGezelWrites: true` opt-in
- * (`missing-flag-external`), or any project where the user explicitly
- * set `allowGezelWrites: false` (`disabled-by-project`). The caller
+ * external `workingDir` without an explicit managed-write opt-in
+ * (`external-consent-required`), or any project where the user explicitly
+ * set the managed-write policy to `deny` (`disabled-by-project`). The caller
  * (HTTP route or MCP tool) translates this into a 403 response with a
  * clear pointer to the Settings toggle the user needs to flip.
  *
@@ -13,14 +15,14 @@
  * doesn't permit gezel writes yet. Callers typically want to catch
  * them together but render different copy.
  */
-export type WorkspaceWriteDeniedReason = 'missing-flag-external' | 'disabled-by-project';
+export type WorkspaceWriteDeniedReason = 'external-consent-required' | 'disabled-by-project';
 
 function deniedMessage(info: { reason: WorkspaceWriteDeniedReason; workingDir: string }): string {
   switch (info.reason) {
     case 'disabled-by-project':
-      return 'Gezel writes are turned off for this project ("Allow gezels to modify the workspace directory" in Project → Settings). Flip it on to let gezels modify files here.';
+      return `Managed workspace writes are turned off for this project ("${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings). Flip it on to let built-in tools modify files here.`;
     default:
-      return `Gezel writes are disabled for this project's external workspace (${info.workingDir}). Enable "Allow gezels to modify the workspace directory" in Project → Settings.`;
+      return `Managed writes are disabled for this project's external workspace (${info.workingDir}). Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.`;
   }
 }
 

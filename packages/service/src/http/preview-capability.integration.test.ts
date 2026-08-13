@@ -110,7 +110,7 @@ describe('preview capabilities (integration)', () => {
     expect(csp).toContain('sandbox allow-scripts');
     expect(csp).toContain("img-src 'self' data: blob:");
     expect(csp).not.toContain('https:');
-    expect(csp).toContain("webrtc 'block'");
+    expect(csp).not.toContain('webrtc');
     expect(page.headers.get('access-control-allow-origin')).toBe('null');
     expect(page.headers.get('x-dns-prefetch-control')).toBe('off');
     expect(page.headers.get('x-gezel-preview-external-services')).toBe('blocked');
@@ -172,7 +172,7 @@ describe('preview capabilities (integration)', () => {
       expect(csp).toContain("frame-src 'none'");
       expect(csp).toContain("form-action 'none'");
       expect(csp).toContain('sandbox allow-scripts');
-      expect(csp).toContain("webrtc 'allow'");
+      expect(csp).not.toContain('webrtc');
       expect(page.headers.get('x-gezel-preview-external-services')).toBe('allowed');
 
       await svc.context.store.writeConfig({

@@ -501,6 +501,52 @@ export const PROJECT_TYPES: ProjectType[] = [
     },
   },
   {
+    // A public posting presence — the outbound half of social. Distinct from
+    // 'email' (correspondence) and from the reserved 'messaging' slot below
+    // (group chat): this one is about drafting, publishing, and reading the
+    // reception of posts on feeds like Bluesky, X, Instagram, and LinkedIn.
+    id: 'social-media',
+    label: 'Social Media',
+    description:
+      'A public posting presence — drafting, approving, publishing, and reading reception across social feeds.',
+    detect: {
+      extensions: ['md', 'json', 'png', 'jpg'],
+      keywords: [
+        'social',
+        'feed',
+        'bluesky',
+        'instagram',
+        'linkedin',
+        'followers',
+        'engagement',
+        'mentions',
+        'caption',
+        'hashtag',
+        'repost',
+      ],
+    },
+    // Tag audit note: 'writing'/'content' are deliberately NOT here — they'd
+    // pull the whole long-form family (blog-post, documentation, 17 research
+    // books) into the rail. 'social'/'post'/'digest'/'engagement' light up
+    // exactly the feed books; 'copywriting' keeps thread/landing copy nearby.
+    craftbookTags: ['social', 'post', 'digest', 'engagement', 'analytics', 'copywriting'],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'omroeper',
+          reason: 'Runs the feed — drafts, queues, and reads the room.',
+        },
+      ],
+      suggested: [
+        { templateId: 'copywriter', reason: 'Sharpens the words when a post has to land.' },
+        {
+          templateId: 'image-generator',
+          reason: 'Produces the visuals for media-first posts.',
+        },
+      ],
+    },
+  },
+  {
     // Email specifically — thread/subject-centric, document-like correspondence.
     // Group chat (Slack/Telegram/Discord) is a distinct, future project type
     // ('messaging'): channel-centric, high-frequency, tiny messages that want a

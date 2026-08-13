@@ -1,4 +1,5 @@
 import type {
+  ClaudePermissionMode,
   CodexPermissionMode,
   GitBranchesResponse,
   GitStatusResponse,
@@ -9,6 +10,7 @@ import { api } from '../api.js';
 import { DropdownChevron, Popover, Select } from '../primitives/index.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
+import type { ProjectClaudePermissionMode } from './project-ai-editability.js';
 
 type ProjectStatus = 'active' | 'readonly' | 'inactive' | 'stable';
 
@@ -21,29 +23,25 @@ interface Props {
    */
   compact?: boolean;
   /**
-   * Raw per-project write flag (tri-state; effective writability is
-   * `allowGezelWrites ?? !workingDir` — see `projectWorkspaceWritable`
-   * in core). Effective writability is surfaced through the
-   * "Edits on/off" dropdown; `workingDir` feeds its tooltip.
+   * Resolved Gezel-managed write access. The parent must derive this through
+   * `projectManagedWorkspaceWritable`; this component never interprets raw
+   * persistence fields.
    */
-  allowGezelWrites?: boolean;
-  workingDir?: string | null;
+  managedWorkspaceWritable?: boolean;
   /**
    * Flip the per-project write switch. When provided, the bar renders an
-   * always-visible "Edits on/off" dropdown next to the status select.
+   * explicitly scoped "Tools: Can edit/Read-only" dropdown next to the
+   * status select.
    * The caller owns the external-dir confirmation flow (enabling writes
    * on a user-supplied folder must confirm first).
    */
-  onAllowWritesChange?: (next: boolean) => void;
-  /**
-   * A configured AI provider can edit the workspace through its own harness,
-   * outside the scoped Gezel write gate. The edits control becomes a disabled
-   * indicator because its on/off value cannot guarantee read-only behavior.
-   */
-  editableViaAiProvider?: boolean;
-  /** Codex-specific project posture. When present, replaces Edits on/off. */
+  onManagedWorkspaceWritesChange?: (next: boolean) => void;
+  /** Codex-specific project posture, displayed independently from managed tools. */
   codexMode?: CodexPermissionMode;
   onCodexModeChange?: (mode: CodexPermissionMode) => void;
+  /** Claude CLI posture, displayed only when Claude is represented in the project. */
+  claudeMode?: ProjectClaudePermissionMode;
+  onClaudeModeChange?: (mode: ClaudePermissionMode) => void;
   /** Opens the GitHub tab — the workbench for saves, diffs, and conflicts. */
   onOpenGitHub?: () => void;
   /**
@@ -63,13 +61,9 @@ const STATUS_TOOLTIP =
   'Read-only or Inactive — ambient gezel work pauses. Chat still works.';
 
 const WRITES_TOOLTIP =
-  "Whether gezellen may create, edit, and delete files in this project's workspace. " +
+  "Whether Gezel-managed tools and background work may create, edit, and delete files in this project's workspace. " +
   'Internal workspaces default to on; a project opened from an existing folder defaults to off ' +
-  '(turning it on asks for confirmation first). Gezels can always write reports into artifacts.';
-
-const PROVIDER_WRITES_TOOLTIP =
-  'Codex CLI, Claude CLI, or Copilot built-in tools can edit this workspace directly. ' +
-  'The Gezel edits switch cannot guarantee a read-only project while that provider is in use.';
+  '(turning it on asks for confirmation first). Provider-native access such as Codex is shown separately.';
 
 const CODEX_MODE_OPTIONS: ReadonlyArray<{
   value: CodexPermissionMode;
@@ -90,9 +84,30 @@ const CODEX_MODE_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const CLAUDE_MODE_OPTIONS: ReadonlyArray<{
+  value: ClaudePermissionMode;
+  label: string;
+  hint: string;
+}> = [
+  { value: 'plan', label: 'Plan', hint: 'Read and reason without changing workspace files.' },
+  { value: 'default', label: 'Ask', hint: 'Let Claude request permission for tool use.' },
+  { value: 'acceptEdits', label: 'Edit', hint: 'Auto-approve file edits; gate shell commands.' },
+  {
+    value: 'bypassPermissions',
+    label: 'Full',
+    hint: 'Bypass Claude permission prompts, including for shell commands.',
+  },
+];
+
 function codexModeTitle(mode: CodexPermissionMode): string {
   const option = CODEX_MODE_OPTIONS.find((item) => item.value === mode);
   return `Codex ${option?.label ?? mode}: ${option?.hint ?? ''}`;
+}
+
+function claudeModeTitle(mode: ProjectClaudePermissionMode): string {
+  if (mode === 'mixed') return 'Claude: assigned gezels currently use different permission modes.';
+  const option = CLAUDE_MODE_OPTIONS.find((item) => item.value === mode);
+  return `Claude ${option?.label ?? mode}: ${option?.hint ?? ''}`;
 }
 
 const PROJECT_STATUS_OPTIONS: ReadonlyArray<{ value: ProjectStatus; label: string }> = [
@@ -134,27 +149,30 @@ function ProjectControlsOverflow({
   projectStatus,
   statusLocked,
   onStatusChange,
-  gezelWritesOn,
-  onAllowWritesChange,
-  editableViaAiProvider,
+  managedWritesOn,
+  onManagedWorkspaceWritesChange,
   codexMode,
   onCodexModeChange,
+  claudeMode,
+  onClaudeModeChange,
 }: {
   projectStatus: ProjectStatus;
   statusLocked?: boolean;
   onStatusChange?: (status: ProjectStatus) => void;
-  gezelWritesOn: boolean;
-  onAllowWritesChange?: (next: boolean) => void;
-  editableViaAiProvider: boolean;
+  managedWritesOn: boolean;
+  onManagedWorkspaceWritesChange?: (next: boolean) => void;
   codexMode?: CodexPermissionMode;
   onCodexModeChange?: (mode: CodexPermissionMode) => void;
+  claudeMode?: ProjectClaudePermissionMode;
+  onClaudeModeChange?: (mode: ClaudePermissionMode) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   if (
     !onStatusChange &&
     !onCodexModeChange &&
-    (!onAllowWritesChange || (gezelWritesOn && !editableViaAiProvider))
+    !onClaudeModeChange &&
+    (!onManagedWorkspaceWritesChange || managedWritesOn)
   ) {
     return null;
   }
@@ -198,28 +216,21 @@ function ProjectControlsOverflow({
                 </div>
               </section>
             )}
-            {!codexMode && onAllowWritesChange && (editableViaAiProvider || !gezelWritesOn) && (
+            {onManagedWorkspaceWritesChange && !managedWritesOn && (
               <section className="project-controls-overflow-section">
-                <span className="project-controls-overflow-label">
-                  {editableViaAiProvider ? 'File edits' : 'File edits are off'}
-                </span>
+                <span className="project-controls-overflow-label">Built-in tools</span>
                 <button
                   type="button"
                   className="project-controls-overflow-item"
-                  disabled={editableViaAiProvider}
-                  title={editableViaAiProvider ? PROVIDER_WRITES_TOOLTIP : undefined}
                   onClick={() => {
-                    if (editableViaAiProvider) return;
-                    onAllowWritesChange(true);
+                    onManagedWorkspaceWritesChange(true);
                     setOpen(false);
                   }}
                 >
                   <span className="project-writes-select-icon" aria-hidden>
                     <EditsLockIcon unlocked />
                   </span>
-                  <span>
-                    {editableViaAiProvider ? 'Editable via AI provider' : 'Turn edits on'}
-                  </span>
+                  <span>Allow workspace edits</span>
                 </button>
               </section>
             )}
@@ -236,6 +247,28 @@ function ProjectControlsOverflow({
                       title={option.hint}
                       onClick={() => {
                         onCodexModeChange(option.value);
+                        setOpen(false);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+            {claudeMode && onClaudeModeChange && (
+              <section className="project-controls-overflow-section">
+                <span className="project-controls-overflow-label">Claude access</span>
+                <div className="project-controls-overflow-options">
+                  {CLAUDE_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="project-controls-overflow-item"
+                      aria-pressed={claudeMode === option.value}
+                      title={option.hint}
+                      onClick={() => {
+                        onClaudeModeChange(option.value);
                         setOpen(false);
                       }}
                     >
@@ -269,12 +302,12 @@ function ProjectControlsOverflow({
 export function ProjectGitStatusBar({
   projectId,
   compact = false,
-  allowGezelWrites,
-  workingDir,
-  onAllowWritesChange,
-  editableViaAiProvider = false,
+  managedWorkspaceWritable = true,
+  onManagedWorkspaceWritesChange,
   codexMode,
   onCodexModeChange,
+  claudeMode,
+  onClaudeModeChange,
   onOpenGitHub,
   status: projectStatus,
   statusLocked = false,
@@ -294,10 +327,7 @@ export function ProjectGitStatusBar({
   const [fullScanState, setFullScanState] = useState<'idle' | 'starting' | 'running'>('idle');
   const [fullScanError, setFullScanError] = useState<string | null>(null);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
-  // Effective per-project writability — mirrors `projectWorkspaceWritable`
-  // in core: explicit flag wins, else internal workspaces are writable and
-  // external working dirs are not.
-  const gezelWritesOn = allowGezelWrites ?? !workingDir;
+  const managedWritesOn = managedWorkspaceWritable;
 
   const refresh = useCallback(async () => {
     try {
@@ -939,6 +969,28 @@ export function ProjectGitStatusBar({
               </Select.Content>
             </Select.Root>
           )}
+          {onManagedWorkspaceWritesChange && (!compact || !managedWritesOn) && (
+            <Select.Root
+              value={managedWritesOn ? 'on' : 'off'}
+              onValueChange={(v) => onManagedWorkspaceWritesChange(v === 'on')}
+            >
+              <Select.Trigger
+                className={`project-writes-select project-writes-select-${managedWritesOn ? 'on' : 'off'}`}
+                title={WRITES_TOOLTIP}
+                aria-label="Built-in tool workspace access for this project"
+              >
+                <span className="project-writes-select-icon" aria-hidden>
+                  <EditsLockIcon unlocked={managedWritesOn} />
+                </span>
+                <span className="project-permission-scope">Tools:</span>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="on">Can edit</Select.Item>
+                <Select.Item value="off">Read-only</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          )}
           {codexMode && onCodexModeChange && (
             <Select.Root
               value={codexMode}
@@ -952,6 +1004,7 @@ export function ProjectGitStatusBar({
                 <span className="project-writes-select-icon" aria-hidden>
                   <EditsLockIcon unlocked={codexMode !== 'plan'} />
                 </span>
+                <span className="project-permission-scope">Codex:</span>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -963,53 +1016,57 @@ export function ProjectGitStatusBar({
               </Select.Content>
             </Select.Root>
           )}
-          {!codexMode &&
-            onAllowWritesChange &&
-            (!compact || !gezelWritesOn || editableViaAiProvider) && (
-              <Select.Root
-                value={editableViaAiProvider ? 'provider' : gezelWritesOn ? 'on' : 'off'}
-                disabled={editableViaAiProvider}
-                onValueChange={(v) => {
-                  if (!editableViaAiProvider) onAllowWritesChange(v === 'on');
-                }}
+          {claudeMode && onClaudeModeChange && (
+            <Select.Root
+              value={claudeMode}
+              onValueChange={(value) => {
+                if (value !== 'mixed') onClaudeModeChange(value as ClaudePermissionMode);
+              }}
+            >
+              <Select.Trigger
+                className={`project-writes-select project-claude-mode project-claude-mode-${claudeMode}`}
+                title={claudeModeTitle(claudeMode)}
+                aria-label="Claude execution mode for this project"
               >
-                <Select.Trigger
-                  className={`project-writes-select project-writes-select-${
-                    editableViaAiProvider ? 'provider' : gezelWritesOn ? 'on' : 'off'
-                  }`}
-                  title={editableViaAiProvider ? PROVIDER_WRITES_TOOLTIP : WRITES_TOOLTIP}
-                  aria-label="Gezel file edits for this project"
-                >
-                  <span className="project-writes-select-icon" aria-hidden>
-                    <EditsLockIcon unlocked={editableViaAiProvider || gezelWritesOn} />
-                  </span>
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  <Select.Item value="on">Edits on</Select.Item>
-                  <Select.Item value="off">Edits off</Select.Item>
-                  <Select.Item value="provider">Editable via AI provider</Select.Item>
-                </Select.Content>
-              </Select.Root>
-            )}
+                <span className="project-writes-select-icon" aria-hidden>
+                  <EditsLockIcon unlocked={claudeMode !== 'plan' && claudeMode !== 'mixed'} />
+                </span>
+                <span className="project-permission-scope">Claude:</span>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {claudeMode === 'mixed' && (
+                  <Select.Item value="mixed" disabled>
+                    Mixed
+                  </Select.Item>
+                )}
+                {CLAUDE_MODE_OPTIONS.map((option) => (
+                  <Select.Item key={option.value} value={option.value} textValue={option.label}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          )}
         </div>
         {compact && (
           <ProjectControlsOverflow
             projectStatus={projectStatus ?? 'active'}
             statusLocked={statusLocked}
             onStatusChange={onStatusChange}
-            gezelWritesOn={gezelWritesOn}
-            onAllowWritesChange={onAllowWritesChange}
-            editableViaAiProvider={editableViaAiProvider}
+            managedWritesOn={managedWritesOn}
+            onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
             codexMode={codexMode}
             onCodexModeChange={onCodexModeChange}
+            claudeMode={claudeMode}
+            onClaudeModeChange={onClaudeModeChange}
           />
         )}
-        {!onAllowWritesChange && !gezelWritesOn && (
+        {!onManagedWorkspaceWritesChange && !managedWritesOn && (
           <span
             className="project-lockdown-chip"
-            title='Gezel file edits are off for this project. Enable "Allow gezellen to modify the workspace directory" in Project → Settings.'
-            aria-label="Gezel file edits are off for this project."
+            title='Managed workspace edits are off for this project. Enable "Allow built-in tools and background work to modify the workspace" in Project → Settings.'
+            aria-label="Built-in tool workspace access is read-only for this project."
           >
             <span className="project-lockdown-chip-icon" aria-hidden>
               <EditsLockIcon />

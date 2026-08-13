@@ -441,6 +441,11 @@ export function projectFindingLifecycleFile(root: string, projectId: string): st
   return join(projectPrivateDir(root, projectId), 'finding-lifecycle.json');
 }
 
+/** Durable Boekwachter issue identity + lifecycle. Account-private. */
+export function projectBoekwachterIssuesFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'boekwachter-issues.json');
+}
+
 /** Durable per-project code-review records for this account. */
 export function projectCodeReviewsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'code-reviews.json');
@@ -921,6 +926,17 @@ export function projectContentIndexDbFile(
   return projectStorageScope(root, projectId) === 'machine-shared'
     ? join(fallbackProjectIndexDir(root, projectId), 'index.db')
     : projectLocalIndexDbFile(workspaceDir);
+}
+
+/**
+ * Derived FTS index over a project's artifact corpora (connector records under
+ * `artifacts/data/**`). Always in the account-private sidecar, never inside
+ * the artifacts tree itself — the database must not surface in the corpus
+ * browser, and mutable SQLite must not ride an externalized artifacts folder.
+ * Rebuildable cache, safe to delete.
+ */
+export function projectArtifactsIndexDbFile(root: string, projectId: string): string {
+  return join(fallbackProjectIndexDir(root, projectId), 'artifacts.db');
 }
 
 /**

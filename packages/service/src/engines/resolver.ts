@@ -9,7 +9,11 @@ import {
   nowIso,
   retryTransient,
 } from '@bendyline/gezel';
-import { type NativeBinaryName, resolvePlatformKey } from '@bendyline/gezel/native';
+import {
+  type NativeBinaryName,
+  resolvePlatformKey,
+  windowsHeadlessSpawnOptions,
+} from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import {
@@ -483,6 +487,7 @@ async function resolveGitHubToken(): Promise<string | null> {
     const out = execFileSync('gh', ['auth', 'token'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      ...windowsHeadlessSpawnOptions(),
     });
     return out.trim() || null;
   } catch {

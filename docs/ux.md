@@ -470,7 +470,7 @@ exact text that will be filed — the user's own description, the error, and a
 machine profile — which they can edit before "Create issue on GitHub" opens a
 pre-filled issue in their browser. The report never contains logs, absolute
 paths, or anything identifying;
-[error-report.ts](../packages/ui/src/error-report.ts) composes the body and
+[error-report.ts](../packages/core/src/error-report.ts) composes the body and
 scrubs it in one pass, and is the only place that decides what goes in. Put
 the link where the app itself failed — an engine crash, a tab that would not
 render, a service that never came up — not next to a validation message the
@@ -714,14 +714,19 @@ regression.
 Below the findings tray, a reviewed file carries a **Boekwachter review card**
 on the same tray recipe but a neutral surface: the 1–10 health score with its
 one-line reason, the reviewer's cliffs notes as read-only markdown prose, and
-plain-text issue rows (`[severity] category — message`) that reveal their line
-in the source when clicked. Review severities (info / minor / major) are a
-deliberately separate vocabulary from security severities and never borrow
-their colors or badge treatment. The card closes on a one-line reminder that
-these are leads from a background model pass — an opinion, not a verdict — and
-a muted provenance footer naming the model, gezel, and date. A file the
-boekwachter hasn't reached yet gets one muted "not reviewed yet" line, no
-spinner.
+durable issue rows identified by a short project-scoped reference (`BW-12`).
+Selecting a current line reveals it in the source; after the file changes, the
+old location is explicitly labelled **Previously line N** and **Needs recheck**
+instead of pretending it is still exact. Rows support read/unread, dismiss as
+not an issue, resolve, and reopen. With project editing enabled, **Fix** opens a
+confirmation dialog and creates an assigned terminal task; the row stays in
+progress and links to that task until completion resolves it. Review severities
+(info / minor / major) are a deliberately separate vocabulary from security
+severities and never borrow their colors or badge treatment. The card closes on
+a one-line reminder that these are leads from a background model pass — an
+opinion, not a verdict — and a muted provenance footer naming the model, gezel,
+and date. A file the boekwachter hasn't reached yet gets one muted "not reviewed
+yet" line, no spinner.
 
 Past street zoom, miniature symbol buildings may gain compact floating tags.
 These use small-radius plates with short rooftop leaders, prioritize functions

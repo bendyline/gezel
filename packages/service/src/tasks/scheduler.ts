@@ -12,7 +12,7 @@ import {
   isSchedulingAllowed,
   localDateKey,
   projectAllowsAmbientWork,
-  projectWorkspaceWritable,
+  projectManagedWorkspaceWritable,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
@@ -388,6 +388,10 @@ export class TaskScheduler {
       toGezelIdOrName: assignee,
       projectId: task.projectId,
       text: gateFrozen ? stuckStepGateNudgeText(task, step) : stuckStepNudgeText(task, step),
+      // Resume the exact task-step thread. Without these fields the nudge
+      // falls into lobby chat and task tools lose their step-scoped env.
+      taskRef: task.ref,
+      stepId: step.id,
       // Ambient re-drive — must yield to any user-driven turn on the same
       // provider, like the voorman nudge.
       lane: 'background',
@@ -605,7 +609,7 @@ export class TaskScheduler {
     if (projects.length === 0) return;
     const config = await this.store.readConfig();
     if (!isProactiveAllowed(config)) return;
-    // Workspace writability is per-project now (projectWorkspaceWritable),
+    // Managed workspace writability is per-project (projectManagedWorkspaceWritable),
     // so the write-blocked guard lives in maybeNudge where the project is
     // known — no global skip here.
     const meesterGezelId = config.meesterGezelId;
@@ -658,9 +662,9 @@ export class TaskScheduler {
     // gezels can't edit this project's files: an external workingDir
     // without the explicit opt-in, or a project the user set to "edits
     // off". Internal workspaces are writable by default (see
-    // projectWorkspaceWritable) — a fresh internal project keeps its
+    // projectManagedWorkspaceWritable) — a fresh internal project keeps its
     // nudges even under super-lockdown.
-    if (!projectWorkspaceWritable(project)) {
+    if (!projectManagedWorkspaceWritable(project)) {
       trace('skip — gezel file edits disabled for this project');
       return;
     }

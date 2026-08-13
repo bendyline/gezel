@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { OutputRingBuffer } from '../fs/ring.js';
 import { winShellSafe } from '../packages/win-shell.js';
 import { runUnderMacSandbox } from '../sandbox/macos.js';
@@ -96,14 +97,11 @@ export async function runWorkspaceCommand(
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
-      // New process group on POSIX so a runaway child tree can be
-      // killed with `process.kill(-pid)` on timeout. On Windows the same
-      // option is DETACHED_PROCESS — not the no-op the previous comment
-      // here claimed — and that is exactly what a console-subsystem build
-      // tool needs under the machine service, whose restricted SID cannot
-      // allocate a console. `killTree` is unaffected: detaching changes the
-      // console and process group, not the parent PID `taskkill /T` walks.
-      detached: true,
+      // New process group on POSIX so a runaway child tree can be killed with
+      // `process.kill(-pid)` on timeout. Windows `taskkill /T` walks parent
+      // PIDs and needs no detachment; keep the owned build tool hidden.
+      detached: process.platform !== 'win32',
+      ...windowsHeadlessSpawnOptions(),
       // Windows: only force a shell when we're running a .cmd/.bat
       // shim that the loader can't exec directly. For absolute paths
       // to .exe binaries (pnpm, node, `.bin/*` after our resolution),
@@ -205,12 +203,11 @@ function killTree(child: import('node:child_process').ChildProcess): void {
     // Node's ChildProcess.kill() terminates only the immediate process on
     // Windows. taskkill /T walks the descendant tree (watchers and compiler
     // workers included) before force-terminating it.
-    // taskkill is itself a console-subsystem executable, so it needs the
-    // same DETACHED_PROCESS treatment — a timeout kill that cannot spawn
-    // its killer would leave the runaway tree running.
+    // taskkill is itself a short-lived console executable; hide its window
+    // while retaining ownership long enough to observe failure.
     const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      detached: true,
       stdio: 'ignore',
+      ...windowsHeadlessSpawnOptions(),
     });
     killer.once('error', () => child.kill('SIGKILL'));
     killer.once('close', (code) => {

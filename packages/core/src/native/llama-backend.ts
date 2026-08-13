@@ -21,10 +21,12 @@
  *   const bin = resolveNativeBinaryPath('llama-server', import.meta.url, probe.backend);
  *
  * Caching: the result is memoized at
- * `<home>/engines/llama-cpp/backend.json` so subsequent launches
- * skip the probe. Cache invalidates whenever `engineVersion`
- * changes — bumping the llama.cpp pin may prefer a different
- * backend.
+ * `<home>/engines/llama-cpp/backend.json`. Subsequent launches reuse
+ * it only while the cheap driver-library check still resolves to the
+ * same backend. That matters when a user installs or removes a GPU
+ * driver between launches. The cache also invalidates whenever
+ * `engineVersion` changes — bumping the llama.cpp pin may prefer a
+ * different backend.
  */
 
 import { execSync } from 'node:child_process';
@@ -38,6 +40,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { arch as nodeArch, platform as nodePlatform } from 'node:process';
+import { windowsHeadlessSpawnOptions } from './console-detach.js';
 
 export type LlamaBackend = 'cuda' | 'vulkan' | 'metal' | 'cpu';
 
@@ -248,9 +251,58 @@ function anyExists(paths: string[], probe: (p: string) => boolean): string | nul
   return null;
 }
 
+const LINUX_CUDA_DRIVER_PATHS = [
+  '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+  '/usr/lib/aarch64-linux-gnu/libcuda.so.1',
+  '/usr/lib64/libcuda.so.1',
+  '/usr/lib/libcuda.so.1',
+  '/lib/x86_64-linux-gnu/libcuda.so.1',
+  '/lib/aarch64-linux-gnu/libcuda.so.1',
+];
+
+const LINUX_VULKAN_LOADER_PATHS = [
+  '/usr/lib/x86_64-linux-gnu/libvulkan.so.1',
+  '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
+  '/usr/lib64/libvulkan.so.1',
+  '/usr/lib/libvulkan.so.1',
+];
+
+function windowsSystem32(): string {
+  return process.env.SYSTEMROOT
+    ? join(process.env.SYSTEMROOT, 'System32')
+    : 'C:\\Windows\\System32';
+}
+
+/**
+ * Resolve the best backend supported by the driver/loader files currently on
+ * disk. This deliberately excludes vendor discovery and command execution so
+ * it is cheap enough to validate a cached probe on every launch.
+ */
+function detectDriverBackend(
+  os: 'linux' | 'win32',
+  probeFile: (p: string) => boolean,
+): { backend: 'cuda' | 'vulkan' | 'cpu'; path?: string } {
+  if (os === 'linux') {
+    const libcuda = anyExists(LINUX_CUDA_DRIVER_PATHS, probeFile);
+    if (libcuda) return { backend: 'cuda', path: libcuda };
+
+    const libvulkan = anyExists(LINUX_VULKAN_LOADER_PATHS, probeFile);
+    if (libvulkan) return { backend: 'vulkan', path: libvulkan };
+    return { backend: 'cpu' };
+  }
+
+  const sys32 = windowsSystem32();
+  const nvcuda = anyExists([join(sys32, 'nvcuda.dll'), join(sys32, 'nvml.dll')], probeFile);
+  if (nvcuda) return { backend: 'cuda', path: nvcuda };
+
+  const vulkan = anyExists([join(sys32, 'vulkan-1.dll')], probeFile);
+  if (vulkan) return { backend: 'vulkan', path: vulkan };
+  return { backend: 'cpu' };
+}
+
 function commandOkDefault(cmd: string): boolean {
   try {
-    execSync(cmd, { stdio: 'ignore' });
+    execSync(cmd, { stdio: 'ignore', ...windowsHeadlessSpawnOptions() });
     return true;
   } catch {
     return false;
@@ -315,9 +367,7 @@ function detectVendor(
     if (found.has('intel')) return 'intel';
     return undefined;
   }
-  const sys32 = process.env.SYSTEMROOT
-    ? join(process.env.SYSTEMROOT, 'System32')
-    : 'C:\\Windows\\System32';
+  const sys32 = windowsSystem32();
   if (probeFile(join(sys32, 'nvcuda.dll')) || probeFile(join(sys32, 'nvapi64.dll'))) {
     return 'nvidia';
   }
@@ -342,30 +392,14 @@ function detectLinuxOrWin(
   readDir: (p: string) => string[],
 ): { backend: LlamaBackend; reason: string; vendorHint?: GpuVendorHint } {
   const vendorHint = detectVendor(os, probeFile, readFileText, readDir);
+  const driver = detectDriverBackend(os, probeFile);
   // ── CUDA probe ─────────────────────────────────────────────────
   // We care about the DRIVER, not the toolkit — bundled
   // llama-server-cuda ships its own cudart alongside it. Linux
   // driver ships libcuda.so.1; Windows driver ships nvcuda.dll
   // (and nvml.dll for monitoring).
-  if (os === 'linux') {
-    // Debian-style multiarch dirs ship the driver lib under
-    // `/usr/lib/<gnu-triplet>/`; the triplet differs by arch
-    // (`x86_64-linux-gnu` vs `aarch64-linux-gnu`). RPM-style hosts
-    // and bare /usr/lib fallbacks cover both. Without the aarch64
-    // entry, linux-arm64 boxes (Jetson, DGX Spark, Grace Hopper)
-    // probe negative and pin themselves to CPU forever.
-    const libcuda = anyExists(
-      [
-        '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
-        '/usr/lib/aarch64-linux-gnu/libcuda.so.1',
-        '/usr/lib64/libcuda.so.1',
-        '/usr/lib/libcuda.so.1',
-        '/lib/x86_64-linux-gnu/libcuda.so.1',
-        '/lib/aarch64-linux-gnu/libcuda.so.1',
-      ],
-      probeFile,
-    );
-    if (libcuda) {
+  if (driver.backend === 'cuda' && driver.path) {
+    if (os === 'linux') {
       // nvidia-smi being responsive is a second signal that the
       // driver is actually live, not just installed-but-broken.
       // Tolerant — we don't gate on it; just include it in the
@@ -373,46 +407,20 @@ function detectLinuxOrWin(
       const smiOk = probeCmd('nvidia-smi -L');
       return {
         backend: 'cuda',
-        reason: `found ${libcuda}${smiOk ? ', nvidia-smi ok' : ', nvidia-smi absent or failing (proceeding anyway)'}`,
+        reason: `found ${driver.path}${smiOk ? ', nvidia-smi ok' : ', nvidia-smi absent or failing (proceeding anyway)'}`,
         vendorHint,
       };
     }
-  } else {
-    const sys32 = process.env.SYSTEMROOT
-      ? join(process.env.SYSTEMROOT, 'System32')
-      : 'C:\\Windows\\System32';
-    const nvcuda = anyExists([join(sys32, 'nvcuda.dll'), join(sys32, 'nvml.dll')], probeFile);
-    if (nvcuda) {
-      return { backend: 'cuda', reason: `found ${nvcuda}`, vendorHint };
-    }
+    return { backend: 'cuda', reason: `found ${driver.path}`, vendorHint };
   }
 
   // ── Vulkan probe ───────────────────────────────────────────────
-  if (os === 'linux') {
-    const libvulkan = anyExists(
-      [
-        '/usr/lib/x86_64-linux-gnu/libvulkan.so.1',
-        '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
-        '/usr/lib64/libvulkan.so.1',
-        '/usr/lib/libvulkan.so.1',
-      ],
-      probeFile,
-    );
-    if (libvulkan) {
-      // Could probe for a physical device via `vulkaninfo --summary`
-      // but it's slow and not always installed. Trust the loader
-      // being present; llama-server raises a clear error on no-device,
-      // and the supervisor can fall through on launch failure.
-      return { backend: 'vulkan', reason: `found ${libvulkan}`, vendorHint };
-    }
-  } else {
-    const sys32 = process.env.SYSTEMROOT
-      ? join(process.env.SYSTEMROOT, 'System32')
-      : 'C:\\Windows\\System32';
-    const vk = anyExists([join(sys32, 'vulkan-1.dll')], probeFile);
-    if (vk) {
-      return { backend: 'vulkan', reason: `found ${vk}`, vendorHint };
-    }
+  if (driver.backend === 'vulkan' && driver.path) {
+    // Could probe for a physical device via `vulkaninfo --summary`
+    // but it's slow and not always installed. Trust the loader
+    // being present; llama-server raises a clear error on no-device,
+    // and the supervisor can fall through on launch failure.
+    return { backend: 'vulkan', reason: `found ${driver.path}`, vendorHint };
   }
 
   return { backend: 'cpu', reason: 'no CUDA driver and no Vulkan loader found', vendorHint };
@@ -470,18 +478,27 @@ function probeOrCached(input: DetectInput): {
   const probeReadFile = input.probe?.readFileText ?? readFileTextDefault;
   const probeReadDir = input.probe?.readDir ?? readDirDefault;
   const cachePath = join(input.home, 'engines', 'llama-cpp', 'backend.json');
+  const plat = input.probe?.platform ?? nodePlatform;
+  const ar = input.probe?.arch ?? nodeArch;
 
   // ── Cache check (always real fs) ───────────────────────────────
-  // Two gates: the engineVersion has to match (probe results may
-  // shift across llama.cpp pins), AND the probeSchemaVersion has to
-  // be current (probe *logic* may have broadened since the cache
-  // was written — see PROBE_SCHEMA_VERSION). Either gate failing
-  // forces a re-probe.
+  // Three gates: the engineVersion has to match (probe results may
+  // shift across llama.cpp pins), the probeSchemaVersion has to be
+  // current (probe *logic* may have broadened since the cache was
+  // written — see PROBE_SCHEMA_VERSION), and the currently-installed
+  // driver files must still resolve to the cached backend. Any gate
+  // failing forces a re-probe.
   if (fileExistsDefault(cachePath)) {
     try {
       const cached: CacheFile = JSON.parse(readFileSync(cachePath, 'utf8'));
       const schemaOk = (cached.probeSchemaVersion ?? 0) >= PROBE_SCHEMA_VERSION;
-      if (cached.engineVersion === input.engineVersion && schemaOk) {
+      const currentDriverBackend =
+        (plat === 'linux' && (ar === 'x64' || ar === 'arm64')) || (plat === 'win32' && ar === 'x64')
+          ? detectDriverBackend(plat, probeFile).backend
+          : undefined;
+      const driverStateUnchanged =
+        currentDriverBackend === undefined || currentDriverBackend === cached.backend;
+      if (cached.engineVersion === input.engineVersion && schemaOk && driverStateUnchanged) {
         return {
           backend: cached.backend,
           cached: true,
@@ -490,16 +507,16 @@ function probeOrCached(input: DetectInput): {
           ...(cached.vendorHint ? { vendorHint: cached.vendorHint } : {}),
         };
       }
-      // engineVersion changed, or the cache was written by an older
-      // probe — fall through and re-probe.
+      // Engine version, probe schema, or installed driver state changed —
+      // fall through and re-probe. The driver check is what lets a machine
+      // move from Nouveau/Vulkan to the NVIDIA/CUDA backend without waiting
+      // for a Gezel release to bump the engine pin.
     } catch {
       // Corrupt cache — re-probe.
     }
   }
 
   // ── Platform dispatch ─────────────────────────────────────────
-  const plat = input.probe?.platform ?? nodePlatform;
-  const ar = input.probe?.arch ?? nodeArch;
   let result: { backend: LlamaBackend; reason: string; vendorHint?: GpuVendorHint };
 
   if (plat === 'darwin') {

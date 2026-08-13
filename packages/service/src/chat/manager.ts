@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ChatMessageToolCall,
   type ChatSession,
+  type ClaudePermissionMode,
   type CodexPermissionMode,
   type ExpectedDeliverable,
   type GezelConfig,
@@ -14,6 +15,7 @@ import {
   type GezelGender,
   type HookSpec,
   type InstalledToolset,
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ModelTier,
   NEW_THREAD_TITLE,
   type ProjectFileEntry,
@@ -40,7 +42,7 @@ import {
   parseTaskRef,
   profileKind,
   projectGezelId,
-  projectWorkspaceWritable,
+  projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
   resolveExecutionDensity,
@@ -310,6 +312,23 @@ function latestUserMessageContent(messages: readonly ChatMessage[]): string | un
 }
 
 /**
+ * Connector-type prefixes that expose the social post write tools
+ * (draft_post / queue_post / publish_post). Mirrors the prefix list in
+ * gezel-mcp's `resolveSocialBinding`.
+ */
+const SOCIAL_CONNECTOR_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'] as const;
+
+function hasSocialConnectorBinding(
+  connectors: readonly { type: string; disabled?: boolean }[] | undefined,
+): boolean {
+  return !!connectors?.some(
+    (binding) =>
+      !binding.disabled &&
+      SOCIAL_CONNECTOR_TYPE_PREFIXES.some((prefix) => binding.type.startsWith(prefix)),
+  );
+}
+
+/**
  * Two send-paths share a `from` bucket when they're either both
  * user-initiated (no `from`) or both originate from the same sender
  * gezel. Used by the queue coalescer — we never merge a user follow-up
@@ -494,6 +513,8 @@ interface LiveSessionState {
   catalogContentSnapshot: string | null;
   /** Effective Codex execution mode baked into the live CLI session. */
   codexPermissionModeSnapshot?: CodexPermissionMode;
+  /** Effective Claude CLI permission mode baked into the live CLI session. */
+  claudePermissionModeSnapshot?: ClaudePermissionMode;
   /**
    * The emergency "missing index.html" tool clamp is derived from the
    * latest user message, so it can change between queued turns without
@@ -2977,6 +2998,39 @@ export class ChatManager {
     });
   }
 
+  /**
+   * Resolve the active session for one exact task step. Scheduler re-drives
+   * use this path so task tools inherit GEZEL_TASK_REF / GEZEL_STEP_ID and
+   * continue the original work thread instead of landing in lobby chat.
+   */
+  private async ensureOrCreateTaskSession(args: {
+    gezelId: string;
+    projectId: string;
+    taskRef: string;
+    stepId?: string;
+  }): Promise<ChatSession> {
+    const existing = await this.store.listSessions({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+    });
+    const active = existing.find(
+      (session) =>
+        !session.archived &&
+        session.taskRef === args.taskRef &&
+        (args.stepId === undefined || session.stepId === args.stepId),
+    );
+    if (active) {
+      const full = await this.store.getSession(args.gezelId, active.id);
+      if (full) return full;
+    }
+    return this.createSession({
+      gezelId: args.gezelId,
+      projectId: args.projectId,
+      taskRef: args.taskRef,
+      ...(args.stepId ? { stepId: args.stepId } : {}),
+    });
+  }
+
   /** Late-bind the fitness manager (see the field's docblock). */
   setModelFitness(manager: import('../fitness/manager.js').ModelFitnessManager): void {
     this.modelFitness = manager;
@@ -3343,7 +3397,8 @@ export class ChatManager {
    * (which is anchored to a task + phase and always opens a fresh session),
    * `messageGezel` drops a message into the target gezel's *active* project
    * session via `ensureOrCreateSession`, so the continuity of their thread
-   * is preserved.
+   * is preserved. Internal task re-drives may also pass `taskRef` + `stepId`
+   * to resume that exact task-step session with its MCP context intact.
    *
    * When the target's turn completes, its reply is injected back into the
    * sender's session as its own handoff-styled message (role=user, `from`
@@ -3363,6 +3418,10 @@ export class ChatManager {
     toGezelIdOrName: string;
     projectId?: string;
     text: string;
+    /** Internal task context for scheduler re-drives. */
+    taskRef?: string;
+    /** Exact step paired with taskRef when re-driving task work. */
+    stepId?: string;
     /**
      * Provider-queue lane for the target's reply turn. Defaults to
      * `interactive`. The scheduler passes `background` for ambient
@@ -3472,10 +3531,20 @@ export class ChatManager {
       : undefined;
     if (pendingHandoff) return { ...pendingHandoff, deduplicated: true };
 
-    const session = await this.ensureOrCreateSession({
-      gezelId: target.id,
-      projectId,
-    });
+    if (args.stepId && !args.taskRef) {
+      throw new Error('messageGezel stepId requires taskRef');
+    }
+    const session = args.taskRef
+      ? await this.ensureOrCreateTaskSession({
+          gezelId: target.id,
+          projectId,
+          taskRef: args.taskRef,
+          ...(args.stepId ? { stepId: args.stepId } : {}),
+        })
+      : await this.ensureOrCreateSession({
+          gezelId: target.id,
+          projectId,
+        });
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const fromConfigPre = await this.store.readConfig();
@@ -3501,7 +3570,7 @@ export class ChatManager {
     const deliverableAnnotation = formatExpectedDeliverableAnnotation(
       args.expectedDeliverable,
       args.expectedDeliverable
-        ? !projectWorkspaceWritable(await this.store.getProject(projectId))
+        ? !projectManagedWorkspaceWritable(await this.store.getProject(projectId))
         : false,
       args.text,
     );
@@ -3889,7 +3958,7 @@ export class ChatManager {
       const deliverableAnnotation = formatExpectedDeliverableAnnotation(
         expectedDeliverable,
         expectedDeliverable
-          ? !projectWorkspaceWritable(await this.store.getProject(projectId))
+          ? !projectManagedWorkspaceWritable(await this.store.getProject(projectId))
           : false,
         args.text,
       );
@@ -6822,6 +6891,15 @@ export class ChatManager {
           });
           break;
         }
+        // A successful question card is the response for this turn. The
+        // user's answer will arrive as a fresh user message, so every
+        // automatic continuation must stop here — including recovery for an
+        // earlier failed tool in the same turn and inspector escalation after
+        // an exhausted continuation budget.
+        if (drained.some((call) => call.name === 'ask_user_question' && call.success)) {
+          log.info(`session ${sessionId}: ask_user_question posted — waiting for the user`);
+          break;
+        }
         if (
           continuations >= maxContinuations &&
           looksStalled(finalContent) &&
@@ -9076,6 +9154,15 @@ export class ChatManager {
        */
       jobLabel?: string;
       /**
+       * Per-call catalog tuning profile. Used by tightly-scoped utility work
+       * whose inference shape differs from the owning gezel's conversational
+       * default (for example, index summaries should use an `instruct`
+       * profile rather than spend their deadline on hidden reasoning).
+       * The profile keeps its catalog-authored sampling/output allowance;
+       * this option does not impose an extra token cap.
+       */
+      tuningProfileId?: string;
+      /**
        * Truly-deferrable housekeeping (memory extraction, icon/about
        * generation, index enrichment, digests). On local engine queues
        * with ambient admission control the one-shot dispatches only
@@ -9206,10 +9293,19 @@ export class ChatManager {
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const sessionDefaults = opts.tuningProfileId
+      ? await this.resolveModelSessionDefaults(effectiveProviderName, model, {
+          tuningProfileId: opts.tuningProfileId,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        })
+      : null;
     const session = await provider.createSession({
       systemMessage,
       model,
       reasoningEffort,
+      ...(sessionDefaults
+        ? { profile: sessionDefaults.profile, tuning: sessionDefaults.tuning }
+        : {}),
     });
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),
@@ -10616,7 +10712,17 @@ export class ChatManager {
      * throwing {@link ModelNotInstalledError}: their plans read the real
      * header.
      */
-    opts: { allowUninstalled?: boolean } = {},
+    opts: {
+      allowUninstalled?: boolean;
+      /**
+       * Price the model as the only resident engine. Inventory/catalog rows
+       * answer "can this model run on this device?", so their estimate must
+       * not change merely because another model happens to be warm. Actual
+       * launch admission keeps the default live-reservation behavior and may
+       * evict an idle model (or report that a busy one is blocking the swap).
+       */
+      standalone?: boolean;
+    } = {},
   ): Promise<{
     contextWindow?: number;
     plannedResidentBytes?: number;
@@ -10702,7 +10808,9 @@ export class ChatManager {
       const fastBudget = brokerSnap?.enforced
         ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
         : liveBudget.fastBytes;
-      const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
+      const committedOtherBytes = opts.standalone
+        ? 0
+        : this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
       const concurrencySizingBudget = brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : liveBudget.concurrencySizingBytes;
@@ -10980,7 +11088,9 @@ export class ChatManager {
     const admissionBudgetBytes = brokerSnap?.enforced
       ? brokerSnap.budgetBytes
       : liveBudget.budgetBytes;
-    const committedOtherBytes = this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
+    const committedOtherBytes = opts.standalone
+      ? 0
+      : this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
     // A preview answers a policy question, so it drops the live-free-RAM half
     // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
     // card still gets a placement cap: pass 0 free RAM so the live term
@@ -11858,6 +11968,9 @@ export class ChatManager {
       const codexPermissionMode = gezel
         ? await this.resolveCodexPermissionMode(existing.record, gezel)
         : undefined;
+      const claudePermissionMode = gezel
+        ? await this.resolveClaudePermissionMode(existing.record, gezel)
+        : undefined;
       if (
         gezel &&
         (gezel.about !== existing.aboutSnapshot ||
@@ -11869,7 +11982,8 @@ export class ChatManager {
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
           projectOrchestrationConstrained !== existing.projectOrchestrationConstrained ||
           gateRepairConstrained !== existing.gateRepairConstrained ||
-          codexPermissionMode !== existing.codexPermissionModeSnapshot)
+          codexPermissionMode !== existing.codexPermissionModeSnapshot ||
+          claudePermissionMode !== existing.claudePermissionModeSnapshot)
       ) {
         if (this.catalog.contentRoot() !== existing.catalogContentSnapshot) {
           log.debug(
@@ -11910,6 +12024,12 @@ export class ChatManager {
           log.info(
             `codex: execution mode changed for ${existing.record.gezelId} ` +
               `(${existing.codexPermissionModeSnapshot ?? 'n/a'} → ${codexPermissionMode ?? 'n/a'})`,
+          );
+        }
+        if (claudePermissionMode !== existing.claudePermissionModeSnapshot) {
+          log.info(
+            `claude: permission mode changed for ${existing.record.gezelId} ` +
+              `(${existing.claudePermissionModeSnapshot ?? 'n/a'} → ${claudePermissionMode ?? 'n/a'})`,
           );
         }
         try {
@@ -12130,6 +12250,9 @@ export class ChatManager {
             ),
           }
         : {}),
+      ...(sessionOpts.claudeCliContext?.permissionModeOverride
+        ? { claudePermissionModeSnapshot: sessionOpts.claudeCliContext.permissionModeOverride }
+        : {}),
       immediateFileWriteConstrained,
       directFileWorkConstrained,
       scenarioFileRepairConstrained,
@@ -12184,6 +12307,24 @@ export class ChatManager {
         frontmatter.codexPermissionMode ??
         frontmatter.claudePermissionMode ??
         config.codexCli?.defaultPermissionMode,
+    );
+  }
+
+  /** Resolve the mode that a Claude CLI session will actually receive. */
+  private async resolveClaudePermissionMode(
+    record: ChatSession,
+    gezel: GezelDetail,
+  ): Promise<ClaudePermissionMode | undefined> {
+    if (record.providerName !== 'anthropic-cli') return undefined;
+    const [project, config] = await Promise.all([
+      this.store.getProject(record.projectId),
+      this.store.readConfig(),
+    ]);
+    return (
+      project?.claudePermissionMode ??
+      gezel.parsed.frontmatter.claudePermissionMode ??
+      config.anthropicCli?.defaultPermissionMode ??
+      'acceptEdits'
     );
   }
 
@@ -13056,10 +13197,10 @@ export class ChatManager {
     }
 
     // Per-project workspace writability — the single write gate (see
-    // projectWorkspaceWritable in core). Drives the workspace-fs-write
+    // projectManagedWorkspaceWritable in core). Drives the workspace-fs-write
     // tool strip and the prompt's "edits off" posture note; the global
     // allowFileEdits deliberately does not.
-    const workspaceWritable = projectWorkspaceWritable(project);
+    const workspaceWritable = projectManagedWorkspaceWritable(project);
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
     const directFileWorkConstrained = gezel
@@ -13087,6 +13228,9 @@ export class ChatManager {
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
         ? ['draft_email', 'queue_email', 'send_email']
+        : []),
+      ...(hasSocialConnectorBinding(project?.connectors) && securityPolicy.allowExternalServices
+        ? ['draft_post', 'queue_post', 'publish_post']
         : []),
       ...(project?.connectors?.length ? ['draft_connector_action'] : []),
     ];
@@ -13872,6 +14016,12 @@ export class ChatManager {
         ...(securityPolicy.allowMail && project?.connectors?.some((b) => b.type.startsWith('mail-'))
           ? { GEZEL_MAIL_ENABLED: '1' }
           : {}),
+        // Same pattern for the social post write tools: only projects with a
+        // non-disabled social-type connector binding (and an external-services
+        // posture) expose draft_post/queue_post/publish_post.
+        ...(securityPolicy.allowExternalServices && hasSocialConnectorBinding(project?.connectors)
+          ? { GEZEL_SOCIAL_ENABLED: '1' }
+          : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
         // Named script-backed tools from the applied project type; gezel-mcp
@@ -14206,7 +14356,7 @@ export class ChatManager {
     // Claude CLI provider needs a few extras the other providers don't:
     // a working directory (the project's `workingDir` if set, otherwise the
     // internal fallback workspace under `~/.gezel/projects/<id>/workspace`),
-    // the resolved per-gezel `claudePermissionMode` override, and the
+    // the resolved project/gezel/install `claudePermissionMode`, and the
     // (sessionId, gezelId, projectId) triple so it can pick a stable runtime
     // `.mcp.json` path. We populate those once at session-build time so the
     // session class doesn't need a Store handle.
@@ -14218,7 +14368,11 @@ export class ChatManager {
 
     if (record.providerName === 'anthropic-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
-      const permissionModeOverride = gezelFm?.claudePermissionMode;
+      const permissionModeOverride =
+        project?.claudePermissionMode ??
+        gezelFm?.claudePermissionMode ??
+        config.anthropicCli?.defaultPermissionMode ??
+        'acceptEdits';
       // Compute the Claude CLI built-ins to disallow AND to auto-allow
       // from the same role+toolsets data the gezel-mcp filter uses. The
       // disallowed list is what the model literally can't reach
@@ -14759,7 +14913,7 @@ function formatExpectedDeliverableAnnotation(
   // that leads to a stripped-tool call and a hallucinated save. Flag the
   // block instead; the recipient's system prompt carries the fuller note.
   if (fileEditsDisabled) {
-    return '\n\n[Note: gezel file edits are turned OFF for this project, so this file deliverable cannot be written. Do not call `write_file` or claim the file was saved — reply that it is blocked until "Allow gezels to modify the workspace directory" is enabled in Project → Settings.]';
+    return `\n\n[Note: this recipient's built-in workspace file tools are read-only, so it cannot write this deliverable. Do not call \`write_file\` or claim the file was saved — reply that this session is blocked until "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" is enabled in Project → Settings. Provider-native sessions such as Codex may have separate access.]`;
   }
   const path = deliverable.filePath?.trim();
   const pathClause = path

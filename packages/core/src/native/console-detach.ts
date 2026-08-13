@@ -1,42 +1,45 @@
 /**
- * Windows console-allocation policy for spawned native children.
+ * Windows console-window policy for owned child processes.
  *
- * Console-subsystem executables (llama-server, ds4-server, bundled Node) get
- * a console allocated by the loader unless the creator says otherwise. Under
- * the machine-wide service there is nothing to allocate one from: the daemon
- * runs in non-interactive Session 0, where — as
- * `native/helpers/service-host/src/main.cpp` records — `AllocConsole` fails
- * with error 317. `DETACHED_PROCESS`, which Node exposes as `detached: true`,
- * asks for no console at all.
+ * Node documents `detached: true` on Windows as giving the child its own
+ * console window. That is the opposite of what short-lived helpers and
+ * supervised engines want: it is what caused Windows Terminal to flash a
+ * fresh command prompt for every native signature check. `windowsHide` is
+ * the dedicated Node/libuv option for suppressing a subprocess console
+ * window, and it leaves the child's lifetime and process-group ownership
+ * unchanged.
  *
- * `windowsHide` is NOT that flag. It maps to `CREATE_NO_WINDOW`, which still
- * allocates a console and only withholds the window.
+ * Keep this win32-only. The option is ignored on POSIX, but omitting it there
+ * makes the platform contract explicit and keeps captured spawn options
+ * deterministic in tests.
+ */
+export function windowsHeadlessSpawnOptions(
+  platform: NodeJS.Platform = process.platform,
+): { windowsHide: true } | Record<string, never> {
+  return platform === 'win32' ? { windowsHide: true } : {};
+}
+
+/**
+ * Windows options for a genuine fire-and-forget child that must outlive its
+ * parent. Detachment is a lifetime decision, not a headless-launch strategy;
+ * pair it with `windowsHide` so Windows does not surface the child's new
+ * console while it starts.
  *
- * `detached` is deliberately scoped to win32. On POSIX the same option means
- * `setsid()`, which changes process-group and signal semantics that callers
- * may depend on; there is no console problem to solve there.
- *
- * ## What this does not fix
- *
- * This helper was introduced in v1.26215.31 believing it fixed the
- * `spawn EPERM` that killed every native-engine launch under the machine
- * service. It did not. That release shipped the flag and the failure
- * continued, on two machines, with the daemon's own log showing the engine,
- * the bundled device-health helper, `nvidia-smi`, `amd-smi` and `rocm-smi`
- * all denied at once. The cause was the service token: `sc sidtype ...
- * restricted` write-restricts it, and libuv creates a named pipe per piped
- * stdio handle before every `CreateProcess`, which that token cannot do. The
- * installer now assigns `unrestricted` (see
- * `packages/app/installer/nsis-hooks.nsh`), and `probeChildProcessSpawn` in
- * the service catches a recurrence at boot.
- *
- * The flag is still correct and still used — a console the service cannot
- * allocate is one Windows should not be asked for — but it is a tidiness
- * measure, not a fix for a permission error. If `spawn EPERM` appears again,
- * do not reach for spawn flags: look at the token.
+ * Most callers should use {@link windowsHeadlessSpawnOptions}. In particular,
+ * awaited probes, package installers, and supervised engines are owned
+ * children and must not be detached.
  */
 export function windowsDetachedSpawnOptions(
   platform: NodeJS.Platform = process.platform,
-): { detached: true } | Record<string, never> {
-  return platform === 'win32' ? { detached: true } : {};
+): { detached: true; windowsHide: true } | Record<string, never> {
+  return platform === 'win32' ? { detached: true, windowsHide: true } : {};
 }
+
+/*
+ * A Windows `spawn EPERM` under the machine service is not fixed by either
+ * helper. The historical failure came from a write-restricted service token:
+ * libuv could not create the named pipes used for piped stdio. The installer
+ * now assigns an unrestricted service SID, and `probeChildProcessSpawn`
+ * detects a recurrence at boot. If that error returns, inspect the token
+ * rather than changing console flags.
+ */

@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as wait } from 'node:timers/promises';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { GezelClient } from './client.js';
 import {
   type RuntimeInfo,
@@ -58,7 +59,12 @@ export interface DiscoverOrSpawnResult {
 export type SpawnLike = (
   command: string,
   args: string[],
-  options: { detached: boolean; stdio: 'ignore' | 'pipe' | 'inherit'; env?: NodeJS.ProcessEnv },
+  options: {
+    detached: boolean;
+    stdio: 'ignore' | 'pipe' | 'inherit';
+    env?: NodeJS.ProcessEnv;
+    windowsHide?: boolean;
+  },
 ) => ChildProcess;
 
 export interface DiscoverOrSpawnOptions {
@@ -198,6 +204,11 @@ export async function discoverOrSpawn(
     env: daemonSpawnEnv(env ?? process.env, {
       shutdownOnStdinEof: !detached && stdio === 'pipe',
     }),
+    // A detached Windows child gets its own console by default. The CLI uses
+    // detachment so a background daemon can outlive it, but that must not
+    // surface a blank terminal window. Attached Electron-owned daemons are
+    // hidden for the same reason.
+    ...windowsHeadlessSpawnOptions(),
   });
   if (detached) child.unref();
 

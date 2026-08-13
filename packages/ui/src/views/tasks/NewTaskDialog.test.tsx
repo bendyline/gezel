@@ -224,7 +224,7 @@ describe('NewTaskDialog', () => {
     expect(api.createTask).not.toHaveBeenCalled();
   });
 
-  it('selecting a craftbook previews its steps and creates a draft from it', async () => {
+  it('selecting a craftbook previews its steps and creates and starts it', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/2',
       projectId: 'pj-alpha',
@@ -252,7 +252,8 @@ describe('NewTaskDialog', () => {
     // No description/steps fields for a book — the recipe supplies them.
     expect(screen.queryByText(/^Description/)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    expect(screen.getByText(/Starts immediately/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -261,11 +262,12 @@ describe('NewTaskDialog', () => {
           title: 'Code Review',
           craftbookId: 'code-review',
           craftbookSourceId: 'bundled',
-          status: 'draft',
+          dispatchEntry: true,
           description: expect.stringContaining('Run the "Code Review" craftbook'),
         }),
       );
     });
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('status');
     expect(onCreated).toHaveBeenCalled();
   });
 
@@ -298,7 +300,7 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
     await user.click(screen.getByTestId('json-editor'));
-    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -334,7 +336,7 @@ describe('NewTaskDialog', () => {
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
     // The copy names the role instead of asking the user to choose.
     expect(await screen.findByText(/Step 1 goes to the developer/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalled();
@@ -361,7 +363,7 @@ describe('NewTaskDialog', () => {
       screen.getAllByTestId('mock-select')[1] as HTMLSelectElement,
       'gz-maya',
     );
-    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -395,7 +397,7 @@ describe('NewTaskDialog', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Blog Post' }));
-    await user.click(screen.getByRole('button', { name: 'Create task' }));
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -421,7 +423,7 @@ describe('NewTaskDialog', () => {
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
 
     expect(screen.getByTestId('toolset-setup')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create & start' })).toBeDisabled();
   });
 
   it('curates scheduling candidates and creates a recurring craftbook host', async () => {

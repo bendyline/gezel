@@ -92,7 +92,9 @@ published installer are intentionally omitted.
 | `which` | `6.0.1` | ISC | all released targets |
 | `yallist` | `5.0.0` | BlueOak-1.0.0 | all released targets |
 
-### Sibling packages (same author)
+---
+
+## Sibling packages (same author)
 
 These are developed in the neighbouring [Squisq](https://github.com/bendyline/squisq)
 repository and linked into the workspace. Their license matches Squisq's
@@ -107,7 +109,9 @@ repository and linked into the workspace. Their license matches Squisq's
 - `@bendyline/squisq-video-react` — MIT (Gezel's editor consumes only its
   cover-image entry; the browser encoder and FFmpeg runtime are not shipped)
 
-### Icon fonts carried inside dependencies
+---
+
+## Icon fonts carried inside dependencies
 
 Two icon sets ship inside the packaged UI without being direct dependencies of
 this workspace: the bundler emits them from packages listed above. They are
@@ -126,7 +130,9 @@ Attribution notice, as CC BY 4.0 requires: Font Awesome Free is by
 by [Microsoft Corporation](https://github.com/microsoft/vscode-codicons).
 Both are used unmodified.
 
-### Reviewed unmodified component redistributions
+---
+
+## Reviewed unmodified component redistributions
 
 Gezel's release policy approves the following exact package versions for
 redistribution as unmodified upstream components inside the larger Gezel app.
@@ -140,7 +146,9 @@ the applicable upstream license and notice material.
 `pnpm audit:licenses` encodes these as narrow reviewed exceptions. It remains
 red for any different package, version, or reported license expression.
 
-### Vendored connector components (Prismatic)
+---
+
+## Vendored connector components (Prismatic)
 
 Gezel's `spectral` connector driver runs Apache-2.0
 [Prismatic](https://prismatic.io/) integration components off-platform to mirror

@@ -49,6 +49,7 @@ const MANIFEST = {
     { name: 'comment', consentScope: 'test-approve' },
     { name: 'escalate', consentScope: 'no-such-scope' },
     { name: 'send', consentScope: 'recipient-allowlist' },
+    { name: 'publish', consentScope: 'social-publish' },
   ],
   availableVersions: ['1.0.0'],
 };
@@ -173,6 +174,90 @@ describe('ConnectorActionManager', () => {
       const r = await m.commit(project, allowed.draftId);
       expect(r.status).toBe('committed');
       expect(lastAction?.action).toBe('send');
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it('social-publish: denies unless the binding enables publishing, and never an empty draft', async () => {
+    const m = mgr();
+    const denied = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'publish',
+      input: { text: 'Hello Bluesky' },
+    });
+    await expect(m.commit(project, denied.draftId)).rejects.toThrow(
+      /publishing is disabled on this connector/,
+    );
+    expect(lastAction).toBeNull();
+
+    project.connectors[0].config = { allowPublish: true };
+    try {
+      const emptyText = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: '   ' },
+      });
+      await expect(m.commit(project, emptyText.draftId)).rejects.toThrow(/no post text/);
+      expect(lastAction).toBeNull();
+
+      const allowed = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: 'Hello Bluesky' },
+      });
+      const r = await m.commit(project, allowed.draftId);
+      expect(r.status).toBe('committed');
+      expect(lastAction).toEqual({ action: 'publish', input: { text: 'Hello Bluesky' } });
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it('social-publish: rejects malformed images shapes before the adapter runs', async () => {
+    const m = mgr();
+    project.connectors[0].config = { allowPublish: true };
+    try {
+      const nonArray = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: 'pics', images: 'shot.png' },
+      });
+      await expect(m.commit(project, nonArray.draftId)).rejects.toThrow(/images must be an array/);
+
+      const tooMany = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: {
+          text: 'pics',
+          images: Array.from({ length: 5 }, (_, i) => ({ path: `p${i}.png` })),
+        },
+      });
+      await expect(m.commit(project, tooMany.draftId)).rejects.toThrow(
+        /attaches 5 images; the maximum is 4/,
+      );
+
+      const noPath = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: 'pics', images: [{ alt: 'no path' }] },
+      });
+      await expect(m.commit(project, noPath.draftId)).rejects.toThrow(
+        /images\[0\] has no string path/,
+      );
+      expect(lastAction).toBeNull();
+
+      const wellFormed = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: 'pics', images: [{ path: 'shots/launch.png', alt: 'Launch chart' }] },
+      });
+      const r = await m.commit(project, wellFormed.draftId);
+      expect(r.status).toBe('committed');
+      expect(lastAction).toEqual({
+        action: 'publish',
+        input: { text: 'pics', images: [{ path: 'shots/launch.png', alt: 'Launch chart' }] },
+      });
     } finally {
       project.connectors[0].config = {};
     }

@@ -96,6 +96,7 @@ import {
   ListGitHubWorkflowRunsResponseSchema,
 } from './api/git.js';
 import { ChannelsConfigSchema } from './channels.js';
+import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
@@ -118,6 +119,7 @@ import {
   HttpsOriginSchema,
   ProjectDetailSchema,
   ProjectGitHubSchema,
+  ProjectManagedWorkspaceWritePolicySchema,
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
@@ -615,7 +617,7 @@ export type ExternalFolders = z.infer<typeof ExternalFoldersSchema>;
  */
 export const SecurityPolicySchema = z.object({
   level: z.enum(['super-lockdown', 'lockdown', 'free', 'custom']),
-  /** Gate model Git/GitHub tools and script-declared shared-document writes. Project workspace writes use `project.allowGezelWrites`; artifacts and builtin document tools remain available. */
+  /** Gate model Git/GitHub tools and script-declared shared-document writes. Managed project-workspace writes use the per-project managed-write policy; artifacts and builtin document tools remain available. */
   allowFileEdits: z.boolean(),
   /** Expose non-local (cloud) chat providers — Copilot, OpenAI, Anthropic, the CLIs. When false, only local engines are offered. */
   allowExternalChat: z.boolean(),
@@ -819,6 +821,19 @@ export const GezelConfigSchema = z.object({
   githubToken: z.string().optional(),
   /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
   githubAuth: GitHubAuthMetaSchema.optional(),
+  /**
+   * Bring-your-own OAuth apps for OAuth-shaped connectors (X, Instagram,
+   * mail, calendar). Gezel is an open-source local-first app, so no OAuth
+   * client is ever shipped — each install registers its own developer app
+   * with the provider and records it here. Keyed by the connector
+   * manifest's `clientIdEnv` name (e.g. `GEZEL_X_CLIENT_ID`), which
+   * naturally shares one entry across types that use the same provider
+   * app (mail-gmail + calendar-google). Only the PUBLIC client id lives
+   * here; the client secret (when the provider requires one — PKCE
+   * public clients don't) goes to the SecretStore. Env vars with the
+   * same names remain the operator/dev override and win when set.
+   */
+  oauthClients: z.record(z.string(), z.object({ clientId: z.string() })).optional(),
   openaiApiKey: z.string().optional(),
   openaiOrganization: z.string().optional(),
   /** Anthropic API key for the `anthropic` provider. SecretStore-routed. */
@@ -2252,8 +2267,8 @@ export const GezelConfigSchema = z.object({
    *     this to false skips the MCP wiring and runs Claude with only
    *     its built-in tools.
    *   - `defaultPermissionMode` (default `acceptEdits`): per-install
-   *     fallback when a gezel hasn't set `claudePermissionMode` on its
-   *     frontmatter. Forwarded as `--permission-mode <value>`.
+   *     fallback when neither the project nor gezel sets
+   *     `claudePermissionMode`. Forwarded as `--permission-mode <value>`.
    *   - `extraModels`: extend the hardcoded model list (e.g. to pin a
    *     newly-released id ahead of an app update).
    */
@@ -2261,9 +2276,7 @@ export const GezelConfigSchema = z.object({
     .object({
       binaryPath: z.string().optional(),
       manageRuntimeFiles: z.boolean().optional(),
-      defaultPermissionMode: z
-        .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
-        .optional(),
+      defaultPermissionMode: ClaudePermissionModeSchema.optional(),
       extraModels: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
       /**
        * Number of long-lived `claude` subprocesses to keep warm at once.
@@ -2730,11 +2743,8 @@ export const UpdateGezelSettingsRequestSchema = z.object({
   font: z.string().nullable().optional(),
   /** `null` inherits the install-level `GezelConfig.sandboxCopilot`. */
   sandboxCopilot: z.boolean().nullable().optional(),
-  /** `null` inherits the install-level `config.anthropicCli.defaultPermissionMode`. */
-  claudePermissionMode: z
-    .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
-    .nullable()
-    .optional(),
+  /** `null` clears the gezel override so project/install Claude defaults apply. */
+  claudePermissionMode: ClaudePermissionModeSchema.nullable().optional(),
   /** `null` inherits the project/install Codex execution posture. */
   codexPermissionMode: CodexPermissionModeCompatSchema.nullable().optional(),
   /**
@@ -3699,12 +3709,18 @@ export const UpdateProjectRequestSchema = z.object({
       }),
     ])
     .optional(),
-  /** Opt-in to allow gezels to modify files in this project's workspace.
-   *  Only consulted when `workingDir` is set (external repo); internal
-   *  workspaces are always writable. */
+  /** Policy for mutations through Gezel-managed tools and automation. */
+  managedWorkspaceWritePolicy: ProjectManagedWorkspaceWritePolicySchema.optional(),
+  /**
+   * Compatibility input for clients predating `managedWorkspaceWritePolicy`.
+   * The service translates it to `allow` / `deny` and stops persisting it.
+   * @deprecated Use `managedWorkspaceWritePolicy`.
+   */
   allowGezelWrites: z.boolean().optional(),
   /** Override the Codex execution posture for every Codex session in this project. */
   codexPermissionMode: CodexPermissionModeSchema.optional(),
+  /** Override the Claude CLI permission posture for every Claude session in this project. */
+  claudePermissionMode: ClaudePermissionModeSchema.optional(),
   /**
    * Per-project override of the ambient Meester-to-voorman progress-check
    * cadence. The supplied object replaces the stored override, so callers

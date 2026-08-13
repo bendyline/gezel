@@ -57,7 +57,9 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   // Mailbox OAuth: `mailOAuthListen` stands up a loopback redirect listener and
   // returns its URI; `mailOAuthAwait` opens the consent page and resolves the
   // captured authorization code. Used by the New Project dialog's email kind.
-  mailOAuthListen: () => ipcRenderer.invoke('mail:oauth-listen'),
+  // `opts.port` pins the listener to a fixed port for providers that match
+  // redirect URIs exactly (X, Meta); omitted, the OS picks an ephemeral one.
+  mailOAuthListen: (opts) => ipcRenderer.invoke('mail:oauth-listen', opts ?? null),
   mailOAuthAwait: (requestId, authUrl) =>
     ipcRenderer.invoke('mail:oauth-await', { requestId, authUrl }),
   autostart: {

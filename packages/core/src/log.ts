@@ -95,6 +95,51 @@ function format(level: Exclude<LogLevel, 'silent'>, name: string, message: strin
   return `${new Date().toISOString()} ${LEVEL_LABEL[level]} [${name}] ${message}`;
 }
 
+/**
+ * A launcher is allowed to close a pipe before Gezel does. In that case the
+ * next write can either throw synchronously (notably EBADF on Windows) or emit
+ * an asynchronous `error` event (usually EPIPE on Unix). Neither is an
+ * application failure: there is simply nowhere left to display the log line.
+ */
+export function isClosedProcessOutputError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+  return code === 'EPIPE' || code === 'EBADF';
+}
+
+type ProcessOutputStream = {
+  write(chunk: string | Uint8Array): boolean;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+};
+
+const guardedProcessOutputStreams = new WeakSet<object>();
+
+/**
+ * Install the asynchronous half of broken-pipe protection once per stream.
+ * Unexpected stream errors still throw: only the two errors that mean the
+ * consumer deliberately disappeared are downgraded to a dropped log line.
+ */
+export function guardProcessOutputStream(stream: ProcessOutputStream): void {
+  if (guardedProcessOutputStreams.has(stream)) return;
+  guardedProcessOutputStreams.add(stream);
+  stream.on('error', (error) => {
+    if (!isClosedProcessOutputError(error)) throw error;
+  });
+}
+
+/** Write process output without turning a closed stdout/stderr pipe into a crash. */
+export function writeProcessOutput(
+  stream: ProcessOutputStream,
+  chunk: string | Uint8Array,
+): boolean {
+  guardProcessOutputStream(stream);
+  try {
+    return stream.write(chunk);
+  } catch (error) {
+    if (isClosedProcessOutputError(error)) return false;
+    throw error;
+  }
+}
+
 function emit(
   level: Exclude<LogLevel, 'silent'>,
   name: string,
@@ -105,13 +150,13 @@ function emit(
   const line = format(level, name, message);
   const stream = level === 'warn' || level === 'error' ? process.stderr : process.stdout;
   if (rest.length === 0) {
-    stream.write(`${line}\n`);
+    writeProcessOutput(stream, `${line}\n`);
     return;
   }
   // Defer formatting of `rest` to console.* so Node's util.inspect handles
   // objects/errors uniformly. Write the prefix line first to keep ordering
   // tight when the stream is line-buffered.
-  stream.write(`${line}\n`);
+  writeProcessOutput(stream, `${line}\n`);
   const sink = level === 'warn' || level === 'error' ? console.error : console.log;
   sink(...rest);
 }

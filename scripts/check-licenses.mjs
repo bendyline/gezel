@@ -60,6 +60,7 @@ const ALLOWED = new Set([
   '(MIT OR Apache-2.0)',
   '(MIT OR CC0-1.0)',
   '(MIT OR WTFPL)',
+  'Apache-2.0 OR MIT',
   'MIT OR Apache-2.0',
   // sqlite-vec publishes this non-SPDX spelling; both choices are permissive.
   'MIT OR Apache',

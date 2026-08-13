@@ -3,6 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ScriptCapability,
   type ScriptMeta,
   type ScriptRun,
@@ -39,7 +40,7 @@ import {
 } from './dispatcher.js';
 import { validateScriptInput } from './input-validator.js';
 import { parseScriptMeta } from './meta.js';
-import { SDK_PACKAGE_NAME, resolveSdkDir } from './sdk.js';
+import { SDK_PACKAGE_NAME, resolveSdkDir, shouldVendorSdkPath } from './sdk.js';
 import { stdlibScriptFile } from './stdlib-source.js';
 
 const log = createLogger('scripts');
@@ -298,8 +299,8 @@ export class ScriptRunner {
       if (!writeGate.ok) {
         stripCapability(
           'workspace.write',
-          writeGate.reason === 'missing-flag-external'
-            ? 'gezel writes to this project\'s external working directory require "Allow gezels to modify the workspace directory" in Project → Settings'
+          writeGate.reason === 'external-consent-required'
+            ? `gezel writes to this project's external working directory require "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings`
             : 'gezel workspace writes are turned off for this project (Project → Settings)',
         );
       }
@@ -552,7 +553,10 @@ export class ScriptRunner {
     const sdkDir = await resolveSdkDir();
     const target = join(scratch, 'node_modules', SDK_PACKAGE_NAME);
     await mkdir(dirname(target), { recursive: true });
-    await cp(sdkDir, target, { recursive: true, filter: (src) => !src.includes('node_modules') });
+    await cp(sdkDir, target, {
+      recursive: true,
+      filter: (src) => shouldVendorSdkPath(sdkDir, src),
+    });
   }
 
   private async runSandbox(opts: {

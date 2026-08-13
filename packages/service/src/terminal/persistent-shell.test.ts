@@ -1,11 +1,32 @@
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
-import { PersistentShell } from './persistent-shell.js';
+import { describe, expect, it, vi } from 'vitest';
+import { NodePtyUnavailableError, PersistentShell, loadNodePty } from './persistent-shell.js';
 
 const bashAvailable = process.platform !== 'win32' && existsSync('/bin/bash');
 const itPosix = bashAvailable ? it : it.skip;
 const itWindows = process.platform === 'win32' ? it : it.skip;
+
+describe('optional node-pty runtime', () => {
+  it('wraps an absent or unloadable native addon in a stable terminal error', async () => {
+    const cause = new Error('Cannot find package node-pty');
+    const importer = vi.fn(async () => Promise.reject(cause));
+
+    await expect(loadNodePty(importer)).rejects.toMatchObject({
+      name: 'NodePtyUnavailableError',
+      code: 'GEZEL_NODE_PTY_UNAVAILABLE',
+      cause,
+    });
+    await expect(loadNodePty(importer)).rejects.toThrow(/optional node-pty runtime/i);
+  });
+
+  it('does not double-wrap an already normalized unavailable error', async () => {
+    const unavailable = new NodePtyUnavailableError(new Error('native ABI mismatch'));
+    const importer = vi.fn(async () => Promise.reject(unavailable));
+
+    await expect(loadNodePty(importer)).rejects.toBe(unavailable);
+  });
+});
 
 describe('PersistentShell (POSIX)', () => {
   itPosix('echoes simple command output and captures cwd', async () => {

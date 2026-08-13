@@ -58,10 +58,12 @@ import { modelFitnessRoutes } from './routes/model-fitness.js';
 import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
 import { nightShiftRoutes } from './routes/night-shift.js';
+import { oauthClientRoutes } from './routes/oauth-clients.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
 import { ollamaRoutes } from './routes/ollama.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
+import { pageReadRoutes } from './routes/page-read.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
 import { previewLogRoutes } from './routes/preview-log.js';
@@ -240,7 +242,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           "frame-src 'self'",
           "frame-ancestors 'none'",
           "form-action 'self'",
-          "webrtc 'block'",
+          // Chromium does not yet implement the draft CSP `webrtc` directive.
+          // An unknown directive only produces console noise; it is not a guard.
         ].join('; '),
       );
       c.res.headers.set('x-frame-options', 'DENY');
@@ -522,6 +525,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/gezels', growthRoutes(ctx));
   app.route('/api/config', configRoutes(ctx));
   app.route('/api/credentials', credentialRoutes(ctx));
+  // Bring-your-own OAuth apps (per-provider client id + keychain secret).
+  app.route('/api/oauth-clients', oauthClientRoutes(ctx));
   app.route('/api/memory', memoryRoutes(ctx));
   app.route(
     '/api/projects',
@@ -532,6 +537,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Interactive type pages: the first-party bridge relaying page tool
   // invokes at /api/projects/:id/page-invoke (see routes/page-invoke.ts).
   app.route('/api/projects', pageInvokeRoutes(ctx));
+  // The read half of the same bridge at /api/projects/:id/page-read.
+  app.route('/api/projects', pageReadRoutes(ctx));
   app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*

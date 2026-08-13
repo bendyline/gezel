@@ -183,6 +183,7 @@ const VOORMAN_STRIPPED_MEESTER_TOOLS: ReadonlySet<string> = new Set([
   'list_gilde',
   'list_projects',
   'start_project',
+  'start_project_from_type',
   'start_job',
   'fetch_repo',
   'fetch_diff',
@@ -635,7 +636,7 @@ export function computeToolAllowlist(opts: {
   securityPolicy?: ResolvedSecurityPolicy;
   /**
    * Effective per-project workspace writability (see
-   * `projectWorkspaceWritable` in core). Explicit `false` strips the
+   * `projectManagedWorkspaceWritable` in core). Explicit `false` strips the
    * `workspace-fs-write` tool group — the per-project replacement for
    * the old global `allowFileEdits` ceiling, so an internal-workspace
    * project keeps its write tools under super-lockdown while an
@@ -1233,8 +1234,12 @@ function applyGitToolGates(
  * Note `wikipedia_search` lands here too: under a no-services posture even
  * the zero-key Wikipedia lookup is egress (it reveals what's being
  * researched), so super-lockdown strips it alongside the keyed backends.
+ *
+ * Exported for `resolveSessionToolSurface`: the contextual-builtin grant
+ * runs after this ceiling, so it consults the same set rather than
+ * re-adding a stripped capability.
  */
-const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
+export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'web_search',
   'wikipedia_search',
   'fetch_url',
@@ -1244,6 +1249,10 @@ const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_email',
   'queue_email',
   'send_email',
+  // Social post draft/publish are the same class of outbound agency.
+  'draft_post',
+  'queue_post',
+  'publish_post',
 ]);
 
 /**
@@ -1254,7 +1263,7 @@ const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
  * onto the surface. It only ever removes tools.
  *
  * `workspace-fs-write` is stripped when the PROJECT is not writable for
- * gezels (`projectWorkspaceWritable === false`) — the global policy's
+ * gezels (`projectManagedWorkspaceWritable === false`) — the global policy's
  * `allowFileEdits` no longer factors in, so internal-workspace projects
  * keep their write tools under super-lockdown. `code-execution` is
  * stripped by group so the set tracks the catalog; `artifacts` is

@@ -1,10 +1,12 @@
 import type { ProjectDetail } from '@bendyline/gezel';
-import { type CSSProperties, useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
 import { connectOAuth } from './connector-link.js';
+import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
 type ConnStatus = Awaited<ReturnType<typeof api.listConnectors>>;
 
@@ -26,7 +28,14 @@ interface ConnManifest {
     >;
     required?: string[];
   };
-  secretShape?: { kind?: string; label?: string; required?: boolean };
+  secretShape?: {
+    kind?: string;
+    label?: string;
+    required?: boolean;
+    clientIdEnv?: string;
+    clientSecretEnv?: string;
+    clientSetup?: unknown;
+  };
   completeness?: string;
   tags?: string[];
 }
@@ -103,6 +112,14 @@ export function ProjectConnectionsTab({
   const [imapHost, setImapHost] = useState('');
   const [imapPort, setImapPort] = useState('');
   const [imapSecure, setImapSecure] = useState(true);
+  // Bring-your-own OAuth apps registered on this install, keyed by the
+  // manifest's `clientIdEnv` name. The daemon may additionally hold env-var
+  // overrides the UI can't see, so an absent key never blocks Connect —
+  // it only drives the proactive "use your own app" affordance.
+  const [oauthClients, setOauthClients] = useState<Record<string, RegisteredOAuthClient>>({});
+  // Counts failed "OAuth is not configured" connects; each bump pops the
+  // setup panel open as the error-driven fallback.
+  const [oauthSetupNudge, setOauthSetupNudge] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -167,6 +184,16 @@ export function ProjectConnectionsTab({
     setImapHost('');
     setImapPort('');
     setImapSecure(true);
+    setOauthSetupNudge(0);
+  }, []);
+
+  const refreshOAuthClients = useCallback(async () => {
+    const res = await api.listOAuthClients();
+    setOauthClients(
+      Object.fromEntries(
+        (res.clients ?? []).map((c) => [c.key, { clientId: c.clientId, hasSecret: c.hasSecret }]),
+      ),
+    );
   }, []);
 
   const openAdd = useCallback(async () => {
@@ -176,6 +203,9 @@ export function ProjectConnectionsTab({
     setSelected(null);
     setError('');
     setNotice('');
+    // Best-effort: an older daemon without the route just means no proactive
+    // affordance — the error-driven fallback still works.
+    void refreshOAuthClients().catch(() => {});
     try {
       const res = await api.listConnectorTypes();
       setTypes(
@@ -190,7 +220,7 @@ export function ProjectConnectionsTab({
     } finally {
       setLoadingTypes(false);
     }
-  }, []);
+  }, [refreshOAuthClients]);
 
   const handleSync = useCallback(
     async (bindingId: string) => {
@@ -257,6 +287,14 @@ export function ProjectConnectionsTab({
     return out;
   }, [selected, config]);
 
+  const oauthRequirement = useMemo(
+    () =>
+      selected?.secretShape?.kind === 'oauth2'
+        ? parseOAuthAppRequirement(selected.name, selected.secretShape)
+        : null,
+    [selected],
+  );
+
   const handleBind = useCallback(async () => {
     if (!selected) return;
     setError('');
@@ -284,7 +322,15 @@ export function ProjectConnectionsTab({
     setBusy('add');
     try {
       if (kind === 'oauth2') {
-        await connectOAuth(project.id, selected.id, built, displayName.trim() || undefined);
+        await connectOAuth(
+          project.id,
+          selected.id,
+          built,
+          displayName.trim() || undefined,
+          oauthRequirement?.redirectPort !== undefined
+            ? { redirectPort: oauthRequirement.redirectPort }
+            : undefined,
+        );
       } else {
         let cred: unknown;
         if (kind === 'imap') {
@@ -315,7 +361,12 @@ export function ProjectConnectionsTab({
         /* best-effort project refetch */
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      // The service ships no OAuth client of its own; this rejection means
+      // the install hasn't registered an app yet — open the setup panel
+      // inline rather than leaving the user with a bare error line.
+      if (isOAuthNotConfiguredError(message)) setOauthSetupNudge((n) => n + 1);
+      setError(message);
     } finally {
       setBusy(null);
     }
@@ -331,7 +382,43 @@ export function ProjectConnectionsTab({
     closeAdd,
     refresh,
     onProjectChange,
+    oauthRequirement,
   ]);
+
+  /**
+   * Save the user's OAuth app (client ID → config, secret → SecretStore),
+   * then proceed straight into the connect flow. Throws on save failure so
+   * the panel keeps its form open.
+   */
+  const handleOAuthAppSave = useCallback(
+    async (body: { clientId: string; clientSecret?: string }) => {
+      if (!oauthRequirement) return;
+      setError('');
+      setBusy('oauth-app');
+      try {
+        await api.putOAuthClient(oauthRequirement.clientKey, body);
+        await refreshOAuthClients().catch(() => {
+          setOauthClients((current) => ({
+            ...current,
+            [oauthRequirement.clientKey]: {
+              clientId: body.clientId,
+              hasSecret:
+                Boolean(body.clientSecret) ||
+                (current[oauthRequirement.clientKey]?.hasSecret ?? false),
+            },
+          }));
+        });
+        setOauthSetupNudge(0);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        setBusy(null);
+      }
+      await handleBind();
+    },
+    [oauthRequirement, refreshOAuthClients, handleBind],
+  );
 
   const bindings = status?.bindings ?? [];
   const kind = selected?.secretShape?.kind;
@@ -345,6 +432,7 @@ export function ProjectConnectionsTab({
     setImapPort('');
     setImapSecure(true);
     setError('');
+    setOauthSetupNudge(0);
   };
 
   return (
@@ -613,6 +701,17 @@ export function ProjectConnectionsTab({
                   </label>
                 )}
               </div>
+
+              {oauthRequirement && (
+                <OAuthAppSetup
+                  key={selected.id}
+                  requirement={oauthRequirement}
+                  registered={oauthClients[oauthRequirement.clientKey] ?? null}
+                  forceOpenNonce={oauthSetupNudge}
+                  busy={busy === 'oauth-app' || busy === 'add'}
+                  onSave={handleOAuthAppSave}
+                />
+              )}
             </div>
           )}
 

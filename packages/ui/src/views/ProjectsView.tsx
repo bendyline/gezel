@@ -1,6 +1,10 @@
-import { EditorShell } from '@bendyline/squisq-editor-react';
+import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import type {
+  BoekwachterIssue,
+  BoekwachterIssueDismissalReason,
+  BoekwachterIssueStatus,
+  ClaudePermissionMode,
   CodexPermissionMode,
   FileReviewResponse,
   GezelSummary,
@@ -12,9 +16,11 @@ import type {
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import {
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   getProjectType,
   listProjectTypes,
   normalizeCodexPermissionMode,
+  projectManagedWorkspaceWritable,
   resolveProjectTypeId,
 } from '@bendyline/gezel';
 import type {
@@ -65,13 +71,17 @@ import {
   indexTone,
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
+import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { navigateToTab } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import {
   type AiProviderEditabilityConfig,
-  projectEditableViaAiProvider,
+  projectUsesClaude,
   projectUsesCodex,
+  resolveProjectClaudePermissionMode,
+  resolveProjectWorkspaceAccess,
 } from '../components/project-ai-editability.js';
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
@@ -181,6 +191,12 @@ function indexedIssueCountForEntry(
 }
 
 type FileTab = 'workspace' | 'artifacts';
+
+interface WorkspaceSourceRevealRequest {
+  path: string;
+  line: number;
+  requestId: number;
+}
 interface OutsideInOpenFile {
   layout: OutsideInLayout;
   sourcePath: string;
@@ -546,6 +562,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [workspaceReviewLoading, setWorkspaceReviewLoading] = useState(false);
   const [workspaceReviewError, setWorkspaceReviewError] = useState<string | null>(null);
   const [workspaceIndexPaneOpen, setWorkspaceIndexPaneOpen] = useState(false);
+  const [workspaceIssueFixRequest, setWorkspaceIssueFixRequest] = useState<{
+    path: string;
+    issue: BoekwachterIssue;
+  } | null>(null);
+  const [workspaceSourceReveal, setWorkspaceSourceReveal] =
+    useState<WorkspaceSourceRevealRequest | null>(null);
   const [newFileName, setNewFileName] = useState('');
   // Output-pane visibility override. `null` = follow the auto default
   // (visible when the workspace has a previewable index.html); an
@@ -718,18 +740,29 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     };
   }, [selectedProjectId]);
 
-  const aiAccess = useMemo(() => {
-    if (!selected) return { editableViaAiProvider: false, codexInUse: false };
+  const workspaceAccess = useMemo(() => {
+    if (!selected) {
+      return {
+        managedWritable: true,
+        nativeWritable: false,
+        effectiveWritable: true,
+        codexInUse: false,
+        claudeInUse: false,
+        claudeMode: 'acceptEdits' as const,
+      };
+    }
     const projectLocalGezels =
       projectLocalGezelRoster?.projectId === selected.id ? projectLocalGezelRoster.gezels : [];
     return {
-      editableViaAiProvider: projectEditableViaAiProvider(
+      ...resolveProjectWorkspaceAccess(selected, gezels, projectLocalGezels, aiProviderConfig),
+      codexInUse: projectUsesCodex(selected, gezels, projectLocalGezels, aiProviderConfig),
+      claudeInUse: projectUsesClaude(selected, gezels, projectLocalGezels, aiProviderConfig),
+      claudeMode: resolveProjectClaudePermissionMode(
         selected,
         gezels,
         projectLocalGezels,
         aiProviderConfig,
       ),
-      codexInUse: projectUsesCodex(selected, gezels, projectLocalGezels, aiProviderConfig),
     };
   }, [selected, gezels, projectLocalGezelRoster, aiProviderConfig]);
 
@@ -887,6 +920,34 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       cancelled = true;
     };
   }, [selectedProjectId, workspaceReviewPath, reviewedFileCount]);
+
+  const refreshWorkspaceIssueSurfaces = useCallback(async () => {
+    if (!selectedProjectId) return;
+    const [issuesResult, reviewResult] = await Promise.all([
+      api.toolListFileIssues(selectedProjectId, { maxResults: 1000 }),
+      workspaceReviewPath
+        ? api.toolFileReview(selectedProjectId, { path: workspaceReviewPath })
+        : Promise.resolve(null),
+    ]);
+    setWorkspaceIssues(issuesResult);
+    if (reviewResult) setWorkspaceReview(reviewResult);
+  }, [selectedProjectId, workspaceReviewPath]);
+
+  const updateWorkspaceIssue = useCallback(
+    async (
+      issue: BoekwachterIssue,
+      patch: {
+        status?: BoekwachterIssueStatus;
+        seen?: boolean;
+        dismissalReason?: BoekwachterIssueDismissalReason;
+      },
+    ) => {
+      if (!selectedProjectId) return;
+      await api.updateBoekwachterIssue(selectedProjectId, { ref: issue.ref, ...patch });
+      await refreshWorkspaceIssueSurfaces();
+    },
+    [refreshWorkspaceIssueSurfaces, selectedProjectId],
+  );
 
   useEffect(() => {
     if (tab !== 'packages' || !selected) {
@@ -1196,14 +1257,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected, refreshProjectFiles],
   );
 
-  const saveAllowGezelWrites = useCallback(
+  const saveManagedWorkspaceWrites = useCallback(
     async (next: boolean) => {
       if (!selected) return;
       try {
-        const updated = await api.updateProject(selected.id, { allowGezelWrites: next });
+        const updated = await api.updateProject(selected.id, {
+          managedWorkspaceWritePolicy: next ? 'allow' : 'deny',
+        });
         setSelected(updated);
       } catch (err) {
-        console.error('updateProject(allowGezelWrites) failed:', err);
+        console.error('updateProject(managedWorkspaceWritePolicy) failed:', err);
       }
     },
     [selected],
@@ -1217,6 +1280,19 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setSelected(updated);
       } catch (err) {
         console.error('updateProject(codexPermissionMode) failed:', err);
+      }
+    },
+    [selected],
+  );
+
+  const saveClaudePermissionMode = useCallback(
+    async (next: ClaudePermissionMode) => {
+      if (!selected) return;
+      try {
+        const updated = await api.updateProject(selected.id, { claudePermissionMode: next });
+        setSelected(updated);
+      } catch (err) {
+        console.error('updateProject(claudePermissionMode) failed:', err);
       }
     },
     [selected],
@@ -1279,7 +1355,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   const canWriteProjectFiles = useCallback(
     (source: FileTab): boolean =>
-      source === 'artifacts' || !selected?.workingDir || selected.allowGezelWrites === true,
+      source === 'artifacts' || projectManagedWorkspaceWritable(selected),
     [selected],
   );
 
@@ -1599,12 +1675,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         workspaceIssues,
       )
     : 0;
+  const activeWorkspaceSourceReveal =
+    workspaceSourceReveal?.path === workspaceReviewPath ? workspaceSourceReveal : null;
   const workspaceIndexToggle: ReactNode = workspaceReviewPath ? (
-    <WorkspaceIndexToggle
-      open={workspaceIndexPaneOpen}
-      issueCount={selectedWorkspaceIssueCount}
-      onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
-    />
+    <>
+      <WorkspaceSourceLineReveal request={activeWorkspaceSourceReveal} />
+      <WorkspaceIndexToggle
+        open={workspaceIndexPaneOpen}
+        issueCount={selectedWorkspaceIssueCount}
+        onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
+      />
+    </>
   ) : null;
 
   // Output pane: the set of previewable workspace HTML files, whether a
@@ -1879,6 +1960,31 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           mode={createMode ?? 'crew'}
           onClose={() => setCreateMode(null)}
           onCreated={handleProjectCreated}
+        />
+      )}
+      {selected && workspaceIssueFixRequest && (
+        <WorkspaceIssueFixDialog
+          key={`${workspaceIssueFixRequest.path}:${workspaceIssueFixRequest.issue.category}:${workspaceIssueFixRequest.issue.message}`}
+          path={workspaceIssueFixRequest.path}
+          issue={workspaceIssueFixRequest.issue}
+          gezels={gezels}
+          assignedGezelIds={
+            new Set([
+              ...(selected.gezelIds ?? []),
+              ...(selected.voormanGezelId ? [selected.voormanGezelId] : []),
+            ])
+          }
+          onCancel={() => setWorkspaceIssueFixRequest(null)}
+          onConfirm={async (gezelId, message) => {
+            await api.fixBoekwachterIssue(selected.id, {
+              ref: workspaceIssueFixRequest.issue.ref,
+              gezelId,
+              message,
+            });
+            await refreshWorkspaceIssueSurfaces();
+            setWorkspaceIssueFixRequest(null);
+            setTab('chat');
+          }}
         />
       )}
       {!detailOnly && (
@@ -2224,11 +2330,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </label>
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Allow gezellen to modify the workspace directory
+                            {MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
                             <div className="new-row" style={{ alignItems: 'center' }}>
                               <input
                                 type="checkbox"
-                                checked={selected.allowGezelWrites ?? !selected.workingDir}
+                                checked={workspaceAccess.managedWritable}
                                 onChange={(e) => {
                                   const next = e.target.checked;
                                   // Flipping ON for an external workingDir prompts a
@@ -2238,14 +2344,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   if (next && selected.workingDir) {
                                     setShowAllowWritesConfirm(true);
                                   } else {
-                                    void saveAllowGezelWrites(next);
+                                    void saveManagedWorkspaceWrites(next);
                                   }
                                 }}
                               />
                               <span className="muted small">
                                 {selected.workingDir
-                                  ? 'Off by default for external dirs. Turn on only if you trust gezellen to edit files at this path.'
-                                  : 'Internal workspace — on by default. Turn off to make this project read-only for gezellen.'}
+                                  ? 'Off by default for external folders. Turn on only if you trust the crew’s tools and automations to edit this path.'
+                                  : 'Internal workspace — on by default. Provider-native access, when used, follows its own project posture.'}
                               </span>
                             </div>
                           </label>
@@ -2576,7 +2682,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     confirmLabel="Enable"
                     danger
                     onConfirm={async () => {
-                      await saveAllowGezelWrites(true);
+                      await saveManagedWorkspaceWrites(true);
                       setShowAllowWritesConfirm(false);
                     }}
                     onCancel={() => setShowAllowWritesConfirm(false)}
@@ -2898,6 +3004,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               onSave={saveArtifact}
                               onComplainAboutPreviewError={complainAboutPreviewError}
                               toolbarIndexToggle={workspaceIndexToggle}
+                              sourceReveal={activeWorkspaceSourceReveal}
                             />
                           ) : isMarkdown(openFile.path) && openFile.source === 'artifacts' ? (
                             <ProjectMarkdownArtifactEditor
@@ -2954,6 +3061,28 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           loading={workspaceReviewLoading}
                           error={workspaceReviewError}
                           onClose={() => setWorkspaceIndexPaneOpen(false)}
+                          onSelectLine={(line) => {
+                            if (!workspaceReviewPath) return;
+                            setWorkspaceSourceReveal((current) => ({
+                              path: workspaceReviewPath,
+                              line,
+                              requestId: (current?.requestId ?? 0) + 1,
+                            }));
+                          }}
+                          onFixIssue={
+                            workspaceAccess.effectiveWritable
+                              ? (issue) => {
+                                  if (workspaceReviewPath) {
+                                    setWorkspaceIssueFixRequest({
+                                      path: workspaceReviewPath,
+                                      issue,
+                                    });
+                                  }
+                                }
+                              : undefined
+                          }
+                          onUpdateIssue={updateWorkspaceIssue}
+                          onOpenTask={(taskRef) => navigateToTab({ kind: 'task', ref: taskRef })}
                         />
                       )}
                     </div>
@@ -2988,21 +3117,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             <ProjectGitStatusBar
               projectId={selected.id}
               compact={effectiveCompact}
-              allowGezelWrites={selected.allowGezelWrites}
-              workingDir={selected.workingDir ?? null}
-              onAllowWritesChange={(next) => {
+              managedWorkspaceWritable={workspaceAccess.managedWritable}
+              onManagedWorkspaceWritesChange={(next) => {
                 // Enabling writes on a user-supplied external dir prompts the
                 // same confirmation the Settings checkbox uses; everything
                 // else flips directly.
                 if (next && selected.workingDir) {
                   setShowAllowWritesConfirm(true);
                 } else {
-                  void saveAllowGezelWrites(next);
+                  void saveManagedWorkspaceWrites(next);
                 }
               }}
-              editableViaAiProvider={aiAccess.editableViaAiProvider}
-              codexMode={aiAccess.codexInUse ? effectiveCodexMode : undefined}
-              onCodexModeChange={aiAccess.codexInUse ? saveCodexPermissionMode : undefined}
+              codexMode={workspaceAccess.codexInUse ? effectiveCodexMode : undefined}
+              onCodexModeChange={workspaceAccess.codexInUse ? saveCodexPermissionMode : undefined}
+              claudeMode={workspaceAccess.claudeInUse ? workspaceAccess.claudeMode : undefined}
+              onClaudeModeChange={
+                workspaceAccess.claudeInUse ? saveClaudePermissionMode : undefined
+              }
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
               status={selected.status ?? 'active'}
               statusLocked={selected.archived === true}
@@ -3020,17 +3151,36 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 }
 
-/**
- * File viewer for `.html` files in the workspace or artifacts tree.
- * Two tabs — Preview renders the page through the service's sandboxed
- * capability-protected static preview route for artifacts or workspace,
- * so relative `<link>` / `<script>` / `<img>` references
- * resolve against sibling files; Source drops back to the normal
- * EditorShell for viewing / editing the raw markup. A Refresh button
- * in the Preview tab bumps the iframe key so the reload picks up any
- * sibling-file edits the user or a gezel has made since.
- */
+/** Switch to source, select an indexed issue's anchored line, and center it. */
+function WorkspaceSourceLineReveal({
+  request,
+}: {
+  request: WorkspaceSourceRevealRequest | null;
+}) {
+  const { activeView, setActiveView, monacoEditor } = useEditorContext();
+  useEffect(() => {
+    if (!request) return;
+    if (activeView !== 'raw') {
+      setActiveView('raw');
+      return;
+    }
+    if (!monacoEditor) return;
+    const model = monacoEditor.getModel();
+    if (!model) return;
+    const lineNumber = Math.max(1, Math.min(request.line, model.getLineCount()));
+    monacoEditor.setSelection({
+      startLineNumber: lineNumber,
+      startColumn: 1,
+      endLineNumber: lineNumber,
+      endColumn: model.getLineMaxColumn(lineNumber),
+    });
+    monacoEditor.revealLineInCenter(lineNumber);
+    monacoEditor.focus();
+  }, [activeView, monacoEditor, request, setActiveView]);
+  return null;
+}
 
+/** Editor for a rendered document's editable Markdown companion. */
 function ProjectOutsideInEditor({
   projectId,
   file,
@@ -3326,6 +3476,10 @@ function AuthedMediaPreview({
   return <video src={blobUrl} controls style={{ maxWidth: '100%', maxHeight: '100%' }} />;
 }
 
+/**
+ * Preview/source viewer for `.html` files. An indexed line selection moves
+ * the viewer to Source before the shared editor bridge reveals the anchor.
+ */
 function HtmlFileViewer({
   projectId,
   file,
@@ -3335,6 +3489,7 @@ function HtmlFileViewer({
   onSave,
   onComplainAboutPreviewError,
   toolbarIndexToggle,
+  sourceReveal,
 }: {
   projectId: string;
   file: { path: string; content: string; source: FileTab };
@@ -3343,6 +3498,7 @@ function HtmlFileViewer({
   onEditorChange: (source: string) => void;
   onSave: () => void | Promise<void>;
   toolbarIndexToggle?: ReactNode;
+  sourceReveal?: WorkspaceSourceRevealRequest | null;
   /**
    * Optional "Complain about this" handler — rendered per-entry on
    * the preview-error panel. The parent seeds a project-chat
@@ -3360,6 +3516,10 @@ function HtmlFileViewer({
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [complainBusyAt, setComplainBusyAt] = useState<number | undefined>(undefined);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sourceReveal?.path === file.path) setMode('source');
+  }, [file.path, sourceReveal]);
 
   const complain = useCallback(
     async (entry: HtmlPreviewLogEntry) => {

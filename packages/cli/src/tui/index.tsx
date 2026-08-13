@@ -7,6 +7,7 @@ export interface LaunchTuiOpts {
   client: GezelClient;
   projectId: string;
   projectName: string;
+  gezelId: string;
 }
 
 /**
@@ -21,6 +22,7 @@ export async function launchTui(opts: LaunchTuiOpts): Promise<void> {
         client={opts.client}
         initialProjectId={opts.projectId}
         initialProjectName={opts.projectName}
+        initialGezelId={opts.gezelId}
       />
     </BootstrapGate>,
     // We own Ctrl+C (interrupt-then-exit); don't let ink exit on the first press.

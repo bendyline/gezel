@@ -513,11 +513,12 @@ describe('buildEnrichDeps enricher override', () => {
     await deps.summarize('p');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
-      expect.any(Number),
+      120_000,
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
         actorLabel: 'Boekwachter',
+        tuningProfileId: 'instruct',
       }),
     );
   });
@@ -598,12 +599,13 @@ describe('buildEnrichDeps enricher override', () => {
     await deps.review!('p');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
-      60_000,
+      180_000,
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
         actorLabel: 'Boekwachter',
         jobLabel: 'index review',
+        tuningProfileId: 'instruct',
       }),
     );
   });
@@ -645,5 +647,37 @@ describe('buildEnrichDeps enricher override', () => {
     } as unknown as Store;
     const deps = await buildEnrichDeps(store, chat, { nightShift: true });
     expect(deps.provenance?.provider).toBe('openai');
+  });
+
+  it('attributes a cloud-policy fallback to the local provider and model that answered', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const oneShotCompletion = vi.fn(
+      async (_prompt: string, _timeoutMs: number, completionOpts: { providerName: string }) => {
+        if (completionOpts.providerName === 'openai') throw new Error('Request blocked.');
+        return 'local review';
+      },
+    );
+    const chat = { oneShotCompletion } as unknown as ChatManager;
+    const store = {
+      readConfig: async () => ({
+        defaultModel: { mlx: 'local-fallback-model' },
+        nightShift: {
+          modelOverride: { enabled: true, provider: 'openai', model: 'cloud-primary-model' },
+        },
+      }),
+    } as unknown as Store;
+
+    const deps = await buildEnrichDeps(store, chat, { nightShift: true, boekwachter: BOOK });
+    const completion = await deps.review!('policy-triggering content');
+
+    expect(deps.model).toBe('cloud-primary-model');
+    expect(deps.provenance?.provider).toBe('openai');
+    expect(completion).toMatchObject({
+      text: 'local review',
+      model: 'local-fallback-model',
+      provenance: { provider: 'mlx', gezelId: 'noor', gezelName: 'Noor' },
+    });
+    expect(oneShotCompletion).toHaveBeenCalledTimes(2);
   });
 });

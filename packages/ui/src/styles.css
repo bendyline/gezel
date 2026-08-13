@@ -6233,6 +6233,11 @@ button.danger {
   font-size: var(--text-xs);
 }
 
+.workspace-index-show-closed {
+  margin-top: 0.35rem;
+  font-size: var(--text-2xs);
+}
+
 .workspace-index-issues ul {
   display: flex;
   flex-direction: column;
@@ -6243,10 +6248,111 @@ button.danger {
 }
 
 .workspace-index-issues li {
-  padding: 0.5rem 0.55rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel);
+}
+
+.workspace-index-issues li[data-status="resolved"],
+.workspace-index-issues li[data-status="dismissed"] {
+  opacity: 0.72;
+}
+
+.workspace-index-issue-content {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+}
+
+.workspace-index-issue-fix.gz-key {
+  padding: 0.2rem 0.45rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+.workspace-index-issue-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  min-width: 5.4rem;
+  padding: 0.4rem;
+}
+
+.workspace-index-issue-actions .link-button {
+  max-width: 9rem;
+  padding: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.25;
+  text-align: right;
+}
+
+.gz-dialog.workspace-issue-fix-dialog {
+  width: min(34rem, 90vw);
+}
+
+.workspace-issue-fix-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.workspace-issue-fix-form label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.workspace-issue-fix-form label > select,
+.workspace-issue-fix-form .gezel-picker-trigger {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.workspace-issue-fix-form label > select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.workspace-issue-fix-form textarea {
+  min-height: 7rem;
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.workspace-issue-fix-missing {
+  margin: -0.2rem 0 0;
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.workspace-index-issue-selectable {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.workspace-index-issue-selectable:hover {
+  background: var(--key-bg-hover);
+}
+
+.workspace-index-issue-selectable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .workspace-index-issue-meta {
@@ -6262,6 +6368,21 @@ button.danger {
 .workspace-index-issue-meta span + span::before {
   margin-right: 0.35rem;
   content: "·";
+}
+
+.workspace-index-issue-meta .workspace-index-issue-ref {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.workspace-index-issue-meta .workspace-index-issue-unread {
+  color: var(--warning);
+}
+
+.workspace-index-issue-error {
+  margin-top: 0.5rem;
+  font-size: var(--text-xs);
 }
 
 .workspace-index-issues li p,
@@ -10103,10 +10224,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--muted);
 }
 
-/* Per-project gezel-edits dropdown — sibling of the status select. "Edits
-   on" is the quiet default; "Edits off" tints muted so the read-only
-   posture is visible from every tab without alarming. Provider-level edit
-   access uses the same muted face plus the shared disabled treatment. */
+/* Per-project permission dropdowns — siblings of the status select. Managed
+   tools and Codex stay visibly scoped because they are independent runtime
+   surfaces in mixed-provider crews. */
 .project-writes-select.gz-select-trigger {
   flex: 0 0 auto;
   padding: 0.2rem 0.5rem;
@@ -10121,6 +10241,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   align-items: center;
   gap: 0.5rem;
   flex: 0 0 auto;
+}
+
+.project-permission-scope {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
 }
 
 /* The ellipsis is dormant until the status bar's own container—not the
@@ -10236,8 +10362,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-writes-select-off.gz-select-trigger,
-.project-writes-select-provider.gz-select-trigger,
-.project-codex-mode-plan.gz-select-trigger {
+.project-codex-mode-plan.gz-select-trigger,
+.project-claude-mode-plan.gz-select-trigger,
+.project-claude-mode-mixed.gz-select-trigger {
   color: var(--text-muted, var(--text));
   background: rgba(127, 127, 127, 0.1);
 }
@@ -10248,6 +10375,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-codex-mode-full.gz-select-trigger {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  color: color-mix(in srgb, var(--warning) 72%, var(--text));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.project-claude-mode-bypassPermissions.gz-select-trigger {
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
   color: color-mix(in srgb, var(--warning) 72%, var(--text));
   background: color-mix(in srgb, var(--warning) 10%, transparent);
@@ -17518,8 +17651,16 @@ button.timeline-session-divider-continuing::before {
   white-space: nowrap;
 }
 
+.model-actions-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
 .model-action-status {
-  min-height: 1.15rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
 }
 
 .model-fitness-badge {
@@ -17646,6 +17787,53 @@ button.timeline-session-divider-continuing::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.local-model-attention {
+  background: color-mix(in srgb, var(--warning) 5%, var(--surface));
+}
+
+.local-model-attention-intro {
+  margin: 0;
+  max-width: 52rem;
+}
+
+.local-model-attention-row {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.local-model-attention-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  min-width: 12rem;
+}
+
+.local-model-attention-reason {
+  min-width: 12rem;
+}
+
+.ollama-pull-head > .local-model-attention-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  overflow: visible;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .local-model-attention-row .ollama-pull-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-model-attention-reason {
+    white-space: normal;
+  }
 }
 
 .ollama-pull-bar {
@@ -21286,6 +21474,130 @@ a.license-button:hover {
 .gz-connector-oauth-note {
   align-self: center;
   margin: 0;
+}
+
+/* Bring-your-own OAuth app: the setup panel inside the connector config
+   tray. A quiet bordered surface; the redirect URI reads as a copyable
+   code row because providers like X match it character-for-character. */
+.gz-oauth-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app p {
+  margin: 0;
+}
+
+.gz-oauth-app-heading {
+  font-size: var(--text-md);
+}
+
+.gz-oauth-app-summary {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.gz-oauth-app-summary-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-summary-text code {
+  overflow: hidden;
+  max-width: 16rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.gz-oauth-app-summary > button {
+  flex: 0 0 auto;
+}
+
+.gz-oauth-app-docs {
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.gz-oauth-app-steps li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gz-oauth-app-redirect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-redirect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.gz-oauth-app-redirect-row code {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.gz-oauth-app-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+}
+
+.gz-oauth-app-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-fields label > input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-oauth-app-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .gz-connector-picker-actions {
@@ -26327,10 +26639,21 @@ button.boekwachter-pill:focus-visible {
   min-height: 0;
 }
 
-/* Cap the reading measure so wide windows keep a book-like column. */
+/* Let wide document sections (tables, galleries, feature splits) use the
+   renderer's 1060px wide measure when the pane has room. Ordinary prose keeps
+   its own narrower 740px measure inside Squisq, so long-form reading remains
+   comfortable. */
 .handboek-doc > * {
-  max-width: 52rem;
+  max-width: 68rem;
   margin: 0 auto;
+}
+
+/* Markdown tables can live inside a prose section (the generated model
+   scorecard does), so Squisq would otherwise keep the whole section on its
+   narrower prose measure. Promote only table-bearing prose sections to the
+   wide measure; prose-only sections stay comfortably readable. */
+.handboek-doc .squisq-page-section--prose:has(.squisq-md-table) .squisq-page-section-inner {
+  max-width: var(--squisq-page-wide-max);
 }
 
 .handboek-player {

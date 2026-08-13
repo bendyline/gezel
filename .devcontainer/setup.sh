@@ -23,8 +23,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 corepack enable
-corepack prepare pnpm@10.33.0 --activate
-pnpm install --frozen-lockfile=false
+corepack prepare pnpm@11.15.1 --activate
+pnpm deps:install -- --frozen-lockfile=false
 pnpm setup:native
 pnpm build
 pnpm typecheck

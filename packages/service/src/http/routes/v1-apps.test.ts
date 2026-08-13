@@ -91,7 +91,7 @@ describe('POST /v1/apps/register', () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("img-src 'self' data: blob:");
     expect(csp).not.toContain('https:');
-    expect(csp).toContain("webrtc 'block'");
+    expect(csp).not.toContain('webrtc');
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');

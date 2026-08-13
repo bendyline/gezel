@@ -23,14 +23,23 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/mlx', '/v1/remote/manage/mlx'));
 
   app.get('/models', async (c) => {
-    const installed = await ctx.mlxModels.listInstalled();
+    const [installed, unrecognized] = await Promise.all([
+      ctx.mlxModels.listInstalled(),
+      ctx.mlxModels.listUnrecognized?.() ?? Promise.resolve([]),
+    ]);
     const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
     const models = await Promise.all(
       installed.map(async (model) => {
         const overrideContextTokens = overrides[`mlx:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
-          const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id);
+          // Inventory is a stable device-fit projection: price this model as
+          // the only resident engine. Live co-residency belongs to the memory
+          // strip and actual launch admission, where idle models can be
+          // evicted and busy ones produce an actionable transient error.
+          const plan = await ctx.chat.previewLocalEnginePlan('mlx', model.id, {
+            standalone: true,
+          });
           return {
             ...model,
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
@@ -75,7 +84,7 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
         }
       }),
     );
-    return c.json({ models });
+    return c.json({ models, unrecognized });
   });
 
   /**

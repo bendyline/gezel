@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -10,6 +11,22 @@ import {
   readBundleMeta,
   redirectAsarToUnpacked,
 } from './extract-bundle.js';
+
+/**
+ * Above every platform's pid ceiling (Linux caps at 2^22 even with
+ * `pid_max` raised), so `process.kill(DEAD_PID, 0)` reliably reports
+ * ESRCH — the sweep's "owner is gone" branch — without the flakiness of
+ * reusing a pid the OS could hand to something else mid-test.
+ */
+const DEAD_PID = 2147483646;
+
+/**
+ * Taken from a staging tree found abandoned on a real install (a launch
+ * killed ~75% through extraction, 683 MB stranded for twelve days). Using
+ * the field-observed uuid rather than a synthetic one keeps the name shape
+ * these tests assert against pinned to what production actually writes.
+ */
+const STAGING_UUID = 'b2ca0a0c-00b9-4a03-b054-25a0d7d73ebd';
 
 interface SeedOptions {
   version: string;
@@ -337,6 +354,95 @@ describe('extractBundleIfNeeded', () => {
     expect(await readFile(join(installDir, 'still-live.txt'), 'utf8')).toBe('good');
     const installedPkg = JSON.parse(await readFile(join(installDir, 'package.json'), 'utf8'));
     expect(installedPkg.version).toBe('0.1.0');
+  });
+
+  it('removes a staging tree abandoned by a dead process', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', undefined, sha);
+    const abandoned = `${installDir}.staging-${DEAD_PID}-${STAGING_UUID}`;
+    await mkdir(join(abandoned, 'node_modules', 'deep'), { recursive: true });
+    await writeFile(join(abandoned, 'node_modules', 'deep', 'partial.js'), 'half a bundle');
+
+    // The up-to-date fast path: nothing is extracted, and the orphan still
+    // has to be reclaimed — that is the only case that ever creates one.
+    const res = await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(res.action).toBe('up-to-date');
+    expect(existsSync(abandoned)).toBe(false);
+    expect(existsSync(join(installDir, 'package.json'))).toBe(true);
+  });
+
+  it('keeps a staging tree whose owning process is still running', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', undefined, sha);
+    // A concurrent extraction must never be deleted out from under itself.
+    const live = `${installDir}.staging-${process.pid}-${STAGING_UUID}`;
+    await mkdir(live, { recursive: true });
+
+    await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(existsSync(live)).toBe(true);
+  });
+
+  it('only deletes exact staging-tree names among its siblings', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', undefined, sha);
+    // Everything here shares a prefix, a word, or a shape with a staging
+    // tree without being one. The install parent is a real user home in
+    // production, so a near-miss must be a no-op.
+    const bystanders = [
+      `${installDir}.previous`,
+      `${installDir}.staging`,
+      `${installDir}.staging-${DEAD_PID}`,
+      `${installDir}.staging-${DEAD_PID}-not-a-uuid`,
+      `${installDir}.staging-0-${STAGING_UUID}`,
+      `${installDir}.staging-${DEAD_PID}-${STAGING_UUID}.bak`,
+      `${installDir}-other.staging-${DEAD_PID}-${STAGING_UUID}`,
+      join(root, `staging-${DEAD_PID}-${STAGING_UUID}`),
+      join(root, 'gezels'),
+    ];
+    for (const dir of bystanders) await mkdir(dir, { recursive: true });
+
+    await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    for (const dir of bystanders) {
+      expect(existsSync(dir), `${basename(dir)} must survive the sweep`).toBe(true);
+    }
+  });
+
+  it('does not delete through a symlink planted where a staging tree would be', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', undefined, sha);
+    const target = join(root, 'precious');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'keep.txt'), 'not ours to delete');
+    const planted = `${installDir}.staging-${DEAD_PID}-${STAGING_UUID}`;
+    try {
+      await symlink(target, planted, 'junction');
+    } catch {
+      // Unprivileged Windows without Developer Mode cannot create links.
+      // The guard is still exercised on every other platform and in CI.
+      return;
+    }
+
+    await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(existsSync(join(target, 'keep.txt'))).toBe(true);
+  });
+
+  it('completes the install when an abandoned staging tree cannot be removed', async () => {
+    await seedTarballBundle(root, tarballPath, metaPath, { version: '0.2.0' });
+    await seedInstalledTree(installDir, '0.1.0');
+    // A plain file wearing a staging tree's name: lstat says "not a
+    // directory", so it is skipped rather than unlinked, and the upgrade
+    // it shares a run with still lands.
+    const impostor = `${installDir}.staging-${DEAD_PID}-${STAGING_UUID}`;
+    await writeFile(impostor, 'not a directory');
+
+    const res = await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(res.action).toBe('upgraded');
+    expect(existsSync(impostor)).toBe(true);
   });
 
   it('recovers a previous install left by an interrupted directory swap', async () => {

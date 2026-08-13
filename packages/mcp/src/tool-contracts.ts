@@ -216,6 +216,9 @@ const TOOL_OUTPUT_SCHEMAS = {
   draft_email: ActionToolOutputSchema,
   queue_email: ActionToolOutputSchema,
   send_email: ActionToolOutputSchema,
+  draft_post: ActionToolOutputSchema,
+  queue_post: ActionToolOutputSchema,
+  publish_post: ActionToolOutputSchema,
   draft_connector_action: ActionToolOutputSchema,
 } as const satisfies Partial<Record<CanonicalToolName, ToolOutputSchema>>;
 
@@ -329,6 +332,7 @@ const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
   'search_code',
   'file_review',
   'list_file_issues',
+  'get_file_issue',
   'security_overview',
   'scan_findings',
   'map_attack_surface',
@@ -408,6 +412,8 @@ const NON_DESTRUCTIVE_MUTATIONS = new Set<CanonicalToolName>([
   'github_pr_create',
   'draft_email',
   'queue_email',
+  'draft_post',
+  'queue_post',
   'draft_connector_action',
   'request_tool_permission',
 ]);
@@ -464,6 +470,9 @@ const OPEN_WORLD_TOOLS = new Set<CanonicalToolName>([
   'draft_email',
   'queue_email',
   'send_email',
+  'draft_post',
+  'queue_post',
+  'publish_post',
   'draft_connector_action',
   'request_tool_permission',
 ]);

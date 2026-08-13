@@ -1,7 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 
@@ -13,6 +23,16 @@ import * as tar from 'tar';
  * rebuilds with the same `package.json` version).
  */
 const SHA_SENTINEL = '.gezel-bundle.sha256';
+
+/**
+ * What `installTarball` appends to the install dir to name a staging tree:
+ * `.staging-<pid>-<uuid>`. Anchored and shape-checked to the exact uuid
+ * layout `randomUUID` produces, because matching this pattern is what
+ * selects a directory for recursive deletion in `sweepAbandonedStaging` —
+ * a loose prefix match here would be a delete primitive.
+ */
+const STAGING_SUFFIX =
+  /^\.staging-([1-9][0-9]{0,9})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * The service bundle ships as a single gzipped tarball plus a small JSON
@@ -145,6 +165,11 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
   const { installDir, tarballPath, metaPath, logger, force } = opts;
 
   await recoverInterruptedInstall(installDir);
+  // Before the bundle checks below, so an orphan is reclaimed on the
+  // up-to-date fast path too — otherwise the one case that leaves a staging
+  // tree behind (a launch that never completes) is also the case that never
+  // extracts again, and the space is never returned.
+  await sweepAbandonedStaging(installDir, logger);
 
   if (!existsSync(tarballPath)) {
     throw new Error(
@@ -318,6 +343,83 @@ async function countExtractedBundleFiles(root: string): Promise<number> {
 async function recoverInterruptedInstall(dest: string): Promise<void> {
   const backup = `${dest}.previous`;
   if (!existsSync(dest) && existsSync(backup)) await rename(backup, dest);
+}
+
+/**
+ * Is `pid` a process that currently exists?
+ *
+ * EPERM means it exists under an identity we cannot signal, which still
+ * counts as alive — every answer other than a definite "gone" has to keep
+ * the staging tree. A recycled pid therefore makes us skip a directory that
+ * was in fact abandoned; that costs one more launch, which is the right
+ * side of the trade.
+ */
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Reclaim staging trees abandoned by a process that died mid-extract.
+ *
+ * `<dest>.previous` self-heals: its name is fixed, so the next install
+ * deletes it. A staging tree's name carries the pid and a uuid so two
+ * extractions can never collide — and that uniqueness is exactly why
+ * nothing ever reclaimed one. A killed extraction left the whole partial
+ * tree (~700 MB) behind permanently. On the system-scope service home the
+ * desktop user cannot even list that directory, so an interrupted silent
+ * auto-update stranded storage no one could find or remove without an
+ * administrator.
+ *
+ * This recursively deletes directories, so it is deliberately narrow and
+ * every check fails toward keeping the directory:
+ *   - direct siblings of `dest` only, never a recursive search;
+ *   - the exact `<basename>.staging-<pid>-<uuid>` shape, anchored;
+ *   - a real directory, not a symlink or Windows junction;
+ *   - still resolving to a direct child of the install parent, so a
+ *     reparse point planted in a staging tree's place cannot redirect the
+ *     delete at its target — the same rule the NSIS hooks apply before any
+ *     elevated operation under ProgramData;
+ *   - never our own pid, and never one whose owner is still running.
+ *
+ * Failures are logged and swallowed. An orphan we cannot remove must never
+ * be the reason an install does not happen.
+ */
+async function sweepAbandonedStaging(
+  dest: string,
+  logger?: ExtractOptions['logger'],
+): Promise<void> {
+  const parent = dirname(dest);
+  const base = basename(dest);
+  const entries = await readdir(parent, { withFileTypes: true }).catch(() => null);
+  const parentReal = await realpath(parent).catch(() => null);
+  if (!entries || parentReal === null) return;
+
+  for (const entry of entries) {
+    if (!entry.name.startsWith(base)) continue;
+    const ownerRaw = STAGING_SUFFIX.exec(entry.name.slice(base.length))?.[1];
+    if (!ownerRaw) continue;
+    const owner = Number.parseInt(ownerRaw, 10);
+    if (!Number.isSafeInteger(owner) || owner <= 0) continue;
+    if (owner === process.pid || pidIsAlive(owner)) continue;
+
+    const candidate = join(parent, entry.name);
+    try {
+      const info = await lstat(candidate);
+      if (info.isSymbolicLink() || !info.isDirectory()) continue;
+      if (dirname(await realpath(candidate)) !== parentReal) continue;
+      await rm(candidate, { recursive: true, force: true });
+      logger?.info?.(`[supervisor] removed abandoned service staging tree ${entry.name}`);
+    } catch (err) {
+      logger?.warn?.(
+        `[supervisor] could not remove abandoned staging tree ${entry.name}: ${(err as Error).message}`,
+      );
+    }
+  }
 }
 
 async function readShaSentinel(installDir: string): Promise<string | null> {

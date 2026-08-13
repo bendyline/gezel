@@ -137,9 +137,9 @@ async function main() {
   // the verbose `node dist/bin/gezel.js …`.
   await writeWrappers(target);
 
-  // Resolve the whole service dep graph (incl. native modules) by importing
-  // its index.js in a throwaway process — index exports startService without
-  // calling it, so nothing binds a port. Catches packaging breakage cheaply.
+  // Resolve the eager service dependency graph by importing its index.js in a
+  // throwaway process — index exports startService without calling it, so
+  // nothing binds a port. Catches packaging breakage cheaply.
   console.log('[build-node-bundle] verifying the bundled service imports cleanly');
   const indexUrl = pathToFileURL(
     join(target, 'node_modules', '@bendyline', 'gezel-service', 'dist', 'index.js'),
@@ -147,6 +147,23 @@ async function main() {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // Public npm installs may omit node-pty; this complete relocatable bundle
+  // must not. The service now imports it lazily, so exercise the deployed
+  // native module explicitly or an optional-install failure would stay hidden
+  // until a user ran their first terminal command.
+  const nodePtyUrl = pathToFileURL(
+    join(target, 'node_modules', 'node-pty', 'lib', 'index.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const p=await import(${JSON.stringify(nodePtyUrl)}); if(typeof p.spawn!=='function') throw new Error('bundled node-pty spawn export missing');`,
+    ],
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 

@@ -55,9 +55,8 @@ export type ServiceQueryExec = (
 ) => Promise<{ stdout: string; stderr: string }>;
 
 const defaultExec: ServiceQueryExec = async (command, args) => {
-  // windowsHide for the same reason machine-service-state.ts gives: this
-  // runs in the interactive Electron main process, and CREATE_NO_WINDOW
-  // just suppresses the console flash of sc.exe.
+  // This runs in the interactive Electron main process; suppress the
+  // otherwise-visible sc.exe console flash.
   const { stdout, stderr } = await execFileAsync(command, args, {
     windowsHide: true,
     timeout: 10_000,

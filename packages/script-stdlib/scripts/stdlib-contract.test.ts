@@ -8,9 +8,15 @@ const scripts = (await readdir(scriptsDir))
   .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
   .sort();
 
-describe('standard gate script contracts', () => {
+// Gate scripts follow the check* naming convention; everything else is an
+// action script and must say so explicitly (`kind: 'action'`).
+const gateScripts = scripts.filter((name) => name.startsWith('check'));
+const actionScripts = scripts.filter((name) => !name.startsWith('check'));
+
+describe('standard script contracts', () => {
   it('keeps the expected standard library breadth', () => {
-    expect(scripts).toHaveLength(34);
+    expect(gateScripts).toHaveLength(34);
+    expect(actionScripts).toEqual(['storeRecords.ts']);
   });
 
   it.each(scripts)('%s has loadable, discoverable metadata', async (filename) => {
@@ -19,14 +25,25 @@ describe('standard gate script contracts', () => {
 
     expect(source).toContain('export const meta = defineScript({');
     expect(source).toMatch(new RegExp(`name:\\s*['"]${expectedName}['"]`));
-    expect(source).toMatch(/kind:\s*['"]gate['"]/);
     expect(source).toMatch(/description:\s*/);
     expect(source).toMatch(/inputs:\s*{/);
     expect(source).toMatch(/outputs:\s*{/);
-    expect(source).toMatch(/decision:\s*{/);
-    expect(source).toMatch(/message:\s*{/);
     expect(source).toMatch(/requires:\s*\[[^\]]+\]/s);
     expect(source).toContain('gezel.output(');
+  });
+
+  it.each(gateScripts)('%s declares the gate contract', async (filename) => {
+    const source = await readFile(join(scriptsDir, filename), 'utf8');
+
+    expect(source).toMatch(/kind:\s*['"]gate['"]/);
+    expect(source).toMatch(/decision:\s*{/);
+    expect(source).toMatch(/message:\s*{/);
+  });
+
+  it.each(actionScripts)('%s declares kind action explicitly', async (filename) => {
+    const source = await readFile(join(scriptsDir, filename), 'utf8');
+
+    expect(source).toMatch(/kind:\s*['"]action['"]/);
   });
 
   it.each(scripts)('%s stays inside the SDK capability boundary', async (filename) => {

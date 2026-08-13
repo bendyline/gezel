@@ -10,6 +10,7 @@ import {
   resolvePnpmInvocation,
   retryTransient,
 } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import * as tar from 'tar';
 
 export const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org';
@@ -414,12 +415,11 @@ function runAndWait(command: string, args: string[], cwd: string, shell: boolean
     const child = spawn(command, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // DETACHED_PROCESS on Windows / a new process group on POSIX. The
-      // Windows half is load-bearing: the machine service's restricted SID
-      // cannot allocate a console, so a console-subsystem child started any
-      // other way dies as `spawn EPERM`. `windowsHide` (CREATE_NO_WINDOW)
-      // does not help — it still allocates one.
-      detached: true,
+      // Keep the process-group boundary used by POSIX timeout cleanup. On
+      // Windows, taskkill follows parent PIDs, so the owned installer stays
+      // attached and its console window stays hidden.
+      detached: process.platform !== 'win32',
+      ...windowsHeadlessSpawnOptions(),
       shell,
     });
     let output = '';
@@ -455,8 +455,8 @@ function runAndWait(command: string, args: string[], cwd: string, shell: boolean
 function killProcessTree(child: import('node:child_process').ChildProcess): void {
   if (process.platform === 'win32' && child.pid) {
     const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-      detached: true,
       stdio: 'ignore',
+      ...windowsHeadlessSpawnOptions(),
     });
     killer.once('error', () => child.kill('SIGKILL'));
     killer.unref();

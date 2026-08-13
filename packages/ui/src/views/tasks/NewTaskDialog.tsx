@@ -90,9 +90,10 @@ const MODE_COPY: Record<
  * the craftbooks recommended for this project, and a right-hand pane
  * with the selected recipe's steps + the task's properties.
  *
- * One-time tasks land as inert drafts ("ready to fire"). Scheduled mode
- * creates an active host that clones a fresh child on each tick; Night Shift
- * creates active work whose dispatch is gated to the configured shift.
+ * One-time craftbook tasks start immediately; blank one-time tasks land as
+ * inert drafts ("ready to fire"). Scheduled mode creates an active host that
+ * clones a fresh child on each tick; Night Shift creates active work whose
+ * dispatch is gated to the configured shift.
  */
 export function NewTaskDialog({
   open,
@@ -435,7 +436,7 @@ export function NewTaskDialog({
                     : {}),
                   ...(assignee ? { assignee } : {}),
                   ...(creationMode === 'one-time'
-                    ? { status: 'draft' as const }
+                    ? { dispatchEntry: true }
                     : { nightShift: { enabled: true }, dispatchEntry: true }),
                   ...(Object.keys(stringified).length > 0 ? { craftbookParams: stringified } : {}),
                 });
@@ -918,13 +919,23 @@ export function NewTaskDialog({
                   {error && <p className="error small">{error}</p>}
                 </div>
                 <div className="gz-npd-pane-footer">
-                  <p className="gz-ntd-footnote">{modeCopy.footnote}</p>
+                  <p className="gz-ntd-footnote">
+                    {creationMode === 'one-time' && selectedBook
+                      ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
+                      : modeCopy.footnote}
+                  </p>
                   <Dialog.Actions>
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel
                     </button>
                     <button type="submit" className="primary" disabled={createDisabled}>
-                      {busy ? 'Creating…' : modeCopy.submitLabel}
+                      {busy
+                        ? creationMode === 'one-time' && selectedBook
+                          ? 'Starting…'
+                          : 'Creating…'
+                        : creationMode === 'one-time' && selectedBook
+                          ? 'Create & start'
+                          : modeCopy.submitLabel}
                     </button>
                   </Dialog.Actions>
                 </div>

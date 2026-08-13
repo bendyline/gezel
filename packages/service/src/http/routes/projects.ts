@@ -1282,7 +1282,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
-  // ── Workspace mutations (gated by `allowGezelWrites` on external workingDir) ──
+  // ── Workspace mutations (gated by the managed-write policy) ──
 
   app.get('/:id/workspace/stat', async (c) => {
     const id = c.req.param('id');

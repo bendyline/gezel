@@ -78,13 +78,14 @@ describe('probeChildProcessSpawn', () => {
   // libuv only creates the named pipes a write-restricted token rejects when
   // stdio is piped, so an `ignore`-stdio probe would pass on precisely the
   // machines this exists to catch.
-  it('pipes stdio and detaches, matching the real call sites', async () => {
+  it('pipes stdio and hides its Windows console, matching the real call sites', async () => {
     const { impl, calls } = spawnEmitting('spawn');
     await probeChildProcessSpawn({ platform: 'win32', spawnImpl: impl });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
-    expect(calls[0]!.options.detached).toBe(true);
+    expect(calls[0]!.options.windowsHide).toBe(true);
+    expect(calls[0]!.options.detached).toBeUndefined();
   });
 
   it('is a no-op off Windows, where the service token cannot have this shape', async () => {

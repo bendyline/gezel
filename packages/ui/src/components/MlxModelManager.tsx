@@ -5,6 +5,7 @@ import type {
   MlxInstallEvent,
   MlxInstalledModel,
   ModelFitnessEntry,
+  UnrecognizedLocalModel,
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -21,6 +22,7 @@ import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
+import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { formatContextWindow } from './model-context.js';
 import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
@@ -123,6 +125,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   // Interrupted/unverified downloads with no manifest — invisible to the
   // installed list. Surfaced for resume/delete before the reclaim sweep.
   const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
+  const [unrecognized, setUnrecognized] = useState<UnrecognizedLocalModel[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -174,6 +177,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     try {
       const res = await api.listMlxModels();
       setModels(res.models);
+      setUnrecognized(res.unrecognized ?? []);
       setModelsError(null);
     } catch (err) {
       setModelsError(err instanceof Error ? err.message : String(err));
@@ -455,6 +459,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     // daemon is busy; refresh restores it (and shows the error) on failure.
     setModels((cur) => cur.filter((m) => m.id !== id));
     setIncomplete((cur) => cur.filter((d) => d.id !== id));
+    setUnrecognized((cur) => cur.filter((model) => model.id !== id));
     try {
       await api.deleteMlxModel(id);
       announceModelInventoryChanged('mlx');
@@ -467,6 +472,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(models.map((m) => m.id)), [models]);
+  const attentionIds = useMemo(
+    () => new Set(unrecognized.map((model) => model.id)),
+    [unrecognized],
+  );
 
   // Map catalog-item id → current catalog manifest version. Used below
   // to flag installed models whose on-disk manifest was written
@@ -518,6 +527,12 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           </div>
         </div>
       )}
+
+      <UnrecognizedModels
+        items={unrecognized.filter((model) => !installs.has(model.id))}
+        onUpdate={(id) => startInstall(id)}
+        onRemove={(id) => setToDelete(id)}
+      />
 
       <IncompleteDownloads
         items={incomplete.filter((d) => !installs.has(d.id))}
@@ -820,6 +835,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
             const m = asMlxEntry(item.manifest);
             if (!m) return null;
             const installed = installedIds.has(m.id);
+            const needsAttention = attentionIds.has(m.id);
             const inflight = installs.get(m.id);
             const pct =
               inflight && inflight.totalBytesAll > 0
@@ -860,7 +876,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                 </div>
                 <button
                   type="button"
-                  disabled={installed || Boolean(inflight)}
+                  disabled={installed || needsAttention || Boolean(inflight)}
                   onClick={() => startInstall(m.id)}
                 >
                   {installed
@@ -873,7 +889,9 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                         : inflight.phase === 'verifying'
                           ? 'Verifying…'
                           : 'Reading metadata…'
-                      : 'Download'}
+                      : needsAttention
+                        ? 'Needs attention above'
+                        : 'Download'}
                 </button>
               </div>
             );

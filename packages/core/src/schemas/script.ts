@@ -413,6 +413,47 @@ export const InvokePageToolResponseSchema = RunScriptResponseSchema.extend({
 });
 export type InvokePageToolResponse = z.infer<typeof InvokePageToolResponseSchema>;
 
+/**
+ * Body for the first-party page-read route: a served type page reads a file
+ * or directory the type's manifest declares in `pages.reads`. Scope is
+ * re-derived from the trusted manifest per request (the write-side analog
+ * is `resolvePageTools` on the page-invoke route) — this is the in-bridge
+ * replacement for the out-of-band preview-capability fetch, which remains
+ * for v0 pages, browser mode, and media URLs.
+ */
+export const PageReadRequestSchema = z.object({
+  op: z.enum(['read', 'list', 'stat']),
+  source: z.enum(['workspace', 'artifacts']),
+  path: z.string().min(1),
+  /** read op only; default derived from extension ('json' for .json else 'text'). */
+  as: z.enum(['text', 'json', 'bytes']).optional(),
+  /** read op only; capped server-side at PAGE_READ_MAX_BYTES regardless. */
+  maxBytes: z.number().int().positive().optional(),
+});
+export type PageReadRequest = z.infer<typeof PageReadRequestSchema>;
+
+export const PageReadEntrySchema = z.object({
+  name: z.string(),
+  kind: z.enum(['file', 'dir']),
+  size: z.number().nonnegative(),
+  mtime: z.number().nonnegative(),
+});
+export type PageReadEntry = z.infer<typeof PageReadEntrySchema>;
+
+export const PageReadResponseSchema = z.object({
+  op: z.enum(['read', 'list', 'stat']),
+  /** read: file body (utf8 text or base64 when `encoding: 'base64'`). */
+  content: z.string().optional(),
+  encoding: z.enum(['utf8', 'base64']).optional(),
+  /** list: directory entries (files and dirs, one level). */
+  entries: z.array(PageReadEntrySchema).optional(),
+  /** read/stat: change token — size:mtime hash; directories hash their listing. */
+  etag: z.string(),
+  size: z.number().nonnegative().optional(),
+  mtime: z.number().nonnegative().optional(),
+});
+export type PageReadResponse = z.infer<typeof PageReadResponseSchema>;
+
 export const ListScriptsResponseSchema = z.object({
   scripts: z.array(
     z.object({

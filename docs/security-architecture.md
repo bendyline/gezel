@@ -235,13 +235,23 @@ started under `free` cannot survive a switch into a locked posture.
 
 `allowFileEdits` is a legacy-named, file-adjacent capability. It does **not** decide whether
 a gezel may mutate a project workspace, and it does not hide the builtin shared-document
-tools. Workspace writes have a separate per-project consent gate:
+tools. Workspace writes through Gezel-managed sinks have a separate per-project policy:
 
-| `project.allowGezelWrites` | Internal workspace | External `workingDir` |
+| `project.managedWorkspaceWritePolicy` | Internal workspace | External `workingDir` |
 |---|---|---|
-| `true` | writable | writable |
-| `false` | read-only | read-only |
-| absent | writable | read-only |
+| `allow` | writable | writable |
+| `deny` | read-only | read-only |
+| `auto` or absent | writable | read-only |
+
+`allowGezelWrites` is a legacy on-disk boolean accepted only for compatibility and translated
+to `allow` / `deny` by the centralized resolver. New code must not read it directly.
+
+Provider-native harnesses are a separate path. Codex CLI uses the project-level
+`codexPermissionMode` (`Plan / Edit / Reviewed / Full`), while Claude CLI uses the project-level
+`claudePermissionMode` (`Plan / Ask / Edit / Full` in the UI). Each project override wins over
+per-gezel and install defaults. Explicitly unsandboxed Copilot can also replace the managed
+filesystem surface for its session. `providerNativeWorkspaceAccess` resolves these paths;
+`resolveGezelWorkspaceAccess` combines it with the managed policy for one effective gezel.
 
 An absent stored policy resolves fail-safe to `lockdown` (`DEFAULT_SECURITY_LEVEL`). During
 first-run migration, a configured legacy install gets an explicit `free` policy to preserve
@@ -267,8 +277,8 @@ off-preset combination (`classifySecurityLevel` re-labels the slider).
    - script execution → `scripts/runner.ts` (gates the run; strips `network`/`credential:*`
      caps when `!allowExternalServices`, applies the per-project workspace gate to
      `workspace.write`, and strips `documents.write` when `!allowFileEdits`).
-   - workspace writes → `fs/store.ts` `assertWorkspaceWritable` (the per-project
-     `allowGezelWrites` tri-state above; independent of `allowFileEdits`).
+   - managed workspace writes → `fs/store.ts` `assertWorkspaceWritable` (the per-project
+     named policy above; independent of `allowFileEdits`).
 
 > **Surface filtering alone is not a sink.** `web_search` fails closed at both its surface
 > and its provider; `fetch_url` must enforce at its route too, or a direct token-holder (or a

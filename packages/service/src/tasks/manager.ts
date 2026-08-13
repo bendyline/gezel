@@ -10,6 +10,7 @@ import {
   type GateAttemptRecord,
   type GateScriptRef,
   type GezelConfig,
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type NewCraftbookStep,
   type NormalizedStepGate,
   type ScriptOutputPredicate,
@@ -41,7 +42,7 @@ import {
   nowIso,
   parseTaskRef,
   planGuardrails,
-  projectWorkspaceWritable,
+  projectManagedWorkspaceWritable,
   removeStepAndCleanEdges,
   reorderStepsArray,
   resolveSecurityPolicy,
@@ -2759,13 +2760,13 @@ export class TaskManager {
     if (unsatFiles) {
       const fileList =
         unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
-      const message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but gezel workspace writes are OFF for this project — no gezel can create or edit workspace files. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
+      const message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but managed workspace writes are OFF for this project. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
       const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
         ...task,
         status: 'paused' as const,
       }));
       await this.appendNote(projectId, task.num, {
-        text: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is gated on workspace ${fileList}, but gezel workspace writes are OFF for this project — no assignee can create or edit workspace files, so retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n- Enable "Allow gezels to modify the workspace directory" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create or fix the file(s) by hand from the content in task notes.`,
+        text: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is gated on workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee can create or edit workspace files, so retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n- Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create or fix the file(s) by hand from the content in task notes.`,
         author: { kind: 'user' },
         stepId: step.id,
       }).catch(() => {});
@@ -2782,7 +2783,7 @@ export class TaskManager {
           task,
           stepId: step.id,
           reason: 'gate_unsatisfiable',
-          detail: `The gate requires workspace ${fileList}, but gezel workspace writes are off for this project.`,
+          detail: `The gate requires workspace ${fileList}, but managed workspace writes are off for this project.`,
         });
       }
       return {
@@ -3077,7 +3078,7 @@ export class TaskManager {
     step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
   ): Promise<string[] | null> {
     const project = await this.store.getProject(projectId).catch(() => null);
-    if (!project || projectWorkspaceWritable(project)) return null;
+    if (!project || projectManagedWorkspaceWritable(project)) return null;
     const files = new Set<string>();
     if (step.advanceWhen?.file && step.advanceWhen.artifact !== true) {
       files.add(step.advanceWhen.file);
@@ -3119,7 +3120,7 @@ export class TaskManager {
     const fileList = files.map((f) => `\`${f}\``).join(', ');
     await this.setStatus(projectId, task.num, 'paused').catch(() => {});
     await this.appendNote(projectId, task.num, {
-      text: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must produce workspace ${fileList}, but gezel workspace writes are OFF for this project — no gezel has \`write_file\`, so no assignee can complete it. The step was not dispatched.\n\nFix one of these, then set the task active again:\n\n- Enable "Allow gezels to modify the workspace directory" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create the file(s) by hand and re-run the step.`,
+      text: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must produce workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee has \`write_file\`, so the step cannot complete through this path. The step was not dispatched.\n\nFix one of these, then set the task active again:\n\n- Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create the file(s) by hand and re-run the step.`,
       author: { kind: 'user' },
       stepId: step.id,
     }).catch(() => {});
@@ -3131,7 +3132,7 @@ export class TaskManager {
       task,
       stepId: step.id,
       reason: 'gate_unsatisfiable',
-      detail: `Step "${step.name}" must write workspace ${fileList}, but gezel workspace writes are off for this project.`,
+      detail: `Step "${step.name}" must write workspace ${fileList}, but managed workspace writes are off for this project.`,
     });
     return true;
   }
@@ -3142,7 +3143,7 @@ export class TaskManager {
     outcome: StepGateOutcome,
   ): Promise<string[] | null> {
     const project = await this.store.getProject(projectId).catch(() => null);
-    if (!project || projectWorkspaceWritable(project)) return null;
+    if (!project || projectManagedWorkspaceWritable(project)) return null;
     const workspaceChecks = new Map<string, string | undefined>();
     for (const c of gate.checks) {
       if ((c as { artifact?: boolean }).artifact === true) continue;

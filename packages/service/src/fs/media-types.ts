@@ -6,6 +6,9 @@ const IMAGE_MIME_TO_EXT: Record<string, string> = {
   'image/gif': '.gif',
   'image/webp': '.webp',
   'image/svg+xml': '.svg',
+  'image/bmp': '.bmp',
+  'image/x-icon': '.ico',
+  'image/vnd.microsoft.icon': '.ico',
 };
 
 const IMAGE_EXT_TO_MIME: Record<string, string> = {
@@ -15,6 +18,11 @@ const IMAGE_EXT_TO_MIME: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  // Without these two, a .bmp/.ico goes out as application/octet-stream —
+  // which the llama.cpp vision server rejects at the data-URI parse with a
+  // 500 before ever looking at the bytes.
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
 };
 
 export function extForMimeType(mime: string): string {

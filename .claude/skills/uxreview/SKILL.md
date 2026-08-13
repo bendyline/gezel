@@ -28,7 +28,7 @@ This is NOT a content / pipeline / agent-behavior skill. It evaluates the **appl
 ```bash
 # Verify build is fresh
 ls packages/ui/dist/index.html 2>/dev/null && echo "ui built" || echo "needs pnpm build"
-ls packages/app/node_modules/playwright 2>/dev/null && echo "playwright present" || echo "needs pnpm install"
+ls packages/app/node_modules/playwright 2>/dev/null && echo "playwright present" || echo "needs pnpm deps:install"
 ```
 
 If build is stale, run `pnpm build` first.

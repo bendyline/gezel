@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": {
-    "hash": "3a8089dace226f1b6b929db8f6456857d8ba7a461ab660c74eef922ab1a612d8",
+    "hash": "b82f74a8d3b48d97538158cc06e724880007b2668f6cc4fc788a664704d38ae0",
     "sourceFile": "AGENTS.md"
   },
   "craftbooks": {
@@ -21,6 +21,36 @@
       "scriptNames": []
     },
     ".claude\\skills\\tune-model\\SKILL.md": {
+      "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
+      "craftbookId": "proj-skill-tune-model",
+      "scriptNames": []
+    },
+    ".claude\\skills\\release-note\\SKILL.md": {
+      "hash": "ceef4d6e91fcb1da2483c6ea5c80f56b558e9c2f6377d872c6c6030792a999ad",
+      "craftbookId": "proj-skill-release-note",
+      "scriptNames": []
+    },
+    ".claude/skills/craftbook-eval-matrix/SKILL.md": {
+      "hash": "9bc96c324c7604318bbf9678c0c08b1514df3732b36c08daffaa39a6d63e004f",
+      "craftbookId": "proj-skill-craftbook-eval-matrix",
+      "scriptNames": []
+    },
+    ".claude/skills/eval-run/SKILL.md": {
+      "hash": "7b90052d8a44aef50083a12791d20e962d85764e656688493c682840a2ef1123",
+      "craftbookId": "proj-skill-eval-run",
+      "scriptNames": []
+    },
+    ".claude/skills/native-bump/SKILL.md": {
+      "hash": "3d38ce5b1616299cfa9cdf35deaa9580b0c97c50e848f59e75c531b8be079056",
+      "craftbookId": "proj-skill-native-bump",
+      "scriptNames": []
+    },
+    ".claude/skills/release-note/SKILL.md": {
+      "hash": "ceef4d6e91fcb1da2483c6ea5c80f56b558e9c2f6377d872c6c6030792a999ad",
+      "craftbookId": "proj-skill-release-note",
+      "scriptNames": []
+    },
+    ".claude/skills/tune-model/SKILL.md": {
       "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
       "craftbookId": "proj-skill-tune-model",
       "scriptNames": []

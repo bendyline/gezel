@@ -77,10 +77,14 @@ provider AND model both pinned on the Boekwachter's frontmatter
 (`resolveEnrichTarget`). Writing both fields on the gezel is the opt-in; an
 incomplete pin and every implicit path (config defaults, provider fallback)
 stay local, so workspace content never drifts to a cloud model the user
-didn't choose for this work. Cloud/CLI targets get longer one-shot deadlines
-(120s/180s vs 30s/60s — CLI cold starts flake below 120s), and the `ambient`
-flag is a no-op there: only local-engine queues hold ambient work, so a
-background drive on a cloud Boekwachter starts immediately.
+didn't choose for this work. Summary/review one-shots use the target model's
+`instruct` tuning profile (including its normal catalog-authored output
+allowance) and get 120s/180s deadlines. Disabling reasoning prevents a
+thinking-capable local model from spending the deadline on hidden work, while
+the longer wall-clock budget accommodates local admission/prefill/thermal
+cooling and 30-90s CLI cold starts. The `ambient` flag is a no-op for cloud
+targets: only local-engine queues hold ambient work, so a background drive on
+a cloud Boekwachter starts immediately.
 
 ### Reviews take whole files; sizing lives in the completion layer
 

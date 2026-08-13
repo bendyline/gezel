@@ -129,9 +129,10 @@ Run `gezel --help` for the full list. The most-used ones:
 | Command | What it does |
 |---|---|
 | `gezel` | Launch the interactive TUI |
-| `gezel run [prompt…]` | One-shot prompt, optionally `--gezel <id>` |
+| `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
 | `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI). On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
+| `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |
 | `gezel agent list\|create\|show` | Manage your gezels |
 | `gezel env list\|create\|install` | Manage projects and their packages |
 | `gezel task list\|create\|show` | Manage tasks |
@@ -144,7 +145,9 @@ Run `gezel --help` for the full list. The most-used ones:
 Inside the interactive TUI, `/continue` processes due schedules and reconciles
 gezel-owned active tasks for the current project. Night Shift is managed with
 `/nightshift start`, `/nightshift stop`, and `/nightshift list`; the command
-wordwheel exposes all three subcommands.
+wordwheel exposes all three subcommands. `/mode` opens a picker for the same
+four activity levels as the one-shot command; `/mode reactive+tasks` (for
+example) switches directly.
 
 ## Stability
 

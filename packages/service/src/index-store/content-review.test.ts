@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompletionBlockedError } from '../chat/large-content.js';
-import type { Store } from '../fs/store.js';
+import { type Store, boekwachterIssueFingerprint } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import type { EnrichDeps } from './enrich.js';
@@ -21,15 +21,66 @@ let dir: string;
 let home: string;
 let artifacts: string;
 let ci: ContentIndex;
+let durableIssues: Array<Record<string, unknown>>;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-review-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-review-home-'));
   artifacts = join(home, 'artifacts');
+  durableIssues = [];
   ci = new ContentIndex(
     {
       projectWorkspaceDir: async () => dir,
       projectArtifactsDir: () => artifacts,
+      observeProjectBoekwachterReviews: async (
+        _projectId: string,
+        observations: Array<{
+          path: string;
+          contentHash: string;
+          issues: Array<{
+            severity: 'info' | 'minor' | 'major';
+            category: string;
+            message: string;
+            line?: number;
+          }>;
+        }>,
+      ) => {
+        for (const observation of observations) {
+          for (const existing of durableIssues.filter((row) => row.path === observation.path)) {
+            existing.lastCheckedAt = '2026-08-12T00:00:00.000Z';
+            existing.lastCheckedContentHash = observation.contentHash;
+          }
+          for (const issue of observation.issues) {
+            const fingerprint = boekwachterIssueFingerprint(observation.path, issue);
+            const existing = durableIssues.find((row) => row.fingerprint === fingerprint);
+            if (existing) {
+              existing.line = issue.line;
+              existing.lastSeenContentHash = observation.contentHash;
+              existing.lastCheckedContentHash = observation.contentHash;
+              continue;
+            }
+            const number = durableIssues.length + 1;
+            durableIssues.push({
+              ...issue,
+              id: `issue-${number}`,
+              ref: `BW-${number}`,
+              fingerprint,
+              path: observation.path,
+              status: 'open',
+              createdAt: '2026-08-12T00:00:00.000Z',
+              lastSeenAt: '2026-08-12T00:00:00.000Z',
+              lastSeenContentHash: observation.contentHash,
+              lastCheckedAt: '2026-08-12T00:00:00.000Z',
+              lastCheckedContentHash: observation.contentHash,
+            });
+          }
+        }
+      },
+      listProjectBoekwachterIssues: async () => durableIssues,
+      getProjectBoekwachterIssue: async (_projectId: string, ref: string) =>
+        durableIssues.find((row) => row.ref === ref) ?? null,
+      updateProjectBoekwachterIssue: async () => null,
+      settleProjectBoekwachterIssuesForTask: async () => 0,
     } as unknown as Store,
     home,
   );
@@ -41,7 +92,7 @@ afterEach(async () => {
 
 const fakeEmbed = async (texts: string[]) => texts.map(() => [] as number[]);
 
-function deps(review: (prompt: string) => Promise<string>): EnrichDeps {
+function deps(review: NonNullable<EnrichDeps['review']>): EnrichDeps {
   return { summarize: async () => '', embed: fakeEmbed, model: 'test-model', review };
 }
 
@@ -100,6 +151,41 @@ describe('ContentIndex.review end-to-end', () => {
 
     const map = await ci.mapRepo('c');
     expect(map.health).toMatchObject({ reviewedFiles: 3, avgHealth: 6, minorIssues: 3 });
+  });
+
+  it('retains an old issue but labels its line stale after the file hash changes', async () => {
+    await seedCode();
+    await ci.review(
+      'c',
+      deps(async () => VALID_REPLY),
+      10,
+      await builtinRubrics(),
+    );
+
+    const current = await ci.fileReview('c', 'src/a.ts');
+    expect(current.trackedIssues).toEqual([
+      expect.objectContaining({ ref: 'BW-1', line: 1, stale: false, status: 'open' }),
+    ]);
+
+    await writeFile(
+      join(dir, 'src', 'a.ts'),
+      '// the line layout changed\nexport function foo(x: string) {\n  return x.length;\n}\n',
+    );
+    const immediatelyAfterEdit = await ci.fileReview('c', 'src/a.ts');
+    expect(immediatelyAfterEdit.found).toBe(false);
+    expect(immediatelyAfterEdit.trackedIssues).toEqual([
+      expect.objectContaining({ ref: 'BW-1', line: 1, stale: true }),
+    ]);
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+    const afterEdit = await ci.fileReview('c', 'src/a.ts');
+    expect(afterEdit.found).toBe(false);
+    expect(afterEdit.trackedIssues).toEqual([
+      expect.objectContaining({ ref: 'BW-1', line: 1, stale: true, status: 'open' }),
+    ]);
+    expect((await ci.listFileIssues('c', {})).issues).toEqual([
+      expect.objectContaining({ ref: 'BW-1', line: 1, stale: true }),
+    ]);
   });
 
   it('reviews large files whole via absolute-numbered windows and merges the parts', async () => {
@@ -241,6 +327,36 @@ describe('ContentIndex.review end-to-end', () => {
     );
     const bare = await ci.fileReview('c', 'src/a.ts');
     expect(bare.review).toMatchObject({ model: 'test-model', provider: null, gezelName: null });
+  });
+
+  it('persists the completion target instead of the deps-level primary target', async () => {
+    await seedCode();
+    const attributed = deps(async () => ({
+      text: VALID_REPLY,
+      model: 'local-fallback-model',
+      provenance: {
+        provider: 'mlx',
+        gezelId: 'noor',
+        gezelName: 'Noor',
+        appVersion: '1.2.3',
+      },
+    }));
+    attributed.model = 'cloud-primary-model';
+    attributed.provenance = {
+      provider: 'openai',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+      appVersion: '1.2.3',
+    };
+
+    await ci.review('c', attributed, 10, await builtinRubrics());
+
+    expect((await ci.fileReview('c', 'src/a.ts')).review).toMatchObject({
+      model: 'local-fallback-model',
+      provider: 'mlx',
+      gezelId: 'noor',
+      gezelName: 'Noor',
+    });
   });
 
   it('never serves a stale review after an edit; re-review refills', async () => {

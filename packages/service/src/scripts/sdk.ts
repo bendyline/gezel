@@ -1,10 +1,22 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SdkTypesResponse } from '@bendyline/gezel';
 
 export const SDK_PACKAGE_NAME = '@bendyline/gezel-sdk';
+
+/**
+ * Keep dependencies nested inside the SDK checkout out of the script
+ * sandbox, while still copying an SDK whose OWN installed path lives under
+ * `node_modules`. Checking the absolute source path filtered out the package
+ * root in every published npm install and left gate scripts unable to import
+ * `@bendyline/gezel-sdk`.
+ */
+export function shouldVendorSdkPath(sdkDir: string, sourcePath: string): boolean {
+  const withinSdk = relative(sdkDir, sourcePath);
+  return !withinSdk.split(/[\\/]/).includes('node_modules');
+}
 
 /**
  * Locate the on-disk `@bendyline/gezel-sdk` package.

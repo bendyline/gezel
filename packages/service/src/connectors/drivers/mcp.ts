@@ -94,6 +94,17 @@ function deriveWindowCursor(records: RecordRef[]): string | undefined {
   return times.length ? times.sort().at(-1) : undefined;
 }
 
+/**
+ * Best-effort throttle detection for MCP tool errors. MCP has no typed
+ * rate-limit error, so this matches the transport's message text; a match
+ * turns the failure into an empty `rateLimited` batch (cursor kept) so the
+ * sync engine's jittered backoff engages instead of re-hitting the server
+ * every tick.
+ */
+export function isRateLimitToolError(message: string): boolean {
+  return /\b429\b|rate.?limit|too many requests/i.test(message);
+}
+
 export class McpConnectorAdapter implements ConnectorAdapter {
   readonly typeId: string;
   private readonly bridge = new McpBridge();
@@ -125,9 +136,17 @@ export class McpConnectorAdapter implements ConnectorAdapter {
       ...(list.args ?? {}),
       ...(list.cursorArg && cursor != null ? { [list.cursorArg]: cursor } : {}),
     };
-    const json = safeParse(
-      await this.bridge.callTool(list.tool, args, { budgetChars: INGEST_BUDGET }),
-    );
+    let text: string;
+    try {
+      text = await this.bridge.callTool(list.tool, args, { budgetChars: INGEST_BUDGET });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (isRateLimitToolError(message)) {
+        return { records: [], cursor, rateLimited: true };
+      }
+      throw err;
+    }
+    const json = safeParse(text);
     const items = (jget(json, list.itemsPath) as unknown[]) ?? [];
     const records: RecordRef[] = items.map((it, i) => {
       const ts = list.tsPath ? jget(it, list.tsPath) : undefined;

@@ -50,7 +50,7 @@ Body prose…
 
   `whats-new/` inverts this to get newest-first: a release article's order is
 
-  the negated calendar line, so `1.26223` carries `order: -26223`, and the
+  the negated calendar line, so `1.26224` carries `order: -26224`, and the
 
   section index sits at `-999999`. Nothing else needs touching when a release
 

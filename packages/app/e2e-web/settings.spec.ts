@@ -1,3 +1,5 @@
+import { mkdir, truncate, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
@@ -75,6 +77,28 @@ test.describe('settings', () => {
 
   test('DwarfStar appears in the header engine pill', async ({ page, daemon }) => {
     const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+    const legacyId = 'deepseek-v4-flash-284b-q2';
+    const legacyDir = join(daemon.home, 'engines', 'ds4', 'models', legacyId);
+    await mkdir(legacyDir, { recursive: true });
+    // Sparse file: realistic disk-size metadata without writing 81 GiB during
+    // the screenshot run. This manifest is the pre-current shape found on an
+    // upgraded install: identifiable, but deliberately not safe to run.
+    const legacyWeights = join(legacyDir, 'legacy.gguf');
+    await writeFile(legacyWeights, '');
+    await truncate(legacyWeights, 81 * 1024 ** 3);
+    await writeFile(
+      join(legacyDir, 'manifest.json'),
+      JSON.stringify({
+        id: legacyId,
+        engine: 'ds4',
+        filename: 'legacy.gguf',
+        huggingfaceRepo: 'antirez/deepseek-v4-gguf',
+        revision: 'legacy-revision',
+        sha256: 'a'.repeat(64),
+        approxSizeBytes: 81 * 1024 ** 3,
+        quantization: 'IQ2_XXS',
+      }),
+    );
     await client.updateConfig({ provider: 'ds4' });
     try {
       // The home workshop waits for a usable chat model before it mounts. This
@@ -105,6 +129,7 @@ test.describe('settings', () => {
         description: 'Settings — DeepSeek V4 / ds4 model manager and device-fit guidance',
       });
     } finally {
+      await client.deleteDs4Model(legacyId).catch(() => {});
       await client.updateConfig({ provider: 'copilot' });
     }
   });

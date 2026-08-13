@@ -141,6 +141,26 @@ describe('ContentIndex.aiShadows', () => {
     expect(transcribeAudio).toHaveBeenCalledTimes(1);
   });
 
+  it('terminally skips vector/icon formats the vision stack cannot decode', async () => {
+    await mkdir(join(dir, 'assets'), { recursive: true });
+    await writeFile(join(dir, 'assets', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    await writeFile(join(dir, 'assets', 'app.ico'), Buffer.from([0, 0, 1, 0, 1, 0]));
+    await writeFile(join(dir, 'assets', 'photo.png'), PNG_800x600);
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+    const describeImage = vi.fn(async (_abs: string) => ({ body: 'described' }));
+    const first = await ci.aiShadows('c', { describeImage }, 10);
+    // The undecodable formats count as handled (so the drive loop keeps
+    // draining) but never reach the model; only the png pays a call.
+    expect(describeImage).toHaveBeenCalledTimes(1);
+    expect(first?.produced).toBe(1);
+    // Terminal: nothing left pending, and a later sweep pays nothing.
+    expect((await ci.enrichmentCounts('c'))?.shadowsPending).toBe(0);
+    const second = await ci.aiShadows('c', { describeImage }, 10);
+    expect(second).toEqual({ files: 0, produced: 0, called: 0 });
+    expect(describeImage).toHaveBeenCalledTimes(1);
+  });
+
   it('caps retries for failing producers and skips silently when none are wired', async () => {
     await seedMedia();
     expect(await ci.aiShadows('c', {}, 10)).toEqual({ files: 0, produced: 0, called: 0 });

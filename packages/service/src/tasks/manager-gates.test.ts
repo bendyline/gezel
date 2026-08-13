@@ -1196,7 +1196,7 @@ describe('completion gates — judge checks (advisory ride-along + budget)', () 
 
 describe('completion gates — unsatisfiable under writes-off', () => {
   it('pauses without consuming an attempt when a failing workspace check cannot be repaired', async () => {
-    await store.updateProject('default', { allowGezelWrites: false });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const task = await tasks.create('default', {
       title: 'Dependency audit',
       description: 'workspace-path deliverable gate on a writes-off project.',
@@ -1227,7 +1227,9 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     const notes = await tasks.listNotes('default', task.num, buildId);
     expect(notes.some((n) => n.text.includes('Gate unsatisfiable — task paused'))).toBe(true);
     expect(
-      notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory')),
+      notes.some((n) =>
+        n.text.includes('Allow built-in tools and background work to modify the workspace'),
+      ),
     ).toBe(true);
   });
 
@@ -1236,7 +1238,7 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     // stalled gezel never makes one (Pull Request Review: it asked which
     // PR to review and the task sat active), so the step is judged when
     // it activates instead.
-    await store.updateProject('default', { allowGezelWrites: false });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const task = await tasks.create('default', {
       title: 'Dependency audit',
       description: 'entry step targets a workspace file nobody can write.',
@@ -1253,7 +1255,9 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     const notes = await tasks.listNotes('default', task.num, task.craftbook.steps[0]!.id);
     expect(notes.some((n) => n.text.includes('Step unsatisfiable — task paused'))).toBe(true);
     expect(
-      notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory')),
+      notes.some((n) =>
+        n.text.includes('Allow built-in tools and background work to modify the workspace'),
+      ),
     ).toBe(true);
   });
 
@@ -1262,7 +1266,7 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     // that only INSPECTS an existing file can still pass. Only a
     // deliverable that must be created (or changed) is hopeless.
     await writeWorkspaceFile('notes/scan.md', 'x'.repeat(200));
-    await store.updateProject('default', { allowGezelWrites: false });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const task = await tasks.create('default', {
       title: 'Verify the scan',
       description: 'gate over a file that is already on disk.',
@@ -1287,7 +1291,7 @@ describe('completion gates — unsatisfiable under writes-off', () => {
   });
 
   it('a drawer-targeted gate stays repairable on a writes-off project', async () => {
-    await store.updateProject('default', { allowGezelWrites: false });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const task = await tasks.create('default', {
       title: 'Threat model',
       description: 'artifact-drawer deliverable gate on a writes-off project.',
@@ -1334,7 +1338,7 @@ describe('completion gates — unsatisfiable under writes-off', () => {
   });
 
   it('fires the needs-help hook with gate_unsatisfiable on the policy pause', async () => {
-    await store.updateProject('default', { allowGezelWrites: false });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
     const events: { reason: string; ref: string; stepId?: string }[] = [];
     tasks.setTaskNeedsHelpHook(({ task, reason, stepId }) => {
       events.push({ reason, ref: task.ref, ...(stepId ? { stepId } : {}) });

@@ -24,7 +24,10 @@ export function ds4Routes(ctx: ServiceContext): Hono {
   app.use('*', machineEngineProxy(ctx, '/api/ds4', '/v1/remote/manage/ds4'));
 
   app.get('/models', async (c) => {
-    const installed = await ctx.ds4Models.listInstalled();
+    const [installed, unrecognized] = await Promise.all([
+      ctx.ds4Models.listInstalled(),
+      ctx.ds4Models.listUnrecognized?.() ?? Promise.resolve([]),
+    ]);
     const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
     // Decorate with the launch-context preview (effective window, override,
     // ceiling) the same way llama-cpp/mlx do. ds4 rows never carried these
@@ -34,7 +37,9 @@ export function ds4Routes(ctx: ServiceContext): Hono {
         const overrideContextTokens = overrides[`ds4:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
         try {
-          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id);
+          const plan = await ctx.chat.previewLocalEnginePlan('ds4', model.id, {
+            standalone: true,
+          });
           return {
             ...model,
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
@@ -76,7 +81,7 @@ export function ds4Routes(ctx: ServiceContext): Hono {
         }
       }),
     );
-    return c.json({ models });
+    return c.json({ models, unrecognized });
   });
 
   /**
@@ -98,6 +103,7 @@ export function ds4Routes(ctx: ServiceContext): Hono {
         try {
           const plan = await ctx.chat.previewLocalEnginePlan('ds4', manifest.id, {
             allowUninstalled: true,
+            standalone: true,
           });
           plans[manifest.id] = {
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),

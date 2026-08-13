@@ -24,6 +24,8 @@ function makeService(
     code?: ContentIndex['searchCode'];
     sessionHits?: SessionSearchHit[];
     documentHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    artifactFiles?: Record<string, string[]>;
+    artifactHits?: Array<{ path: string; lineStart: number; snippet: string }>;
   } = {},
 ) {
   const store = {
@@ -41,6 +43,11 @@ function makeService(
       engine: 'unavailable' as const,
       truncated: false,
     })),
+    searchArtifacts: vi.fn(async () => ({
+      results: opts.artifactHits ?? [],
+      truncated: false,
+    })),
+    listArtifactIndexFiles: vi.fn(async (id: string) => opts.artifactFiles?.[id] ?? []),
     findSymbol: vi.fn(async () => ({
       matches: [],
       truncated: false,
@@ -125,7 +132,7 @@ describe('SearchService.quickOpen', () => {
     } as unknown as Store;
     const svc = new SearchService(
       store,
-      {} as unknown as ContentIndex,
+      { listArtifactIndexFiles: vi.fn(async () => []) } as unknown as ContentIndex,
       {} as unknown as MemoryManager,
       { readFiles: vi.fn(async () => []) } as unknown as WorkspaceIndexManager,
     );
@@ -218,5 +225,36 @@ describe('SearchService.search (full)', () => {
     const { results } = await svc.search('style', { mode: 'full' });
     const docRows = results.filter((r) => r.id === 'document:guides/style.md');
     expect(docRows).toHaveLength(1);
+  });
+
+  it('surfaces artifact-corpus hits and catalog rows with source artifacts', async () => {
+    const record = 'data/bluesky/posts/2026-08/001--sunrise.md';
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Ops' }],
+      artifactFiles: { p1: [record] },
+      artifactHits: [{ path: record, lineStart: 5, snippet: 'sunrise over the haven' }],
+    });
+
+    const { results } = await svc.search('sunrise', { mode: 'full' });
+
+    const content = results.find((r) => r.kind === 'content' && r.source === 'artifacts');
+    expect(content).toMatchObject({
+      id: `content:p1:artifacts:${record}:5`,
+      title: '001--sunrise.md',
+      subtitle: `Ops · ${record}`,
+      snippet: 'sunrise over the haven',
+      projectId: 'p1',
+      path: record,
+      line: 5,
+    });
+
+    // The name catalog carries the indexed record too, as a file entry.
+    const file = results.find((r) => r.kind === 'file' && r.source === 'artifacts');
+    expect(file).toMatchObject({
+      id: `file:p1:artifacts:${record}`,
+      title: '001--sunrise.md',
+      projectId: 'p1',
+      path: record,
+    });
   });
 });

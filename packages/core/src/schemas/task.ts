@@ -368,6 +368,12 @@ export const TaskSchema = z.object({
         managedByGezelId: z.string().optional(),
       }),
       z.object({
+        /** A fix task linked back to one durable project-local BW issue. */
+        kind: z.literal('boekwachter-issue'),
+        issueRef: z.string().regex(/^BW-[1-9]\d*$/),
+        path: z.string().min(1),
+      }),
+      z.object({
         /**
          * A host materialized from a gezel template's `suggestedCraftbooks`
          * entry via the suggested-work layer. `suggestionKey` is the

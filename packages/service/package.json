@@ -3,15 +3,7 @@
   "version": "1.0.0",
   "description": "The Gezel daemon: HTTP API, task runner, sandbox, agent runtime.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "daemon",
-    "server",
-    "llm"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -70,14 +62,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
-    "@bendyline/gezel": "1.0.0",
-    "@bendyline/gezel-client": "1.0.0",
-    "@bendyline/gezel-catalog": "1.0.0",
-    "@bendyline/gezel-connectors-spectral": "1.0.0",
-    "@bendyline/gezel-mcp": "1.0.0",
-    "@bendyline/gezel-plugin-sdk": "1.0.0",
-    "@bendyline/gezel-script-stdlib": "1.0.0",
-    "@bendyline/gezel-sdk": "1.0.0",
+    "@atproto/api": "0.20.38",
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-catalog": "workspace:*",
+    "@bendyline/gezel-connectors-spectral": "workspace:*",
+    "@bendyline/gezel-mcp": "workspace:*",
+    "@bendyline/gezel-plugin-sdk": "workspace:*",
+    "@bendyline/gezel-script-stdlib": "workspace:*",
+    "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/squisq": "2.7.1",
     "@bendyline/squisq-cli": "2.5.4",
     "@bendyline/squisq-formats": "2.4.3",
@@ -93,7 +86,6 @@
     "hono": "4.12.34",
     "imapflow": "^1.4.8",
     "mailparser": "^3.9.14",
-    "node-pty": "^1.1.0",
     "nodemailer": "^9.0.3",
     "openai": "^6.48.0",
     "pino": "^10.3.1",
@@ -108,6 +100,9 @@
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1",
     "zod": "^4.4.3"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   },
   "peerDependencies": {
     "@huggingface/transformers": "^3.8.1",

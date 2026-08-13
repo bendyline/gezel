@@ -14,5 +14,5 @@ Run gezel eval suites (core scorecard, smoke, extended deep-dives) or single sce
 
 Closes the loop on gezel evaluations: pre-flight → run → score → report → strategic-check.
 
-> Converted from `.claude\skills\eval-run\SKILL.md` (skill "eval-run").
+> Converted from `.claude/skills/eval-run/SKILL.md` (skill "eval-run").
 > - 5 shell block(s) kept as prose (not statically convertible)

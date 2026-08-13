@@ -1,8 +1,10 @@
 import type {
   ChatSessionSummary,
+  ClaudePermissionMode,
   CodexPermissionMode,
   GezelSummary,
   NightShiftTasksResponse,
+  Project,
   Question,
   Task,
   TaskStatus,
@@ -10,6 +12,13 @@ import type {
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ensureCliProjectLead } from '../connection.js';
+import {
+  CLI_ENGAGEMENT_MODES,
+  CLI_ENGAGEMENT_MODE_USAGE,
+  cliEngagementModeOption,
+  parseCliEngagementMode,
+} from '../engagement-mode.js';
 import { activeAccessMode } from './active-access.js';
 import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashWordwheel } from './commands.js';
 import { ChatFeed } from './components/ChatFeed.js';
@@ -67,6 +76,7 @@ type Overlay =
   | null
   | 'project'
   | 'gezel'
+  | 'engagement-mode'
   | 'model'
   | 'thread'
   | 'task'
@@ -78,8 +88,12 @@ interface ProjectRow {
   id: string;
   name: string;
   workingDir?: string;
+  voormanGezelId?: string;
+  managedWorkspaceWritePolicy?: Project['managedWorkspaceWritePolicy'];
+  /** @deprecated Compatibility with project files written before the named policy. */
   allowGezelWrites?: boolean;
   codexPermissionMode?: CodexPermissionMode;
+  claudePermissionMode?: ClaudePermissionMode;
 }
 interface TaskTextPrompt {
   kind: 'create' | 'title' | 'description';
@@ -89,6 +103,7 @@ interface TaskTextPrompt {
 
 const HELP = [
   '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/mode — choose read-only, reactive, reactive+tasks, or full-play AI activity',
   '/thread — switch or start a chat thread',
   '/task — list, inspect, create, edit, assign, or change task status',
   '/start — choose a craftbook and start it as a task',
@@ -104,6 +119,7 @@ export function App(props: {
   client: GezelClient;
   initialProjectId: string;
   initialProjectName: string;
+  initialGezelId: string;
   /** Role-based labels are the compact TUI default. */
   boring?: boolean;
 }): JSX.Element {
@@ -305,6 +321,39 @@ export function App(props: {
     [client, note],
   );
 
+  const switchProject = useCallback(
+    async (id: string) => {
+      setOverlay(null);
+      const project = projects.find((candidate) => candidate.id === id);
+      if (!project || id === projectId) return;
+      try {
+        const gezelId = project.voormanGezelId ?? (await ensureCliProjectLead(client, id));
+        setProjectId(id);
+        setProjectName(project.name);
+        setActiveGezelId(gezelId);
+        setRows([]);
+        setTurns(new Map());
+        setActiveRuns(new Set());
+        setPendingInput(null);
+        setPendingQuestions([]);
+        setThreads([]);
+        setActiveThreadTitle(null);
+        setTasks([]);
+        setCraftbooks([]);
+        setCraftbookProjectType(null);
+        setSuggestedCraftbookIds(new Set());
+        setCraftbooksNeedingSetup(new Set());
+        setStartCategoryId(null);
+        setManagedTaskRef(null);
+        setTaskPrompt(null);
+        await ensureSession(gezelId, id);
+      } catch (err) {
+        note(`could not switch project: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, ensureSession, note, projectId, projects],
+  );
+
   const openThreadPicker = useCallback(async () => {
     if (!activeGezelId) return note('no active gezel yet.', 'error');
     if (threadsLoading) return;
@@ -374,15 +423,17 @@ export function App(props: {
             id: p.id,
             name: p.name,
             workingDir: p.workingDir,
+            voormanGezelId: p.voormanGezelId,
+            managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
             allowGezelWrites: p.allowGezelWrites,
             codexPermissionMode: p.codexPermissionMode,
+            claudePermissionMode: p.claudePermissionMode,
           })),
         );
-        const gezelId = cfg.meesterGezelId ?? gz.gezels[0]?.id ?? null;
+        const gezelId = props.initialGezelId;
         setActiveGezelId(gezelId);
         setStatus(null);
-        if (gezelId) await ensureSession(gezelId, projectId);
-        else note('no gezels available — create one with `gezel agent create`.', 'error');
+        await ensureSession(gezelId, projectId);
       } catch (err) {
         if (!cancelled) setStatus(`Failed to connect: ${errMsg(err)}`);
       }
@@ -507,6 +558,26 @@ export function App(props: {
   const rememberTask = useCallback((task: Task) => {
     setTasks((current) => sortTasks([...current.filter((item) => item.ref !== task.ref), task]));
   }, []);
+
+  const applyEngagementMode = useCallback(
+    async (requested: string) => {
+      const next = parseCliEngagementMode(requested);
+      if (!next) {
+        note(`usage: /mode ${CLI_ENGAGEMENT_MODE_USAGE}`, 'error');
+        return;
+      }
+      const option = cliEngagementModeOption(next);
+      setOverlay(null);
+      try {
+        const updated = await client.updateConfig({ aiEngagementMode: next });
+        setConfig(updated);
+        note(`AI mode → ${option.label}. ${option.description}`);
+      } catch (err) {
+        note(`could not change AI mode: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note],
+  );
 
   const startCraftbook = useCallback(
     async (book: StartCraftbook) => {
@@ -711,6 +782,10 @@ export function App(props: {
           return setOverlay('project');
         case 'gezel':
           return setOverlay('gezel');
+        case 'mode':
+          if (!rest.trim()) return setOverlay('engagement-mode');
+          await applyEngagementMode(rest);
+          return;
         case 'model': {
           if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
           if (activeGezel.fixedFunction) {
@@ -864,6 +939,7 @@ export function App(props: {
     [
       activeGezel,
       activeGezelId,
+      applyEngagementMode,
       client,
       config,
       craftbooks,
@@ -986,29 +1062,7 @@ export function App(props: {
           title="Switch project"
           items={projects.map((p) => ({ label: p.name, value: p.id, hint: p.workingDir }))}
           onCancel={() => setOverlay(null)}
-          onSelect={(id) => {
-            setOverlay(null);
-            const p = projects.find((x) => x.id === id);
-            if (!p || id === projectId) return;
-            setProjectId(id);
-            setProjectName(p.name);
-            setRows([]);
-            setTurns(new Map());
-            setActiveRuns(new Set());
-            setPendingInput(null);
-            setPendingQuestions([]);
-            setThreads([]);
-            setActiveThreadTitle(null);
-            setTasks([]);
-            setCraftbooks([]);
-            setCraftbookProjectType(null);
-            setSuggestedCraftbookIds(new Set());
-            setCraftbooksNeedingSetup(new Set());
-            setStartCategoryId(null);
-            setManagedTaskRef(null);
-            setTaskPrompt(null);
-            if (activeGezelId) void ensureSession(activeGezelId, id);
-          }}
+          onSelect={(id) => void switchProject(id)}
         />
       ) : null}
       {overlay === 'gezel' ? (
@@ -1028,6 +1082,19 @@ export function App(props: {
             setActiveThreadTitle(null);
             void ensureSession(id, projectId);
           }}
+        />
+      ) : null}
+      {overlay === 'engagement-mode' ? (
+        <Picker
+          title="Choose AI engagement mode"
+          items={CLI_ENGAGEMENT_MODES.map((option) => ({
+            label: option.label,
+            value: option.name,
+            hint: option.description,
+          }))}
+          initialValue={cliEngagementModeOption(config?.aiEngagementMode).name}
+          onCancel={() => setOverlay(null)}
+          onSelect={(selected) => void applyEngagementMode(selected)}
         />
       ) : null}
       {overlay === 'model' ? (

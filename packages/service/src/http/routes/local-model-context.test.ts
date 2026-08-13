@@ -18,7 +18,7 @@ const installed = {
 const emptyStore = { readConfig: async () => ({}) };
 
 describe('local model inventory context caps', () => {
-  it('adds the live llama.cpp admission cap without replacing the advertised window', async () => {
+  it('adds the standalone llama.cpp admission cap without replacing the advertised window', async () => {
     const previewLocalEnginePlan = vi.fn(async () => ({
       contextWindow: 65_536,
       plannedResidentBytes: 9_000_000_000,
@@ -43,7 +43,9 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('llama-cpp', 'local-model', {
+      standalone: true,
+    });
   });
 
   it('carries the slot reservation alongside the single-chat footprint', async () => {
@@ -142,7 +144,9 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('mlx', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('mlx', 'local-model', {
+      standalone: true,
+    });
   });
 
   it('marks a llama.cpp model whose selected context policy cannot fit', async () => {
@@ -273,6 +277,42 @@ describe('local model inventory context caps', () => {
         },
       ],
     });
-    expect(previewLocalEnginePlan).toHaveBeenCalledWith('ds4', 'local-model');
+    expect(previewLocalEnginePlan).toHaveBeenCalledWith('ds4', 'local-model', {
+      standalone: true,
+    });
+  });
+
+  it('returns rejected ds4 directories as management-only inventory rows', async () => {
+    const ctx = {
+      ds4Models: {
+        listInstalled: vi.fn(async () => []),
+        listUnrecognized: vi.fn(async () => [
+          {
+            id: 'deepseek-v4-flash-284b-q2',
+            name: 'DeepSeek V4 Flash (IQ2_XXS)',
+            bytes: 86_720_111_488,
+            updatedAt: '2026-06-29T15:11:58.000Z',
+            reason: 'This model was installed by an older version of Gezel.',
+            canUpdate: true,
+          },
+        ]),
+      },
+      chat: { previewLocalEnginePlan: vi.fn() },
+      store: emptyStore,
+    } as unknown as ServiceContext;
+
+    const response = await ds4Routes(ctx).request('http://test/models');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [],
+      unrecognized: [
+        {
+          id: 'deepseek-v4-flash-284b-q2',
+          bytes: 86_720_111_488,
+          canUpdate: true,
+        },
+      ],
+    });
   });
 });

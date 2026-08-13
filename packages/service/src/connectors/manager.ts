@@ -26,6 +26,7 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import { normalizeHttpsOrigin } from '../secrets/origins.js';
 import type { SecretStore } from '../secrets/types.js';
 import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
@@ -33,12 +34,15 @@ import { ScriptConnectorAdapter } from './drivers/script.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
 import { ProjectLocks } from './lock.js';
 import {
+  type LongLivedExchange,
   type OAuthEndpoints,
   buildAuthorizeUrl,
   createPkce,
   exchangeAuthCode,
+  exchangeLongLivedToken,
+  parseLongLivedExchange,
   randomState,
-  resolveOAuthClientFromEnv,
+  resolveOAuthClient,
   validateOAuthEndpoints,
 } from './oauth.js';
 import { NATIVE_ADAPTERS, connectorCredentialName, connectorSecretKey } from './registry.js';
@@ -62,6 +66,41 @@ import {
 const log = createLogger('connectors');
 
 const DEFAULT_BACKFILL_LIMIT = 500;
+
+/**
+ * Resolve a connector type's declared `allowedOrigins` against a binding's
+ * config. Entries are literal HTTPS origins or `$config.<dot.path>`
+ * placeholders (GitHub Enterprise's `apiBaseUrl` is the motivating case).
+ * Invalid or unresolvable entries are dropped with a warning — an authored
+ * typo must degrade to "that origin isn't allowed", never to a write of a
+ * non-origin into the project's allowlist (the project schema would reject
+ * the whole patch).
+ */
+export function resolveDeclaredOrigins(
+  manifest: Pick<ConnectorTypeManifest, 'allowedOrigins' | 'id'>,
+  config: Record<string, unknown> | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const entry of manifest.allowedOrigins ?? []) {
+    let raw = entry;
+    if (entry.startsWith('$config.')) {
+      let value: unknown = config ?? {};
+      for (const part of entry.slice('$config.'.length).split('.')) {
+        value =
+          value && typeof value === 'object' ? (value as Record<string, unknown>)[part] : undefined;
+      }
+      if (typeof value !== 'string' || !value) continue; // unset optional config — not an error
+      raw = value;
+    }
+    const origin = normalizeHttpsOrigin(raw);
+    if (origin) {
+      if (!out.includes(origin)) out.push(origin);
+    } else {
+      log.warn(`connector ${manifest.id}: dropped invalid allowedOrigins entry '${entry}'`);
+    }
+  }
+  return out;
+}
 
 /**
  * Corpus root for a binding: `data/<slug(displayName || type)>`, suffixed
@@ -416,6 +455,12 @@ interface PendingConnectorOAuth {
   clientId: string;
   clientSecret?: string;
   endpoints: OAuthEndpoints;
+  /** Meta-style post-exchange trade for providers that issue no refresh token. */
+  longLivedExchange?: LongLivedExchange;
+  /** LinkedIn-style: no refresh token AND no exchange — the access token
+   *  itself is simply long-lived, so a missing refresh token is not a
+   *  failure. */
+  longLived?: boolean;
   redirectUri: string;
   verifier: string;
   createdAt: number;
@@ -496,12 +541,24 @@ export class ConnectorManager {
       };
       // A `script` connector's fetch script reaches its credential parent-side
       // via `gezel.http.authed` — grant the named credential on the project so
-      // the plaintext never enters the sandbox.
-      let grantPatch: { grantedCredentials?: string[] } = {};
+      // the plaintext never enters the sandbox, and pin the manifest's
+      // declared destination origins for that credential name (without an
+      // entry, the dispatcher's origin allowlist denies every authed fetch).
+      let grantPatch: {
+        grantedCredentials?: string[];
+        credentialAllowedOrigins?: Record<string, string[]>;
+      } = {};
       if (type.driver === 'script') {
         const grant = connectorCredentialName(input.type, id);
         const grants = current.grantedCredentials ?? [];
         if (!grants.includes(grant)) grantPatch = { grantedCredentials: [...grants, grant] };
+        const origins = resolveDeclaredOrigins(type, binding.config);
+        if (origins.length > 0) {
+          grantPatch.credentialAllowedOrigins = {
+            ...(current.credentialAllowedOrigins ?? {}),
+            [grant]: origins,
+          };
+        }
       }
       await this.opts.store.updateProject(project.id, {
         connectors: [...existing, binding],
@@ -554,19 +611,31 @@ export class ConnectorManager {
       clientIdEnv?: string;
       clientSecretEnv?: string;
       authParams?: Record<string, string>;
+      longLivedExchange?: unknown;
+      longLived?: unknown;
     };
     if (shape.kind !== 'oauth2' || !shape.authorizeUrl || !shape.tokenUrl) {
       throw new Error(`connector type '${input.type}' is not an OAuth type`);
     }
-    const { clientId, clientSecret } = resolveOAuthClientFromEnv(
-      shape.clientIdEnv ?? '',
-      shape.clientSecretEnv,
-    );
+    // Env vars are the operator/dev override; the Settings-registered
+    // bring-your-own app (config.oauthClients + SecretStore secret) is the
+    // desktop path, read lazily only on an env miss. The resolved client
+    // rides the pending entry, is persisted into the credential blob at
+    // completion, and is never re-resolved at refresh time.
+    const { clientId, clientSecret } = await resolveOAuthClient({
+      ...(shape.clientIdEnv ? { clientIdEnv: shape.clientIdEnv } : {}),
+      ...(shape.clientSecretEnv ? { clientSecretEnv: shape.clientSecretEnv } : {}),
+      getConfiguredClients: async () => (await this.opts.store.readConfig()).oauthClients,
+      getSecret: (key) => this.opts.secrets.get(key),
+    });
     const endpoints: OAuthEndpoints = validateOAuthEndpoints({
       authEndpoint: shape.authorizeUrl,
       tokenEndpoint: shape.tokenUrl,
       scopes: (shape.scopes ?? '').split(' ').filter(Boolean),
     });
+    // Validated up front so a malformed manifest fails at link start, before
+    // the user has consented in the browser.
+    const longLivedExchange = parseLongLivedExchange(shape.longLivedExchange);
     const { verifier, challenge } = createPkce();
     const state = randomState();
     this.gcPendingOAuth();
@@ -580,6 +649,8 @@ export class ConnectorManager {
       clientId,
       ...(clientSecret ? { clientSecret } : {}),
       endpoints,
+      ...(longLivedExchange ? { longLivedExchange } : {}),
+      ...(shape.longLived === true ? { longLived: true } : {}),
       redirectUri: input.redirectUri,
       verifier,
       createdAt: Date.now(),
@@ -616,21 +687,55 @@ export class ConnectorManager {
         codeVerifier: pending.verifier,
         redirectUri: pending.redirectUri,
       });
-      if (!tokens.refreshToken) {
-        throw new Error('OAuth succeeded but no refresh token was returned (need offline access).');
+      let credential: string;
+      if (pending.longLivedExchange) {
+        // Meta issues no refresh token: trade the short-lived token for the
+        // ~60-day one and store the refresh URL so the adapter can renew it
+        // in place (`ig_refresh_token`) instead of using a refresh token.
+        const longLived = await exchangeLongLivedToken({
+          exchangeUrl: pending.longLivedExchange.exchangeUrl,
+          accessToken: tokens.accessToken,
+          ...(pending.clientSecret ? { clientSecret: pending.clientSecret } : {}),
+        });
+        credential = JSON.stringify({
+          accessToken: longLived.accessToken,
+          expiresAt: longLived.expiresAt,
+          refreshMode: 'long-lived-exchange',
+          refreshUrl: pending.longLivedExchange.refreshUrl,
+        });
+      } else if (pending.longLived && !tokens.refreshToken) {
+        // LinkedIn-style providers issue refresh tokens only to approved
+        // partners; an ordinary app's code exchange yields just a long-lived
+        // (~60 day) access token, with no renewal endpoint either. That is
+        // not a failure: persist the token with refreshMode 'none' and let
+        // the adapter surface an actionable reconnect error once it expires.
+        // When such a provider DOES return a refresh token, the standard
+        // path below persists it and refresh works as usual.
+        credential = JSON.stringify({
+          accessToken: tokens.accessToken,
+          expiresAt: tokens.expiresAt,
+          refreshMode: 'none',
+        });
+      } else {
+        if (!tokens.refreshToken) {
+          throw new Error(
+            'OAuth succeeded but no refresh token was returned (need offline access).',
+          );
+        }
+        const cred = {
+          provider: pending.config.provider,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+          clientId: pending.clientId,
+          ...(pending.clientSecret ? { clientSecret: pending.clientSecret } : {}),
+          ...(pending.config.tenant ? { tenant: pending.config.tenant } : {}),
+        };
+        credential = JSON.stringify(cred);
       }
-      const cred = {
-        provider: pending.config.provider,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresAt,
-        clientId: pending.clientId,
-        ...(pending.clientSecret ? { clientSecret: pending.clientSecret } : {}),
-        ...(pending.config.tenant ? { tenant: pending.config.tenant } : {}),
-      };
       pending.completion = {
         bindingId: `${pending.type}:${randomUUID().slice(0, 8)}`,
-        credential: JSON.stringify(cred),
+        credential,
       };
     }
     const binding = await this.bind(project, {
@@ -653,18 +758,28 @@ export class ConnectorManager {
     }
   }
 
-  /** Remove a binding + its stored credential. */
+  /** Remove a binding + its stored credential (and its origin allowlist entry). */
   async unbind(project: ProjectDetail, bindingId: string): Promise<void> {
     return this.withLock(project.id, async () => {
-      const existing = (await this.reread(project)).connectors ?? [];
+      const current = await this.reread(project);
+      const existing = current.connectors ?? [];
       const binding = existing.find((b) => b.id === bindingId);
       if (binding) {
         await this.opts.secrets
           .delete(connectorSecretKey(binding.type, binding.id))
           .catch(() => {});
       }
+      let originsPatch: { credentialAllowedOrigins?: Record<string, string[]> } = {};
+      if (binding && current.credentialAllowedOrigins) {
+        const credName = connectorCredentialName(binding.type, binding.id);
+        if (credName in current.credentialAllowedOrigins) {
+          const { [credName]: _removed, ...rest } = current.credentialAllowedOrigins;
+          originsPatch = { credentialAllowedOrigins: rest };
+        }
+      }
       await this.opts.store.updateProject(project.id, {
         connectors: existing.filter((b) => b.id !== bindingId),
+        ...originsPatch,
       });
       await this.opts.store.historyManager
         ?.log({
@@ -741,6 +856,35 @@ export class ConnectorManager {
     });
   }
 
+  /**
+   * Idempotent sync-time heal for the origin allowlist: bindings created
+   * before their type declared `allowedOrigins` (or before this write path
+   * existed) get the entry on their next sync, with no migration step.
+   * Called under the project lock.
+   */
+  private async ensureDeclaredOrigins(
+    project: ProjectDetail,
+    binding: ProjectConnectorBinding,
+    manifest: ConnectorTypeManifest,
+  ): Promise<void> {
+    if (manifest.driver !== 'script' || !manifest.allowedOrigins?.length) return;
+    const expected = resolveDeclaredOrigins(manifest, binding.config);
+    if (expected.length === 0) return;
+    const credName = connectorCredentialName(binding.type, binding.id);
+    const existing = project.credentialAllowedOrigins?.[credName];
+    if (existing && JSON.stringify([...existing].sort()) === JSON.stringify([...expected].sort())) {
+      return;
+    }
+    await this.opts.store
+      .updateProject(project.id, {
+        credentialAllowedOrigins: {
+          ...(project.credentialAllowedOrigins ?? {}),
+          [credName]: expected,
+        },
+      })
+      .catch((err) => log.warn(`origin heal failed for ${binding.id}:`, err));
+  }
+
   /** The per-binding sync body — always called under the project lock. */
   private async syncBindingInner(
     project: ProjectDetail,
@@ -756,6 +900,7 @@ export class ConnectorManager {
         binding.version,
         binding.sourceId ?? 'bundled',
       );
+      await this.ensureDeclaredOrigins(project, binding, resolved.manifest);
       const adapter = await createConnectorAdapter(resolved.manifest, binding, {
         secrets: this.opts.secrets,
         store: this.opts.store,
@@ -795,6 +940,12 @@ export class ConnectorManager {
         scopes: r.scopes ?? [],
         ...(r.error ? {} : { lastSyncedAt }),
       }).catch(() => {});
+      // Corpus records live under artifacts, outside the workspace indexer's
+      // walk — the dedicated artifacts index is what makes them searchable.
+      // Fire-and-forget; the façade debounces per project.
+      if ((r.written + r.pruned > 0 || migrated) && this.opts.contentIndex) {
+        this.opts.contentIndex.refreshArtifacts(project.id).catch(() => {});
+      }
       // The content index scans the workspace, not artifacts. A one-time
       // refresh after migration removes the corpus's old workspace rows;
       // ordinary artifact-only syncs do not trigger a needless code re-index.

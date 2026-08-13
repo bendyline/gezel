@@ -18,7 +18,7 @@ describe('activeAccessMode', () => {
     expect(
       activeAccessMode({
         provider: 'openai',
-        project: { workingDir: '/repo', allowGezelWrites: true },
+        project: { workingDir: '/repo', managedWorkspaceWritePolicy: 'allow' },
         gezel: undefined,
         config: null,
       }),
@@ -70,6 +70,19 @@ describe('activeAccessMode', () => {
         config: null,
       }),
     ).toBe('read-only');
+    expect(
+      activeAccessMode({
+        provider: 'anthropic-cli',
+        project: { claudePermissionMode: 'bypassPermissions' },
+        gezel: {
+          id: 'reviewer',
+          name: 'Reviewer',
+          claudePermissionMode: 'plan',
+          updatedAt: '2026-08-08T00:00:00.000Z',
+        },
+        config: null,
+      }),
+    ).toBe('full access');
     expect(
       activeAccessMode({
         provider: 'copilot',

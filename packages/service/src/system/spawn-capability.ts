@@ -23,7 +23,7 @@
  * can only ever answer "ok" is a process spawn nobody needed.
  */
 import { spawn } from 'node:child_process';
-import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 /** `null` means "not applicable here", never "unknown but fine". */
 export type SpawnCapability = 'ok' | 'denied' | null;
@@ -82,7 +82,7 @@ export function probeChildProcessSpawn(options: ProbeSpawnOptions = {}): Promise
     try {
       child = spawnImpl(comspec, ['/d', '/c', 'exit'], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        ...windowsDetachedSpawnOptions(platform),
+        ...windowsHeadlessSpawnOptions(platform),
       });
     } catch (err) {
       settle(deniedOrOk(err));

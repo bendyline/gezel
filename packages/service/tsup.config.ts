@@ -59,6 +59,9 @@ export default defineConfig({
   // path via `getLoadablePath()` relative to its own package dir on disk —
   // bundling it would break that resolution. Keep it external; loaded from
   // node_modules at runtime. (`node:sqlite` is a builtin, already external.)
+  // `node-pty` is an optional native terminal adapter, dynamically imported
+  // only on the first terminal command. Keep that import external so the
+  // service entrypoint can load when optional dependencies were omitted.
   // squisq (document import/export) + its XML polyfill are loaded from
   // node_modules at runtime. squisq is large and has its own dynamic-require
   // internals (jszip, pdfjs-dist); bundling it into the daemon is both wasteful
@@ -69,6 +72,7 @@ export default defineConfig({
     'typescript',
     'undici',
     'sqlite-vec',
+    'node-pty',
     '@xmldom/xmldom',
     /^@bendyline\/squisq/,
     // Mail stack: imapflow (IMAP client) + mailparser (MIME) have dynamic

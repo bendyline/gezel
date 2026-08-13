@@ -95,7 +95,7 @@ async function createExternalProject(
   const project = (await created.json()) as { id: string };
   const updated = await api(service, `/api/projects/${project.id}`, {
     method: 'PUT',
-    body: JSON.stringify({ workingDir, allowGezelWrites: true }),
+    body: JSON.stringify({ workingDir, managedWorkspaceWritePolicy: 'allow' }),
   });
   expect(updated.status).toBe(200);
   return project.id;

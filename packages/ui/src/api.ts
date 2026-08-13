@@ -67,10 +67,15 @@ declare global {
        * redirect listener and returns its URI to feed into the service's
        * `/mail/oauth/start`; `mailOAuthAwait` opens the consent page in the
        * browser and resolves the captured authorization `code` + `state`.
-       * Absent outside Electron — the renderer falls back to finishing the
-       * link from the project's Mail tab.
+       * `opts.port` pins the listener to a fixed port for providers that
+       * match redirect URIs exactly (X, Meta) — declared by the connector
+       * manifest's `clientSetup.redirectPort`; omitted, the OS picks an
+       * ephemeral port. Absent outside Electron — the renderer falls back
+       * to finishing the link from the project's Mail tab.
        */
-      mailOAuthListen?: () => Promise<{ requestId: string; redirectUri: string }>;
+      mailOAuthListen?: (opts?: {
+        port?: number;
+      }) => Promise<{ requestId: string; redirectUri: string }>;
       mailOAuthAwait?: (
         requestId: string,
         authUrl: string,

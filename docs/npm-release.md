@@ -113,6 +113,25 @@ Two consequences worth knowing:
 - Published cross-deps end up **exact** (`1.4.0`, not `^1.4.0`). For packages
   this interdependent that is the coupling we want.
 
+`multi-semantic-release` has its own prepare-time dependency rewrite and turns
+local `workspace:*` declarations into concrete versions in the source
+manifest. That source rewrite must not reach Git: it makes the workspace
+lockfile stale and disables pnpm's explicit local-package contract.
+[`scripts/prepare-package.mjs`](../scripts/prepare-package.mjs) therefore
+restores every local dependency to `workspace:*` after
+`multi-semantic-release` computes the release graph but before
+`@semantic-release/git` commits `package.json`. Package version fields remain
+stamped, so the later `pnpm publish` still resolves each workspace dependency
+against the exact sibling version selected for the release. Plugin ordering in
+`.releaserc.json` is load-bearing: the exec prepare hook must stay before the
+git plugin.
+
+Both `pnpm validate` and the end of the npm release workflow run
+`pnpm check:workspace-deps`; the post-release gate also performs a frozen,
+lockfile-only install. If a release-tool update changes prepare behavior, the
+release fails rather than leaving concrete sibling versions or a stale
+`pnpm-lock.yaml` on `main`.
+
 The alternative — plain semver cross-deps — was rejected because
 `linkWorkspacePackages` defaults to `false` in pnpm 10/11, so pnpm would try
 to resolve siblings from the registry during local development.

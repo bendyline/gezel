@@ -274,6 +274,14 @@ tool rejecting the same paths early), because a deleted record is never re-fetch
 cursor has already advanced past it. Script-dispatch artifact mutations remain the
 documented residual gap.
 
+**Corpus records are searchable.** A per-project artifacts index
+([index-store/artifacts-indexer.ts](../packages/service/src/index-store/artifacts-indexer.ts))
+walks `artifacts/data/**` after each sync that wrote or pruned records — `.md` records only,
+skipping the `_`-prefixed mutable surface and `attachments/` — and feeds a docs-FTS collection
+in the account-private sidecar (`<home>/projects/<id>/index/artifacts.db`, never inside the
+artifacts tree). The unified titlebar search surfaces those hits alongside workspace content
+with `source: 'artifacts'`; the workspace content index still never walks the corpus.
+
 ## The isolation boundary — what it buys, and its one caveat
 
 Precisely what is isolated: the **credentials and the network fetch**. The connector process
@@ -314,6 +322,34 @@ configuration is a **human-in-the-loop step** — the Meester or a settings flow
 call — and its UX (OAuth consent screens, IMAP passwords, revocation, error surfacing via the
 binding's `lastError`) is the genuinely expensive 80% of every new type. The contract keeps
 that cost inside the adapter; it does not remove it.
+
+### Bring your own OAuth app
+
+Gezel is open source and ships **no OAuth client of its own** — an embedded client ID/secret
+would be public the moment it shipped, and for providers like X the API quota bills the app
+owner. Each install therefore registers its own developer app per provider. Resolution
+ladder (`resolveOAuthClient` in [connectors/oauth.ts](../packages/service/src/connectors/oauth.ts)):
+
+1. **Env override** — the env vars named by the type's `secretShape.clientIdEnv` /
+   `clientSecretEnv` (operator/dev path; wins when set).
+2. **Settings-registered app** — the client ID lives in `config.oauthClients[<clientIdEnv>]`
+   (config.json — client IDs are public identifiers) and the client secret in the
+   SecretStore under the `oauth-client` toolset namespace, keyed by the same name. Managed
+   through `/api/oauth-clients` (listings never reflect the secret back, only `hasSecret`)
+   and registered in-product by the bind flow's setup panel in the project Connections tab.
+
+Keying by the manifest's `clientIdEnv` *name* means one registered provider app serves every
+type that names the same pair — `mail-gmail` and `calendar-google` share one Google app.
+
+Manifests describe that panel through an optional `secretShape.clientSetup` block:
+`providerLabel`, `docsUrl` (the provider's developer console), `appTypeNote` (what kind of
+app to create), `secretRequired` (leave false for PKCE public clients — the secret input
+reads as optional), and — only for providers that match redirect URIs **exactly** (X, Meta)
+— a `redirectPort`. With a `redirectPort` declared, the desktop shell pins its loopback
+listener to that fixed port and the panel shows the literal
+`http://127.0.0.1:<port>/callback` to register, with `redirectNote` carrying provider
+quirks. Without one, the listener keeps its ephemeral port — RFC 8252 providers (Google,
+Microsoft) accept any loopback port, so there is nothing exact to register.
 
 ## Write-back and the morning briefing
 

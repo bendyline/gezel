@@ -100,5 +100,65 @@ describe('ScriptConnectorAdapter', () => {
         raw: { id: 7, title: 'Seven', body: 'Issue body' },
       },
     ]);
+    // A clean batch carries no throttle/continuation flags.
+    expect(batch.rateLimited).toBeUndefined();
+    expect(batch.partial).toBeUndefined();
+  });
+
+  it('passes rateLimited/partial from the script output through to the batch', async () => {
+    const runner = {
+      run: async () =>
+        ({
+          status: 'ok',
+          output: {
+            records: [],
+            cursor: 'kept-clean-cursor',
+            rateLimited: true,
+            partial: true,
+          },
+        }) as Awaited<ReturnType<ScriptRunner['run']>>,
+    } as unknown as ScriptRunner;
+    const adapter = new ScriptConnectorAdapter(
+      TYPE,
+      { id: 'github-issues:deadbeef', type: 'github-issues', config: {} },
+      {
+        projectId: 'alpha',
+        scriptRunner: runner,
+        store: {} as Store,
+        secrets: {} as SecretStore,
+      },
+    );
+
+    const batch = await adapter.listChangesSince('', 'prior');
+    expect(batch).toEqual({
+      records: [],
+      cursor: 'kept-clean-cursor',
+      rateLimited: true,
+      partial: true,
+    });
+  });
+
+  it('ignores non-boolean throttle flags from script output', async () => {
+    const runner = {
+      run: async () =>
+        ({
+          status: 'ok',
+          output: { records: [], cursor: null, rateLimited: 'yes', partial: 1 },
+        }) as Awaited<ReturnType<ScriptRunner['run']>>,
+    } as unknown as ScriptRunner;
+    const adapter = new ScriptConnectorAdapter(
+      TYPE,
+      { id: 'github-issues:deadbeef', type: 'github-issues', config: {} },
+      {
+        projectId: 'alpha',
+        scriptRunner: runner,
+        store: {} as Store,
+        secrets: {} as SecretStore,
+      },
+    );
+
+    const batch = await adapter.listChangesSince('', null);
+    expect(batch.rateLimited).toBeUndefined();
+    expect(batch.partial).toBeUndefined();
   });
 });

@@ -104,7 +104,7 @@ interface MatrixScenario {
   securityPolicy: ResolvedSecurityPolicy;
   /**
    * Per-project workspace writability for the scenario (see
-   * `projectWorkspaceWritable`). `false` exercises the edits-off prompt
+   * `projectManagedWorkspaceWritable`). `false` exercises the edits-off prompt
    * contract (write tools stripped + posture note); omitted → writable.
    */
   workspaceWritable?: boolean;
@@ -209,6 +209,13 @@ function scenariosForRole(
   const locked = resolveSecurityPolicy({
     securityPolicy: securityPolicyForLevel('super-lockdown'),
   });
+  // The default (lockdown) posture never grants the outbound connector
+  // write tools in production — the chat manager gates them on
+  // allowMail/allowExternalServices — so those scenarios carry the posture
+  // that actually co-occurs with the grant.
+  const servicesOn = resolveSecurityPolicy({
+    securityPolicy: securityPolicyForLevel('free'),
+  });
   const common: MatrixScenario[] = [
     {
       id: 'generic-project-chat',
@@ -293,8 +300,15 @@ function scenariosForRole(
         id: 'mail-connector-context',
         latestUserMessage: 'Draft a reply for the connected mailbox.',
         workspaceFiles: [],
-        securityPolicy: normal,
+        securityPolicy: servicesOn,
         contextualBuiltinTools: ['draft_email', 'queue_email', 'send_email'],
+      },
+      {
+        id: 'social-connector-context',
+        latestUserMessage: 'Draft a short post announcing the release for the connected account.',
+        workspaceFiles: [],
+        securityPolicy: servicesOn,
+        contextualBuiltinTools: ['draft_post', 'queue_post', 'publish_post'],
       },
       {
         id: 'generic-connector-context',
@@ -747,6 +761,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
   const requiredConditionalCoverage: Array<[scenario: string, tool: string]> = [
     ['craftbook-editor-context', 'craftbook_update_step'],
     ['mail-connector-context', 'draft_email'],
+    ['social-connector-context', 'draft_post'],
     ['generic-connector-context', 'draft_connector_action'],
   ];
   const missingConditionals = requiredConditionalCoverage.filter(

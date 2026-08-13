@@ -109,8 +109,12 @@ import type {
   FindSymbolResponse,
   FireReportActionRequest,
   FireReportActionResponse,
+  FixBoekwachterIssueRequest,
+  FixBoekwachterIssueResponse,
   GenerateGezelAboutRequest,
   GenerateGezelIconRequest,
+  GetBoekwachterIssueRequest,
+  GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
   GezelGender,
   GezelGrowthResponse,
@@ -213,6 +217,8 @@ import type {
   OutlineFileResponse,
   PageCheckRequest,
   PageCheckResponse,
+  PageReadRequest,
+  PageReadResponse,
   PendingImports,
   Poppetje,
   PreviewLogEntry,
@@ -312,6 +318,8 @@ import type {
   TransformStreamEvent,
   TransformTextRequest,
   UnifiedSearchResponse,
+  UpdateBoekwachterIssueRequest,
+  UpdateBoekwachterIssueResponse,
   UpdateConfigRequest,
   UpdateCraftbookRequest,
   UpdateGezelAboutRequest,
@@ -1532,6 +1540,28 @@ export interface IncompleteModelDownload {
 }
 
 /**
+ * A model directory with a manifest that the current daemon cannot safely
+ * load. The files stay visible in Settings so an older install can be updated
+ * from today's catalog or explicitly removed instead of masquerading as an
+ * empty model slot.
+ */
+export interface UnrecognizedLocalModel {
+  id: string;
+  /** Catalog or legacy-manifest display name, when one can be recovered. */
+  name?: string;
+  /** Total bytes held by the model directory. */
+  bytes: number;
+  /** ISO timestamp of the newest file in the directory. */
+  updatedAt: string;
+  /** User-facing explanation of why the current daemon cannot load it. */
+  reason: string;
+  /** True when the same id still has a compatible source in today's catalog. */
+  canUpdate: boolean;
+  /** Machine/shared overlays cannot be removed by this user daemon. */
+  readOnly?: boolean;
+}
+
+/**
  * One installed llama.cpp model on disk. Returned by
  * {@link GezelClient.listLlamaCppModels}.
  */
@@ -2366,6 +2396,28 @@ export class GezelClient {
     return this.request('POST', `/api/channels/${encodeURIComponent(name)}/test`);
   }
 
+  /**
+   * Bring-your-own OAuth apps (Settings → Connections). Keys are the
+   * connector manifest's `clientIdEnv` name; the secret is write-only —
+   * listings carry only `hasSecret`.
+   */
+  listOAuthClients(): Promise<{
+    clients: Array<{ key: string; clientId: string; hasSecret: boolean }>;
+  }> {
+    return this.request('GET', '/api/oauth-clients');
+  }
+
+  putOAuthClient(
+    key: string,
+    body: { clientId: string; clientSecret?: string | null },
+  ): Promise<{ ok: boolean }> {
+    return this.request('PUT', `/api/oauth-clients/${encodeURIComponent(key)}`, body);
+  }
+
+  deleteOAuthClient(key: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/oauth-clients/${encodeURIComponent(key)}`);
+  }
+
   /** Mint a scoped artifacts-preview lease for a first-party client. */
   createProjectPreviewUrl(
     projectId: string,
@@ -2926,7 +2978,10 @@ export class GezelClient {
 
   // ── llama.cpp local model management ──
 
-  listLlamaCppModels(): Promise<{ models: LlamaCppInstalledModel[] }> {
+  listLlamaCppModels(): Promise<{
+    models: LlamaCppInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/llama-cpp/models');
   }
 
@@ -3022,7 +3077,10 @@ export class GezelClient {
 
   // ── ds4 (DeepSeek-V4) local model management — same shape as llama.cpp ──
 
-  listDs4Models(): Promise<{ models: LlamaCppInstalledModel[] }> {
+  listDs4Models(): Promise<{
+    models: LlamaCppInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/ds4/models');
   }
 
@@ -3214,7 +3272,10 @@ export class GezelClient {
 
   // ── MLX local model management (Apple Silicon only) ──
 
-  listMlxModels(): Promise<{ models: MlxInstalledModel[] }> {
+  listMlxModels(): Promise<{
+    models: MlxInstalledModel[];
+    unrecognized?: UnrecognizedLocalModel[];
+  }> {
     return this.request('GET', '/api/mlx/models');
   }
 
@@ -5077,7 +5138,7 @@ export class GezelClient {
     );
   }
 
-  // ── workspace (CRUD — writes gated by project.allowGezelWrites) ──
+  // ── workspace (CRUD — writes gated by the managed workspace-write policy) ──
 
   listProjectWorkspace(
     id: string,
@@ -5308,6 +5369,39 @@ export class GezelClient {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(id)}/tools/list-file-issues`,
+      body,
+    );
+  }
+
+  getBoekwachterIssue(
+    id: string,
+    body: GetBoekwachterIssueRequest,
+  ): Promise<GetBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/get-file-issue`,
+      body,
+    );
+  }
+
+  updateBoekwachterIssue(
+    id: string,
+    body: UpdateBoekwachterIssueRequest,
+  ): Promise<UpdateBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/update-file-issue`,
+      body,
+    );
+  }
+
+  fixBoekwachterIssue(
+    id: string,
+    body: FixBoekwachterIssueRequest,
+  ): Promise<FixBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/fix-file-issue`,
       body,
     );
   }
@@ -6361,6 +6455,16 @@ export class GezelClient {
     body: InvokePageToolRequest,
   ): Promise<InvokePageToolResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-invoke`, body);
+  }
+
+  /**
+   * The read half of the same bridge: read/list/stat a path the applied
+   * type's manifest declares in `pages.reads`. Backs the injected
+   * `window.gezel.data.*` API (Output Pane API v1); scope enforcement is
+   * server-side, per request.
+   */
+  invokeProjectPageRead(projectId: string, body: PageReadRequest): Promise<PageReadResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-read`, body);
   }
 
   getProjectScriptRun(projectId: string, runId: string): Promise<ScriptRun> {

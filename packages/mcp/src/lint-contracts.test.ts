@@ -11,6 +11,8 @@ describe('loadBuiltinToolContractsForLint', () => {
 
     expect(byName.has('write_file')).toBe(true);
     expect(byName.has('draft_email')).toBe(true);
+    expect(byName.has('draft_post')).toBe(true);
+    expect(byName.has('publish_post')).toBe(true);
     expect(byName.has('draft_connector_action')).toBe(true);
     expect(byName.has('request_tool_permission')).toBe(true);
     expect(byName.has('craftbook_update_step')).toBe(true);
@@ -53,6 +55,7 @@ describe('loadBuiltinToolContractsForLint', () => {
       'run_playwright_script',
       'run_git',
       'draft_email',
+      'draft_post',
       'draft_connector_action',
     ]) {
       expect(byName.get(name)?.outputSchema, `${name} output schema`).toMatchObject({

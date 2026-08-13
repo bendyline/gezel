@@ -109,8 +109,10 @@ export function useEffectiveTheme(): EffectiveTheme {
   return useSyncExternalStore(
     (onChange) => {
       window.addEventListener(CHANGE_EVENT, onChange);
-      const mql = window.matchMedia('(prefers-color-scheme: dark)');
-      mql.addEventListener('change', onChange);
+      // Optional-chained for environments without matchMedia (jsdom tests) —
+      // same stance as systemTheme() above.
+      const mql = window.matchMedia?.('(prefers-color-scheme: dark)');
+      mql?.addEventListener('change', onChange);
       // Re-render when data-theme is stamped directly — the attribute is
       // authoritative (see attributeTheme) and not every setter dispatches
       // the CHANGE_EVENT.
@@ -121,7 +123,7 @@ export function useEffectiveTheme(): EffectiveTheme {
       });
       return () => {
         window.removeEventListener(CHANGE_EVENT, onChange);
-        mql.removeEventListener('change', onChange);
+        mql?.removeEventListener('change', onChange);
         observer.disconnect();
       };
     },

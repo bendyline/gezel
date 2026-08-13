@@ -3,14 +3,7 @@
   "version": "1.0.0",
   "description": "Gezel typed HTTP + SSE client and runtime discovery.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "http-client",
-    "sdk"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "http-client", "sdk"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -45,10 +38,7 @@
       "import": "./dist/node.js"
     }
   },
-  "files": [
-    "dist",
-    "!dist/**/*.map"
-  ],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -57,7 +47,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@bendyline/gezel": "1.0.0",
+    "@bendyline/gezel": "workspace:*",
     "undici": "8.9.0",
     "zod": "^4.4.3"
   },

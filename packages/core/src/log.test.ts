@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createLogger, getLogLevel, setDebugNamespaces, setLogLevel } from './log.js';
+import {
+  createLogger,
+  getLogLevel,
+  guardProcessOutputStream,
+  setDebugNamespaces,
+  setLogLevel,
+} from './log.js';
 
 describe('logger', () => {
   const initialLevel = getLogLevel();
@@ -116,5 +122,40 @@ describe('logger', () => {
     createLogger('test').info('with object', { a: 1 });
     expect(out.lines.some((l) => l.includes('INFO  [test] with object'))).toBe(true);
     expect(consoleSpy).toHaveBeenCalledWith({ a: 1 });
+  });
+
+  it.each(['EPIPE', 'EBADF'])('drops a log line when stdout throws %s', (code) => {
+    setLogLevel('info');
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => {
+      throw Object.assign(new Error(`write ${code}`), { code });
+    });
+    expect(() => createLogger('test').info('consumer went away')).not.toThrow();
+  });
+
+  it('does not hide unexpected synchronous stream failures', () => {
+    setLogLevel('info');
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => {
+      throw Object.assign(new Error('write EIO'), { code: 'EIO' });
+    });
+    expect(() => createLogger('test').info('disk-like failure')).toThrow('write EIO');
+  });
+
+  it('drops asynchronous EPIPE/EBADF events but rethrows unexpected stream errors', () => {
+    let onError: ((error: Error) => void) | undefined;
+    const stream = {
+      write: () => true,
+      on: (_event: 'error', listener: (error: Error) => void) => {
+        onError = listener;
+      },
+    };
+    guardProcessOutputStream(stream);
+
+    expect(() =>
+      onError?.(Object.assign(new Error('broken pipe'), { code: 'EPIPE' })),
+    ).not.toThrow();
+    expect(() => onError?.(Object.assign(new Error('bad fd'), { code: 'EBADF' }))).not.toThrow();
+    expect(() => onError?.(Object.assign(new Error('I/O failure'), { code: 'EIO' }))).toThrow(
+      'I/O failure',
+    );
   });
 });

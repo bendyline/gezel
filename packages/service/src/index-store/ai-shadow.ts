@@ -1,9 +1,14 @@
 import { readFile } from 'node:fs/promises';
-import { nowIso } from '@bendyline/gezel';
+import { createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
 import { chunkMarkdown, shadowDocFilesPaths, writeConvertedMarkdownAt } from './docs.js';
 import { parseFrontmatter, withFrontmatter } from './frontmatter.js';
-import type { FileRecord, IndexProvenance, IndexStore } from './index-store.js';
+import {
+  type FileRecord,
+  type IndexProvenance,
+  type IndexStore,
+  MAX_ENRICH_ATTEMPTS,
+} from './index-store.js';
 
 /**
  * AI-shadow producers: the second shadow-tree producer class. Office docs get
@@ -18,6 +23,22 @@ import type { FileRecord, IndexProvenance, IndexStore } from './index-store.js';
  * (home-fallback flip, deleted index) re-adopts a fresh sidecar without
  * re-paying the model call.
  */
+
+const log = createLogger('enrich');
+
+/**
+ * Raster formats the vision stack can actually decode (llama.cpp's mtmd uses
+ * stb_image). SVG is a vector format and ICO a multi-frame container — both
+ * failed 3-for-3 deterministically in the wild (400 "Failed to load image"),
+ * burning engine calls and log noise on every fresh content hash.
+ */
+const VISION_RASTER_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
+
+function fileExtension(path: string): string {
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  return dot < 0 ? '' : base.slice(dot).toLowerCase();
+}
 
 export interface AiShadowProducers {
   /** Absolute image path → markdown body (description + OCR), null when unavailable. */
@@ -68,6 +89,16 @@ export async function aiShadowFile(
     }
   }
 
+  // Formats the vision stack cannot decode are a deterministic dead end —
+  // mark them terminal without paying (and re-paying) a doomed engine call.
+  // Counted as handled (skipped: false) so an all-unsupported batch doesn't
+  // read as "no media work left" to the drive loop while real files wait.
+  if (file.modality === 'image' && !VISION_RASTER_EXTS.has(fileExtension(file.path))) {
+    store.markAiShadowUnsupported(file.hash, file.path);
+    log.info(`no vision support for ${file.path} (no raster decoder for this format) — skipped`);
+    return { produced: false, skipped: false, called: false };
+  }
+
   const abs = safeJoin(workspaceDir, file.path);
   if (!abs) {
     store.markAiShadowAttempt(file.hash, file.path);
@@ -80,7 +111,13 @@ export async function aiShadowFile(
     result = null;
   }
   if (!result?.body.trim()) {
-    store.markAiShadowAttempt(file.hash, file.path);
+    const attempts = store.markAiShadowAttempt(file.hash, file.path);
+    const verb = file.modality === 'image' ? 'describe' : 'transcribe';
+    log.warn(
+      attempts >= MAX_ENRICH_ATTEMPTS
+        ? `giving up on ${verb} for ${file.path} after ${attempts} attempts — it stays undescribed until its content changes`
+        : `${verb} produced nothing for ${file.path} (attempt ${attempts}/${MAX_ENRICH_ATTEMPTS})`,
+    );
     return { produced: false, skipped: false, called: true };
   }
 

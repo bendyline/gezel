@@ -1,5 +1,8 @@
 import type { GezelConfig, SecurityPolicy } from '../schemas/api.js';
-import type { Project } from '../schemas/project.js';
+import type { ClaudePermissionMode } from '../schemas/claude.js';
+import { type CodexPermissionMode, normalizeCodexPermissionMode } from '../schemas/codex.js';
+import type { GezelSummary, ProviderName } from '../schemas/gezel.js';
+import type { Project, ProjectManagedWorkspaceWritePolicy } from '../schemas/project.js';
 
 /**
  * Centralized security & compliance resolution.
@@ -85,7 +88,7 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
  *   shared-document writes from scripts. Read/review/index and the builtin
  *   artifact/document tools still work.
  *   Workspace file writes are NOT globally gated by this level — they are
- *   governed per project by {@link projectWorkspaceWritable}: internal
+ *   governed per project by {@link projectManagedWorkspaceWritable}: internal
  *   workspaces (our own folder, nothing precious) stay writable, external
  *   working directories stay deny-until-opted-in.
  * - `lockdown`: coding posture. Edits, scripts, cloud chat, GitHub R/W,
@@ -154,18 +157,34 @@ export function classifySecurityLevel(caps: SecurityCapabilities): SecurityLevel
 }
 
 /**
- * Effective per-project workspace writability for gezel-initiated work —
- * THE single gate for workspace file writes (tool surface, script
- * `workspace.write` capability, Store mutations, ambient scheduler work).
+ * Resolve the Gezel-managed workspace-write policy. The named enum is the
+ * current persistence contract; `allowGezelWrites` is a read-only compatibility
+ * fallback for project files written before that contract existed.
+ */
+export function projectManagedWorkspaceWritePolicy(
+  project?: Pick<Project, 'managedWorkspaceWritePolicy' | 'allowGezelWrites'> | null,
+): ProjectManagedWorkspaceWritePolicy {
+  if (project?.managedWorkspaceWritePolicy) return project.managedWorkspaceWritePolicy;
+  if (project?.allowGezelWrites === true) return 'allow';
+  if (project?.allowGezelWrites === false) return 'deny';
+  return 'auto';
+}
+
+/** User-facing Project Settings label referenced by write-denial recovery copy. */
+export const MANAGED_WORKSPACE_WRITE_SETTING_LABEL =
+  'Allow built-in tools and background work to modify the workspace';
+
+/**
+ * Effective per-project writability for Gezel-managed workspace mutations:
+ * builtin MCP tools, scripts, Store routes, and ambient scheduler work.
  *
- * Semantics of `project.allowGezelWrites` (an optional boolean, so
- * effectively a tri-state):
+ * Semantics of `project.managedWorkspaceWritePolicy`:
  *
- *   - explicit `true`  → writable, including external working dirs the
+ *   - `allow` → writable, including external working dirs the
  *     user has consented to (the confirmation-dialog path);
- *   - explicit `false` → read-only for gezels, including internal
+ *   - `deny` → read-only for gezels, including internal
  *     workspaces (the per-project "edits off" switch);
- *   - unset            → internal workspaces are writable (our folder
+ *   - `auto`/unset → internal workspaces are writable (our folder
  *     under `~/.gezel/projects/<id>/workspace/`, no precious files),
  *     external `workingDir`s are not (the user's real folder — writes
  *     require the explicit opt-in above).
@@ -177,12 +196,118 @@ export function classifySecurityLevel(caps: SecurityCapabilities): SecurityLevel
  * level. `undefined`/`null` project means the implicit default bucket —
  * internal, writable.
  */
-export function projectWorkspaceWritable(
-  project?: Pick<Project, 'workingDir' | 'allowGezelWrites'> | null,
+export function projectManagedWorkspaceWritable(
+  project?: Pick<Project, 'workingDir' | 'managedWorkspaceWritePolicy' | 'allowGezelWrites'> | null,
 ): boolean {
   if (!project) return true;
-  if (project.allowGezelWrites !== undefined) return project.allowGezelWrites;
-  return !project.workingDir;
+  switch (projectManagedWorkspaceWritePolicy(project)) {
+    case 'allow':
+      return true;
+    case 'deny':
+      return false;
+    case 'auto':
+      return !project.workingDir;
+  }
+}
+
+/**
+ * Backward-compatible export for extensions compiled against the historical
+ * helper name. New code must use `projectManagedWorkspaceWritable`, which
+ * makes clear that provider-native CLI writes are a separate path.
+ *
+ * @deprecated Use `projectManagedWorkspaceWritable`.
+ */
+export const projectWorkspaceWritable = projectManagedWorkspaceWritable;
+
+export type ProviderNativeWorkspaceAccess = 'none' | 'read-only' | 'edit' | 'reviewed' | 'full';
+
+export type WorkspaceAccessConfig = Pick<
+  GezelConfig,
+  'sandboxCopilot' | 'anthropicCli' | 'codexCli'
+>;
+
+function effectiveCodexPermissionMode(
+  projectMode: CodexPermissionMode | undefined,
+  gezel: GezelSummary | undefined,
+  config: WorkspaceAccessConfig | null | undefined,
+): CodexPermissionMode {
+  return normalizeCodexPermissionMode(
+    projectMode ??
+      gezel?.codexPermissionMode ??
+      gezel?.claudePermissionMode ??
+      config?.codexCli?.defaultPermissionMode,
+  );
+}
+
+/** Resolve only the provider-native path; `none` means the provider uses the managed gate. */
+export function providerNativeWorkspaceAccess(opts: {
+  provider: ProviderName | undefined;
+  projectCodexMode?: CodexPermissionMode;
+  projectClaudeMode?: ClaudePermissionMode;
+  gezel?: GezelSummary;
+  config?: WorkspaceAccessConfig | null;
+}): ProviderNativeWorkspaceAccess {
+  const { provider, projectCodexMode, projectClaudeMode, gezel, config } = opts;
+  if (provider === 'codex-cli') {
+    const mode = effectiveCodexPermissionMode(projectCodexMode, gezel, config);
+    return mode === 'plan' ? 'read-only' : mode;
+  }
+  if (provider === 'anthropic-cli') {
+    const mode =
+      projectClaudeMode ??
+      gezel?.claudePermissionMode ??
+      config?.anthropicCli?.defaultPermissionMode ??
+      'acceptEdits';
+    if (mode === 'plan') return 'read-only';
+    if (mode === 'bypassPermissions') return 'full';
+    return 'edit';
+  }
+  if (
+    provider === 'copilot' &&
+    !resolveSandboxCopilot(config?.sandboxCopilot, gezel?.sandboxCopilot)
+  ) {
+    return 'edit';
+  }
+  return 'none';
+}
+
+export interface ResolvedGezelWorkspaceAccess {
+  managedWritable: boolean;
+  nativeAccess: ProviderNativeWorkspaceAccess;
+  effectiveWritable: boolean;
+}
+
+/** Resolve the two independent write paths for one effective gezel/provider. */
+export function resolveGezelWorkspaceAccess(opts: {
+  project?: Pick<
+    Project,
+    | 'workingDir'
+    | 'managedWorkspaceWritePolicy'
+    | 'allowGezelWrites'
+    | 'codexPermissionMode'
+    | 'claudePermissionMode'
+  > | null;
+  provider: ProviderName | undefined;
+  gezel?: GezelSummary;
+  config?: WorkspaceAccessConfig | null;
+}): ResolvedGezelWorkspaceAccess {
+  const managedWritable = projectManagedWorkspaceWritable(opts.project);
+  const nativeAccess = providerNativeWorkspaceAccess({
+    provider: opts.provider,
+    projectCodexMode: opts.project?.codexPermissionMode,
+    projectClaudeMode: opts.project?.claudePermissionMode,
+    gezel: opts.gezel,
+    config: opts.config,
+  });
+  const nativeWritable =
+    nativeAccess === 'edit' || nativeAccess === 'reviewed' || nativeAccess === 'full';
+  return {
+    managedWritable,
+    nativeAccess,
+    // A provider-native harness replaces the managed filesystem surface for
+    // that gezel. Only providers with `none` fall back to managed tools.
+    effectiveWritable: nativeAccess === 'none' ? managedWritable : nativeWritable,
+  };
 }
 
 /**

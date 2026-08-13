@@ -191,6 +191,20 @@ describe('Sidebar', () => {
     expect(await screen.findByText('No projects yet.')).toBeInTheDocument();
   });
 
+  it('keeps the current Default project visible and selected after restore', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'default', name: 'Default' } as Project],
+    } as never);
+    const selection: RecentTab = { kind: 'project', id: 'default', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    const currentProject = await screen.findByRole('button', { name: 'Default' });
+    expect(currentProject).toHaveClass('active');
+    expect(currentProject).toHaveAttribute('aria-current', 'page');
+    expect(currentProject.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
+    expect(screen.queryByText('No projects yet.')).not.toBeInTheDocument();
+  });
+
   it('hides archived projects from the primary navigation list', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [
@@ -217,6 +231,7 @@ describe('Sidebar', () => {
     render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const beta = await screen.findByText('Beta');
     expect(beta.closest('button')?.className).toContain('active');
+    expect(beta.closest('button')).toHaveAttribute('aria-current', 'page');
     expect(beta.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
   });
 

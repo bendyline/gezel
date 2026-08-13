@@ -275,8 +275,8 @@ describe('ProjectGitStatusBar', () => {
       <ProjectGitStatusBar
         projectId="pj-1"
         compact
-        allowGezelWrites
-        onAllowWritesChange={vi.fn()}
+        managedWorkspaceWritable
+        onManagedWorkspaceWritesChange={vi.fn()}
       />,
     );
 
@@ -284,7 +284,9 @@ describe('ProjectGitStatusBar', () => {
     expect(screen.queryByText('1 unsaved change')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync' })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('combobox', { name: 'Gezel file edits for this project' }),
+      screen.queryByRole('combobox', {
+        name: 'Built-in tool workspace access for this project',
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -293,73 +295,92 @@ describe('ProjectGitStatusBar', () => {
       <ProjectGitStatusBar
         projectId="pj-1"
         compact
-        allowGezelWrites={false}
-        onAllowWritesChange={vi.fn()}
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={vi.fn()}
       />,
     );
 
     expect(
-      screen.getByRole('combobox', { name: 'Gezel file edits for this project' }),
-    ).toHaveTextContent('Edits off');
+      screen.getByRole('combobox', {
+        name: 'Built-in tool workspace access for this project',
+      }),
+    ).toHaveTextContent('Tools:Read-only');
   });
 
-  it('grays out the edits control when an AI provider can edit implicitly', async () => {
-    const onAllowWritesChange = vi.fn();
-    render(
-      <ProjectGitStatusBar
-        projectId="pj-1"
-        allowGezelWrites={false}
-        onAllowWritesChange={onAllowWritesChange}
-        editableViaAiProvider
-      />,
-    );
-
-    const control = screen.getByRole('combobox', {
-      name: 'Gezel file edits for this project',
-    });
-    expect(control).toBeDisabled();
-    expect(control).toHaveTextContent('Editable via AI provider');
-    expect(control).toHaveAttribute('title', expect.stringContaining('can edit this workspace'));
-    expect(onAllowWritesChange).not.toHaveBeenCalled();
-  });
-
-  it('replaces Edits on/off with the four Codex execution postures', async () => {
+  it('keeps managed tools independently configurable alongside Codex access', async () => {
+    const onManagedWorkspaceWritesChange = vi.fn();
     const onCodexModeChange = vi.fn();
     render(
       <ProjectGitStatusBar
         projectId="pj-1"
-        allowGezelWrites={false}
-        onAllowWritesChange={vi.fn()}
-        editableViaAiProvider
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
         codexMode="edit"
         onCodexModeChange={onCodexModeChange}
       />,
     );
 
-    const control = screen.getByRole('combobox', {
+    const managedControl = screen.getByRole('combobox', {
+      name: 'Built-in tool workspace access for this project',
+    });
+    expect(managedControl).toBeEnabled();
+    expect(managedControl).toHaveTextContent('Tools:Read-only');
+
+    const codexControl = screen.getByRole('combobox', {
       name: 'Codex execution mode for this project',
     });
-    expect(control).toHaveTextContent('Edit');
-    expect(
-      screen.queryByRole('combobox', { name: 'Gezel file edits for this project' }),
-    ).not.toBeInTheDocument();
+    expect(codexControl).toHaveTextContent('Codex:Edit');
 
-    await userEvent.click(control);
+    await userEvent.click(managedControl);
+    await userEvent.click(await screen.findByRole('option', { name: 'Can edit' }));
+    expect(onManagedWorkspaceWritesChange).toHaveBeenCalledWith(true);
+
+    await userEvent.click(codexControl);
     await userEvent.click(await screen.findByRole('option', { name: 'Reviewed' }));
     expect(onCodexModeChange).toHaveBeenCalledWith('reviewed');
   });
 
+  it('shows and wires Claude access independently from managed tools', async () => {
+    const onClaudeModeChange = vi.fn();
+    render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={vi.fn()}
+        claudeMode="acceptEdits"
+        onClaudeModeChange={onClaudeModeChange}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', {
+        name: 'Built-in tool workspace access for this project',
+      }),
+    ).toHaveTextContent('Tools:Read-only');
+    const claudeControl = screen.getByRole('combobox', {
+      name: 'Claude execution mode for this project',
+    });
+    expect(claudeControl).toHaveTextContent('Claude:Edit');
+    expect(
+      screen.queryByRole('combobox', { name: 'Codex execution mode for this project' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(claudeControl);
+    await userEvent.click(await screen.findByRole('option', { name: 'Plan' }));
+    expect(onClaudeModeChange).toHaveBeenCalledWith('plan');
+  });
+
   it('moves secondary controls into the compact overflow menu', async () => {
     const onStatusChange = vi.fn();
-    const onAllowWritesChange = vi.fn();
+    const onManagedWorkspaceWritesChange = vi.fn();
     render(
       <ProjectGitStatusBar
         projectId="pj-1"
         compact
         status="readonly"
         onStatusChange={onStatusChange}
-        allowGezelWrites={false}
-        onAllowWritesChange={onAllowWritesChange}
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
       />,
     );
 
@@ -374,8 +395,30 @@ describe('ProjectGitStatusBar', () => {
     expect(onStatusChange).toHaveBeenCalledWith('active');
 
     await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Turn edits on' }));
-    expect(onAllowWritesChange).toHaveBeenCalledWith(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Allow workspace edits' }));
+    expect(onManagedWorkspaceWritesChange).toHaveBeenCalledWith(true);
+  });
+
+  it('shows both access scopes in the compact overflow for mixed-provider projects', async () => {
+    render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        compact
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={vi.fn()}
+        codexMode="edit"
+        onCodexModeChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
+    expect(within(overflow).getByText('Built-in tools')).toBeInTheDocument();
+    expect(within(overflow).getByText('Codex access')).toBeInTheDocument();
+    expect(within(overflow).getByRole('button', { name: 'Edit' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('Sync calls the one-verb endpoint and toasts the plain-language result', async () => {
