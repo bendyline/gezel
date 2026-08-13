@@ -1,6 +1,12 @@
-import type { InvokePageToolResponse, PreviewLogEntry, ScriptRun } from '@bendyline/gezel';
+import type {
+  InvokePageToolResponse,
+  PageReadRequest,
+  PreviewLogEntry,
+  ScriptRun,
+} from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useEffectiveTheme } from '../theme.js';
 
 export type HtmlPreviewSource = 'artifacts' | 'workspace' | 'type';
 
@@ -94,6 +100,28 @@ interface HtmlPreviewFrameProps {
 
 /** Bound on concurrently in-flight page invokes per frame. */
 const MAX_INFLIGHT_INVOKES = 4;
+/** Bound on concurrently relayed page reads (watch stats ride outside it). */
+const MAX_INFLIGHT_READS = 8;
+/** Advertised to the page via init.limits; mirrors the page-read route cap. */
+const MAX_READ_BYTES = 2 * 1024 * 1024;
+/** Centralized watch sweep cadence. Zero registered watches = zero polling. */
+const WATCH_INTERVAL_MS = 2_500;
+
+/** Map an HTTP failure to the page-facing typed error code. */
+function pageErrorCode(
+  status: number | undefined,
+): 'not-allowed' | 'invalid-input' | 'rate-limited' | 'unavailable' {
+  if (status === 400 || status === 413 || status === 422) return 'invalid-input';
+  if (status === 403 || status === 404) return 'not-allowed';
+  if (status === 429) return 'rate-limited';
+  return 'unavailable';
+}
+
+interface PageWatch {
+  source: 'workspace' | 'artifacts';
+  path: string;
+  etag: string | null;
+}
 
 type PreviewLoadState =
   | { requestKey: string; status: 'ready'; url: string }
@@ -133,6 +161,11 @@ export function HtmlPreviewFrame({
 }: HtmlPreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const inflightInvokes = useRef<Set<string>>(new Set());
+  const inflightReads = useRef<Set<string>>(new Set());
+  const watches = useRef<Map<string, PageWatch>>(new Map());
+  const theme = useEffectiveTheme();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const [securityPolicyRevision, setSecurityPolicyRevision] = useState(0);
   const requestKey = JSON.stringify([
     projectId,
@@ -226,6 +259,226 @@ export function HtmlPreviewFrame({
       if (!flushTimer) flushTimer = setTimeout(flush, REPORT_FLUSH_MS);
     };
 
+    // ── Output Pane API v1 relay ─────────────────────────────────────────
+    // The versioned envelope handled here coexists forever with the legacy
+    // sentinels below: shipped catalog pages hard-code v0, the injected
+    // window.gezel shim speaks v1. Both share the same identity check.
+    const postToFrame = (payload: Record<string, unknown>) => {
+      iframeRef.current?.contentWindow?.postMessage({ __gezelPage: 1, ...payload }, '*');
+    };
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let sweeping = false;
+    const sweepWatches = async () => {
+      if (sweeping || disposed || watches.current.size === 0) return;
+      sweeping = true;
+      try {
+        await Promise.all(
+          [...watches.current.entries()].map(async ([id, w]) => {
+            try {
+              const res = await api.invokeProjectPageRead(projectId, {
+                op: 'stat',
+                source: w.source,
+                path: w.path,
+              });
+              if (disposed || !watches.current.has(id)) return;
+              if (w.etag !== null && res.etag !== w.etag) {
+                postToFrame({ kind: 'change', watchId: id, path: w.path, etag: res.etag });
+              }
+              w.etag = res.etag;
+            } catch {
+              // Transient stat failures never kill a watch; the next sweep retries.
+            }
+          }),
+        );
+      } finally {
+        sweeping = false;
+      }
+    };
+    const ensurePolling = () => {
+      if (pollTimer || watches.current.size === 0) return;
+      pollTimer = setInterval(() => {
+        if (document.visibilityState !== 'hidden') void sweepWatches();
+      }, WATCH_INTERVAL_MS);
+    };
+    const stopPollingIfIdle = () => {
+      if (pollTimer && watches.current.size === 0) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    const relayV1Invoke = (id: string, tool: string, input?: Record<string, unknown>) => {
+      if (!pageTools || !pageTools.includes(tool)) {
+        postToFrame({
+          kind: 'result',
+          id,
+          ok: false,
+          error: `tool '${tool}' is not page-invokable`,
+          errorCode: 'not-allowed',
+        });
+        return;
+      }
+      if (inflightInvokes.current.size >= MAX_INFLIGHT_INVOKES) {
+        postToFrame({
+          kind: 'result',
+          id,
+          ok: false,
+          error: 'too many concurrent invokes',
+          errorCode: 'rate-limited',
+        });
+        return;
+      }
+      inflightInvokes.current.add(id);
+      void api
+        .invokeProjectPageTool(projectId, { tool, ...(input ? { input } : {}) })
+        .then((res) => {
+          const outcome = ++latestPageInvokeOutcome;
+          postToFrame({
+            kind: 'result',
+            id,
+            ok: res.status === 'ok',
+            output: res.output,
+            runId: res.runId,
+            ...(res.error ? { error: res.error, errorCode: 'script-error' } : {}),
+            ...(res.reaction ? { reaction: res.reaction } : {}),
+          });
+          if (res.status === 'ok') {
+            if (!disposed) onPageScriptError?.(null);
+            // Read-your-write: a user action usually mutates a watched file;
+            // sweep immediately so the repaint lands in ~200ms, not a poll
+            // interval later.
+            void sweepWatches();
+          } else if (onPageScriptError) {
+            void api
+              .getProjectScriptRun(projectId, res.runId)
+              .then((run) => {
+                if (!disposed && outcome === latestPageInvokeOutcome) {
+                  onPageScriptError({ tool, response: res, run });
+                }
+              })
+              .catch((err) => {
+                if (disposed || outcome !== latestPageInvokeOutcome) return;
+                onPageScriptError({
+                  tool,
+                  response: res,
+                  detailLoadError: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
+        })
+        .catch((err) => {
+          ++latestPageInvokeOutcome;
+          const status = (err as { status?: number }).status;
+          const message = err instanceof Error ? err.message : String(err);
+          postToFrame({
+            kind: 'result',
+            id,
+            ok: false,
+            error: message,
+            errorCode: pageErrorCode(status),
+          });
+          if (!disposed) onPageScriptError?.({ tool, transportError: message });
+        })
+        .finally(() => {
+          inflightInvokes.current.delete(id);
+        });
+    };
+    const relayV1Read = (msg: {
+      id: string;
+      op: 'read' | 'list' | 'stat';
+      source: 'workspace' | 'artifacts';
+      path: string;
+      as?: unknown;
+      maxBytes?: unknown;
+    }) => {
+      if (inflightReads.current.size >= MAX_INFLIGHT_READS) {
+        postToFrame({
+          kind: 'read-result',
+          id: msg.id,
+          ok: false,
+          error: 'too many concurrent reads',
+          errorCode: 'rate-limited',
+        });
+        return;
+      }
+      const body: PageReadRequest = {
+        op: msg.op,
+        source: msg.source,
+        path: msg.path,
+        ...(msg.as === 'bytes' ? { as: 'bytes' as const } : {}),
+        ...(typeof msg.maxBytes === 'number' ? { maxBytes: msg.maxBytes } : {}),
+      };
+      inflightReads.current.add(msg.id);
+      void api
+        .invokeProjectPageRead(projectId, body)
+        .then((res) => {
+          postToFrame({ kind: 'read-result', id: msg.id, ok: true, ...res });
+        })
+        .catch((err) => {
+          const status = (err as { status?: number }).status;
+          postToFrame({
+            kind: 'read-result',
+            id: msg.id,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            errorCode: pageErrorCode(status),
+          });
+        })
+        .finally(() => {
+          inflightReads.current.delete(msg.id);
+        });
+    };
+
+    function handleV1Message(raw: Record<string, unknown>): void {
+      const kind = raw.kind;
+      if (kind === 'hello') {
+        postToFrame({
+          kind: 'init',
+          api: 1,
+          theme: { mode: themeRef.current },
+          limits: { maxInflight: MAX_INFLIGHT_INVOKES, maxReadBytes: MAX_READ_BYTES },
+        });
+        return;
+      }
+      if (kind === 'refresh') {
+        onRequestRefresh?.();
+        return;
+      }
+      const id = raw.id;
+      if (typeof id !== 'string' || id.length === 0 || id.length > 64) return;
+      if (kind === 'invoke') {
+        if (typeof raw.tool !== 'string') return;
+        const input =
+          raw.input && typeof raw.input === 'object' && !Array.isArray(raw.input)
+            ? (raw.input as Record<string, unknown>)
+            : undefined;
+        relayV1Invoke(id, raw.tool, input);
+        return;
+      }
+      if (kind === 'read') {
+        const op = raw.op;
+        const src = raw.source;
+        if (op !== 'read' && op !== 'list' && op !== 'stat') return;
+        if (src !== 'workspace' && src !== 'artifacts') return;
+        if (typeof raw.path !== 'string' || raw.path.length === 0) return;
+        relayV1Read({ id, op, source: src, path: raw.path, as: raw.as, maxBytes: raw.maxBytes });
+        return;
+      }
+      if (kind === 'watch') {
+        const src = raw.source;
+        if (src !== 'workspace' && src !== 'artifacts') return;
+        if (typeof raw.path !== 'string' || raw.path.length === 0) return;
+        watches.current.set(id, { source: src, path: raw.path, etag: null });
+        ensurePolling();
+        // Seed the etag right away so the first real change notifies fast.
+        void sweepWatches();
+        return;
+      }
+      if (kind === 'unwatch') {
+        watches.current.delete(id);
+        stopPollingIfIdle();
+      }
+    }
+
     function handleMessage(event: MessageEvent) {
       const frame = iframeRef.current;
       if (!frame || event.source !== frame.contentWindow) return;
@@ -233,11 +486,17 @@ export function HtmlPreviewFrame({
         __gezelPreviewLog?: boolean;
         __gezelPageInvoke?: boolean;
         __gezelPageRefresh?: boolean;
+        __gezelPage?: unknown;
         id?: unknown;
         tool?: unknown;
         input?: unknown;
       };
       if (!data) return;
+
+      if (data.__gezelPage === 1 && typeof (data as { kind?: unknown }).kind === 'string') {
+        handleV1Message(data as unknown as Record<string, unknown>);
+        return;
+      }
 
       if (data.__gezelPageRefresh === true) {
         onRequestRefresh?.();
@@ -329,9 +588,22 @@ export function HtmlPreviewFrame({
       disposed = true;
       window.removeEventListener('message', handleMessage);
       if (flushTimer) clearTimeout(flushTimer);
+      if (pollTimer) clearInterval(pollTimer);
+      // A remounted/renavigated page must re-register its watches — stale
+      // entries would poll paths the new document never asked for.
+      watches.current.clear();
       flush();
     };
   }, [onLog, projectId, path, source, pageTools, onPageScriptError, onRequestRefresh]);
+
+  useEffect(() => {
+    // Live theme push (v1 pages). Pages get the mount-time theme via their
+    // init reply; this keeps an open page in step with Settings/OS switches.
+    iframeRef.current?.contentWindow?.postMessage(
+      { __gezelPage: 1, kind: 'theme', theme: { mode: theme } },
+      '*',
+    );
+  }, [theme]);
 
   if (loadError) {
     return <div className={className}>Preview unavailable: {loadError}</div>;

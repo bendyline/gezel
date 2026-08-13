@@ -120,3 +120,62 @@ registerConsentEnforcer('recipient-allowlist', (ctx) => {
   }
   return { ok: true };
 });
+
+/** Cheap shape gate for a draft's `images`; byte-level checks (existence,
+ *  size, mime) stay in the adapter's `runAction`. */
+function malformedImagesReason(input: unknown): string | undefined {
+  const images = (input as { images?: unknown }).images;
+  if (images === undefined || images === null) return undefined;
+  if (!Array.isArray(images)) {
+    return "the draft's images must be an array of { path, alt } entries";
+  }
+  if (images.length > 4) {
+    return `the draft attaches ${images.length} images; the maximum is 4`;
+  }
+  const bad = images.findIndex((entry) => {
+    const path = (entry as { path?: unknown } | null)?.path;
+    return typeof path !== 'string' || !path.trim();
+  });
+  if (bad !== -1) {
+    return `the draft's images[${bad}] has no string path; each image needs a project-relative path`;
+  }
+  return undefined;
+}
+
+/**
+ * `social-publish` gates social-post write-back (Bluesky today; X/Instagram
+ * follow the same scope). Publishing is off by default: the binding's owner
+ * must flip `allowPublish` on the connector's settings before any commit
+ * transmits, and an empty draft never does. Platform-specific validation
+ * (length limits, reply threading, image bytes) stays in the adapter's
+ * `runAction`; only the images *shape* is rejected here so a malformed draft
+ * fails before the outbox ever accepts it.
+ */
+registerConsentEnforcer('social-publish', (ctx) => {
+  const cfg = (ctx.binding.config ?? {}) as { allowPublish?: unknown };
+  if (cfg.allowPublish !== true) {
+    return {
+      ok: false,
+      reason:
+        "publishing is disabled on this connector. Ask the user to enable 'Allow publishing' in the connector's settings first.",
+    };
+  }
+  const text =
+    ctx.input !== null && typeof ctx.input === 'object'
+      ? (ctx.input as { text?: unknown }).text
+      : undefined;
+  if (typeof text !== 'string' || !text.trim()) {
+    return { ok: false, reason: 'the draft has no post text' };
+  }
+  const imagesReason = malformedImagesReason(ctx.input);
+  if (imagesReason) return { ok: false, reason: imagesReason };
+  return { ok: true };
+});
+
+// `manual-export` deliberately has NO registered enforcer: enforceConsent's
+// deny-by-default turns every commit into "no enforcer registered", so a
+// manifest that declares it produces drafts that can only leave through the
+// human — draft_post stays reviewable, the daemon never transmits. The
+// original users (x-posts, instagram-media) have since graduated to real
+// `social-publish` write-back; the scope remains the honest default for any
+// future platform whose write API gezel cannot or should not drive.

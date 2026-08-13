@@ -213,6 +213,8 @@ import type {
   OutlineFileResponse,
   PageCheckRequest,
   PageCheckResponse,
+  PageReadRequest,
+  PageReadResponse,
   PendingImports,
   Poppetje,
   PreviewLogEntry,
@@ -2386,6 +2388,28 @@ export class GezelClient {
 
   testChannel(name: 'webhook'): Promise<SendChannelResult> {
     return this.request('POST', `/api/channels/${encodeURIComponent(name)}/test`);
+  }
+
+  /**
+   * Bring-your-own OAuth apps (Settings → Connections). Keys are the
+   * connector manifest's `clientIdEnv` name; the secret is write-only —
+   * listings carry only `hasSecret`.
+   */
+  listOAuthClients(): Promise<{
+    clients: Array<{ key: string; clientId: string; hasSecret: boolean }>;
+  }> {
+    return this.request('GET', '/api/oauth-clients');
+  }
+
+  putOAuthClient(
+    key: string,
+    body: { clientId: string; clientSecret?: string | null },
+  ): Promise<{ ok: boolean }> {
+    return this.request('PUT', `/api/oauth-clients/${encodeURIComponent(key)}`, body);
+  }
+
+  deleteOAuthClient(key: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/oauth-clients/${encodeURIComponent(key)}`);
   }
 
   /** Mint a scoped artifacts-preview lease for a first-party client. */
@@ -6392,6 +6416,16 @@ export class GezelClient {
     body: InvokePageToolRequest,
   ): Promise<InvokePageToolResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-invoke`, body);
+  }
+
+  /**
+   * The read half of the same bridge: read/list/stat a path the applied
+   * type's manifest declares in `pages.reads`. Backs the injected
+   * `window.gezel.data.*` API (Output Pane API v1); scope enforcement is
+   * server-side, per request.
+   */
+  invokeProjectPageRead(projectId: string, body: PageReadRequest): Promise<PageReadResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-read`, body);
   }
 
   getProjectScriptRun(projectId: string, runId: string): Promise<ScriptRun> {

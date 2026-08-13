@@ -62,6 +62,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
+    "@atproto/api": "0.20.38",
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",

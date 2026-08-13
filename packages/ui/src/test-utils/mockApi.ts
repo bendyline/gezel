@@ -45,6 +45,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listAvailableCredentials: { credentials: [] },
   listConnectors: { bindings: [] },
   listConnectorActions: { pending: [] },
+  listOAuthClients: { clients: [] },
   listHistory: { entries: [] },
   listChannels: { channels: [] },
   listAudioVoices: { voices: [] },

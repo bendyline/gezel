@@ -80,7 +80,12 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
       trigger: { kind: 'connector', typeId: this.type.id, bindingId: this.binding.id },
     });
     if (run.status !== 'ok') throw new Error(run.error ?? 'connector fetch script failed');
-    const out = (run.output ?? {}) as { records?: unknown[]; cursor?: unknown };
+    const out = (run.output ?? {}) as {
+      records?: unknown[];
+      cursor?: unknown;
+      rateLimited?: unknown;
+      partial?: unknown;
+    };
     const idPath = this.src.idPath ?? '$.id';
     const records: RecordRef[] = (out.records ?? []).map((r, i) => {
       const ts = this.src.tsPath ? jget(r, this.src.tsPath) : undefined;
@@ -91,7 +96,19 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
         ...ordinalKeyFromTs(ts),
       };
     });
-    return { records, cursor: out.cursor };
+    // Pass the script's throttle/continuation signals through so the sync
+    // engine's backoff ladder and partial-continuation rounds work for
+    // script sources exactly as they do for natives. A script that sees a
+    // 429 should return its last clean cursor + `rateLimited: true` instead
+    // of throwing (a throw voids the whole batch and re-fetches from the
+    // stale cursor next pass — the failure mode that burns rate-limited
+    // APIs hardest).
+    return {
+      records,
+      cursor: out.cursor,
+      ...(out.rateLimited === true ? { rateLimited: true } : {}),
+      ...(out.partial === true ? { partial: true } : {}),
+    };
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {

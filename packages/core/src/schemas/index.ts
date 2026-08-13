@@ -34,6 +34,7 @@ export * from './toolsets.js';
 export * from './question.js';
 export * from './report-action.js';
 export * from './suggested-work.js';
+export * from './page-bridge.js';
 export * from './preview.js';
 export * from './render.js';
 export * from './image.js';

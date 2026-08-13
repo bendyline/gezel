@@ -931,6 +931,13 @@ export type ProjectTypePreviewRead = z.infer<typeof ProjectTypePreviewReadSchema
 export const ProjectTypePagesSchema = z.object({
   /** Entry HTML relative to the version's `pages/` folder, e.g. `dashboard/index.html`. */
   entry: z.string(),
+  /**
+   * Output Pane API generation this page is authored against. Serving does
+   * not branch on it (the v1 shim is always injected for type pages); it
+   * routes gilde lint (v0 vs v1 page checks) and documents intent. Omitted
+   * on legacy pages that hand-roll the v0 postMessage sentinels.
+   */
+  api: z.literal(1).optional(),
   /** Trusted, declarative cross-directory/source reads needed by this page. */
   reads: z.array(ProjectTypePreviewReadSchema).optional(),
   /**
@@ -1129,6 +1136,17 @@ const ConnectorTypeCompositionShape = {
   actions: z.array(ConnectorActionSchema).default([]),
   /** Whether the corpus is a faithful mirror or a rolling window. */
   completeness: z.enum(['mirror', 'window']).optional(),
+  /**
+   * HTTPS origins this connector's per-binding credential may be sent to
+   * by a `script`-driver fetch (`gezel.http.authed` enforces a
+   * destination-origin allowlist). Entries are literal origins
+   * (`https://api.github.com`) or `$config.<path>` placeholders resolved
+   * from the binding's config at bind time. Written into the project's
+   * `credentialAllowedOrigins` for the binding's own credential name only;
+   * native drivers ignore it (their network never crosses the sandbox
+   * boundary).
+   */
+  allowedOrigins: z.array(z.string()).optional(),
   notes: z.string().optional(),
 } as const;
 

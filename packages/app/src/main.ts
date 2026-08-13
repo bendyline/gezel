@@ -1309,9 +1309,23 @@ const oauthSessions = new Map<
 
 ipcMain.handle(
   'mail:oauth-listen',
-  async (): Promise<{ requestId: string; redirectUri: string }> => {
+  async (
+    _event,
+    opts?: { port?: number } | null,
+  ): Promise<{ requestId: string; redirectUri: string }> => {
     const http = require('node:http') as typeof import('node:http');
     const { randomUUID } = require('node:crypto') as typeof import('node:crypto');
+    // Providers that match redirect URIs exactly (X, Meta) need the same port
+    // every time; the connector manifest declares it and the renderer passes
+    // it through. Absent, the OS picks an ephemeral port (RFC 8252 loopback —
+    // Google/Microsoft accept any).
+    const requestedPort = opts?.port;
+    if (
+      requestedPort !== undefined &&
+      (!Number.isInteger(requestedPort) || requestedPort < 1024 || requestedPort > 65535)
+    ) {
+      throw new Error('OAuth redirect port must be an integer between 1024 and 65535.');
+    }
     const requestId = randomUUID();
     let settle!: (v: { code?: string; state?: string; error?: string }) => void;
     const done = new Promise<{ code: string; state: string }>((resolve, reject) => {
@@ -1346,9 +1360,44 @@ ipcMain.handle(
       else if (code) settle({ code, state });
       else settle({ error: 'no authorization code in redirect' });
     });
+    if (requestedPort !== undefined) {
+      // A previous abandoned flow (start failed, user closed the consent tab)
+      // may still hold this exact port until its reap timer fires. It's our
+      // own listener — reclaim it rather than failing the retry.
+      for (const [staleId, stale] of oauthSessions) {
+        const staleAddr = stale.server.address();
+        if (typeof staleAddr === 'object' && staleAddr?.port === requestedPort) {
+          oauthSessions.delete(staleId);
+          try {
+            stale.server.closeAllConnections();
+          } catch {
+            /* nothing to drop */
+          }
+          // Await the close so the re-listen below can't race the handle
+          // release; closeAllConnections above keeps it from hanging on a
+          // lingering keep-alive from the consent tab.
+          await new Promise<void>((resolve) => {
+            try {
+              stale.server.close(() => resolve());
+            } catch {
+              resolve();
+            }
+          });
+        }
+      }
+    }
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
+      server.once('error', (err) => {
+        const code = (err as NodeJS.ErrnoException).code;
+        reject(
+          code === 'EADDRINUSE' && requestedPort !== undefined
+            ? new Error(
+                `port ${requestedPort} is in use by another app — close it and retry, or wait a moment`,
+              )
+            : err,
+        );
+      });
+      server.listen(requestedPort ?? 0, '127.0.0.1', resolve);
     });
     const addr = server.address();
     const port = typeof addr === 'object' && addr ? addr.port : 0;

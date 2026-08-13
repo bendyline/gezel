@@ -310,6 +310,23 @@ function latestUserMessageContent(messages: readonly ChatMessage[]): string | un
 }
 
 /**
+ * Connector-type prefixes that expose the social post write tools
+ * (draft_post / queue_post / publish_post). Mirrors the prefix list in
+ * gezel-mcp's `resolveSocialBinding`.
+ */
+const SOCIAL_CONNECTOR_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'] as const;
+
+function hasSocialConnectorBinding(
+  connectors: readonly { type: string; disabled?: boolean }[] | undefined,
+): boolean {
+  return !!connectors?.some(
+    (binding) =>
+      !binding.disabled &&
+      SOCIAL_CONNECTOR_TYPE_PREFIXES.some((prefix) => binding.type.startsWith(prefix)),
+  );
+}
+
+/**
  * Two send-paths share a `from` bucket when they're either both
  * user-initiated (no `from`) or both originate from the same sender
  * gezel. Used by the queue coalescer — we never merge a user follow-up
@@ -13177,6 +13194,9 @@ export class ChatManager {
       securityPolicy.allowMail
         ? ['draft_email', 'queue_email', 'send_email']
         : []),
+      ...(hasSocialConnectorBinding(project?.connectors) && securityPolicy.allowExternalServices
+        ? ['draft_post', 'queue_post', 'publish_post']
+        : []),
       ...(project?.connectors?.length ? ['draft_connector_action'] : []),
     ];
     const promptSurface = await resolveSessionToolSurface({
@@ -13960,6 +13980,12 @@ export class ChatManager {
         // draft_email/queue_email/send_email.
         ...(securityPolicy.allowMail && project?.connectors?.some((b) => b.type.startsWith('mail-'))
           ? { GEZEL_MAIL_ENABLED: '1' }
+          : {}),
+        // Same pattern for the social post write tools: only projects with a
+        // non-disabled social-type connector binding (and an external-services
+        // posture) expose draft_post/queue_post/publish_post.
+        ...(securityPolicy.allowExternalServices && hasSocialConnectorBinding(project?.connectors)
+          ? { GEZEL_SOCIAL_ENABLED: '1' }
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),

@@ -819,6 +819,19 @@ export const GezelConfigSchema = z.object({
   githubToken: z.string().optional(),
   /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
   githubAuth: GitHubAuthMetaSchema.optional(),
+  /**
+   * Bring-your-own OAuth apps for OAuth-shaped connectors (X, Instagram,
+   * mail, calendar). Gezel is an open-source local-first app, so no OAuth
+   * client is ever shipped — each install registers its own developer app
+   * with the provider and records it here. Keyed by the connector
+   * manifest's `clientIdEnv` name (e.g. `GEZEL_X_CLIENT_ID`), which
+   * naturally shares one entry across types that use the same provider
+   * app (mail-gmail + calendar-google). Only the PUBLIC client id lives
+   * here; the client secret (when the provider requires one — PKCE
+   * public clients don't) goes to the SecretStore. Env vars with the
+   * same names remain the operator/dev override and win when set.
+   */
+  oauthClients: z.record(z.string(), z.object({ clientId: z.string() })).optional(),
   openaiApiKey: z.string().optional(),
   openaiOrganization: z.string().optional(),
   /** Anthropic API key for the `anthropic` provider. SecretStore-routed. */

@@ -1234,8 +1234,12 @@ function applyGitToolGates(
  * Note `wikipedia_search` lands here too: under a no-services posture even
  * the zero-key Wikipedia lookup is egress (it reveals what's being
  * researched), so super-lockdown strips it alongside the keyed backends.
+ *
+ * Exported for `resolveSessionToolSurface`: the contextual-builtin grant
+ * runs after this ceiling, so it consults the same set rather than
+ * re-adding a stripped capability.
  */
-const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
+export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'web_search',
   'wikipedia_search',
   'fetch_url',
@@ -1245,6 +1249,10 @@ const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_email',
   'queue_email',
   'send_email',
+  // Social post draft/publish are the same class of outbound agency.
+  'draft_post',
+  'queue_post',
+  'publish_post',
 ]);
 
 /**

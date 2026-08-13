@@ -35,6 +35,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
     'GEZEL_SCRIPT_TOOLS',
     'GEZEL_CRAFTBOOK_ID',
     'GEZEL_MAIL_ENABLED',
+    'GEZEL_SOCIAL_ENABLED',
     'GEZEL_CONNECTORS_ENABLED',
     'GEZEL_PERMISSION_PROMPT',
   ] as const;
@@ -50,6 +51,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
   // though ordinary sessions do not advertise it.
   process.env.GEZEL_CRAFTBOOK_ID = 'schema-lint-craftbook';
   process.env.GEZEL_MAIL_ENABLED = '1';
+  process.env.GEZEL_SOCIAL_ENABLED = '1';
   process.env.GEZEL_CONNECTORS_ENABLED = '1';
   process.env.GEZEL_PERMISSION_PROMPT = '1';
 

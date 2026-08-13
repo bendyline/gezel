@@ -41,6 +41,10 @@
       "types": "./dist/stores.d.ts",
       "import": "./dist/stores.js"
     },
+    "./page": {
+      "types": "./dist/page.d.ts",
+      "import": "./dist/page.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "!dist/**/*.map"],

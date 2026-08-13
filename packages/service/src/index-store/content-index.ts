@@ -37,6 +37,7 @@ import { nowIso } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
+  projectArtifactsIndexDbFile,
   projectContentIndexDbFile,
   projectLocalFilesDir,
   projectLocalIndexDbFile,
@@ -55,6 +56,11 @@ import type { Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
+import {
+  type ArtifactsIndexStats,
+  artifactsCollectionId,
+  indexProjectArtifacts,
+} from './artifacts-indexer.js';
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
 import { ensureShadowDocSidecar, shadowDocFilesPaths } from './docs.js';
@@ -89,6 +95,13 @@ import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from 
  */
 
 const MAX_READ_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Debounce for artifacts-corpus refreshes: a connector pass fires one
+ * fire-and-forget refresh per binding, and a project can sync several
+ * bindings back to back — collapsing them buys one walk per burst.
+ */
+const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
 const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
@@ -177,10 +190,20 @@ export class ContentIndex {
    *  no-change builds skip touching the user's repo). */
   private readonly cityStores = new Map<string, VillageFileStore>();
 
+  /** Debounce window for {@link refreshArtifacts}; tests shrink it. */
+  private readonly artifactsDebounceMs: number;
+  /** Per-project pending artifacts pass — calls within the window join it. */
+  private readonly artifactsRefreshPending = new Map<string, Promise<ArtifactsIndexStats | null>>();
+  /** Per-project settle of the last dispatched pass, so passes never overlap. */
+  private readonly artifactsRefreshLast = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly store: Store,
     private readonly home: string,
-  ) {}
+    opts: { artifactsDebounceMs?: number } = {},
+  ) {
+    this.artifactsDebounceMs = opts.artifactsDebounceMs ?? ARTIFACTS_REFRESH_DEBOUNCE_MS;
+  }
 
   private cityStoreFor(projectId: string, workspaceDir: string | null): VillageFileStore {
     let cs = this.cityStores.get(projectId);
@@ -1487,6 +1510,90 @@ export class ContentIndex {
     };
   }
 
+  // ── artifacts corpora (connector records under artifacts/data/**) ────────
+
+  /**
+   * Schedule a rebuild of the project's artifacts-corpus index. Debounced per
+   * project: calls landing within the window join the same pass, so a burst
+   * of connector syncs costs one walk; passes for a project never overlap.
+   * This is the only artifacts-index method that CREATES the database.
+   */
+  refreshArtifacts(projectId: string): Promise<ArtifactsIndexStats | null> {
+    const pending = this.artifactsRefreshPending.get(projectId);
+    if (pending) return pending;
+    const prior = this.artifactsRefreshLast.get(projectId) ?? Promise.resolve();
+    const run = (async () => {
+      await sleep(this.artifactsDebounceMs);
+      this.artifactsRefreshPending.delete(projectId);
+      await prior.catch(() => {});
+      if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
+      return indexProjectArtifacts(this.store, this.home, projectId);
+    })();
+    this.artifactsRefreshPending.set(projectId, run);
+    this.artifactsRefreshLast.set(
+      projectId,
+      run.catch(() => {}),
+    );
+    return run;
+  }
+
+  /** Docs-FTS over the project's artifacts corpora. Empty until a refresh has built the index. */
+  async searchArtifacts(
+    projectId: string,
+    query: string,
+    maxResults = 20,
+  ): Promise<{
+    results: Array<{ path: string; lineStart: number; snippet: string }>;
+    truncated: boolean;
+  }> {
+    const index = await this.openArtifacts(projectId);
+    if (!index) return { results: [], truncated: false };
+    try {
+      if (!index.ftsAvailable) return { results: [], truncated: false };
+      const hits = index.searchDocs(query, maxResults + 1);
+      return {
+        results: hits.slice(0, maxResults).map((h) => ({
+          path: h.filePath,
+          lineStart: h.lineStart,
+          snippet: h.snippet,
+        })),
+        truncated: hits.length > maxResults,
+      };
+    } finally {
+      index.close();
+    }
+  }
+
+  /** Indexed artifact record paths (artifacts-relative), for the search catalog. */
+  async listArtifactIndexFiles(projectId: string, cap = 2000): Promise<string[]> {
+    const index = await this.openArtifacts(projectId);
+    if (!index) return [];
+    try {
+      return index.allFilePaths().slice(0, cap);
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Open the artifacts-corpus collection for a READ. Stat-first — opening a
+   * missing db would create it (same discipline as {@link hasIndex}), so pure
+   * reads return null until {@link refreshArtifacts} has built one.
+   */
+  private async openArtifacts(projectId: string): Promise<IndexStore | null> {
+    try {
+      const dbPath = projectArtifactsIndexDbFile(this.home, projectId);
+      if (!existsSync(dbPath)) return null;
+      return await IndexStore.open(dbPath, {
+        collectionId: artifactsCollectionId(projectId),
+        kind: 'generic',
+        rootPath: this.store.projectArtifactsDir(projectId),
+      });
+    } catch {
+      return null;
+    }
+  }
+
   // ── image-intel ──────────────────────────────────────────────────────────
 
   async searchImages(
@@ -1802,6 +1909,14 @@ function readSpan(
     ...(signature ? { signature } : {}),
     source,
   };
+}
+
+/** Unref'd delay — must never hold the daemon open through a debounce window. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    (t as { unref?: () => void }).unref?.();
+  });
 }
 
 /** Cosine similarity between two equal-length vectors. */

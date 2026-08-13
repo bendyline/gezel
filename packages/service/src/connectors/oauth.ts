@@ -47,22 +47,22 @@ export interface OAuthEndpoints {
   scopes: string[];
 }
 
+function assertCredentialUrl(label: string, raw: string): void {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`OAuth ${label} endpoint is not a valid URL`);
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+    throw new Error(`OAuth ${label} endpoint must be an exact HTTPS URL`);
+  }
+}
+
 /** OAuth endpoints are credential destinations; accept exact HTTPS URLs only. */
 export function validateOAuthEndpoints(endpoints: OAuthEndpoints): OAuthEndpoints {
-  for (const [label, raw] of [
-    ['authorization', endpoints.authEndpoint],
-    ['token', endpoints.tokenEndpoint],
-  ] as const) {
-    let url: URL;
-    try {
-      url = new URL(raw);
-    } catch {
-      throw new Error(`OAuth ${label} endpoint is not a valid URL`);
-    }
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
-      throw new Error(`OAuth ${label} endpoint must be an exact HTTPS URL`);
-    }
-  }
+  assertCredentialUrl('authorization', endpoints.authEndpoint);
+  assertCredentialUrl('token', endpoints.tokenEndpoint);
   return endpoints;
 }
 
@@ -206,6 +206,73 @@ export function isExpired(cred: { expiresAt?: string }): boolean {
   return !cred.expiresAt || Date.parse(cred.expiresAt) <= Date.now();
 }
 
+/**
+ * Meta's Instagram platform never returns a refresh token: the code exchange
+ * yields a short-lived token that must be traded (`ig_exchange_token`) for a
+ * ~60-day token, which is itself refreshed in place (`ig_refresh_token`)
+ * before it expires. A connector type opts in via
+ * `secretShape.longLivedExchange`; both URLs are credential destinations, so
+ * they get the same exact-HTTPS validation as token endpoints.
+ */
+export interface LongLivedExchange {
+  exchangeUrl: string;
+  refreshUrl: string;
+}
+
+/**
+ * Parse a manifest's `secretShape.longLivedExchange`. Absent/empty returns
+ * undefined (the default refresh-token contract stays in force); a partial or
+ * non-HTTPS shape throws so a broken manifest fails at link start.
+ */
+export function parseLongLivedExchange(raw: unknown): LongLivedExchange | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { exchangeUrl?: unknown; refreshUrl?: unknown };
+  const exchangeUrl = typeof value.exchangeUrl === 'string' ? value.exchangeUrl.trim() : '';
+  const refreshUrl = typeof value.refreshUrl === 'string' ? value.refreshUrl.trim() : '';
+  if (!exchangeUrl && !refreshUrl) return undefined;
+  assertCredentialUrl('long-lived exchange', exchangeUrl);
+  assertCredentialUrl('long-lived refresh', refreshUrl);
+  return { exchangeUrl, refreshUrl };
+}
+
+export interface ExchangeLongLivedTokenParams {
+  exchangeUrl: string;
+  /** The short-lived token the code exchange returned. */
+  accessToken: string;
+  clientSecret?: string;
+  /** Injectable for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+/** Trade a short-lived Meta token for its long-lived (~60 day) form. */
+export async function exchangeLongLivedToken(
+  params: ExchangeLongLivedTokenParams,
+): Promise<OAuthTokens> {
+  assertCredentialUrl('long-lived exchange', params.exchangeUrl);
+  const url = new URL(params.exchangeUrl);
+  url.searchParams.set('grant_type', 'ig_exchange_token');
+  if (params.clientSecret) url.searchParams.set('client_secret', params.clientSecret);
+  url.searchParams.set('access_token', params.accessToken);
+  const doFetch = params.fetchImpl ?? fetch;
+  const res = await doFetch(url.toString(), {
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const json = await readBoundedOAuthJson(res);
+  if (!res.ok) {
+    // Meta wraps errors as `{error: {message}}` rather than OAuth's string.
+    const metaMessage =
+      json.error && typeof json.error === 'object'
+        ? (json.error as { message?: unknown }).message
+        : json.error;
+    const err = json.error_description ?? metaMessage ?? `HTTP ${res.status}`;
+    throw new Error(`long-lived token exchange failed: ${String(err)}`);
+  }
+  const accessToken = String(json.access_token ?? '');
+  if (!accessToken) throw new Error('long-lived token exchange returned no access token');
+  return { accessToken, expiresAt: expiresAtFrom(json.expires_in) };
+}
+
 export interface OAuthClient {
   clientId: string;
   clientSecret?: string;
@@ -220,11 +287,7 @@ export function resolveOAuthClientFromEnv(
   clientIdEnv: string,
   clientSecretEnv?: string,
 ): OAuthClient {
-  const envName = /^GEZEL_[A-Z0-9_]{1,120}$/;
-  if (!envName.test(clientIdEnv) || (clientSecretEnv && !envName.test(clientSecretEnv))) {
-    throw new Error('OAuth manifest contains an invalid client environment-variable name');
-  }
-  const clientId = process.env[clientIdEnv];
+  const clientId = readOAuthClientEnv(clientIdEnv, clientSecretEnv)?.clientId;
   if (!clientId) {
     throw new Error(
       `OAuth is not configured for this connector — set ${clientIdEnv}${clientSecretEnv ? ` (and ${clientSecretEnv})` : ''}.`,
@@ -232,4 +295,74 @@ export function resolveOAuthClientFromEnv(
   }
   const clientSecret = clientSecretEnv ? process.env[clientSecretEnv] : undefined;
   return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+}
+
+const OAUTH_CLIENT_ENV_NAME = /^GEZEL_[A-Z0-9_]{1,120}$/;
+
+function readOAuthClientEnv(clientIdEnv: string, clientSecretEnv?: string): OAuthClient | null {
+  if (
+    !OAUTH_CLIENT_ENV_NAME.test(clientIdEnv) ||
+    (clientSecretEnv && !OAUTH_CLIENT_ENV_NAME.test(clientSecretEnv))
+  ) {
+    throw new Error('OAuth manifest contains an invalid client environment-variable name');
+  }
+  const clientId = process.env[clientIdEnv];
+  if (!clientId) return null;
+  const clientSecret = clientSecretEnv ? process.env[clientSecretEnv] : undefined;
+  return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+}
+
+/** SecretStore namespace for install-registered OAuth app secrets. */
+export const OAUTH_CLIENT_TOOLSET_ID = 'oauth-client';
+
+/**
+ * SecretStore key for a bring-your-own OAuth app's client secret. Keyed by
+ * the manifest's `clientIdEnv` name — the same key `config.oauthClients`
+ * uses — so one provider app registered once serves every connector type
+ * that names the same env pair (mail-gmail + calendar-google).
+ */
+export function oauthClientSecretKey(clientKey: string): {
+  kind: 'toolset';
+  toolsetId: string;
+  fieldId: string;
+} {
+  return { kind: 'toolset', toolsetId: OAUTH_CLIENT_TOOLSET_ID, fieldId: clientKey };
+}
+
+export interface ResolveOAuthClientOptions {
+  clientIdEnv?: string;
+  clientSecretEnv?: string;
+  /**
+   * Lazy read of the install's configured clients (`config.oauthClients`).
+   * Only consulted on an env miss, so the operator-override fast path never
+   * pays a config read.
+   */
+  getConfiguredClients?: () => Promise<Record<string, { clientId: string }> | undefined>;
+  /** Secret lookup for the configured client's secret. */
+  getSecret: (key: ReturnType<typeof oauthClientSecretKey>) => Promise<string | null>;
+}
+
+/**
+ * Resolve the OAuth app identity for a connector: environment variables
+ * (the operator/dev override) win when set; otherwise the install's
+ * Settings-registered client (`config.oauthClients` + SecretStore secret).
+ * Gezel is open source and ships no OAuth client of its own — when neither
+ * source is configured, the error names both remedies.
+ */
+export async function resolveOAuthClient(opts: ResolveOAuthClientOptions): Promise<OAuthClient> {
+  const clientIdEnv = opts.clientIdEnv ?? '';
+  const fromEnv = readOAuthClientEnv(clientIdEnv, opts.clientSecretEnv);
+  if (fromEnv) return fromEnv;
+
+  const configured = (await opts.getConfiguredClients?.().catch(() => undefined))?.[clientIdEnv];
+  if (configured?.clientId) {
+    const secret = await opts.getSecret(oauthClientSecretKey(clientIdEnv)).catch(() => null);
+    return { clientId: configured.clientId, ...(secret ? { clientSecret: secret } : {}) };
+  }
+
+  throw new Error(
+    `OAuth is not configured for this connector — add your own app's client ID under Settings (Connections), or set ${clientIdEnv}${
+      opts.clientSecretEnv ? ` (and ${opts.clientSecretEnv})` : ''
+    }.`,
+  );
 }

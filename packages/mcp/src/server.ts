@@ -663,6 +663,181 @@ if (process.env.GEZEL_MAIL_ENABLED === '1') {
   registerEmailTools();
 }
 
+// ── social posts (projects with a social-type connector binding) ──────────
+// Reading synced posts/mentions/stats is done by reading the corpus files.
+// These three tools are the WRITE path over the connector action surface:
+// drafting stages a `publish` action under the social binding's corpus, and
+// publish_post commits it through the daemon-enforced social-publish consent
+// scope (deny-by-default; night shift defers to the outbox). Registered only
+// when the chat manager set GEZEL_SOCIAL_ENABLED (i.e. the project has a
+// social-type connector binding).
+const SOCIAL_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'];
+
+/** Social-type bindings on the project (accountId narrows to one). */
+async function resolveSocialBinding(accountId?: string): Promise<string | null> {
+  const { ok, data } = await connectorActionApi('', 'GET');
+  if (!ok) throw new Error(String(data.error ?? 'failed to list connector bindings'));
+  const bindings = (data.bindings ?? []) as { id: string; type: string }[];
+  const social = bindings.filter(
+    (b) =>
+      typeof b.type === 'string' &&
+      SOCIAL_TYPE_PREFIXES.some((prefix) => b.type.startsWith(prefix)),
+  );
+  if (accountId) {
+    const match = social.find((b) => b.id === accountId)?.id;
+    if (!match) throw new Error(`social connector binding "${accountId}" was not found`);
+    return match;
+  }
+  return social[0]?.id ?? null;
+}
+
+function registerSocialTools() {
+  server.tool(
+    'draft_post',
+    "Compose a social post draft and save it for review. This does NOT publish — it stages a publish action under the social connector's corpus. Use queue_post to stage it for approval and publish_post to publish. Works with any connected social account: Bluesky, X, and LinkedIn publish directly once the user enables publishing on the connection; Instagram additionally requires a publicly hosted https image URL (Meta's servers fetch the media). Every publish clears the user's consent gate.",
+    {
+      text: z.string().describe('The post text (Bluesky limit: 300 characters)'),
+      replyToUri: z
+        .string()
+        .optional()
+        .describe('at:// URI of the post being replied to, to thread the reply'),
+      langs: z
+        .array(z.string())
+        .optional()
+        .describe('BCP-47 language codes for the post, e.g. ["en"]'),
+      images: z
+        .array(
+          z.object({
+            path: z
+              .string()
+              .describe(
+                "Project-relative image path, resolved against the project's artifacts directory first, then its workspace",
+              ),
+            alt: z.string().optional().describe('Alt text describing the image for accessibility'),
+          }),
+        )
+        .max(4)
+        .optional()
+        .describe(
+          'Up to 4 images to embed (png/jpg/jpeg/webp/gif, at most 1,000,000 bytes each; paths resolve against project artifacts first, then the workspace). ALWAYS write meaningful alt text for every image — never leave it blank.',
+        ),
+      accountId: z
+        .string()
+        .optional()
+        .describe('Which social connector binding to post from (defaults to the first)'),
+    },
+    async (args) => {
+      try {
+        const bindingId = await resolveSocialBinding(args.accountId);
+        if (!bindingId) return errorResult('This project has no linked social connector.');
+        const { accountId: _drop, ...input } = args;
+        const { ok, data } = await connectorActionApi(
+          `${encodeURIComponent(bindingId)}/actions`,
+          'POST',
+          { action: 'publish', input },
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Post draft failed.'));
+        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Draft saved${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. Review it, then call queue_post then publish_post.`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'drafted',
+            ...(draftId ? { draftId } : {}),
+            ...(relPath ? { relPath } : {}),
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`draft_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'queue_post',
+    'Stage a saved post draft for publishing by moving it to the outbox. Does not publish.',
+    { draftId: z.string().describe('The draft id returned by draft_post') },
+    async ({ draftId }) => {
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/queue`,
+          'POST',
+        );
+        if (!ok) return errorResult(String(data.error ?? 'Post queue failed.'));
+        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+        const summary = `Queued draft ${draftId}${relPath ? ` (${relPath})` : ''}.`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'queued',
+            draftId,
+            ...(relPath ? { relPath } : {}),
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`queue_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'publish_post',
+    'Publish a drafted/queued social post. The daemon enforces per-binding publish consent (publishing must be enabled on the connector, and each publish clears the social-publish consent scope) and will NOT publish during night shift (the post is staged for daytime approval instead).',
+    { draftId: z.string().describe('The draft id to publish') },
+    async ({ draftId }) => {
+      try {
+        const { ok, data } = await connectorActionApi(
+          `actions/${encodeURIComponent(draftId)}/commit`,
+          'POST',
+        );
+        if (!ok) {
+          const message = String(data.error ?? 'Post publish failed.');
+          const hint = /publishing is disabled/i.test(message)
+            ? "Ask the user to enable 'Allow publishing' on the connector's settings."
+            : undefined;
+          return errorResult(message, { ...(hint ? { hint } : {}) });
+        }
+        if (data.status === 'queued-night-shift') {
+          const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
+          const summary = `Night shift is active — not publishing unattended. The post is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
+          return okResult(
+            ActionToolOutputSchema,
+            {
+              summary,
+              status: 'queued-night-shift',
+              draftId,
+              ...(relPath ? { relPath } : {}),
+            },
+            { text: summary },
+          );
+        }
+        const result = (data.result ?? {}) as { uri?: string; permalink?: string };
+        const summary = `Published.${result.permalink ? ` ${result.permalink}` : result.uri ? ` ${result.uri}` : ''}`;
+        return okResult(
+          ActionToolOutputSchema,
+          {
+            summary,
+            status: 'published',
+            draftId,
+          },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`publish_post failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+}
+
+if (process.env.GEZEL_SOCIAL_ENABLED === '1') {
+  registerSocialTools();
+}
+
 // ── Project-type script tools (dynamic, per-session) ──
 // The chat manager resolves the applied project type's script-backed tools
 // and passes them via GEZEL_SCRIPT_TOOLS; each registers as a named tool

@@ -187,6 +187,18 @@ describe('POST /api/projects/:id/page-invoke', () => {
     expect(body.reaction).toBeUndefined();
   });
 
+  it("400s input that violates the tool's declared schema, before any run", async () => {
+    runStub.mockClear();
+    // checkers user_move declares { from: string, to: string } — a number is
+    // a type violation the route must reject without dispatching.
+    const res = await invoke({ tool: 'user_move', input: { from: 5, to: 'd4' } });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('input does not match tool schema');
+    expect(body.error).toContain('/from');
+    expect(runStub).not.toHaveBeenCalled();
+  });
+
   it('rate-limits runaway pages', async () => {
     let limited = false;
     for (let i = 0; i < 130 && !limited; i += 1) {

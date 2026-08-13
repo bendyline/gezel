@@ -21343,6 +21343,130 @@ a.license-button:hover {
   margin: 0;
 }
 
+/* Bring-your-own OAuth app: the setup panel inside the connector config
+   tray. A quiet bordered surface; the redirect URI reads as a copyable
+   code row because providers like X match it character-for-character. */
+.gz-oauth-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app p {
+  margin: 0;
+}
+
+.gz-oauth-app-heading {
+  font-size: var(--text-md);
+}
+
+.gz-oauth-app-summary {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.gz-oauth-app-summary-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-summary-text code {
+  overflow: hidden;
+  max-width: 16rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.gz-oauth-app-summary > button {
+  flex: 0 0 auto;
+}
+
+.gz-oauth-app-docs {
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.gz-oauth-app-steps li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gz-oauth-app-redirect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-redirect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.gz-oauth-app-redirect-row code {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.gz-oauth-app-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+}
+
+.gz-oauth-app-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-fields label > input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-oauth-app-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .gz-connector-picker-actions {
   padding-top: 0.75rem;
   border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);

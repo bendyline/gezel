@@ -291,6 +291,11 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
   queue_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
   send_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
+  // Social post write tools — registered only for projects with a social-type
+  // connector binding (the chat manager sets GEZEL_SOCIAL_ENABLED).
+  draft_post: { envVar: 'GEZEL_SOCIAL_ENABLED', envValue: '1', modelFacing: true },
+  queue_post: { envVar: 'GEZEL_SOCIAL_ENABLED', envValue: '1', modelFacing: true },
+  publish_post: { envVar: 'GEZEL_SOCIAL_ENABLED', envValue: '1', modelFacing: true },
   // Generic connector writes are draft-only and appear only for projects
   // with at least one connector binding.
   draft_connector_action: {

@@ -924,6 +924,17 @@ export function projectContentIndexDbFile(
 }
 
 /**
+ * Derived FTS index over a project's artifact corpora (connector records under
+ * `artifacts/data/**`). Always in the account-private sidecar, never inside
+ * the artifacts tree itself — the database must not surface in the corpus
+ * browser, and mutable SQLite must not ride an externalized artifacts folder.
+ * Rebuildable cache, safe to delete.
+ */
+export function projectArtifactsIndexDbFile(root: string, projectId: string): string {
+  return join(fallbackProjectIndexDir(root, projectId), 'artifacts.db');
+}
+
+/**
  * The committable code-map "city file": placement anchors, user overrides, and
  * the layout journal. Deliberately OUTSIDE the self-gitignored `.gezel/index/`
  * subtree — committing it keeps the city stable across machines and index

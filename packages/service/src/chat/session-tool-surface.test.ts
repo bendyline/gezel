@@ -1,4 +1,5 @@
 import type { ChatSession } from '@bendyline/gezel';
+import { resolveSecurityPolicy, securityPolicyForLevel } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   availableBuiltinToolsForAllowlist,
@@ -319,6 +320,41 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
         new Set(['draft_connector_action']),
       ).map((tool) => tool.name),
     ).toEqual(['draft_connector_action']);
+  });
+
+  it('admits the social post trio only when granted, and strips it under a no-services posture', async () => {
+    const granted = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+      contextualBuiltinTools: ['draft_post', 'queue_post', 'publish_post'],
+    });
+    expect(granted.allowlist?.has('draft_post')).toBe(true);
+    expect(granted.allowlist?.has('queue_post')).toBe(true);
+    expect(granted.allowlist?.has('publish_post')).toBe(true);
+
+    const ungranted = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+    });
+    expect(ungranted.allowlist?.has('draft_post')).toBe(false);
+    expect(ungranted.allowlist?.has('publish_post')).toBe(false);
+
+    // Outbound social agency is external-service class: even a granted trio
+    // is stripped by the security ceiling when services are off.
+    const locked = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+      contextualBuiltinTools: ['draft_post', 'queue_post', 'publish_post'],
+      securityPolicy: resolveSecurityPolicy({
+        securityPolicy: securityPolicyForLevel('super-lockdown'),
+      }),
+    });
+    expect(locked.allowlist?.has('draft_post')).toBe(false);
+    expect(locked.allowlist?.has('queue_post')).toBe(false);
+    expect(locked.allowlist?.has('publish_post')).toBe(false);
   });
 
   it('grants write_task_note/advance_task_step to a Meester assigned a step', async () => {

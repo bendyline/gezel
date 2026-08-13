@@ -129,6 +129,39 @@ export async function resolvePageTools(
   };
 }
 
+export interface ResolvedPageReadScope {
+  source: 'workspace' | 'artifacts';
+  path: string;
+  subtree: boolean;
+}
+
+/**
+ * The declared read surface for a project's applied type pages — the
+ * server-side scope list the first-party page-read route enforces per
+ * request. The same declarations are also folded into the preview
+ * capability at mint time (the v0 out-of-band fetch path); this resolver is
+ * the in-bridge twin, re-derived fresh so it tolerates version drift and
+ * never freezes at mint. `type`-source reads are excluded: the page tree
+ * itself is served by the preview route, not readable as data.
+ */
+export async function resolvePageReads(
+  catalog: CatalogService,
+  project: Pick<Project, 'projectType'> | null | undefined,
+): Promise<ResolvedPageReadScope[] | null> {
+  const manifest = await resolveProjectTypeManifest(catalog, project);
+  if (!manifest) return null;
+  return (manifest.pages?.reads ?? [])
+    .filter(
+      (read): read is typeof read & { source: 'workspace' | 'artifacts' } =>
+        read.source === 'workspace' || read.source === 'artifacts',
+    )
+    .map((read) => ({
+      source: read.source,
+      path: read.path,
+      subtree: read.subtree === true,
+    }));
+}
+
 /**
  * Names from a serialized `GEZEL_SCRIPT_TOOLS` payload. Used where the
  * resolved list isn't in scope (the codex-cli allowlist union) — parsing

@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/checks.ts', 'src/stores.ts'],
+  entry: ['src/index.ts', 'src/checks.ts', 'src/stores.ts', 'src/page.ts'],
   format: ['esm'],
   // `resolve` inlines the @bendyline/gezel/checks types into checks.d.ts —
   // without it the dts keeps an external `export * from '@bendyline/gezel/checks'`

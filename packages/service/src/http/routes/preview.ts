@@ -1,10 +1,12 @@
 import { readFile, stat } from 'node:fs/promises';
-import { type PreviewSource, resolveSecurityPolicy } from '@bendyline/gezel';
+import { type PageApiBootstrap, type PreviewSource, resolveSecurityPolicy } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
+import { resolvePageTools } from '../../project-type/script-tools.js';
 import type { ServiceContext } from '../context.js';
 import { mimeTypeForPath } from '../mime.js';
 import type { PreviewCapabilityStore } from '../preview-capability.js';
+import { buildPageApiShim } from './page-api-shim.js';
 
 /**
  * Live, asset-resolving preview of a project's workspace, artifacts, or
@@ -238,7 +240,10 @@ if(document.body)document.body.replaceChildren(box);
  * log. Strip only browser-internal `<link>` resources while preserving normal
  * relative/HTTPS links and literal `chrome://` text in the document body.
  */
-export function preparePreviewHtml(html: string): string {
+export function preparePreviewHtml(
+  html: string,
+  opts: { pageApi?: PageApiBootstrap } = {},
+): string {
   let out = html.replace(BROWSER_INTERNAL_LINK_RE, '');
   const unbuiltSourceModules: string[] = [];
   out = out.replace(SCRIPT_ELEMENT_RE, (match, rawAttrs: string) => {
@@ -255,8 +260,13 @@ export function preparePreviewHtml(html: string): string {
     return `<!-- Gezel omitted unbuilt source module: ${src.replaceAll('--', '—')} -->`;
   });
   const headMatch = out.match(/<head[^>]*>/i);
+  // Order matters: log shim first (so page-api shim errors are captured),
+  // then the page API (so `window.gezel` exists before any page script).
   const shims =
-    PREVIEW_LOG_SHIM + PREVIEW_SCROLLBAR_SHIM + unbuiltSourceModuleShim(unbuiltSourceModules);
+    PREVIEW_LOG_SHIM +
+    (opts.pageApi ? buildPageApiShim(opts.pageApi) : '') +
+    PREVIEW_SCROLLBAR_SHIM +
+    unbuiltSourceModuleShim(unbuiltSourceModules);
   if (headMatch) {
     const at = (headMatch.index ?? 0) + headMatch[0].length;
     out = out.slice(0, at) + shims + out.slice(at);
@@ -349,8 +359,21 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
         const allowExternalNetwork = await previewAllowsExternalNetwork(ctx);
+        // Server-authoritative bootstrap for the injected window.gezel API.
+        // A failed manifest resolve degrades to an empty tool list — the
+        // page still gets identity + reads, matching v0's degradation.
+        const pageTools = await resolvePageTools(ctx.catalog, project).catch(() => null);
+        const pageApi: PageApiBootstrap = {
+          api: 1,
+          projectId,
+          source: 'type',
+          entry: filePath,
+          typeName: pageTools?.typeName ?? pt.id,
+          params: pageTools?.params ?? {},
+          tools: (pageTools?.tools ?? []).map((t) => t.name),
+        };
         return c.body(
-          preparePreviewHtml(buf.toString('utf8')),
+          preparePreviewHtml(buf.toString('utf8'), { pageApi }),
           200,
           previewHeaders(mime, allowExternalNetwork),
         );

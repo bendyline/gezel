@@ -35,10 +35,14 @@ import { createCodexSetupModelSource } from './codex-setup/model-source.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
+import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
 import { registerGitHubReleasesAdapters } from './connectors/natives/github-releases.js';
 import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
+import { registerInstagramAdapters } from './connectors/natives/instagram-media.js';
+import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js';
+import { registerXAdapters } from './connectors/natives/x-posts.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks } from './craftbook/applicable.js';
@@ -1884,6 +1888,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // stack (MailManager + its routes) was retired in the connector overhaul.
   registerMailAdapters();
   registerCalendarAdapters();
+  registerBlueskyAdapters();
+  registerXAdapters();
+  registerInstagramAdapters();
+  registerLinkedInAdapters();
   registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
   const connectorLocks = new ProjectLocks();

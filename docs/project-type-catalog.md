@@ -766,17 +766,25 @@ gap on this list relative to unlocked value.
 
 **5. Connector kinds beyond mail.** The mail pipeline proved the shape: external
 data synced into project-local canonical files, then everything downstream is
-ordinary gezel machinery. Four more connectors unlock eight types: **calendar**
-(Calendar Desk — already a "Soon" tile), **feeds/RSS** (Topic Watch), **watched
-folder** (Photo Curator, CSV drops for Budget/Shop Numbers), **CSV drop** as a
-degenerate watched folder. Same consent posture as mail; per-kind drivers.
+ordinary gezel machinery. PARTIALLY SHIPPED: **social feeds** (Bluesky/X/
+Instagram — the Social Feed and Image Feed types, with Bluesky publishing
+through the outbox consent flow) landed with the marketing/social family,
+and connector corpora are now content-indexed so gezels can search synced
+records. Still open: **calendar** (Calendar Desk — already a "Soon" tile),
+**feeds/RSS** (Topic Watch), **watched folder** (Photo Curator, CSV drops for
+Budget/Shop Numbers), **CSV drop** as a degenerate watched folder. Same
+consent posture as mail; per-kind drivers.
 
 **6. Interactive Output pages (the page↔host bridge).** SHIPPED (Phase 1a): the
 `pages.tools` allowlist + page-invoke route + HtmlPreviewFrame postMessage relay,
 plus tool `reaction`s that summon a gezel turn from a page action — proven by the
 Checkers and Flashcards exemplars. The bridge exposes *only* the type's declared
-script-tools, keeping the security model unchanged. Remaining platform caveat:
-scripts (and therefore interactive pages) need a Windows denyNet boundary.
+script-tools, keeping the security model unchanged. Phase 1b SHIPPED: the
+versioned `window.gezel` Output Pane API (docs/output-pane-api.md) — injected
+shim, in-bridge reads with centralized watch, server-side tool-input
+validation — with the v0 sentinels kept for shipped pages. Remaining platform
+caveat: scripts (and therefore interactive pages) need a Windows denyNet
+boundary.
 
 **7. A print/PDF pipeline.** The most uplifting end states are physical: the
 heirloom cookbook, the emergency sheet, the puzzle pack, the invitation, the

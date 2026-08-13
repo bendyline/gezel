@@ -222,7 +222,22 @@ read-only cross-source paths in `pages.reads`; the service folds only those trus
 manifest scopes into the capability. The preview surface stays read-only; all writes
 go through scripts/tools.
 
-### Page-invoke bridge and reactions
+### The Output Pane API (`window.gezel`) — v1
+
+New pages should be authored against the injected, versioned page API
+documented in [docs/output-pane-api.md](output-pane-api.md): the daemon
+splices a `window.gezel` shim into every served type-page HTML response
+with a server-authoritative bootstrap (identity, adoption params, declared
+tool names). Pages get `gezel.tools.invoke` (the same declared-script-tool
+funnel as below, plus server-side validation of the tool's declared
+`inputs` schema), `gezel.data.read/list/watch` (relayed through the
+first-party `page-read` route — scopes re-derived per request from
+`pages.reads`, no more capability-expiry juggling), `gezel.data.url` for
+media, live theme, and mode detection (embedded / browser / demo). Mark
+such pages with `pages.api: 1` in the manifest. The v0 wire protocol below
+remains supported forever for shipped page versions.
+
+### Page-invoke bridge and reactions (v0 wire protocol)
 
 Interactive pages write through **declared script-tools**, never raw endpoints. The
 manifest lists a page-ONLY subset of `tools[]` in `pages.tools`; those names are

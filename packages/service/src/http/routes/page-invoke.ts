@@ -1,4 +1,9 @@
-import { InvokePageToolRequestSchema, createLogger } from '@bendyline/gezel';
+import {
+  InvokePageToolRequestSchema,
+  createLogger,
+  formatJsonSchemaViolations,
+  validateJsonSchema,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { dispatchToolReaction } from '../../project-type/reactions.js';
 import { resolvePageTools, resolveProjectTypeManifest } from '../../project-type/script-tools.js';
@@ -65,6 +70,21 @@ export function pageInvokeRoutes(ctx: ServiceContext): Hono {
       return (manifest?.tools ?? []).some((t) => t.name === body.tool)
         ? c.json({ error: 'tool is not exposed to pages' }, 403)
         : c.json({ error: 'unknown tool' }, 404);
+    }
+
+    // Enforce the tool's declared `inputs` JSON schema on the page's half of
+    // the payload only — `bind` is trusted manifest data and merged after, so
+    // a schema can never be used to reject (or a page to override) a pinned
+    // bind value. Validation is subset-permissive: unknown keywords in an
+    // authored schema are ignored, never fatal.
+    if (tool.inputs) {
+      const violations = validateJsonSchema(body.input ?? {}, tool.inputs);
+      if (violations.length > 0) {
+        return c.json(
+          { error: `input does not match tool schema: ${formatJsonSchemaViolations(violations)}` },
+          400,
+        );
+      }
     }
 
     const run = await ctx.scriptRunner.run({

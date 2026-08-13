@@ -308,6 +308,19 @@ Checklist:
   the env vars naming the install's client), `apikey` (with `field` and a human `label`), or
   `imap`. Mark `required: false` for sources that work anonymously — `github-issues` and
   `github-wiki` both do.
+- **`secretShape.clientSetup`** (oauth2 types) drives the bind flow's bring-your-own-app
+  panel: `providerLabel`, `docsUrl` (the provider's developer console), `appTypeNote` (what
+  kind of app to create), and `secretRequired` (leave false for PKCE public clients — the
+  secret input reads as optional). Declare `redirectPort` + `redirectNote` **only** when the
+  provider matches redirect URIs exactly (X 6241, Instagram/Meta 6242, LinkedIn 6243 — pick
+  a fresh port per provider): the desktop shell then pins its loopback listener to that
+  port and the panel shows the literal `http://127.0.0.1:<port>/callback` to register. Omit
+  it for RFC 8252 providers (Google, Microsoft), which accept any loopback port. Ship a
+  `steps` array (≤8 short imperative strings) with the click path — where in the provider's
+  console the app is created, which product/platform to add, where the ID and secret live,
+  and any expiry trap (Google's 7-day Testing-mode token expiry is the canonical example);
+  the panel renders it as a numbered list. Absent `clientSetup` entirely, the panel still
+  renders with the type name and generic copy.
 - **`normalize`** is `mapping` for tidy JSON, `script` for messy or prose-heavy output,
   `native` when the adapter already built the record. Set `title` and `timestamp` whenever the
   source has them: they become the filename stem and the `date` frontmatter, and a corpus
@@ -352,7 +365,7 @@ discard.
 
 ## 6. Discoverability
 
-A corpus nothing knows about is a corpus nothing reads. Three surfaces have to agree:
+A corpus nothing knows about is a corpus nothing reads. Four surfaces have to agree:
 
 - **Artifact tools and browser** list/read the corpus without mixing it into workspace code
   search or the user's repository.
@@ -361,6 +374,11 @@ A corpus nothing knows about is a corpus nothing reads. Three surfaces have to a
   capped at eight) plus the read-only rule. Absent entirely when no bindings exist, so
   no-connector prompts stay byte-identical for prefix caching.
 - **`_meta.json`** answers "what is this directory?" for a gezel already reading files.
+- **The artifacts index** makes records findable without knowing they exist: a sync that
+  wrote or pruned anything triggers a debounced walk of `data/**` (`.md` records only; the
+  `_` surface and `attachments/` skipped) into a per-project FTS collection stored in the
+  account-private sidecar, never in the corpus itself. Unified search returns those hits
+  with `source: 'artifacts'`, ranked like workspace document content.
 
 The model's connector tool surface is deliberately small: `draft_connector_action`, plus
 the mail-specific `draft_email` / `queue_email` / `send_email` (thin wrappers over the same

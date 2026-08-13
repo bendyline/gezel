@@ -36,6 +36,8 @@ const FANOUT_CONCURRENCY = 8;
 const PER_SCOPE_TIMEOUT_MS = 600;
 /** Hits requested from each per-project content source. */
 const PER_SOURCE_RESULTS = 5;
+/** Catalog cap on indexed artifact-corpus records per project. */
+const ARTIFACT_CATALOG_CAP = 2000;
 /** Hits requested from each memory scope. */
 const PER_MEMORY_RESULTS = 3;
 /** Default merged result cap returned to the caller. */
@@ -185,12 +187,16 @@ export class SearchService {
       });
     }
 
-    // File paths from each project's persisted files.json (no re-walk).
+    // File paths from each project's persisted files.json (no re-walk), plus
+    // indexed artifact-corpus records (connector data under artifacts/data/**).
     const fileLists = await mapPool(projects, FANOUT_CONCURRENCY, async (p) => {
-      const files = await this.indexManager.readFiles(p.id).catch(() => []);
-      return { project: p, files };
+      const [files, artifactFiles] = await Promise.all([
+        this.indexManager.readFiles(p.id).catch(() => []),
+        this.contentIndex.listArtifactIndexFiles(p.id, ARTIFACT_CATALOG_CAP).catch(() => []),
+      ]);
+      return { project: p, files, artifactFiles };
     });
-    for (const { project, files } of fileLists) {
+    for (const { project, files, artifactFiles } of fileLists) {
       for (const f of files) {
         entries.push({
           kind: 'file',
@@ -201,6 +207,20 @@ export class SearchService {
           projectId: project.id,
           projectName: project.name,
           source: 'workspace',
+        });
+      }
+      for (const path of artifactFiles) {
+        entries.push({
+          kind: 'file',
+          // `artifacts:` segment — a workspace file may share the same
+          // relative path, and the two must stay distinct rows.
+          id: `file:${project.id}:artifacts:${path}`,
+          title: basename(path),
+          path,
+          subtitle: `${project.name} · ${path}`,
+          projectId: project.id,
+          projectName: project.name,
+          source: 'artifacts',
         });
       }
     }
@@ -268,12 +288,15 @@ export class SearchService {
       const codeOpts = vector
         ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
         : { mode: 'keyword' as const, maxResults: PER_SOURCE_RESULTS };
-      const [code, docs, symbols, mem] = await Promise.all([
+      const [code, docs, artifacts, symbols, mem] = await Promise.all([
         workspaceIndexing
           ? this.contentIndex.searchCode(p.id, query, codeOpts).catch(() => null)
           : Promise.resolve(null),
         workspaceIndexing
           ? this.contentIndex.searchDocs(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
+          : Promise.resolve(null),
+        workspaceIndexing
+          ? this.contentIndex.searchArtifacts(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
           : Promise.resolve(null),
         workspaceIndexing
           ? this.contentIndex
@@ -310,6 +333,21 @@ export class SearchService {
           projectName: p.name,
           path: r.sourcePath,
           source: 'workspace',
+          line: r.lineStart,
+          score: 0.6 * WEIGHT.content,
+        });
+      }
+      for (const r of artifacts?.results ?? []) {
+        out.push({
+          kind: 'content',
+          id: `content:${p.id}:artifacts:${r.path}:${r.lineStart}`,
+          title: basename(r.path),
+          subtitle: `${p.name} · ${r.path}`,
+          snippet: r.snippet,
+          projectId: p.id,
+          projectName: p.name,
+          path: r.path,
+          source: 'artifacts',
           line: r.lineStart,
           score: 0.6 * WEIGHT.content,
         });
