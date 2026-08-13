@@ -39,4 +39,21 @@ The supported surface is the `run-action` **subprocess contract** — its
 argument shape and its output envelope — under semver. The CommonJS module
 exports are an implementation detail of that host.
 
+## Third-party code and licenses
+
+The compiled entry points contain a modified, minimal slice of Prismatic's
+[open-source components](https://github.com/prismatic-io/components), licensed
+under Apache-2.0. The package includes:
+
+- [`NOTICE.md`](./NOTICE.md), which identifies the upstream component and the
+  modifications made for Gezel;
+- [`vendor/provenance.json`](./vendor/provenance.json), the machine-readable
+  per-action source, license, runtime-version, modification, and content-hash
+  ledger;
+- [`THIRD_PARTY_LICENSES/Apache-2.0.txt`](./THIRD_PARTY_LICENSES/Apache-2.0.txt),
+  the full upstream license text.
+
+The package as a whole remains MIT-licensed by Bendyline; those vendored
+portions remain under Apache-2.0.
+
 MIT © Bendyline

@@ -21,6 +21,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { type PackageJson, REPO_ROOT, loadPublishedPackages } from './_packages';
 
 const RUNTIME_DEP_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const;
+const workspaceVersions = new Map(
+  loadPublishedPackages().map(({ name, pkg }) => [name, pkg.version]),
+);
 
 /** Only packages that actually declare a workspace sibling need packing. */
 const packages = loadPublishedPackages().filter((p) =>
@@ -111,6 +114,13 @@ describe('workspace protocol is resolved at pack time', () => {
             range,
             `${packed.name} → ${dep} in ${field} still uses the workspace protocol`,
           ).not.toContain('workspace:');
+          const siblingVersion = workspaceVersions.get(dep);
+          if (siblingVersion) {
+            expect(
+              range,
+              `${packed.name} → ${dep} in ${field} does not match the sibling tarball version`,
+            ).toBe(siblingVersion);
+          }
         }
       }
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  findWorkspaceDependencies,
   findWorkspaceDependencyViolations,
   normalizeWorkspaceDependencies,
   normalizeWorkspaceManifest,
@@ -53,6 +54,15 @@ test('normalizes every local dependency scope while leaving registry dependencie
   assert.equal(manifest.peerDependencies['@bendyline/gezel-sdk'], 'workspace:*');
   assert.equal(manifest.optionalDependencies['@bendyline/gezel-mcp'], 'workspace:*');
   assert.deepEqual(findWorkspaceDependencyViolations(manifest, names), []);
+  assert.deepEqual(
+    findWorkspaceDependencies(manifest, names).map(({ field, name }) => `${field}:${name}`),
+    [
+      'dependencies:@bendyline/gezel',
+      'devDependencies:@bendyline/gezel-client',
+      'peerDependencies:@bendyline/gezel-sdk',
+      'optionalDependencies:@bendyline/gezel-mcp',
+    ],
+  );
 });
 
 test('discovers the Gezel workspace layout and writes only changed manifests', async () => {

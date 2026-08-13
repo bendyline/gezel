@@ -79,7 +79,8 @@ CLI-owned daemon on the canonical port.
 
 ## What you get with no further setup
 
-The install is pure JavaScript. Straight away you can use:
+The CLI does not bundle native inference engines; those are downloaded only on
+demand when you opt into on-device models. Straight away you can use:
 
 - The interactive TUI (`gezel`) and one-shot prompts (`gezel run "…"`)
 - Cloud providers — OpenAI, Anthropic, GitHub Copilot, and any

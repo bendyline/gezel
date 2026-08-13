@@ -33,7 +33,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
-import { normalizeWorkspaceManifest, readWorkspaceManifests } from './workspace-dependencies.mjs';
+import { writeReleasePackageState } from './release-package-state.mjs';
+import {
+  findWorkspaceDependencies,
+  findWorkspaceDependencyViolations,
+  normalizeWorkspaceManifest,
+  readWorkspaceManifests,
+} from './workspace-dependencies.mjs';
 
 const version = process.argv[2];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,13 +51,13 @@ if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\w.]+)?$/.test(version ?? ''))
   process.exit(1);
 }
 
-// multi-semantic-release deliberately replaces local workspace ranges with
-// concrete versions before it calls semantic-release's prepare plugins. That
-// is correct for npm-oriented monorepos, but Gezel delegates this conversion
-// to `pnpm publish`, which rewrites workspace:* only in the packed manifest.
-// Restore the source invariant before @semantic-release/git commits this
-// package.json; sibling package versions remain stamped on disk, so pnpm still
-// resolves every tarball against the versions selected for this release.
+// multi-semantic-release deliberately replaces changed local workspace ranges
+// with the versions it selected before calling semantic-release's prepare
+// plugins. Preserve that release-only manifest before restoring the source
+// invariant: publish-package.mjs materializes it while pnpm packs the tarball.
+// This bridge matters because multi-semantic-release serializes each package's
+// prepare+publish pair; a dependency that publishes later still has its old
+// on-disk version when this package is packed.
 let currentRecord;
 let workspaceNames;
 try {
@@ -70,15 +76,28 @@ if (!currentRecord) {
   process.exit(1);
 }
 
-const dependencyChanges = normalizeWorkspaceManifest(currentRecord, workspaceNames, {
-  write: !dryRun,
-});
+const dependencyChanges = findWorkspaceDependencyViolations(currentRecord.manifest, workspaceNames);
+const workspaceDependencies = findWorkspaceDependencies(currentRecord.manifest, workspaceNames);
+// Preserve state for every package with local edges, even when msr left those
+// edges as workspace:*. publish-package.mjs deliberately fails closed without
+// this hand-off, so a dropped/misordered prepare hook cannot silently fall back
+// to whichever sibling versions happen to be on disk.
+if (!dryRun && workspaceDependencies.length > 0) {
+  writeReleasePackageState({
+    repoRoot,
+    packageName: currentRecord.manifest.name,
+    packageVersion: currentRecord.manifest.version,
+    source: currentRecord.source,
+  });
+}
 if (dependencyChanges.length > 0) {
   const action = dryRun ? 'would restore' : 'restored';
   console.log(
     `prepare-package: ${action} ${dependencyChanges.length} workspace dependency specifier(s) in ${currentRecord.manifest.name}`,
   );
 }
+if (!dryRun && dependencyChanges.length > 0)
+  normalizeWorkspaceManifest(currentRecord, workspaceNames);
 
 if (basename(packageDir) !== 'core') process.exit(0);
 

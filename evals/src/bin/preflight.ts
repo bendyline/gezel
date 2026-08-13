@@ -10,10 +10,18 @@ import { formatHostState } from '../host-state.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { ensurePreflightAdmission, runPreflight } from '../preflight.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
-import { parseArgs, resolveProviderFlag } from './args.ts';
+import { assertKnownFlags, parseArgs, resolveProviderFlag } from './args.ts';
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  assertKnownFlags(args.flags, [
+    'cache-root',
+    'force',
+    'llama-bin',
+    'min-tps',
+    'mlx-source-home',
+    'model',
+  ]);
   const engine = resolveProviderFlag(args.flags) ?? defaultProvider();
   const modelId = String(args.flags.model ?? defaultModelFor(engine));
   assertLocalEngineSource(engine, modelId);

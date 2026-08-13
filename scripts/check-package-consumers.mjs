@@ -10,9 +10,9 @@
  *   1. A missing runtime dependency. It resolves in the workspace because
  *      some sibling hoisted it; it is absent in a consumer's tree.
  *   2. A native/prebuild install failure. `@bendyline/gezel-service` pulls
- *      optional node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and
- *      playwright-core. The heavyweight Transformers/Kokoro stack is an
- *      optional peer for npm consumers and is tested in complete bundles.
+ *      @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and playwright-core.
+ *      node-pty and the heavyweight Transformers/Kokoro stack are optional
+ *      peers for npm consumers and are tested separately in complete bundles.
  *
  * So: pnpm pack (which resolves `workspace:*`), then `npm install` into an
  * empty non-workspace directory, then exercise it.
@@ -31,6 +31,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -38,9 +39,11 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as tar from 'tar';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
+const requireReleaseStamp = process.argv.includes('--require-release-stamp');
 const tarballDirFlag = process.argv.indexOf('--tarball-dir');
 const suppliedTarballDir =
   tarballDirFlag === -1 ? null : resolve(process.argv[tarballDirFlag + 1] ?? '');
@@ -63,6 +66,13 @@ const PUBLISHED = [
   'script-stdlib',
   'cli',
 ];
+const PUBLISHED_NAMES = PUBLISHED.map((dir) => {
+  const manifest = JSON.parse(
+    readFileSync(resolve(repoRoot, 'packages', dir, 'package.json'), 'utf8'),
+  );
+  return manifest.name;
+});
+const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
 
 /**
  * Subpaths a consumer must be able to `import()` under plain node. Kept to
@@ -104,6 +114,68 @@ function logicalTreeBytes(root) {
     else total += lstatSync(path).size;
   }
   return total;
+}
+
+function auditTarballArchive(tarball) {
+  const names = new Set();
+  tar.list({
+    file: tarball,
+    sync: true,
+    onReadEntry(entry) {
+      const path = entry.path.replaceAll('\\', '/');
+      if (!path.startsWith('package/') || path.startsWith('/') || path.split('/').includes('..')) {
+        fail(`${basename(tarball)} contains an unsafe archive path: ${JSON.stringify(path)}`);
+      }
+      if (!['File', 'Directory'].includes(entry.type)) {
+        fail(`${basename(tarball)} contains unexpected ${entry.type} entry ${path}`);
+      }
+      if (names.has(path)) fail(`${basename(tarball)} contains duplicate archive entry ${path}`);
+      names.add(path);
+      entry.resume();
+    },
+  });
+}
+
+const SENSITIVE_PATH =
+  /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.yarnrc|id_(?:rsa|dsa|ecdsa|ed25519)|credentials?(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|jks|keystore|key))(?:$|\/)/i;
+const SECRET_PATTERNS = [
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{30,255}\b/,
+  /\bnpm_[A-Za-z0-9]{36}\b/,
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/,
+];
+
+function auditInstalledPackage(root, packageName) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      const relative = path.slice(root.length + 1).replaceAll('\\', '/');
+      if (entry.isSymbolicLink()) {
+        fail(`${packageName} contains a symlink: ${relative}`);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        pending.push(path);
+        continue;
+      }
+      if (SENSITIVE_PATH.test(relative)) {
+        fail(`${packageName} contains a credential-like path: ${relative}`);
+      }
+      const content = readFileSync(path);
+      // Skip binary payloads. Packed text is small enough to scan in full.
+      if (content.includes(0)) continue;
+      const text = content.toString('utf8');
+      for (const pattern of SECRET_PATTERNS) {
+        if (pattern.test(text)) {
+          fail(`${packageName} contains high-confidence secret material in ${relative}`);
+        }
+      }
+    }
+  }
 }
 
 function run(command, args, options = {}) {
@@ -199,6 +271,8 @@ try {
   } else {
     ok(`packed ${tarballs.length} tarballs`);
   }
+  for (const tarball of tarballs) auditTarballArchive(tarball);
+  ok('tarball archives contain only unique, package-scoped regular files and directories');
 
   // ── 2. Install into a plain npm project ────────────────────────────────
   step('installing into a non-workspace consumer');
@@ -213,7 +287,66 @@ try {
     fail(`npm install of the tarballs failed\n${install.stdout}\n${install.stderr}`);
     throw new Error('cannot continue without a successful install');
   }
-  ok('npm install succeeded (including the native prebuild chain)');
+  const installOutput = `${install.stdout}\n${install.stderr}`;
+  const installedNodePty = join(consumer, 'node_modules', 'node-pty', 'package.json');
+  if (existsSync(installedNodePty)) {
+    fail('npm unexpectedly auto-installed the optional node-pty peer');
+  } else if (/node-pty/i.test(installOutput)) {
+    fail(`default npm install mentioned node-pty\n${installOutput}`);
+  } else {
+    ok('npm install succeeded without installing or warning about node-pty');
+  }
+
+  step('validating the installed Gezel release graph');
+  const installedManifests = new Map(
+    PUBLISHED_NAMES.map((name) => {
+      const path = join(consumer, 'node_modules', ...name.split('/'), 'package.json');
+      if (!existsSync(path)) {
+        fail(`installed release set is missing ${name}`);
+        return [name, null];
+      }
+      return [name, JSON.parse(readFileSync(path, 'utf8'))];
+    }),
+  );
+  for (const [name, manifest] of installedManifests) {
+    if (!manifest) continue;
+    for (const field of RUNTIME_DEPENDENCY_FIELDS) {
+      for (const [dependency, range] of Object.entries(manifest[field] ?? {})) {
+        const sibling = installedManifests.get(dependency);
+        if (!sibling) continue;
+        if (range !== sibling.version) {
+          fail(
+            `${name} → ${dependency} in ${field} is ${range}; release set has ${sibling.version}`,
+          );
+        }
+      }
+    }
+  }
+  const coreVersion = installedManifests.get('@bendyline/gezel')?.version;
+  if (!coreVersion) fail('could not determine installed @bendyline/gezel version');
+  else ok(`all internal runtime pins match the ${coreVersion} release set`);
+
+  for (const name of PUBLISHED_NAMES) {
+    auditInstalledPackage(join(consumer, 'node_modules', ...name.split('/')), name);
+  }
+  ok('installed package payloads contain no symlinks, credential-like paths, or known token forms');
+
+  const spectralRoot = join(consumer, 'node_modules', '@bendyline', 'gezel-connectors-spectral');
+  for (const relative of [
+    'NOTICE.md',
+    'THIRD_PARTY_LICENSES/Apache-2.0.txt',
+    'vendor/provenance.json',
+  ]) {
+    if (!existsSync(join(spectralRoot, relative)))
+      fail(`installed Spectral host is missing ${relative}`);
+  }
+  for (const relative of ['dist/index.js', 'dist/run-action.js']) {
+    const source = readFileSync(join(spectralRoot, relative), 'utf8');
+    if (!source.includes('Includes modified portions of prismatic-io/components')) {
+      fail(`installed Spectral host ${relative} is missing its Apache modification banner`);
+    }
+  }
+  ok('installed Spectral host carries its Apache license, notice, provenance, and banners');
 
   const installedBytes = logicalTreeBytes(join(consumer, 'node_modules'));
   const installedMiB = installedBytes / 1024 / 1024;
@@ -253,6 +386,42 @@ try {
   if (imported.status !== 0) fail(`import probe failed\n${imported.stderr}`);
   else ok(`imported ${IMPORTABLE.length} subpaths`);
 
+  step('typechecking installed declarations with skipLibCheck=false');
+  const typeProbe = join(consumer, 'probe-types.mts');
+  writeFileSync(
+    typeProbe,
+    `${IMPORTABLE.map((specifier) => `import ${JSON.stringify(specifier)};`).join('\n')}\n`,
+  );
+  writeFileSync(
+    join(consumer, 'tsconfig.consumer.json'),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          skipLibCheck: false,
+          noEmit: true,
+          types: ['node'],
+        },
+        files: ['./probe-types.mts'],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const typecheck = run(
+    process.execPath,
+    [join(consumer, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.consumer.json'],
+    { cwd: consumer },
+  );
+  if (typecheck.status !== 0) {
+    fail(`installed declaration typecheck failed\n${typecheck.stdout}\n${typecheck.stderr}`);
+  } else {
+    ok('installed declarations typecheck without skipping library errors');
+  }
+
   // ── 4. The runtime-resolved specifiers ─────────────────────────────────
   step('resolving the runtime-resolved specifiers');
   const resolveProbe = join(consumer, 'probe-resolve.mjs');
@@ -273,10 +442,74 @@ try {
   if (resolved.status !== 0) fail(`resolve probe failed\n${resolved.stderr}`);
   else ok('daemon, MCP server, spectral host, stdlib and SDK all resolve');
 
+  step('running installed MCP and Spectral subprocess protocols');
+  const mcpProbe = join(consumer, 'probe-mcp.mjs');
+  writeFileSync(
+    mcpProbe,
+    [
+      "import { Client } from '@modelcontextprotocol/sdk/client/index.js';",
+      "import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';",
+      `const server = ${JSON.stringify(join(consumer, 'node_modules', '@bendyline', 'gezel-mcp', 'dist', 'server.js'))};`,
+      'const transport = new StdioClientTransport({',
+      '  command: process.execPath,',
+      '  args: [server],',
+      '  env: {',
+      "    GEZEL_BASE_URL: 'http://127.0.0.1:9',",
+      "    GEZEL_TOKEN: 'consumer-smoke',",
+      "    GEZEL_AGENT_ID: 'consumer-smoke',",
+      "    GEZEL_PROJECT_ID: 'default',",
+      `    GEZEL_HOME: ${JSON.stringify(join(root, 'mcp-home'))},`,
+      '  },',
+      '});',
+      "const client = new Client({ name: 'package-smoke', version: '0.0.0' });",
+      'await client.connect(transport);',
+      'const result = await client.listTools();',
+      "if (!Array.isArray(result.tools) || result.tools.length < 100) throw new Error('MCP tool surface is incomplete');",
+      'console.log(result.tools.length);',
+      'await client.close();',
+    ].join('\n'),
+  );
+  const mcp = run(process.execPath, [mcpProbe], { cwd: consumer });
+  if (mcp.status !== 0) fail(`MCP stdio smoke failed\n${mcp.stdout}\n${mcp.stderr}`);
+  else ok(`MCP initialized over stdio and listed ${mcp.stdout.trim()} tools`);
+
+  const spectralEntry = join(spectralRoot, 'dist', 'run-action.js');
+  const spectral = run(process.execPath, [spectralEntry], {
+    cwd: consumer,
+    input: JSON.stringify({
+      component: 'echo',
+      action: 'list',
+      inputs: { records: [{ id: 'consumer-smoke' }] },
+    }),
+  });
+  let spectralData;
+  try {
+    spectralData = JSON.parse(spectral.stdout).data;
+  } catch {
+    // The failure below includes stdout/stderr.
+  }
+  if (spectral.status !== 0 || spectralData?.[0]?.id !== 'consumer-smoke') {
+    fail(`Spectral subprocess smoke failed\n${spectral.stdout}\n${spectral.stderr}`);
+  } else {
+    ok('Spectral subprocess executed echo/list through its packed entry point');
+  }
+
   // ── 5. The CLI binary ──────────────────────────────────────────────────
   step('running the installed CLI');
   const bin = join(consumer, 'node_modules', '@bendyline', 'gezel-cli', 'dist', 'bin', 'gezel.js');
-  for (const args of [['--version'], ['--help'], ['native', '--help']]) {
+  const cliVersionResult = run(process.execPath, [bin, '--version'], {
+    cwd: consumer,
+    env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },
+  });
+  const cliVersion = cliVersionResult.stdout.trim();
+  if (cliVersionResult.status !== 0) {
+    fail(`gezel --version\n${cliVersionResult.stderr}`);
+  } else if (requireReleaseStamp && cliVersion !== coreVersion) {
+    fail(`gezel --version printed ${JSON.stringify(cliVersion)}; expected ${coreVersion}`);
+  } else {
+    ok(`gezel --version (${cliVersion})`);
+  }
+  for (const args of [['--help'], ['native', '--help']]) {
     const result = run(process.execPath, [bin, ...args], {
       cwd: consumer,
       env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },
@@ -285,30 +518,9 @@ try {
     else ok(`gezel ${args.join(' ')}`);
   }
 
-  // ── 6. Boot the installed daemon and drive one chat turn ───────────────
+  // ── 6. Default install: boot without the optional PTY peer ─────────────
   if (process.env.GEZEL_CONSUMER_SKIP_DAEMON === '1') {
-    step('daemon smoke (skipped via GEZEL_CONSUMER_SKIP_DAEMON=1)');
-  } else {
-    step('booting the installed daemon');
-    await daemonSmoke(consumer);
-  }
-
-  // ── 7. Omit just the optional PTY runtime ──────────────────────────────
-  // Dynamic import is only half the contract. Simulate npm's allowed outcome
-  // when this ONE optional native package fails to install, then prove the
-  // daemon still boots and the first terminal command returns a stable
-  // capability error rather than taking down gezeld.
-  //
-  // Do not use `npm install --omit=optional`: packages such as
-  // @napi-rs/keyring publish their required per-platform native binding as an
-  // optional dependency too, so that flag deliberately creates a daemon with
-  // several unrelated native capabilities removed. This targeted deletion is
-  // the exact tree shape produced by a node-pty-only optional install failure.
-  step('simulating an omitted optional node-pty and rechecking the daemon');
-  rmSync(join(consumer, 'node_modules', 'node-pty'), { recursive: true, force: true });
-  if (existsSync(join(consumer, 'node_modules', 'node-pty', 'package.json'))) {
-    fail('could not remove node-pty from the temporary packed consumer');
-  } else if (process.env.GEZEL_CONSUMER_SKIP_DAEMON === '1') {
+    step('daemon smoke without node-pty (skipped via GEZEL_CONSUMER_SKIP_DAEMON=1)');
     const probe = run(
       process.execPath,
       ['--input-type=module', '-e', "await import('@bendyline/gezel-service')"],
@@ -317,8 +529,39 @@ try {
     if (probe.status !== 0) fail(`service import without node-pty failed\n${probe.stderr}`);
     else ok('service imports without node-pty');
   } else {
-    ok('removed only node-pty from the temporary packed consumer');
-    await daemonSmoke(consumer, { pty: 'unavailable' });
+    step('booting the default install without node-pty');
+    await daemonSmoke(consumer, {
+      pty: 'unavailable',
+      expectedVersion: requireReleaseStamp ? coreVersion : undefined,
+    });
+  }
+
+  // ── 7. Explicit terminal opt-in ────────────────────────────────────────
+  // Optional peers are never auto-installed by npm. Prove the instruction in
+  // the terminal error is sufficient: install node-pty beside Gezel and then
+  // exercise the real terminal path through the same packed daemon.
+  step('installing the optional terminal peer explicitly');
+  const ptyInstall = runPackageManager(
+    'npm',
+    ['install', '--no-save', '--no-audit', '--no-fund', 'node-pty@^1.1.0'],
+    { cwd: consumer },
+  );
+  if (ptyInstall.status !== 0) {
+    fail(`explicit npm install node-pty failed\n${ptyInstall.stdout}\n${ptyInstall.stderr}`);
+    throw new Error('cannot continue without the explicit terminal peer');
+  }
+  if (!existsSync(installedNodePty)) {
+    fail('npm install node-pty succeeded but the package is absent');
+  } else {
+    ok('npm install node-pty supplied the optional terminal peer');
+  }
+
+  if (process.env.GEZEL_CONSUMER_SKIP_DAEMON !== '1') {
+    step('restarting the installed daemon with node-pty');
+    await daemonSmoke(consumer, {
+      pty: 'available',
+      expectedVersion: requireReleaseStamp ? coreVersion : undefined,
+    });
   }
 } finally {
   if (keep) console.log(`\nleft the consumer project at ${root}`);
@@ -333,14 +576,14 @@ console.log('\npacked-consumer checks passed');
 
 /**
  * The end-to-end proof: the daemon a consumer installed from npm actually
- * boots, serves its API, and creates a gezel. With the default options it also
- * runs a macOS terminal command through the installed node-pty. The optional
- * runtime pass instead proves the daemon stays healthy and returns a stable
- * terminal-unavailable result when node-pty was omitted. Uses the mock
- * provider so no credentials and no network are involved.
+ * boots, serves its API, and creates a gezel. The default npm install proves
+ * the daemon stays healthy and returns an actionable terminal-unavailable
+ * result without node-pty. The explicit opt-in pass runs a real PTY command on
+ * macOS. Uses the mock provider so no credentials and no network are involved.
  */
 async function daemonSmoke(consumerDir, opts = {}) {
   const pty = opts.pty ?? 'available';
+  const expectedVersion = opts.expectedVersion;
   const home = mkdtempSync(join(tmpdir(), 'gezel-consumer-home-'));
   const entry = join(
     consumerDir,
@@ -397,6 +640,8 @@ async function daemonSmoke(consumerDir, opts = {}) {
     const health = await client.health();
     if (!health) {
       fail('health probe returned nothing');
+    } else if (expectedVersion && health.version !== expectedVersion) {
+      fail(`daemon health reports ${health.version ?? 'unknown'}; expected ${expectedVersion}`);
     } else {
       ok(
         pty === 'unavailable'
@@ -422,9 +667,9 @@ async function daemonSmoke(consumerDir, opts = {}) {
       if (
         terminalOutput?.exitCode === -1 &&
         terminalOutput.errorMessage === 'shell-failed' &&
-        /optional node-pty runtime could not be loaded/i.test(terminalOutput.content)
+        /npm install node-pty/i.test(terminalOutput.content)
       ) {
-        ok('terminal reports optional node-pty is unavailable without crashing the daemon');
+        ok('terminal gives npm install instructions without crashing the daemon');
       } else {
         fail(`missing-node-pty terminal result was not stable\n${JSON.stringify(terminalOutput)}`);
       }

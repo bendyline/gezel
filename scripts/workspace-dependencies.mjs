@@ -70,6 +70,19 @@ export function findWorkspaceDependencyViolations(manifest, workspaceNames) {
   return violations;
 }
 
+/** Every dependency edge whose target is another package in this workspace. */
+export function findWorkspaceDependencies(manifest, workspaceNames) {
+  const dependencies = [];
+  for (const field of WORKSPACE_DEPENDENCY_FIELDS) {
+    const entries = manifest[field];
+    if (!entries || typeof entries !== 'object') continue;
+    for (const [name, specifier] of Object.entries(entries)) {
+      if (workspaceNames.has(name)) dependencies.push({ field, name, specifier });
+    }
+  }
+  return dependencies;
+}
+
 export function normalizeWorkspaceDependencies(manifest, workspaceNames) {
   const changes = findWorkspaceDependencyViolations(manifest, workspaceNames);
   for (const { field, name } of changes) manifest[field][name] = 'workspace:*';

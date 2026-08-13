@@ -1,9 +1,17 @@
 {
-  "_note": "Vendored slices of Apache-2.0 Prismatic components (github.com/prismatic-io/components). Each runs off-platform through the connectors-spectral host and is gated by a *.conformance.test.ts. Pinned @prismatic-io/spectral: 10.17.1.",
+  "_note": "Vendored slices of Apache-2.0 Prismatic components (github.com/prismatic-io/components). Each runs off-platform through the connectors-spectral host and is gated by a *.conformance.test.ts. Pinned @prismatic-io/spectral: 10.23.0.",
   "airtable/listRecords": {
     "source": "prismatic-io/components: airtable/src/{actions/records/listRecords,client,util/index,types/index}.ts",
+    "upstream": "https://github.com/prismatic-io/components/tree/main/components/airtable",
     "license": "Apache-2.0",
-    "spectralVersion": "10.17.1",
+    "spectralVersion": "10.23.0",
+    "modifiedBy": "Bendyline",
+    "modifications": [
+      "Selected only the files and symbols needed by listRecords.",
+      "Repointed imports to the vendored slice and the pinned Spectral SDK.",
+      "Inlined required inputs and removed documentation-only payloads and metadata.",
+      "Bundled the modified source into the package's CommonJS entry points."
+    ],
     "slice": ["list-records.ts", "client.ts", "util.ts", "types.ts"],
     "vendoredSha": "2d97d6e66db52a58"
   }

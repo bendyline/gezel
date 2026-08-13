@@ -58,6 +58,7 @@ import { formatPassClaim } from '../stats-discipline.ts';
 import { listSuites, suiteScenarios } from '../suites.ts';
 import { valueRequiredAllFlagError } from './all-args.ts';
 import {
+  assertKnownFlags,
   parseArgs,
   parseDuration,
   printScenarios,
@@ -69,6 +70,29 @@ import {
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
+  assertKnownFlags(args.flags, [
+    'cache-root',
+    'count',
+    'count-strict',
+    'force-behaviors',
+    'ignore-gpu-panic',
+    'image-bin',
+    'image-model',
+    'list',
+    'llm-judge',
+    'llama-bin',
+    'mlx-source-home',
+    'model',
+    'no-triage',
+    'parallel',
+    'remove-behaviors',
+    'runs-dir',
+    'scenarios',
+    'skip-preflight',
+    'suite',
+    'timeout',
+    'triage-k',
+  ]);
 
   // parseArgs represents a bare long flag as boolean `true`. For flags
   // whose value is required, accepting that sentinel is dangerous:
@@ -164,6 +188,18 @@ async function main() {
   if (triageK !== undefined && (!Number.isInteger(triageK) || triageK < 0)) {
     console.error('--triage-k must be a non-negative integer');
     process.exit(2);
+  }
+  if (args.flags['llm-judge']) {
+    // Accepted, deliberately not honored inline: judging a multi-cell run
+    // cell-by-cell scores each one with whatever the backend resolved to at
+    // that moment, which is exactly the drift the post-hoc pass exists to
+    // remove. Silently ignoring it was worse — every sweep passed this flag
+    // and no one noticed nothing judged.
+    console.warn(
+      '[evals] --llm-judge is not run inline for multi-trial batches.\n' +
+        '        Judge the finished run in one pass instead, so every score shares a judge:\n' +
+        '          pnpm eval:judge-sweep --run-id <id>',
+    );
   }
   const provider = resolveProviderFlag(args.flags) ?? defaultProvider();
   const modelId = String(args.flags.model ?? defaultModelFor(provider));

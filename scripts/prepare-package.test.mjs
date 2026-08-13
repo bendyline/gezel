@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { clearReleasePackageState, readReleasePackageState } from './release-package-state.mjs';
 
 const execFileP = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,10 @@ async function fixture() {
   await copyFile(
     join(here, 'workspace-dependencies.mjs'),
     join(root, 'scripts', 'workspace-dependencies.mjs'),
+  );
+  await copyFile(
+    join(here, 'release-package-state.mjs'),
+    join(root, 'scripts', 'release-package-state.mjs'),
   );
   // prepare-package imports it to derive the content-compat calendar line.
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
@@ -61,12 +66,43 @@ async function run(root, cwd, args, env = {}) {
   });
 }
 
-test('does nothing for a package that is not core', async () => {
+test('preserves release state for an unchanged workspace edge without rebuilding core', async () => {
   const root = await fixture();
+  const packageName = '@bendyline/gezel-cli';
   try {
     const { stdout } = await run(root, 'packages/cli', ['1.2.3']);
     assert.equal(stdout.trim(), '');
     assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+    const releaseState = readReleasePackageState({
+      repoRoot: root,
+      packageName,
+      packageVersion: '0.1.0',
+    });
+    assert.ok(releaseState, 'workspace:* edge did not produce fail-closed publish state');
+    assert.equal(
+      JSON.parse(releaseState.source).dependencies['@bendyline/gezel-client'],
+      'workspace:*',
+    );
+  } finally {
+    clearReleasePackageState({ repoRoot: root, packageName });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('publish fails closed when a package with workspace edges has no prepare state', async () => {
+  const root = await fixture();
+  await copyFile(join(here, 'publish-package.mjs'), join(root, 'scripts', 'publish-package.mjs'));
+  try {
+    await assert.rejects(
+      () =>
+        execFileP(process.execPath, [join(root, 'scripts', 'publish-package.mjs')], {
+          cwd: join(root, 'packages', 'cli'),
+          env: process.env,
+        }),
+      (err) =>
+        err.code === 1 &&
+        /refusing to publish .* without prepare-time release state/.test(err.stderr),
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -74,6 +110,7 @@ test('does nothing for a package that is not core', async () => {
 
 test('restores workspace dependency specifiers before a non-core release commit', async () => {
   const root = await fixture();
+  const packageName = '@bendyline/gezel-cli';
   try {
     const manifestPath = join(root, 'packages', 'cli', 'package.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -87,7 +124,16 @@ test('restores workspace dependency specifiers before a non-core release commit'
     assert.equal(normalized.dependencies['@bendyline/gezel-client'], 'workspace:*');
     assert.equal(normalized.dependencies.commander, '^15.0.0');
     assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+
+    const releaseState = readReleasePackageState({
+      repoRoot: root,
+      packageName,
+      packageVersion: '0.1.0',
+    });
+    assert.ok(releaseState, 'computed dependency versions were not preserved for publish');
+    assert.equal(JSON.parse(releaseState.source).dependencies['@bendyline/gezel-client'], '1.0.0');
   } finally {
+    clearReleasePackageState({ repoRoot: root, packageName });
     await rm(root, { recursive: true, force: true });
   }
 });

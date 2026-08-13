@@ -6,15 +6,7 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "connectors",
-    "spectral",
-    "prismatic"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "connectors", "spectral", "prismatic"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -40,7 +32,10 @@
   },
   "files": [
     "dist",
-    "!dist/**/*.map"
+    "!dist/**/*.map",
+    "NOTICE.md",
+    "THIRD_PARTY_LICENSES",
+    "vendor/provenance.json"
   ],
   "scripts": {
     "build": "tsup",

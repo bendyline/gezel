@@ -937,6 +937,24 @@ describe('McpBridge', () => {
       expect(out).toMatch(/copy_artifact_to_workspace/);
     });
 
+    it('explains a bad source instead of echoing an HTTP status line', async () => {
+      // The powerpoint-deck wall: the model passed the URI a conversion
+      // tool handed back rather than the artifact path it saved, and got
+      // "Gezel API error 404 on POST /api/projects/.../workspace/copy-from-artifact"
+      // — a status line with nothing to act on. It then "fixed" the missing
+      // workspace file by hand-writing markdown to deck.pptx, which the
+      // container gate correctly failed, with a real PPTX already sitting
+      // in the artifacts drawer the whole time.
+      const out = await bridge.callTool('copy_artifact_to_workspace', {
+        source: 'mock://docblocks/deck.pptx',
+        dest: 'deliverables/d-day.pptx',
+      });
+      expect(out).toMatch(/artifact not found/i);
+      expect(out).not.toMatch(/Gezel API error/);
+      expect(out).toMatch(/list_artifacts/);
+      expect(out).toMatch(/write_file` corrupts binaries|corrupts binaries/);
+    });
+
     it('returns an actionable error with line + excerpt on a JS syntax error in HTML', async () => {
       await bridge.callTool('list_projects', {}); // ensure context exists
       // write_file refuses HTML with broken script body, so use

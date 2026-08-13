@@ -26,10 +26,16 @@ const pkgRoot = resolve(here, '..');
 const vendorDir = join(pkgRoot, 'vendor');
 const provenancePath = join(vendorDir, 'provenance.json');
 const registryPath = join(pkgRoot, 'src', 'vendor', 'index.ts');
+const packagePath = join(pkgRoot, 'package.json');
 
 const update = process.argv.includes('--update');
 const provenance = JSON.parse(readFileSync(provenancePath, 'utf8'));
 const registry = readFileSync(registryPath, 'utf8');
+const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8'));
+const spectralVersion = packageManifest.dependencies?.['@prismatic-io/spectral'];
+if (typeof spectralVersion !== 'string' || spectralVersion.length === 0) {
+  throw new Error('package.json must pin @prismatic-io/spectral');
+}
 
 /** sha256 (first 16 hex) over a slice's files, order-independent. */
 function sliceSha(compDir, slice) {
@@ -58,6 +64,23 @@ for (const [key, entry] of Object.entries(provenance)) {
   if (!hasConformance) problems.push('no *.conformance.test.ts alongside the slice');
   if (!registry.includes(`'${key}'`)) {
     problems.push(`not registered in src/vendor/index.ts (expected key '${key}')`);
+  }
+  if (entry.license !== 'Apache-2.0') {
+    problems.push(`license must be Apache-2.0, found ${JSON.stringify(entry.license)}`);
+  }
+  if (entry.spectralVersion !== spectralVersion) {
+    problems.push(
+      `spectralVersion ${JSON.stringify(entry.spectralVersion)} does not match package pin ${spectralVersion}`,
+    );
+  }
+  if (typeof entry.upstream !== 'string' || !entry.upstream.startsWith('https://github.com/')) {
+    problems.push('no public GitHub upstream URL');
+  }
+  if (typeof entry.modifiedBy !== 'string' || entry.modifiedBy.length === 0) {
+    problems.push('no modifiedBy attribution');
+  }
+  if (!Array.isArray(entry.modifications) || entry.modifications.length === 0) {
+    problems.push('no modification summary');
   }
 
   const sha = sliceSha(compDir, slice);

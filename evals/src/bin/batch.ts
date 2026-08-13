@@ -31,6 +31,7 @@ import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { formatPassClaim } from '../stats-discipline.ts';
 import { valueRequiredBatchFlagError } from './all-args.ts';
 import {
+  assertKnownFlags,
   parseArgs,
   parseDuration,
   printScenarios,
@@ -41,6 +42,24 @@ import {
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
+  assertKnownFlags(args.flags, [
+    'cache-root',
+    'count',
+    'image-bin',
+    'image-model',
+    'list',
+    'llm-judge',
+    'llama-bin',
+    'mlx-source-home',
+    'model',
+    'no-triage',
+    'parallel',
+    'runs-dir',
+    'scenario',
+    'skip-preflight',
+    'timeout',
+    'triage-k',
+  ]);
 
   // parseArgs represents a bare long flag as boolean true. Number(true)
   // is 1, so without this guard `--count` accidentally launches one real

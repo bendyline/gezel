@@ -17,7 +17,9 @@ describe('optional node-pty runtime', () => {
       code: 'GEZEL_NODE_PTY_UNAVAILABLE',
       cause,
     });
-    await expect(loadNodePty(importer)).rejects.toThrow(/optional node-pty runtime/i);
+    await expect(loadNodePty(importer)).rejects.toThrow(
+      /Install it alongside Gezel, then retry: npm install node-pty/,
+    );
   });
 
   it('does not double-wrap an already normalized unavailable error', async () => {

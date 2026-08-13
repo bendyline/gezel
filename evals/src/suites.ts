@@ -137,13 +137,13 @@ export const SUITES: Record<string, EvalSuite> = {
 
   // Deep dive on creative writing. Pass/fail measures brief-compliance
   // (the deterministic gates); the qualitative signal is the advisory
-  // LLM judge, so run this suite with --llm-judge for the axis scores
+  // LLM judge, so judge this suite post-hoc (pnpm eval:judge-sweep) for the axis scores
   // that actually differentiate models.
   'extended-writing': {
     id: 'extended-writing',
     description:
       'Creative-writing deep-dive: historical fiction grounded in a seeded fact sheet, and ' +
-      'original fantasy against a constrained brief. Run with --llm-judge for the ' +
+      'original fantasy against a constrained brief. Judge post-hoc with eval:judge-sweep for the ' +
       'qualitative axis scores.',
     scenarios: ['historical-fiction', 'fantasy-fiction'],
   },
@@ -190,7 +190,7 @@ export const SUITES: Record<string, EvalSuite> = {
       'Knowledge-work scorecard (13 scenarios, <=6h05m at --count 1): constrained communications, ' +
       'meeting follow-up, records, planning, calendar synthesis, experiment analysis, ' +
       'local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks ' +
-      'document production (PPTX, DOCX, theme round-trip). Fully hermetic. Run with --llm-judge — ' +
+      'document production (PPTX, DOCX, theme round-trip). Fully hermetic. Judge post-hoc with eval:judge-sweep — ' +
       'the deterministic gates measure ' +
       'brief-compliance; the judge axes are what differentiate models.',
     // Cheap and broad first, so a run that gets cut short still says

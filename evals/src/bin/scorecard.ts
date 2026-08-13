@@ -53,7 +53,7 @@ import {
 } from '../scorecard.ts';
 import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
-import { parseArgs } from './args.ts';
+import { assertKnownFlags, parseArgs } from './args.ts';
 
 /** The suites a scorecard always covers. Not configurable on purpose. */
 const SCORECARD_SUITES = ['core', 'productivity'] as const;
@@ -101,6 +101,19 @@ function suiteBudgetMinutes(suiteId: string): number {
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
+  assertKnownFlags(args.flags, [
+    'count',
+    'gilde-version',
+    'harness-commit',
+    'ingest-only',
+    'judge-model',
+    'list',
+    'models',
+    'note',
+    'run-id',
+    'started-at',
+    'verify',
+  ]);
   const verify = Boolean(args.flags.verify);
   // A verify run is pinned to one trial: it proves plumbing, and letting
   // it take a count would invite treating its output as a score.
@@ -254,7 +267,12 @@ function main(): void {
             model.id,
             '--provider',
             model.engine,
-            '--llm-judge',
+            // No inline --llm-judge: `eval:all` never read it (only bin/run.ts
+            // does), so it rode along dead on every sweep while looking like
+            // judging was wired. Judging is a post-hoc pass — see
+            // `pnpm eval:judge-sweep --run-id <id>` — which is also what makes
+            // one judge score the whole sweep instead of whatever the backend
+            // resolved to at each cell's completion time.
             '--runs-dir',
             matrixRoot,
           ],

@@ -3275,7 +3275,8 @@ export function retryLoopSniffKey(
 
 export function sniffArtifactHasScored(
   sniff:
-    | (Pick<TrialFinalSniff, 'key' | 'score'> & Partial<Pick<TrialFinalSniff, 'bytes'>>)
+    | (Pick<TrialFinalSniff, 'key' | 'score' | 'repairFilePath'> &
+        Partial<Pick<TrialFinalSniff, 'bytes'>>)
     | null
     | undefined,
   scoredSniffKeys: ReadonlySet<string>,
@@ -3285,8 +3286,18 @@ export function sniffArtifactHasScored(
   // near-miss exists (for example a deck source/preview at the wrong binary
   // path). Bytes are observable proof that the team has produced an artifact;
   // exempting that state from every plateau guard lets active chatter run to
-  // the multi-hour ceiling. A true "not written yet" sniff remains 0/0.
-  return sniff.score > 0 || (sniff.bytes ?? 0) > 0 || scoredSniffKeys.has(sniff.key);
+  // the multi-hour ceiling.
+  if (sniff.score > 0 || scoredSniffKeys.has(sniff.key)) return true;
+  // ...but bytes alone only prove *something* was written, and on a
+  // multi-deliverable scenario that something is routinely a DIFFERENT
+  // file. The old code assumed "a true 'not written yet' sniff remains
+  // 0/0"; with four deliverables it reads 0/2728 because sources.md and
+  // outline.md exist while deck.md never has. That armed the 8-minute
+  // stubborn-rewriter path against an artifact nobody had written yet and
+  // failed six of fifteen powerpoint-deck trials whose models were still
+  // actively calling tools. With no repair target identified there is no
+  // scored artifact to be stubborn about, so bytes do not count.
+  return (sniff.bytes ?? 0) > 0 && !!sniff.repairFilePath;
 }
 
 function retryLoopFailReasonKey(reason: string | undefined): string {

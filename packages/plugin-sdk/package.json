@@ -3,14 +3,7 @@
   "version": "1.0.1",
   "description": "Helpers for authoring Gezel plugins.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "sdk",
-    "plugins"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "plugins"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -41,10 +34,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "!dist/**/*.map"
-  ],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

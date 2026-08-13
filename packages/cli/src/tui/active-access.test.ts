@@ -1,5 +1,5 @@
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { activeAccessMode } from './active-access.js';
 
 describe('activeAccessMode', () => {
@@ -91,5 +91,38 @@ describe('activeAccessMode', () => {
         config: { sandboxCopilot: false },
       }),
     ).toBe('editable');
+  });
+
+  it('falls back cleanly when an older core package lacks the shared resolver', () => {
+    const reflectGet = Reflect.get.bind(Reflect);
+    const get = vi
+      .spyOn(Reflect, 'get')
+      .mockImplementation((target, key, receiver) =>
+        key === 'resolveGezelWorkspaceAccess'
+          ? undefined
+          : receiver === undefined
+            ? reflectGet(target, key)
+            : reflectGet(target, key, receiver),
+      );
+    try {
+      expect(
+        activeAccessMode({
+          provider: 'codex-cli',
+          project: { codexPermissionMode: 'reviewed' },
+          gezel: undefined,
+          config: null,
+        }),
+      ).toBe('reviewed edits');
+      expect(
+        activeAccessMode({
+          provider: 'openai',
+          project: { workingDir: '/repo', managedWorkspaceWritePolicy: 'allow' },
+          gezel: undefined,
+          config: null,
+        }),
+      ).toBe('editable');
+    } finally {
+      get.mockRestore();
+    }
   });
 });

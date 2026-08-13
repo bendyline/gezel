@@ -1335,7 +1335,20 @@ server.tool(
         ],
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Unwrap, or the model sees only "Gezel API error 404 on POST
+      // /api/projects/x/workspace/copy-from-artifact" — a status line with
+      // nothing to act on. The route already answers `artifact not found:
+      // <source>`; dropping it is what turned a one-line fix into a loop.
+      let message = unwrapApiError(err);
+      if (/artifact not found/i.test(message) && source.includes('://')) {
+        // Observed repeatedly on craftbook-powerpoint-deck: the model
+        // passes the URI a conversion tool handed back (`mock://…/deck.pptx`)
+        // instead of the path it saved into the drawer. It then "fixes" the
+        // missing workspace file by hand-writing text to the binary path,
+        // which the container gate correctly fails — three trials died this
+        // way with a perfectly good PPTX already sitting in artifacts.
+        message += `\n\n\`source\` must be a path inside the artifacts drawer, not a tool-returned URI like "${source}". Call \`list_artifacts\` to see the real paths, then retry with the one you saved (e.g. \`deliverables/d-day.pptx\`). Do not write the file by hand instead — \`write_file\` corrupts binaries.`;
+      }
       return {
         content: [{ type: 'text' as const, text: message }],
         isError: true,
@@ -1721,7 +1734,7 @@ server.tool(
       newProjectId = project.id;
       resolvedName = project.name;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `fetch_diff: createProject failed: ${message}` }],
         isError: true,
@@ -1752,7 +1765,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = unwrapApiError(err);
       return {
         content: [
           {
@@ -6275,7 +6288,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = unwrapApiError(err);
       return errorResult(
         `ask_user_question failed: ${message}. Retry the call with corrected arguments — \`question\` must be a non-empty string and \`choices\` (when used) must be a real JSON array like \`["A","B","C"]\` (not a stringified one). Do NOT fall back to asking the question in prose; the user's notification depends on this tool firing.`,
         { retryable: true },
@@ -8989,7 +9002,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(
         `Render failed: ${msg}. Check that Chromium has finished installing (it downloads in the background on first boot).`,
         { retryable: true },
@@ -9441,7 +9454,7 @@ server.tool(
       const body = res.body ?? (res.bodyBase64 ? `[base64 ${res.bodyBase64.length} chars]` : '');
       return { content: [{ type: 'text' as const, text: `${head}\n\n${body}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `fetch_url failed: ${msg}` }],
         isError: true,
@@ -9483,7 +9496,7 @@ server.tool(
       const res = await api.toolWebSearch(projectId, args);
       return { content: [{ type: 'text' as const, text: formatWebSearchResponse(res) }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `web_search failed: ${msg}` }],
         isError: true,
@@ -9518,7 +9531,7 @@ server.tool(
       const res = await api.toolWikipediaSearch(projectId, args);
       return { content: [{ type: 'text' as const, text: formatWebSearchResponse(res) }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `wikipedia_search failed: ${msg}` }],
         isError: true,
@@ -9668,7 +9681,7 @@ server.tool(
         { text: `${header}\n${lines.join('\n') || '(no matches)'}${truncation}` },
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`grep_files failed: ${msg}`);
     }
   },
@@ -9701,7 +9714,7 @@ server.tool(
         { text: `${header}\n${res.files.join('\n') || '(none)'}` },
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`find_files failed: ${msg}`);
     }
   },
@@ -9739,7 +9752,7 @@ server.tool(
       const body = lines.length ? lines.join('\n') : '(no symbols)';
       return { content: [{ type: 'text' as const, text: `${head}${summary}${health}\n${body}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `outline_file failed: ${msg}` }],
         isError: true,
@@ -9802,7 +9815,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `file_review failed: ${msg}` }],
         isError: true,
@@ -9839,7 +9852,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `get_file_issue failed: ${msg}` }],
         isError: true,
@@ -9872,7 +9885,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `set_file_issue_status failed: ${msg}` }],
         isError: true,
@@ -9909,7 +9922,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `find_symbol failed: ${msg}` }],
         isError: true,
@@ -9936,7 +9949,7 @@ server.tool(
       const head = `${res.path}:${res.lineStart}-${res.lineEnd}  ${res.kind} ${res.name}`;
       return { content: [{ type: 'text' as const, text: `${head}\n---\n${res.source ?? ''}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `read_symbol failed: ${msg}` }],
         isError: true,
@@ -9964,7 +9977,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `find_references failed: ${msg}` }],
         isError: true,
@@ -10013,7 +10026,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `map_repo failed: ${msg}` }],
         isError: true,
@@ -10057,7 +10070,7 @@ server.tool(
         },
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`search_code failed: ${msg}`);
     }
   },
@@ -10095,7 +10108,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `security_scan failed: ${msg}` }],
         isError: true,
@@ -10141,7 +10154,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `security_overview failed: ${msg}` }],
         isError: true,
@@ -10179,7 +10192,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `scan_findings failed: ${msg}` }],
         isError: true,
@@ -10232,7 +10245,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `list_file_issues failed: ${msg}` }],
         isError: true,
@@ -10268,7 +10281,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `map_attack_surface failed: ${msg}` }],
         isError: true,
@@ -10305,7 +10318,7 @@ server.tool(
         content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `list_dependencies failed: ${msg}` }],
         isError: true,
@@ -10348,7 +10361,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `trace_taint failed: ${msg}` }],
         isError: true,
@@ -10376,7 +10389,7 @@ server.tool(
         content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `search_images failed: ${msg}` }],
         isError: true,
@@ -10415,7 +10428,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `find_similar_images failed: ${msg}` }],
         isError: true,
@@ -10445,7 +10458,7 @@ server.tool(
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `describe_folder failed: ${msg}` }],
         isError: true,
@@ -10475,7 +10488,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `find_entity failed: ${msg}` }],
         isError: true,
@@ -10508,7 +10521,7 @@ server.tool(
       const head = `${res.entity?.kind}: ${res.entity?.label} — ${res.mentions.length} mention${res.mentions.length === 1 ? '' : 's'}`;
       return { content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n')}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `list_entity_mentions failed: ${msg}` }],
         isError: true,
@@ -10535,7 +10548,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `search_docs failed: ${msg}` }],
         isError: true,
@@ -10562,7 +10575,7 @@ server.tool(
       const head = `${res.sourcePath} → ${res.markdownPath}${res.truncated ? ' (truncated)' : ''}`;
       return { content: [{ type: 'text' as const, text: `${head}\n---\n${res.markdown ?? ''}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `read_doc_as_markdown failed: ${msg}` }],
         isError: true,
@@ -10600,7 +10613,7 @@ server.tool(
       }
       return { content: [{ type: 'text' as const, text: res.diff }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `diff_files failed: ${msg}` }],
         isError: true,
@@ -10629,7 +10642,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `read_image_as_base64 failed: ${msg}` }],
         isError: true,
@@ -10687,7 +10700,7 @@ server.tool(
       }
       return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `describe_image failed: ${msg}` }],
         isError: true,
@@ -10740,7 +10753,7 @@ server.tool(
       }
       return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `read_image_metadata failed: ${msg}` }],
         isError: true,
@@ -10767,7 +10780,7 @@ server.tool(
       }${res.truncated ? ' (truncated)' : ''}`;
       return { content: [{ type: 'text' as const, text: `${header}\n${lines.join('\n')}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `list_archive failed: ${msg}` }],
         isError: true,
@@ -10797,7 +10810,7 @@ server.tool(
         ],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `extract_archive failed: ${msg}` }],
         isError: true,
@@ -10851,7 +10864,7 @@ server.tool(
         { text },
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`run_git failed: ${msg}`);
     }
   },
@@ -10936,7 +10949,7 @@ server.tool(
       });
       return formatScriptRunResult(res);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`run_installed_script failed: ${msg}`);
     }
   },
@@ -10970,7 +10983,7 @@ server.tool(
         { text: `${summary}\n${JSON.stringify(run, null, 2)}` },
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return errorResult(`get_script_run failed: ${msg}`);
     }
   },
@@ -11015,7 +11028,7 @@ server.tool(
       });
       return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_list failed: ${msg}` }],
         isError: true,
@@ -11047,7 +11060,7 @@ server.tool(
       ];
       return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_view failed: ${msg}` }],
         isError: true,
@@ -11076,7 +11089,7 @@ server.tool(
       });
       return { content: [{ type: 'text' as const, text: blocks.join('\n\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_files failed: ${msg}` }],
         isError: true,
@@ -11098,7 +11111,7 @@ server.tool(
       const res = await api.getProjectGitHubPullDiff(resolved, number);
       return { content: [{ type: 'text' as const, text: res.diff || '(empty diff)' }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_diff failed: ${msg}` }],
         isError: true,
@@ -11127,7 +11140,7 @@ server.tool(
       });
       return { content: [{ type: 'text' as const, text: lines.join('\n\n---\n\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_comments failed: ${msg}` }],
         isError: true,
@@ -11152,7 +11165,7 @@ server.tool(
         content: [{ type: 'text' as const, text: `Posted comment ${res.id} — ${res.url}` }],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_comment failed: ${msg}` }],
         isError: true,
@@ -11186,7 +11199,7 @@ server.tool(
         content: [{ type: 'text' as const, text: `Opened PR #${res.number} — ${res.url}` }],
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_pr_create failed: ${msg}` }],
         isError: true,
@@ -11218,7 +11231,7 @@ server.tool(
       );
       return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_workflow_runs failed: ${msg}` }],
         isError: true,
@@ -11250,7 +11263,7 @@ server.tool(
       );
       return { content: [{ type: 'text' as const, text: `${header}\n${lines.join('\n')}` }] };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `github_check_status failed: ${msg}` }],
         isError: true,
