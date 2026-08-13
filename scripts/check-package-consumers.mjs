@@ -10,7 +10,7 @@
  *   1. A missing runtime dependency. It resolves in the workspace because
  *      some sibling hoisted it; it is absent in a consumer's tree.
  *   2. A native/prebuild install failure. `@bendyline/gezel-service` pulls
- *      node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and
+ *      optional node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and
  *      playwright-core. The heavyweight Transformers/Kokoro stack is an
  *      optional peer for npm consumers and is tested in complete bundles.
  *
@@ -292,6 +292,34 @@ try {
     step('booting the installed daemon');
     await daemonSmoke(consumer);
   }
+
+  // ── 7. Omit just the optional PTY runtime ──────────────────────────────
+  // Dynamic import is only half the contract. Simulate npm's allowed outcome
+  // when this ONE optional native package fails to install, then prove the
+  // daemon still boots and the first terminal command returns a stable
+  // capability error rather than taking down gezeld.
+  //
+  // Do not use `npm install --omit=optional`: packages such as
+  // @napi-rs/keyring publish their required per-platform native binding as an
+  // optional dependency too, so that flag deliberately creates a daemon with
+  // several unrelated native capabilities removed. This targeted deletion is
+  // the exact tree shape produced by a node-pty-only optional install failure.
+  step('simulating an omitted optional node-pty and rechecking the daemon');
+  rmSync(join(consumer, 'node_modules', 'node-pty'), { recursive: true, force: true });
+  if (existsSync(join(consumer, 'node_modules', 'node-pty', 'package.json'))) {
+    fail('could not remove node-pty from the temporary packed consumer');
+  } else if (process.env.GEZEL_CONSUMER_SKIP_DAEMON === '1') {
+    const probe = run(
+      process.execPath,
+      ['--input-type=module', '-e', "await import('@bendyline/gezel-service')"],
+      { cwd: consumer },
+    );
+    if (probe.status !== 0) fail(`service import without node-pty failed\n${probe.stderr}`);
+    else ok('service imports without node-pty');
+  } else {
+    ok('removed only node-pty from the temporary packed consumer');
+    await daemonSmoke(consumer, { pty: 'unavailable' });
+  }
 } finally {
   if (keep) console.log(`\nleft the consumer project at ${root}`);
   else rmSync(root, { recursive: true, force: true });
@@ -305,11 +333,14 @@ console.log('\npacked-consumer checks passed');
 
 /**
  * The end-to-end proof: the daemon a consumer installed from npm actually
- * boots, serves its API, creates a gezel, and (on macOS) runs a terminal
- * command through the installed node-pty. Uses the mock provider so no
- * credentials and no network are involved.
+ * boots, serves its API, and creates a gezel. With the default options it also
+ * runs a macOS terminal command through the installed node-pty. The optional
+ * runtime pass instead proves the daemon stays healthy and returns a stable
+ * terminal-unavailable result when node-pty was omitted. Uses the mock
+ * provider so no credentials and no network are involved.
  */
-async function daemonSmoke(consumerDir) {
+async function daemonSmoke(consumerDir, opts = {}) {
+  const pty = opts.pty ?? 'available';
   const home = mkdtempSync(join(tmpdir(), 'gezel-consumer-home-'));
   const entry = join(
     consumerDir,
@@ -364,8 +395,15 @@ async function daemonSmoke(consumerDir) {
     const client = new GezelClient({ baseUrl: runtime.baseUrl, token: runtime.token });
 
     const health = await client.health();
-    if (!health) fail('health probe returned nothing');
-    else ok(`daemon healthy (version ${health.version ?? 'unknown'})`);
+    if (!health) {
+      fail('health probe returned nothing');
+    } else {
+      ok(
+        pty === 'unavailable'
+          ? `daemon healthy without node-pty (version ${health.version ?? 'unknown'})`
+          : `daemon healthy (version ${health.version ?? 'unknown'})`,
+      );
+    }
 
     const gezel = await client.createGezel({ name: 'Consumer Smoke', role: 'Tester' });
     if (!gezel?.id) fail('could not create a gezel');
@@ -374,7 +412,23 @@ async function daemonSmoke(consumerDir) {
     // npm can install node-pty's macOS spawn-helper without its execute bit.
     // Exercise the Gezel terminal path rather than raw node-pty: the service's
     // lazy pre-spawn repair is the supported behavior for published consumers.
-    if (process.platform === 'darwin') {
+    if (pty === 'unavailable') {
+      step('running the first terminal command without node-pty');
+      const { threadId } = await client.runTerminalCommand('default', {
+        workingDir: '',
+        input: 'printf GEZEL_PTY_SHOULD_NOT_RUN',
+      });
+      const terminalOutput = await waitForTerminalOutput(client, 'default', threadId);
+      if (
+        terminalOutput?.exitCode === -1 &&
+        terminalOutput.errorMessage === 'shell-failed' &&
+        /optional node-pty runtime could not be loaded/i.test(terminalOutput.content)
+      ) {
+        ok('terminal reports optional node-pty is unavailable without crashing the daemon');
+      } else {
+        fail(`missing-node-pty terminal result was not stable\n${JSON.stringify(terminalOutput)}`);
+      }
+    } else if (process.platform === 'darwin') {
       step('spawning a clean-install macOS PTY through the daemon');
       const { threadId } = await client.runTerminalCommand('default', {
         workingDir: '',

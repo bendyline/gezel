@@ -170,8 +170,8 @@ async function main() {
 
 async function verifyBundleRuntime(root) {
   console.log(`[build-service-bundle] verifying extracted runtime: ${root}`);
-  // Importing the service module resolves the whole dep graph, including
-  // native modules. We spawn a throwaway node process, let it import
+  // Importing the service module resolves its eager dependency graph. We
+  // spawn a throwaway node process, let it import
   // `index.js` (which exports `startService` without *calling* it — so no
   // port binding), then exit. This is ~1s and catches a huge class of
   // packaging bugs that `--check` misses.
@@ -185,6 +185,22 @@ async function verifyBundleRuntime(root) {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // node-pty is optional for public npm consumers and dynamically imported on
+  // the first terminal command. Complete app bundles are not optional-feature
+  // installs: the desktop terminal must be present. Import the deployed module
+  // explicitly so an optional native install failure cannot pass the now-lazy
+  // service-entry check and silently ship a terminal-less application.
+  const nodePtyUrl = pathToFileURL(join(root, 'node_modules', 'node-pty', 'lib', 'index.js')).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const p=await import(${JSON.stringify(nodePtyUrl)}); if(typeof p.spawn!=='function') throw new Error('bundled node-pty spawn export missing');`,
+    ],
     { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
 
