@@ -45,6 +45,7 @@ import {
   installNativeToolkit,
   parseNativeVariant,
 } from '../native-command.js';
+import { installSignalCleanup } from '../signal-cleanup.js';
 
 const program = new Command();
 program
@@ -437,7 +438,11 @@ program
       return;
     }
     const conn = await connectForRun(cliGlobals());
-    const removeSignalCleanup = installSignalCleanup(conn.stop);
+    const removeSignalCleanup = installSignalCleanup(conn.stop, {
+      onError: (error) => {
+        console.error(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
     try {
       const { client } = conn;
       const projectId = await resolveRunProject(client, cliGlobals());
@@ -472,30 +477,6 @@ program
       if (conn.stop) await conn.stop();
     }
   });
-
-/**
- * Node's default Ctrl+C handling exits immediately, which skips async
- * `finally` cleanup. Owning one signal listener keeps the event loop alive
- * long enough for an in-process one-shot service to stop its native children.
- */
-function installSignalCleanup(cleanup: (() => Promise<void>) | undefined): () => void {
-  if (!cleanup) return () => {};
-  const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
-    process.exitCode = signal === 'SIGINT' ? 130 : 143;
-    void cleanup().catch((error) => {
-      console.error(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
-      process.exitCode = 1;
-    });
-  };
-  const onSigint = () => onSignal('SIGINT');
-  const onSigterm = () => onSignal('SIGTERM');
-  process.on('SIGINT', onSigint);
-  process.on('SIGTERM', onSigterm);
-  return () => {
-    process.off('SIGINT', onSigint);
-    process.off('SIGTERM', onSigterm);
-  };
-}
 
 const agent = program.command('agent').description('Manage agents');
 

@@ -25,6 +25,7 @@ import {
   stopProcessByPid,
 } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { connectForTui } from './connection.js';
 
 let gezelHome: string;
 let spawned: DiscoverOrSpawnResult;
@@ -164,6 +165,36 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
         await stopProcessByPid(runtime.pid);
       }
       await rm(headlessHome, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps ownership of a TUI-spawned daemon and shuts it down on exit', async () => {
+    const tuiHome = await mkdtemp(join(tmpdir(), 'gezel-cli-tui-owned-'));
+    const previousHome = process.env.GEZEL_HOME;
+    const previousMock = process.env.GEZEL_MOCK_PROVIDER;
+    let stop: (() => Promise<void>) | undefined;
+    try {
+      process.env.GEZEL_HOME = tuiHome;
+      process.env.GEZEL_MOCK_PROVIDER = '1';
+      const connection = await connectForTui({ home: tuiHome });
+      stop = connection.stop;
+      expect(stop).toBeTypeOf('function');
+
+      const runtime = await readRuntime(tuiHome);
+      expect(runtime).not.toBeNull();
+      expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
+
+      await stop?.();
+      expect(runtime ? isProcessAlive(runtime.pid) : true).toBe(false);
+    } finally {
+      if (stop) await stop().catch(() => {});
+      if (previousHome === undefined) delete process.env.GEZEL_HOME;
+      else process.env.GEZEL_HOME = previousHome;
+      if (previousMock === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
+      else process.env.GEZEL_MOCK_PROVIDER = previousMock;
+      const runtime = await readRuntime(tuiHome).catch(() => null);
+      if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
+      await rm(tuiHome, { recursive: true, force: true });
     }
   });
 

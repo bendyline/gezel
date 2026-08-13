@@ -32,12 +32,12 @@ With no connection flags, the CLI follows this order:
    machine service when one is present. A modern machine service on port
    `6228` is an engine broker, not a product API, so the CLI never sends it
    projects, credentials, tools, or terminal requests.
-2. Discover the logged-in user's product daemon through the Gezel app SDK.
-   Its actual dynamic port and pinned TLS certificate come from
-   `~/.gezel/runtime`; management commands may start that user-role daemon
-   when it is absent. The interactive TUI retains ownership when it starts a
-   daemon itself, so exiting the TUI runs the daemon's complete shutdown path
-   and cleans up its local engine children.
+2. Discover the logged-in user's product daemon through the same pinned
+   runtime discovery used by the Gezel app SDK. Its actual dynamic port and
+   pinned TLS certificate come from `~/.gezel/runtime`; management commands
+   may start that user-role daemon when it is absent. The interactive TUI
+   retains ownership when it starts a daemon itself, so exiting the TUI runs
+   the daemon's complete shutdown path and cleans up its local engine children.
 3. On first use, the terminal waits while the Gezel app asks you to approve
    **Gezel CLI**. The terminal shows a six-character code that you enter in
    the app to confirm that you initiated the request. The resulting revocable,
