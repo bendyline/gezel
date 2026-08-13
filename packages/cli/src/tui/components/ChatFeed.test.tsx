@@ -1,5 +1,5 @@
 import type { GezelSummary } from '@bendyline/gezel';
-import { renderToString } from 'ink';
+import { Box, Text, renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 import type { FeedRow } from '../feed.js';
 import { ChatFeed } from './ChatFeed.js';
@@ -39,6 +39,36 @@ describe('ChatFeed', () => {
     expect(output).not.toContain('discarded');
     expect(output).toContain('▎you: question');
     expect(output).toContain('▎Builder: answer');
+  });
+
+  it('labels queued user input as pending', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[row('focus', 'pending', 'please also inspect the tests', 'builder')]}
+        gezels={gezels}
+        boring
+        focusedSessionId="focus"
+      />,
+    );
+
+    expect(output).toContain('▎pending: please also inspect the tests');
+    expect(output).not.toContain('Builder: please also inspect the tests');
+  });
+
+  it('leaves a blank line between the feed and the prompt area', () => {
+    const output = renderToString(
+      <Box flexDirection="column">
+        <ChatFeed
+          rows={[row('focus', 'assistant', 'answer', 'builder')]}
+          gezels={gezels}
+          boring
+          focusedSessionId="focus"
+        />
+        <Text>prompt area</Text>
+      </Box>,
+    );
+
+    expect(output).toContain('▎Builder: answer\n\nprompt area');
   });
 
   it('renders terminal blocks without a speaker prefix and humanizes assistant tool markup', () => {

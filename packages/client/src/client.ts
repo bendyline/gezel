@@ -1248,14 +1248,9 @@ export interface ConfigResponse {
     extraConfigOverrides?: Record<string, string>;
   };
   /**
-   * Cached health probe for the `claude` binary. `installed` is the
-   * boolean the dropdown / Settings panel should gate on; `path` and
-   * `version` are populated when the probe succeeded; `error` is the
-   * underlying failure message when it didn't (useful for "binary at
-   * X is not executable: ENOENT" diagnostics in Settings).
-   *
-   * Cached server-side with a 60s TTL so repeated config GETs don't
-   * spawn `claude --version` per-poll.
+   * Passive filesystem/PATH presence for the `claude` binary. Config reads do
+   * not execute the CLI; provider tests and actual use perform the full health
+   * probe. `version` remains optional for compatibility with probed responses.
    */
   anthropicCliStatus?: {
     installed: boolean;
@@ -1263,7 +1258,7 @@ export interface ConfigResponse {
     version?: string;
     error?: string;
   };
-  /** Cached health probe for the `codex` binary. Mirrors `anthropicCliStatus`. */
+  /** Passive presence for the `codex` binary. Mirrors `anthropicCliStatus`. */
   codexCliStatus?: {
     installed: boolean;
     path?: string;

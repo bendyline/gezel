@@ -14,7 +14,7 @@ export interface FeedRow {
   key: string;
   sessionId: string;
   gezelId: string;
-  kind: 'user' | 'assistant' | 'tool' | 'note' | 'error' | 'shell';
+  kind: 'user' | 'pending' | 'assistant' | 'tool' | 'note' | 'error' | 'shell';
   text: string;
   open: boolean;
 }
@@ -50,6 +50,26 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
           open: false,
         },
       ]);
+
+    case 'queue_enqueued': {
+      const key = `queue-${event.queueId}`;
+      const pending: FeedRow = {
+        key,
+        sessionId,
+        gezelId,
+        kind: 'pending',
+        text: event.preview,
+        open: false,
+      };
+      const idx = rows.findIndex((row) => row.key === key);
+      if (idx === -1) return cap([...rows, pending]);
+      const next = rows.slice();
+      next[idx] = pending;
+      return next;
+    }
+
+    case 'queue_removed':
+      return rows.filter((row) => row.key !== `queue-${event.queueId}`);
 
     case 'delta': {
       const idx = findOpenAssistant(rows, sessionId);

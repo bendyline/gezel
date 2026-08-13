@@ -27,6 +27,9 @@ export function evalSpecFromTestSpec(
       projectName: spec.setup.projectName,
       ...(spec.setup.about ? { about: spec.setup.about } : {}),
       ...(spec.setup.missionObjectives ? { missionObjectives: spec.setup.missionObjectives } : {}),
+      ...(spec.setup.managedWorkspaceWritePolicy
+        ? { managedWorkspaceWritePolicy: spec.setup.managedWorkspaceWritePolicy }
+        : {}),
       files: spec.setup.files,
       ...(spec.setup.craftbookParams ? { craftbookParams: spec.setup.craftbookParams } : {}),
       ...(legacySimulators.length > 0 ? { simulators: legacySimulators } : {}),
@@ -39,6 +42,7 @@ export function evalSpecFromTestSpec(
             deliverables: spec.success.deliverables.map((deliverable) => ({
               path: deliverable.path,
               kind: deliverable.kind,
+              ...(deliverable.artifact ? { artifact: true } : {}),
               ...(deliverable.minBytes !== undefined ? { minBytes: deliverable.minBytes } : {}),
               ...(deliverable.checks
                 ? { checks: deliverable.checks as CraftbookEvalGateCheck[] }

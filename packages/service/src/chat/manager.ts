@@ -2848,6 +2848,14 @@ export class ChatManager {
      */
     consultationMode?: boolean;
     /**
+     * Pin the session's name-rendering mode ("boring mode") instead of
+     * following the live config flag. Passed by clients with a fixed
+     * presentation mode (the TUI) so the prompt's gezel references match
+     * the labels that client renders. See
+     * `ChatSessionSchema.roleBasedNameOnlyMode`.
+     */
+    roleBasedNameOnlyMode?: boolean;
+    /**
      * Shape-of-deliverable hint persisted on the session. When
      * `kind: "file"` is set, the consultation-mode addendum swaps
      * "reply in chat" guidance for "write to disk + reply with path
@@ -2920,6 +2928,9 @@ export class ChatManager {
       ...(args.stepId ? { stepId: args.stepId } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
+      ...(args.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
+        : {}),
       ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
       ...(numCtx ? { numCtx } : {}),
     };
@@ -3548,18 +3559,27 @@ export class ChatManager {
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const fromConfigPre = await this.store.readConfig();
-    const fromName = fromGezel
-      ? displayName(
-          { name: fromGezel.name, roleBasedName: fromGezel.roleBasedName },
-          fromConfigPre.roleBasedNameOnlyMode ?? false,
-        )
-      : 'another gezel';
+    const configBoring = fromConfigPre.roleBasedNameOnlyMode ?? false;
+    // Name-rendering mode is resolved per side: a string delivered into a
+    // session follows that session's pinned mode (falling back to the
+    // config flag). These strings are model-visible — a friendly name
+    // leaked into a boring-mode session teaches the model a name the
+    // user's client never shows.
+    const targetBoring = session.roleBasedNameOnlyMode ?? configBoring;
+    const senderSession = args.fromSessionId
+      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
+      : null;
+    const senderBoring = senderSession?.roleBasedNameOnlyMode ?? configBoring;
+    const targetDisplay = (boring: boolean) =>
+      displayName({ name: target.name, roleBasedName: target.roleBasedName }, boring);
+    const fromDisplay = (boring: boolean) =>
+      fromGezel
+        ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, boring)
+        : 'another gezel';
+    const fromName = fromDisplay(targetBoring);
     const result = {
       sessionId: session.id,
-      toGezelName: displayName(
-        { name: target.name, roleBasedName: target.roleBasedName },
-        fromConfigPre.roleBasedNameOnlyMode ?? false,
-      ),
+      toGezelName: targetDisplay(senderBoring),
       toGezelId: target.id,
     };
     // Re-check after the async session/config reads so simultaneous calls
@@ -3602,7 +3622,9 @@ export class ChatManager {
         targetSessionId: session.id,
         fromSessionId: resolvedFromSessionId,
         toGezelId: target.id,
-        toName: target.name,
+        // Sender-visible: the reply seed `[Message from <toName>]` lands
+        // in the SENDER's session, so it follows the sender's mode.
+        toName: targetDisplay(senderBoring),
         toGender: target.gender,
         fromGezelId: args.fromGezelId,
         fromGezelName: fromName,
@@ -3616,7 +3638,7 @@ export class ChatManager {
         kind: 'gezel.messaged',
         projectId,
         gezelId: args.fromGezelId,
-        summary: `${fromName} messaged ${target.name}`,
+        summary: `${fromDisplay(configBoring)} messaged ${targetDisplay(configBoring)}`,
         details: {
           fromGezelId: args.fromGezelId,
           toGezelId: target.id,
@@ -3678,7 +3700,7 @@ export class ChatManager {
                 kind: 'gezel.message.delivered',
                 projectId,
                 gezelId: target.id,
-                summary: `${target.name} processed message from ${fromName}`,
+                summary: `${targetDisplay(configBoring)} processed message from ${fromDisplay(configBoring)}`,
                 details: {
                   fromGezelId: args.fromGezelId,
                   toGezelId: target.id,
@@ -3713,7 +3735,7 @@ export class ChatManager {
                 kind: 'gezel.message.delivery_failed',
                 projectId,
                 gezelId: target.id,
-                summary: `Message from ${fromName} to ${target.name} failed to deliver`,
+                summary: `Message from ${fromDisplay(configBoring)} to ${targetDisplay(configBoring)} failed to deliver`,
                 details: {
                   fromGezelId: args.fromGezelId,
                   toGezelId: target.id,
@@ -3889,6 +3911,12 @@ export class ChatManager {
       projectId,
       ...(taskRef ? { taskRef } : {}),
       ...(taskRef && stepId ? { stepId } : {}),
+      // Consultations inherit the asker's pinned name-rendering mode —
+      // the reply flows back into the asker's session, so both sides
+      // must speak the same identifier for names not to leak.
+      ...(fromRec?.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: fromRec.roleBasedNameOnlyMode }
+        : {}),
       // Mark as consultation so the target's system prompt gets the
       // focused-question addendum and their tool roster drops
       // team-management + onward ask_specialist / ask_gezel — a
@@ -3901,18 +3929,19 @@ export class ChatManager {
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const askConfig = await this.store.readConfig();
+    // The asker's pinned mode governs both directions: the consultation
+    // session inherited it above, and every asker-facing string below
+    // lands in the asker's session.
+    const askBoring = fromRec?.roleBasedNameOnlyMode ?? askConfig.roleBasedNameOnlyMode ?? false;
     const fromName = fromGezel
-      ? displayName(
-          { name: fromGezel.name, roleBasedName: fromGezel.roleBasedName },
-          askConfig.roleBasedNameOnlyMode ?? false,
-        )
+      ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, askBoring)
       : 'another gezel';
 
     // Resolved once up front: used in the asker-facing "Waiting on …"
     // event, the error messages below, and the success reply.
     const targetDisplayName = displayName(
       { name: target.name, roleBasedName: target.roleBasedName },
-      askConfig.roleBasedNameOnlyMode ?? false,
+      askBoring,
     );
 
     const timeoutMs = await this.resolveConsultationIdleTimeoutMs(session, args.timeoutMs);
@@ -13201,6 +13230,7 @@ export class ChatManager {
     // tool strip and the prompt's "edits off" posture note; the global
     // allowFileEdits deliberately does not.
     const workspaceWritable = projectManagedWorkspaceWritable(project);
+    const isProjectVoorman = project?.voormanGezelId === record.gezelId;
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
     const directFileWorkConstrained = gezel
@@ -13246,6 +13276,7 @@ export class ChatManager {
       ...(project?.mode ? { projectMode: project.mode } : {}),
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),
@@ -13338,7 +13369,10 @@ export class ChatManager {
     );
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
-      roleBasedNameOnlyMode: config.roleBasedNameOnlyMode ?? false,
+      // Session stamp wins over the live config flag: a TUI-created
+      // session stays boring even when the desktop preference is named.
+      roleBasedNameOnlyMode:
+        record.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode ?? false,
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
       ...(lessonsMd.trim() ? { lessons: lessonsMd.trim() } : {}),
@@ -14084,10 +14118,12 @@ export class ChatManager {
         mcpEnv.GEZEL_MCP_EXCLUDE = CLAUDE_CLI_EXCLUDED_MCP_TOOLS.join(',');
         mcpEnv.GEZEL_PERMISSION_PROMPT = '1';
       }
-      // Codex CLI has its own built-in shell + file edit + web search,
-      // so we hide gezel-mcp's overlapping surface here too. Codex doesn't
-      // expose a `--permission-prompt-tool` hook — its sandbox/approval
-      // flags handle gating natively, so no equivalent of GEZEL_PERMISSION_PROMPT.
+      // Codex CLI has its own built-in shell + file edit + web search, so we
+      // hide gezel-mcp's overlapping mutation/execution/web surface. Gezel's
+      // scoped workspace readers stay registered for read-only and Plan-mode
+      // sessions. Codex doesn't expose a `--permission-prompt-tool` hook — its
+      // sandbox/approval flags gate natively, so there is no equivalent of
+      // GEZEL_PERMISSION_PROMPT.
       if (record.providerName === 'codex-cli') {
         mcpEnv.GEZEL_MCP_EXCLUDE = CODEX_CLI_EXCLUDED_MCP_TOOLS.join(',');
       }
@@ -14451,6 +14487,7 @@ export class ChatManager {
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(record.consultationMode ? { consultationMode: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),

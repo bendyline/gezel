@@ -11,6 +11,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import type { SecurityFindingInput, SecuritySeverity } from '../index-store/index-store.js';
 
 const log = createLogger('security');
@@ -41,7 +42,7 @@ export interface AvailableTools {
 export async function hasCommand(cmd: string): Promise<boolean> {
   const probe = process.platform === 'win32' ? 'where' : 'which';
   try {
-    await exec(probe, [cmd], { timeout: 5_000 });
+    await exec(probe, [cmd], { timeout: 5_000, ...windowsHeadlessSpawnOptions() });
     return true;
   } catch {
     return false;
@@ -65,6 +66,7 @@ async function runJson(cmd: string, args: string[], cwd: string): Promise<unknow
       timeout: TOOL_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,
       encoding: 'utf8',
+      ...windowsHeadlessSpawnOptions(),
     });
     return JSON.parse(stdout);
   } catch (err) {

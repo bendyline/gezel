@@ -141,9 +141,11 @@ describe('CodexCliSession', () => {
       expect(names).toContain('mcp__gezel__message_gezel');
       expect(names).toContain('mcp__gezel__start_project');
       expect(names).toContain('mcp__gezel__list_tasks');
-      // Codex has built-in file/shell/web tools — these are explicitly
-      // excluded via GEZEL_MCP_EXCLUDE and must NOT appear.
-      expect(names).not.toContain('mcp__gezel__read_file');
+      // Gezel's scoped readers remain registered so Plan/read-only sessions
+      // can inspect without falling through to a general-purpose shell.
+      expect(names).toContain('mcp__gezel__read_file');
+      expect(names).toContain('mcp__gezel__list_dir');
+      // Codex's duplicate mutation/execution/web surfaces stay excluded.
       expect(names).not.toContain('mcp__gezel__write_file');
       expect(names).not.toContain('mcp__gezel__fetch_url');
       expect(names).not.toContain('mcp__gezel__run_npx');
@@ -187,8 +189,7 @@ describe('CodexCliSession', () => {
       expect(names).toContain('mcp__gezel__list_tasks');
       expect(names).toContain('mcp__gezel__read_task_notes');
       expect(names).not.toContain('mcp__gezel__ask_specialist');
-      // Still hidden by Codex's duplicate-built-in exclusion layer.
-      expect(names).not.toContain('mcp__gezel__read_file');
+      expect(names).toContain('mcp__gezel__read_file');
     });
 
     it('lists project-type script tools from GEZEL_SCRIPT_TOOLS regardless of the role allowlist', () => {
@@ -255,9 +256,9 @@ describe('CodexCliSession', () => {
     await session.sendAndWait('hello');
     const configPath = join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml');
     const body = await readFile(configPath, 'utf8');
-    expect(body).toContain('enabled_tools = ["list_tasks", "read_task_notes"]');
+    expect(body).toContain('enabled_tools = ["list_tasks", "read_task_notes", "read_file"]');
     expect(body).toContain('disabled_tools = [');
-    expect(body).toContain('"read_file"');
+    expect(body).not.toMatch(/disabled_tools = \[[^\]]*"read_file"/s);
   });
 
   it('writes admitted MCP extras with approval and without storing HTTP header values', async () => {

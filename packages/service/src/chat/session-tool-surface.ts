@@ -89,6 +89,8 @@ export interface ResolveSessionToolSurfaceOptions {
   leanProfile?: boolean;
   consultationMode?: boolean;
   rolesAsTools?: boolean;
+  /** Current gezel owns this project (`project.voormanGezelId === gezelId`). */
+  isProjectVoorman?: boolean;
   webSearchProvider?: WebSearchBackendName;
   githubLinked: boolean;
   isGitRepo: boolean;
@@ -216,6 +218,7 @@ export async function resolveSessionToolSurface(
     ...(opts.projectMode ? { projectMode: opts.projectMode } : {}),
     ...(opts.consultationMode ? { consultationMode: true } : {}),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
+    ...(opts.isProjectVoorman ? { isProjectVoorman: true } : {}),
     ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
     githubLinked: opts.githubLinked,
     isGitRepo: opts.isGitRepo,

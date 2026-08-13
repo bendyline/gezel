@@ -316,6 +316,33 @@ describe('projects API', () => {
     expect(proj.workingDir).toBe('/tmp');
   });
 
+  it('rebuilds project tool surfaces when its edit permission changes', async () => {
+    const create = await api('POST', '/api/projects', {
+      name: 'PermissionRefresh',
+      about: 'A project used to verify live permission-surface refreshes.',
+      missionObjectives: 'Permission changes rebuild cached project tool surfaces.',
+    });
+    expect(create.status).toBe(201);
+    const projectId = ((await create.json()) as { id: string }).id;
+    const resetProjectToolsets = vi.spyOn(svc.context.chat, 'resetProjectToolsets');
+    try {
+      const res = await api('PUT', `/api/projects/${projectId}`, {
+        managedWorkspaceWritePolicy: 'allow',
+        codexPermissionMode: 'edit',
+        claudePermissionMode: 'acceptEdits',
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()) as Record<string, unknown>).toMatchObject({
+        managedWorkspaceWritePolicy: 'allow',
+        codexPermissionMode: 'edit',
+        claudePermissionMode: 'acceptEdits',
+      });
+      expect(resetProjectToolsets).toHaveBeenCalledWith(projectId);
+    } finally {
+      resetProjectToolsets.mockRestore();
+    }
+  });
+
   it('creates typed projects atomically and emits no lifecycle/history event on failure', async () => {
     const lifecycle: Array<{ event: { type: string; projectId?: string } }> = [];
     const unsubscribe = svc.context.chatEvents.subscribeAll((event) => lifecycle.push(event));

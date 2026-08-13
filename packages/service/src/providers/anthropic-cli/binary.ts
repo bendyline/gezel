@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { delimiter, join as pathJoin } from 'node:path';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { winShellSafe } from '../../packages/win-shell.js';
 
 /**
@@ -124,6 +125,7 @@ export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<s
     const child = spawn(target.command, target.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: useShell,
+      ...windowsHeadlessSpawnOptions(),
     });
     let stdout = '';
     let stderr = '';

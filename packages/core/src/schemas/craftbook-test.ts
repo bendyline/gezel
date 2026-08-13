@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DeliverableKindSchema } from './craftbook.js';
 import { GateCheckSchema } from './gate.js';
 import { HistoryEventKindSchema } from './history.js';
+import { ProjectManagedWorkspaceWritePolicySchema } from './project.js';
 
 /**
  * ─ Craftbook test spec (`test.json`) ─────────────────────────────────
@@ -263,6 +264,8 @@ export const CraftbookTestSetupSchema = z
     projectName: z.string().min(1),
     about: z.string().optional(),
     missionObjectives: z.string().optional(),
+    /** Reproduce project write posture before the craftbook task starts. */
+    managedWorkspaceWritePolicy: ProjectManagedWorkspaceWritePolicySchema.optional(),
     files: z.array(CraftbookTestFixtureFileSchema).default([]),
     /** Exact values supplied to the catalog craftbook's `paramSchema`. */
     craftbookParams: z.record(z.string(), z.string()).optional(),
@@ -280,6 +283,8 @@ export const CraftbookTestDeliverableSchema = z
   .object({
     path: z.string().min(1),
     kind: DeliverableKindSchema,
+    /** Grade the path in the project's artifacts drawer, not its workspace. */
+    artifact: z.boolean().optional(),
     minBytes: z.number().int().positive().optional(),
     checks: z.array(CraftbookTestCheckSchema).optional(),
   })

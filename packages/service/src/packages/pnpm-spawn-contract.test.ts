@@ -58,13 +58,41 @@ describe('machine-service child-process contract', () => {
     );
   });
 
+  it('keeps concurrent security probes and provider CLI children hidden on Windows', () => {
+    const securityTools = source('../security/external-tools.ts');
+    expect(
+      securityTools.match(/windowsHeadlessSpawnOptions\(\)/g)?.length ?? 0,
+    ).toBeGreaterThanOrEqual(2);
+
+    for (const providerPath of [
+      '../providers/anthropic-cli/binary.ts',
+      '../providers/anthropic-cli/worker.ts',
+      '../providers/codex-cli/binary.ts',
+      '../providers/codex-cli/invoker.ts',
+      '../providers/codex-cli/quota.ts',
+    ]) {
+      expect(source(providerPath), providerPath).toContain('windowsHeadlessSpawnOptions()');
+    }
+
+    const signature = source('../engines/signature.ts');
+    expect(signature).toContain("'-WindowStyle'");
+    expect(signature).toContain("'Hidden'");
+  });
+
   // Node documents Windows detachment as giving the child its own console.
   // Owned service children must use the headless helper instead; detachment
   // is reserved for the few processes intentionally allowed to outlive us.
   it('does not use Windows detachment as the service headless policy', () => {
     for (const caller of productionTypeScriptFiles()) {
       const name = relative(serviceSrc, caller).replaceAll('\\', '/');
-      expect(readFileSync(caller, 'utf8'), name).not.toContain('windowsDetachedSpawnOptions');
+      const body = readFileSync(caller, 'utf8');
+      if (name === 'providers/ollama-launch.ts') {
+        // Ollama intentionally outlives the daemon; only its launcher may
+        // combine real detachment with a hidden intermediate Windows console.
+        expect(body).toContain('windowsDetachedSpawnOptions()');
+        continue;
+      }
+      expect(body, name).not.toContain('windowsDetachedSpawnOptions');
     }
   });
 });

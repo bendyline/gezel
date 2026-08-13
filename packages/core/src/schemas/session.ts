@@ -122,6 +122,18 @@ export const ChatSessionSchema = z.object({
   }),
   /** Snapshot of the gezel's about.md at session creation, for drift warnings. */
   aboutSnapshot: z.string().optional(),
+  /**
+   * Per-session override of `config.roleBasedNameOnlyMode` ("boring mode").
+   * Stamped at creation when the creating client has a fixed presentation
+   * mode — the TUI always renders role-based labels, so it pins the
+   * sessions it creates to `true`. This keeps the prompt (what the model
+   * is told about other gezels) consistent with what that client shows;
+   * without it the TUI displayed `reviewer:` while the system prompt said
+   * "the voorman is Tomas", and the model naturally leaked names into
+   * prose. Unset = follow the live config flag, which is what desktop
+   * sessions do.
+   */
+  roleBasedNameOnlyMode: z.boolean().optional(),
   /** Set when the last attempted resume failed — UI surfaces a banner. */
   resumeFailed: z.boolean().optional(),
   /**
@@ -361,6 +373,13 @@ export const CreateChatSessionRequestSchema = z.object({
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
   craftbookRef: z.string().optional(),
+  /**
+   * Pin the session's name-rendering mode instead of following
+   * `config.roleBasedNameOnlyMode`. Passed by clients whose presentation
+   * mode is fixed (the TUI) so prompt-side name rendering matches their
+   * labels. See `ChatSessionSchema.roleBasedNameOnlyMode`.
+   */
+  roleBasedNameOnlyMode: z.boolean().optional(),
 });
 export type CreateChatSessionRequest = z.infer<typeof CreateChatSessionRequestSchema>;
 

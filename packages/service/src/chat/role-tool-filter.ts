@@ -121,11 +121,25 @@ const DELEGATION_ORCHESTRATOR_ROLES: ReadonlySet<string> = new Set([
   'planner',
 ]);
 
-function roleDelegationGroups(role: string | undefined): readonly string[] {
+function roleDelegationGroups(
+  role: string | undefined,
+  isProjectVoorman: boolean,
+): readonly string[] {
   const canonical = canonicalRoleKey(role);
+  // Project ownership is an assignment, not a job-title string. A Reviewer,
+  // Developer, or other specialist can be selected as the project's voorman;
+  // offering that gezel `delegate_voorman` / `consult_voorman` points them
+  // straight back at themselves. Keep the ordinary specialist escalation
+  // surface for now, then strip only the self-targeting pair below.
+  if (isProjectVoorman) return ['role-delegation-escalation'];
   if (canonical && DELEGATION_ORCHESTRATOR_ROLES.has(canonical)) return ['role-delegation'];
   return ['role-delegation-escalation'];
 }
+
+const PROJECT_VOORMAN_SELF_ESCALATION_TOOLS: ReadonlySet<string> = new Set([
+  'delegate_voorman',
+  'consult_voorman',
+]);
 
 /**
  * True for the role-typed delegation tools (`delegate_<role>` /
@@ -624,6 +638,12 @@ export function computeToolAllowlist(opts: {
    */
   rolesAsTools?: boolean;
   /**
+   * True when this gezel is the current project's assigned voorman, even if
+   * their persisted role is Reviewer/Developer/etc. Removes the role-typed
+   * escalation tools that would resolve back to the current gezel.
+   */
+  isProjectVoorman?: boolean;
+  /**
    * Resolved centralized security posture (see
    * `resolveSecurityPolicy`). Applied as a hard ceiling that strips
    * code-execution / external-service / git tools when the posture
@@ -718,7 +738,7 @@ export function computeToolAllowlist(opts: {
   // `consult_<role>` tools surface. Additive over both role-default and
   // custom-toolset surfaces.
   const baseGroups = opts.rolesAsTools
-    ? [...roleBaseGroups, ...roleDelegationGroups(opts.role)]
+    ? [...roleBaseGroups, ...roleDelegationGroups(opts.role, opts.isProjectVoorman === true)]
     : roleBaseGroups;
   // Consultation sessions get the same group-level strip solo
   // projects do — no team-management at the group layer. The
@@ -764,6 +784,14 @@ export function computeToolAllowlist(opts: {
     // VOORMAN_STRIPPED_DELEGATION_TOOLS) — only present at all when
     // `rolesAsTools` added `role-delegation`, so this is a no-op otherwise.
     for (const name of VOORMAN_STRIPPED_DELEGATION_TOOLS) next.delete(name);
+    resolved = next;
+  }
+  // The project relation wins over the role label for self-escalation. A
+  // Reviewer selected as voorman is still the person `delegate_voorman`
+  // would target, so never advertise that dead-end pair to their session.
+  if (opts.isProjectVoorman === true) {
+    const next = new Set(resolved);
+    for (const name of PROJECT_VOORMAN_SELF_ESCALATION_TOOLS) next.delete(name);
     resolved = next;
   }
   // Surgical line-editing rides with content-editing. `replace_lines` (edit

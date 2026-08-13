@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 /**
  * Thin wrapper around the `git` CLI. Lives here (not in a library) so we
@@ -119,11 +120,13 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
           cwd: opts.cwd,
           env,
           stdio: ['pipe', 'pipe', 'pipe'],
+          ...windowsHeadlessSpawnOptions(),
         })
       : spawn('git', gitArgs, {
           cwd: opts.cwd,
           env,
           stdio: ['ignore', 'pipe', 'pipe'],
+          ...windowsHeadlessSpawnOptions(),
         });
     const stdinState: { error?: Error } = {};
     if (hasStdinPayload) {

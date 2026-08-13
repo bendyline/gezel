@@ -50,7 +50,7 @@ export function normalizeCraftbooks(items: ReadonlyArray<CatalogItemSummary>): S
 }
 
 /**
- * First-stage `/start` choices. The active project's curated recommendation
+ * First-stage `/do` choices. The active project's curated recommendation
  * is first, followed by project-local work, lifecycle-role shelves that have
  * at least one match, and an escape hatch containing the complete inventory.
  */
@@ -115,7 +115,7 @@ export function findCraftbook(
   return books.find((book) => book.id.toLowerCase() === query || book.name.toLowerCase() === query);
 }
 
-/** Build the one-shot, immediately-dispatched task behind `/start`. */
+/** Build the one-shot, immediately-dispatched task behind `/do`. */
 export function craftbookStartRequest(book: StartCraftbook): CreateTaskRequest {
   const summary = book.description?.trim();
   const description = summary

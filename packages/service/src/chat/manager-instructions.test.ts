@@ -364,8 +364,51 @@ describe('buildInstructions active gezel identity', () => {
     });
 
     expect(full).toContain('You are the voorman of this project.');
+    expect(full).toContain('Do not ask the user to escalate work to the voorman — that is you.');
     expect(full).not.toContain('Wren');
     expect(full).not.toContain('(he/him)');
+  });
+});
+
+describe('buildInstructions boring mode (roleBasedNameOnlyMode)', () => {
+  const crewProject = {
+    id: 'workshop',
+    name: 'Workshop',
+    mode: 'crew',
+    voormanGezelId: 'tomas',
+  } as unknown as ProjectDetail;
+
+  it('renders the voorman by role-based name and states the naming rule', () => {
+    const { full } = buildInstructions({
+      name: 'Abby',
+      role: 'Reviewer',
+      about: 'Review the work.',
+      roleBasedNameOnlyMode: true,
+      project: crewProject,
+      voormanName: 'Tomas',
+      voormanRoleBasedName: 'voorman',
+      voormanGender: 'male',
+    });
+
+    expect(full).toContain('by role name only');
+    expect(full).toContain('**voorman**');
+    // The friendly name must not appear anywhere — a single leak teaches
+    // the model an identifier the boring-mode client never displays.
+    expect(full).not.toContain('Tomas');
+  });
+
+  it('keeps friendly names and omits the naming rule when off', () => {
+    const { full } = buildInstructions({
+      name: 'Abby',
+      role: 'Reviewer',
+      about: 'Review the work.',
+      project: crewProject,
+      voormanName: 'Tomas',
+      voormanRoleBasedName: 'voorman',
+    });
+
+    expect(full).not.toContain('by role name only');
+    expect(full).toContain('**Tomas**');
   });
 });
 

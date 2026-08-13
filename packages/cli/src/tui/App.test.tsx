@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import type { ChatEventEnvelope } from '@bendyline/gezel';
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { type RenderOptions, render } from 'ink';
 import type { ReactNode } from 'react';
@@ -33,9 +34,12 @@ describe('App interactions', () => {
     const harness = mountApp(client);
 
     await vi.waitFor(() => {
+      // The TUI pins its boring presentation mode onto the sessions it
+      // creates so the daemon's prompt rendering matches its labels.
       expect(client.createChatSession).toHaveBeenCalledWith({
         gezelId: 'foreman',
         projectId: 'studio',
+        roleBasedNameOnlyMode: true,
       });
     });
     await harness.waitUntilRenderFlush();
@@ -59,6 +63,27 @@ describe('App interactions', () => {
     expect(harness.text()).toContain('Studio');
     expect(harness.text()).toContain('Voorman');
     expect(harness.text()).toContain('New thread');
+  });
+
+  it('shows an edit-permission note when the initial folder is read-only', async () => {
+    const client = createClient({ studioProject: { workingDir: '/tmp/studio' } });
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    const bootOutput = harness.text();
+    expect(bootOutput).toContain('Note: this folder is read-only to gezel');
+    expect(bootOutput).toContain('analysis and writing');
+    expect(bootOutput).toContain(
+      "/allow edits command to permit gezel to edit this folder's contents",
+    );
+  });
+
+  it('does not show the edit-permission note for an editable initial project', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    expect(harness.text()).not.toContain('Note: this folder is read-only to gezel');
   });
 
   it('routes chat text and switches bare input between chat and CLI modes', async () => {
@@ -95,6 +120,47 @@ describe('App interactions', () => {
     expect(client.runTerminalCommand).toHaveBeenCalledTimes(1);
   });
 
+  it('queues input as a nudge and shows it as pending while the focused turn is busy', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'engine_phase',
+        provider: 'llama-cpp',
+        phase: 'prefill',
+        progress: 0.54,
+      },
+    });
+    await harness.waitUntilRenderFlush();
+
+    await submit(harness, 'please also inspect the tests');
+    expect(client.sendToChatSession).toHaveBeenLastCalledWith('session-studio-foreman', {
+      message: 'please also inspect the tests',
+      nudge: true,
+    });
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'queue_enqueued',
+        queueId: 'queue-1',
+        preview: 'please also inspect the tests',
+        enqueuedAt: '2026-08-13T12:00:00.000Z',
+        nudge: true,
+      },
+    });
+    await harness.waitUntilRenderFlush();
+
+    expect(harness.text()).toContain('pending: please also inspect the tests');
+  });
+
   it('changes the install-wide engagement mode by name or through the picker', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -117,6 +183,89 @@ describe('App interactions', () => {
       expect(harness.text()).toContain('Read-only');
       expect(harness.text()).toContain('Full play');
     });
+  });
+
+  it('allows and disallows managed project edits', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/allow edits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenCalledWith('studio', {
+        managedWorkspaceWritePolicy: 'allow',
+      });
+    });
+    expect(harness.text()).toContain(
+      'Project edits allowed. Built-in tools and background work can now modify Studio.',
+    );
+
+    await submit(harness, '/disallow edits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenLastCalledWith('studio', {
+        managedWorkspaceWritePolicy: 'deny',
+      });
+    });
+    expect(harness.text()).toContain(
+      'Project edits disallowed. Built-in tools and background work are now read-only in Studio.',
+    );
+    expect(harness.text()).toContain('read-only');
+  });
+
+  it('allows and disallows provider-native edits for Codex and Claude', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/allow codexedits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenLastCalledWith('studio', {
+        codexPermissionMode: 'edit',
+      });
+    });
+    expect(harness.text()).toContain('Codex edits allowed. Codex sessions can now modify Studio.');
+
+    await submit(harness, '/disallow codexedits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenLastCalledWith('studio', {
+        codexPermissionMode: 'plan',
+      });
+    });
+    expect(harness.text()).toContain(
+      'Codex edits disallowed. Codex sessions are now read-only in Studio.',
+    );
+
+    await submit(harness, '/allow claudeedits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenLastCalledWith('studio', {
+        claudePermissionMode: 'acceptEdits',
+      });
+    });
+    expect(harness.text()).toContain(
+      'Claude edits allowed. Claude sessions can now modify Studio.',
+    );
+
+    await submit(harness, '/disallow claudeedits');
+    await vi.waitFor(() => {
+      expect(client.updateProject).toHaveBeenLastCalledWith('studio', {
+        claudePermissionMode: 'plan',
+      });
+    });
+    expect(harness.text()).toContain(
+      'Claude edits disallowed. Claude sessions are now read-only in Studio.',
+    );
+  });
+
+  it('shows permission usage without changing the project for unsupported names', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/allow');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('usage: /allow edits|codexedits|claudeedits');
+    });
+    expect(client.updateProject).not.toHaveBeenCalled();
   });
 
   it('lists and invokes tools while rejecting malformed JSON before the client call', async () => {
@@ -162,6 +311,7 @@ describe('App interactions', () => {
       expect(client.createChatSession).toHaveBeenLastCalledWith({
         gezelId: 'archive-foreman',
         projectId: 'archive',
+        roleBasedNameOnlyMode: true,
       });
     });
     await harness.waitUntilRenderFlush();
@@ -191,6 +341,7 @@ async function ready(client: ReturnType<typeof createClient>, harness: InkHarnes
     expect(client.createChatSession).toHaveBeenCalledWith({
       gezelId: 'foreman',
       projectId: 'studio',
+      roleBasedNameOnlyMode: true,
     });
   });
   await harness.waitUntilRenderFlush();
@@ -203,7 +354,18 @@ async function submit(harness: InkHarness, value: string): Promise<void> {
   await harness.waitUntilRenderFlush();
 }
 
-function createClient() {
+function projectEventHandler(): (event: ChatEventEnvelope) => void {
+  const call = streamHooks.useProjectEvents.mock.calls.at(-1);
+  if (!call) throw new Error('project event hook was not registered');
+  return call[2] as (event: ChatEventEnvelope) => void;
+}
+
+function createClient(opts?: {
+  studioProject?: {
+    workingDir?: string;
+    managedWorkspaceWritePolicy?: 'auto' | 'allow' | 'deny';
+  };
+}) {
   const config = {
     provider: 'openai',
     meesterGezelId: 'meester',
@@ -249,7 +411,7 @@ function createClient() {
     },
   ];
   const projects = [
-    { id: 'studio', name: 'Studio', voormanGezelId: 'foreman' },
+    { id: 'studio', name: 'Studio', voormanGezelId: 'foreman', ...opts?.studioProject },
     {
       id: 'archive',
       name: 'Archive',
@@ -263,6 +425,10 @@ function createClient() {
     updateConfig: vi.fn(async (patch: Partial<ConfigResponse>) => ({ ...config, ...patch })),
     listGezels: vi.fn().mockResolvedValue({ gezels }),
     listProjects: vi.fn().mockResolvedValue({ projects }),
+    updateProject: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
+      ...projects.find((project) => project.id === id),
+      ...patch,
+    })),
     createChatSession: vi.fn(async ({ gezelId, projectId }) => ({
       id: `session-${projectId}-${gezelId}`,
       gezelId,

@@ -39,6 +39,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('uv');
 
@@ -136,7 +137,7 @@ export class UvRuntime {
   private readonly spawn: typeof nodeSpawn;
   private readonly exec: (
     cmd: string,
-    opts?: { timeout?: number },
+    opts?: { timeout?: number; windowsHide?: boolean },
   ) => Promise<{ stdout: string; stderr: string }>;
   private readonly onLog: (line: string) => void;
   /** Cached probe result so repeated `ensureVenv` calls skip the re-probe. */
@@ -432,17 +433,22 @@ export class UvRuntime {
   }
 
   private async readPythonVersion(pythonPath: string): Promise<string> {
-    const out = await this.exec(`"${pythonPath}" --version`).catch(() => ({
-      stdout: '',
-      stderr: '',
-    }));
+    const out = await this.exec(`"${pythonPath}" --version`, windowsHeadlessSpawnOptions()).catch(
+      () => ({
+        stdout: '',
+        stderr: '',
+      }),
+    );
     const m = `${out.stdout}\n${out.stderr}`.match(/Python\s+(\d+\.\d+(?:\.\d+)?)/i);
     return m?.[1] ?? '';
   }
 
   private async probeCommandVersion(cmd: string, pattern: RegExp): Promise<string | undefined> {
     try {
-      const { stdout, stderr } = await this.exec(cmd, { timeout: 5_000 });
+      const { stdout, stderr } = await this.exec(cmd, {
+        timeout: 5_000,
+        ...windowsHeadlessSpawnOptions(),
+      });
       const m = `${stdout}\n${stderr}`.match(pattern);
       return m?.[1];
     } catch {
@@ -460,6 +466,7 @@ export class UvRuntime {
       const child = this.spawn(command, args, {
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        ...windowsHeadlessSpawnOptions(),
       });
       // Keep a ring buffer of the most recent meaningful (non-noise)
       // lines so a non-zero exit can surface WHY it failed (e.g.

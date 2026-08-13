@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { Hono } from 'hono';
 import { readClaudeQuotaSnapshot } from '../../providers/anthropic-cli/quota.js';
-import { getCliDetections } from '../../providers/cli-detection.js';
+import { getCliPresence } from '../../providers/cli-detection.js';
 import { readCodexQuotaBucketsCached } from '../../providers/codex-cli/quota.js';
 import type { ServiceContext } from '../context.js';
 
@@ -15,12 +15,15 @@ export function usageRoutes(ctx: ServiceContext): Hono {
     // none of those conditions should make the usage endpoint fail.
     try {
       const config = await ctx.store.readConfig();
-      const detections = await getCliDetections({
+      const detections = getCliPresence({
         ...(config.anthropicCli ? { anthropicCli: config.anthropicCli } : {}),
         ...(config.codexCli ? { codexCli: config.codexCli } : {}),
       });
+      const prior = ctx.chat.usageTracker.summary();
+      const refreshCodexQuota =
+        config.provider === 'codex-cli' || prior.providers['codex-cli'] !== undefined;
       const [codexBuckets, claudeSnapshot] = await Promise.all([
-        detections.codexCli.installed && detections.codexCli.path
+        refreshCodexQuota && detections.codexCli.installed && detections.codexCli.path
           ? readCodexQuotaBucketsCached({ binaryPath: detections.codexCli.path }).catch(() => null)
           : Promise.resolve(null),
         readClaudeQuotaSnapshot(join(ctx.home, 'runtime', 'anthropic-cli')),

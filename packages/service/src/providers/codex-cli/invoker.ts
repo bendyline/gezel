@@ -6,6 +6,7 @@ import {
   prettifyToolName,
   toolActivityLabel,
 } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { winShellSafe } from '../../packages/win-shell.js';
 import { SessionResumeError } from '../types.js';
 import type { ToolCallEvent, TurnUsage } from '../types.js';
@@ -289,6 +290,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       env,
       stdio: [opts.promptViaStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       shell: useShell,
+      ...windowsHeadlessSpawnOptions(),
     });
   } catch (err) {
     throw err instanceof Error ? err : new Error(String(err));

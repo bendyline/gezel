@@ -64,6 +64,7 @@ import {
   WikipediaSearchRequestSchema,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ReadEntry } from 'tar';
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
@@ -1377,7 +1378,7 @@ async function runGit(
   opts: { timeoutMs: number },
 ): Promise<RunGitResponse> {
   return new Promise((resolvePromise) => {
-    const child = spawn('git', args, { cwd });
+    const child = spawn('git', args, { cwd, ...windowsHeadlessSpawnOptions() });
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;

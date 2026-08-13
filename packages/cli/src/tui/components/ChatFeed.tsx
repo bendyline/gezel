@@ -13,6 +13,7 @@ const TABLE_LOGO = [
 
 const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
   user: 'white',
+  pending: 'yellow',
   assistant: 'cyan',
   tool: 'yellow',
   note: 'magenta',
@@ -37,9 +38,9 @@ export function ChatFeed(props: {
   const shown = rows.slice(Math.max(0, rows.length - visible));
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} marginBottom={1}>
       {shown.length === 0 ? (
-        <Box flexDirection="row" marginBottom={1}>
+        <Box flexDirection="row">
           <Text color="yellow">{TABLE_LOGO}</Text>
           <Box flexDirection="column" marginLeft={3}>
             <Text>gezel {GEZEL_VERSION}</Text>
@@ -62,15 +63,17 @@ export function ChatFeed(props: {
           const who =
             row.kind === 'user'
               ? 'you'
-              : row.gezelId
-                ? gezelLabel(row.gezelId, gezels, boring)
-                : row.kind === 'tool'
-                  ? 'tool'
-                  : row.kind === 'shell'
-                    ? 'shell'
-                    : row.kind === 'error'
-                      ? 'error'
-                      : 'system';
+              : row.kind === 'pending'
+                ? 'pending'
+                : row.gezelId
+                  ? gezelLabel(row.gezelId, gezels, boring)
+                  : row.kind === 'tool'
+                    ? 'tool'
+                    : row.kind === 'shell'
+                      ? 'shell'
+                      : row.kind === 'error'
+                        ? 'error'
+                        : 'system';
           const isFocused = focusedSessionId && row.sessionId === focusedSessionId;
           // Full message body, wrapped to the terminal width (Ink's default).
           // Only the speaker prefix is fixed; long chat replies render in
@@ -85,7 +88,7 @@ export function ChatFeed(props: {
                   {who}
                   {': '}
                 </Text>
-                <Text color={KIND_COLOR[row.kind]}>
+                <Text color={KIND_COLOR[row.kind]} dimColor={row.kind === 'pending'}>
                   {clip(row.kind === 'assistant' ? humanizeToolMarkup(row.text) : row.text)}
                 </Text>
               </Text>

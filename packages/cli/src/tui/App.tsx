@@ -20,7 +20,13 @@ import {
   parseCliEngagementMode,
 } from '../engagement-mode.js';
 import { activeAccessMode } from './active-access.js';
-import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashWordwheel } from './commands.js';
+import {
+  PROJECT_PERMISSION_USAGE,
+  SLASH_COMMAND_WORDWHEEL_SIZE,
+  parseInput,
+  parseProjectPermissionName,
+  suggestSlashWordwheel,
+} from './commands.js';
 import { ChatFeed } from './components/ChatFeed.js';
 import { Picker, type PickerItem } from './components/Picker.js';
 import { PromptLine } from './components/PromptLine.js';
@@ -103,10 +109,13 @@ interface TaskTextPrompt {
 
 const HELP = [
   '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
+  '/allow codexedits|claudeedits — allow provider-native project edits',
+  '/disallow codexedits|claudeedits — put that provider in read-only plan mode',
   '/mode — choose read-only, reactive, reactive+tasks, or full-play AI activity',
   '/thread — switch or start a chat thread',
   '/task — list, inspect, create, edit, assign, or change task status',
-  '/start — choose a craftbook and start it as a task',
+  '/do — choose a craftbook and start it as a task',
   '/continue — process due schedules and active tasks in this project',
   '/nightshift start|stop|list — manage Night Shift',
   '/focus — send into another active chat   /cli — CLI mode   /chat — chat mode',
@@ -114,6 +123,9 @@ const HELP = [
   '/clear — clear feed   /quit — exit',
   '↑/↓ — input history   Esc — interrupt turn   Ctrl+C — interrupt, then again to exit',
 ];
+
+const READ_ONLY_BOOT_NOTE =
+  "Note: this folder is read-only to gezel, and can be used for doing analysis and writing reports. Use the /allow edits command to permit gezel to edit this folder's contents.";
 
 export function App(props: {
   client: GezelClient;
@@ -308,7 +320,14 @@ export function App(props: {
   const ensureSession = useCallback(
     async (gezelId: string, pid: string) => {
       try {
-        const session = await client.createChatSession({ gezelId, projectId: pid });
+        // Pin the session's name-rendering mode to the TUI's: without the
+        // stamp the daemon builds prompts from the desktop preference and
+        // the model addresses gezels by names these labels never show.
+        const session = await client.createChatSession({
+          gezelId,
+          projectId: pid,
+          roleBasedNameOnlyMode: boring,
+        });
         setOwnSessionId(session.id);
         setFocusedSessionId(session.id);
         setActiveThreadTitle(displayThreadTitle(session.title));
@@ -318,7 +337,7 @@ export function App(props: {
         return false;
       }
     },
-    [client, note],
+    [client, note, boring],
   );
 
   const switchProject = useCallback(
@@ -392,7 +411,11 @@ export function App(props: {
     setOverlay(null);
     if (!activeGezelId) return note('no active gezel yet.', 'error');
     try {
-      const session = await client.createChatSession({ gezelId: activeGezelId, projectId });
+      const session = await client.createChatSession({
+        gezelId: activeGezelId,
+        projectId,
+        roleBasedNameOnlyMode: boring,
+      });
       setOwnSessionId(session.id);
       setFocusedSessionId(session.id);
       setActiveThreadTitle(displayThreadTitle(session.title));
@@ -401,7 +424,7 @@ export function App(props: {
     } catch (err) {
       note(`could not start a thread: ${errMsg(err)}`, 'error');
     }
-  }, [activeGezelId, client, note, projectId]);
+  }, [activeGezelId, client, note, projectId, boring]);
 
   // Initial load. Mount-only — project/gezel switches are driven by their
   // pickers, which call ensureSession directly.
@@ -418,21 +441,32 @@ export function App(props: {
         if (cancelled) return;
         setConfig(cfg);
         setGezels(gz.gezels);
-        setProjects(
-          pj.projects.map((p) => ({
-            id: p.id,
-            name: p.name,
-            workingDir: p.workingDir,
-            voormanGezelId: p.voormanGezelId,
-            managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
-            allowGezelWrites: p.allowGezelWrites,
-            codexPermissionMode: p.codexPermissionMode,
-            claudePermissionMode: p.claudePermissionMode,
-          })),
-        );
+        const projectRows = pj.projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          workingDir: p.workingDir,
+          voormanGezelId: p.voormanGezelId,
+          managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
+          allowGezelWrites: p.allowGezelWrites,
+          codexPermissionMode: p.codexPermissionMode,
+          claudePermissionMode: p.claudePermissionMode,
+        }));
+        setProjects(projectRows);
         const gezelId = props.initialGezelId;
+        const initialGezel = gz.gezels.find((gezel) => gezel.id === gezelId);
+        const initialProject = projectRows.find((project) => project.id === projectId);
         setActiveGezelId(gezelId);
         setStatus(null);
+        if (
+          activeAccessMode({
+            provider: initialGezel?.provider ?? cfg.provider,
+            project: initialProject,
+            gezel: initialGezel,
+            config: cfg,
+          }) === 'read-only'
+        ) {
+          note(READ_ONLY_BOOT_NOTE);
+        }
         await ensureSession(gezelId, projectId);
       } catch (err) {
         if (!cancelled) setStatus(`Failed to connect: ${errMsg(err)}`);
@@ -476,12 +510,12 @@ export function App(props: {
     };
   }, [refreshTasks]);
 
-  // Keep the active project's craftbooks warm so `/start ` can wordwheel
-  // immediately. A manual `/start` retries and surfaces an error if this
+  // Keep the active project's craftbooks warm so `/do ` can wordwheel
+  // immediately. A manual `/do` retries and surfaces an error if this
   // background refresh failed.
   useEffect(() => {
     void refreshCraftbooks().catch(() => {
-      /* non-fatal — /start retries with visible error handling */
+      /* non-fatal — /do retries with visible error handling */
     });
   }, [refreshCraftbooks]);
 
@@ -577,6 +611,47 @@ export function App(props: {
       }
     },
     [client, note],
+  );
+
+  const applyProjectPermission = useCallback(
+    async (permission: string, allowed: boolean) => {
+      const permissionName = parseProjectPermissionName(permission);
+      if (!permissionName) {
+        note(`usage: /${allowed ? 'allow' : 'disallow'} ${PROJECT_PERMISSION_USAGE}`, 'error');
+        return;
+      }
+      try {
+        const patch =
+          permissionName === 'edits'
+            ? { managedWorkspaceWritePolicy: allowed ? ('allow' as const) : ('deny' as const) }
+            : permissionName === 'codexedits'
+              ? { codexPermissionMode: allowed ? ('edit' as const) : ('plan' as const) }
+              : { claudePermissionMode: allowed ? ('acceptEdits' as const) : ('plan' as const) };
+        const updated = await client.updateProject(projectId, patch);
+        setProjects((current) =>
+          current.map((project) =>
+            project.id === projectId ? { ...project, ...updated } : project,
+          ),
+        );
+        if (permissionName === 'edits') {
+          note(
+            allowed
+              ? `Project edits allowed. Built-in tools and background work can now modify ${projectName}.`
+              : `Project edits disallowed. Built-in tools and background work are now read-only in ${projectName}.`,
+          );
+        } else {
+          const provider = permissionName === 'codexedits' ? 'Codex' : 'Claude';
+          note(
+            allowed
+              ? `${provider} edits allowed. ${provider} sessions can now modify ${projectName}.`
+              : `${provider} edits disallowed. ${provider} sessions are now read-only in ${projectName}.`,
+          );
+        }
+      } catch (err) {
+        note(`could not change project permission: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, projectId, projectName],
   );
 
   const startCraftbook = useCallback(
@@ -704,7 +779,10 @@ export function App(props: {
           const target = focusedSessionId ?? ownSessionId;
           if (!target) return note('no active session yet.', 'error');
           try {
-            await client.sendToChatSession(target, parsed.text);
+            await client.sendToChatSession(
+              target,
+              turns.has(target) ? { message: parsed.text, nudge: true } : parsed.text,
+            );
           } catch (err) {
             note(`send failed: ${errMsg(err)}`, 'error');
           }
@@ -768,6 +846,7 @@ export function App(props: {
       pendingInput,
       submitTaskPrompt,
       taskPrompt,
+      turns,
     ],
   );
 
@@ -782,6 +861,12 @@ export function App(props: {
           return setOverlay('project');
         case 'gezel':
           return setOverlay('gezel');
+        case 'allow':
+          await applyProjectPermission(rest, true);
+          return;
+        case 'disallow':
+          await applyProjectPermission(rest, false);
+          return;
         case 'mode':
           if (!rest.trim()) return setOverlay('engagement-mode');
           await applyEngagementMode(rest);
@@ -861,7 +946,7 @@ export function App(props: {
           }
           return;
         }
-        case 'start': {
+        case 'do': {
           let available = craftbooks;
           if (available.length === 0) {
             try {
@@ -879,7 +964,7 @@ export function App(props: {
           }
           const book = findCraftbook(available, rest);
           if (!book) {
-            return note(`craftbook not found: ${rest.trim()} (try /start)`, 'error');
+            return note(`craftbook not found: ${rest.trim()} (try /do)`, 'error');
           }
           await startCraftbook(book);
           return;
@@ -940,6 +1025,7 @@ export function App(props: {
       activeGezel,
       activeGezelId,
       applyEngagementMode,
+      applyProjectPermission,
       client,
       config,
       craftbooks,

@@ -48,6 +48,29 @@ describe('parseCraftbookTestSpec', () => {
     }
   });
 
+  it('accepts artifact deliverables on a managed-workspace read-only project', () => {
+    const spec = minimalSpec();
+    (spec.setup as Record<string, unknown>).managedWorkspaceWritePolicy = 'deny';
+    const deliverable = (spec.success as { deliverables: Array<Record<string, unknown>> })
+      .deliverables[0]!;
+    deliverable.artifact = true;
+    deliverable.checks = [
+      {
+        kind: 'notContains',
+        file: 'runbook.md',
+        pattern: 'secret-value',
+        artifact: true,
+      },
+    ];
+
+    const result = parseCraftbookTestSpec(spec);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.setup.managedWorkspaceWritePolicy).toBe('deny');
+      expect(result.spec.success.deliverables?.[0]?.artifact).toBe(true);
+    }
+  });
+
   it('preserves hidden fixtures while ordinary fixtures remain model inputs by default', () => {
     const spec = minimalSpec();
     (spec.setup as { files: unknown[] }).files.push({

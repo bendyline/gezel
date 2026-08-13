@@ -148,7 +148,11 @@ gezel-owned active tasks for the current project. Night Shift is managed with
 `/nightshift start`, `/nightshift stop`, and `/nightshift list`; the command
 wordwheel exposes all three subcommands. `/mode` opens a picker for the same
 four activity levels as the one-shot command; `/mode reactive+tasks` (for
-example) switches directly.
+example) switches directly. Project edit permissions are available through
+`/allow` and `/disallow`: use `edits` for built-in tools and background work,
+`codexedits` for Codex sessions, or `claudeedits` for Claude sessions. For
+example, `/disallow edits` makes Gezel-managed access to the current project
+read-only, while `/allow codexedits` puts Codex in project-scoped edit mode.
 
 ## Stability
 
