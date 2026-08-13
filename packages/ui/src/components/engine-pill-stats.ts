@@ -45,6 +45,17 @@ export function formatTokensPerSec(rate: number): string {
   return `${rate.toFixed(1)} tok/s`;
 }
 
+/**
+ * Best-effort live output-token count for providers that only publish their
+ * exact usage in the terminal stream frame. The UI prefixes this value with
+ * an approximation mark; the engine's exact counter still wins whenever its
+ * phase detail already contains one.
+ */
+export function estimateLiveOutputTokens(outputChars: number): number {
+  if (!Number.isFinite(outputChars) || outputChars <= 0) return 0;
+  return Math.max(1, Math.round(outputChars / 4));
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   // RAM and VRAM are sold as e.g. "24 GB" and "128 GB" even though their

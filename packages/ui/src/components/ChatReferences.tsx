@@ -1,4 +1,4 @@
-import type { GezelSummary, Task, TaskNote } from '@bendyline/gezel';
+import type { GezelSummary, Task, TaskNote, TaskStatus } from '@bendyline/gezel';
 import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
@@ -23,6 +23,7 @@ import { CommandsPanel } from './CommandsPanel.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
 import { gezelChatTheme } from './chat-theme.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
@@ -52,7 +53,7 @@ import { useCompactLayout } from './useCompactLayout.js';
  * that scope.
  */
 
-type RefKind = 'artifact' | 'document' | 'workspace';
+type RefKind = OpenChatReferenceKind;
 
 // Reference-panel split — persisted as a fraction of the container
 // width (0 → no side pane, 1 → no chat) so the ratio is stable across
@@ -141,6 +142,8 @@ interface Reference {
   kind: RefKind;
   path: string;
   firstSeenAt: number;
+  /** Monotonic per-rail counter used to expose a true most-recent-first list. */
+  lastSeenOrder: number;
   /**
    * Optional project override used when this reference comes from a
    * cross-project timeline (the Meester's global view). Falls back to
@@ -173,8 +176,16 @@ export interface ChatReferencesApi {
    * back to this ChatReferences' own `projectId` prop).
    */
   onArtifactReference: (path: string, projectId?: string) => void;
+  /** Remember a parsed artifact mention without pulling focus away from chat. */
+  onArtifactSeen: (path: string, projectId?: string) => void;
   /** Promote a workspace file into the References viewer. */
   onWorkspaceReference: (path: string, projectId?: string) => void;
+  /** Remember a verified workspace path without opening the viewer. */
+  onWorkspaceSeen: (path: string, projectId?: string) => void;
+  /** Most-recent-first file list used by the composer's `/open` command. */
+  recentReferences: readonly OpenChatReference[];
+  /** Open an MRU item in this rail's existing References viewer. */
+  onOpenReference: (reference: OpenChatReference) => void;
   /**
    * Fed by the timeline as it loads/streams messages. Surfaces a task in
    * the right rail's "Task" tab so the gezel's current work context is
@@ -204,6 +215,7 @@ export function ChatReferences({
   chatKey,
   skillsProjectId,
   compact = false,
+  onTaskChanged,
   banner,
   children,
 }: {
@@ -230,6 +242,11 @@ export function ChatReferences({
    */
   compact?: boolean;
   /**
+   * Reports task mutations made from the compact rail card. Project chat
+   * uses this to refresh its active-task chips immediately.
+   */
+  onTaskChanged?: (task: Task) => void;
+  /**
    * Optional full-width band above both panes (the project chat's pill
    * row). It gets the same reference API as `children` because focusing a
    * task pill also scopes the side rail. In compact mode it stays above the
@@ -246,6 +263,7 @@ export function ChatReferences({
 }) {
   const resolvedProjectId = projectId ?? 'default';
   const [references, setReferences] = useState<Reference[]>([]);
+  const seenOrderRef = useRef(0);
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
@@ -256,14 +274,44 @@ export function ChatReferences({
   // still settling.
   const [skillsAvailableProjectId, setSkillsAvailableProjectId] = useState<string | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey is the reset trigger — the effect body doesn't read it, but changing it must re-fire.
+  const previousChatKeyRef = useRef(chatKey);
   useEffect(() => {
+    // State already starts empty on mount. Skipping that first reset is
+    // important because child timeline effects rebuild the persisted MRU at
+    // the same time; a parent mount effect must not erase their registrations.
+    if (previousChatKeyRef.current === chatKey) return;
+    previousChatKeyRef.current = chatKey;
     setReferences([]);
+    seenOrderRef.current = 0;
     setActiveRef(null);
     setTaskRefs([]);
     setActiveTaskRef(null);
     setCompactPane('chat');
   }, [chatKey]);
+
+  const rememberReference = useCallback(
+    (kind: RefKind, path: string, messageProjectId?: string): Reference => {
+      const key = referenceKey(kind, messageProjectId, path);
+      const firstSeenAt = Date.now();
+      const lastSeenOrder = ++seenOrderRef.current;
+      let remembered: Reference = {
+        key,
+        kind,
+        path,
+        firstSeenAt,
+        lastSeenOrder,
+        ...(messageProjectId ? { projectId: messageProjectId } : {}),
+      };
+      setReferences((prev) => {
+        const hit = prev.find((reference) => reference.key === key);
+        if (!hit) return [...prev, remembered];
+        remembered = { ...hit, lastSeenOrder };
+        return prev.map((reference) => (reference.key === key ? remembered : reference));
+      });
+      return remembered;
+    },
+    [],
+  );
 
   // The Skills panel owns richer polling while it is visible, but it cannot
   // discover that it should mount in the first place. This lightweight probe
@@ -325,124 +373,116 @@ export function ChatReferences({
     [],
   );
 
-  const handleToolActivity = useCallback((tool: ToolActivity) => {
-    if (!tool.success) return;
-    // Generated media (generate_video mp4, generate_image png) rides on
-    // the tool call as artifact paths in `videos`/`images`, not `tool.path`.
-    // Surface each in the rail so it's previewable to the right — videos
-    // are auto-promoted to the viewer so a new clip shows immediately.
-    const mediaPaths = [
-      ...(tool.videos?.map((v) => ({ path: v.path, promote: true })) ?? []),
-      ...(tool.images?.map((im) => ({ path: im.path, promote: false })) ?? []),
-    ];
-    if (mediaPaths.length > 0) {
-      for (const m of mediaPaths) {
-        const key = referenceKey('artifact', tool.projectId, m.path);
-        let ref: Reference | null = null;
-        setReferences((prev) => {
-          const hit = prev.find((r) => r.key === key);
-          if (hit) {
-            ref = hit;
-            return prev;
-          }
-          ref = {
-            key,
-            kind: 'artifact',
-            path: m.path,
-            firstSeenAt: Date.now(),
-            ...(tool.projectId ? { projectId: tool.projectId } : {}),
-          };
-          return [...prev, ref];
-        });
-        if (m.promote && ref) setActiveRef(ref);
+  const handleToolActivity = useCallback(
+    (tool: ToolActivity) => {
+      if (!tool.success) return;
+      // Generated media (generate_video mp4, generate_image png) rides on
+      // the tool call as artifact paths in `videos`/`images`, not `tool.path`.
+      // Surface each in the rail so it's previewable to the right — videos
+      // are auto-promoted to the viewer so a new clip shows immediately.
+      const mediaPaths = [
+        ...(tool.videos?.map((v) => ({ path: v.path, promote: true })) ?? []),
+        ...(tool.images?.map((im) => ({ path: im.path, promote: false })) ?? []),
+      ];
+      if (mediaPaths.length > 0) {
+        for (const m of mediaPaths) {
+          const ref = rememberReference('artifact', m.path, tool.projectId);
+          if (m.promote) setActiveRef(ref);
+        }
       }
-    }
-    const kind = classifyTool(tool.name);
-    if (!kind) return;
-    const paths = tool.paths && tool.paths.length > 0 ? tool.paths : tool.path ? [tool.path] : [];
-    if (paths.length === 0) return;
-    setReferences((prev) => {
-      const next = [...prev];
-      const known = new Set(prev.map((reference) => reference.key));
+      const kind = classifyTool(tool.name);
+      if (!kind) return;
+      const paths = tool.paths && tool.paths.length > 0 ? tool.paths : tool.path ? [tool.path] : [];
+      if (paths.length === 0) return;
       for (const path of paths) {
         // Workspace HTML already gets a dedicated, larger live preview in the
         // left-hand Output pane (ProjectOutputPane). Surfacing it here too just
         // duplicates the running app, so skip it. Non-HTML workspace files
         // still belong in this rail.
         if (kind === 'workspace' && isHtml(path)) continue;
-        const key = referenceKey(kind, tool.projectId, path);
-        if (known.has(key)) continue;
-        known.add(key);
-        next.push({
+        rememberReference(kind, path, tool.projectId);
+      }
+    },
+    [rememberReference],
+  );
+
+  const handleArtifactReference = useCallback(
+    (path: string, messageProjectId?: string) => {
+      const ref = rememberReference('artifact', path, messageProjectId);
+      setActiveRef(ref);
+      setCompactPane('references');
+    },
+    [rememberReference],
+  );
+
+  const handleArtifactSeen = useCallback(
+    (path: string, messageProjectId?: string) => {
+      rememberReference('artifact', path, messageProjectId);
+    },
+    [rememberReference],
+  );
+
+  const handleWorkspaceReference = useCallback(
+    (path: string, messageProjectId?: string) => {
+      const ref = rememberReference('workspace', path, messageProjectId);
+      setActiveRef(ref);
+      setCompactPane('references');
+    },
+    [rememberReference],
+  );
+
+  const handleWorkspaceSeen = useCallback(
+    (path: string, messageProjectId?: string) => {
+      rememberReference('workspace', path, messageProjectId);
+    },
+    [rememberReference],
+  );
+
+  const recentReferences = useMemo<readonly OpenChatReference[]>(
+    () =>
+      [...references]
+        .sort((left, right) => right.lastSeenOrder - left.lastSeenOrder)
+        .slice(0, 12)
+        .map(({ key, kind, path, projectId: referenceProjectId }) => ({
           key,
           kind,
           path,
-          firstSeenAt: Date.now(),
-          ...(tool.projectId ? { projectId: tool.projectId } : {}),
-        });
-      }
-      return next;
-    });
-  }, []);
+          ...(referenceProjectId ? { projectId: referenceProjectId } : {}),
+        })),
+    [references],
+  );
 
-  const handleArtifactReference = useCallback((path: string, messageProjectId?: string) => {
-    const key = referenceKey('artifact', messageProjectId, path);
-    let ref: Reference | null = null;
-    setReferences((prev) => {
-      const hit = prev.find((r) => r.key === key);
-      if (hit) {
-        ref = hit;
-        return prev;
-      }
-      ref = {
-        key,
-        kind: 'artifact',
-        path,
-        firstSeenAt: Date.now(),
-        ...(messageProjectId ? { projectId: messageProjectId } : {}),
-      };
-      return [...prev, ref];
-    });
-    // Promote the clicked artifact to the viewer. `ref` is assigned
-    // synchronously inside the updater so it's defined by now.
-    if (ref) {
+  const handleOpenReference = useCallback(
+    (reference: OpenChatReference) => {
+      const ref = rememberReference(reference.kind, reference.path, reference.projectId);
       setActiveRef(ref);
+      setActiveTab('references');
       setCompactPane('references');
-    }
-  }, []);
-
-  const handleWorkspaceReference = useCallback((path: string, messageProjectId?: string) => {
-    const key = referenceKey('workspace', messageProjectId, path);
-    let ref: Reference | null = null;
-    setReferences((prev) => {
-      const hit = prev.find((r) => r.key === key);
-      if (hit) {
-        ref = hit;
-        return prev;
-      }
-      ref = {
-        key,
-        kind: 'workspace',
-        path,
-        firstSeenAt: Date.now(),
-        ...(messageProjectId ? { projectId: messageProjectId } : {}),
-      };
-      return [...prev, ref];
-    });
-    if (ref) {
-      setActiveRef(ref);
-      setCompactPane('references');
-    }
-  }, []);
+    },
+    [rememberReference],
+  );
 
   const referenceApi = useMemo<ChatReferencesApi>(
     () => ({
       onToolActivity: handleToolActivity,
       onArtifactReference: handleArtifactReference,
+      onArtifactSeen: handleArtifactSeen,
       onWorkspaceReference: handleWorkspaceReference,
+      onWorkspaceSeen: handleWorkspaceSeen,
+      recentReferences,
+      onOpenReference: handleOpenReference,
       onTaskReference: handleTaskReference,
     }),
-    [handleToolActivity, handleArtifactReference, handleWorkspaceReference, handleTaskReference],
+    [
+      handleToolActivity,
+      handleArtifactReference,
+      handleArtifactSeen,
+      handleWorkspaceReference,
+      handleWorkspaceSeen,
+      recentReferences,
+      handleOpenReference,
+      handleTaskReference,
+    ],
   );
 
   const handleResolved = useCallback((refKey: string, resolvedKind: RefKind) => {
@@ -667,6 +707,7 @@ export function ChatReferences({
               <TaskRailCard
                 key={effectiveTaskRef}
                 taskRef={effectiveTaskRef}
+                onTaskChanged={onTaskChanged}
                 onOpenTask={(ref) =>
                   window.dispatchEvent(
                     new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -817,6 +858,7 @@ export function ChatReferences({
                   <TaskRailCard
                     key={effectiveTaskRef}
                     taskRef={effectiveTaskRef}
+                    onTaskChanged={onTaskChanged}
                     onOpenTask={(ref) =>
                       window.dispatchEvent(
                         new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -864,15 +906,19 @@ export function ChatReferences({
 function TaskRailCard({
   taskRef,
   onOpenTask,
+  onTaskChanged,
 }: {
   taskRef: string;
   onOpenTask?: (ref: string) => void;
+  onTaskChanged?: (task: Task) => void;
 }) {
   const [task, setTask] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [notes, setNotes] = useState<TaskNote[]>([]);
   const [notesState, setNotesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -893,6 +939,7 @@ function TaskRailCard({
     let cancelled = false;
     setLoaded(false);
     setTask(null);
+    setStatusError(null);
     api
       .getTaskByRef(taskRef)
       .then((t) => {
@@ -950,14 +997,74 @@ function TaskRailCard({
   const legacyTitleMatch = /^(.*) — \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(task.title);
   const legacyGeneratedTitle = cb && legacyTitleMatch?.[1] === cb.id;
   const displayTitle = legacyGeneratedTitle ? cb.name : task.title;
+  const statusOptions: Array<Exclude<TaskStatus, 'draft'>> =
+    task.origin?.kind === 'system-job'
+      ? ['active', 'paused']
+      : ['active', 'paused', 'complete', 'canceled'];
+  const changeStatus = async (status: Exclude<TaskStatus, 'draft'>) => {
+    if (status === task.status || statusBusy) return;
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      const updated = await api.setTaskStatus(task.projectId, task.num, status);
+      setTask(updated);
+      onTaskChanged?.(updated);
+    } catch (err) {
+      setStatusError((err as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  };
   return (
     <div className="chat-rail-task">
       <div className="chat-rail-task-topbar">
         <header className="chat-rail-task-header">
           <code className="chat-rail-task-ref">{task.ref}</code>
-          <span className={`chat-rail-task-status chat-rail-task-status-${task.status}`}>
-            {task.status}
-          </span>
+          {task.status === 'draft' ? (
+            <span className="chat-rail-task-status chat-rail-task-status-draft">draft</span>
+          ) : (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className={`chat-rail-task-status chat-rail-task-status-trigger chat-rail-task-status-${task.status}`}
+                  disabled={statusBusy}
+                  aria-label={`Task status: ${taskStatusLabel(task.status)}. Change status`}
+                  aria-busy={statusBusy}
+                >
+                  <span>{taskStatusLabel(task.status)}</span>
+                  <DropdownChevron />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="app-nav-menu chat-rail-task-status-menu"
+                  align="start"
+                  sideOffset={4}
+                >
+                  {statusOptions.map((status) => {
+                    const current = status === task.status;
+                    return (
+                      <DropdownMenu.Item
+                        key={status}
+                        className={`app-nav-menu-item chat-rail-task-status-option${current ? ' is-current' : ''}`}
+                        disabled={current || statusBusy}
+                        aria-current={current ? 'true' : undefined}
+                        onSelect={() => void changeStatus(status)}
+                      >
+                        <span
+                          className={`task-status-dot task-status-${status}`}
+                          aria-hidden="true"
+                        />
+                        <span>{taskStatusLabel(status)}</span>
+                        {current && <span className="sr-only"> (current)</span>}
+                      </DropdownMenu.Item>
+                    );
+                  })}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
         </header>
         <button
           type="button"
@@ -967,6 +1074,11 @@ function TaskRailCard({
           Open full task
         </button>
       </div>
+      {statusError && (
+        <p className="error small chat-rail-task-status-error" role="alert">
+          Couldn't change task status: {statusError}
+        </p>
+      )}
       <h4 className="chat-rail-task-title">{displayTitle}</h4>
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
@@ -1037,6 +1149,10 @@ function TaskRailCard({
       </section>
     </div>
   );
+}
+
+function taskStatusLabel(status: TaskStatus): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function formatTaskNoteTime(at: string): string {

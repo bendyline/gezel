@@ -340,21 +340,71 @@ describe('ChatPillRow', () => {
     const user = userEvent.setup();
     const { onFocusTask } = renderRow({ activeTaskRef: 'p1/4' });
 
-    const pill = await screen.findByRole('button', { name: 'Task p1/4: Ship the game' });
+    const pill = await screen.findByRole('button', {
+      name: 'Task p1/4: Ship the game. No chat yet. Assigned to Esra. Active',
+    });
     expect(pill).toHaveAttribute('aria-pressed', 'true');
+    expect(pill.querySelector('.chat-pill-task-icon')).not.toBeNull();
+    expect(pill.querySelector('.chat-pill-task-number')).toHaveTextContent('#4');
+    expect(pill).toHaveTextContent('Ship the game');
+    expect(pill.querySelector('.chat-pill-participants')).toHaveTextContent('Esra');
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent('No chat yet');
+    expect(pill.querySelector('.chat-pill-thread-updated-at')).toHaveTextContent('p1/4');
+    expect(pill.querySelector('.chat-pill-thread-status')).toHaveTextContent('Active');
     await user.click(pill);
     expect(onFocusTask).toHaveBeenCalledWith(expect.objectContaining({ ref: 'p1/4' }));
   });
 
-  it('suppresses an idle thread whose task already has a pill', async () => {
+  it('unifies an active task with its latest chat instead of rendering a second pill', async () => {
     vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [task('p1/4', 'Ship the game')] });
     vi.mocked(api.listChatSessions).mockResolvedValue({
-      sessions: [session('s1', 'g1', { taskRef: 'p1/4' })],
+      sessions: [
+        session('latest', 'g2', {
+          taskRef: 'p1/4',
+          title: 'Implementation handoff',
+          lastMessagePreview: 'The final polish is ready.',
+          lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+        }),
+        session('older', 'g1', {
+          taskRef: 'p1/4',
+          lastActivityAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+        }),
+      ],
     });
     renderRow();
 
-    await screen.findByRole('button', { name: 'Task p1/4: Ship the game' });
-    expect(screen.queryByRole('button', { name: /^Esra: Thread s1\./ })).toBeNull();
+    const pill = await screen.findByRole('button', {
+      name: /^Task p1\/4: Ship the game\. Latest chat with Wren: Implementation handoff\./,
+    });
+    expect(pill.querySelector('.chat-pill-task-icon')).not.toBeNull();
+    expect(pill.querySelector('.chat-pill-task-number')).toHaveTextContent('#4');
+    expect(pill.querySelector('.chat-pill-participants')).toHaveTextContent('Wren');
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+      'The final polish is ready.',
+    );
+    expect(pill.querySelector('.chat-pill-thread-updated-at')).toHaveTextContent(
+      'Updated 2 minutes ago',
+    );
+    expect(pill.querySelector('.chat-pill-thread-status')).toHaveTextContent('Ready');
+    expect(screen.queryByRole('button', { name: /^Wren: Implementation handoff\./ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Esra: Thread older\./ })).toBeNull();
+  });
+
+  it('carries live chat state on the unified task pill', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [task('p1/4', 'Ship the game')] });
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [session('task-thread', 'g1', { taskRef: 'p1/4' })],
+    });
+    vi.mocked(api.listInflightTurns).mockResolvedValue({
+      inflight: [{ sessionId: 'task-thread' }],
+    } as never);
+    renderRow();
+
+    const pill = await screen.findByRole('button', {
+      name: /^Task p1\/4: Ship the game\..*Working$/,
+    });
+    expect(pill).toHaveTextContent('Working');
+    expect(screen.queryByRole('button', { name: /^Esra: Thread task-thread\./ })).toBeNull();
   });
 
   it('re-reads tasks when a task_event lands on the stream', async () => {
@@ -376,7 +426,9 @@ describe('ChatPillRow', () => {
     // The re-read is debounced, so give it more than the default 1s window.
     await waitFor(
       () => {
-        expect(screen.getByRole('button', { name: 'Task p1/9: New work' })).toBeVisible();
+        expect(
+          screen.getByRole('button', { name: /^Task p1\/9: New work\. No chat yet\./ }),
+        ).toBeVisible();
       },
       { timeout: 3000 },
     );

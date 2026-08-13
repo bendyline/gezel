@@ -1,13 +1,13 @@
-import { detectClaudeBinary } from './anthropic-cli/binary.js';
-import { detectCodexBinary } from './codex-cli/binary.js';
+import { statSync } from 'node:fs';
+import { which as whichClaude } from './anthropic-cli/binary.js';
+import { which as whichCodex } from './codex-cli/binary.js';
 
 /**
  * Snapshot of CLI-binary availability as the config endpoint surfaces it.
  * `installed === false` means neither the override path nor a PATH lookup
- * resolved to an executable; the optional `error` is the underlying probe
- * failure (useful in Settings: "claude at /usr/local/bin/claude is not
- * executable: ENOENT" lands the user on the right diagnostic faster than
- * a bare "not installed").
+ * resolved to a file; the optional `error` explains an invalid override.
+ * This is presence, not execution health — the provider test endpoint owns
+ * that distinction.
  */
 export interface CliDetectionView {
   installed: boolean;
@@ -21,73 +21,54 @@ export interface CliDetections {
   codexCli: CliDetectionView;
 }
 
-interface CacheEntry {
-  /** The override path the cached probe was run with — invalidates on change. */
-  override: string | undefined;
-  result: CliDetectionView;
-  expiresAt: number;
-}
-
-const TTL_MS = 60_000;
-
-let claudeCache: CacheEntry | null = null;
-let codexCache: CacheEntry | null = null;
-
 /**
- * Probe both CLI binaries with a 60s in-memory TTL. The probe spawns
- * `<bin> --version` per provider on a cache miss, which is fast (~100ms)
- * but not free, so we don't want to do it on every config GET — the
- * Settings UI polls config across most user interactions. A 60s TTL is
- * the right tradeoff: a user who installs the CLI mid-session sees it
- * light up within a minute, and the steady-state cost is one `which`
- * walk per provider per minute.
+ * Cheap provider presence for passive config/usage reads.
  *
- * The cache key is the override path: a config edit that changes
- * `anthropicCli.binaryPath` invalidates the affected entry on the next
- * call without needing an explicit reset.
+ * This deliberately does not execute either CLI. `/api/config` is read by
+ * nearly every UI surface and by every CLI command's authorization check; a
+ * real health probe here used to turn an otherwise idle startup into
+ * `claude --version` plus four `codex` version/help subprocesses. Presence is
+ * enough to decide whether a provider belongs in a picker. The existing
+ * provider test routes and first real provider use still perform the full,
+ * actionable health/capability probe.
  */
-export async function getCliDetections(config: {
-  anthropicCli?: { binaryPath?: string };
-  codexCli?: { binaryPath?: string };
-}): Promise<CliDetections> {
-  const now = Date.now();
-  const anthropicOverride = config.anthropicCli?.binaryPath;
-  const codexOverride = config.codexCli?.binaryPath;
-
-  const [anthropicCli, codexCli] = await Promise.all([
-    probeWithCache('claude', claudeCache, anthropicOverride, now, () =>
-      detectClaudeBinary(anthropicOverride ? { override: anthropicOverride } : {}),
-    ).then((entry) => {
-      claudeCache = entry;
-      return entry.result;
-    }),
-    probeWithCache('codex', codexCache, codexOverride, now, () =>
-      detectCodexBinary(codexOverride ? { override: codexOverride } : {}),
-    ).then((entry) => {
-      codexCache = entry;
-      return entry.result;
-    }),
-  ]);
-
-  return { anthropicCli, codexCli };
+export function getCliPresence(
+  config: {
+    anthropicCli?: { binaryPath?: string };
+    codexCli?: { binaryPath?: string };
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): CliDetections {
+  return {
+    anthropicCli: presence(
+      'Claude CLI',
+      config.anthropicCli?.binaryPath,
+      whichClaude('claude', env.PATH ?? '', env.PATHEXT),
+    ),
+    codexCli: presence(
+      'Codex CLI',
+      config.codexCli?.binaryPath,
+      whichCodex('codex', env.PATH ?? '', env.PATHEXT),
+    ),
+  };
 }
 
-async function probeWithCache(
-  _label: string,
-  cached: CacheEntry | null,
+function presence(
+  label: string,
   override: string | undefined,
-  now: number,
-  probe: () => Promise<CliDetectionView>,
-): Promise<CacheEntry> {
-  if (cached && cached.override === override && cached.expiresAt > now) {
-    return cached;
+  onPath: string | null,
+): CliDetectionView {
+  const path = override ?? onPath;
+  if (!path) return { installed: false };
+  try {
+    if (!statSync(path).isFile()) {
+      return { installed: false, error: `${label} path is not a file: ${path}` };
+    }
+    return { installed: true, path };
+  } catch (err) {
+    return {
+      installed: false,
+      error: `${label} path is unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
-  const result = await probe();
-  return { override, result, expiresAt: now + TTL_MS };
-}
-
-/** Test-only escape hatch — clears the cache so repeat probes happen fresh. */
-export function resetCliDetectionCache(): void {
-  claudeCache = null;
-  codexCache = null;
 }

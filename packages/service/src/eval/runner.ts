@@ -26,6 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('eval-runner');
 
@@ -156,6 +157,7 @@ export async function runEval(
       // Inherit GEZEL_* env so the child harness sees the user's
       // cache root, dev-home, API keys for the LLM judge, etc.
       env: { ...process.env },
+      ...windowsHeadlessSpawnOptions(),
     });
   } catch (err) {
     await opts.onEvent({

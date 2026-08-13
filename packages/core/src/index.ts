@@ -46,6 +46,7 @@ export * from './gezel-version.js';
 export * from './outside-in-paths.js';
 export * from './shadow-paths.js';
 export * from './thread-title.js';
+export * from './catalog-work-in-progress.js';
 
 /**
  * The package version is embedded into health responses and logs so clients

@@ -72,6 +72,8 @@ export async function listProcessSnapshots(
       '-NoLogo',
       '-NoProfile',
       '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
       '-Command',
       WINDOWS_PROCESS_QUERY,
     ]);

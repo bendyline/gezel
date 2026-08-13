@@ -47,6 +47,14 @@ interface BootstrapContext {
 
 interface ModelPlan {
   context: BootstrapContext;
+  installedChatModels: Array<{
+    id: string;
+    name?: string;
+    approxSizeBytes?: number;
+  }>;
+  /** Hardware winner before availability is considered. */
+  recommendedChatModel?: BootstrapChatModel;
+  /** Downloadable choices, in hardware recommendation order. */
   chatModels: BootstrapChatModel[];
   accessories: BootstrapAccessoryModel[];
 }
@@ -74,6 +82,7 @@ type Screen =
 type ModelChoice =
   | { kind: 'bundle'; model: BootstrapChatModel }
   | { kind: 'chat'; model: BootstrapChatModel }
+  | { kind: 'installed'; modelId: string }
   | { kind: 'skip' };
 
 const MAX_ALTERNATIVE_MODELS = 6;
@@ -112,7 +121,8 @@ export function BootstrapGate(props: {
         context.provider === 'mlx'
           ? await client.listMlxModels()
           : await client.listLlamaCppModels();
-      if (installedChat.models.length > 0) {
+      const pinnedModel = context.config.defaultModel?.[context.provider];
+      if (pinnedModel && installedChat.models.some((model) => model.id === pinnedModel)) {
         setScreen({ kind: 'ready' });
         return;
       }
@@ -138,8 +148,15 @@ export function BootstrapGate(props: {
         client.listInstalledTtsModels().catch(() => ({ models: [] })),
         client.listInstalledRecognitionModels().catch(() => ({ models: [] })),
       ]);
-      const chatModels = rankChatModels(context.chatCatalog, context.device, context.provider);
-      if (chatModels.length === 0) {
+      const installedIds = new Set(installedChat.models.map((model) => model.id));
+      const rankedChatModels = rankChatModels(
+        context.chatCatalog,
+        context.device,
+        context.provider,
+      );
+      const recommendedChatModel = rankedChatModels[0];
+      const chatModels = rankedChatModels.filter((model) => !installedIds.has(model.id));
+      if (chatModels.length === 0 && installedChat.models.length === 0) {
         setScreen({
           kind: 'error',
           title: 'No compatible local models found',
@@ -164,7 +181,16 @@ export function BootstrapGate(props: {
         },
         context.device,
       );
-      setScreen({ kind: 'model-choice', plan: { context, chatModels, accessories } });
+      setScreen({
+        kind: 'model-choice',
+        plan: {
+          context,
+          installedChatModels: installedChat.models,
+          ...(recommendedChatModel ? { recommendedChatModel } : {}),
+          chatModels,
+          accessories,
+        },
+      });
     },
     [client],
   );
@@ -199,14 +225,7 @@ export function BootstrapGate(props: {
       const context: BootstrapContext = {
         config,
         provider: config.provider,
-        device: {
-          platform: memory.platform,
-          gpuVramBytes: memory.gpuVramBytes,
-          ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
-          totalRamBytes: memory.totalRamBytes,
-          usableBytes: memory.usableBytes,
-          ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
-        },
+        device: recoDevice(memory),
         chatCatalog: chatCatalog.items,
         nativeStatus,
       };
@@ -244,12 +263,23 @@ export function BootstrapGate(props: {
       }
       try {
         await installNativeToolkit(client, context.nativeStatus, missing, setScreen);
-        const nativeStatus = await client.getNativeEngineStatus();
-        await prepareModels({ ...context, nativeStatus });
+        // The first memory snapshot was taken before llama-server existed, so
+        // an AMD/Intel Vulkan host looked CPU-only and fell into the E2B
+        // safety floor. Re-probe after the resolver stamps the binary path;
+        // recommendation must use the dGPU the freshly-installed engine sees.
+        const [nativeStatus, memory] = await Promise.all([
+          client.getNativeEngineStatus(),
+          client.getMemoryProfile(),
+        ]);
+        await prepareModels({
+          ...context,
+          nativeStatus,
+          device: recoDevice(memory),
+        });
       } catch (error) {
         setScreen({
           kind: 'error',
-          title: 'Native toolkit install failed',
+          title: 'Gezel native toolkit install failed',
           message: errorMessage(error),
           retry,
         });
@@ -266,14 +296,32 @@ export function BootstrapGate(props: {
       }
       const retry = () => void installModels(plan, choice);
       try {
+        if (choice.kind === 'installed') {
+          const updated = await client.updateConfig({
+            provider: plan.context.provider,
+            defaultModel: {
+              ...plan.context.config.defaultModel,
+              [plan.context.provider]: choice.modelId,
+            },
+            firstRunInstallError: null,
+          });
+          plan.context.config = updated;
+          setScreen({ kind: 'ready' });
+          return;
+        }
         if (choice.kind === 'bundle') {
           const missing = missingToolkit(await client.getNativeEngineStatus());
           if (missing.length > 0) {
             await installNativeToolkit(client, plan.context.nativeStatus, missing, setScreen);
           }
         }
+        const chatAlreadyInstalled =
+          choice.kind === 'bundle' &&
+          plan.installedChatModels.some((model) => model.id === choice.model.id);
         const jobs = [
-          { label: choice.model.name, sizeBytes: choice.model.approxSizeBytes },
+          ...(!chatAlreadyInstalled
+            ? [{ label: choice.model.name, sizeBytes: choice.model.approxSizeBytes }]
+            : []),
           ...(choice.kind === 'bundle'
             ? plan.accessories.map((model) => ({
                 label: model.name,
@@ -282,10 +330,12 @@ export function BootstrapGate(props: {
             : []),
         ];
         let jobIndex = 0;
-        await installChatModel(client, choice.model, (event) => {
-          updateDownloadProgress(setScreen, jobs[jobIndex]!, jobIndex, jobs.length, event);
-        });
-        jobIndex += 1;
+        if (!chatAlreadyInstalled) {
+          await installChatModel(client, choice.model, (event) => {
+            updateDownloadProgress(setScreen, jobs[jobIndex]!, jobIndex, jobs.length, event);
+          });
+          jobIndex += 1;
+        }
         const updated = await client.updateConfig({
           provider: choice.model.provider,
           defaultModel: {
@@ -340,16 +390,19 @@ export function BootstrapGate(props: {
   if (screen.kind === 'native-choice') {
     const labels = screen.missing.map(nativeLabel).join(', ');
     return (
-      <BootstrapFrame title="Local tools are not installed yet">
+      <BootstrapFrame title="The Gezel native toolkit -- needed to run AI models locally -- is not installed yet">
+        <Text>{`Gezel can install the verified Gezel native toolkit (native-v${screen.context.nativeStatus.release}) for this device.`}</Text>
         <Text>
-          Gezel can install the verified native-v{screen.context.nativeStatus.release} toolkit for
-          this device.
+          Downloaded from{' '}
+          <Text bold color="cyan">
+            https://github.com/bendyline/gezel/releases/
+          </Text>
         </Text>
         <Text dimColor>Missing: {labels}</Text>
         <BootstrapChoiceList
           options={[
             {
-              label: 'Install the native toolkit',
+              label: 'Install the Gezel native toolkit',
               hint: 'recommended · engines for chat, images, speech, and local model helpers',
               value: 'install',
             },
@@ -367,39 +420,81 @@ export function BootstrapGate(props: {
     );
   }
   if (screen.kind === 'model-choice') {
-    const best = screen.plan.chatModels[0]!;
+    const best = screen.plan.recommendedChatModel;
+    const bestInstalled = best
+      ? screen.plan.installedChatModels.some((model) => model.id === best.id)
+      : false;
     const accessoryBytes = screen.plan.accessories.reduce(
       (sum, model) => sum + model.approxSizeBytes,
       0,
     );
+    const workshopDownloadBytes =
+      accessoryBytes + (best && !bestInstalled ? best.approxSizeBytes : 0);
     const options = [
-      {
-        label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
-        hint: formatDownloadSize(best.approxSizeBytes + accessoryBytes),
-        value: 'bundle',
-      },
-      {
-        label: `${best.name} only`,
-        hint: `best chat model · ${formatDownloadSize(best.approxSizeBytes)}`,
-        value: `chat:${best.id}`,
-      },
-      ...screen.plan.chatModels.slice(1, MAX_ALTERNATIVE_MODELS + 1).map((model) => ({
-        label: `${model.name} only`,
-        hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
-        value: `chat:${model.id}`,
-      })),
+      ...(best
+        ? [
+            {
+              label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
+              hint: `${bestInstalled ? 'chat model already available · ' : ''}${
+                workshopDownloadBytes > 0
+                  ? formatDownloadSize(workshopDownloadBytes)
+                  : 'already available'
+              }`,
+              value: 'bundle',
+            },
+            {
+              label: `${bestInstalled ? 'Use' : 'Download'} ${best.name} only`,
+              hint: `recommended for this device · ${
+                bestInstalled ? 'already available' : formatDownloadSize(best.approxSizeBytes)
+              }`,
+              value: bestInstalled ? `installed:${best.id}` : `chat:${best.id}`,
+            },
+          ]
+        : []),
+      ...screen.plan.installedChatModels
+        .filter((model) => model.id !== best?.id)
+        .map((model) => ({
+          label: `Use ${model.name ?? model.id}`,
+          hint: `already available on this machine${
+            model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
+          }`,
+          value: `installed:${model.id}`,
+        })),
+      ...screen.plan.chatModels
+        .filter((model) => model.id !== best?.id)
+        .slice(0, MAX_ALTERNATIVE_MODELS)
+        .map((model) => ({
+          label: `Download ${model.name} only`,
+          hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
+          value: `chat:${model.id}`,
+        })),
       { label: 'Not now', hint: 'open the TUI without a local model', value: 'skip' },
     ];
     return (
-      <BootstrapFrame title="No local chat model is installed">
-        <Text>Pick a setup for this device. Downloads stay under your Gezel home folder.</Text>
+      <BootstrapFrame
+        title={
+          screen.plan.installedChatModels.length > 0
+            ? 'Choose a local chat model'
+            : 'No local chat model is installed'
+        }
+      >
+        <Text>
+          {screen.plan.installedChatModels.length > 0
+            ? 'These models are already available in your Gezel or shared machine store. You can use one now or download another.'
+            : 'Pick a setup for this device. Downloads stay under Gezel model storage.'}
+        </Text>
         <BootstrapChoiceList
           options={options}
           onSelect={(value) => {
             if (value === 'skip') {
               void installModels(screen.plan, { kind: 'skip' });
             } else if (value === 'bundle') {
-              void installModels(screen.plan, { kind: 'bundle', model: best });
+              if (best) void installModels(screen.plan, { kind: 'bundle', model: best });
+            } else if (value.startsWith('installed:')) {
+              void installModels(screen.plan, {
+                kind: 'installed',
+                modelId: value.slice('installed:'.length),
+              });
             } else {
               const id = value.slice('chat:'.length);
               const model = screen.plan.chatModels.find((candidate) => candidate.id === id);
@@ -448,6 +543,17 @@ function BootstrapFrame(props: { title: string; children: ReactNode }): JSX.Elem
       <Text dimColor>Ctrl+C exit</Text>
     </Box>
   );
+}
+
+function recoDevice(memory: Awaited<ReturnType<GezelClient['getMemoryProfile']>>): RecoDevice {
+  return {
+    platform: memory.platform,
+    gpuVramBytes: memory.gpuVramBytes,
+    ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
+    totalRamBytes: memory.totalRamBytes,
+    usableBytes: memory.usableBytes,
+    ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
+  };
 }
 
 function BootstrapChoiceList(props: {
@@ -530,7 +636,7 @@ async function installNativeToolkit(
           index,
           missing.length,
           event,
-          `Installing native-v${status.release}`,
+          `Installing the Gezel native toolkit (native-v${status.release})`,
         );
       },
       engine === 'llama-server' ? status.llamaBackend : undefined,

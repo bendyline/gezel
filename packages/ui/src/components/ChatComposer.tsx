@@ -9,6 +9,13 @@ import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import {
+  type OpenChatReference,
+  type OpenChatTarget,
+  openChatSuggestions,
+  parseOpenChatQuery,
+  resolveOpenChatTarget,
+} from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -103,6 +110,10 @@ export interface ChatComposerProps {
    * References pane scoped to the active turn).
    */
   onToolActivity?: (tool: ToolActivity) => void;
+  /** Most-recent-first files surfaced by the surrounding References rail. */
+  recentReferences?: readonly OpenChatReference[];
+  /** Opens an MRU file in the surrounding References viewer. */
+  onOpenReference?: (reference: OpenChatReference) => void;
   /**
    * Called when a turn starts/ends. The parent uses this to render
    * inline status (e.g. an error banner) outside the composer.
@@ -208,6 +219,8 @@ export function ChatComposer({
   sessionId,
   onSessionCreated,
   onToolActivity,
+  recentReferences = [],
+  onOpenReference,
   craftbookRef,
   onTurnStateChange,
   placeholder,
@@ -275,6 +288,10 @@ export function ChatComposer({
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
   const [draftNonEmpty, setDraftNonEmpty] = useState(false);
+  // A non-null value means the entire single-line draft is a local `/open`
+  // command. Keeping the query in state lets the suggestion tray react to
+  // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
+  const [openCommandQuery, setOpenCommandQuery] = useState<string | null>(null);
   // EditorShell reads initialMarkdown and configures its placeholder only
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
@@ -301,6 +318,7 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
+    setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
   }, [projectId]);
   useEffect(() => {
@@ -567,6 +585,7 @@ export function ChatComposer({
       draftRef.current = source;
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
+      setOpenCommandQuery(parseOpenChatQuery(source));
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
       // to the parent which will flip the compose surface into
@@ -616,9 +635,59 @@ export function ChatComposer({
     draftRef.current = '';
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
+    setOpenCommandQuery(null);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
   }, []);
+
+  const openSuggestions = useMemo(
+    () =>
+      openCommandQuery === null ? [] : openChatSuggestions(openCommandQuery, recentReferences),
+    [openCommandQuery, recentReferences],
+  );
+
+  const executeOpenTarget = useCallback(
+    async (selectedTarget?: OpenChatTarget) => {
+      const draftSnapshot = beginDraftSubmission();
+      if (!draftSnapshot) return;
+      const query = parseOpenChatQuery(draftSnapshot.source);
+      const target =
+        selectedTarget ?? (query === null ? null : resolveOpenChatTarget(query, recentReferences));
+      if (!target) {
+        setError(
+          query
+            ? `No recent file matches “${query}”. Choose a suggestion or use workspace or artifacts.`
+            : 'Choose workspace, artifacts, or a recent file.',
+        );
+        finishDraftSubmission();
+        return;
+      }
+
+      setError(null);
+      try {
+        if (target.type === 'folder') {
+          await api.revealProject(projectId, target.folder);
+        } else if (onOpenReference) {
+          onOpenReference(target.reference);
+        } else {
+          throw new Error('Recent file opening is unavailable in this chat.');
+        }
+        clearAcceptedDraft(draftSnapshot);
+      } catch (err) {
+        setError(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        finishDraftSubmission();
+      }
+    },
+    [
+      beginDraftSubmission,
+      clearAcceptedDraft,
+      finishDraftSubmission,
+      onOpenReference,
+      projectId,
+      recentReferences,
+    ],
+  );
 
   // Project-chat pivot. When the draft picks up an @-mention for a gezel
   // OTHER than the current primary, fire `onPivotToMention(firstOther.id)`
@@ -649,6 +718,12 @@ export function ChatComposer({
   }, [mentioned, gezelId, projectId, onPivotToMention]);
 
   const send = useCallback(async () => {
+    // `/open` is renderer-local: never create a session or send the command to
+    // the model. It also remains useful while AI engagement is turned off.
+    if (parseOpenChatQuery(draftRef.current) !== null) {
+      await executeOpenTarget();
+      return;
+    }
     if (!gezelId || turnActive) return;
     if (engagementOff) return;
     const draftSnapshot = beginDraftSubmission();
@@ -863,6 +938,7 @@ export function ChatComposer({
     // run on idle pivots.
     passiveCcGezelIds,
     onPassiveCcConsumed,
+    executeOpenTarget,
   ]);
 
   const cancelWedged = useCallback(async () => {
@@ -988,9 +1064,11 @@ export function ChatComposer({
   const submitRef = useRef<() => void>(() => {});
   submitRef.current = draftSubmissionPending
     ? () => {}
-    : turnActive
-      ? () => void queueNudge()
-      : () => void send();
+    : openCommandQuery !== null
+      ? () => void executeOpenTarget()
+      : turnActive
+        ? () => void queueNudge()
+        : () => void send();
 
   return (
     <div ref={composerRef} className="chat-composer" data-testid="chat-composer">
@@ -1107,6 +1185,38 @@ export function ChatComposer({
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">
+        {openCommandQuery !== null && (
+          <div className="chat-open-command-menu" role="menu" aria-label="Open targets">
+            <div className="chat-open-command-heading">
+              <code>/open</code>
+              <span>Project folders and recent chat files</span>
+            </div>
+            {openSuggestions.length > 0 ? (
+              <div className="chat-open-command-items">
+                {openSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.key}
+                    type="button"
+                    role="menuitem"
+                    className="chat-open-command-item"
+                    aria-label={
+                      suggestion.target.type === 'folder'
+                        ? `Open ${suggestion.target.folder} folder`
+                        : `Open ${suggestion.label}`
+                    }
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void executeOpenTarget(suggestion.target)}
+                  >
+                    <code>{suggestion.label}</code>
+                    <span>{suggestion.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="chat-open-command-empty">No matching recent files.</p>
+            )}
+          </div>
+        )}
         <EditorShell
           // Squisq installs its Tiptap placeholder extension on mount. Include
           // the active recipient and prompt in the key so changing the To line
@@ -1140,7 +1250,18 @@ export function ChatComposer({
           thinMargins
           submitOnEnter={() => submitRef.current()}
           toolbarSlotRight={
-            turnActive ? (
+            openCommandQuery !== null ? (
+              <button
+                type="button"
+                className="chat-send-btn"
+                data-testid="chat-open"
+                onClick={() => void executeOpenTarget()}
+                disabled={draftSubmissionPending}
+                title="Open this folder or recent file (Enter)"
+              >
+                {draftSubmissionPending ? 'Opening…' : 'Open'}
+              </button>
+            ) : turnActive ? (
               <>
                 {draftNonEmpty && !engagementOff && (
                   <>

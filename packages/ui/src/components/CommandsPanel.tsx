@@ -1,20 +1,22 @@
-import type {
-  CatalogItemSummary,
-  CraftbookTemplateManifest,
-  CraftbookToolsetNeed,
-  DiscoveredCommand,
-  DiscoveredSkill,
-  PendingImportItem,
-  WorkspaceCommandIndex,
-  WorkspaceIndexStatus,
+import {
+  type CatalogItemSummary,
+  type CraftbookTemplateManifest,
+  type CraftbookToolsetNeed,
+  type DiscoveredCommand,
+  type DiscoveredSkill,
+  type PendingImportItem,
+  type WorkspaceCommandIndex,
+  type WorkspaceIndexStatus,
+  visibleCatalogItems,
 } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
 import { CraftbookParamForm } from './CraftbookParamForm.js';
 import { CraftbookToolsetSetup } from './CraftbookToolsetSetup.js';
 import { craftbookCommandName, renderCraftbookCommand } from './craftbook-command.js';
 import { osCommandGroups } from './os-commands.js';
+import { useShowWorkInProgressFeatures } from './useShowWorkInProgressFeatures.js';
 
 /**
  * Which slice of the panel to render. The terminal toolbar opens one popover
@@ -108,6 +110,7 @@ export function CommandsPanel({
   onAvailabilityChange,
   onStageCommand,
 }: Props) {
+  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   const showCommands = section === 'all' || section === 'commands';
   const showScripts = section === 'all' || section === 'scripts';
   const showCraftbooks = section === 'all' || section === 'tasks';
@@ -119,6 +122,7 @@ export function CommandsPanel({
   const needsIndex = showCommands || showScripts;
   const [index, setIndex] = useState<WorkspaceCommandIndex | null>(null);
   const [craftbooks, setCraftbooks] = useState<CatalogItemSummary[]>([]);
+  const craftbookLoadSequence = useRef(0);
   // Craftbook id → required toolsets it declares that aren't installed.
   const [missingToolsets, setMissingToolsets] = useState<Record<string, CraftbookToolsetNeed[]>>(
     {},
@@ -205,18 +209,23 @@ export function CommandsPanel({
   // git/GitHub state, which can change (branch switch) without an index
   // scan — so this is re-fetched on the same poll cadence below.
   const loadCraftbooks = useCallback(async () => {
+    const sequence = ++craftbookLoadSequence.current;
     try {
       const res = await api.listProjectCraftbooks(projectId);
-      setCraftbooks(res.items);
+      if (sequence !== craftbookLoadSequence.current) return;
+      const visibleItems = visibleCatalogItems(res.items, showWorkInProgressFeatures);
+      const visibleIds = new Set(visibleItems.map((item) => item.manifest.id));
+      setCraftbooks(visibleItems);
       setMissingToolsets(res.missingToolsets ?? {});
       setProjectType(res.projectType ?? null);
-      setSuggestedIds(new Set(res.suggestedIds ?? []));
+      setSuggestedIds(new Set((res.suggestedIds ?? []).filter((id) => visibleIds.has(id))));
     } catch {
+      if (sequence !== craftbookLoadSequence.current) return;
       /* craftbooks are best-effort */
     } finally {
-      setTasksLoaded(true);
+      if (sequence === craftbookLoadSequence.current) setTasksLoaded(true);
     }
-  }, [projectId]);
+  }, [projectId, showWorkInProgressFeatures]);
   // (loaded on mount + every 30s by the status poll below)
 
   // Drop a command into the terminal input for review. Nothing is fired on

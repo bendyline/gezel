@@ -10,13 +10,8 @@
     "vscode": "^1.97.0"
   },
   "main": "./dist/extension.cjs",
-  "files": [
-    "dist",
-    "resources"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
+  "files": ["dist", "resources"],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "viewsContainers": {
       "activitybar": [

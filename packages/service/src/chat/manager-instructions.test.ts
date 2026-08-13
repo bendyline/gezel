@@ -301,6 +301,83 @@ describe('buildInstructions connected data', () => {
   });
 });
 
+describe('buildInstructions structured step inputs', () => {
+  it('renders artifact provenance and makes read_artifact the first small-model action', () => {
+    const step = {
+      id: 'audit',
+      name: 'Audit controls',
+      prompt: 'Write findings with `write_artifact`, then re-read them with `read_artifact`.',
+      consumes: [{ file: 'security/review-scope.md', artifact: true }],
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Ebere',
+      role: 'Application Security Engineer',
+      about: 'Audit the project.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['read_file', 'read_artifact', 'write_artifact', 'advance_task_step'].map(
+        (name) => ({ name, description: `${name} tool` }),
+      ),
+      task: {
+        task: {
+          ref: 'gezel/1',
+          title: 'Security Architecture Review',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'ebere' },
+          craftbook: { steps: [step], entryStepId: 'audit' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('#### Required inputs');
+    expect(rendered).toContain(
+      '`security/review-scope.md` — required input in the **artifacts drawer**',
+    );
+    expect(rendered).toContain(
+      '`read_artifact({ path: "security/review-scope.md" })`; do not try the other drawer',
+    );
+    expect(rendered).toContain(
+      'First action: call `read_artifact` exactly as the procedure specifies.',
+    );
+    expect(rendered).not.toContain(
+      'First action: call `write_artifact` exactly as the procedure specifies.',
+    );
+  });
+
+  it('surfaces a missing drawer read capability without calling the input missing', () => {
+    const step = {
+      id: 'audit',
+      name: 'Audit controls',
+      prompt: 'First call `read_artifact({ path: "security/review-scope.md" })`.',
+      consumes: [{ file: 'security/review-scope.md', artifact: true }],
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Ebere',
+      role: 'Application Security Engineer',
+      about: 'Audit the project.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: [{ name: 'read_file', description: 'workspace reader' }],
+      task: {
+        task: {
+          ref: 'gezel/1',
+          title: 'Security Architecture Review',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'ebere' },
+          craftbook: { steps: [step], entryStepId: 'audit' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('`read_artifact` is not wired this turn');
+    expect(rendered).toContain('Do not claim it is missing');
+  });
+});
+
 describe('buildInstructions assigned pronouns', () => {
   const soloProject = {
     id: 'solo-job',
@@ -364,8 +441,51 @@ describe('buildInstructions active gezel identity', () => {
     });
 
     expect(full).toContain('You are the voorman of this project.');
+    expect(full).toContain('Do not ask the user to escalate work to the voorman — that is you.');
     expect(full).not.toContain('Wren');
     expect(full).not.toContain('(he/him)');
+  });
+});
+
+describe('buildInstructions boring mode (roleBasedNameOnlyMode)', () => {
+  const crewProject = {
+    id: 'workshop',
+    name: 'Workshop',
+    mode: 'crew',
+    voormanGezelId: 'tomas',
+  } as unknown as ProjectDetail;
+
+  it('renders the voorman by role-based name and states the naming rule', () => {
+    const { full } = buildInstructions({
+      name: 'Abby',
+      role: 'Reviewer',
+      about: 'Review the work.',
+      roleBasedNameOnlyMode: true,
+      project: crewProject,
+      voormanName: 'Tomas',
+      voormanRoleBasedName: 'voorman',
+      voormanGender: 'male',
+    });
+
+    expect(full).toContain('by role name only');
+    expect(full).toContain('**voorman**');
+    // The friendly name must not appear anywhere — a single leak teaches
+    // the model an identifier the boring-mode client never displays.
+    expect(full).not.toContain('Tomas');
+  });
+
+  it('keeps friendly names and omits the naming rule when off', () => {
+    const { full } = buildInstructions({
+      name: 'Abby',
+      role: 'Reviewer',
+      about: 'Review the work.',
+      project: crewProject,
+      voormanName: 'Tomas',
+      voormanRoleBasedName: 'voorman',
+    });
+
+    expect(full).not.toContain('by role name only');
+    expect(full).toContain('**Tomas**');
   });
 });
 

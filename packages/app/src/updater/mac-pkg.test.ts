@@ -209,7 +209,7 @@ describe('stageVerifiedMacPkg', () => {
       const checkedPath = args.at(-1)!;
       checkedPaths.push(checkedPath);
       expect(checkedPath).not.toBe(pkgPath);
-      expect(checkedPath).toMatch(/\/\.[^/]+\.partial-Gezel-.*\.pkg$/);
+      expect(checkedPath).toMatch(/[\\/]\.[^\\/]+\.partial-Gezel-.*\.pkg$/);
       await expect(readFile(pkgPath)).rejects.toMatchObject({ code: 'ENOENT' });
       return file.endsWith('pkgutil')
         ? { stdout: goodSignature() }

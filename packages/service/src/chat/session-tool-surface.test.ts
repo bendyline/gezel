@@ -922,6 +922,43 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist).not.toBeNull();
     expect(allowlist!.has('write_file')).toBe(false);
     expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_files')).toBe(true);
+    expect(allowlist!.has('list_dir')).toBe(true);
+  });
+
+  it("keeps a voorman's workspace readers when managed writes are off", async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Voorman',
+      workspaceWritable: false,
+      session: baseSession({}),
+      tier: 'medium',
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_file')).toBe(false);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_files')).toBe(true);
+    expect(allowlist!.has('list_dir')).toBe(true);
+    expect(allowlist!.has('grep_files')).toBe(true);
+  });
+
+  it('does not offer a project voorman escalation tools that target themselves', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      rolesAsTools: true,
+      isProjectVoorman: true,
+      session: baseSession({}),
+      tier: 'medium',
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('delegate_voorman')).toBe(false);
+    expect(allowlist!.has('consult_voorman')).toBe(false);
+    expect(allowlist!.has('delegate_meester')).toBe(true);
+    expect(allowlist!.has('consult_meester')).toBe(true);
   });
 
   it('a github mandate stays stripped when the project has no repo linked', async () => {

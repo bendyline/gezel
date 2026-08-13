@@ -36,9 +36,11 @@ describe('suggestSlashCommands', () => {
       'clear',
     ]);
     expect(suggestSlashCommands('/pro').map((command) => command.name)).toEqual(['project']);
+    expect(suggestSlashCommands('/a').map((command) => command.name)).toEqual(['allow']);
+    expect(suggestSlashCommands('/d').map((command) => command.name)).toEqual(['disallow', 'do']);
     expect(suggestSlashCommands('/m').map((command) => command.name)).toEqual(['mode', 'model']);
     expect(suggestSlashCommands('/th').map((command) => command.name)).toEqual(['thread']);
-    expect(suggestSlashCommands('/st').map((command) => command.name)).toEqual(['start']);
+    expect(suggestSlashCommands('/st')).toEqual([]);
     expect(suggestSlashCommands('/n').map((command) => command.name)).toEqual(['nightshift']);
   });
 
@@ -49,26 +51,22 @@ describe('suggestSlashCommands', () => {
 });
 
 describe('suggestSlashWordwheel', () => {
-  it('keeps bare /start as a command that opens the picker', () => {
-    expect(suggestSlashWordwheel('/start', CRAFTBOOKS)).toEqual([
-      expect.objectContaining({ submit: '/start', label: '/start' }),
+  it('keeps bare /do as a command that opens the picker', () => {
+    expect(suggestSlashWordwheel('/do', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({ submit: '/do', label: '/do' }),
     ]);
   });
 
-  it('switches to craftbooks after the /start space', () => {
-    expect(suggestSlashWordwheel('/start ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
-      '/start code-review',
-      '/start release-check',
+  it('switches to craftbooks after the /do space', () => {
+    expect(suggestSlashWordwheel('/do ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
+      '/do code-review',
+      '/do release-check',
     ]);
   });
 
   it('filters craftbooks by id, name, and description', () => {
-    expect(suggestSlashWordwheel('/start rele', CRAFTBOOKS)[0]?.submit).toBe(
-      '/start release-check',
-    );
-    expect(suggestSlashWordwheel('/start maintain', CRAFTBOOKS)[0]?.submit).toBe(
-      '/start code-review',
-    );
+    expect(suggestSlashWordwheel('/do rele', CRAFTBOOKS)[0]?.submit).toBe('/do release-check');
+    expect(suggestSlashWordwheel('/do maintain', CRAFTBOOKS)[0]?.submit).toBe('/do code-review');
   });
 
   it('offers Night Shift subcommands after the command is completed', () => {
@@ -91,6 +89,45 @@ describe('suggestSlashWordwheel', () => {
       '/mode read-only',
       '/mode reactive',
       '/mode reactive+tasks',
+    ]);
+  });
+
+  it('offers the model download subcommand after /model', () => {
+    expect(suggestSlashWordwheel('/model ', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/model download',
+        description: 'choose and download a new on-device model',
+      }),
+    ]);
+  });
+
+  it('offers the project edit permission after /allow and /disallow', () => {
+    expect(suggestSlashWordwheel('/allow ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
+      '/allow edits',
+      '/allow codexedits',
+      '/allow claudeedits',
+    ]);
+    expect(suggestSlashWordwheel('/disallow e', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/disallow edits',
+        description: 'make built-in tools and background work read-only',
+      }),
+    ]);
+    expect(suggestSlashWordwheel('/allow c', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/allow codexedits',
+        description: 'let Codex sessions edit this project',
+      }),
+      expect.objectContaining({
+        submit: '/allow claudeedits',
+        description: 'let Claude sessions edit this project',
+      }),
+    ]);
+    expect(suggestSlashWordwheel('/disallow cla', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/disallow claudeedits',
+        description: 'put Claude sessions in read-only plan mode',
+      }),
     ]);
   });
 });

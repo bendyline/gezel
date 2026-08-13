@@ -9,7 +9,12 @@ import type {
   Task,
   TaskStatus,
 } from '@bendyline/gezel';
-import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
+import type {
+  ConfigResponse,
+  GezelClient,
+  LlamaCppInstallEvent,
+  MlxInstallEvent,
+} from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ensureCliProjectLead } from '../connection.js';
@@ -20,7 +25,13 @@ import {
   parseCliEngagementMode,
 } from '../engagement-mode.js';
 import { activeAccessMode } from './active-access.js';
-import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashWordwheel } from './commands.js';
+import {
+  PROJECT_PERMISSION_USAGE,
+  SLASH_COMMAND_WORDWHEEL_SIZE,
+  parseInput,
+  parseProjectPermissionName,
+  suggestSlashWordwheel,
+} from './commands.js';
 import { ChatFeed } from './components/ChatFeed.js';
 import { Picker, type PickerItem } from './components/Picker.js';
 import { PromptLine } from './components/PromptLine.js';
@@ -47,7 +58,13 @@ import {
   reduceTurns,
   sessionToFeedRows,
 } from './feed.js';
-import { type ModelChoice, loadModelChoices, modelProviderLabel } from './model-picker.js';
+import {
+  type ModelChoice,
+  type ModelDownloadChoice,
+  loadModelChoices,
+  loadModelDownloadChoices,
+  modelProviderLabel,
+} from './model-picker.js';
 import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
@@ -78,6 +95,7 @@ type Overlay =
   | 'gezel'
   | 'engagement-mode'
   | 'model'
+  | 'model-download'
   | 'thread'
   | 'task'
   | 'start-category'
@@ -101,12 +119,24 @@ interface TaskTextPrompt {
   taskRef?: string;
 }
 
+interface ModelDownloadProgress {
+  choice: ModelDownloadChoice;
+  bytesWritten: number;
+  totalBytes: number | null;
+  pct: number | null;
+  phase?: string;
+}
+
 const HELP = [
   '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/model download — choose and download a new on-device model',
+  '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
+  '/allow codexedits|claudeedits — allow provider-native project edits',
+  '/disallow codexedits|claudeedits — put that provider in read-only plan mode',
   '/mode — choose read-only, reactive, reactive+tasks, or full-play AI activity',
   '/thread — switch or start a chat thread',
   '/task — list, inspect, create, edit, assign, or change task status',
-  '/start — choose a craftbook and start it as a task',
+  '/do — choose a craftbook and start it as a task',
   '/continue — process due schedules and active tasks in this project',
   '/nightshift start|stop|list — manage Night Shift',
   '/focus — send into another active chat   /cli — CLI mode   /chat — chat mode',
@@ -114,6 +144,9 @@ const HELP = [
   '/clear — clear feed   /quit — exit',
   '↑/↓ — input history   Esc — interrupt turn   Ctrl+C — interrupt, then again to exit',
 ];
+
+const READ_ONLY_BOOT_NOTE =
+  "Note: this folder is read-only to gezel, and can be used for doing analysis and writing reports. Use the /allow edits command to permit gezel to edit this folder's contents.";
 
 export function App(props: {
   client: GezelClient;
@@ -142,6 +175,11 @@ export function App(props: {
   );
   const [startCategoryId, setStartCategoryId] = useState<string | null>(null);
   const [modelChoices, setModelChoices] = useState<ModelChoice[]>([]);
+  const [modelDownloadChoices, setModelDownloadChoices] = useState<ModelDownloadChoice[]>([]);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(
+    null,
+  );
+  const [modelDownloadReturn, setModelDownloadReturn] = useState<'model' | null>(null);
   const [modelChoicesLoading, setModelChoicesLoading] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [pendingQuestions, setPendingQuestions] = useState<Question[]>([]);
@@ -182,7 +220,10 @@ export function App(props: {
     : 0;
   const modelPickerWindowSize = Math.max(4, Math.min(10, termRows - 12));
   const inventoryPickerRows =
-    overlay === 'model' || overlay === 'start-category' || overlay === 'start-craftbook'
+    overlay === 'model' ||
+    overlay === 'model-download' ||
+    overlay === 'start-category' ||
+    overlay === 'start-craftbook'
       ? modelPickerWindowSize + 5
       : 0;
   const visibleRows = Math.max(
@@ -216,6 +257,29 @@ export function App(props: {
     [],
   );
 
+  // A task launch can recruit a new gezel after the TUI's initial roster
+  // load. Keep ids in a ref so the project-event callback can detect that
+  // actor without being recreated for every roster update, and coalesce the
+  // burst of task + chat events into one refresh.
+  const gezelIds = useRef<Set<string>>(new Set());
+  const gezelRefreshInFlight = useRef(false);
+  const applyGezelSnapshot = useCallback((next: GezelSummary[]) => {
+    gezelIds.current = new Set(next.map((gezel) => gezel.id));
+    setGezels(next);
+  }, []);
+  const refreshGezels = useCallback(async () => {
+    if (gezelRefreshInFlight.current) return;
+    gezelRefreshInFlight.current = true;
+    try {
+      const result = await client.listGezels();
+      applyGezelSnapshot(result.gezels);
+    } catch {
+      /* retain the last good snapshot; the next unknown actor retries */
+    } finally {
+      gezelRefreshInFlight.current = false;
+    }
+  }, [applyGezelSnapshot, client]);
+
   const taskLoadSequence = useRef(0);
   const refreshTasks = useCallback(async () => {
     const sequence = ++taskLoadSequence.current;
@@ -233,13 +297,13 @@ export function App(props: {
     const sequence = ++craftbookLoadSequence.current;
     const result = await client.listProjectCraftbooks(projectId);
     if (sequence !== craftbookLoadSequence.current) return [];
-    const next = normalizeCraftbooks(result.items);
+    const next = normalizeCraftbooks(result.items, config?.showWorkInProgressFeatures === true);
     setCraftbooks(next);
     setCraftbookProjectType(result.projectType ?? null);
     setSuggestedCraftbookIds(new Set(result.suggestedIds ?? []));
     setCraftbooksNeedingSetup(new Set(Object.keys(result.missingToolsets)));
     return next;
-  }, [client, projectId]);
+  }, [client, config?.showWorkInProgressFeatures, projectId]);
 
   // Live feeds for the whole project (chat across all gezels + terminal).
   useProjectEvents(
@@ -249,6 +313,9 @@ export function App(props: {
       (env) => {
         setRows((r) => reduceFeed(r, env));
         setTurns((t) => reduceTurns(t, env));
+        const eventGezelId =
+          env.gezelId || (env.event.type === 'task_event' ? env.event.gezelId : undefined);
+        if (eventGezelId && !gezelIds.current.has(eventGezelId)) void refreshGezels();
         if (env.event.type === 'task_event') void refreshTasks();
         if (env.event.type === 'user_message' && env.sessionId === ownSessionId) {
           const nextTitle = env.event.message.content.slice(0, 60).trim() || 'Untitled';
@@ -266,7 +333,7 @@ export function App(props: {
           setPendingQuestions((questions) => updatePendingQuestion(questions, question));
         }
       },
-      [ownSessionId, refreshTasks],
+      [ownSessionId, refreshGezels, refreshTasks],
     ),
   );
   useTerminalEvents(
@@ -308,7 +375,14 @@ export function App(props: {
   const ensureSession = useCallback(
     async (gezelId: string, pid: string) => {
       try {
-        const session = await client.createChatSession({ gezelId, projectId: pid });
+        // Pin the session's name-rendering mode to the TUI's: without the
+        // stamp the daemon builds prompts from the desktop preference and
+        // the model addresses gezels by names these labels never show.
+        const session = await client.createChatSession({
+          gezelId,
+          projectId: pid,
+          roleBasedNameOnlyMode: boring,
+        });
         setOwnSessionId(session.id);
         setFocusedSessionId(session.id);
         setActiveThreadTitle(displayThreadTitle(session.title));
@@ -318,7 +392,7 @@ export function App(props: {
         return false;
       }
     },
-    [client, note],
+    [client, note, boring],
   );
 
   const switchProject = useCallback(
@@ -352,6 +426,58 @@ export function App(props: {
       }
     },
     [client, ensureSession, note, projectId, projects],
+  );
+
+  const openModelPicker = useCallback(async () => {
+    if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+    if (activeGezel.fixedFunction) {
+      return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+    }
+    if (modelChoicesLoading) return note('model choices are already loading.');
+    setModelChoicesLoading(true);
+    note('loading available engines and models…');
+    try {
+      const choices = await loadModelChoices(client, config ?? (await client.getConfig()));
+      setModelChoices(choices);
+      setOverlay('model');
+    } catch (err) {
+      note(`could not load models: ${errMsg(err)}`, 'error');
+    } finally {
+      setModelChoicesLoading(false);
+    }
+  }, [activeGezel, activeGezelId, client, config, modelChoicesLoading, note]);
+
+  const openModelDownloadPicker = useCallback(
+    async (returnTo: 'model' | null = null) => {
+      if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+      if (activeGezel.fixedFunction) {
+        return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+      }
+      if (modelChoicesLoading) return note('model choices are already loading.');
+      setOverlay(null);
+      setModelChoicesLoading(true);
+      note('finding on-device models that fit this machine…');
+      try {
+        const choices = await loadModelDownloadChoices(
+          client,
+          config ?? (await client.getConfig()),
+        );
+        if (choices.length === 0) {
+          note('no additional compatible on-device models are available to download.');
+          if (returnTo === 'model') await openModelPicker();
+          return;
+        }
+        setModelDownloadChoices(choices);
+        setModelDownloadProgress(null);
+        setModelDownloadReturn(returnTo);
+        setOverlay('model-download');
+      } catch (err) {
+        note(`could not load downloadable models: ${errMsg(err)}`, 'error');
+      } finally {
+        setModelChoicesLoading(false);
+      }
+    },
+    [activeGezel, activeGezelId, client, config, modelChoicesLoading, note, openModelPicker],
   );
 
   const openThreadPicker = useCallback(async () => {
@@ -392,7 +518,11 @@ export function App(props: {
     setOverlay(null);
     if (!activeGezelId) return note('no active gezel yet.', 'error');
     try {
-      const session = await client.createChatSession({ gezelId: activeGezelId, projectId });
+      const session = await client.createChatSession({
+        gezelId: activeGezelId,
+        projectId,
+        roleBasedNameOnlyMode: boring,
+      });
       setOwnSessionId(session.id);
       setFocusedSessionId(session.id);
       setActiveThreadTitle(displayThreadTitle(session.title));
@@ -401,7 +531,7 @@ export function App(props: {
     } catch (err) {
       note(`could not start a thread: ${errMsg(err)}`, 'error');
     }
-  }, [activeGezelId, client, note, projectId]);
+  }, [activeGezelId, client, note, projectId, boring]);
 
   // Initial load. Mount-only — project/gezel switches are driven by their
   // pickers, which call ensureSession directly.
@@ -417,22 +547,33 @@ export function App(props: {
         ]);
         if (cancelled) return;
         setConfig(cfg);
-        setGezels(gz.gezels);
-        setProjects(
-          pj.projects.map((p) => ({
-            id: p.id,
-            name: p.name,
-            workingDir: p.workingDir,
-            voormanGezelId: p.voormanGezelId,
-            managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
-            allowGezelWrites: p.allowGezelWrites,
-            codexPermissionMode: p.codexPermissionMode,
-            claudePermissionMode: p.claudePermissionMode,
-          })),
-        );
+        applyGezelSnapshot(gz.gezels);
+        const projectRows = pj.projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          workingDir: p.workingDir,
+          voormanGezelId: p.voormanGezelId,
+          managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
+          allowGezelWrites: p.allowGezelWrites,
+          codexPermissionMode: p.codexPermissionMode,
+          claudePermissionMode: p.claudePermissionMode,
+        }));
+        setProjects(projectRows);
         const gezelId = props.initialGezelId;
+        const initialGezel = gz.gezels.find((gezel) => gezel.id === gezelId);
+        const initialProject = projectRows.find((project) => project.id === projectId);
         setActiveGezelId(gezelId);
         setStatus(null);
+        if (
+          activeAccessMode({
+            provider: initialGezel?.provider ?? cfg.provider,
+            project: initialProject,
+            gezel: initialGezel,
+            config: cfg,
+          }) === 'read-only'
+        ) {
+          note(READ_ONLY_BOOT_NOTE);
+        }
         await ensureSession(gezelId, projectId);
       } catch (err) {
         if (!cancelled) setStatus(`Failed to connect: ${errMsg(err)}`);
@@ -476,12 +617,12 @@ export function App(props: {
     };
   }, [refreshTasks]);
 
-  // Keep the active project's craftbooks warm so `/start ` can wordwheel
-  // immediately. A manual `/start` retries and surfaces an error if this
+  // Keep the active project's craftbooks warm so `/do ` can wordwheel
+  // immediately. A manual `/do` retries and surfaces an error if this
   // background refresh failed.
   useEffect(() => {
     void refreshCraftbooks().catch(() => {
-      /* non-fatal — /start retries with visible error handling */
+      /* non-fatal — /do retries with visible error handling */
     });
   }, [refreshCraftbooks]);
 
@@ -530,7 +671,10 @@ export function App(props: {
     for (const r of rows) {
       if (r.sessionId === 'local' || r.sessionId.startsWith('term-')) continue;
       if (!seen.has(r.sessionId)) {
-        const label = gezels.find((g) => g.id === r.gezelId)?.name ?? (r.gezelId || r.sessionId);
+        const gezel = gezels.find((candidate) => candidate.id === r.gezelId);
+        const label = boring
+          ? gezelLabel(r.gezelId, gezels, true)
+          : (gezel?.name ?? (r.gezelId || r.sessionId));
         seen.set(r.sessionId, label);
       }
     }
@@ -541,7 +685,7 @@ export function App(props: {
       items.push({ label, value: sid });
     }
     return items;
-  }, [rows, gezels, ownSessionId, gezelLine]);
+  }, [rows, gezels, ownSessionId, gezelLine, boring]);
 
   // Cancel everything in flight: open chat turns + running shell commands.
   const cancelActive = useCallback(async () => {
@@ -577,6 +721,47 @@ export function App(props: {
       }
     },
     [client, note],
+  );
+
+  const applyProjectPermission = useCallback(
+    async (permission: string, allowed: boolean) => {
+      const permissionName = parseProjectPermissionName(permission);
+      if (!permissionName) {
+        note(`usage: /${allowed ? 'allow' : 'disallow'} ${PROJECT_PERMISSION_USAGE}`, 'error');
+        return;
+      }
+      try {
+        const patch =
+          permissionName === 'edits'
+            ? { managedWorkspaceWritePolicy: allowed ? ('allow' as const) : ('deny' as const) }
+            : permissionName === 'codexedits'
+              ? { codexPermissionMode: allowed ? ('edit' as const) : ('plan' as const) }
+              : { claudePermissionMode: allowed ? ('acceptEdits' as const) : ('plan' as const) };
+        const updated = await client.updateProject(projectId, patch);
+        setProjects((current) =>
+          current.map((project) =>
+            project.id === projectId ? { ...project, ...updated } : project,
+          ),
+        );
+        if (permissionName === 'edits') {
+          note(
+            allowed
+              ? `Project edits allowed. Built-in tools and background work can now modify ${projectName}.`
+              : `Project edits disallowed. Built-in tools and background work are now read-only in ${projectName}.`,
+          );
+        } else {
+          const provider = permissionName === 'codexedits' ? 'Codex' : 'Claude';
+          note(
+            allowed
+              ? `${provider} edits allowed. ${provider} sessions can now modify ${projectName}.`
+              : `${provider} edits disallowed. ${provider} sessions are now read-only in ${projectName}.`,
+          );
+        }
+      } catch (err) {
+        note(`could not change project permission: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, projectId, projectName],
   );
 
   const startCraftbook = useCallback(
@@ -704,7 +889,10 @@ export function App(props: {
           const target = focusedSessionId ?? ownSessionId;
           if (!target) return note('no active session yet.', 'error');
           try {
-            await client.sendToChatSession(target, parsed.text);
+            await client.sendToChatSession(
+              target,
+              turns.has(target) ? { message: parsed.text, nudge: true } : parsed.text,
+            );
           } catch (err) {
             note(`send failed: ${errMsg(err)}`, 'error');
           }
@@ -768,6 +956,7 @@ export function App(props: {
       pendingInput,
       submitTaskPrompt,
       taskPrompt,
+      turns,
     ],
   );
 
@@ -782,31 +971,21 @@ export function App(props: {
           return setOverlay('project');
         case 'gezel':
           return setOverlay('gezel');
+        case 'allow':
+          await applyProjectPermission(rest, true);
+          return;
+        case 'disallow':
+          await applyProjectPermission(rest, false);
+          return;
         case 'mode':
           if (!rest.trim()) return setOverlay('engagement-mode');
           await applyEngagementMode(rest);
           return;
         case 'model': {
-          if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
-          if (activeGezel.fixedFunction) {
-            return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
-          }
-          if (modelChoicesLoading) return note('model choices are already loading.');
-          setModelChoicesLoading(true);
-          note('loading available engines and models…');
-          try {
-            const choices = await loadModelChoices(client, config ?? (await client.getConfig()));
-            if (choices.length === 0) {
-              return note('no engines with available chat models were found.', 'error');
-            }
-            setModelChoices(choices);
-            setOverlay('model');
-          } catch (err) {
-            note(`could not load models: ${errMsg(err)}`, 'error');
-          } finally {
-            setModelChoicesLoading(false);
-          }
-          return;
+          const subcommand = rest.trim().toLowerCase();
+          if (!subcommand) return openModelPicker();
+          if (subcommand === 'download') return openModelDownloadPicker();
+          return note('usage: /model [download]', 'error');
         }
         case 'thread':
           await openThreadPicker();
@@ -861,7 +1040,7 @@ export function App(props: {
           }
           return;
         }
-        case 'start': {
+        case 'do': {
           let available = craftbooks;
           if (available.length === 0) {
             try {
@@ -879,7 +1058,7 @@ export function App(props: {
           }
           const book = findCraftbook(available, rest);
           if (!book) {
-            return note(`craftbook not found: ${rest.trim()} (try /start)`, 'error');
+            return note(`craftbook not found: ${rest.trim()} (try /do)`, 'error');
           }
           await startCraftbook(book);
           return;
@@ -937,15 +1116,14 @@ export function App(props: {
       }
     },
     [
-      activeGezel,
-      activeGezelId,
       applyEngagementMode,
+      applyProjectPermission,
       client,
-      config,
       craftbooks,
-      modelChoicesLoading,
       note,
       exit,
+      openModelDownloadPicker,
+      openModelPicker,
       openThreadPicker,
       projectId,
       projectName,
@@ -955,11 +1133,10 @@ export function App(props: {
     ],
   );
 
-  const applyModelChoice = useCallback(
-    async (value: string) => {
+  const applyModelSelection = useCallback(
+    async (choice?: ModelChoice) => {
       setOverlay(null);
       if (!activeGezelId || !activeGezel || !config) return;
-      const choice = modelChoices.find((item) => item.value === value);
       const nextProvider = choice?.provider ?? null;
       const nextModel = choice?.model.id;
       const providerChanged = (activeGezel.provider ?? null) !== nextProvider;
@@ -986,8 +1163,83 @@ export function App(props: {
         note(`could not switch model: ${errMsg(err)}`, 'error');
       }
     },
-    [activeGezel, activeGezelId, client, config, ensureSession, modelChoices, note, projectId],
+    [activeGezel, activeGezelId, client, config, ensureSession, note, projectId],
   );
+
+  const applyModelChoice = useCallback(
+    async (value: string) => {
+      await applyModelSelection(modelChoices.find((item) => item.value === value));
+    },
+    [applyModelSelection, modelChoices],
+  );
+
+  const installModelDownload = useCallback(
+    async (value: string) => {
+      const choice = modelDownloadChoices.find((candidate) => candidate.value === value);
+      if (!choice) return;
+      let terminalError: string | null = null;
+      setModelDownloadProgress({
+        choice,
+        bytesWritten: 0,
+        totalBytes: choice.model.approxSizeBytes,
+        pct: 0,
+        phase: 'starting',
+      });
+      const onEvent = (event: LlamaCppInstallEvent | MlxInstallEvent) => {
+        if (event.type === 'error') terminalError = event.error;
+        const progress = readModelDownloadProgress(choice, event);
+        if (progress) setModelDownloadProgress(progress);
+      };
+      try {
+        if (choice.provider === 'mlx') {
+          await client.installMlxModel(choice.model.id, onEvent);
+        } else {
+          await client.installLlamaCppModel(choice.model.id, onEvent);
+        }
+        if (terminalError) throw new Error(terminalError);
+        const installedChoice: ModelChoice = {
+          provider: choice.provider,
+          model: {
+            id: choice.model.id,
+            name: choice.model.name,
+          },
+          value: choice.value,
+          label: `${modelProviderLabel(choice.provider)} · ${choice.model.name}`,
+        };
+        setModelChoices((current) => [
+          ...current.filter((candidate) => candidate.value !== installedChoice.value),
+          installedChoice,
+        ]);
+        setModelDownloadProgress(null);
+        note(`downloaded ${choice.model.name}; switching this gezel to it…`);
+        await applyModelSelection(installedChoice);
+      } catch (err) {
+        setModelDownloadProgress(null);
+        setOverlay('model-download');
+        note(`model download failed: ${errMsg(err)}`, 'error');
+      }
+    },
+    [applyModelSelection, client, modelDownloadChoices, note],
+  );
+
+  const cancelModelDownload = useCallback(async () => {
+    const progress = modelDownloadProgress;
+    if (!progress) return;
+    try {
+      if (progress.choice.provider === 'mlx') {
+        await client.cancelMlxModelInstall(progress.choice.model.id);
+      } else {
+        await client.cancelLlamaCppModelInstall(progress.choice.model.id);
+      }
+      note(`canceled the ${progress.choice.model.name} download.`);
+    } catch (err) {
+      note(`could not cancel model download: ${errMsg(err)}`, 'error');
+    } finally {
+      setModelDownloadProgress(null);
+      if (modelDownloadReturn === 'model') await openModelPicker();
+      else setOverlay(null);
+    }
+  }, [client, modelDownloadProgress, modelDownloadReturn, note, openModelPicker]);
 
   const onSubmit = useCallback(
     (raw: string) => {
@@ -1110,6 +1362,11 @@ export function App(props: {
                   : ''
               }`,
             },
+            {
+              label: 'Download a new model…',
+              value: '__download__',
+              hint: 'browse on-device models ranked for this machine',
+            },
             ...modelChoices.map((choice) => ({
               label: choice.label,
               value: choice.value,
@@ -1128,8 +1385,34 @@ export function App(props: {
           }
           windowSize={modelPickerWindowSize}
           onCancel={() => setOverlay(null)}
-          onSelect={(value) => void applyModelChoice(value)}
+          onSelect={(value) => {
+            if (value === '__download__') void openModelDownloadPicker('model');
+            else void applyModelChoice(value);
+          }}
         />
+      ) : null}
+      {overlay === 'model-download' ? (
+        modelDownloadProgress ? (
+          <ModelDownloadProgressPanel
+            progress={modelDownloadProgress}
+            onCancel={() => void cancelModelDownload()}
+          />
+        ) : (
+          <Picker
+            title="Download and use an on-device model"
+            items={modelDownloadChoices.map((choice) => ({
+              label: choice.label,
+              value: choice.value,
+              hint: choice.hint,
+            }))}
+            windowSize={modelPickerWindowSize}
+            onCancel={() => {
+              if (modelDownloadReturn === 'model') setOverlay('model');
+              else setOverlay(null);
+            }}
+            onSelect={(value) => void installModelDownload(value)}
+          />
+        )
       ) : null}
       {overlay === 'start-category' ? (
         <Picker
@@ -1322,6 +1605,67 @@ export function App(props: {
   );
 }
 
+function ModelDownloadProgressPanel(props: {
+  progress: ModelDownloadProgress;
+  onCancel: () => void;
+}): JSX.Element {
+  const { progress, onCancel } = props;
+  useInput((input, key) => {
+    if (key.escape || (key.ctrl && input === 'c')) onCancel();
+  });
+  const transferred = progress.totalBytes
+    ? `${formatModelBytes(progress.bytesWritten)} / ${formatModelBytes(progress.totalBytes)}`
+    : formatModelBytes(progress.bytesWritten);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+      <Text bold color="yellow">
+        Downloading {progress.choice.model.name}
+      </Text>
+      <Text>
+        {progress.pct == null ? 'Working…' : `${progress.pct}%`} · {transferred}
+      </Text>
+      {progress.phase ? <Text dimColor>{progress.phase}</Text> : null}
+      <Text dimColor>Esc / Ctrl+C cancel</Text>
+    </Box>
+  );
+}
+
+function readModelDownloadProgress(
+  choice: ModelDownloadChoice,
+  event: LlamaCppInstallEvent | MlxInstallEvent,
+): ModelDownloadProgress | null {
+  if (event.type === 'progress') {
+    const bytesWritten = 'bytesWrittenAll' in event ? event.bytesWrittenAll : event.bytesWritten;
+    const totalBytes = 'totalBytesAll' in event ? event.totalBytesAll : event.totalBytes;
+    return {
+      choice,
+      bytesWritten,
+      totalBytes,
+      pct: totalBytes > 0 ? Math.min(100, Math.floor((bytesWritten / totalBytes) * 100)) : null,
+      phase: 'downloading and verifying model files',
+    };
+  }
+  if (event.type === 'companion') {
+    return {
+      choice,
+      bytesWritten: event.bytesWritten,
+      totalBytes: event.totalBytes,
+      pct:
+        event.totalBytes > 0
+          ? Math.min(100, Math.floor((event.bytesWritten / event.totalBytes) * 100))
+          : null,
+      phase: `downloading ${event.name}`,
+    };
+  }
+  return null;
+}
+
+function formatModelBytes(bytes: number): string {
+  return bytes >= 1_000_000_000
+    ? `${(bytes / 1_000_000_000).toFixed(1)} GB`
+    : `${Math.max(0, Math.round(bytes / 1_000_000))} MB`;
+}
+
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -1416,7 +1760,7 @@ function taskAssigneeLabel(
   if (task.assignee.kind === 'user') return 'you';
   const gezelId = task.assignee.gezelId;
   const gezel = gezels.find((item) => item.id === gezelId);
-  if (!gezel) return gezelId;
+  if (!gezel) return boring ? 'gezel' : gezelId;
   return boring ? (gezel.roleBasedName ?? gezel.role ?? gezel.id) : gezel.name;
 }
 

@@ -89,6 +89,7 @@ export interface CraftbookEvalSetup {
   projectName: string;
   about?: string;
   missionObjectives?: string;
+  managedWorkspaceWritePolicy?: 'auto' | 'allow' | 'deny';
   files?: CraftbookEvalFixtureFile[];
   craftbookParams?: Record<string, string>;
   simulators?: CraftbookEvalSimulator[];
@@ -103,6 +104,7 @@ export interface CraftbookEvalSetup {
 export interface CraftbookEvalDeliverable {
   path: string;
   kind: DeliverableKind;
+  artifact?: boolean;
   minBytes?: number;
   checks?: CraftbookEvalGateCheck[];
 }

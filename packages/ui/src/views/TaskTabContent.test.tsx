@@ -13,12 +13,10 @@ vi.mock('./TaskDetail.js', () => ({
   TaskDetail: (props: {
     task: Task;
     projectName: string;
-    standalone?: boolean;
   }) => (
     <div data-testid="task-detail">
       <span data-testid="task-ref">{props.task.ref}</span>
       <span data-testid="project-name">{props.projectName}</span>
-      <span data-testid="standalone">{String(props.standalone ?? false)}</span>
     </div>
   ),
 }));
@@ -87,18 +85,7 @@ describe('TaskTabContent', () => {
     });
     expect(screen.getByTestId('task-ref')).toHaveTextContent('PROJ-42');
     expect(screen.getByTestId('project-name')).toHaveTextContent('Alpha');
-    expect(screen.getByTestId('standalone')).toHaveTextContent('false');
     expect(api.getTaskByRef).toHaveBeenCalledWith('PROJ-42');
-  });
-
-  it('passes through the standalone prop', async () => {
-    vi.mocked(api.getTaskByRef).mockResolvedValue(FAKE_TASK);
-
-    render(<TaskTabContent taskRef="PROJ-42" standalone />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('standalone')).toHaveTextContent('true');
-    });
   });
 
   it('shows an error placeholder when getTaskByRef rejects', async () => {

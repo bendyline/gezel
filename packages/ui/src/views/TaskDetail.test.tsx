@@ -41,9 +41,6 @@ vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => null,
 }));
-vi.mock('../components/PromoteToTabButton.js', () => ({
-  PromoteToTabButton: () => <span data-testid="promote">promote</span>,
-}));
 vi.mock('../components/PromptDialog.js', () => ({
   PromptDialog: () => null,
 }));
@@ -294,13 +291,6 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(screen.getByTestId('task-chat-pane')).toBeInTheDocument();
     });
-  });
-
-  it('hides the promote-to-tab button in standalone mode', async () => {
-    render(
-      <TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} standalone />,
-    );
-    expect(screen.queryByTestId('promote')).not.toBeInTheDocument();
   });
 
   it('a catalog-craftbook draft shows the Fire button without plan guardrails', async () => {

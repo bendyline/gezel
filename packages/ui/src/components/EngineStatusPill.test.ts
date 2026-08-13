@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { composeQueueStatus, computeRollingTokensPerSec } from './engine-pill-stats.js';
+import {
+  composeQueueStatus,
+  computeRollingTokensPerSec,
+  estimateLiveOutputTokens,
+} from './engine-pill-stats.js';
 
 /**
  * The rolling-avg helper aggregates by total tokens / total
@@ -74,6 +78,14 @@ describe('computeRollingTokensPerSec', () => {
       { at: now, promptTokens: 10, completionTokens: 100, durationMs: 5_000, tokensPerSec: 20 },
     ]);
     expect(result!).toBeCloseTo(20, 1);
+  });
+});
+
+describe('estimateLiveOutputTokens', () => {
+  it('uses the shared four-characters-per-token heuristic for live text', () => {
+    expect(estimateLiveOutputTokens(0)).toBe(0);
+    expect(estimateLiveOutputTokens(1)).toBe(1);
+    expect(estimateLiveOutputTokens(398)).toBe(100);
   });
 });
 

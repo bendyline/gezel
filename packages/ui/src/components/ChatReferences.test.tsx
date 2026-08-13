@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   listGezels: vi.fn(),
   listTaskNotes: vi.fn(),
+  setTaskStatus: vi.fn(),
   previewReference: vi.fn(),
   fetchProjectArtifactBlob: vi.fn(),
   fetchProjectWorkspaceBlob: vi.fn(),
@@ -307,6 +308,40 @@ describe('ChatReferences responsive split', () => {
 });
 
 describe('ChatReferences task picker', () => {
+  it('changes an active task status from the compact card', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const activeTask = task('project-1/1', 'First task');
+    const completedTask = { ...activeTask, status: 'complete' } as Task;
+    const onTaskChanged = vi.fn();
+    apiMocks.getTaskByRef.mockResolvedValue(activeTask);
+    apiMocks.setTaskStatus.mockResolvedValue(completedTask);
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1" onTaskChanged={onTaskChanged}>
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1')}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Task status: Active. Change status' }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: 'Complete' }));
+
+    await waitFor(() => {
+      expect(apiMocks.setTaskStatus).toHaveBeenCalledWith('project-1', 1, 'complete');
+      expect(onTaskChanged).toHaveBeenCalledWith(completedTask);
+    });
+    expect(
+      screen.getByRole('button', { name: 'Task status: Complete. Change status' }),
+    ).toBeVisible();
+  });
+
   it('replaces legacy generated ISO titles with the craftbook name', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
@@ -433,6 +468,40 @@ describe('ChatReferences task picker', () => {
 });
 
 describe('ChatReferences reference picker', () => {
+  it('exposes parsed and tool-backed files in most-recent-first order', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactSeen, onWorkspaceSeen, recentReferences }) => (
+          <>
+            <button type="button" onClick={() => onArtifactSeen('reports/first.md')}>
+              See first
+            </button>
+            <button type="button" onClick={() => onWorkspaceSeen('security/review-scope.md')}>
+              See scope
+            </button>
+            <output data-testid="recent-reference-paths">
+              {recentReferences.map((reference) => reference.path).join('|')}
+            </output>
+          </>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'See first' }));
+    await user.click(screen.getByRole('button', { name: 'See scope' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'security/review-scope.md|reports/first.md',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'See first' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'reports/first.md|security/review-scope.md',
+    );
+  });
+
   it('renders global HTML documents as inert source rather than srcDoc', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

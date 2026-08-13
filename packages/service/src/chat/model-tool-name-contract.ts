@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -47,14 +46,8 @@ export interface ModelToolNameContractReport {
   entryCount: number;
   allowedToolCount: number;
   errors: ModelToolNameContractFinding[];
-  /** Exact, content-fingerprint-bound debt in the immutable pinned gilde package. */
-  pinnedDebt: ModelToolNameContractFinding[];
-  pinnedDebtFingerprint?: {
-    version: string;
-    count: number;
-    sha256: string;
-    matchesWaiver: boolean;
-  };
+  /** Non-blocking diagnostics for content owned and released by the gilde repo. */
+  catalogFindings: ModelToolNameContractFinding[];
 }
 
 interface SourcePatternGroup {
@@ -131,26 +124,6 @@ const SOURCE_IGNORES = [
   'packages/service/src/chat/prompt-tool-contract.ts',
   'packages/service/src/chat/role-tool-filter.ts',
 ];
-
-/**
- * Published gilde packages retain historical versions that predate canonical
- * tool naming. Their content is published from the separate gilde repo, so
- * Gezel cannot edit an already-published package in place. Keep a narrow,
- * content-addressed occurrence budget for those immutable versions: an
- * unchanged package update keeps the same waiver, while any added, removed,
- * renamed, or relocated occurrence changes the fingerprint and fails CI.
- */
-const PINNED_GILDE_TOOL_NAME_DEBT = {
-  // Temporary baseline for the exact @bendyline/gilde@0.1.23 payload. The
-  // corrected catalog release replaces the three new run_script occurrences
-  // and will intentionally require this fingerprint to be reviewed again.
-  count: 156,
-  // SHA-256 of sorted `relative-source|line|json-pointer|rule|tool`
-  // occurrences. This makes the waiver exact without checking a 150-line
-  // generated list into Gezel: a new, removed, renamed, or relocated
-  // occurrence changes the digest and fails CI.
-  sha256: '435a0629e370648a80e432a7424cfd09a8656f19f91490c8e4c7263db3731d43',
-} as const;
 
 /**
  * Extract only runtime string/template bodies from TypeScript. This keeps the
@@ -262,13 +235,6 @@ async function readCatalogToolsets(dataDir: string): Promise<Map<string, readonl
   return toolsets;
 }
 
-async function gildePackageVersion(dataDir: string): Promise<string> {
-  const packageJson = JSON.parse(await readFile(resolve(dataDir, '../package.json'), 'utf8')) as {
-    version?: string;
-  };
-  return packageJson.version ?? 'unknown';
-}
-
 async function projectTypeToolsByGezelTemplate(
   dataDir: string,
 ): Promise<Map<string, readonly string[]>> {
@@ -312,52 +278,22 @@ async function projectTypeToolsByGezelTemplate(
   return new Map([...byTemplate].map(([id, tools]) => [id, [...tools]]));
 }
 
-export function partitionPinnedGildeDebt(args: {
-  findings: ModelToolNameContractFinding[];
-  gildeVersion: string;
-  waiver?: { count: number; sha256: string };
-}): {
+/**
+ * Gezel owns and gates its source prompts. Generated catalog content is owned
+ * and released by the separate gilde repository, so keep its findings visible
+ * without making every independently versioned catalog update block this repo.
+ */
+export function partitionModelToolNameFindings(findings: ModelToolNameContractFinding[]): {
   errors: ModelToolNameContractFinding[];
-  pinnedDebt: ModelToolNameContractFinding[];
-  fingerprint?: ModelToolNameContractReport['pinnedDebtFingerprint'];
+  catalogFindings: ModelToolNameContractFinding[];
 } {
   const errors: ModelToolNameContractFinding[] = [];
-  const waiver = args.waiver ?? PINNED_GILDE_TOOL_NAME_DEBT;
-  const candidates: Array<{ finding: ModelToolNameContractFinding; signature: string }> = [];
-  for (const finding of args.findings) {
-    const marker = '/@bendyline/gilde/data/';
-    const normalizedSource = normalizeModelToolCorpusSource(finding.source);
-    const markerIndex = normalizedSource.indexOf(marker);
-    if (markerIndex < 0) {
-      errors.push(finding);
-      continue;
-    }
-    const relativeSource = normalizedSource.slice(markerIndex + marker.length);
-    candidates.push({
-      finding,
-      signature: `${relativeSource}|${finding.line}|${finding.jsonPointer ?? ''}|${finding.rule}|${finding.tool ?? ''}`,
-    });
+  const catalogFindings: ModelToolNameContractFinding[] = [];
+  for (const finding of findings) {
+    if (finding.category === 'generated-catalog') catalogFindings.push(finding);
+    else errors.push(finding);
   }
-  if (candidates.length === 0) return { errors, pinnedDebt: [] };
-  const digest = createHash('sha256')
-    .update(
-      candidates
-        .map((candidate) => candidate.signature)
-        .sort()
-        .join('\n'),
-    )
-    .digest('hex');
-  const matchesWaiver = candidates.length === waiver.count && digest === waiver.sha256;
-  const fingerprint = {
-    version: args.gildeVersion,
-    count: candidates.length,
-    sha256: digest,
-    matchesWaiver,
-  };
-  if (!matchesWaiver) {
-    return { errors: args.findings, pinnedDebt: [], fingerprint };
-  }
-  return { errors, pinnedDebt: candidates.map((candidate) => candidate.finding), fingerprint };
+  return { errors, catalogFindings };
 }
 
 async function sourceEntries(
@@ -717,18 +653,16 @@ export async function buildModelToolNameContract(args?: {
     for (const tool of entry.declaredTools ?? []) declaredToolUniverse.add(tool);
   }
 
-  const partitioned = partitionPinnedGildeDebt({
-    findings: lintModelToolNameEntries({ entries, allowedTools }),
-    gildeVersion: await gildePackageVersion(dataDir),
-  });
+  const partitioned = partitionModelToolNameFindings(
+    lintModelToolNameEntries({ entries, allowedTools }),
+  );
 
   return {
     fileCount: files.size,
     entryCount: entries.length,
     allowedToolCount: new Set([...allowedTools, ...declaredToolUniverse]).size,
     errors: partitioned.errors,
-    pinnedDebt: partitioned.pinnedDebt,
-    ...(partitioned.fingerprint ? { pinnedDebtFingerprint: partitioned.fingerprint } : {}),
+    catalogFindings: partitioned.catalogFindings,
   };
 }
 
@@ -743,11 +677,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     process.stdout.write(
-      `Model tool-name contract: ${report.fileCount} files, ${report.entryCount} model-facing strings, ${report.allowedToolCount} declared tool names\n  pinned gilde migration debt: ${report.pinnedDebt.length} known occurrence(s); any new occurrence fails\n${
-        report.pinnedDebtFingerprint
-          ? `  pinned fingerprint: ${report.pinnedDebtFingerprint.count} / ${report.pinnedDebtFingerprint.sha256}${report.pinnedDebtFingerprint.matchesWaiver ? '' : ' (WAIVER MISMATCH)'}\n`
-          : ''
-      }`,
+      `Model tool-name contract: ${report.fileCount} files, ${report.entryCount} model-facing strings, ${report.allowedToolCount} declared tool names\n  gilde catalog diagnostics: ${report.catalogFindings.length} non-blocking occurrence(s); separately owned catalog content does not gate Gezel\n`,
     );
     for (const finding of report.errors.slice(0, 200)) {
       process.stdout.write(`ERROR ${formatModelToolNameFinding(finding)}\n`);

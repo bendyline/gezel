@@ -2,7 +2,6 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
-import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -86,11 +85,9 @@ async function prepareDocument(path: string, layout: OutsideInLayout): Promise<P
 export function OutsideInDocumentDetail({
   path,
   layout,
-  standalone,
 }: {
   path: string;
   layout: OutsideInLayout;
-  standalone: boolean;
 }) {
   const [prepared, setPrepared] = useState<PreparedDocument | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -157,7 +154,6 @@ export function OutsideInDocumentDetail({
       path={path}
       layout={layout}
       prepared={prepared}
-      standalone={standalone}
       enabling={enabling}
       enableError={enableError}
       onEnableEditing={enableEditing}
@@ -169,7 +165,6 @@ function OutsideInEditor({
   path,
   layout,
   prepared,
-  standalone,
   enabling,
   enableError,
   onEnableEditing,
@@ -177,7 +172,6 @@ function OutsideInEditor({
   path: string;
   layout: OutsideInLayout;
   prepared: PreparedDocument;
-  standalone: boolean;
   enabling: boolean;
   enableError: string | null;
   onEnableEditing: () => void | Promise<void>;
@@ -270,10 +264,7 @@ function OutsideInEditor({
           allowVersioning={prepared.editingEnabled}
           versionBasename={basename(prepared.sourcePath)}
           toolbarSlotAfterActions={
-            <>
-              {prepared.editingEnabled && <TransformToolbarButton context="generic" />}
-              {!standalone && <PromoteToTabButton target={{ kind: 'document', path }} />}
-            </>
+            prepared.editingEnabled ? <TransformToolbarButton context="generic" /> : undefined
           }
           statusBarSlotRight={
             prepared.editingEnabled ? <AutosaveStatus autosave={autosave} /> : undefined

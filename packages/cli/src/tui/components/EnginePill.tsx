@@ -15,12 +15,14 @@ export function EnginePill(props: {
   label?: string | undefined;
 }): JSX.Element {
   const { provider, model, accessMode, busy, label } = props;
-  const text = formatEngineStatus(provider, model, busy, label, accessMode);
+  const metadata = formatEngineMetadata(provider, model, accessMode);
+  const activity = formatEngineActivity(busy, label);
   return (
     <Box>
+      <Text> {metadata} ·</Text>
       <Text backgroundColor={busy ? 'yellow' : 'blackBright'} color={busy ? 'black' : 'white'}>
         {' '}
-        {text}{' '}
+        {activity}{' '}
       </Text>
     </Box>
   );
@@ -33,8 +35,22 @@ export function formatEngineStatus(
   label?: string,
   accessMode?: string,
 ): string {
-  const activity = busy ? `● ${label ?? 'working'}` : '○ idle';
-  return [activity, accessMode, formatEngineIdentity(provider, model)].filter(Boolean).join(' · ');
+  return [
+    formatEngineMetadata(provider, model, accessMode),
+    formatEngineActivity(busy, label),
+  ].join(' · ');
+}
+
+function formatEngineMetadata(
+  provider: string | undefined,
+  model: string | undefined,
+  accessMode?: string,
+): string {
+  return [accessMode, formatEngineIdentity(provider, model)].filter(Boolean).join(' · ');
+}
+
+function formatEngineActivity(busy: boolean, label?: string): string {
+  return busy ? `● ${label ?? 'working'}` : '○ idle';
 }
 
 export function formatEngineIdentity(

@@ -1,18 +1,20 @@
-import type {
-  CraftbookToolsetNeed,
-  GezelSummary,
-  NewCraftbookStep,
-  Project,
-  Task,
-  TaskAssignee,
-  TaskCronOverlap,
+import {
+  type CraftbookToolsetNeed,
+  type GezelSummary,
+  type NewCraftbookStep,
+  type Project,
+  type Task,
+  type TaskAssignee,
+  type TaskCronOverlap,
+  visibleCatalogItems,
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
+import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, Select } from '../../primitives/index.js';
 import { ProjectGlyph } from '../projects/new-project-meta.js';
 import {
@@ -116,11 +118,13 @@ export function NewTaskDialog({
   onCreated: (created: Task) => Promise<void> | void;
 }) {
   const modeCopy = MODE_COPY[creationMode];
+  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   const [projectId, setProjectId] = useState(defaultProjectId);
   // Gallery data — re-fetched per project (applicability + suggestions
   // depend on the project's type and GitHub/branch state).
   const [books, setBooks] = useState<BookItem[]>([]);
   const [booksLoaded, setBooksLoaded] = useState(false);
+  const craftbookLoadSequence = useRef(0);
   const [missingToolsets, setMissingToolsets] = useState<Record<string, CraftbookToolsetNeed[]>>(
     {},
   );
@@ -170,27 +174,34 @@ export function NewTaskDialog({
   }, [open, defaultProjectId]);
 
   const loadCraftbooks = useCallback(async () => {
+    const sequence = ++craftbookLoadSequence.current;
     if (!projectId) {
+      if (sequence !== craftbookLoadSequence.current) return;
       setBooks([]);
       setBooksLoaded(true);
       return;
     }
     try {
       const res = await api.listProjectCraftbooks(projectId);
-      setBooks(toBookItems(res.items ?? []));
+      if (sequence !== craftbookLoadSequence.current) return;
+      const visibleItems = visibleCatalogItems(res.items ?? [], showWorkInProgressFeatures);
+      const visibleIds = new Set(visibleItems.map((item) => item.manifest.id));
+      setBooks(toBookItems(visibleItems));
       setMissingToolsets(res.missingToolsets ?? {});
       setProjectType(res.projectType ?? null);
-      setSuggestedIds(new Set(res.suggestedIds ?? []));
+      setSuggestedIds(new Set((res.suggestedIds ?? []).filter((id) => visibleIds.has(id))));
+      setSelectedBookId((current) => (current && !visibleIds.has(current) ? null : current));
     } catch {
+      if (sequence !== craftbookLoadSequence.current) return;
       // Craftbooks are best-effort — the General card always works.
       setBooks([]);
       setMissingToolsets({});
       setProjectType(null);
       setSuggestedIds(new Set());
     } finally {
-      setBooksLoaded(true);
+      if (sequence === craftbookLoadSequence.current) setBooksLoaded(true);
     }
-  }, [projectId]);
+  }, [projectId, showWorkInProgressFeatures]);
 
   useEffect(() => {
     if (!open) return;

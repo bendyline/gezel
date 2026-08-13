@@ -1,5 +1,11 @@
-import type { ModelInfo, ProviderName } from '@bendyline/gezel';
+import type { CatalogItemSummary, ModelInfo, ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
+import {
+  type BootstrapChatModel,
+  type BootstrapChatProvider,
+  formatDownloadSize,
+  rankChatModels,
+} from './bootstrap.js';
 
 /** One provider/model pair offered by the TUI's combined `/model` picker. */
 export interface ModelChoice {
@@ -9,9 +15,31 @@ export interface ModelChoice {
   label: string;
 }
 
+/** One not-yet-installed local model offered by `/model download`. */
+export interface ModelDownloadChoice {
+  provider: BootstrapChatProvider;
+  model: BootstrapChatModel;
+  value: string;
+  label: string;
+  hint: string;
+}
+
 interface ModelInventoryClient {
   getCopilotStatus(): Promise<{ available: boolean }>;
   getMemoryProfile(): Promise<{ totalRamBytes: number }>;
+  listProviderModels(provider: ProviderName): Promise<{ models: ModelInfo[] }>;
+}
+
+interface ModelDownloadClient {
+  getMemoryProfile(): Promise<{
+    platform: string;
+    totalRamBytes: number;
+    gpuVramBytes: number | null;
+    gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
+    usableBytes: number;
+    budgetBytes?: number;
+  }>;
+  listCatalogItems(kind: 'chat-model'): Promise<{ items: CatalogItemSummary[] }>;
   listProviderModels(provider: ProviderName): Promise<{ models: ModelInfo[] }>;
 }
 
@@ -129,4 +157,72 @@ export async function loadModelChoices(
       label: `${modelProviderLabel(provider)} · ${model.name}`,
     })),
   );
+}
+
+/**
+ * Load device-ranked local models that are available to download but are not
+ * already visible through either the user's writable store or the shared
+ * machine model overlay. The configured local provider wins; otherwise the
+ * daemon platform selects MLX on Apple Silicon installs and llama.cpp
+ * everywhere else.
+ */
+export async function loadModelDownloadChoices(
+  client: ModelDownloadClient,
+  config: ConfigResponse,
+  platform: NodeJS.Platform = process.platform,
+  arch: NodeJS.Architecture = process.arch,
+): Promise<ModelDownloadChoice[]> {
+  const [memory, catalog] = await Promise.all([
+    client.getMemoryProfile(),
+    client.listCatalogItems('chat-model'),
+  ]);
+  const provider: BootstrapChatProvider =
+    config.provider === 'mlx' || config.provider === 'llama-cpp'
+      ? config.provider
+      : memory.platform === 'darwin' && platform === 'darwin' && arch === 'arm64'
+        ? 'mlx'
+        : 'llama-cpp';
+  const installed = await client.listProviderModels(provider).catch(() => ({ models: [] }));
+  const installedIds = new Set(installed.models.map((model) => model.id));
+  const ranked = rankChatModels(
+    catalog.items,
+    {
+      platform: memory.platform,
+      gpuVramBytes: memory.gpuVramBytes,
+      ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
+      totalRamBytes: memory.totalRamBytes,
+      usableBytes: memory.usableBytes,
+      ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
+    },
+    provider,
+  );
+
+  return ranked
+    .filter((model) => !installedIds.has(model.id))
+    .map((model, index) => ({
+      provider,
+      model,
+      value: `${provider}:${model.id}`,
+      label: model.name,
+      hint: [
+        index === 0 ? 'recommended' : null,
+        formatDownloadSize(model.approxSizeBytes),
+        modelFitLabel(model.fit),
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    }));
+}
+
+function modelFitLabel(fit: BootstrapChatModel['fit']): string {
+  switch (fit) {
+    case 'fits':
+      return 'fits this device';
+    case 'fits-offload':
+      return 'fits with offload';
+    case 'tight':
+      return 'tight fit';
+    case 'too-big':
+      return 'larger than recommended';
+  }
 }

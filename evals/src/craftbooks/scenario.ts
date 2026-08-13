@@ -63,18 +63,37 @@ function sourceWorkspaceFixturePaths(spec: CraftbookEvalSpec): string[] {
     .map((file) => file.path);
 }
 
-function deliverablePaths(spec: CraftbookEvalSpec): string[] {
-  return (spec.success.deliverables ?? []).map((deliverable) => deliverable.path);
+function workspaceDeliverablePaths(spec: CraftbookEvalSpec): string[] {
+  return (spec.success.deliverables ?? [])
+    .filter((deliverable) => !deliverable.artifact)
+    .map((deliverable) => deliverable.path);
+}
+
+function artifactDeliverablePaths(spec: CraftbookEvalSpec): string[] {
+  return (spec.success.deliverables ?? [])
+    .filter((deliverable) => deliverable.artifact)
+    .map((deliverable) => deliverable.path);
+}
+
+async function readDeliverable(
+  workspace: CraftbookEvalWorkspace,
+  deliverable: CraftbookEvalDeliverable,
+): Promise<string | null> {
+  if (deliverable.artifact) return workspace.readArtifact?.(deliverable.path) ?? null;
+  return workspace.read(deliverable.path);
 }
 
 function splitDeliverablePaths(spec: CraftbookEvalSpec): {
-  text: string[];
-  binary: string[];
+  workspace: { text: string[]; binary: string[] };
+  artifacts: { text: string[]; binary: string[] };
 } {
-  const paths = deliverablePaths(spec);
-  return {
+  const split = (paths: string[]) => ({
     text: paths.filter((path) => !isBinaryDocumentDeliverablePath(path)),
     binary: paths.filter(isBinaryDocumentDeliverablePath),
+  });
+  return {
+    workspace: split(workspaceDeliverablePaths(spec)),
+    artifacts: split(artifactDeliverablePaths(spec)),
   };
 }
 
@@ -83,8 +102,13 @@ function binaryProductionInstruction(paths: readonly string[]): string | null {
   return `Produce the real binary deliverable${paths.length === 1 ? '' : 's'} through the active craftbook production workflow: ${paths.map((path) => `\`${path}\``).join(', ')}. Author and review the text source first, then use DocBlocks \`convert_document\`, \`preview_document\`, and \`save_artifact\`; finally use \`copy_artifact_to_workspace\` to copy the saved binary bytes to each exact workspace path. Never call \`write_file\` with prose, base64, or hand-built OOXML for these binary paths, and do not replace the craftbook with an ad-hoc Developer handoff.`;
 }
 
+function artifactBinaryProductionInstruction(paths: readonly string[]): string | null {
+  if (paths.length === 0) return null;
+  return `Produce the real binary artifact${paths.length === 1 ? '' : 's'} through the active craftbook workflow: ${paths.map((path) => `\`${path}\``).join(', ')}. Author and review the source, then use DocBlocks \`convert_document\`, \`preview_document\`, and \`save_artifact\` so the exact binary path remains in the artifacts drawer. Do not copy it into the workspace and do not substitute prose, base64, or hand-built OOXML.`;
+}
+
 function directWorkerNeedsWorkspaceToolsets(spec: CraftbookEvalSpec): boolean {
-  return workspaceFixturePaths(spec).length > 0 || deliverablePaths(spec).length > 0;
+  return workspaceFixturePaths(spec).length > 0 || workspaceDeliverablePaths(spec).length > 0;
 }
 
 const RASTER_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp']);
@@ -136,22 +160,25 @@ interface ChatSessionLike {
 
 function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
   const seededPaths = sourceWorkspaceFixturePaths(spec);
-  const outputs = deliverablePaths(spec);
+  const workspaceOutputs = workspaceDeliverablePaths(spec);
+  const artifactOutputs = artifactDeliverablePaths(spec);
   const lines = [
     '### Eval harness rules',
-    'This is a self-contained craftbook eval project. Treat all paths as project workspace paths.',
+    'This is a self-contained craftbook eval project. Source paths are project workspace paths; declared artifact outputs live in the project artifacts drawer.',
     seededPaths.length > 0
       ? `Seeded workspace inputs: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. Read them with the workspace \`read_file\` tool, not artifact/document/library tools.`
       : null,
-    outputs.length > 0
-      ? `Required workspace deliverable${outputs.length === 1 ? '' : 's'}: ${outputs.map((path) => `\`${path}\``).join(', ')}. Chat summaries, artifacts, plans, and task notes do not satisfy file deliverables.`
+    workspaceOutputs.length > 0
+      ? `Required workspace deliverable${workspaceOutputs.length === 1 ? '' : 's'}: ${workspaceOutputs.map((path) => `\`${path}\``).join(', ')}. Chat summaries, artifacts, plans, and task notes do not satisfy workspace file deliverables.`
+      : null,
+    artifactOutputs.length > 0
+      ? `Required artifact deliverable${artifactOutputs.length === 1 ? '' : 's'}: ${artifactOutputs.map((path) => `\`${path}\``).join(', ')}. Write and re-read these with \`write_artifact\` / \`read_artifact\`; workspace copies and task notes do not satisfy them.`
       : null,
   ].filter((line): line is string => !!line);
   return [spec.setup?.about?.trim(), lines.join('\n\n')].filter(Boolean).join('\n\n');
 }
 
 function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
-  const outputs = deliverablePaths(spec);
   const splitOutputs = splitDeliverablePaths(spec);
   const harnessMission = spec.success.taskGraph
     ? [
@@ -161,11 +188,15 @@ function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
       ]
     : [
         'Use the requested craftbook/template when available, then execute the work in this project until the deterministic eval outputs exist.',
-        outputs.length > 0
-          ? `Land the final file${outputs.length === 1 ? '' : 's'} at the exact workspace-root-relative path${outputs.length === 1 ? '' : 's'}: ${outputs.map((path) => `\`${path}\``).join(', ')}.`
+        splitOutputs.workspace.text.length + splitOutputs.workspace.binary.length > 0
+          ? `Land the final workspace file${splitOutputs.workspace.text.length + splitOutputs.workspace.binary.length === 1 ? '' : 's'} at the exact workspace-root-relative path${splitOutputs.workspace.text.length + splitOutputs.workspace.binary.length === 1 ? '' : 's'}: ${[...splitOutputs.workspace.text, ...splitOutputs.workspace.binary].map((path) => `\`${path}\``).join(', ')}.`
           : null,
-        binaryProductionInstruction(splitOutputs.binary),
-        splitOutputs.binary.length > 0
+        splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length > 0
+          ? `Land the final artifact${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'} at the exact artifacts-drawer path${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'}: ${[...splitOutputs.artifacts.text, ...splitOutputs.artifacts.binary].map((path) => `\`${path}\``).join(', ')}.`
+          : null,
+        binaryProductionInstruction(splitOutputs.workspace.binary),
+        artifactBinaryProductionInstruction(splitOutputs.artifacts.binary),
+        splitOutputs.workspace.binary.length + splitOutputs.artifacts.binary.length > 0
           ? 'If invoking the craftbook creates a task, keep carrying out its active production step; do not convert the binary output into an ad-hoc expected-file handoff.'
           : 'If invoking the craftbook creates a task, do not stop after creating or assigning it; carry out the active step or hand it to an appropriate gezel with an explicit expected file deliverable.',
       ];
@@ -182,10 +213,14 @@ function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
     seededPaths.length > 0
       ? `Before writing any deliverable, read every seeded input with workspace file tools: ${readCalls.map((call) => `\`${call}\``).join(', ')}. Do not use \`read_artifact\`, \`read_document\`, or library tools for these workspace files.`
       : 'Use workspace file tools for any project files you need to inspect.',
-    splitOutputs.text.length > 0
-      ? `Write the text workspace deliverable${splitOutputs.text.length === 1 ? '' : 's'} with \`write_file\` at the exact path${splitOutputs.text.length === 1 ? '' : 's'}: ${splitOutputs.text.map((path) => `\`${path}\``).join(', ')} (not \`workspace/<path>\`).`
+    splitOutputs.workspace.text.length > 0
+      ? `Write the text workspace deliverable${splitOutputs.workspace.text.length === 1 ? '' : 's'} with \`write_file\` at the exact path${splitOutputs.workspace.text.length === 1 ? '' : 's'}: ${splitOutputs.workspace.text.map((path) => `\`${path}\``).join(', ')} (not \`workspace/<path>\`).`
       : null,
-    binaryProductionInstruction(splitOutputs.binary),
+    splitOutputs.artifacts.text.length > 0
+      ? `Write the text artifact deliverable${splitOutputs.artifacts.text.length === 1 ? '' : 's'} with \`write_artifact\` at the exact artifacts-drawer path${splitOutputs.artifacts.text.length === 1 ? '' : 's'}: ${splitOutputs.artifacts.text.map((path) => `\`${path}\``).join(', ')}. Re-read it with \`read_artifact\`; do not create a workspace copy.`
+      : null,
+    binaryProductionInstruction(splitOutputs.workspace.binary),
+    artifactBinaryProductionInstruction(splitOutputs.artifacts.binary),
     spec.success.taskGraph
       ? 'Use the requested craftbook/template by invoking it when needed, but keep the work task-native: create and complete the authoring flow for the draft task graph. Do not activate the draft and do not build the planned workspace artifact.'
       : 'Use the requested craftbook/template as guidance or by invoking it, but do not stop after creating a task. Execute the active craftbook step(s) now until the required output exists.',
@@ -203,11 +238,15 @@ function craftbookMissingDeliverableRepairDirective(spec: CraftbookEvalSpec): st
     seededPaths.length > 0
       ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`read_file\` on that exact path; do not ask the user for it and do not use artifact/document/library tools.`
       : null,
-    outputs.text.length > 0
-      ? `Text deliverables must be written with workspace \`write_file\`: ${outputs.text.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
+    outputs.workspace.text.length > 0
+      ? `Text workspace deliverables must be written with \`write_file\`: ${outputs.workspace.text.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
       : null,
-    binaryProductionInstruction(outputs.binary),
-    outputs.binary.length > 0
+    outputs.artifacts.text.length > 0
+      ? `Text artifact deliverables must be written with \`write_artifact\`: ${outputs.artifacts.text.map((path) => `\`${path}\``).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
+      : null,
+    binaryProductionInstruction(outputs.workspace.binary),
+    artifactBinaryProductionInstruction(outputs.artifacts.binary),
+    outputs.workspace.binary.length + outputs.artifacts.binary.length > 0
       ? 'If you invoked a craftbook task, do not wait for another assignee and do not make an ad-hoc binary file handoff. Continue its production step through DocBlocks and copy the saved binary artifact to the required workspace path.'
       : 'If you invoked a craftbook task, do not wait for another assignee before producing the eval deliverable. Execute the active step yourself or make an explicit file-deliverable handoff, then write the required file.',
   ].filter((line): line is string => !!line);
@@ -322,6 +361,19 @@ async function writeFixtureFiles(
       await ctx.client.writeProjectWorkspaceFile(projectId, { path: file.path, content });
     }
   }
+}
+
+async function applyProjectWritePolicy(
+  ctx: EvalContext,
+  projectId: string,
+  spec: CraftbookEvalSpec,
+): Promise<void> {
+  const managedWorkspaceWritePolicy = spec.setup?.managedWorkspaceWritePolicy;
+  if (!managedWorkspaceWritePolicy) return;
+  await ctx.client.updateProject(projectId, { managedWorkspaceWritePolicy });
+  ctx.log(
+    `[craftbook:${spec.craftbookId}] set managed workspace writes to ${managedWorkspaceWritePolicy} on ${projectId}`,
+  );
 }
 
 /**
@@ -766,7 +818,26 @@ function successChecksForSpec(spec: CraftbookEvalSpec) {
       'eval',
       1,
     );
-    checks.push(...(gate.checks ?? []));
+    const gateChecks = deliverable.artifact
+      ? (gate.checks ?? [])
+          .filter((check) =>
+            [
+              'minBytes',
+              'sniff',
+              'contains',
+              'notContains',
+              'tableShape',
+              'recordSchema',
+              'citationsResolve',
+              'valueGrounding',
+              'valuesSubsetOf',
+              'judge',
+              'planStructure',
+            ].includes(check.kind),
+          )
+          .map((check) => ({ ...check, artifact: true }) as GateCheck)
+      : (gate.checks ?? []);
+    checks.push(...gateChecks);
     checks.push(...evalChecks);
   }
   if (spec.success.taskNotes) {
@@ -1303,6 +1374,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       if (projectId) await writeFixtureFiles(ctx, projectId, spec);
       if (projectId && ctx.mocks) await setupMockServices(ctx, projectId, spec);
       if (projectId && ctx.mocks) await installMockMcpToolsets(ctx, spec, projectId);
+      if (projectId) await applyProjectWritePolicy(ctx, projectId, spec);
       if (projectId && (spec.setup?.worker || spec.runAsCraftbookTask)) {
         const workerId = await ensureWorker(ctx, spec);
         if (!workerId) return;
@@ -1382,7 +1454,9 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       const checks = successChecksForSpec(spec);
       const workspace = workspaceFromClient(ctx.client, projectId);
       const primaryDeliverable = spec.success.deliverables?.[0];
-      const primaryText = primaryDeliverable ? await workspace.read(primaryDeliverable.path) : null;
+      const primaryText = primaryDeliverable
+        ? await readDeliverable(workspace, primaryDeliverable)
+        : null;
       let taskNotes:
         | { text: string; taskCount: number; matchingCraftbookTaskCount: number }
         | undefined;
@@ -1563,7 +1637,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         repairDeliverable && repairDeliverable.path === primaryDeliverable?.path
           ? primaryText
           : repairDeliverable
-            ? await workspace.read(repairDeliverable.path)
+            ? await readDeliverable(workspace, repairDeliverable)
             : null;
       if (repairDeliverable) {
         if (repairText === null) {

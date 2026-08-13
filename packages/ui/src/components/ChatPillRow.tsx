@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { DropdownMenu } from '../primitives/index.js';
+import { AreaIcon } from './AreaIcon.js';
 import { GezelIcon } from './GezelIcon.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 import { type ThreadPill, useChatThreadPills } from './useChatThreadPills.js';
@@ -24,9 +25,10 @@ function timestampMs(iso: string): number {
 }
 
 /**
- * The status band across the top of a project chat: one pill per thread
- * that is streaming, failed, or recently active; one per active task; and
- * a "Do +" action that starts a new task from a craftbook.
+ * The status band across the top of a project chat: one pill per active
+ * task, enriched with its latest chat; the newest independent thread plus
+ * other recent/attention-worthy threads; and a "Do +" action that starts a
+ * new task from a craftbook.
  *
  * Purely presentational apart from the two data hooks — it owns no dialog
  * and performs no navigation. The parent decides what focusing a thread or
@@ -66,13 +68,12 @@ export function ChatPillRow({
   terminalRefreshKey?: number | undefined;
 }) {
   const { tasks } = useProjectActiveTasks({ projectId, refreshKey });
-  // An idle thread for a task that already has its own pill is redundant.
   const taskRefs = useMemo(() => new Set(tasks.map((t) => t.ref)), [tasks]);
-  const { pills, overflow } = useChatThreadPills({
+  const { pills, overflow, taskPills } = useChatThreadPills({
     projectId,
     gezelId,
     pinnedSessionId: activeSessionId,
-    suppressedTaskRefs: taskRefs,
+    groupedTaskRefs: taskRefs,
     refreshKey,
   });
   const [terminalThreads, setTerminalThreads] = useState<TerminalThreadSummary[]>([]);
@@ -118,8 +119,9 @@ export function ChatPillRow({
   const namesFor = (pill: ThreadPill): string =>
     [...new Set(pill.involvedGezelIds.map(nameFor))].join(', ');
 
-  const liveCount = pills.filter((p) => p.state === 'inflight').length;
-  const errorCount = pills.filter((p) => p.state === 'errored').length;
+  const visibleChatPills = [...pills, ...taskPills.values()];
+  const liveCount = visibleChatPills.filter((p) => p.state === 'inflight').length;
+  const errorCount = visibleChatPills.filter((p) => p.state === 'errored').length;
   // One live region for the whole row. Announcing per-pill would let five
   // concurrent turns machine-gun a screen reader.
   const announcement = [
@@ -187,14 +189,25 @@ export function ChatPillRow({
               />
             ))}
 
-          {tasks.map((task) => (
-            <TaskPillButton
-              key={task.ref}
-              task={task}
-              active={task.ref === activeTaskRef}
-              onFocus={onFocusTask}
-            />
-          ))}
+          {tasks.map((task) => {
+            const latestThread = taskPills.get(task.ref);
+            const gezelNames = latestThread
+              ? namesFor(latestThread)
+              : task.assignee.kind === 'gezel'
+                ? nameFor(task.assignee.gezelId)
+                : 'You';
+            return (
+              <TaskPillButton
+                key={task.ref}
+                task={task}
+                latestThread={latestThread}
+                gezels={gezels}
+                gezelNames={gezelNames}
+                active={task.ref === activeTaskRef}
+                onFocus={onFocusTask}
+              />
+            );
+          })}
         </div>
         {overflowBar.node}
       </div>
@@ -494,27 +507,86 @@ function formatLongRelativeTime(iso: string): string {
 
 function TaskPillButton({
   task,
+  latestThread,
+  gezels,
+  gezelNames,
   active,
   onFocus,
 }: {
   task: Task;
+  latestThread?: ThreadPill | undefined;
+  gezels: GezelSummary[];
+  gezelNames: string;
   active: boolean;
   onFocus: (task: Task) => void;
 }) {
   const unassigned = task.assignee.kind === 'user';
+  const assigneeGezelId = task.assignee.kind === 'gezel' ? task.assignee.gezelId : null;
+  const gezel = latestThread
+    ? gezels.find((candidate) => candidate.id === latestThread.gezelId)
+    : assigneeGezelId
+      ? gezels.find((candidate) => candidate.id === assigneeGezelId)
+      : undefined;
+  const updated = latestThread ? formatLongRelativeTime(latestThread.lastActivityAt) : null;
+  const status = latestThread ? threadStatusLabel(latestThread.state) : 'Active';
+  const message = latestThread ? messagePreviewFor(latestThread) : 'No chat yet';
+  const accessibleChat = latestThread
+    ? `Latest chat with ${gezelNames}: ${latestThread.title}. ${message}. Updated ${updated}. ${status}`
+    : `${message}. Assigned to ${gezelNames}. ${status}`;
   return (
     <button
       type="button"
-      className={`chat-pill chat-pill-task${active ? ' is-active' : ''}`}
+      className={`chat-pill chat-pill-thread chat-pill-task${
+        latestThread ? ` chat-pill-${latestThread.state}` : ''
+      }${active ? ' is-active' : ''}`}
       aria-pressed={active}
-      aria-label={`Task ${task.ref}: ${task.title}`}
+      aria-label={`Task ${task.ref}: ${task.title}. ${accessibleChat}`}
       title={
-        unassigned ? `${task.ref} · ${task.title} — assigned to you` : `${task.ref} · ${task.title}`
+        latestThread
+          ? `${task.ref} · ${task.title} · latest chat: ${latestThread.title} · ${gezelNames} · updated ${updated} · ${status}${latestThread.error ? `: ${latestThread.error}` : ''}`
+          : unassigned
+            ? `${task.ref} · ${task.title} — assigned to you · no chat yet`
+            : `${task.ref} · ${task.title} · no chat yet`
       }
       onClick={() => onFocus(task)}
     >
-      <span className="task-status-dot task-status-active" aria-hidden="true" />
-      <span className="chat-pill-label">{task.title}</span>
+      <span className="chat-pill-thread-line chat-pill-task-title">
+        <AreaIcon area="tasks" size={13} className="chat-pill-task-icon" />
+        <span className="chat-pill-task-number">#{task.num}</span>
+        <span className="chat-pill-label">{task.title}</span>
+      </span>
+      <span className="chat-pill-thread-line chat-pill-thread-context">
+        {gezel && (
+          <GezelIcon
+            svg={gezel.icon ?? null}
+            poppetje={gezel.poppetje}
+            iconOverride={gezel.iconOverride}
+            name={gezelNames}
+            size={14}
+          />
+        )}
+        <span className="chat-pill-participants">{gezelNames}</span>
+        <span className="chat-pill-separator" aria-hidden="true">
+          ·
+        </span>
+        <span className="chat-pill-message-preview">{message}</span>
+      </span>
+      <span className="chat-pill-thread-line chat-pill-thread-update">
+        <span className="chat-pill-thread-updated-at">
+          {updated ? `Updated ${updated}` : task.ref}
+        </span>
+        <span className="chat-pill-separator" aria-hidden="true">
+          ·
+        </span>
+        <span className="chat-pill-thread-status">
+          {latestThread ? (
+            <span className="chat-pill-dot" aria-hidden="true" />
+          ) : (
+            <span className="task-status-dot task-status-active" aria-hidden="true" />
+          )}
+          {status}
+        </span>
+      </span>
     </button>
   );
 }

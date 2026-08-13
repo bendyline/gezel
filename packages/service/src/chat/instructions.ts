@@ -474,7 +474,15 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         )
       : undefined;
   const displayedRole = role?.trim();
-  const header = displayedRole ? `Your role is "${displayedRole}".` : 'You are a gezel.';
+  // Boring mode: role-based identifiers are the only rendered names, but
+  // older transcript messages may still carry friendly names from before
+  // the mode applied. Without this line the model mirrors those names
+  // back into new prose, leaking identifiers the user's client never
+  // shows (the "Hi Tomas" in a `reviewer:`-labeled TUI incident).
+  const namingRule = roleBasedNameOnlyMode
+    ? ' Refer to gezels, including yourself, by role name only (e.g. "reviewer", "voorman"); never use personal names, even when earlier messages used them.'
+    : '';
+  const header = `${displayedRole ? `Your role is "${displayedRole}".` : 'You are a gezel.'}${namingRule}`;
   const body = about.trim().length > 0 ? about.trim() : '(no about.md written yet)';
   // Stable-prefix band: traits (identity) then lessons (experience) sit
   // right after the about body so the gezel's earned behaviors and
@@ -584,7 +592,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     if (isProjectStrategicOwner) {
       projectContext += isSolo
         ? ' You are the lead of this project and will handle it yourself; team-management tools are intentionally not available here.'
-        : ' You are the voorman of this project.';
+        : ' You are the voorman of this project. Do not ask the user to escalate work to the voorman — that is you. Inspect what your read tools can access, route work to a specialist when one is available, or escalate only to the Meester/user when a real permission or product decision requires it.';
     } else if (displayedVoormanName) {
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
       const voormanPronounForms = pronounFormsForGender(voormanGender);
@@ -1001,6 +1009,17 @@ ${artifactsLine}
       if (step.prompt && step.prompt.trim().length > 0) {
         lines.push(`#### Step procedure\n\n${step.prompt.trim()}`);
       }
+      if (step.consumes && step.consumes.length > 0) {
+        const inputLines = step.consumes.map((input) => {
+          const tool = input.artifact ? 'read_artifact' : 'read_file';
+          const drawer = input.artifact ? 'artifacts drawer' : 'project workspace';
+          const call = `${tool}({ path: ${JSON.stringify(input.file)} })`;
+          return availableTools === undefined || availableToolNameSet.has(tool)
+            ? `- \`${input.file}\` — required input in the **${drawer}**. Open it with \`${call}\`; do not try the other drawer.`
+            : `- \`${input.file}\` — required input in the **${drawer}**, but \`${tool}\` is not wired this turn. Do not claim it is missing; delegate or surface the unavailable read capability.`;
+        });
+        lines.push(`#### Required inputs\n\n${inputLines.join('\n')}`);
+      }
       if (activeStepIsGate) {
         const attemptNote =
           activeStepAttempt > 1
@@ -1104,10 +1123,12 @@ ${artifactsLine}
       // require `write_task_note` before `write_file`.
       let firstActionAnchor = '';
       if (smallOrLeaky && task.step) {
-        const firstProcedureTool = firstAvailableProcedureTool(
-          task.step.prompt ?? '',
-          availableToolNameSet,
-        );
+        const firstInput = task.step.consumes?.[0];
+        const firstInputTool = firstInput?.artifact ? 'read_artifact' : 'read_file';
+        const firstProcedureTool =
+          firstInput && availableToolNameSet.has(firstInputTool)
+            ? firstInputTool
+            : firstAvailableProcedureTool(task.step.prompt ?? '', availableToolNameSet);
         if (firstProcedureTool) {
           firstActionAnchor = ` First action: call \`${firstProcedureTool}\` exactly as the procedure specifies.`;
         }

@@ -1,6 +1,7 @@
-import type { WorkspaceCommandIndex } from '@bendyline/gezel';
+import { type WorkspaceCommandIndex, visibleCatalogItems } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { useShowWorkInProgressFeatures } from '../useShowWorkInProgressFeatures.js';
 import {
   type CraftbookCompletionSpec,
   type McpToolCompletionSpec,
@@ -17,6 +18,7 @@ import {
  * monaco chunk lands. Mirrors `CommandsPanel`'s 30s status-poll pattern.
  */
 export function useTerminalCompletionSources(projectId: string): void {
+  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   const [index, setIndex] = useState<WorkspaceCommandIndex | null>(null);
   const [craftbooks, setCraftbooks] = useState<CraftbookCompletionSpec[]>([]);
   const [mcpTools, setMcpTools] = useState<McpToolCompletionSpec[]>([]);
@@ -39,7 +41,7 @@ export function useTerminalCompletionSources(projectId: string): void {
         const res = await api.listProjectCraftbooks(projectId);
         if (cancelled) return;
         setCraftbooks(
-          res.items.flatMap((it) => {
+          visibleCatalogItems(res.items, showWorkInProgressFeatures).flatMap((it) => {
             const m = it.manifest as {
               kind?: string;
               id?: string;
@@ -104,7 +106,7 @@ export function useTerminalCompletionSources(projectId: string): void {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [projectId]);
+  }, [projectId, showWorkInProgressFeatures]);
 
   // Publish to the provider's store whenever a source changes.
   useEffect(() => {

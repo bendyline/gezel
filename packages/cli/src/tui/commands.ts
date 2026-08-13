@@ -26,11 +26,13 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'help', description: 'show the command reference' },
   { name: 'project', description: 'switch active project' },
   { name: 'gezel', description: 'switch active gezel' },
+  { name: 'allow', description: 'allow a project permission' },
+  { name: 'disallow', description: 'disallow a project permission' },
   { name: 'mode', description: 'set AI activity: read-only through full play' },
   { name: 'model', description: 'switch engine and model' },
   { name: 'thread', description: 'switch the active chat thread' },
   { name: 'task', description: 'list and manage project tasks' },
-  { name: 'start', description: 'start a task from a craftbook' },
+  { name: 'do', description: 'do a task from a craftbook' },
   { name: 'continue', description: 'process due and active project tasks' },
   { name: 'nightshift', description: 'start, stop, or list night-shift work' },
   { name: 'focus', description: 'send into another active chat' },
@@ -66,8 +68,40 @@ const NIGHT_SHIFT_SUBCOMMANDS = [
   { name: 'list', description: 'show current and upcoming night-shift work' },
 ] as const;
 
+const MODEL_SUBCOMMANDS = [
+  { name: 'download', description: 'choose and download a new on-device model' },
+] as const;
+
+export const PROJECT_PERMISSIONS = [
+  {
+    name: 'edits',
+    allowDescription: 'let built-in tools and background work edit this project',
+    disallowDescription: 'make built-in tools and background work read-only',
+  },
+  {
+    name: 'codexedits',
+    allowDescription: 'let Codex sessions edit this project',
+    disallowDescription: 'put Codex sessions in read-only plan mode',
+  },
+  {
+    name: 'claudeedits',
+    allowDescription: 'let Claude sessions edit this project',
+    disallowDescription: 'put Claude sessions in read-only plan mode',
+  },
+] as const;
+
+export type ProjectPermissionName = (typeof PROJECT_PERMISSIONS)[number]['name'];
+export const PROJECT_PERMISSION_USAGE = PROJECT_PERMISSIONS.map(
+  (permission) => permission.name,
+).join('|');
+
+export function parseProjectPermissionName(input: string): ProjectPermissionName | undefined {
+  const normalized = input.trim().toLowerCase();
+  return PROJECT_PERMISSIONS.find((permission) => permission.name === normalized)?.name;
+}
+
 /**
- * Suggestions for the prompt's slash-command wordwheel. `/start ` changes
+ * Suggestions for the prompt's slash-command wordwheel. `/do ` changes
  * the wheel to the active project's craftbook inventory; `/mode ` and
  * `/nightshift ` change it to their finite action lists.
  */
@@ -75,6 +109,34 @@ export function suggestSlashWordwheel(
   input: string,
   craftbooks: ReadonlyArray<CraftbookSummary>,
 ): ReadonlyArray<SlashWordwheelSuggestion> {
+  const modelMatch = input.match(/^\/model\s+(.*)$/i);
+  if (modelMatch) {
+    const query = (modelMatch[1] ?? '').trim().toLowerCase();
+    return MODEL_SUBCOMMANDS.filter((command) => command.name.startsWith(query)).map((command) => ({
+      key: `model:${command.name}`,
+      label: `/model ${command.name}`,
+      description: command.description,
+      submit: `/model ${command.name}`,
+      completion: `/model ${command.name}`,
+    }));
+  }
+
+  const permissionMatch = input.match(/^\/(allow|disallow)\s+(.*)$/i);
+  if (permissionMatch) {
+    const command = (permissionMatch[1] ?? '').toLowerCase() as 'allow' | 'disallow';
+    const query = (permissionMatch[2] ?? '').trim().toLowerCase();
+    return PROJECT_PERMISSIONS.filter((permission) => permission.name.startsWith(query)).map(
+      (permission) => ({
+        key: `${command}:${permission.name}`,
+        label: `/${command} ${permission.name}`,
+        description:
+          command === 'allow' ? permission.allowDescription : permission.disallowDescription,
+        submit: `/${command} ${permission.name}`,
+        completion: `/${command} ${permission.name}`,
+      }),
+    );
+  }
+
   const modeMatch = input.match(/^\/mode\s+(.*)$/i);
   if (modeMatch) {
     const query = (modeMatch[1] ?? '').trim().toLowerCase();
@@ -101,9 +163,9 @@ export function suggestSlashWordwheel(
     );
   }
 
-  const startMatch = input.match(/^\/start\s+(.*)$/i);
-  if (startMatch) {
-    const query = (startMatch[1] ?? '').trim().toLowerCase();
+  const doMatch = input.match(/^\/do\s+(.*)$/i);
+  if (doMatch) {
+    const query = (doMatch[1] ?? '').trim().toLowerCase();
     const terms = query.split(/\s+/).filter(Boolean);
     return craftbooks
       .filter((book) => {
@@ -117,10 +179,10 @@ export function suggestSlashWordwheel(
       })
       .map((book) => ({
         key: `craftbook:${book.id}`,
-        label: `/start ${book.id}`,
+        label: `/do ${book.id}`,
         description: `${book.name} · ${book.stepCount} ${book.stepCount === 1 ? 'step' : 'steps'} · ${book.source}`,
-        submit: `/start ${book.id}`,
-        completion: `/start ${book.id}`,
+        submit: `/do ${book.id}`,
+        completion: `/do ${book.id}`,
       }));
   }
 

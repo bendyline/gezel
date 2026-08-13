@@ -15,6 +15,8 @@ export function GlobalTimeline({
   onFocusSession,
   onToolActivity,
   onArtifactReference,
+  onArtifactSeen,
+  onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
 }: {
@@ -22,6 +24,8 @@ export function GlobalTimeline({
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
   onToolActivity?: (tool: ToolActivity) => void;
   onArtifactReference?: (path: string, projectId?: string) => void;
+  onArtifactSeen?: (path: string, projectId?: string) => void;
+  onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
 }) {
@@ -38,6 +42,8 @@ export function GlobalTimeline({
       onFocusSession={onFocusSession}
       onToolActivity={onToolActivity}
       onArtifactReference={onArtifactReference}
+      onArtifactSeen={onArtifactSeen}
+      onWorkspaceSeen={onWorkspaceSeen}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}

@@ -323,6 +323,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       }
     }
     const project = await ctx.store.updateProject(id, body);
+    if (
+      body.managedWorkspaceWritePolicy !== undefined ||
+      body.allowGezelWrites !== undefined ||
+      body.codexPermissionMode !== undefined ||
+      body.claudePermissionMode !== undefined
+    ) {
+      // Permission posture is baked into managed MCP allowlists and native
+      // CLI sessions. Tear down this project's cached surfaces so the next
+      // turn/list/invoke observes the new setting immediately.
+      await ctx.chat.resetProjectToolsets(id);
+    }
     return c.json(project);
   });
 

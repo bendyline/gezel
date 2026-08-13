@@ -1,7 +1,12 @@
-import type { ModelInfo, ProviderName } from '@bendyline/gezel';
+import type { CatalogItemSummary, ModelInfo, ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
 import { describe, expect, it } from 'vitest';
-import { configuredModelProviders, loadModelChoices, modelProviderLabel } from './model-picker.js';
+import {
+  configuredModelProviders,
+  loadModelChoices,
+  loadModelDownloadChoices,
+  modelProviderLabel,
+} from './model-picker.js';
 
 function config(overrides: Partial<ConfigResponse> = {}): ConfigResponse {
   return {
@@ -96,6 +101,66 @@ describe('loadModelChoices', () => {
       },
     ]);
     expect(calls).toEqual(['llama-cpp', 'ds4', 'ollama', 'codex-cli']);
+  });
+});
+
+describe('loadModelDownloadChoices', () => {
+  it('ranks compatible catalog models and excludes user or shared installed models', async () => {
+    const bytes = 2 * 1024 ** 3;
+    const catalogModel = (id: string, score: number): CatalogItemSummary =>
+      ({
+        sourceId: 'test',
+        kind: 'chat-model',
+        manifest: {
+          schemaVersion: 1,
+          kind: 'chat-model',
+          id,
+          name: id,
+          description: '',
+          tags: [],
+          maintainer: { name: 'test' },
+          licenseClass: 'open',
+          recoScore: score,
+          version: '1.0.0',
+          releasedAt: '2026-01-01',
+          parameterSize: '2B',
+          approxSizeBytes: bytes,
+          supportsTools: true,
+          llamaCpp: {
+            huggingfaceRepo: 'test/model',
+            filename: 'model.gguf',
+            sha256: '0'.repeat(64),
+            approxSizeBytes: bytes,
+            residentBytes: bytes,
+          },
+          availableVersions: [],
+        },
+      }) as CatalogItemSummary;
+    const client = {
+      getMemoryProfile: async () => ({
+        platform: 'win32',
+        totalRamBytes: 32 * 1024 ** 3,
+        gpuVramBytes: 12 * 1024 ** 3,
+        usableBytes: 10 * 1024 ** 3,
+      }),
+      listCatalogItems: async () => ({
+        items: [catalogModel('already-shared', 100), catalogModel('new-model', 80)],
+      }),
+      listProviderModels: async () => ({
+        models: [{ id: 'already-shared', name: 'Already shared' }],
+      }),
+    };
+
+    await expect(loadModelDownloadChoices(client, config(), 'win32', 'x64')).resolves.toMatchObject(
+      [
+        {
+          provider: 'llama-cpp',
+          value: 'llama-cpp:new-model',
+          label: 'new-model',
+          hint: expect.stringContaining('2.1 GB'),
+        },
+      ],
+    );
   });
 });
 

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  cliUserDaemonEnv,
   describeMachineEngineBroker,
   ensureCliProjectLead,
   ensureProjectForFolder,
@@ -185,6 +186,30 @@ describe('start-port selection', () => {
 
   it('omits GEZEL_PORT (canonical preference) when no machine service exists', () => {
     expect(resolveStartPortEnv(undefined, true)).toBeUndefined();
+  });
+});
+
+describe('interactive daemon environment', () => {
+  it('forces a user-role ephemeral daemon and removes inherited service-host state', () => {
+    expect(
+      cliUserDaemonEnv('D:\\scratch\\gezel', false, {
+        PATH: 'test-path',
+        GEZEL_PORT: '6228',
+        GEZEL_SERVICE_ROLE: 'machine-engine',
+        GEZEL_SYSTEM_SCOPE: '1',
+      }),
+    ).toEqual({
+      PATH: 'test-path',
+      GEZEL_HOME: 'D:\\scratch\\gezel',
+      GEZEL_PORT: '0',
+      GEZEL_SERVICE_ROLE: 'user',
+    });
+  });
+
+  it('leaves the port unset when the caller has reserved the canonical preference', () => {
+    const env = cliUserDaemonEnv(undefined, true, { GEZEL_PORT: '7000' });
+    expect(env.GEZEL_PORT).toBeUndefined();
+    expect(env.GEZEL_SERVICE_ROLE).toBe('user');
   });
 });
 

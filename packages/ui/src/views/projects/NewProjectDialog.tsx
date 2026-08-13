@@ -1,9 +1,11 @@
-import type {
-  CatalogItemSummary,
-  GitHubIdentity,
-  GitHubRepoSummary,
-  ProjectDetail,
-  ProjectTypeCategory,
+import {
+  type CatalogItemSummary,
+  type GitHubIdentity,
+  type GitHubRepoSummary,
+  type ProjectDetail,
+  type ProjectTypeCategory,
+  connectorCraftbookIds,
+  visibleCatalogItems,
 } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
@@ -15,6 +17,7 @@ import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth, linkImapMailbox } from '../../components/mail-link.js';
 import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
+import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
 import {
@@ -172,6 +175,7 @@ export function NewProjectDialog({
   onClose: () => void;
   onCreated: (created: ProjectDetail) => Promise<void> | void;
 }) {
+  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   const [name, setName] = useState('');
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [kind, setKind] = useState<ProjectKindId>('general');
@@ -256,10 +260,19 @@ export function NewProjectDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void api
-      .listCatalogItems('project-type')
-      .then((res) => {
-        if (!cancelled) setProjectTypes(res.items.filter((i) => i.manifest.id !== 'email'));
+    const projectTypesRequest = api.listCatalogItems('project-type');
+    const connectorBooksRequest = showWorkInProgressFeatures
+      ? Promise.resolve({ items: [] as CatalogItemSummary[] })
+      : api.listCatalogItems('craftbook-template');
+    void Promise.all([projectTypesRequest, connectorBooksRequest])
+      .then(([types, books]) => {
+        if (cancelled) return;
+        const connectorIds = connectorCraftbookIds(books.items);
+        setProjectTypes(
+          visibleCatalogItems(types.items, showWorkInProgressFeatures, connectorIds).filter(
+            (item) => item.manifest.id !== 'email',
+          ),
+        );
       })
       .catch(() => {
         if (!cancelled) setProjectTypes([]);
@@ -267,7 +280,11 @@ export function NewProjectDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, showWorkInProgressFeatures]);
+
+  useEffect(() => {
+    if (!showWorkInProgressFeatures && kind === 'email') setKind('general');
+  }, [kind, showWorkInProgressFeatures]);
 
   // Fetch the user's accessible repos once they're known to be signed
   // in. Drives the datalist suggestions on the GitHub URL field. The
@@ -466,13 +483,17 @@ export function NewProjectDialog({
     selectedType?.manifest.kind === 'project-type'
       ? (selectedType.manifest.params as SquisqAnnotatedSchema | undefined)
       : undefined;
+  const availableProjectKinds = useMemo(
+    () => PROJECT_KINDS.filter((item) => showWorkInProgressFeatures || item.id !== 'email'),
+    [showWorkInProgressFeatures],
+  );
   const normalizedProjectTypeQuery = projectTypeQuery.trim().toLowerCase();
   const filteredProjectKinds = useMemo(() => {
-    if (!normalizedProjectTypeQuery) return PROJECT_KINDS;
-    return PROJECT_KINDS.filter((item) =>
+    if (!normalizedProjectTypeQuery) return availableProjectKinds;
+    return availableProjectKinds.filter((item) =>
       `${item.label} ${item.description}`.toLowerCase().includes(normalizedProjectTypeQuery),
     );
-  }, [normalizedProjectTypeQuery]);
+  }, [availableProjectKinds, normalizedProjectTypeQuery]);
   const filteredProjectTypes = useMemo(() => {
     if (!normalizedProjectTypeQuery) return projectTypes;
     return projectTypes.filter((item) => {
@@ -506,16 +527,18 @@ export function NewProjectDialog({
       PROJECT_CATEGORIES.map((cat) => ({
         cat,
         count:
-          PROJECT_KINDS.filter((k) => k.category === cat.id).length +
+          availableProjectKinds.filter((k) => k.category === cat.id).length +
           projectTypes.filter((t) => categorizeCatalogType(t) === cat.id).length,
       })).filter((entry) => entry.count > 0),
-    [projectTypes],
+    [availableProjectKinds, projectTypes],
   );
   const paneSelection: PaneSelection = selectedType
     ? { source: 'catalog', item: selectedType }
     : {
         source: 'builtin',
-        kind: PROJECT_KINDS.find((k) => k.id === kind) ?? PROJECT_KINDS[0]!,
+        kind:
+          availableProjectKinds.find((candidate) => candidate.id === kind) ??
+          availableProjectKinds[0]!,
       };
 
   const handleSubmit = useCallback(

@@ -3,8 +3,6 @@ import { CraftbookEditor } from './CraftbookEditor.js';
 interface CraftbookTabContentProps {
   craftbookId: string;
   source?: 'bundled' | 'local' | 'project';
-  /** Present for parity with TaskTabContent; the editor has no promote-to-tab affordance. */
-  standalone?: boolean;
   onChanged?: () => void;
 }
 

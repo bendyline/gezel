@@ -285,8 +285,9 @@ describe('ChatEventSchema', () => {
         summary: 'Task default/1 → paused',
         at: '2026-08-08T12:00:00.000Z',
         taskRef: 'default/1',
-      }).type,
-    ).toBe('task_event');
+        gezelId: 'reviewer',
+      }),
+    ).toMatchObject({ type: 'task_event', gezelId: 'reviewer' });
   });
 
   it('accepts an in-app Settings action on a warning', () => {

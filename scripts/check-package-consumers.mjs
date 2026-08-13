@@ -21,6 +21,7 @@
  *   node scripts/check-package-consumers.mjs
  *   node scripts/check-package-consumers.mjs --keep   # leave the temp dir
  *   node scripts/check-package-consumers.mjs --tarball-dir artifacts/npm-tarballs
+ *   node scripts/check-package-consumers.mjs --require-release-stamp --tarball-dir artifacts/npm-tarballs
  *
  * Env:
  *   GEZEL_CONSUMER_SKIP_DAEMON=1   skip the daemon boot (fastest useful run)
@@ -42,6 +43,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+validateArgs(process.argv.slice(2));
 const keep = process.argv.includes('--keep');
 const requireReleaseStamp = process.argv.includes('--require-release-stamp');
 const tarballDirFlag = process.argv.indexOf('--tarball-dir');
@@ -51,6 +53,21 @@ if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
   throw new Error('--tarball-dir requires a directory path');
 }
 const MAX_NODE_MODULES_BYTES = 800 * 1024 * 1024;
+
+function validateArgs(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--keep' || arg === '--require-release-stamp') continue;
+    if (arg === '--tarball-dir') {
+      index += 1;
+      if (!args[index] || args[index].startsWith('--')) {
+        throw new Error('--tarball-dir requires a directory path');
+      }
+      continue;
+    }
+    throw new Error(`unexpected argument ${JSON.stringify(arg)}`);
+  }
+}
 
 /** Mirrors tests/published/_packages.ts. Keep the two in step. */
 const PUBLISHED = [
@@ -369,10 +386,23 @@ try {
       cwd: consumer,
     },
   );
+  let auditCounts = null;
+  try {
+    const parsed = JSON.parse(audit.stdout);
+    auditCounts = parsed?.metadata?.vulnerabilities ?? null;
+  } catch {
+    fail(`npm audit did not return valid JSON\n${audit.stdout}\n${audit.stderr}`);
+  }
   if (audit.status !== 0) {
     fail(`npm audit found a critical-severity issue\n${audit.stdout}\n${audit.stderr}`);
   } else {
     ok('npm audit reports no critical-severity vulnerabilities');
+  }
+  if (auditCounts) {
+    const summary = ['info', 'low', 'moderate', 'high', 'critical']
+      .map((severity) => `${severity}=${Number(auditCounts[severity] ?? 0)}`)
+      .join(', ');
+    console.log(`  note npm audit production counts: ${summary}`);
   }
 
   // ── 3. Import every public subpath ─────────────────────────────────────

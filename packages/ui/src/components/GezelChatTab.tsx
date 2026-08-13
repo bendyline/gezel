@@ -216,7 +216,15 @@ function GezelChatBody({
       skillsProjectId={project.projectId === 'default' ? undefined : project.projectId}
       chatKey={`${project.projectId}:${gezel.id}`}
     >
-      {({ onToolActivity, onArtifactReference, onTaskReference }) => (
+      {({
+        onToolActivity,
+        onArtifactReference,
+        onArtifactSeen,
+        onWorkspaceSeen,
+        recentReferences,
+        onOpenReference,
+        onTaskReference,
+      }) => (
         <>
           <ProjectTimeline
             projectId={project.projectId}
@@ -231,6 +239,8 @@ function GezelChatBody({
             }}
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
+            onArtifactSeen={onArtifactSeen}
+            onWorkspaceSeen={onWorkspaceSeen}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
           />
@@ -248,6 +258,8 @@ function GezelChatBody({
               setSessionRefreshKey((k) => k + 1);
             }}
             onToolActivity={onToolActivity}
+            recentReferences={recentReferences}
+            onOpenReference={onOpenReference}
             placeholder={composerPlaceholder}
             belowAddressLine={
               <SessionSwitcher
@@ -301,7 +313,15 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
       skillsProjectId={composerProjectId === 'default' ? undefined : composerProjectId}
       chatKey={`all:${gezel.id}`}
     >
-      {({ onToolActivity, onArtifactReference, onTaskReference }) => (
+      {({
+        onToolActivity,
+        onArtifactReference,
+        onArtifactSeen,
+        onWorkspaceSeen,
+        recentReferences,
+        onOpenReference,
+        onTaskReference,
+      }) => (
         <>
           <GezelTimeline
             gezelId={gezel.id}
@@ -311,6 +331,8 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             }}
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
+            onArtifactSeen={onArtifactSeen}
+            onWorkspaceSeen={onWorkspaceSeen}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
           />
@@ -324,6 +346,8 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             sessionId={focused?.sessionId}
             onSessionCreated={(sid) => setFocused({ sessionId: sid, projectId: composerProjectId })}
             onToolActivity={onToolActivity}
+            recentReferences={recentReferences}
+            onOpenReference={onOpenReference}
             placeholder={composerPlaceholder}
           />
         </>

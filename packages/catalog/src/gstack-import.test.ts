@@ -399,6 +399,61 @@ describe('applyOverlay', () => {
     expect(out.plan).toBe('Only guidance.');
   });
 
+  it('routes review-only quality workflows entirely through the artifacts drawer', () => {
+    const out = applyOverlay(base, {
+      workflow: {
+        plan: 'Review without changing source files.',
+        storage: 'artifacts',
+        phases: [
+          {
+            id: 'inspect',
+            name: 'Inspect',
+            description: 'Inspect the source.',
+            suggestedRole: 'reviewer',
+            prompt: 'Read the source and record the findings.',
+            output: {
+              path: 'reports/findings.md',
+              minBytes: 100,
+              requiredPatterns: [{ pattern: '^## Findings', label: 'findings heading' }],
+            },
+          },
+        ],
+        review: {
+          artifactPath: 'reports/findings.md',
+          reviewPath: 'reviews/findings-evaluation.md',
+          criteria: ['Findings cite source evidence.'],
+        },
+      },
+    });
+    const byId = new Map(out.steps.map((step) => [step.id, step]));
+    const inspect = byId.get('inspect')!;
+    const evaluate = byId.get('evaluate')!;
+    const repair = byId.get('repair')!;
+
+    expect(inspect.prompt).toContain('artifacts drawer with `write_artifact`');
+    expect(inspect.prompt).toContain('`read_artifact`');
+    expect(inspect.advanceWhen).toMatchObject({
+      file: 'reports/findings.md',
+      artifact: true,
+      requireChange: true,
+    });
+    expect(normalizeStepGate(inspect.gate!).checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'minBytes', artifact: true }),
+        expect.objectContaining({ kind: 'sniff', artifact: true }),
+        expect.objectContaining({ kind: 'contains', artifact: true }),
+      ]),
+    );
+    expect(evaluate.prompt).toContain('Open every review target with `read_artifact`');
+    expect(
+      normalizeStepGate(evaluate.gate!).checks.every(
+        (check) => (check as { artifact?: boolean }).artifact === true,
+      ),
+    ).toBe(true);
+    expect(repair.prompt).toContain('actual artifact files with `write_artifact`');
+    expect(repair.advanceWhen).toMatchObject({ artifact: true, requireChange: true });
+  });
+
   it('version generation preserves catalog-owned identity metadata', () => {
     const book = {
       source: 'demo',

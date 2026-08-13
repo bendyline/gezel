@@ -4,37 +4,33 @@ import { api } from '../api.js';
 import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import {
+  ConnectorConfigFields,
+  type ConnectorConfigValue,
+  type ConnectorFormManifest,
+  initialConnectorConfig,
+} from './ConnectorConfigFields.js';
 import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
 import { connectOAuth } from './connector-link.js';
 import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
 type ConnStatus = Awaited<ReturnType<typeof api.listConnectors>>;
 
-interface ConnManifest {
+interface ConnManifest extends ConnectorFormManifest {
   id: string;
   name: string;
   description: string;
-  configSchema?: {
-    properties?: Record<
-      string,
-      {
-        type?: string;
-        title?: string;
-        const?: unknown;
-        default?: unknown;
-        minimum?: number;
-        maximum?: number;
-      }
-    >;
-    required?: string[];
-  };
   secretShape?: {
     kind?: string;
     label?: string;
+    description?: string;
+    helpUrl?: string;
+    helpLabel?: string;
     required?: boolean;
     clientIdEnv?: string;
     clientSecretEnv?: string;
     clientSetup?: unknown;
+    'x-gezel-priority'?: 'primary' | 'secondary';
   };
   completeness?: string;
   tags?: string[];
@@ -43,18 +39,6 @@ interface ConnManifest {
 interface ConnectorOption extends ConnManifest {
   iconSvg?: string;
   logoUrl?: string;
-}
-
-type ConnectorConfigValue = string | boolean;
-
-function initialConnectorConfig(connector: ConnectorOption): Record<string, ConnectorConfigValue> {
-  const initial: Record<string, ConnectorConfigValue> = {};
-  for (const [key, property] of Object.entries(connector.configSchema?.properties ?? {})) {
-    if (property.default === undefined) continue;
-    initial[key] =
-      property.type === 'boolean' ? property.default === true : String(property.default);
-  }
-  return initial;
 }
 
 function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
@@ -606,101 +590,23 @@ export function ProjectConnectionsTab({
                 </div>
               </div>
 
-              <div className="gz-connector-config-fields">
-                <label>
-                  Display name <span className="muted">(optional)</span>
-                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-                </label>
-                {Object.entries(selected.configSchema?.properties ?? {})
-                  .filter(([, prop]) => prop.const === undefined)
-                  .map(([key, prop]) =>
-                    prop.type === 'boolean' ? (
-                      <label key={key} className="gz-connector-boolean-field">
-                        <input
-                          type="checkbox"
-                          checked={config[key] === true}
-                          onChange={(e) =>
-                            setConfig((current) => ({ ...current, [key]: e.target.checked }))
-                          }
-                        />
-                        {prop.title ?? key}
-                      </label>
-                    ) : (
-                      <label key={key}>
-                        {prop.title ?? key}
-                        <input
-                          type={
-                            prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'
-                          }
-                          value={typeof config[key] === 'string' ? config[key] : ''}
-                          onChange={(e) =>
-                            setConfig((current) => ({ ...current, [key]: e.target.value }))
-                          }
-                          placeholder={prop.type === 'array' ? 'comma,separated' : ''}
-                          min={prop.minimum}
-                          max={prop.maximum}
-                          step={prop.type === 'integer' ? 1 : undefined}
-                        />
-                      </label>
-                    ),
-                  )}
-
-                {kind === 'oauth2' ? (
-                  <p className="muted small gz-connector-oauth-note">
-                    You'll authorize this connector in your browser — a window opens when you click
-                    Connect.
-                  </p>
-                ) : kind === 'imap' ? (
-                  <>
-                    <label>
-                      IMAP host
-                      <input
-                        value={imapHost}
-                        onChange={(e) => setImapHost(e.target.value)}
-                        placeholder="imap.example.com"
-                      />
-                    </label>
-                    <div className="gz-imap-row">
-                      <label className="gz-imap-port">
-                        Port <span className="muted">(optional)</span>
-                        <input
-                          value={imapPort}
-                          onChange={(e) => setImapPort(e.target.value)}
-                          placeholder="993"
-                        />
-                      </label>
-                      <label className="gz-imap-tls">
-                        <input
-                          type="checkbox"
-                          checked={imapSecure}
-                          onChange={(e) => setImapSecure(e.target.checked)}
-                        />
-                        Use TLS
-                      </label>
-                    </div>
-                    <label>
-                      Password / app password
-                      <input
-                        type="password"
-                        value={credential}
-                        onChange={(e) => setCredential(e.target.value)}
-                        autoComplete="off"
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <label>
-                    {selected.secretShape?.label ?? 'API key / token'}{' '}
-                    {!selected.secretShape?.required && <span className="muted">(optional)</span>}
-                    <input
-                      type="password"
-                      value={credential}
-                      onChange={(e) => setCredential(e.target.value)}
-                      autoComplete="off"
-                    />
-                  </label>
-                )}
-              </div>
+              <ConnectorConfigFields
+                connector={selected}
+                config={config}
+                onConfigChange={(key, value) =>
+                  setConfig((current) => ({ ...current, [key]: value }))
+                }
+                displayName={displayName}
+                onDisplayNameChange={setDisplayName}
+                credential={credential}
+                onCredentialChange={setCredential}
+                imapHost={imapHost}
+                onImapHostChange={setImapHost}
+                imapPort={imapPort}
+                onImapPortChange={setImapPort}
+                imapSecure={imapSecure}
+                onImapSecureChange={setImapSecure}
+              />
 
               {oauthRequirement && (
                 <OAuthAppSetup

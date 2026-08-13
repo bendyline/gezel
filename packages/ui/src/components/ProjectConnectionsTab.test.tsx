@@ -60,7 +60,18 @@ describe('ProjectConnectionsTab connector picker', () => {
         }),
         connectorItem('mail-imap', 'Email (IMAP)', {
           completeness: 'window',
-          secretShape: { kind: 'imap', label: 'Mail login', required: true },
+          secretShape: {
+            kind: 'imap',
+            label: 'Mail login',
+            required: true,
+            description:
+              'Use an app-specific password when your mail provider offers one. Do not enter your normal mail password unless your provider explicitly supports it.',
+          },
+          setupInstructions: {
+            title: 'Check which password your mail provider requires',
+            description:
+              "Prefer Gezel's dedicated Gmail and Microsoft connectors when they are available.",
+          },
           configSchema: {
             type: 'object',
             properties: { address: { type: 'string', title: 'Email address' } },
@@ -99,6 +110,12 @@ describe('ProjectConnectionsTab connector picker', () => {
     expect(imap).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText(/Display name/)).toHaveValue('');
     expect(screen.getByLabelText('IMAP host')).toBeInTheDocument();
+    expect(
+      screen.getByText('Check which password your mail provider requires'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Use an app-specific password when your mail provider offers one/),
+    ).toBeInTheDocument();
   });
 
   it('binds the selected tile with its configured values', async () => {
@@ -153,6 +170,100 @@ describe('ProjectConnectionsTab connector picker', () => {
         config: { maxReleases: 12, includeDrafts: false },
       });
     });
+  });
+
+  it('leads with prioritized credentials and renders catalog-owned setup help', async () => {
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({
+      items: [
+        connectorItem('bluesky-posts', 'Bluesky Posts', {
+          setupInstructions: {
+            title: 'Create a Bluesky app password',
+            description:
+              "Create this password inside Bluesky. If Bluesky asks you to sign in, enter your normal password only on Bluesky's own site — never in Gezel.",
+            steps: [
+              "Open Bluesky's App Passwords settings using the link below and sign in to Bluesky if asked.",
+              'Choose Add App Password and give it a name such as Gezel.',
+              'Copy the generated app password, return to Gezel, and paste it into the Bluesky app password field.',
+            ],
+            url: 'https://bsky.app/settings/app-passwords',
+            urlLabel: 'Open Bluesky app-password settings',
+          },
+          configSchema: {
+            type: 'object',
+            properties: {
+              service: { type: 'string', title: 'Service URL', default: 'https://bsky.social' },
+              handle: {
+                type: 'string',
+                title: 'Bluesky handle',
+                'x-gezel-priority': 'primary',
+              },
+              syncMentions: {
+                type: 'boolean',
+                title: 'Sync mentions, replies, and quotes',
+                default: true,
+              },
+            },
+            required: ['handle'],
+          },
+          secretShape: {
+            kind: 'apikey',
+            label: 'Bluesky app password',
+            required: true,
+            'x-gezel-priority': 'primary',
+            description:
+              'Do not enter your normal Bluesky account password. Create a separate app password in Bluesky, then paste the generated app password here.',
+            helpUrl: 'https://bsky.app/settings/app-passwords',
+            helpLabel: 'Open Bluesky app-password settings',
+          },
+        }),
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'Bluesky Posts' }));
+
+    expect(screen.getByText('Create a Bluesky app password')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Create this password inside Bluesky. If Bluesky asks you to sign in, enter your normal password only on Bluesky's own site — never in Gezel.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Copy the generated app password, return to Gezel, and paste it into the Bluesky app password field.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Do not enter your normal Bluesky account password. Create a separate app password in Bluesky, then paste the generated app password here.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('link', { name: 'Open Bluesky app-password settings' }),
+    ).toHaveLength(2);
+    expect(
+      screen
+        .getAllByRole('link', { name: 'Open Bluesky app-password settings' })
+        .every((link) => link.getAttribute('href') === 'https://bsky.app/settings/app-passwords'),
+    ).toBe(true);
+
+    const handle = screen.getByLabelText('Bluesky handle');
+    const password = screen.getByLabelText('Bluesky app password');
+    const service = screen.getByLabelText('Service URL');
+    const displayName = screen.getByLabelText('Display name');
+    expect(handle).toBeRequired();
+    expect(password).toBeRequired();
+    expect(
+      handle.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      password.compareDocumentPosition(service) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      service.compareDocumentPosition(displayName) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

@@ -1,4 +1,10 @@
-import { UpdateConfigRequestSchema, createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
+import {
+  GEZEL_VERSION,
+  UpdateConfigRequestSchema,
+  createLogger,
+  resolveSandboxCopilot,
+  resolveShowWorkInProgressFeatures,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -6,7 +12,7 @@ import {
   transferBoekwachterMembership,
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
-import { getCliDetections } from '../../providers/cli-detection.js';
+import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
@@ -152,13 +158,11 @@ export function configRoutes(ctx: ServiceContext): Hono {
     const copilotCliInstallDir = (
       await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk')
     )?.path;
-    // CLI-binary health probes for the `anthropic-cli` / `codex-cli`
-    // providers. Cached 60s — the Settings UI polls config across most
-    // user interactions, and we don't want to spawn `<bin> --version`
-    // on every poll. Used by the Settings health-check panel and by
-    // ProviderModelSelect to gate the CLI provider entries (mirrors how
-    // `hasOpenaiApiKey` gates the OpenAI entry).
-    const cliDetections = await getCliDetections({
+    // Passive CLI-binary presence for provider pickers. Config is read during
+    // every CLI command's authorization check and by most UI surfaces, so it
+    // must never execute third-party CLIs. The provider-specific "Test
+    // connection" routes perform the real version/capability probe on demand.
+    const cliDetections = getCliPresence({
       ...(config.anthropicCli ? { anthropicCli: config.anthropicCli } : {}),
       ...(config.codexCli ? { codexCli: config.codexCli } : {}),
     });
@@ -187,6 +191,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       keurmeester: config.keurmeester,
       debugMode: config.debugMode === true,
       showAdvancedFeatures: config.showAdvancedFeatures === true,
+      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
+        config.showWorkInProgressFeatures,
+        GEZEL_VERSION,
+      ),
       resetTemplatesOnStartup: config.resetTemplatesOnStartup === true,
       roleBasedNameOnlyMode: config.roleBasedNameOnlyMode === true,
       showPoppetjes: config.showPoppetjes !== false,
@@ -624,6 +632,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       keurmeester: updated.keurmeester,
       debugMode: updated.debugMode === true,
       showAdvancedFeatures: updated.showAdvancedFeatures === true,
+      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
+        updated.showWorkInProgressFeatures,
+        GEZEL_VERSION,
+      ),
       resetTemplatesOnStartup: updated.resetTemplatesOnStartup === true,
       roleBasedNameOnlyMode: updated.roleBasedNameOnlyMode === true,
       showPoppetjes: updated.showPoppetjes !== false,

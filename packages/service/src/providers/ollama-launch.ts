@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 import { type OllamaDetection, detectOllamaInstallation } from './ollama-detect.js';
 
 export interface LaunchResult {
@@ -146,6 +147,7 @@ function runDetached(command: string, args: string[]): Promise<void> {
       const child = spawn(command, args, {
         detached: true,
         stdio: 'ignore',
+        ...windowsDetachedSpawnOptions(),
       });
       child.on('error', reject);
       // Don't await the child — we expect it to live past this process.

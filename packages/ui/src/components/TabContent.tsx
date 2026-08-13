@@ -21,23 +21,19 @@ interface TabContentProps {
 }
 
 export function TabContent({ tab }: TabContentProps) {
-  // Every entity branch here is "the entity is its own top-level tab" —
-  // pass `standalone` so the detail views know to hide the promote-to-tab
-  // affordance. (ProjectsView reads its `detailOnly` flag instead, which
-  // ProjectDetailView already sets via `forceProjectId`.)
   switch (tab.kind) {
     case 'project':
       return <ProjectDetailView projectId={tab.id} />;
     case 'gezel':
-      return <GezelDetail gezelId={tab.id} standalone />;
+      return <GezelDetail gezelId={tab.id} />;
     case 'document':
-      return <DocumentDetail path={tab.path} standalone />;
+      return <DocumentDetail path={tab.path} />;
     case 'task':
-      return <TaskTabContent taskRef={tab.ref} standalone />;
+      return <TaskTabContent taskRef={tab.ref} />;
     case 'script':
       return <ScriptEditorView projectId={tab.projectId} scriptName={tab.name} scope={tab.scope} />;
     case 'craftbook':
-      return <CraftbookTabContent craftbookId={tab.id} source={tab.source} standalone />;
+      return <CraftbookTabContent craftbookId={tab.id} source={tab.source} />;
     case 'craftbook-script':
       return <CraftbookScriptEditorView craftbookId={tab.craftbookId} scriptName={tab.name} />;
     case 'area':

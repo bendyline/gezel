@@ -14,6 +14,7 @@ import {
 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { SearchFilesMatch, SearchFilesRequest, SearchFilesResponse } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { resolveInside } from '../fs/safe-paths.js';
 
 const DEFAULT_MAX_RESULTS = 50;
@@ -287,6 +288,7 @@ async function runRipgrep(
       shell: false,
       env: minimalSearchEnvironment(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...windowsHeadlessSpawnOptions(),
     });
     let stdoutBytes = 0;
     let stderr = '';

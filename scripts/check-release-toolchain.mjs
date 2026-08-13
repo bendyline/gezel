@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 /**
  * Preflight for the npm release toolchain.
@@ -80,6 +81,20 @@ for (const relativePath of [
   } catch {
     failures.push(`missing ${path} — required by the npm release dependency/version boundary`);
   }
+}
+
+const consumerArgCheck = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, 'scripts/check-package-consumers.mjs'), 'unexpected-positional-argument'],
+  { cwd: repoRoot, encoding: 'utf8' },
+);
+if (
+  consumerArgCheck.status !== 1 ||
+  !consumerArgCheck.stderr.includes('unexpected argument "unexpected-positional-argument"')
+) {
+  failures.push(
+    'check-package-consumers.mjs must reject unexpected positional arguments instead of silently repacking the workspace',
+  );
 }
 
 try {

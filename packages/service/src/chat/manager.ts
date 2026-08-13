@@ -303,6 +303,58 @@ const log = createLogger('chat');
 const memLog = createLogger('memory');
 const oneShotLog = createLogger('one-shot');
 
+function oneShotTimeoutError(timeoutMs: number): Error {
+  const duration = timeoutMs < 1_000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1_000)}s`;
+  const err = new Error(
+    `one-shot timed out after ${duration} (including provider setup and queue wait)`,
+  );
+  err.name = 'TimeoutError';
+  return err;
+}
+
+/**
+ * Bound setup stages that do not natively accept an AbortSignal. The original
+ * promise remains observed after cancellation (so it cannot reject unhandled),
+ * and callers may clean up a resource that resolves after the deadline.
+ */
+function awaitOneShotStage<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  abortError: () => Error,
+  onLateResolve?: (value: T) => void,
+): Promise<T> {
+  if (signal.aborted) {
+    void promise.then(onLateResolve, () => {});
+    return Promise.reject(abortError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(abortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        if (settled) {
+          onLateResolve?.(value);
+          return;
+        }
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 function latestUserMessageContent(messages: readonly ChatMessage[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -2451,9 +2503,10 @@ export class ChatManager {
   }
 
   /**
-   * Install-wide panic stop for chat work. The engagement-mode cache flips
-   * synchronously before any teardown awaits, so task runners and autonomous
-   * follow-ups cannot admit replacement turns while the current ones unwind.
+   * Install-wide panic stop for chat work and resident providers. The
+   * engagement-mode cache flips synchronously before any teardown awaits, so
+   * task runners and autonomous follow-ups cannot admit replacement turns
+   * while the current ones unwind.
    * Pending user messages and after-idle handoffs are deliberately discarded:
    * leaving either queue intact would make an "emergency stop" immediately
    * restart work as soon as the cancelled provider call releases its slot.
@@ -2493,6 +2546,13 @@ export class ChatManager {
       (total, result) => total + (result.status === 'fulfilled' && result.value.cancelled ? 1 : 0),
       0,
     );
+
+    // A hard stop must release resident local engines, not merely interrupt
+    // their current HTTP request. The ordinary live reset path disconnects
+    // bridges/providers and force-evicts the production-owned engine pool;
+    // unlike service shutdown, it leaves ChatManager reusable for the next
+    // explicit user message while Reactive mode blocks autonomous restarts.
+    await this.resetClient();
 
     return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
   }
@@ -2848,6 +2908,14 @@ export class ChatManager {
      */
     consultationMode?: boolean;
     /**
+     * Pin the session's name-rendering mode ("boring mode") instead of
+     * following the live config flag. Passed by clients with a fixed
+     * presentation mode (the TUI) so the prompt's gezel references match
+     * the labels that client renders. See
+     * `ChatSessionSchema.roleBasedNameOnlyMode`.
+     */
+    roleBasedNameOnlyMode?: boolean;
+    /**
      * Shape-of-deliverable hint persisted on the session. When
      * `kind: "file"` is set, the consultation-mode addendum swaps
      * "reply in chat" guidance for "write to disk + reply with path
@@ -2920,6 +2988,9 @@ export class ChatManager {
       ...(args.stepId ? { stepId: args.stepId } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
+      ...(args.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
+        : {}),
       ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
       ...(numCtx ? { numCtx } : {}),
     };
@@ -3548,18 +3619,27 @@ export class ChatManager {
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const fromConfigPre = await this.store.readConfig();
-    const fromName = fromGezel
-      ? displayName(
-          { name: fromGezel.name, roleBasedName: fromGezel.roleBasedName },
-          fromConfigPre.roleBasedNameOnlyMode ?? false,
-        )
-      : 'another gezel';
+    const configBoring = fromConfigPre.roleBasedNameOnlyMode ?? false;
+    // Name-rendering mode is resolved per side: a string delivered into a
+    // session follows that session's pinned mode (falling back to the
+    // config flag). These strings are model-visible — a friendly name
+    // leaked into a boring-mode session teaches the model a name the
+    // user's client never shows.
+    const targetBoring = session.roleBasedNameOnlyMode ?? configBoring;
+    const senderSession = args.fromSessionId
+      ? await this.getSessionRecord(args.fromSessionId).catch(() => null)
+      : null;
+    const senderBoring = senderSession?.roleBasedNameOnlyMode ?? configBoring;
+    const targetDisplay = (boring: boolean) =>
+      displayName({ name: target.name, roleBasedName: target.roleBasedName }, boring);
+    const fromDisplay = (boring: boolean) =>
+      fromGezel
+        ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, boring)
+        : 'another gezel';
+    const fromName = fromDisplay(targetBoring);
     const result = {
       sessionId: session.id,
-      toGezelName: displayName(
-        { name: target.name, roleBasedName: target.roleBasedName },
-        fromConfigPre.roleBasedNameOnlyMode ?? false,
-      ),
+      toGezelName: targetDisplay(senderBoring),
       toGezelId: target.id,
     };
     // Re-check after the async session/config reads so simultaneous calls
@@ -3602,7 +3682,9 @@ export class ChatManager {
         targetSessionId: session.id,
         fromSessionId: resolvedFromSessionId,
         toGezelId: target.id,
-        toName: target.name,
+        // Sender-visible: the reply seed `[Message from <toName>]` lands
+        // in the SENDER's session, so it follows the sender's mode.
+        toName: targetDisplay(senderBoring),
         toGender: target.gender,
         fromGezelId: args.fromGezelId,
         fromGezelName: fromName,
@@ -3616,7 +3698,7 @@ export class ChatManager {
         kind: 'gezel.messaged',
         projectId,
         gezelId: args.fromGezelId,
-        summary: `${fromName} messaged ${target.name}`,
+        summary: `${fromDisplay(configBoring)} messaged ${targetDisplay(configBoring)}`,
         details: {
           fromGezelId: args.fromGezelId,
           toGezelId: target.id,
@@ -3678,7 +3760,7 @@ export class ChatManager {
                 kind: 'gezel.message.delivered',
                 projectId,
                 gezelId: target.id,
-                summary: `${target.name} processed message from ${fromName}`,
+                summary: `${targetDisplay(configBoring)} processed message from ${fromDisplay(configBoring)}`,
                 details: {
                   fromGezelId: args.fromGezelId,
                   toGezelId: target.id,
@@ -3713,7 +3795,7 @@ export class ChatManager {
                 kind: 'gezel.message.delivery_failed',
                 projectId,
                 gezelId: target.id,
-                summary: `Message from ${fromName} to ${target.name} failed to deliver`,
+                summary: `Message from ${fromDisplay(configBoring)} to ${targetDisplay(configBoring)} failed to deliver`,
                 details: {
                   fromGezelId: args.fromGezelId,
                   toGezelId: target.id,
@@ -3889,6 +3971,12 @@ export class ChatManager {
       projectId,
       ...(taskRef ? { taskRef } : {}),
       ...(taskRef && stepId ? { stepId } : {}),
+      // Consultations inherit the asker's pinned name-rendering mode —
+      // the reply flows back into the asker's session, so both sides
+      // must speak the same identifier for names not to leak.
+      ...(fromRec?.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: fromRec.roleBasedNameOnlyMode }
+        : {}),
       // Mark as consultation so the target's system prompt gets the
       // focused-question addendum and their tool roster drops
       // team-management + onward ask_specialist / ask_gezel — a
@@ -3901,18 +3989,19 @@ export class ChatManager {
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const askConfig = await this.store.readConfig();
+    // The asker's pinned mode governs both directions: the consultation
+    // session inherited it above, and every asker-facing string below
+    // lands in the asker's session.
+    const askBoring = fromRec?.roleBasedNameOnlyMode ?? askConfig.roleBasedNameOnlyMode ?? false;
     const fromName = fromGezel
-      ? displayName(
-          { name: fromGezel.name, roleBasedName: fromGezel.roleBasedName },
-          askConfig.roleBasedNameOnlyMode ?? false,
-        )
+      ? displayName({ name: fromGezel.name, roleBasedName: fromGezel.roleBasedName }, askBoring)
       : 'another gezel';
 
     // Resolved once up front: used in the asker-facing "Waiting on …"
     // event, the error messages below, and the success reply.
     const targetDisplayName = displayName(
       { name: target.name, roleBasedName: target.roleBasedName },
-      askConfig.roleBasedNameOnlyMode ?? false,
+      askBoring,
     );
 
     const timeoutMs = await this.resolveConsultationIdleTimeoutMs(session, args.timeoutMs);
@@ -9188,14 +9277,28 @@ export class ChatManager {
     } = {},
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
+    const deadlineAt = Date.now() + timeoutMs;
+    const deadlineSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
+    const oneShotSignal = opts.signal
+      ? AbortSignal.any([opts.signal, deadlineSignal])
+      : deadlineSignal;
+    const abortError = () => {
+      if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs);
+      if (opts.signal?.reason instanceof Error) return opts.signal.reason;
+      const err = new Error('one-shot cancelled by caller');
+      err.name = 'AbortError';
+      return err;
+    };
+    const wait = <T>(promise: Promise<T>, onLateResolve?: (value: T) => void) =>
+      awaitOneShotStage(promise, oneShotSignal, abortError, onLateResolve);
     let { gezelId } = opts;
     let actorLabel = opts.actorLabel?.trim() || undefined;
-    const config = await this.store.readConfig();
+    const config = await wait(this.store.readConfig());
     let personaAbout: string | undefined;
     if (opts.useKlerk) {
       actorLabel ??= 'Klerk';
       if (config.klerkGezelId) {
-        const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
+        const klerk = await wait(this.store.getGezel(config.klerkGezelId).catch(() => null));
         if (klerk) {
           gezelId = klerk.id;
           personaAbout = klerk.about?.trim() || undefined;
@@ -9205,7 +9308,9 @@ export class ChatManager {
     if (opts.useKeurmeester) {
       actorLabel ??= 'Keurmeester';
       if (config.keurmeesterGezelId) {
-        const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
+        const keurmeester = await wait(
+          this.store.getGezel(config.keurmeesterGezelId).catch(() => null),
+        );
         if (keurmeester) {
           gezelId = keurmeester.id;
           personaAbout = keurmeester.about?.trim() || undefined;
@@ -9213,19 +9318,19 @@ export class ChatManager {
       }
     }
     if (opts.useGezelPersona && gezelId) {
-      const persona = await this.store.getGezel(gezelId).catch(() => null);
+      const persona = await wait(this.store.getGezel(gezelId).catch(() => null));
       if (persona) {
         personaAbout = persona.about?.trim() || undefined;
         actorLabel ??= persona.name;
       }
     }
     if (!actorLabel && !gezelId) actorLabel = 'System';
-    const providerName = opts.providerName ?? (await this.resolveProviderName(gezelId));
+    const providerName = opts.providerName ?? (await wait(this.resolveProviderName(gezelId)));
     let model = opts.model ?? config.defaultModel?.[providerName];
     let reasoningEffort = config.defaultReasoningEffort?.[providerName];
     let pinnedByGezel = false;
     if (gezelId && !opts.model) {
-      const gezel = await this.store.getGezel(gezelId).catch(() => null);
+      const gezel = await wait(this.store.getGezel(gezelId).catch(() => null));
       if (gezel?.parsed.frontmatter.model) {
         model = gezel.parsed.frontmatter.model;
         pinnedByGezel = true;
@@ -9248,10 +9353,10 @@ export class ChatManager {
     let effectiveProviderName = providerName;
     let provider: LLMProvider;
     const modelWasPinned = Boolean(opts.model) || pinnedByGezel;
-    const bgTarget = modelWasPinned ? null : await this.selectEngineForTask(providerName);
+    const bgTarget = modelWasPinned ? null : await wait(this.selectEngineForTask(providerName));
     if (bgTarget) {
       try {
-        provider = await this.getProviderForModel(bgTarget.provider, bgTarget.modelId);
+        provider = await wait(this.getProviderForModel(bgTarget.provider, bgTarget.modelId));
         effectiveProviderName = bgTarget.provider;
         model = bgTarget.modelId;
         reasoningEffort = config.defaultReasoningEffort?.[bgTarget.provider];
@@ -9261,15 +9366,16 @@ export class ChatManager {
           }`,
         );
       } catch (err) {
+        if (oneShotSignal.aborted) throw abortError();
         oneShotLog.warn(
           `background route to ${bgTarget.provider}:${bgTarget.modelId} failed; using ${providerName}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        provider = await this.resolveOneShotProvider(providerName, model);
+        provider = await wait(this.resolveOneShotProvider(providerName, model));
       }
     } else {
-      provider = await this.resolveOneShotProvider(providerName, model);
+      provider = await wait(this.resolveOneShotProvider(providerName, model));
     }
 
     // Ambient chores must never COLD-LOAD a local engine into a machine
@@ -9294,18 +9400,25 @@ export class ChatManager {
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
     const sessionDefaults = opts.tuningProfileId
-      ? await this.resolveModelSessionDefaults(effectiveProviderName, model, {
-          tuningProfileId: opts.tuningProfileId,
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-        })
+      ? await wait(
+          this.resolveModelSessionDefaults(effectiveProviderName, model, {
+            tuningProfileId: opts.tuningProfileId,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          }),
+        )
       : null;
-    const session = await provider.createSession({
+    const sessionPromise = provider.createSession({
       systemMessage,
       model,
       reasoningEffort,
       ...(sessionDefaults
         ? { profile: sessionDefaults.profile, tuning: sessionDefaults.tuning }
         : {}),
+    });
+    const session = await wait(sessionPromise, (lateSession) => {
+      void lateSession.disconnect().catch((err) => {
+        oneShotLog.warn('late session disconnect error:', err);
+      });
     });
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),
@@ -9320,18 +9433,20 @@ export class ChatManager {
       // a user's active chat turn. Also thread gezelId where available
       // so the affinity bonus keeps the KV cache warm when a gezel is
       // mid-batch of tasks.
-      const content = await session.sendAndWait(prompt, {
-        timeoutMs,
-        queue: {
-          lane: 'background',
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          ...(opts.ambient ? { ambient: true } : {}),
-          ...(gezelId ? { gezelId } : {}),
-          ...(actorLabel ? { actorLabel } : {}),
-          ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
-          ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
-        },
-      });
+      const content = await wait(
+        session.sendAndWait(prompt, {
+          timeoutMs: Math.max(1, deadlineAt - Date.now()),
+          queue: {
+            lane: 'background',
+            signal: oneShotSignal,
+            ...(opts.ambient ? { ambient: true } : {}),
+            ...(gezelId ? { gezelId } : {}),
+            ...(actorLabel ? { actorLabel } : {}),
+            ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
+            ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
+          },
+        }),
+      );
       oneShotLog.info(`completed (${content.length} chars)`);
       return content;
     } finally {
@@ -13201,6 +13316,7 @@ export class ChatManager {
     // tool strip and the prompt's "edits off" posture note; the global
     // allowFileEdits deliberately does not.
     const workspaceWritable = projectManagedWorkspaceWritable(project);
+    const isProjectVoorman = project?.voormanGezelId === record.gezelId;
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
     const directFileWorkConstrained = gezel
@@ -13246,6 +13362,7 @@ export class ChatManager {
       ...(project?.mode ? { projectMode: project.mode } : {}),
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),
@@ -13338,7 +13455,9 @@ export class ChatManager {
     );
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
-      roleBasedNameOnlyMode: config.roleBasedNameOnlyMode ?? false,
+      // Session stamp wins over the live config flag: a TUI-created
+      // session stays boring even when the desktop preference is named.
+      roleBasedNameOnlyMode: record.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode ?? false,
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
       ...(lessonsMd.trim() ? { lessons: lessonsMd.trim() } : {}),
@@ -14084,10 +14203,12 @@ export class ChatManager {
         mcpEnv.GEZEL_MCP_EXCLUDE = CLAUDE_CLI_EXCLUDED_MCP_TOOLS.join(',');
         mcpEnv.GEZEL_PERMISSION_PROMPT = '1';
       }
-      // Codex CLI has its own built-in shell + file edit + web search,
-      // so we hide gezel-mcp's overlapping surface here too. Codex doesn't
-      // expose a `--permission-prompt-tool` hook — its sandbox/approval
-      // flags handle gating natively, so no equivalent of GEZEL_PERMISSION_PROMPT.
+      // Codex CLI has its own built-in shell + file edit + web search, so we
+      // hide gezel-mcp's overlapping mutation/execution/web surface. Gezel's
+      // scoped workspace readers stay registered for read-only and Plan-mode
+      // sessions. Codex doesn't expose a `--permission-prompt-tool` hook — its
+      // sandbox/approval flags gate natively, so there is no equivalent of
+      // GEZEL_PERMISSION_PROMPT.
       if (record.providerName === 'codex-cli') {
         mcpEnv.GEZEL_MCP_EXCLUDE = CODEX_CLI_EXCLUDED_MCP_TOOLS.join(',');
       }
@@ -14451,6 +14572,7 @@ export class ChatManager {
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(record.consultationMode ? { consultationMode: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),

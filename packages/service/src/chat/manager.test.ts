@@ -381,6 +381,35 @@ describe('ChatManager — session lifecycle', () => {
     const picked = await manager.ensureOrCreateSession({ gezelId: 'ada' });
     expect(picked.messages).toEqual([]);
   });
+
+  it('stamps roleBasedNameOnlyMode when the creating client pins it', async () => {
+    const pinned = await manager.createSession({ gezelId: 'ada', roleBasedNameOnlyMode: true });
+    expect(pinned.roleBasedNameOnlyMode).toBe(true);
+    const read = await store.getSession('ada', pinned.id);
+    expect(read?.roleBasedNameOnlyMode).toBe(true);
+
+    // Unpinned sessions carry no stamp — they follow the live config flag.
+    const unpinned = await manager.createSession({ gezelId: 'ada' });
+    expect(unpinned.roleBasedNameOnlyMode).toBeUndefined();
+  });
+
+  it('a pinned session builds a boring-mode prompt even when the config flag is off', async () => {
+    // config.roleBasedNameOnlyMode is unset (falsy) in this harness — the
+    // session stamp alone must flip the prompt into role-name rendering.
+    const session = await manager.createSession({ gezelId: 'ada', roleBasedNameOnlyMode: true });
+    mock.script('ok');
+    await manager.send(session.id, 'hello');
+
+    const create = mock.calls.filter((call) => call.kind === 'create').at(-1);
+    expect(create?.opts?.systemMessage).toContain('by role name only');
+
+    // And an unpinned session under the same (off) config stays named.
+    const plain = await manager.createSession({ gezelId: 'ada' });
+    mock.script('ok');
+    await manager.send(plain.id, 'hello');
+    const plainCreate = mock.calls.filter((call) => call.kind === 'create').at(-1);
+    expect(plainCreate?.opts?.systemMessage).not.toContain('by role name only');
+  });
 });
 
 describe('ChatManager — send + persistence', () => {
@@ -1666,6 +1695,7 @@ describe('ChatManager — inflight visibility + cancel', () => {
   it('emergencyStop flips to reactive before cancelling turns and clears restart queues', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     const queuedReject = vi.fn();
+    const engineRouter = { shutdown: vi.fn(async () => {}) };
     let parkedRan = false;
     const internals = manager as unknown as {
       inflight: Map<string, { userText: string; startedAt: number }>;
@@ -1679,7 +1709,9 @@ describe('ChatManager — inflight visibility + cancel', () => {
         }>
       >;
       afterSessionIdle: Map<string, Array<() => void>>;
+      engineRouterCache: typeof engineRouter | null;
     };
+    internals.engineRouterCache = engineRouter;
     internals.inflight.set(session.id, {
       userText: 'keep working until stopped',
       startedAt: Date.now(),
@@ -1714,6 +1746,7 @@ describe('ChatManager — inflight visibility + cancel', () => {
       expect.objectContaining({ message: expect.any(String) }),
     );
     expect(parkedRan).toBe(false);
+    expect(engineRouter.shutdown).toHaveBeenCalledOnce();
   });
 
   it('beginShutdown cancels live turns, drops parked handoffs, and rejects new sends', async () => {
@@ -1818,6 +1851,60 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     });
     expect(mayaDisk!.messages[1]?.role).toBe('assistant');
     expect(mayaDisk!.messages[1]?.content).toBe('I checked — all good.');
+  });
+
+  it('resolves relay names per side: a boring-pinned sender never sees friendly names', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Voorman' });
+    const adaSession = await manager.createSession({
+      gezelId: 'ada',
+      roleBasedNameOnlyMode: true,
+    });
+    mock.script('All good.');
+
+    const res = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'status?',
+    });
+
+    // The tool result goes back into Ada's pinned-boring session — it must
+    // carry the role-based name, or the model leaks "Maya" into prose.
+    expect(res.toGezelName).toBe('voorman');
+
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', res.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+
+    // Maya's session is unpinned and the config flag is off, so the seed
+    // delivered INTO her session keeps the friendly sender name.
+    const mayaDisk = await store.getSession('maya', res.sessionId);
+    expect(mayaDisk!.messages[0]?.content).toBe('[Message from Ada]: status?');
+  });
+
+  it('renders relay names role-based everywhere when the config flag is on', async () => {
+    await store.writeConfig({ provider: 'copilot', roleBasedNameOnlyMode: true });
+    await store.createGezel({ name: 'Maya', role: 'Voorman' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('All good.');
+
+    const res = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'status?',
+    });
+
+    expect(res.toGezelName).toBe('voorman');
+
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', res.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+
+    const mayaDisk = await store.getSession('maya', res.sessionId);
+    expect(mayaDisk!.messages[0]?.content).toBe('[Message from developer]: status?');
   });
 
   it('adds single-file HTML constraints to index.html file handoffs', async () => {
@@ -3626,7 +3713,30 @@ describe('ChatManager — one-shot attribution', () => {
     });
 
     const send = mock.calls.find((call) => call.kind === 'send');
-    expect(send?.sendOpts?.queue?.signal).toBe(controller.signal);
+    const forwarded = send?.sendOpts?.queue?.signal;
+    expect(forwarded).toBeDefined();
+    expect(forwarded).not.toBe(controller.signal);
+    expect(forwarded?.aborted).toBe(false);
+    controller.abort(new Error('cancel test'));
+    expect(forwarded?.aborted).toBe(true);
+  });
+
+  it('applies the one-shot deadline to provider setup, before generation starts', async () => {
+    const gate = mock.gateNextCreateSession();
+    const pending = manager.oneShotCompletion('draft a persona', 30);
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'TimeoutError',
+      message: expect.stringContaining('including provider setup and queue wait'),
+    });
+
+    // A provider that finishes setup after the caller timed out must not leak
+    // the ephemeral session.
+    gate.release();
+    await vi.waitFor(
+      () => expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true),
+      { timeout: 2_000, interval: 10 },
+    );
   });
 
   it('resolves and forwards an explicit one-shot tuning profile', async () => {

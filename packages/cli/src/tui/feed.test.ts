@@ -15,6 +15,7 @@ describe('reduceFeed task events', () => {
         summary: 'Task default/4 → complete',
         at: '2026-08-08T12:00:00.000Z',
         taskRef: 'default/4',
+        gezelId: 'reviewer',
       },
     };
 
@@ -23,8 +24,66 @@ describe('reduceFeed task events', () => {
         sessionId: 'local',
         kind: 'note',
         text: 'task · Task default/4 → complete',
+        taskEvent: { kind: 'task.status.changed', gezelId: 'reviewer' },
       }),
     ]);
+  });
+});
+
+describe('reduceFeed queued messages', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('shows a queued message immediately and upserts its preview', () => {
+    const queued = reduceFeed(
+      [],
+      envelope({
+        type: 'queue_enqueued',
+        queueId: 'q1',
+        preview: 'please also check the tests',
+        enqueuedAt: '2026-08-13T12:00:00.000Z',
+        nudge: true,
+      }),
+    );
+    const updated = reduceFeed(
+      queued,
+      envelope({
+        type: 'queue_enqueued',
+        queueId: 'q1',
+        preview: 'please check the tests and docs',
+        enqueuedAt: '2026-08-13T12:00:00.000Z',
+        nudge: true,
+      }),
+    );
+
+    expect(updated).toEqual([
+      expect.objectContaining({
+        key: 'queue-q1',
+        sessionId: 's1',
+        kind: 'pending',
+        text: 'please check the tests and docs',
+      }),
+    ]);
+  });
+
+  it('removes the pending row when the queued message starts or is discarded', () => {
+    const queued = reduceFeed(
+      [],
+      envelope({
+        type: 'queue_enqueued',
+        queueId: 'q1',
+        preview: 'follow up',
+        enqueuedAt: '2026-08-13T12:00:00.000Z',
+      }),
+    );
+
+    expect(
+      reduceFeed(queued, envelope({ type: 'queue_removed', queueId: 'q1', reason: 'started' })),
+    ).toEqual([]);
   });
 });
 

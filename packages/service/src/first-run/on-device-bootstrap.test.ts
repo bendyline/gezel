@@ -162,20 +162,16 @@ describe('bootstrapOnDeviceFirstRun', () => {
     expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
   });
 
-  it('re-pins to an already-installed model when the pinned one is missing', async () => {
-    // The "forgot my models" upgrade scenario: the pinned model vanished
-    // (deleted from Settings, or a home flip hid it) but other working
-    // models are on disk. Re-pinning to the tier winner would make Home
-    // offer a fresh multi-GB download; instead we adopt an installed model.
+  it('re-evaluates hardware instead of adopting an unrelated installed model when the pin is missing', async () => {
     await store.writeConfig({
       provider: 'llama-cpp',
-      defaultModel: { 'llama-cpp': 'gemma4-26b-q4' },
+      defaultModel: { 'llama-cpp': 'missing-custom-model' },
       firstRunCompleted: true,
       firstRunInstallError: 'stale error from the abandoned install',
     });
     const { manager: llama, calls: llamaCalls } = fakeModelManager(
       [],
-      [{ id: 'gemma4-e2b-q4' }, { id: 'qwen3.6-27b-q8' }],
+      [{ id: 'shared-custom-a' }, { id: 'shared-custom-b' }],
     );
     const { manager: mlx } = fakeMlxManager();
     await bootstrapOnDeviceFirstRun({
@@ -187,7 +183,8 @@ describe('bootstrapOnDeviceFirstRun', () => {
       archOverride: 'x64',
     });
     const config = await store.readConfig();
-    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e2b-q4');
+    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(config.defaultModel?.['llama-cpp']).not.toMatch(/^shared-custom-/);
     expect(config.firstRunInstallError).toBeUndefined();
     expect(llamaCalls).toEqual([]);
   });
@@ -248,6 +245,58 @@ describe('bootstrapOnDeviceFirstRun', () => {
     // The bootstrap no longer fires the install — the user must click
     // "Download recommended model" in the Home banner.
     expect(calls).toEqual([]);
+  });
+
+  it('keeps the hardware recommendation independent of unrelated shared models', async () => {
+    const { manager, calls } = fakeModelManager([], [{ id: 'shared-model-not-in-catalog' }]);
+    await bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: manager,
+      mlxModels: fakeMlxManager().manager,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+
+    const config = await store.readConfig();
+    expect(config.provider).toBe('llama-cpp');
+    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(config.defaultModel?.['llama-cpp']).not.toBe('shared-model-not-in-catalog');
+    expect(config.firstRunCompleted).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('publishes the recommendation before slow shared-model verification finishes', async () => {
+    let releaseInstalled: (models: Array<{ id: string }>) => void = () => {};
+    const installed = new Promise<Array<{ id: string }>>((resolve) => {
+      releaseInstalled = resolve;
+    });
+    const manager = {
+      listInstalled: () => installed,
+      getActiveInstalls: () => [],
+    } as unknown as LlamaCppModelManager;
+    const run = bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: manager,
+      mlxModels: fakeMlxManager().manager,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+
+    let provisional = await store.readConfig();
+    for (let attempt = 0; !provisional.firstRunCompleted && attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      provisional = await store.readConfig();
+    }
+    releaseInstalled([{ id: 'shared-after-verification' }]);
+    await run;
+
+    expect(provisional.provider).toBe('llama-cpp');
+    expect(provisional.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect((await store.readConfig()).defaultModel?.['llama-cpp']).toBe(
+      provisional.defaultModel?.['llama-cpp'],
+    );
   });
 
   it('pins provider to mlx and a recommended default on darwin-arm64 without auto-installing', async () => {

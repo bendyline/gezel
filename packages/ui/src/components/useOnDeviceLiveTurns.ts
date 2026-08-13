@@ -5,10 +5,9 @@
  * drive the header pill + dropdown) and QueueMeter (to annotate the
  * per-session rows inside the popover with their current phase).
  *
- * Deliberately minimal — only tracks what both consumers need. Per-
- * pill telemetry (rolling tokens/sec, RAM footprint) still lives on
- * the pill itself; promoting it here would pull QueueMeter into a
- * subscription it doesn't actually use.
+ * Deliberately minimal — only tracks what both consumers need by default.
+ * EngineStatusPill can opt into a throttled output-volume counter; QueueMeter
+ * leaves that off so token deltas don't re-render its larger popover.
  *
  * Each mount of the hook opens its own SSE connection to
  * `/events/chat/all`. That's two connections when both the pill and
@@ -18,7 +17,7 @@
  */
 
 import type { ChatEventEnvelope } from '@bendyline/gezel';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 
@@ -42,6 +41,14 @@ export interface LiveTurnState {
   startedAt: number;
   /** 0-1 progress, when the phase event carried one (prompt-processing batches). */
   progress?: number;
+  /**
+   * Generated output volume observed on the chat stream. Includes visible
+   * prose, private reasoning, and structured tool arguments so it tracks the
+   * engine's eventual completion-token total more closely than visible text
+   * alone. Consumers present the derived token count as an estimate because
+   * streamed text fragments are not tokenizer boundaries.
+   */
+  outputChars?: number;
   /**
    * Wall-clock millis of the most recent event that touched this
    * entry (user_message seed, engine_phase update). Used by the idle
@@ -73,8 +80,15 @@ const LIVE_TURN_MAX_IDLE_MS = 90_000;
  * `enabled: false` — lets the caller gate subscription on whether
  * the user is on the llama-cpp provider at all.
  */
-export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnState> {
+export function useOnDeviceLiveTurns(
+  enabled: boolean,
+  trackOutput = false,
+): Map<string, LiveTurnState> {
   const [liveTurns, setLiveTurns] = useState<Map<string, LiveTurnState>>(new Map());
+  const pendingOutputRef = useRef(
+    new Map<string, { chars: number; gezelId: string; projectId: string }>(),
+  );
+  const outputFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -82,6 +96,35 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
       return;
     }
     const ctrl = new AbortController();
+    const flushPendingOutput = () => {
+      outputFlushTimerRef.current = null;
+      if (pendingOutputRef.current.size === 0) return;
+      const pending = pendingOutputRef.current;
+      pendingOutputRef.current = new Map();
+      setLiveTurns((prev) => {
+        const next = new Map(prev);
+        const now = Date.now();
+        for (const [sessionId, addition] of pending) {
+          const prior = next.get(sessionId);
+          next.set(sessionId, {
+            phase: prior?.phase ?? 'generating',
+            ...(prior?.provider ? { provider: prior.provider } : {}),
+            label: prior?.label ?? phaseBaseLabel('generating'),
+            gezelId: prior?.gezelId ?? addition.gezelId,
+            projectId: prior?.projectId ?? addition.projectId,
+            startedAt: prior?.startedAt ?? now,
+            lastEventAt: now,
+            ...(prior?.progress !== undefined ? { progress: prior.progress } : {}),
+            outputChars: (prior?.outputChars ?? 0) + addition.chars,
+          });
+        }
+        return next;
+      });
+    };
+    const queueOutputFlush = () => {
+      if (outputFlushTimerRef.current !== null) return;
+      outputFlushTimerRef.current = setTimeout(flushPendingOutput, 250);
+    };
     void (async () => {
       try {
         for await (const env of streamSharedAllChatEvents({
@@ -116,11 +159,13 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
                 projectId,
                 startedAt: prior?.startedAt ?? Date.now(),
                 lastEventAt: Date.now(),
+                outputChars: prior?.outputChars ?? 0,
                 ...(typeof progress === 'number' ? { progress } : {}),
               });
               return next;
             });
           } else if (event.type === 'user_message') {
+            pendingOutputRef.current.delete(sessionId);
             setLiveTurns((prev) => {
               // Always reset on user_message — a fresh user turn means
               // any prior turn for this session must have ended. If
@@ -140,10 +185,25 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
                 projectId,
                 startedAt: Date.now(),
                 lastEventAt: Date.now(),
+                outputChars: 0,
               });
               return next;
             });
+          } else if (
+            event.type === 'delta' ||
+            event.type === 'reasoning_delta' ||
+            event.type === 'tool_args_delta'
+          ) {
+            if (!trackOutput) continue;
+            const pending = pendingOutputRef.current.get(sessionId);
+            pendingOutputRef.current.set(sessionId, {
+              chars: (pending?.chars ?? 0) + event.content.length,
+              gezelId: pending?.gezelId ?? gezelId,
+              projectId: pending?.projectId ?? projectId,
+            });
+            queueOutputFlush();
           } else if (event.type === 'done' || event.type === 'error') {
+            pendingOutputRef.current.delete(sessionId);
             setLiveTurns((prev) => {
               if (!prev.has(sessionId)) return prev;
               const next = new Map(prev);
@@ -156,8 +216,13 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
         /* aborted / stream closed */
       }
     })();
-    return () => ctrl.abort();
-  }, [enabled]);
+    return () => {
+      ctrl.abort();
+      if (outputFlushTimerRef.current !== null) clearTimeout(outputFlushTimerRef.current);
+      outputFlushTimerRef.current = null;
+      pendingOutputRef.current.clear();
+    };
+  }, [enabled, trackOutput]);
 
   // Idle sweeper: drop entries whose last event was >LIVE_TURN_MAX_IDLE_MS
   // ago. Runs every 5s — cheap, scales with the (always small) live-

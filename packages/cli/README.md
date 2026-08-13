@@ -13,8 +13,9 @@ gezel
 ```
 
 On a clean machine, the TUI stays in first-time setup until you decide what to
-install. It offers the verified native toolkit first, then device-ranked model
-choices:
+install. It offers the verified Gezel native toolkit first, downloaded from
+the [Gezel GitHub Releases](https://github.com/bendyline/gezel/releases/), then
+device-ranked model choices:
 
 1. The best chat model plus every recommended image, speech, reading, and video
    helper that fits this device.
@@ -24,6 +25,11 @@ choices:
 Downloads show live progress and activate inside the running daemon, so setup
 continues directly into the TUI without a restart.
 
+If the per-user or machine-shared store already has the configured model, the
+TUI uses it without downloading another copy. A stale recommendation never
+counts merely because some other shared model exists: setup asks you to use an
+available model or download the recommendation instead.
+
 ## Which Gezel service the CLI uses
 
 With no connection flags, the CLI follows this order:
@@ -32,10 +38,12 @@ With no connection flags, the CLI follows this order:
    machine service when one is present. A modern machine service on port
    `6228` is an engine broker, not a product API, so the CLI never sends it
    projects, credentials, tools, or terminal requests.
-2. Discover the logged-in user's product daemon through the Gezel app SDK.
-   Its actual dynamic port and pinned TLS certificate come from
-   `~/.gezel/runtime`; management commands may start that user-role daemon
-   when it is absent.
+2. Discover the logged-in user's product daemon through the same pinned
+   runtime discovery used by the Gezel app SDK. Its actual dynamic port and
+   pinned TLS certificate come from `~/.gezel/runtime`; management commands
+   may start that user-role daemon when it is absent. The interactive TUI
+   retains ownership when it starts a daemon itself, so exiting the TUI runs
+   the daemon's complete shutdown path and cleans up its local engine children.
 3. On first use, the terminal waits while the Gezel app asks you to approve
    **Gezel CLI**. The terminal shows a six-character code that you enter in
    the app to confirm that you initiated the request. The resulting revocable,
@@ -131,7 +139,7 @@ Run `gezel --help` for the full list. The most-used ones:
 |---|---|
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
-| `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI). On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
+| `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |
 | `gezel agent list\|create\|show` | Manage your gezels |
@@ -148,7 +156,14 @@ gezel-owned active tasks for the current project. Night Shift is managed with
 `/nightshift start`, `/nightshift stop`, and `/nightshift list`; the command
 wordwheel exposes all three subcommands. `/mode` opens a picker for the same
 four activity levels as the one-shot command; `/mode reactive+tasks` (for
-example) switches directly.
+example) switches directly. `/model` lists every installed user/shared model
+and includes **Download a new model**; `/model download` opens that device-ranked
+download list directly. A completed download is selected for the active gezel
+and starts a fresh chat. Project edit permissions are available through
+`/allow` and `/disallow`: use `edits` for built-in tools and background work,
+`codexedits` for Codex sessions, or `claudeedits` for Claude sessions. For
+example, `/disallow edits` makes Gezel-managed access to the current project
+read-only, while `/allow codexedits` puts Codex in project-scoped edit mode.
 
 ## Stability
 

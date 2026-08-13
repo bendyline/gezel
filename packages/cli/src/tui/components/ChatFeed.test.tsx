@@ -1,5 +1,5 @@
 import type { GezelSummary } from '@bendyline/gezel';
-import { renderToString } from 'ink';
+import { Box, Text, renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 import type { FeedRow } from '../feed.js';
 import { ChatFeed } from './ChatFeed.js';
@@ -39,6 +39,71 @@ describe('ChatFeed', () => {
     expect(output).not.toContain('discarded');
     expect(output).toContain('▎you: question');
     expect(output).toContain('▎Builder: answer');
+  });
+
+  it('labels queued user input as pending', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[row('focus', 'pending', 'please also inspect the tests', 'builder')]}
+        gezels={gezels}
+        boring
+        focusedSessionId="focus"
+      />,
+    );
+
+    expect(output).toContain('▎pending: please also inspect the tests');
+    expect(output).not.toContain('Builder: please also inspect the tests');
+  });
+
+  it('rewrites actor names in task updates for boring mode', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[
+          {
+            ...row('local', 'note', 'task · Task studio/1 entry step "model-system" handed to Bo'),
+            taskEvent: { kind: 'task.entry.dispatched', gezelId: 'builder' },
+          },
+        ]}
+        gezels={gezels}
+        boring
+        focusedSessionId={undefined}
+      />,
+    );
+
+    expect(output).toContain(
+      'system: task · Task studio/1 entry step "model-system" handed to Builder',
+    );
+    expect(output).not.toContain('handed to Bo');
+  });
+
+  it('does not expose a name-derived raw id while a new gezel is missing from the roster', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[row('task-session', 'assistant', 'I am starting.', 'vasile')]}
+        gezels={gezels}
+        boring
+        focusedSessionId="task-session"
+      />,
+    );
+
+    expect(output).not.toContain('vasile:');
+    expect(output).toContain('gezel: I am starting.');
+  });
+
+  it('leaves a blank line between the feed and the prompt area', () => {
+    const output = renderToString(
+      <Box flexDirection="column">
+        <ChatFeed
+          rows={[row('focus', 'assistant', 'answer', 'builder')]}
+          gezels={gezels}
+          boring
+          focusedSessionId="focus"
+        />
+        <Text>prompt area</Text>
+      </Box>,
+    );
+
+    expect(output).toContain('▎Builder: answer\n\nprompt area');
   });
 
   it('renders terminal blocks without a speaker prefix and humanizes assistant tool markup', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatEngineIdentity, formatEngineStatus } from './EnginePill.js';
+import { EnginePill, formatEngineIdentity, formatEngineStatus } from './EnginePill.js';
 
 describe('formatEngineIdentity', () => {
   it('presents llama-cpp as llama and includes its model', () => {
@@ -17,9 +17,24 @@ describe('formatEngineIdentity', () => {
 });
 
 describe('formatEngineStatus', () => {
-  it('places the effective access mode between activity and engine identity', () => {
+  it('places changing activity after the stable access mode and engine identity', () => {
     expect(formatEngineStatus('mlx', 'qwen3.6-27b-q8', true, 'reading prompt', 'editable')).toBe(
-      '● reading prompt · editable · mlx · qwen3.6-27b-q8',
+      'editable · mlx · qwen3.6-27b-q8 · ● reading prompt',
     );
+  });
+
+  it('highlights only the trailing activity', () => {
+    const pill = EnginePill({
+      provider: 'mlx',
+      model: 'qwen3.6-27b-q8',
+      accessMode: 'editable',
+      busy: true,
+      label: 'reading prompt',
+    });
+    const [metadata, activity] = pill.props.children;
+
+    expect(metadata.props.backgroundColor).toBeUndefined();
+    expect(activity.props.backgroundColor).toBe('yellow');
+    expect(activity.props.children).toContain('● reading prompt');
   });
 });

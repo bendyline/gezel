@@ -81,10 +81,12 @@ async function listChatModelManifests(catalog: CatalogService): Promise<ChatMode
  *      "don't override the user's decisions."
  *   2. Probes the host and ranks open local models from the catalog for
  *      the available RAM and GPU memory.
- *   3. Branches on platform: Apple Silicon → `mlx` provider + MLX
- *      variant of the tier; everyone else → `llama-cpp` provider
- *      + GGUF variant. Pins the choice as the default model and
- *      sets `firstRunCompleted = true`.
+ *   3. Branches on platform: Apple Silicon → `mlx` provider; everyone else
+ *      → `llama-cpp`. Pins the hardware-ranked recommendation regardless of
+ *      whether unrelated user/shared models happen to be installed. An
+ *      installed copy of that exact recommendation is immediately usable;
+ *      other installed models remain alternatives in first-party pickers.
+ *      Sets `firstRunCompleted = true`.
  *   4. Stops here. A first-party client (the desktop banner or CLI TUI)
  *      asks before downloading. The pin tells each client which model to
  *      recommend without surprising the user with a background download.
@@ -163,30 +165,14 @@ export async function bootstrapOnDeviceFirstRun(opts: {
       const pinned = config.defaultModel?.[provider];
       const installed = await installer.listInstalled();
       const pinnedIsOnDisk = pinned ? installed.some((m) => m.id === pinned) : false;
-      if (!pinnedIsOnDisk && installed.length > 0) {
-        // The pin is stale but the user has working models — repoint at one
-        // of those instead of the tier winner. Re-pinning to a not-installed
-        // recommendation here would make Home offer a fresh multi-GB
-        // download while gigabytes of working weights sit on disk, which
-        // reads as "the app forgot my models."
-        const fallback = installed[0]!.id;
-        log.warn(
-          `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed but ` +
-            `${installed.length} model(s) are; re-pinning to installed ${fallback}.`,
-        );
-        await store.writeConfig({
-          defaultModel: { ...config.defaultModel, [provider]: fallback },
-          firstRunInstallError: null as unknown as undefined,
-        });
-        return;
-      }
       if (!pinnedIsOnDisk) {
         const decision = await detectModelTier(await listChatModelManifests(opts.catalog));
         const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
         if (target.provider === provider && target.modelId !== pinned) {
           log.info(
             `[first-run] re-evaluating: pinned ${provider}/${pinned ?? '<none>'} not installed; ` +
-              `resolver now picks ${target.modelId} (${decision.reason}). Updating pin.`,
+              `resolver now picks ${target.modelId} (${decision.reason}). Updating pin; ` +
+              `${installed.length} other installed model(s) remain available as alternatives.`,
           );
           await store.writeConfig({
             defaultModel: { ...config.defaultModel, [provider]: target.modelId },
@@ -224,16 +210,31 @@ export async function bootstrapOnDeviceFirstRun(opts: {
     `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb})`,
   );
 
-  // Write the provider + default-model pin so the Home banner can
-  // label the "Download recommended model" CTA with the right id.
-  // We deliberately do NOT auto-fire the install — a fresh launch
-  // shouldn't kick off a multi-GB download without the user's
-  // explicit consent. The UI reads the pin and offers the button;
-  // clicking it goes through the same install SSE route Settings uses.
+  // Publish the recommendation before shared-model verification. A first
+  // adoption may hash tens of gigabytes and the CLI must not time out waiting
+  // for `provider` to leave its compatibility fallback. The exact inventory
+  // reconciliation below corrects the durable pin; first-party clients that
+  // are already checking inventory either see the recommended model or
+  // present the verified installed alternatives instead of claiming setup is
+  // ready merely because some different model exists.
   await store.writeConfig({
     provider: target.provider,
     defaultModel: { ...config.defaultModel, [target.provider]: target.modelId },
     firstRunCompleted: true,
     firstRunInstallError: null as unknown as undefined,
   });
+
+  const targetManager = target.provider === 'mlx' ? mlxModels : llamaCppModels;
+  const installed = await targetManager.listInstalled();
+  const installedTarget = installed.find((model) => model.id === target.modelId);
+  if (installedTarget) {
+    log.info(
+      `[first-run] recommended ${target.provider}/${target.modelId} is already available among ${installed.length} user/shared model(s).`,
+    );
+  } else if (installed.length > 0) {
+    log.info(
+      `[first-run] retaining hardware recommendation ${target.provider}/${target.modelId}; ` +
+        `${installed.length} other user/shared model(s) remain available as picker alternatives.`,
+    );
+  }
 }

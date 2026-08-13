@@ -122,13 +122,14 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     label: z.string().min(1).optional(),
     artifact: z.boolean().optional(),
   }),
-  /** `file` must NOT match `pattern` (regex). E.g. exclude internal-only release noise. */
+  /** `file` must NOT match `pattern` (regex), in the workspace or artifacts drawer. */
   z.object({
     kind: z.literal('notContains'),
     file: z.string().min(1),
     pattern: z.string().min(1),
     flags: z.string().optional(),
     label: z.string().min(1).optional(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * `file` may use high-risk claim wording only when the exact matched

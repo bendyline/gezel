@@ -935,7 +935,7 @@ server.tool(
 
 server.tool(
   'read_file',
-  'Read one workspace file, optionally only an inclusive line range. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
+  'Read one project-workspace file, optionally only an inclusive line range. This tool never reads the separate artifacts drawer; use read_artifact for artifact inputs. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
   {
     path: z.string().min(1).max(4096).describe('File path relative to the project root.'),
     startLine: z
@@ -1006,6 +1006,11 @@ server.tool(
       // self-evident from the tool result alone.
       let text = `read_file "${path}": ${base}`;
       if (/not found|404|no such file/i.test(base)) {
+        const artifactCollision = await artifactCollisionForWorkspacePath(path);
+        if (artifactCollision) {
+          text += `. A project artifact exists at "${artifactCollision}". The workspace and artifacts are separate drawers; call read_artifact({ path: ${JSON.stringify(artifactCollision)} }) instead of read_file. The artifact was not opened automatically.`;
+          return { content: [{ type: 'text' as const, text }], isError: true };
+        }
         try {
           const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
           const listing = await api.listProjectWorkspace(projectId, dir, false);
@@ -3090,6 +3095,24 @@ async function workspaceCollisionForArtifactPath(
     // artifact tool continue to its normal path-safety/error handling.
   }
   return null;
+}
+
+/**
+ * Find an exact same-path artifact after a workspace read misses. This is a
+ * redirect hint only: deliberately do not return artifact content from the
+ * workspace tool, because that would erase the provenance boundary and could
+ * make later writes land in the wrong drawer.
+ */
+async function artifactCollisionForWorkspacePath(path: string): Promise<string | null> {
+  try {
+    const cleanPath = normalizeArtifactPath(path);
+    const result = await api.readProjectArtifactSlice(projectId, cleanPath, { head: 0 });
+    return result.kind === 'found' && !result.fuzzy ? result.path : null;
+  } catch {
+    // This helper only adds a corrective hint. Preserve read_file's ordinary
+    // near-match handling when the artifact lookup itself is unavailable.
+    return null;
+  }
 }
 
 const WORKSPACE_DELIVERABLE_EXTENSIONS = new Set([

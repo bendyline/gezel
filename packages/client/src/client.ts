@@ -1048,6 +1048,12 @@ export interface ConfigResponse {
    */
   showAdvancedFeatures?: boolean;
   /**
+   * When true, very early work-in-progress surfaces are revealed in the UI
+   * and CLI. Materialized on GET; defaults on in development builds and off
+   * in releases, while an explicit user choice always wins.
+   */
+  showWorkInProgressFeatures?: boolean;
+  /**
    * Debug-only opt-in: when true, the service restores every
    * template-derived gezel's about.md to its catalog default on each boot,
    * discarding local edits. Materialized on GET (defaults to `false` when
@@ -1248,14 +1254,9 @@ export interface ConfigResponse {
     extraConfigOverrides?: Record<string, string>;
   };
   /**
-   * Cached health probe for the `claude` binary. `installed` is the
-   * boolean the dropdown / Settings panel should gate on; `path` and
-   * `version` are populated when the probe succeeded; `error` is the
-   * underlying failure message when it didn't (useful for "binary at
-   * X is not executable: ENOENT" diagnostics in Settings).
-   *
-   * Cached server-side with a 60s TTL so repeated config GETs don't
-   * spawn `claude --version` per-poll.
+   * Passive filesystem/PATH presence for the `claude` binary. Config reads do
+   * not execute the CLI; provider tests and actual use perform the full health
+   * probe. `version` remains optional for compatibility with probed responses.
    */
   anthropicCliStatus?: {
     installed: boolean;
@@ -1263,7 +1264,7 @@ export interface ConfigResponse {
     version?: string;
     error?: string;
   };
-  /** Cached health probe for the `codex` binary. Mirrors `anthropicCliStatus`. */
+  /** Passive presence for the `codex` binary. Mirrors `anthropicCliStatus`. */
   codexCliStatus?: {
     installed: boolean;
     path?: string;
@@ -4234,9 +4235,10 @@ export class GezelClient {
   }
 
   /**
-   * Stop every in-progress chat, discard queued chat messages, and persist
-   * install-wide Reactive engagement mode. This is a product-daemon action,
-   * not an engine-broker action: the broker never owns chats or user config.
+   * Stop every in-progress chat, discard queued chat messages, release
+   * resident providers/local engines, and persist install-wide Reactive
+   * engagement mode. This is a product-daemon action, not an engine-broker
+   * action: the broker never owns chats or user config.
    */
   emergencyStopChats(): Promise<{
     ok: boolean;

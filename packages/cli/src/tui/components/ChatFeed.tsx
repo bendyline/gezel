@@ -13,6 +13,7 @@ const TABLE_LOGO = [
 
 const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
   user: 'white',
+  pending: 'yellow',
   assistant: 'cyan',
   tool: 'yellow',
   note: 'magenta',
@@ -37,9 +38,9 @@ export function ChatFeed(props: {
   const shown = rows.slice(Math.max(0, rows.length - visible));
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} marginBottom={1}>
       {shown.length === 0 ? (
-        <Box flexDirection="row" marginBottom={1}>
+        <Box flexDirection="row">
           <Text color="yellow">{TABLE_LOGO}</Text>
           <Box flexDirection="column" marginLeft={3}>
             <Text>gezel {GEZEL_VERSION}</Text>
@@ -62,15 +63,17 @@ export function ChatFeed(props: {
           const who =
             row.kind === 'user'
               ? 'you'
-              : row.gezelId
-                ? gezelLabel(row.gezelId, gezels, boring)
-                : row.kind === 'tool'
-                  ? 'tool'
-                  : row.kind === 'shell'
-                    ? 'shell'
-                    : row.kind === 'error'
-                      ? 'error'
-                      : 'system';
+              : row.kind === 'pending'
+                ? 'pending'
+                : row.gezelId
+                  ? gezelLabel(row.gezelId, gezels, boring)
+                  : row.kind === 'tool'
+                    ? 'tool'
+                    : row.kind === 'shell'
+                      ? 'shell'
+                      : row.kind === 'error'
+                        ? 'error'
+                        : 'system';
           const isFocused = focusedSessionId && row.sessionId === focusedSessionId;
           // Full message body, wrapped to the terminal width (Ink's default).
           // Only the speaker prefix is fixed; long chat replies render in
@@ -85,8 +88,14 @@ export function ChatFeed(props: {
                   {who}
                   {': '}
                 </Text>
-                <Text color={KIND_COLOR[row.kind]}>
-                  {clip(row.kind === 'assistant' ? humanizeToolMarkup(row.text) : row.text)}
+                <Text color={KIND_COLOR[row.kind]} dimColor={row.kind === 'pending'}>
+                  {clip(
+                    row.taskEvent
+                      ? taskEventText(row, gezels, boring)
+                      : row.kind === 'assistant'
+                        ? humanizeToolMarkup(row.text)
+                        : row.text,
+                  )}
                 </Text>
               </Text>
             </Box>
@@ -95,6 +104,34 @@ export function ChatFeed(props: {
       )}
     </Box>
   );
+}
+
+/**
+ * History summaries deliberately keep friendly names. Rewrite only the
+ * actor-bearing task phrases from structured event metadata, leaving the
+ * durable audit prose untouched while respecting this CLI's fixed naming
+ * mode. The generic placeholder prevents a one-render name flash while a
+ * newly recruited gezel is being added to the live roster snapshot.
+ */
+function taskEventText(row: FeedRow, gezels: ReadonlyArray<GezelSummary>, boring: boolean): string {
+  const event = row.taskEvent;
+  if (!boring || !event?.gezelId) return row.text;
+  const actor = gezelLabel(event.gezelId, gezels, true);
+  switch (event.kind) {
+    case 'task.entry.dispatched':
+      return row.text.replace(/ handed to .*$/, ` handed to ${actor}`);
+    case 'tasknote.appended':
+      return row.text.replace(/^task · .*? noted on /, `task · ${actor} noted on `);
+    case 'tasknote.deleted':
+      return row.text.replace(
+        /^task · .*? removed a note from /,
+        `task · ${actor} removed a note from `,
+      );
+    case 'tasknote.updated':
+      return row.text.replace(/^task · .*? edited a note on /, `task · ${actor} edited a note on `);
+    default:
+      return row.text;
+  }
 }
 
 /**

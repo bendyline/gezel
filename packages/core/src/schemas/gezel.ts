@@ -1023,6 +1023,14 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     summary: z.string(),
     at: z.string(),
     taskRef: z.string().optional(),
+    /**
+     * Gezel responsible for the event, when History recorded one. Kept
+     * separate from the human-readable summary so fixed-presentation
+     * clients (notably the role-name-only CLI) can render the actor using
+     * their own naming mode instead of leaking the friendly name embedded
+     * in the audit prose.
+     */
+    gezelId: z.string().optional(),
   }),
   /**
    * Emitted when a gezel crosses a growth level threshold and a pending

@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import type { QuotaBucket } from '../../chat/usage.js';
 import { winShellSafe } from '../../packages/win-shell.js';
 
@@ -51,6 +52,7 @@ export async function readCodexQuotaBuckets(opts: {
       env: opts.env ?? process.env,
       shell: useShell,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...windowsHeadlessSpawnOptions(),
     });
     let stdout = '';
     let stderr = '';

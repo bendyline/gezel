@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createLogger, toolActivityLabel } from '@bendyline/gezel';
+import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { SessionResumeError } from '../types.js';
 import type { SessionOpts, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
@@ -294,6 +295,7 @@ export class ClaudeWorker {
             : {}),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...windowsHeadlessSpawnOptions(),
       });
     } catch (err) {
       this.state = { kind: 'crashed', reason: 'spawn failed' };

@@ -160,6 +160,8 @@ async function verifyWindows(
   const res = await run('powershell', [
     '-NoProfile',
     '-NonInteractive',
+    '-WindowStyle',
+    'Hidden',
     '-Command',
     `$sig = Get-AuthenticodeSignature -LiteralPath '${escaped}'; Write-Output ([string]$sig.Status); Write-Output ([string]$sig.SignerCertificate.Subject)`,
   ]);

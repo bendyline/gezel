@@ -10,6 +10,20 @@ vi.mock('./NewProjectDetailPane.js', () => ({ NewProjectPaneHero: () => null }))
 const { NewProjectDialog } = await import('./NewProjectDialog.js');
 const { api } = await import('../../api.js');
 
+function catalogItem(manifest: Record<string, unknown>) {
+  return {
+    sourceId: 'bundled',
+    kind: manifest.kind,
+    manifest: {
+      description: `${String(manifest.name ?? manifest.id)} description`,
+      tags: [],
+      craftbooks: [],
+      schedules: [],
+      ...manifest,
+    },
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -59,6 +73,7 @@ describe('NewProjectDialog GitHub repository drafting', () => {
       provider: 'mock',
       klerkGezelId: 'klerk-1',
       showPoppetjes: true,
+      showWorkInProgressFeatures: false,
     } as never);
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [{ id: 'klerk-1', name: 'Lukas', role: 'Klerk' }],
@@ -140,5 +155,61 @@ describe('NewProjectDialog GitHub repository drafting', () => {
       await draft.promise;
     });
     expect(screen.getByRole('textbox', { name: /^About/ })).toHaveValue('');
+  });
+
+  it('hides connector-backed project types and the Email kind while WIP is off', async () => {
+    const plainType = catalogItem({
+      kind: 'project-type',
+      id: 'plain-office',
+      name: 'Plain Office',
+      category: 'general',
+    });
+    const socialType = catalogItem({
+      kind: 'project-type',
+      id: 'social-feed',
+      name: 'Social Feed',
+      category: 'communication',
+      craftbooks: ['social-digest'],
+    });
+    const connectorBook = catalogItem({
+      kind: 'craftbook-template',
+      id: 'social-digest',
+      name: 'Social Digest',
+      connectors: [{ typeId: 'bluesky-posts', optional: true }],
+    });
+    vi.mocked(api.listCatalogItems).mockImplementation(
+      async (kind) =>
+        ({ items: kind === 'project-type' ? [plainType, socialType] : [connectorBook] }) as never,
+    );
+
+    render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+
+    expect(await screen.findByRole('radio', { name: 'Plain Office' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Social Feed' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'E-Mail' })).not.toBeInTheDocument();
+  });
+
+  it('shows connector-backed project types and the Email kind while WIP is on', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+    const socialType = catalogItem({
+      kind: 'project-type',
+      id: 'social-feed',
+      name: 'Social Feed',
+      category: 'communication',
+      craftbooks: ['social-digest'],
+    });
+    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [socialType] } as never);
+
+    render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+
+    expect(await screen.findByRole('radio', { name: 'Social Feed' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'E-Mail' })).toBeInTheDocument();
   });
 });

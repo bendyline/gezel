@@ -23,10 +23,16 @@
  * cold model loads visible before phase events begin.
  */
 
-import type { ChatEventEnvelope, ProviderName, SessionGpuTask } from '@bendyline/gezel';
+import type {
+  ChatEventEnvelope,
+  GezelSummary,
+  ProviderName,
+  SessionGpuTask,
+} from '@bendyline/gezel';
 import {
   CANONICAL_PROFILES,
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  displayName,
   isKnownProfileId,
 } from '@bendyline/gezel';
 import type {
@@ -45,6 +51,7 @@ import {
   type TurnStatsEntry,
   composeQueueStatus,
   computeRollingTokensPerSec,
+  estimateLiveOutputTokens,
   formatBytes,
   formatTokensPerSec,
 } from './engine-pill-stats.js';
@@ -86,6 +93,7 @@ const ENGINE_RETENTION_PRESETS: ReadonlyArray<{
 
 export function EngineStatusPill() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
   const [queueStatus, setQueueStatus] = useState<QueueStatusResponse | null>(null);
   const [inflightTurns, setInflightTurns] = useState<InflightTurn[]>([]);
   const [deviceSafetySaving, setDeviceSafetySaving] = useState(false);
@@ -124,6 +132,22 @@ export function EngineStatusPill() {
     const timer = setInterval(refreshConfig, 10_000);
     return () => clearInterval(timer);
   }, [refreshConfig]);
+
+  const refreshGezels = useCallback(() => {
+    void api
+      .listGezels()
+      .then(({ gezels: nextGezels }) => {
+        if (!mountedRef.current) return;
+        setGezels(new Map(nextGezels.map((gezel) => [gezel.id, gezel])));
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshGezels();
+    const timer = setInterval(refreshGezels, 10_000);
+    return () => clearInterval(timer);
+  }, [refreshGezels]);
 
   const refreshActivity = useCallback(() => {
     void Promise.all([api.getQueueStatus(), api.listInflightTurns()])
@@ -211,7 +235,7 @@ export function EngineStatusPill() {
           result.clearedQueuedMessages > 0
             ? ` and discarded ${result.clearedQueuedMessages} queued ${result.clearedQueuedMessages === 1 ? 'message' : 'messages'}`
             : ''
-        }. Gezel is Reactive.`,
+        }. Local engines unloaded. Gezel is Reactive.`,
       );
       setEmergencyStopOpen(false);
       window.dispatchEvent(
@@ -231,7 +255,7 @@ export function EngineStatusPill() {
   // Provider overrides can invoke a different local engine than the
   // install-wide default. Keep one shared subscription open so a cold
   // secondary engine is visible before its provider queue registers.
-  const liveTurns = useOnDeviceLiveTurns(true);
+  const liveTurns = useOnDeviceLiveTurns(true, true);
   const defaultProvider = toOnDeviceProvider(config?.provider);
   const visibleProviders = visibleOnDeviceProviders({
     defaultProvider,
@@ -248,6 +272,7 @@ export function EngineStatusPill() {
         provider={defaultProvider}
         defaultProvider={defaultProvider}
         config={config}
+        gezels={gezels}
         queueStatus={queueStatus}
         inflightTurns={inflightTurns}
         liveTurns={liveTurns}
@@ -273,6 +298,7 @@ export function EngineStatusPill() {
             provider={provider}
             defaultProvider={defaultProvider}
             config={config}
+            gezels={gezels}
             queueStatus={queueStatus}
             inflightTurns={inflightTurns}
             liveTurns={liveTurns}
@@ -296,8 +322,9 @@ export function EngineStatusPill() {
         title="Hard stop all chats?"
         message={
           <>
-            Every chat in progress will stop, queued chat messages will be discarded, and Gezel will
-            switch to Reactive. It will only respond when you initiate a chat.
+            Every chat in progress will stop, queued chat messages will be discarded, local engines
+            will be unloaded, and Gezel will switch to Reactive. It will only respond when you
+            initiate a chat.
             {emergencyStopError && (
               <span className="engine-pill-emergency-error" role="alert">
                 {emergencyStopError}
@@ -320,6 +347,7 @@ function EngineStatusPillForProvider({
   provider: onDeviceProvider,
   defaultProvider,
   config,
+  gezels,
   queueStatus,
   inflightTurns,
   liveTurns: allLiveTurns,
@@ -337,6 +365,7 @@ function EngineStatusPillForProvider({
   provider: OnDeviceProvider | null;
   defaultProvider: OnDeviceProvider | null;
   config: ConfigResponse | null;
+  gezels: ReadonlyMap<string, GezelSummary>;
   queueStatus: QueueStatusResponse | null;
   inflightTurns: InflightTurn[];
   liveTurns: Map<string, LiveTurn>;
@@ -619,7 +648,7 @@ function EngineStatusPillForProvider({
           signal: ctrl.signal,
           fetch: api.getFetch(),
         })) {
-          const { event, sessionId } = env as ChatEventEnvelope;
+          const { event, sessionId, gezelId } = env as ChatEventEnvelope;
           if (event.type !== 'gpu_swap') continue;
           setMediaActivity((prev) => {
             const next = new Map(prev);
@@ -630,6 +659,7 @@ function EngineStatusPillForProvider({
               next.set(sessionId, {
                 kind: event.task === 'video_generation' ? 'video' : 'image',
                 label: mediaLabel(event),
+                gezelId,
                 ...(typeof event.progress === 'number' ? { progress: event.progress } : {}),
                 startedAt: existing?.startedAt ?? Date.now(),
               });
@@ -687,6 +717,7 @@ function EngineStatusPillForProvider({
   // if they happen we pick the newest so the pill shows what's
   // *right now*, not what's waiting.
   const current = pickCurrent(liveTurns);
+  const currentInflight = pickCurrentInflight(providerInflightTurns);
   // A turn is in flight per the server's inflight snapshot. This is the
   // backstop for the case the user hit: a slow cold model load emits no
   // engine_phase events, the 90s sweeper drops `current`, but the turn
@@ -705,6 +736,21 @@ function EngineStatusPillForProvider({
   const busyStartedAt = activeMedia
     ? activeMedia.startedAt
     : (current?.startedAt ?? inflight.earliestStartedAt ?? undefined);
+  const activeGezelId = activeMedia?.gezelId ?? current?.gezelId ?? currentInflight?.gezelId;
+  const activeGezel = activeGezelId ? gezels.get(activeGezelId) : undefined;
+  const activeGezelName = activeGezel
+    ? displayName(activeGezel, config?.roleBasedNameOnlyMode === true)
+    : undefined;
+  // Some engines (currently MLX) already put their exact cumulative token
+  // count in the phase label. Others report usage only when the turn ends;
+  // for those, derive an explicitly approximate live counter from all
+  // streamed output channels.
+  const estimatedOutputTokens =
+    current?.phase === 'generating' && !phaseLabelIncludesTokenCount(busyLabel)
+      ? estimateLiveOutputTokens(current.outputChars ?? 0)
+      : 0;
+  const liveTokenLabel =
+    estimatedOutputTokens > 0 ? `≈${estimatedOutputTokens.toLocaleString('en-US')} tok` : '';
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -780,7 +826,7 @@ function EngineStatusPillForProvider({
   // the live phase label (queue counts aren't known to composeQueueStatus);
   // otherwise the queue-aware idle/queued string.
   const statusText = busy
-    ? `${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
+    ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · ${liveTokenLabel}` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
     : queue.idleStatus;
   const healthPresentation = deviceHealth ? presentDeviceHealth(deviceHealth) : null;
   const dotClassName = [
@@ -823,7 +869,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · about ${estimatedOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -836,6 +882,7 @@ function EngineStatusPillForProvider({
                   alongside an idle default DwarfStar engine: two anonymous
                   progress bars would recreate the same ambiguity. */}
               <span className="engine-pill-kind">{platformPillLabel}</span>
+              {activeGezelName && <span className="engine-pill-actor">{activeGezelName} · </span>}
               {showProgress ? (
                 <span
                   className="engine-pill-progress"
@@ -854,6 +901,9 @@ function EngineStatusPillForProvider({
                 </span>
               ) : (
                 busyLabel
+              )}
+              {liveTokenLabel && (
+                <span className="engine-pill-live-tokens">{` · ${liveTokenLabel}`}</span>
               )}
             </>
           ) : (
@@ -1069,7 +1119,7 @@ function EngineStatusPillForProvider({
             <div className="engine-pill-emergency-stop">
               <div className="engine-pill-emergency-copy">
                 <strong>Need everything to pause?</strong>
-                <span>Stop every chat and switch Gezel to Reactive.</span>
+                <span>Stop every chat, unload local engines, and switch Gezel to Reactive.</span>
               </div>
               <button
                 type="button"
@@ -1139,9 +1189,23 @@ function pickCurrent(turns: Map<string, LiveTurn>): LiveTurn | null {
   return newest;
 }
 
+function pickCurrentInflight(turns: readonly InflightTurn[]): InflightTurn | null {
+  let newest: InflightTurn | null = null;
+  for (const turn of turns) {
+    if (!newest || turn.startedAt > newest.startedAt) newest = turn;
+  }
+  return newest;
+}
+
+function phaseLabelIncludesTokenCount(label: string): boolean {
+  return /\b\d[\d,]*\s+tokens?\b/i.test(label);
+}
+
 /** One in-flight local media-engine job (image / video / recognition). */
 interface MediaActivity {
   kind: 'image' | 'video' | 'recognition';
+  /** Gezel whose turn owns this GPU task. */
+  gezelId?: string;
   /** Live phase/progress label, e.g. "Loading model weights…" or
    *  "Generating video — step 12/40". */
   label: string;

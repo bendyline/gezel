@@ -239,7 +239,7 @@ function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<s
  * `TaskVariation.context` contract). Unknown placeholders are left intact
  * so a template typo is visible, not silently blanked. This is what lands
  * the per-item data (`{{client}}`, `{{number}}`, …) in a declarative-fanout
- * child's step prompt AND its gate/advanceWhen file paths, so a child that
+ * child's step prompt, declared inputs, AND its gate/advanceWhen file paths, so a child that
  * writes `invoices/{{number}}.html` is gated against that exact file.
  */
 function interpolateContext(text: string, context: Record<string, string>): string {
@@ -268,6 +268,12 @@ function interpolateStepsContext(
     if (step.name) step.name = interpolateContext(step.name, context);
     if (step.description) step.description = interpolateContext(step.description, context);
     if (step.prompt) step.prompt = interpolateContext(step.prompt, context);
+    if (step.consumes?.length) {
+      step.consumes = step.consumes.map((input) => ({
+        ...input,
+        file: interpolateContext(input.file, context),
+      }));
+    }
     if (step.advanceWhen?.file) {
       step.advanceWhen = {
         ...step.advanceWhen,
@@ -527,6 +533,13 @@ export class TaskManager {
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
+  /**
+   * Join concurrent replays of the same step transition. Local models can
+   * retry an MCP call when its response is slow; without single-flight both
+   * requests read the same active step and independently run gates, scripts,
+   * recruitment, and handoff hooks before either write becomes visible.
+   */
+  private readonly inFlightStepCompletions = new Map<string, Promise<CompleteStepOutcome>>();
 
   constructor(
     private readonly store: Store,
@@ -1445,7 +1458,7 @@ export class TaskManager {
 
   /**
    * Patch a single step's mutable fields (`description`, `prompt`,
-   * `assignee`, `suggestedGezelId`). `undefined` means "leave alone";
+   * `consumes`, `assignee`, `suggestedGezelId`). `undefined` means "leave alone";
    * explicit `null` on the optional fields means "clear it." Returns
    * the updated task. Returns `null` when the step id doesn't exist.
    */
@@ -1780,7 +1793,19 @@ export class TaskManager {
     next?: string,
     opts?: CompleteStepOpts,
   ): Promise<CompleteStepOutcome> {
-    return this.completeStepInternal(projectId, num, stepId, next, 0, opts ?? {});
+    const key = `${projectId}\u0000${num}\u0000${stepId}`;
+    const existing = this.inFlightStepCompletions.get(key);
+    if (existing) return existing;
+
+    const pending = this.completeStepInternal(projectId, num, stepId, next, 0, opts ?? {});
+    this.inFlightStepCompletions.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.inFlightStepCompletions.get(key) === pending) {
+        this.inFlightStepCompletions.delete(key);
+      }
+    }
   }
 
   /**
@@ -2092,13 +2117,21 @@ export class TaskManager {
     if (terminating || !newActive) {
       delete (updated as { activeStepId?: string }).activeStepId;
     }
-    // Resolve the newly-activated step's `suggestedRole` BEFORE writing
-    // — same purpose as the resolution in `create()`. The step picks up
-    // a concrete gezel id so the handoff fires against the right role.
+    // Commit the state-machine transition BEFORE recruitment. Role resolution
+    // may consult a catalog, touch the roster, or (under custom wiring) block;
+    // none of that may leave the completed step looking active to an MCP retry.
+    // If the process stops after this write, the durable task is still on the
+    // correct next step and the runner's recovery sweep can pick it up.
+    await this.store.writeTask(updated);
+
+    // Resolve the newly-activated step's `suggestedRole` for the handoff, then
+    // persist that enrichment separately. Production task routing uses a
+    // deterministic template/static resolver, but the split also protects the
+    // transition from slow or third-party resolver implementations.
     if (newActive && !terminating) {
       await this.maybeResolveStepRole(updated.craftbook, newActive, projectId);
+      await this.store.writeTask(updated);
     }
-    await this.store.writeTask(updated);
     // Terminal step closed the task → the project may have come to rest;
     // advancing to a new step is live work → keep/make it active.
     if (terminating) {
