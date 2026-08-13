@@ -4229,9 +4229,10 @@ export class GezelClient {
   }
 
   /**
-   * Stop every in-progress chat, discard queued chat messages, and persist
-   * install-wide Reactive engagement mode. This is a product-daemon action,
-   * not an engine-broker action: the broker never owns chats or user config.
+   * Stop every in-progress chat, discard queued chat messages, release
+   * resident providers/local engines, and persist install-wide Reactive
+   * engagement mode. This is a product-daemon action, not an engine-broker
+   * action: the broker never owns chats or user config.
    */
   emergencyStopChats(): Promise<{
     ok: boolean;

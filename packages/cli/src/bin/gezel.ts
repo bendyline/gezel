@@ -21,6 +21,7 @@ import {
   type CliGlobals,
   applyHome,
   connectForRun,
+  connectForTui,
   connectOwned,
   describeMachineEngineBroker,
   ensureCliProjectLead,
@@ -85,18 +86,23 @@ program.hook('preAction', () => {
 program.action(async () => {
   const globals = cliGlobals();
   resolveDevHome(globals);
-  const client = await connectOwned(globals);
-  const projectId = await resolveTuiProject(client, globals);
-  const gezelId = await ensureCliProjectLead(client, projectId);
-  let projectName = basename(process.cwd()) || 'workspace';
+  const connection = await connectForTui(globals);
   try {
-    const { projects } = await client.listProjects();
-    projectName = projects.find((p) => p.id === projectId)?.name ?? projectName;
-  } catch {
-    /* fall back to the folder name */
+    const { client } = connection;
+    const projectId = await resolveTuiProject(client, globals);
+    const gezelId = await ensureCliProjectLead(client, projectId);
+    let projectName = basename(process.cwd()) || 'workspace';
+    try {
+      const { projects } = await client.listProjects();
+      projectName = projects.find((p) => p.id === projectId)?.name ?? projectName;
+    } catch {
+      /* fall back to the folder name */
+    }
+    const { launchTui } = await import('../tui/index.js');
+    await launchTui({ client, projectId, projectName, gezelId });
+  } finally {
+    await connection.stop?.();
   }
-  const { launchTui } = await import('../tui/index.js');
-  await launchTui({ client, projectId, projectName, gezelId });
 });
 
 program
@@ -338,32 +344,62 @@ program
 
 program
   .command('stop')
-  .description('Stop the user-owned Gezel daemon')
-  .action(async () => {
+  .description('Hard stop all AI work and switch Gezel to Reactive mode')
+  .option('--daemon', 'Shut down the user-owned daemon process itself')
+  .action(async (opts: { daemon?: boolean }) => {
     const globals = cliGlobals();
-    if (globals.connect) {
-      throw new CliError('gezel stop cannot stop an explicit remote service.');
-    }
-    const system = await findHealthySystemService(globals);
-    if (system) {
-      console.log(
-        `The Electron-installed system service is running on port ${system.port} and is managed by the operating system. Use --standalone to target a user-owned runtime instead.`,
-      );
+    if (opts.daemon) {
+      await stopUserDaemon(globals);
       return;
     }
-    const runtime = await readRuntime();
-    if (!runtime) {
-      console.log('gezeld is not running');
-      return;
+
+    // Do not manufacture a local daemon merely to tell it to stop. Explicit
+    // and rolling-upgrade system connections are already concrete targets;
+    // otherwise require a live per-user runtime and adopt it below.
+    if (!globals.connect && !(await findHealthySystemService(globals))) {
+      const runtime = await readRuntime();
+      if (!runtime || !isProcessAlive(runtime.pid)) {
+        console.log('Gezel has no running AI work to stop.');
+        return;
+      }
     }
-    const stopped = await stopProcessByPid(runtime.pid);
-    if (stopped) {
-      console.log(`stopped gezeld pid=${runtime.pid}`);
-    } else {
-      console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
-      process.exitCode = 1;
-    }
+
+    const client = await connectOwned(globals);
+    const result = await client.emergencyStopChats();
+    const details = [
+      `${result.cancelledTurns} active ${result.cancelledTurns === 1 ? 'chat' : 'chats'}`,
+      `${result.clearedQueuedMessages} queued ${result.clearedQueuedMessages === 1 ? 'message' : 'messages'}`,
+      `${result.clearedDeferredActions} deferred ${result.clearedDeferredActions === 1 ? 'action' : 'actions'}`,
+    ];
+    console.log(
+      `Hard stop complete: ${details.join(', ')}. Local engines unloaded; Gezel is Reactive.`,
+    );
   });
+
+async function stopUserDaemon(globals: CliGlobals): Promise<void> {
+  if (globals.connect) {
+    throw new CliError('gezel stop --daemon cannot stop an explicit remote service.');
+  }
+  const system = await findHealthySystemService(globals);
+  if (system) {
+    console.log(
+      `The Electron-installed system service is running on port ${system.port} and is managed by the operating system. Use --standalone to target a user-owned runtime instead.`,
+    );
+    return;
+  }
+  const runtime = await readRuntime();
+  if (!runtime) {
+    console.log('gezeld is not running');
+    return;
+  }
+  const stopped = await stopProcessByPid(runtime.pid);
+  if (stopped) {
+    console.log(`stopped gezeld pid=${runtime.pid}`);
+  } else {
+    console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
+    process.exitCode = 1;
+  }
+}
 
 program
   .command('mode [mode]')
@@ -401,6 +437,7 @@ program
       return;
     }
     const conn = await connectForRun(cliGlobals());
+    const removeSignalCleanup = installSignalCleanup(conn.stop);
     try {
       const { client } = conn;
       const projectId = await resolveRunProject(client, cliGlobals());
@@ -431,9 +468,34 @@ program
       if (printed) process.stdout.write('\n');
       if (errored) process.exitCode = 1;
     } finally {
+      removeSignalCleanup();
       if (conn.stop) await conn.stop();
     }
   });
+
+/**
+ * Node's default Ctrl+C handling exits immediately, which skips async
+ * `finally` cleanup. Owning one signal listener keeps the event loop alive
+ * long enough for an in-process one-shot service to stop its native children.
+ */
+function installSignalCleanup(cleanup: (() => Promise<void>) | undefined): () => void {
+  if (!cleanup) return () => {};
+  const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+    process.exitCode = signal === 'SIGINT' ? 130 : 143;
+    void cleanup().catch((error) => {
+      console.error(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
+  };
+  const onSigint = () => onSignal('SIGINT');
+  const onSigterm = () => onSignal('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  return () => {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+  };
+}
 
 const agent = program.command('agent').description('Manage agents');
 

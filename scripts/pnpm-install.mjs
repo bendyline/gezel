@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { spawnPnpm } from './pnpm-cli.mjs';
@@ -175,7 +175,51 @@ function waitForChild(child) {
   });
 }
 
-export function workspaceDependenciesReady(repoRoot) {
+function workspacePackageDirs(repoRoot) {
+  const packageDirs = [repoRoot];
+  for (const container of ['packages', 'evals']) {
+    const containerPath = join(repoRoot, container);
+    if (!existsSync(containerPath)) continue;
+    if (existsSync(join(containerPath, 'package.json'))) packageDirs.push(containerPath);
+    if (container !== 'packages') continue;
+    for (const entry of readdirSync(containerPath, { withFileTypes: true })) {
+      if (entry.isDirectory() && existsSync(join(containerPath, entry.name, 'package.json'))) {
+        packageDirs.push(join(containerPath, entry.name));
+      }
+    }
+  }
+  return packageDirs;
+}
+
+function dependencyLinkPath(packageDir, dependency) {
+  return join(packageDir, 'node_modules', ...dependency.split('/'));
+}
+
+/** Find direct dependency links that pnpm's optimistic repeat-install can overlook. */
+export function missingWorkspaceDependencyLinks(repoRoot) {
+  const missing = [];
+  for (const packageDir of workspacePackageDirs(repoRoot)) {
+    const manifestPath = join(packageDir, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const dependencies = {
+      ...(manifest.dependencies ?? {}),
+      ...(manifest.devDependencies ?? {}),
+    };
+    for (const dependency of Object.keys(dependencies)) {
+      if (!existsSync(dependencyLinkPath(packageDir, dependency))) {
+        missing.push({
+          packageDir,
+          packageName: manifest.name ?? (relative(repoRoot, packageDir) || '.'),
+          dependency,
+        });
+      }
+    }
+  }
+  return missing;
+}
+
+function workspaceDependencyMarkersReady(repoRoot) {
   const binSuffix = process.platform === 'win32' ? '.cmd' : '';
   return (
     existsSync(join(repoRoot, 'node_modules', '.pnpm')) &&
@@ -183,6 +227,33 @@ export function workspaceDependenciesReady(repoRoot) {
     existsSync(join(repoRoot, 'packages', 'ui', 'node_modules', '.bin', `vite${binSuffix}`)) &&
     existsSync(join(repoRoot, 'packages', 'app', 'node_modules', '.bin', `electron${binSuffix}`))
   );
+}
+
+export function workspaceDependenciesReady(repoRoot) {
+  return (
+    workspaceDependencyMarkersReady(repoRoot) && missingWorkspaceDependencyLinks(repoRoot).length === 0
+  );
+}
+
+function repairInstallArgs(repoRoot, args) {
+  const repairedArgs = [...args];
+  if (!repairedArgs.includes('--config.optimistic-repeat-install=false')) {
+    repairedArgs.push('--config.optimistic-repeat-install=false');
+  }
+
+  // A missing root marker means the whole generated tree is incomplete. When
+  // the markers are intact, constrain reconciliation to packages with missing
+  // direct links so one damaged symlink does not trigger a full workspace
+  // reinstall.
+  if (!workspaceDependencyMarkersReady(repoRoot)) return repairedArgs;
+  const filters = new Set(
+    missingWorkspaceDependencyLinks(repoRoot).map(({ packageDir }) => {
+      const packagePath = relative(repoRoot, packageDir).replaceAll('\\', '/');
+      return packagePath ? `./${packagePath}` : '.';
+    }),
+  );
+  for (const filter of filters) repairedArgs.push('--filter', filter);
+  return repairedArgs;
 }
 
 function reportDependencyLockOwners(owners) {
@@ -249,6 +320,8 @@ export async function runSerializedPnpmInstall(options = {}) {
         return 0;
       }
 
+      const installArgs = options.ifMissing ? repairInstallArgs(repoRoot, args) : args;
+
       const lockOwners = (options.dependencyLockProbeFn ?? inspectWindowsDependencyLocks)(repoRoot);
       if (lockOwners.length > 0) {
         reportDependencyLockOwners(lockOwners);
@@ -257,7 +330,7 @@ export async function runSerializedPnpmInstall(options = {}) {
 
       return runPnpmInstallChild({
         repoRoot,
-        args,
+        args: installArgs,
         env: options.env,
         spawnPnpmFn: options.spawnPnpmFn,
         setChildPid,

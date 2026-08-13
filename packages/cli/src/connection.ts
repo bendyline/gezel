@@ -14,11 +14,13 @@ import {
   GezelApiError,
   GezelClient,
   createTrustingFetch,
+  discoverOrSpawn,
   electronNativeBinCandidates,
   isProcessAlive,
   readRuntime,
   readSystemServiceEndpoint,
   resolveDaemonEntry,
+  stopOwnedDaemon,
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
@@ -140,6 +142,74 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
   return connected.client;
 }
 
+export type TuiConnection = {
+  client: GezelClient;
+  /** Present only when this TUI launched the daemon it is using. */
+  stop?: () => Promise<void>;
+};
+
+/**
+ * Connect the interactive CLI while retaining ownership of a daemon that it
+ * had to launch. Unlike short management commands, the TUI has a real host
+ * lifetime: an attached stdin pipe lets gezeld run its full shutdown sequence
+ * when the TUI exits, receives Ctrl+C, or crashes. An already-running local,
+ * configured, or legacy system daemon remains caller-external and is never
+ * stopped here.
+ */
+export async function connectForTui(globals: CliGlobals): Promise<TuiConnection> {
+  applyHome(globals);
+  const preferred = await connectPreferredService(globals);
+  if (preferred) return { client: preferred.client };
+
+  const runtime = await readRuntime();
+  if (!runtime || !isProcessAlive(runtime.pid)) {
+    await prepareStandaloneAssets();
+  }
+
+  const result = await discoverOrSpawn({
+    daemonEntry: resolveDaemonEntry(import.meta.url),
+    detached: false,
+    stdio: 'pipe',
+    env: cliUserDaemonEnv(process.env.GEZEL_HOME, await shouldPreferCanonicalPort()),
+    ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
+    timeoutMs: 20_000,
+  });
+
+  // stdout/stderr are piped only so stdin can remain a dedicated ownership
+  // channel. Drain them to prevent a chatty daemon from filling the pipe and
+  // blocking while the TUI owns the terminal display.
+  result.child?.stdout?.resume();
+  result.child?.stderr?.resume();
+
+  if (result.outcome !== 'spawned') return { client: result.client };
+
+  let stopPromise: Promise<void> | undefined;
+  return {
+    client: result.client,
+    stop: () => (stopPromise ??= stopOwnedDaemon(result.child)),
+  };
+}
+
+/** Sanitize inherited service-host variables for a CLI-owned user daemon. */
+export function cliUserDaemonEnv(
+  home: string | undefined,
+  preferCanonicalPort: boolean,
+  inherited: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const {
+    GEZEL_PORT: _inheritedPort,
+    GEZEL_SERVICE_ROLE: _inheritedRole,
+    GEZEL_SYSTEM_SCOPE: _inheritedSystemScope,
+    ...rest
+  } = inherited;
+  return {
+    ...rest,
+    ...(home ? { GEZEL_HOME: home } : {}),
+    ...(preferCanonicalPort ? {} : { GEZEL_PORT: '0' }),
+    GEZEL_SERVICE_ROLE: 'user',
+  };
+}
+
 /**
  * Whether a CLI-spawned user daemon should try to claim the canonical port
  * 6228 (with ephemeral fallback). True only when this host has no registered
@@ -251,21 +321,25 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
     token: svc.clientToken,
     ...(svc.cert ? { fetch: createTrustingFetch({ cert: svc.cert.certPem }) } : {}),
   });
-  const stop = async (): Promise<void> => {
-    await svc.stop();
-    // Remove the runtime files this one-shot wrote — but only if they're
-    // still ours (pid === this process), so we never clobber a real daemon
-    // that happened to start during the run. (We only reach in-proc because
-    // adopt found nothing live, so the common case is ours to clean.)
-    try {
-      const paths = gezelPaths();
-      const pid = (await readFile(paths.runtime.pid, 'utf8')).trim();
-      if (pid === String(process.pid)) {
-        await rm(paths.runtime.dir, { recursive: true, force: true });
+  let stopPromise: Promise<void> | undefined;
+  const stop = (): Promise<void> => {
+    stopPromise ??= (async () => {
+      await svc.stop();
+      // Remove the runtime files this one-shot wrote — but only if they're
+      // still ours (pid === this process), so we never clobber a real daemon
+      // that happened to start during the run. (We only reach in-proc because
+      // adopt found nothing live, so the common case is ours to clean.)
+      try {
+        const paths = gezelPaths();
+        const pid = (await readFile(paths.runtime.pid, 'utf8')).trim();
+        if (pid === String(process.pid)) {
+          await rm(paths.runtime.dir, { recursive: true, force: true });
+        }
+      } catch {
+        /* nothing to clean up */
       }
-    } catch {
-      /* nothing to clean up */
-    }
+    })();
+    return stopPromise;
   };
   return { kind: 'owned', client, baseUrl, stop };
 }

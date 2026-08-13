@@ -5,13 +5,18 @@ description: Improve craftbook template quality from audit findings and local-mo
 
 > **Content lives in `../gilde`.** Catalog data (model manifests, craftbooks,
 > role templates) moved to the sibling [bendyline/gilde](https://github.com/bendyline/gilde)
-> repo. Before any loop that edits content, run `pnpm link:gilde` so the
-> daemon, tests, and evals resolve your checkout instead of the pinned
-> `@bendyline/gilde` package; refresh generated indexes with
-> `pnpm --filter @bendyline/gezel-catalog build-index`. When the loop
-> lands: PR the gilde changes, publish, bump the pin in
-> `packages/catalog/package.json` (+ its `minimumReleaseAgeExclude` entry
-> in `pnpm-workspace.yaml`), then `pnpm unlink:gilde`.
+> repo. Source-only authoring, generation, and validation should use the
+> sibling checkout directly (`GILDE_DIR=../gilde`; the generators also detect
+> that checkout) and must not relink the workspace dependency tree. Run
+> `pnpm link:gilde` only when a daemon or end-to-end eval must resolve the local
+> checkout as the installed `@bendyline/gilde` package. Before linking, run
+> `pnpm deps:install --if-missing`; allow the relink/install to finish without a
+> short command timeout, and stop the quality loop immediately if it fails.
+> Refresh generated indexes with `pnpm --filter @bendyline/gezel-catalog
+> build-index`. When the loop lands: run `pnpm unlink:gilde`, confirm
+> `pnpm check:local-links`, then PR the gilde changes, publish, and bump the pin
+> in `packages/catalog/package.json` (+ its `minimumReleaseAgeExclude` entry in
+> `pnpm-workspace.yaml`).
 
 
 # Craftbook Quality Iterate

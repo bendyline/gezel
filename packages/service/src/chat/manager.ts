@@ -2451,9 +2451,10 @@ export class ChatManager {
   }
 
   /**
-   * Install-wide panic stop for chat work. The engagement-mode cache flips
-   * synchronously before any teardown awaits, so task runners and autonomous
-   * follow-ups cannot admit replacement turns while the current ones unwind.
+   * Install-wide panic stop for chat work and resident providers. The
+   * engagement-mode cache flips synchronously before any teardown awaits, so
+   * task runners and autonomous follow-ups cannot admit replacement turns
+   * while the current ones unwind.
    * Pending user messages and after-idle handoffs are deliberately discarded:
    * leaving either queue intact would make an "emergency stop" immediately
    * restart work as soon as the cancelled provider call releases its slot.
@@ -2493,6 +2494,13 @@ export class ChatManager {
       (total, result) => total + (result.status === 'fulfilled' && result.value.cancelled ? 1 : 0),
       0,
     );
+
+    // A hard stop must release resident local engines, not merely interrupt
+    // their current HTTP request. The ordinary live reset path disconnects
+    // bridges/providers and force-evicts the production-owned engine pool;
+    // unlike service shutdown, it leaves ChatManager reusable for the next
+    // explicit user message while Reactive mode blocks autonomous restarts.
+    await this.resetClient();
 
     return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
   }

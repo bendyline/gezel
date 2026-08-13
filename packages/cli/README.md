@@ -35,7 +35,9 @@ With no connection flags, the CLI follows this order:
 2. Discover the logged-in user's product daemon through the Gezel app SDK.
    Its actual dynamic port and pinned TLS certificate come from
    `~/.gezel/runtime`; management commands may start that user-role daemon
-   when it is absent.
+   when it is absent. The interactive TUI retains ownership when it starts a
+   daemon itself, so exiting the TUI runs the daemon's complete shutdown path
+   and cleans up its local engine children.
 3. On first use, the terminal waits while the Gezel app asks you to approve
    **Gezel CLI**. The terminal shows a six-character code that you enter in
    the app to confirm that you initiated the request. The resulting revocable,
@@ -131,7 +133,7 @@ Run `gezel --help` for the full list. The most-used ones:
 |---|---|
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
-| `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI). On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
+| `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |
 | `gezel agent list\|create\|show` | Manage your gezels |

@@ -239,6 +239,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       const dialog = screen.getByRole('alertdialog');
       expect(within(dialog).getByText('Hard stop all chats?')).toBeInTheDocument();
       expect(within(dialog).getByText(/switch to Reactive/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/local engines.*unloaded/i)).toBeInTheDocument();
       await user.click(within(dialog).getByRole('button', { name: 'Hard stop' }));
 
       await waitFor(() => {

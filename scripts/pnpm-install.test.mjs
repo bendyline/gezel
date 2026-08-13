@@ -126,6 +126,49 @@ test('does not mistake a partial virtual store for a complete workspace install'
   assert.equal(workspaceDependenciesReady(root), false);
 });
 
+test('repairs a missing direct dependency link only in the affected workspace package', async (t) => {
+  const root = await fixture(t);
+  const binSuffix = process.platform === 'win32' ? '.cmd' : '';
+  await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
+  await writeFile(join(root, 'node_modules', '.modules.yaml'), 'layoutVersion: 5\n');
+  await mkdir(join(root, 'packages', 'ui', 'node_modules', '.bin'), { recursive: true });
+  await writeFile(join(root, 'packages', 'ui', 'node_modules', '.bin', `vite${binSuffix}`), '');
+  await mkdir(join(root, 'packages', 'app', 'node_modules', '.bin'), { recursive: true });
+  await writeFile(
+    join(root, 'packages', 'app', 'node_modules', '.bin', `electron${binSuffix}`),
+    '',
+  );
+  await mkdir(join(root, 'packages', 'client'), { recursive: true });
+  await writeFile(
+    join(root, 'packages', 'client', 'package.json'),
+    JSON.stringify({ name: '@bendyline/gezel-client', dependencies: { undici: '8.9.0' } }),
+  );
+
+  let childArgs;
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    ifMissing: true,
+    dependencyLockProbeFn: () => [],
+    spawnPnpmFn: (args) => {
+      childArgs = args;
+      const child = new EventEmitter();
+      child.pid = 2_147_483_647;
+      child.killed = false;
+      child.kill = () => true;
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(childArgs, [
+    'install',
+    '--config.optimistic-repeat-install=false',
+    '--filter',
+    './packages/client',
+  ]);
+});
+
 test('stops before pnpm when Windows reports a locked dependency asset', async (t) => {
   const root = await fixture(t);
   const code = await runSerializedPnpmInstall({

@@ -1695,6 +1695,7 @@ describe('ChatManager — inflight visibility + cancel', () => {
   it('emergencyStop flips to reactive before cancelling turns and clears restart queues', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     const queuedReject = vi.fn();
+    const engineRouter = { shutdown: vi.fn(async () => {}) };
     let parkedRan = false;
     const internals = manager as unknown as {
       inflight: Map<string, { userText: string; startedAt: number }>;
@@ -1708,7 +1709,9 @@ describe('ChatManager — inflight visibility + cancel', () => {
         }>
       >;
       afterSessionIdle: Map<string, Array<() => void>>;
+      engineRouterCache: typeof engineRouter | null;
     };
+    internals.engineRouterCache = engineRouter;
     internals.inflight.set(session.id, {
       userText: 'keep working until stopped',
       startedAt: Date.now(),
@@ -1743,6 +1746,7 @@ describe('ChatManager — inflight visibility + cancel', () => {
       expect.objectContaining({ message: expect.any(String) }),
     );
     expect(parkedRan).toBe(false);
+    expect(engineRouter.shutdown).toHaveBeenCalledOnce();
   });
 
   it('beginShutdown cancels live turns, drops parked handoffs, and rejects new sends', async () => {

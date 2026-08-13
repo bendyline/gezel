@@ -211,7 +211,7 @@ export function EngineStatusPill() {
           result.clearedQueuedMessages > 0
             ? ` and discarded ${result.clearedQueuedMessages} queued ${result.clearedQueuedMessages === 1 ? 'message' : 'messages'}`
             : ''
-        }. Gezel is Reactive.`,
+        }. Local engines unloaded. Gezel is Reactive.`,
       );
       setEmergencyStopOpen(false);
       window.dispatchEvent(
@@ -296,8 +296,9 @@ export function EngineStatusPill() {
         title="Hard stop all chats?"
         message={
           <>
-            Every chat in progress will stop, queued chat messages will be discarded, and Gezel will
-            switch to Reactive. It will only respond when you initiate a chat.
+            Every chat in progress will stop, queued chat messages will be discarded, local engines
+            will be unloaded, and Gezel will switch to Reactive. It will only respond when you
+            initiate a chat.
             {emergencyStopError && (
               <span className="engine-pill-emergency-error" role="alert">
                 {emergencyStopError}
@@ -1069,7 +1070,7 @@ function EngineStatusPillForProvider({
             <div className="engine-pill-emergency-stop">
               <div className="engine-pill-emergency-copy">
                 <strong>Need everything to pause?</strong>
-                <span>Stop every chat and switch Gezel to Reactive.</span>
+                <span>Stop every chat, unload local engines, and switch Gezel to Reactive.</span>
               </div>
               <button
                 type="button"
