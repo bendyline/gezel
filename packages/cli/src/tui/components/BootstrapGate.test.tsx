@@ -57,6 +57,62 @@ describe('BootstrapGate interactions', () => {
     expect(client.ensureNativeEngine.mock.calls.at(-1)?.[2]).toBe('cuda');
   });
 
+  it('re-probes hardware after native setup so a newly-visible Vulkan dGPU replaces the CPU fallback', async () => {
+    const missing = nativeStatus(false);
+    const installed = { ...nativeStatus(true), llamaBackend: 'vulkan' as const };
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'provisional-small' },
+      }),
+      getMemoryProfile: vi
+        .fn()
+        .mockResolvedValueOnce({
+          platform: 'win32',
+          gpuVramBytes: null,
+          gpuMemoryKind: 'none',
+          totalRamBytes: 64 * 1024 ** 3,
+          usableBytes: 32 * 1024 ** 3,
+        })
+        .mockResolvedValueOnce({
+          platform: 'win32',
+          gpuVramBytes: 32 * 1024 ** 3,
+          gpuMemoryKind: 'discrete',
+          totalRamBytes: 64 * 1024 ** 3,
+          usableBytes: 30 * 1024 ** 3,
+          budgetBytes: 60 * 1024 ** 3,
+        }),
+      getNativeEngineStatus: vi
+        .fn()
+        .mockResolvedValueOnce(missing)
+        .mockResolvedValueOnce(installed),
+      ensureNativeEngine: vi.fn(async (_engine, onEvent) => {
+        onEvent({ type: 'done', binPath: '/native/engine', cached: false });
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model'
+          ? {
+              items: [
+                chatModel({ id: 'small', name: 'Small', score: 15, bytes: 3 * 1024 ** 3 }),
+                chatModel({ id: 'qwen-27b', name: 'Qwen 27B', score: 20, bytes: 20 * 1024 ** 3 }),
+              ],
+            }
+          : { items: [] },
+      ),
+    });
+    const harness = mountGate(client);
+
+    await chooseFirst(harness, 'Install the Gezel native toolkit');
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Recommended workshop set — Qwen 27B');
+      expect(harness.text()).not.toContain('Recommended workshop set — Small');
+    });
+    expect(client.getMemoryProfile).toHaveBeenCalledTimes(2);
+  });
+
   it('installs the selected llama.cpp model and persists it before entering the TUI', async () => {
     const client = createClient({
       listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
@@ -104,6 +160,70 @@ describe('BootstrapGate interactions', () => {
     expect(client.updateConfig).toHaveBeenCalledWith({
       provider: 'llama-cpp',
       defaultModel: { 'llama-cpp': 'shared-gemma' },
+      firstRunInstallError: null,
+    });
+  });
+
+  it('puts the hardware recommendation ahead of an unrelated shared model', async () => {
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'missing-provisional' },
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'shared-small', name: 'Shared Small' }],
+      }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model'
+          ? { items: [chatModel({ id: 'best-fit', name: 'Best Fit', score: 20 })] }
+          : { items: [] },
+      ),
+      installLlamaCppModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'done', model: { id: 'best-fit' } });
+      }),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => {
+      const text = harness.text();
+      expect(text).toContain('Recommended workshop set — Best Fit');
+      expect(text).toContain('Use Shared Small');
+      expect(text.indexOf('Recommended workshop set — Best Fit')).toBeLessThan(
+        text.indexOf('Use Shared Small'),
+      );
+    });
+    await chooseFirst(harness, 'Recommended workshop set — Best Fit');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.installLlamaCppModel).toHaveBeenCalledWith('best-fit', expect.any(Function));
+  });
+
+  it('recommends an installed hardware winner without downloading it again', async () => {
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'missing-provisional' },
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'best-fit', name: 'Best Fit' }],
+      }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model'
+          ? { items: [chatModel({ id: 'best-fit', name: 'Best Fit', score: 20 })] }
+          : { items: [] },
+      ),
+    });
+    const harness = mountGate(client);
+
+    await chooseFirst(harness, 'Recommended workshop set — Best Fit');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.installLlamaCppModel).not.toHaveBeenCalled();
+    expect(client.updateConfig).toHaveBeenCalledWith({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'best-fit' },
       firstRunInstallError: null,
     });
   });
@@ -197,21 +317,29 @@ function createClient(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function chatModel(): CatalogItemSummary {
-  const bytes = 2 * 1024 ** 3;
+function chatModel(
+  input: {
+    id?: string;
+    name?: string;
+    score?: number;
+    bytes?: number;
+  } = {},
+): CatalogItemSummary {
+  const id = input.id ?? 'chat-model';
+  const bytes = input.bytes ?? 2 * 1024 ** 3;
   return {
     sourceId: 'test',
     kind: 'chat-model',
     manifest: {
       schemaVersion: 1,
       kind: 'chat-model',
-      id: 'chat-model',
-      name: 'Chat Model',
+      id,
+      name: input.name ?? 'Chat Model',
       description: '',
       tags: [],
       maintainer: { name: 'test' },
       licenseClass: 'open',
-      recoScore: 100,
+      recoScore: input.score ?? 100,
       version: '1.0.0',
       releasedAt: '2026-01-01',
       parameterSize: '1B',

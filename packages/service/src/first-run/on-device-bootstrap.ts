@@ -82,10 +82,11 @@ async function listChatModelManifests(catalog: CatalogService): Promise<ChatMode
  *   2. Probes the host and ranks open local models from the catalog for
  *      the available RAM and GPU memory.
  *   3. Branches on platform: Apple Silicon → `mlx` provider; everyone else
- *      → `llama-cpp`. If that engine can already see a user or shared-machine
- *      model, pins an actually installed model. Otherwise pins the ranked
- *      recommendation so a client can offer its download. Sets
- *      `firstRunCompleted = true`.
+ *      → `llama-cpp`. Pins the hardware-ranked recommendation regardless of
+ *      whether unrelated user/shared models happen to be installed. An
+ *      installed copy of that exact recommendation is immediately usable;
+ *      other installed models remain alternatives in first-party pickers.
+ *      Sets `firstRunCompleted = true`.
  *   4. Stops here. A first-party client (the desktop banner or CLI TUI)
  *      asks before downloading. The pin tells each client which model to
  *      recommend without surprising the user with a background download.
@@ -164,30 +165,14 @@ export async function bootstrapOnDeviceFirstRun(opts: {
       const pinned = config.defaultModel?.[provider];
       const installed = await installer.listInstalled();
       const pinnedIsOnDisk = pinned ? installed.some((m) => m.id === pinned) : false;
-      if (!pinnedIsOnDisk && installed.length > 0) {
-        // The pin is stale but the user has working models — repoint at one
-        // of those instead of the tier winner. Re-pinning to a not-installed
-        // recommendation here would make Home offer a fresh multi-GB
-        // download while gigabytes of working weights sit on disk, which
-        // reads as "the app forgot my models."
-        const fallback = installed[0]!.id;
-        log.warn(
-          `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed but ` +
-            `${installed.length} model(s) are; re-pinning to installed ${fallback}.`,
-        );
-        await store.writeConfig({
-          defaultModel: { ...config.defaultModel, [provider]: fallback },
-          firstRunInstallError: null as unknown as undefined,
-        });
-        return;
-      }
       if (!pinnedIsOnDisk) {
         const decision = await detectModelTier(await listChatModelManifests(opts.catalog));
         const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
         if (target.provider === provider && target.modelId !== pinned) {
           log.info(
             `[first-run] re-evaluating: pinned ${provider}/${pinned ?? '<none>'} not installed; ` +
-              `resolver now picks ${target.modelId} (${decision.reason}). Updating pin.`,
+              `resolver now picks ${target.modelId} (${decision.reason}). Updating pin; ` +
+              `${installed.length} other installed model(s) remain available as alternatives.`,
           );
           await store.writeConfig({
             defaultModel: { ...config.defaultModel, [provider]: target.modelId },
@@ -242,16 +227,14 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   const targetManager = target.provider === 'mlx' ? mlxModels : llamaCppModels;
   const installed = await targetManager.listInstalled();
   const installedTarget = installed.find((model) => model.id === target.modelId);
-  const selectedModelId = installedTarget?.id ?? installed[0]?.id ?? target.modelId;
-  if (installed.length > 0) {
+  if (installedTarget) {
     log.info(
-      `[first-run] reconciled to installed ${target.provider}/${selectedModelId} from ${installed.length} available user/shared model(s) (recommended ${target.modelId}).`,
+      `[first-run] recommended ${target.provider}/${target.modelId} is already available among ${installed.length} user/shared model(s).`,
     );
-    if (selectedModelId !== target.modelId) {
-      await store.writeConfig({
-        defaultModel: { ...config.defaultModel, [target.provider]: selectedModelId },
-        firstRunInstallError: null as unknown as undefined,
-      });
-    }
+  } else if (installed.length > 0) {
+    log.info(
+      `[first-run] retaining hardware recommendation ${target.provider}/${target.modelId}; ` +
+        `${installed.length} other user/shared model(s) remain available as picker alternatives.`,
+    );
   }
 }

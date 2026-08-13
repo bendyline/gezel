@@ -52,6 +52,9 @@ interface ModelPlan {
     name?: string;
     approxSizeBytes?: number;
   }>;
+  /** Hardware winner before availability is considered. */
+  recommendedChatModel?: BootstrapChatModel;
+  /** Downloadable choices, in hardware recommendation order. */
   chatModels: BootstrapChatModel[];
   accessories: BootstrapAccessoryModel[];
 }
@@ -146,11 +149,13 @@ export function BootstrapGate(props: {
         client.listInstalledRecognitionModels().catch(() => ({ models: [] })),
       ]);
       const installedIds = new Set(installedChat.models.map((model) => model.id));
-      const chatModels = rankChatModels(
+      const rankedChatModels = rankChatModels(
         context.chatCatalog,
         context.device,
         context.provider,
-      ).filter((model) => !installedIds.has(model.id));
+      );
+      const recommendedChatModel = rankedChatModels[0];
+      const chatModels = rankedChatModels.filter((model) => !installedIds.has(model.id));
       if (chatModels.length === 0 && installedChat.models.length === 0) {
         setScreen({
           kind: 'error',
@@ -181,6 +186,7 @@ export function BootstrapGate(props: {
         plan: {
           context,
           installedChatModels: installedChat.models,
+          ...(recommendedChatModel ? { recommendedChatModel } : {}),
           chatModels,
           accessories,
         },
@@ -219,14 +225,7 @@ export function BootstrapGate(props: {
       const context: BootstrapContext = {
         config,
         provider: config.provider,
-        device: {
-          platform: memory.platform,
-          gpuVramBytes: memory.gpuVramBytes,
-          ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
-          totalRamBytes: memory.totalRamBytes,
-          usableBytes: memory.usableBytes,
-          ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
-        },
+        device: recoDevice(memory),
         chatCatalog: chatCatalog.items,
         nativeStatus,
       };
@@ -264,8 +263,19 @@ export function BootstrapGate(props: {
       }
       try {
         await installNativeToolkit(client, context.nativeStatus, missing, setScreen);
-        const nativeStatus = await client.getNativeEngineStatus();
-        await prepareModels({ ...context, nativeStatus });
+        // The first memory snapshot was taken before llama-server existed, so
+        // an AMD/Intel Vulkan host looked CPU-only and fell into the E2B
+        // safety floor. Re-probe after the resolver stamps the binary path;
+        // recommendation must use the dGPU the freshly-installed engine sees.
+        const [nativeStatus, memory] = await Promise.all([
+          client.getNativeEngineStatus(),
+          client.getMemoryProfile(),
+        ]);
+        await prepareModels({
+          ...context,
+          nativeStatus,
+          device: recoDevice(memory),
+        });
       } catch (error) {
         setScreen({
           kind: 'error',
@@ -305,8 +315,13 @@ export function BootstrapGate(props: {
             await installNativeToolkit(client, plan.context.nativeStatus, missing, setScreen);
           }
         }
+        const chatAlreadyInstalled =
+          choice.kind === 'bundle' &&
+          plan.installedChatModels.some((model) => model.id === choice.model.id);
         const jobs = [
-          { label: choice.model.name, sizeBytes: choice.model.approxSizeBytes },
+          ...(!chatAlreadyInstalled
+            ? [{ label: choice.model.name, sizeBytes: choice.model.approxSizeBytes }]
+            : []),
           ...(choice.kind === 'bundle'
             ? plan.accessories.map((model) => ({
                 label: model.name,
@@ -315,10 +330,12 @@ export function BootstrapGate(props: {
             : []),
         ];
         let jobIndex = 0;
-        await installChatModel(client, choice.model, (event) => {
-          updateDownloadProgress(setScreen, jobs[jobIndex]!, jobIndex, jobs.length, event);
-        });
-        jobIndex += 1;
+        if (!chatAlreadyInstalled) {
+          await installChatModel(client, choice.model, (event) => {
+            updateDownloadProgress(setScreen, jobs[jobIndex]!, jobIndex, jobs.length, event);
+          });
+          jobIndex += 1;
+        }
         const updated = await client.updateConfig({
           provider: choice.model.provider,
           defaultModel: {
@@ -403,38 +420,54 @@ export function BootstrapGate(props: {
     );
   }
   if (screen.kind === 'model-choice') {
-    const best = screen.plan.chatModels[0];
+    const best = screen.plan.recommendedChatModel;
+    const bestInstalled = best
+      ? screen.plan.installedChatModels.some((model) => model.id === best.id)
+      : false;
     const accessoryBytes = screen.plan.accessories.reduce(
       (sum, model) => sum + model.approxSizeBytes,
       0,
     );
+    const workshopDownloadBytes =
+      accessoryBytes + (best && !bestInstalled ? best.approxSizeBytes : 0);
     const options = [
-      ...screen.plan.installedChatModels.map((model) => ({
-        label: `Use ${model.name ?? model.id}`,
-        hint: `already available on this machine${
-          model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
-        }`,
-        value: `installed:${model.id}`,
-      })),
       ...(best
         ? [
             {
               label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
-              hint: formatDownloadSize(best.approxSizeBytes + accessoryBytes),
+              hint: `${bestInstalled ? 'chat model already available · ' : ''}${
+                workshopDownloadBytes > 0
+                  ? formatDownloadSize(workshopDownloadBytes)
+                  : 'already available'
+              }`,
               value: 'bundle',
             },
             {
-              label: `Download ${best.name} only`,
-              hint: `best chat model · ${formatDownloadSize(best.approxSizeBytes)}`,
-              value: `chat:${best.id}`,
+              label: `${bestInstalled ? 'Use' : 'Download'} ${best.name} only`,
+              hint: `recommended for this device · ${
+                bestInstalled ? 'already available' : formatDownloadSize(best.approxSizeBytes)
+              }`,
+              value: bestInstalled ? `installed:${best.id}` : `chat:${best.id}`,
             },
           ]
         : []),
-      ...screen.plan.chatModels.slice(1, MAX_ALTERNATIVE_MODELS + 1).map((model) => ({
-        label: `Download ${model.name} only`,
-        hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
-        value: `chat:${model.id}`,
-      })),
+      ...screen.plan.installedChatModels
+        .filter((model) => model.id !== best?.id)
+        .map((model) => ({
+          label: `Use ${model.name ?? model.id}`,
+          hint: `already available on this machine${
+            model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
+          }`,
+          value: `installed:${model.id}`,
+        })),
+      ...screen.plan.chatModels
+        .filter((model) => model.id !== best?.id)
+        .slice(0, MAX_ALTERNATIVE_MODELS)
+        .map((model) => ({
+          label: `Download ${model.name} only`,
+          hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
+          value: `chat:${model.id}`,
+        })),
       { label: 'Not now', hint: 'open the TUI without a local model', value: 'skip' },
     ];
     return (
@@ -510,6 +543,17 @@ function BootstrapFrame(props: { title: string; children: ReactNode }): JSX.Elem
       <Text dimColor>Ctrl+C exit</Text>
     </Box>
   );
+}
+
+function recoDevice(memory: Awaited<ReturnType<GezelClient['getMemoryProfile']>>): RecoDevice {
+  return {
+    platform: memory.platform,
+    gpuVramBytes: memory.gpuVramBytes,
+    ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
+    totalRamBytes: memory.totalRamBytes,
+    usableBytes: memory.usableBytes,
+    ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
+  };
 }
 
 function BootstrapChoiceList(props: {
