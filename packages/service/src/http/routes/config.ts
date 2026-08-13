@@ -1,4 +1,10 @@
-import { UpdateConfigRequestSchema, createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
+import {
+  GEZEL_VERSION,
+  UpdateConfigRequestSchema,
+  createLogger,
+  resolveSandboxCopilot,
+  resolveShowWorkInProgressFeatures,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -185,6 +191,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       keurmeester: config.keurmeester,
       debugMode: config.debugMode === true,
       showAdvancedFeatures: config.showAdvancedFeatures === true,
+      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
+        config.showWorkInProgressFeatures,
+        GEZEL_VERSION,
+      ),
       resetTemplatesOnStartup: config.resetTemplatesOnStartup === true,
       roleBasedNameOnlyMode: config.roleBasedNameOnlyMode === true,
       showPoppetjes: config.showPoppetjes !== false,
@@ -622,6 +632,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       keurmeester: updated.keurmeester,
       debugMode: updated.debugMode === true,
       showAdvancedFeatures: updated.showAdvancedFeatures === true,
+      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
+        updated.showWorkInProgressFeatures,
+        GEZEL_VERSION,
+      ),
       resetTemplatesOnStartup: updated.resetTemplatesOnStartup === true,
       roleBasedNameOnlyMode: updated.roleBasedNameOnlyMode === true,
       showPoppetjes: updated.showPoppetjes !== false,

@@ -2069,6 +2069,13 @@ export const GezelConfigSchema = z.object({
    */
   showAdvancedFeatures: z.boolean().optional(),
   /**
+   * When `true`, very early work-in-progress surfaces are revealed in the
+   * UI and CLI. This is a discoverability preference, not a security or
+   * service-layer capability boundary. Defaults on in development builds
+   * and off in releases; an explicit user choice always wins.
+   */
+  showWorkInProgressFeatures: z.boolean().optional(),
+  /**
    * Debug-only opt-in: when `true`, the service rewrites every
    * template-derived gezel's `about.md` back to the prose its catalog
    * template ships on each boot — discarding any local edits. Bespoke

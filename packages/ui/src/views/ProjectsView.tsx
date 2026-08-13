@@ -85,6 +85,7 @@ import {
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
+import { useShowWorkInProgressFeatures } from '../components/useShowWorkInProgressFeatures.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
@@ -494,6 +495,7 @@ export function ProjectDetailView({
 
 export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewProps = {}) {
   const detailOnly = forceProjectId !== undefined;
+  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   // Auto-compact: observe the outermost container's width and flip
   // to compact layout when it drops below the threshold. The
   // explicit `compact` prop is OR-merged in — a host that knows
@@ -521,6 +523,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [approvals, setApprovals] = useState<ProjectApprovalsResponse | null>(null);
 
   const [tab, setTab] = useState<ProjectTab>('chat');
+  useEffect(() => {
+    if (!showWorkInProgressFeatures && tab === 'mail') setTab('about');
+  }, [showWorkInProgressFeatures, tab]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -2143,7 +2148,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         show: projectTabIsVisible(selected, 'artifacts'),
                       },
                       { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
-                      { value: 'mail', label: 'Mail', show: isEmailProject(selected) },
+                      {
+                        value: 'mail',
+                        label: 'Mail',
+                        show: showWorkInProgressFeatures && isEmailProject(selected),
+                      },
                       {
                         value: 'map',
                         label: 'Village',
@@ -2276,12 +2285,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         projectName={selected.name}
                       />
 
-                      <section
-                        id="project-about-connections"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <ProjectConnectionsTab project={selected} onProjectChange={setSelected} />
-                      </section>
+                      {showWorkInProgressFeatures && (
+                        <section
+                          id="project-about-connections"
+                          className="project-about-section project-about-anchor"
+                        >
+                          <ProjectConnectionsTab project={selected} onProjectChange={setSelected} />
+                        </section>
+                      )}
 
                       <section
                         id="project-about-settings"
@@ -2654,7 +2665,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
                         <a href="#project-about-memories">Project memories</a>
-                        <a href="#project-about-connections">Connections</a>
+                        {showWorkInProgressFeatures && (
+                          <a href="#project-about-connections">Connections</a>
+                        )}
                         <a href="#project-about-settings">Settings</a>
                         <a href="#project-about-toolsets">Toolsets</a>
                         <a href="#project-about-history">History</a>
@@ -3093,7 +3106,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     <ProjectGitHubView project={selected} onProjectChange={setSelected} />
                   )}
 
-                  {tab === 'mail' && (
+                  {showWorkInProgressFeatures && tab === 'mail' && (
                     <ProjectMailTab project={selected} onProjectChange={setSelected} />
                   )}
 

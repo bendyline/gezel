@@ -4,6 +4,7 @@ import {
   type CraftbookRole,
   type CraftbookSummary,
   type CreateTaskRequest,
+  visibleCatalogItems,
 } from '@bendyline/gezel';
 
 export interface StartCraftbook extends CraftbookSummary {
@@ -27,9 +28,12 @@ export interface StartCraftbookCategory {
  * CLI picker and wordwheel share. The endpoint already places project-local
  * books ahead of same-id catalog entries; retain that precedence defensively.
  */
-export function normalizeCraftbooks(items: ReadonlyArray<CatalogItemSummary>): StartCraftbook[] {
+export function normalizeCraftbooks(
+  items: ReadonlyArray<CatalogItemSummary>,
+  showWorkInProgressFeatures = false,
+): StartCraftbook[] {
   const byId = new Map<string, StartCraftbook>();
-  for (const item of items) {
+  for (const item of visibleCatalogItems(items, showWorkInProgressFeatures)) {
     if (item.manifest.kind !== 'craftbook-template') continue;
     const manifest = item.manifest;
     if (byId.has(manifest.id)) continue;

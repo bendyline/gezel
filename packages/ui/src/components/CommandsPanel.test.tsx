@@ -6,6 +6,7 @@ import { osCommandGroups } from './os-commands.js';
 
 const apiMocks = vi.hoisted(() => ({
   health: vi.fn(),
+  getConfig: vi.fn(),
   getProjectIndex: vi.fn(),
   getProjectIndexStatus: vi.fn(),
   refreshProjectIndex: vi.fn(),
@@ -64,6 +65,7 @@ const ORDERED_INDEX = {
 beforeEach(() => {
   window.__GEZEL__ = { ...window.__GEZEL__, token: 't', platform: 'linux' };
   apiMocks.health.mockResolvedValue({ platform: 'linux' });
+  apiMocks.getConfig.mockResolvedValue({ showWorkInProgressFeatures: false });
   apiMocks.getProjectIndex.mockResolvedValue(INDEX);
   apiMocks.getProjectIndexStatus.mockResolvedValue({ state: 'fresh', meta: { scannedAt: '1' } });
   apiMocks.refreshProjectIndex.mockResolvedValue(undefined);
@@ -92,10 +94,26 @@ const PENDING_IMPORT = {
 
 const CRAFTBOOK = {
   sourceId: 'gilde',
+  kind: 'craftbook-template',
   manifest: {
+    kind: 'craftbook-template',
     id: 'ship-it',
     name: 'Ship it',
     description: 'Ship the thing',
+    paramSchema: {},
+  },
+};
+
+const CONNECTOR_CRAFTBOOK = {
+  sourceId: 'gilde',
+  kind: 'craftbook-template',
+  manifest: {
+    kind: 'craftbook-template',
+    id: 'social-digest',
+    name: 'Social Digest',
+    description: 'Digest connected social feeds',
+    tags: [],
+    connectors: [{ typeId: 'bluesky-posts', optional: true }],
     paramSchema: {},
   },
 };
@@ -182,6 +200,26 @@ describe('CommandsPanel sections', () => {
     expect(await screen.findByText('Craftbooks')).toBeTruthy();
     expect(screen.getByText('Skills (workspace)')).toBeTruthy();
     expect(screen.getByText('Imports to review (1)')).toBeTruthy();
+  });
+
+  it('hides connector-backed craftbooks from the command launcher while WIP is off', async () => {
+    apiMocks.listProjectCraftbooks.mockResolvedValue({
+      items: [CRAFTBOOK, CONNECTOR_CRAFTBOOK],
+    });
+
+    render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
+
+    expect(await screen.findByText('Ship it')).toBeTruthy();
+    expect(screen.queryByText('Social Digest')).toBeNull();
+  });
+
+  it('shows connector-backed craftbooks in the command launcher while WIP is on', async () => {
+    apiMocks.getConfig.mockResolvedValue({ showWorkInProgressFeatures: true });
+    apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [CONNECTOR_CRAFTBOOK] });
+
+    render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
+
+    expect(await screen.findByText('Social Digest')).toBeTruthy();
   });
 });
 

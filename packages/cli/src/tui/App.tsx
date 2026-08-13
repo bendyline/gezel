@@ -297,13 +297,13 @@ export function App(props: {
     const sequence = ++craftbookLoadSequence.current;
     const result = await client.listProjectCraftbooks(projectId);
     if (sequence !== craftbookLoadSequence.current) return [];
-    const next = normalizeCraftbooks(result.items);
+    const next = normalizeCraftbooks(result.items, config?.showWorkInProgressFeatures === true);
     setCraftbooks(next);
     setCraftbookProjectType(result.projectType ?? null);
     setSuggestedCraftbookIds(new Set(result.suggestedIds ?? []));
     setCraftbooksNeedingSetup(new Set(Object.keys(result.missingToolsets)));
     return next;
-  }, [client, projectId]);
+  }, [client, config?.showWorkInProgressFeatures, projectId]);
 
   // Live feeds for the whole project (chat across all gezels + terminal).
   useProjectEvents(

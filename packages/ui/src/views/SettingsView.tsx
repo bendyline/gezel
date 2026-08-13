@@ -522,6 +522,25 @@ export function SettingsView() {
     }
   }, []);
 
+  const saveShowWorkInProgressFeatures = useCallback(
+    async (showWorkInProgressFeatures: boolean) => {
+      setStatus('saving…');
+      try {
+        const res = await api.updateConfig({ showWorkInProgressFeatures });
+        setConfig(res);
+        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+        setStatus(
+          showWorkInProgressFeatures
+            ? 'very early work-in-progress features ON'
+            : 'very early work-in-progress features OFF',
+        );
+      } catch (err) {
+        setStatus(`save failed: ${(err as Error).message}`);
+      }
+    },
+    [],
+  );
+
   const resetTemplatesNow = useCallback(async () => {
     if (
       !window.confirm(
@@ -3399,6 +3418,18 @@ export function SettingsView() {
                 />
                 <span>Show advanced features</span>
               </label>
+              <label className="debug-toggle">
+                <input
+                  type="checkbox"
+                  checked={config?.showWorkInProgressFeatures === true}
+                  onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
+                />
+                <span>Show very early work-in-progress features</span>
+              </label>
+              <p className="muted small">
+                Very early features may be incomplete or change shape. The current preview is
+                Connectors and the project types and craftbooks that use them.
+              </p>
             </section>
             {isDarwin && window.__GEZEL__?.uninstall && (
               <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>

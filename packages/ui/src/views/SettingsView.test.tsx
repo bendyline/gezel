@@ -138,6 +138,26 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
+  it('defaults very early work-in-progress features off and persists the toggle', async () => {
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-about'));
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Show very early work-in-progress features',
+    });
+    expect(checkbox).not.toBeChecked();
+
+    fireEvent.click(checkbox);
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ showWorkInProgressFeatures: true }),
+    );
+  });
+
   it('offers the installed macOS uninstaller from About settings', async () => {
     window.__GEZEL__ = {
       ...window.__GEZEL__,

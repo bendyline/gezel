@@ -1,6 +1,7 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GEZEL_VERSION } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from './service.js';
@@ -650,6 +651,27 @@ describe('config API', () => {
 
     const persistedRes = await api('GET', '/api/config');
     expect(await persistedRes.json()).toMatchObject({ autoUpdateChecks: false });
+  });
+
+  it('materializes the build default for work-in-progress features and persists explicit choices', async () => {
+    const initialRes = await api('GET', '/api/config');
+    expect(await initialRes.json()).toMatchObject({
+      showWorkInProgressFeatures: GEZEL_VERSION === '0.0.0',
+    });
+
+    const disabledRes = await api('PUT', '/api/config', { showWorkInProgressFeatures: false });
+    expect(disabledRes.status).toBe(200);
+    expect(await disabledRes.json()).toMatchObject({ showWorkInProgressFeatures: false });
+
+    const disabledPersistedRes = await api('GET', '/api/config');
+    expect(await disabledPersistedRes.json()).toMatchObject({ showWorkInProgressFeatures: false });
+
+    const enabledRes = await api('PUT', '/api/config', { showWorkInProgressFeatures: true });
+    expect(enabledRes.status).toBe(200);
+    expect(await enabledRes.json()).toMatchObject({ showWorkInProgressFeatures: true });
+
+    const persistedRes = await api('GET', '/api/config');
+    expect(await persistedRes.json()).toMatchObject({ showWorkInProgressFeatures: true });
   });
 });
 

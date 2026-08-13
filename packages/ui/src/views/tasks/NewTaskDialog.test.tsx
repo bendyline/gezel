@@ -83,6 +83,10 @@ function renderDialog(props: Partial<Parameters<typeof NewTaskDialog>[0]> = {}) 
 
 describe('NewTaskDialog', () => {
   beforeEach(() => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: false,
+    } as never);
     vi.mocked(api.listProjectCraftbooks).mockReset();
     vi.mocked(api.createTask).mockReset();
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
@@ -111,6 +115,48 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /Browse all 2 craftbooks/ }));
     expect(screen.getByRole('radio', { name: 'Blog Post' })).toBeInTheDocument();
+  });
+
+  it('hides connector-backed craftbooks while WIP features are off', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('plain-report', 'Plain Report'),
+        bookItem('social-digest', 'Social Digest', {
+          connectors: [{ typeId: 'bluesky-posts', optional: true }],
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+      establishedCodebase: false,
+    });
+
+    renderDialog();
+
+    expect(await screen.findByRole('radio', { name: 'Plain Report' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Social Digest' })).not.toBeInTheDocument();
+  });
+
+  it('shows connector-backed craftbooks while WIP features are on', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('social-digest', 'Social Digest', {
+          connectors: [{ typeId: 'bluesky-posts', optional: true }],
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+      establishedCodebase: false,
+    });
+
+    renderDialog();
+
+    expect(await screen.findByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
   });
 
   it('groups craftbooks into project-lifecycle shelves', async () => {

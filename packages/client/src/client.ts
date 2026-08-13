@@ -1048,6 +1048,12 @@ export interface ConfigResponse {
    */
   showAdvancedFeatures?: boolean;
   /**
+   * When true, very early work-in-progress surfaces are revealed in the UI
+   * and CLI. Materialized on GET; defaults on in development builds and off
+   * in releases, while an explicit user choice always wins.
+   */
+  showWorkInProgressFeatures?: boolean;
+  /**
    * Debug-only opt-in: when true, the service restores every
    * template-derived gezel's about.md to its catalog default on each boot,
    * discarding local edits. Materialized on GET (defaults to `false` when

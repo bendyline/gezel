@@ -16,6 +16,7 @@ function catalogCraftbook(input: {
   description?: string;
   version?: string;
   role?: 'project-starter' | 'maintenance-review' | 'general';
+  connectors?: Array<{ typeId: string; optional?: boolean }>;
 }): CatalogItemSummary {
   const stepCount = input.stepCount ?? 1;
   return {
@@ -28,6 +29,7 @@ function catalogCraftbook(input: {
       description: input.description,
       version: input.version ?? '1.0.0',
       role: input.role ?? 'general',
+      connectors: input.connectors,
       tags: input.tags ?? [],
       steps: Array.from({ length: stepCount }, (_, index) => ({
         id: `step-${index + 1}`,
@@ -55,6 +57,23 @@ describe('craftbook start helpers', () => {
       ['release', 'Release'],
     ]);
     expect(normalized[0]).toMatchObject({ source: 'project', sourceId: 'project' });
+  });
+
+  it('hides connector-backed craftbooks unless WIP features are enabled', () => {
+    const items = [
+      catalogCraftbook({ id: 'plain', name: 'Plain' }),
+      catalogCraftbook({
+        id: 'social-digest',
+        name: 'Social Digest',
+        connectors: [{ typeId: 'bluesky-posts', optional: true }],
+      }),
+    ];
+
+    expect(normalizeCraftbooks(items).map((book) => book.id)).toEqual(['plain']);
+    expect(normalizeCraftbooks(items, true).map((book) => book.id)).toEqual([
+      'plain',
+      'social-digest',
+    ]);
   });
 
   it('builds a recommended first stage plus project-lifecycle shelves', () => {

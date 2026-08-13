@@ -187,6 +187,10 @@ describe('ProjectsView', () => {
     window.localStorage.removeItem('gezel:project-output-fraction');
     window.localStorage.removeItem('gezel:project-output-fraction:v2');
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: false,
+    } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [] } as never);
     vi.mocked(api.getProject).mockImplementation(
@@ -739,7 +743,6 @@ describe('ProjectsView', () => {
       'About this project',
       'Mission objectives',
       'Project memories',
-      'Connections',
       'Settings',
       'Toolsets',
       'History',
@@ -749,11 +752,29 @@ describe('ProjectsView', () => {
       '#project-about-overview',
       '#project-about-mission',
       '#project-about-memories',
-      '#project-about-connections',
       '#project-about-settings',
       '#project-about-toolsets',
       '#project-about-history',
     ]);
+    expect(document.querySelector('#project-about-connections')).toBeNull();
+  });
+
+  it('reveals project connection settings while WIP features are on', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const toc = await screen.findByRole('navigation', { name: 'About sections' });
+    expect(await within(toc).findByRole('link', { name: 'Connections' })).toHaveAttribute(
+      'href',
+      '#project-about-connections',
+    );
+    expect(document.querySelector('#project-about-connections')).not.toBeNull();
   });
 
   it('keeps a failed project-document edit dirty and retries it', async () => {
