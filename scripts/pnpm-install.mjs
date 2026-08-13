@@ -231,7 +231,8 @@ function workspaceDependencyMarkersReady(repoRoot) {
 
 export function workspaceDependenciesReady(repoRoot) {
   return (
-    workspaceDependencyMarkersReady(repoRoot) && missingWorkspaceDependencyLinks(repoRoot).length === 0
+    workspaceDependencyMarkersReady(repoRoot) &&
+    missingWorkspaceDependencyLinks(repoRoot).length === 0
   );
 }
 

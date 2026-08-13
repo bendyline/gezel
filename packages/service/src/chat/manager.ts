@@ -13379,8 +13379,7 @@ export class ChatManager {
       name: gezel?.name ?? 'Agent',
       // Session stamp wins over the live config flag: a TUI-created
       // session stays boring even when the desktop preference is named.
-      roleBasedNameOnlyMode:
-        record.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode ?? false,
+      roleBasedNameOnlyMode: record.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode ?? false,
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
       ...(lessonsMd.trim() ? { lessons: lessonsMd.trim() } : {}),

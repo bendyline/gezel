@@ -186,7 +186,10 @@ export async function connectForTui(globals: CliGlobals): Promise<TuiConnection>
   let stopPromise: Promise<void> | undefined;
   return {
     client: result.client,
-    stop: () => (stopPromise ??= stopOwnedDaemon(result.child)),
+    stop: () => {
+      stopPromise ??= stopOwnedDaemon(result.child);
+      return stopPromise;
+    },
   };
 }
 
