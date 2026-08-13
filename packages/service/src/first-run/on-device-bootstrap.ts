@@ -81,10 +81,11 @@ async function listChatModelManifests(catalog: CatalogService): Promise<ChatMode
  *      "don't override the user's decisions."
  *   2. Probes the host and ranks open local models from the catalog for
  *      the available RAM and GPU memory.
- *   3. Branches on platform: Apple Silicon → `mlx` provider + MLX
- *      variant of the tier; everyone else → `llama-cpp` provider
- *      + GGUF variant. Pins the choice as the default model and
- *      sets `firstRunCompleted = true`.
+ *   3. Branches on platform: Apple Silicon → `mlx` provider; everyone else
+ *      → `llama-cpp`. If that engine can already see a user or shared-machine
+ *      model, pins an actually installed model. Otherwise pins the ranked
+ *      recommendation so a client can offer its download. Sets
+ *      `firstRunCompleted = true`.
  *   4. Stops here. A first-party client (the desktop banner or CLI TUI)
  *      asks before downloading. The pin tells each client which model to
  *      recommend without surprising the user with a background download.
@@ -224,16 +225,33 @@ export async function bootstrapOnDeviceFirstRun(opts: {
     `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb})`,
   );
 
-  // Write the provider + default-model pin so the Home banner can
-  // label the "Download recommended model" CTA with the right id.
-  // We deliberately do NOT auto-fire the install — a fresh launch
-  // shouldn't kick off a multi-GB download without the user's
-  // explicit consent. The UI reads the pin and offers the button;
-  // clicking it goes through the same install SSE route Settings uses.
+  // Publish the recommendation before shared-model verification. A first
+  // adoption may hash tens of gigabytes and the CLI must not time out waiting
+  // for `provider` to leave its compatibility fallback. The exact inventory
+  // reconciliation below corrects the durable pin; first-party clients that
+  // are already checking inventory either see the recommended model or
+  // present the verified installed alternatives instead of claiming setup is
+  // ready merely because some different model exists.
   await store.writeConfig({
     provider: target.provider,
     defaultModel: { ...config.defaultModel, [target.provider]: target.modelId },
     firstRunCompleted: true,
     firstRunInstallError: null as unknown as undefined,
   });
+
+  const targetManager = target.provider === 'mlx' ? mlxModels : llamaCppModels;
+  const installed = await targetManager.listInstalled();
+  const installedTarget = installed.find((model) => model.id === target.modelId);
+  const selectedModelId = installedTarget?.id ?? installed[0]?.id ?? target.modelId;
+  if (installed.length > 0) {
+    log.info(
+      `[first-run] reconciled to installed ${target.provider}/${selectedModelId} from ${installed.length} available user/shared model(s) (recommended ${target.modelId}).`,
+    );
+    if (selectedModelId !== target.modelId) {
+      await store.writeConfig({
+        defaultModel: { ...config.defaultModel, [target.provider]: selectedModelId },
+        firstRunInstallError: null as unknown as undefined,
+      });
+    }
+  }
 }

@@ -9,7 +9,12 @@ import type {
   Task,
   TaskStatus,
 } from '@bendyline/gezel';
-import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
+import type {
+  ConfigResponse,
+  GezelClient,
+  LlamaCppInstallEvent,
+  MlxInstallEvent,
+} from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ensureCliProjectLead } from '../connection.js';
@@ -53,7 +58,13 @@ import {
   reduceTurns,
   sessionToFeedRows,
 } from './feed.js';
-import { type ModelChoice, loadModelChoices, modelProviderLabel } from './model-picker.js';
+import {
+  type ModelChoice,
+  type ModelDownloadChoice,
+  loadModelChoices,
+  loadModelDownloadChoices,
+  modelProviderLabel,
+} from './model-picker.js';
 import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
@@ -84,6 +95,7 @@ type Overlay =
   | 'gezel'
   | 'engagement-mode'
   | 'model'
+  | 'model-download'
   | 'thread'
   | 'task'
   | 'start-category'
@@ -107,8 +119,17 @@ interface TaskTextPrompt {
   taskRef?: string;
 }
 
+interface ModelDownloadProgress {
+  choice: ModelDownloadChoice;
+  bytesWritten: number;
+  totalBytes: number | null;
+  pct: number | null;
+  phase?: string;
+}
+
 const HELP = [
   '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/model download — choose and download a new on-device model',
   '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
   '/allow codexedits|claudeedits — allow provider-native project edits',
   '/disallow codexedits|claudeedits — put that provider in read-only plan mode',
@@ -154,6 +175,11 @@ export function App(props: {
   );
   const [startCategoryId, setStartCategoryId] = useState<string | null>(null);
   const [modelChoices, setModelChoices] = useState<ModelChoice[]>([]);
+  const [modelDownloadChoices, setModelDownloadChoices] = useState<ModelDownloadChoice[]>([]);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(
+    null,
+  );
+  const [modelDownloadReturn, setModelDownloadReturn] = useState<'model' | null>(null);
   const [modelChoicesLoading, setModelChoicesLoading] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [pendingQuestions, setPendingQuestions] = useState<Question[]>([]);
@@ -194,7 +220,10 @@ export function App(props: {
     : 0;
   const modelPickerWindowSize = Math.max(4, Math.min(10, termRows - 12));
   const inventoryPickerRows =
-    overlay === 'model' || overlay === 'start-category' || overlay === 'start-craftbook'
+    overlay === 'model' ||
+    overlay === 'model-download' ||
+    overlay === 'start-category' ||
+    overlay === 'start-craftbook'
       ? modelPickerWindowSize + 5
       : 0;
   const visibleRows = Math.max(
@@ -371,6 +400,58 @@ export function App(props: {
       }
     },
     [client, ensureSession, note, projectId, projects],
+  );
+
+  const openModelPicker = useCallback(async () => {
+    if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+    if (activeGezel.fixedFunction) {
+      return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+    }
+    if (modelChoicesLoading) return note('model choices are already loading.');
+    setModelChoicesLoading(true);
+    note('loading available engines and models…');
+    try {
+      const choices = await loadModelChoices(client, config ?? (await client.getConfig()));
+      setModelChoices(choices);
+      setOverlay('model');
+    } catch (err) {
+      note(`could not load models: ${errMsg(err)}`, 'error');
+    } finally {
+      setModelChoicesLoading(false);
+    }
+  }, [activeGezel, activeGezelId, client, config, modelChoicesLoading, note]);
+
+  const openModelDownloadPicker = useCallback(
+    async (returnTo: 'model' | null = null) => {
+      if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+      if (activeGezel.fixedFunction) {
+        return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+      }
+      if (modelChoicesLoading) return note('model choices are already loading.');
+      setOverlay(null);
+      setModelChoicesLoading(true);
+      note('finding on-device models that fit this machine…');
+      try {
+        const choices = await loadModelDownloadChoices(
+          client,
+          config ?? (await client.getConfig()),
+        );
+        if (choices.length === 0) {
+          note('no additional compatible on-device models are available to download.');
+          if (returnTo === 'model') await openModelPicker();
+          return;
+        }
+        setModelDownloadChoices(choices);
+        setModelDownloadProgress(null);
+        setModelDownloadReturn(returnTo);
+        setOverlay('model-download');
+      } catch (err) {
+        note(`could not load downloadable models: ${errMsg(err)}`, 'error');
+      } finally {
+        setModelChoicesLoading(false);
+      }
+    },
+    [activeGezel, activeGezelId, client, config, modelChoicesLoading, note, openModelPicker],
   );
 
   const openThreadPicker = useCallback(async () => {
@@ -872,26 +953,10 @@ export function App(props: {
           await applyEngagementMode(rest);
           return;
         case 'model': {
-          if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
-          if (activeGezel.fixedFunction) {
-            return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
-          }
-          if (modelChoicesLoading) return note('model choices are already loading.');
-          setModelChoicesLoading(true);
-          note('loading available engines and models…');
-          try {
-            const choices = await loadModelChoices(client, config ?? (await client.getConfig()));
-            if (choices.length === 0) {
-              return note('no engines with available chat models were found.', 'error');
-            }
-            setModelChoices(choices);
-            setOverlay('model');
-          } catch (err) {
-            note(`could not load models: ${errMsg(err)}`, 'error');
-          } finally {
-            setModelChoicesLoading(false);
-          }
-          return;
+          const subcommand = rest.trim().toLowerCase();
+          if (!subcommand) return openModelPicker();
+          if (subcommand === 'download') return openModelDownloadPicker();
+          return note('usage: /model [download]', 'error');
         }
         case 'thread':
           await openThreadPicker();
@@ -1022,16 +1087,14 @@ export function App(props: {
       }
     },
     [
-      activeGezel,
-      activeGezelId,
       applyEngagementMode,
       applyProjectPermission,
       client,
-      config,
       craftbooks,
-      modelChoicesLoading,
       note,
       exit,
+      openModelDownloadPicker,
+      openModelPicker,
       openThreadPicker,
       projectId,
       projectName,
@@ -1041,11 +1104,10 @@ export function App(props: {
     ],
   );
 
-  const applyModelChoice = useCallback(
-    async (value: string) => {
+  const applyModelSelection = useCallback(
+    async (choice?: ModelChoice) => {
       setOverlay(null);
       if (!activeGezelId || !activeGezel || !config) return;
-      const choice = modelChoices.find((item) => item.value === value);
       const nextProvider = choice?.provider ?? null;
       const nextModel = choice?.model.id;
       const providerChanged = (activeGezel.provider ?? null) !== nextProvider;
@@ -1072,8 +1134,83 @@ export function App(props: {
         note(`could not switch model: ${errMsg(err)}`, 'error');
       }
     },
-    [activeGezel, activeGezelId, client, config, ensureSession, modelChoices, note, projectId],
+    [activeGezel, activeGezelId, client, config, ensureSession, note, projectId],
   );
+
+  const applyModelChoice = useCallback(
+    async (value: string) => {
+      await applyModelSelection(modelChoices.find((item) => item.value === value));
+    },
+    [applyModelSelection, modelChoices],
+  );
+
+  const installModelDownload = useCallback(
+    async (value: string) => {
+      const choice = modelDownloadChoices.find((candidate) => candidate.value === value);
+      if (!choice) return;
+      let terminalError: string | null = null;
+      setModelDownloadProgress({
+        choice,
+        bytesWritten: 0,
+        totalBytes: choice.model.approxSizeBytes,
+        pct: 0,
+        phase: 'starting',
+      });
+      const onEvent = (event: LlamaCppInstallEvent | MlxInstallEvent) => {
+        if (event.type === 'error') terminalError = event.error;
+        const progress = readModelDownloadProgress(choice, event);
+        if (progress) setModelDownloadProgress(progress);
+      };
+      try {
+        if (choice.provider === 'mlx') {
+          await client.installMlxModel(choice.model.id, onEvent);
+        } else {
+          await client.installLlamaCppModel(choice.model.id, onEvent);
+        }
+        if (terminalError) throw new Error(terminalError);
+        const installedChoice: ModelChoice = {
+          provider: choice.provider,
+          model: {
+            id: choice.model.id,
+            name: choice.model.name,
+          },
+          value: choice.value,
+          label: `${modelProviderLabel(choice.provider)} · ${choice.model.name}`,
+        };
+        setModelChoices((current) => [
+          ...current.filter((candidate) => candidate.value !== installedChoice.value),
+          installedChoice,
+        ]);
+        setModelDownloadProgress(null);
+        note(`downloaded ${choice.model.name}; switching this gezel to it…`);
+        await applyModelSelection(installedChoice);
+      } catch (err) {
+        setModelDownloadProgress(null);
+        setOverlay('model-download');
+        note(`model download failed: ${errMsg(err)}`, 'error');
+      }
+    },
+    [applyModelSelection, client, modelDownloadChoices, note],
+  );
+
+  const cancelModelDownload = useCallback(async () => {
+    const progress = modelDownloadProgress;
+    if (!progress) return;
+    try {
+      if (progress.choice.provider === 'mlx') {
+        await client.cancelMlxModelInstall(progress.choice.model.id);
+      } else {
+        await client.cancelLlamaCppModelInstall(progress.choice.model.id);
+      }
+      note(`canceled the ${progress.choice.model.name} download.`);
+    } catch (err) {
+      note(`could not cancel model download: ${errMsg(err)}`, 'error');
+    } finally {
+      setModelDownloadProgress(null);
+      if (modelDownloadReturn === 'model') await openModelPicker();
+      else setOverlay(null);
+    }
+  }, [client, modelDownloadProgress, modelDownloadReturn, note, openModelPicker]);
 
   const onSubmit = useCallback(
     (raw: string) => {
@@ -1196,6 +1333,11 @@ export function App(props: {
                   : ''
               }`,
             },
+            {
+              label: 'Download a new model…',
+              value: '__download__',
+              hint: 'browse on-device models ranked for this machine',
+            },
             ...modelChoices.map((choice) => ({
               label: choice.label,
               value: choice.value,
@@ -1214,8 +1356,34 @@ export function App(props: {
           }
           windowSize={modelPickerWindowSize}
           onCancel={() => setOverlay(null)}
-          onSelect={(value) => void applyModelChoice(value)}
+          onSelect={(value) => {
+            if (value === '__download__') void openModelDownloadPicker('model');
+            else void applyModelChoice(value);
+          }}
         />
+      ) : null}
+      {overlay === 'model-download' ? (
+        modelDownloadProgress ? (
+          <ModelDownloadProgressPanel
+            progress={modelDownloadProgress}
+            onCancel={() => void cancelModelDownload()}
+          />
+        ) : (
+          <Picker
+            title="Download and use an on-device model"
+            items={modelDownloadChoices.map((choice) => ({
+              label: choice.label,
+              value: choice.value,
+              hint: choice.hint,
+            }))}
+            windowSize={modelPickerWindowSize}
+            onCancel={() => {
+              if (modelDownloadReturn === 'model') setOverlay('model');
+              else setOverlay(null);
+            }}
+            onSelect={(value) => void installModelDownload(value)}
+          />
+        )
       ) : null}
       {overlay === 'start-category' ? (
         <Picker
@@ -1406,6 +1574,67 @@ export function App(props: {
       />
     </Box>
   );
+}
+
+function ModelDownloadProgressPanel(props: {
+  progress: ModelDownloadProgress;
+  onCancel: () => void;
+}): JSX.Element {
+  const { progress, onCancel } = props;
+  useInput((input, key) => {
+    if (key.escape || (key.ctrl && input === 'c')) onCancel();
+  });
+  const transferred = progress.totalBytes
+    ? `${formatModelBytes(progress.bytesWritten)} / ${formatModelBytes(progress.totalBytes)}`
+    : formatModelBytes(progress.bytesWritten);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+      <Text bold color="yellow">
+        Downloading {progress.choice.model.name}
+      </Text>
+      <Text>
+        {progress.pct == null ? 'Working…' : `${progress.pct}%`} · {transferred}
+      </Text>
+      {progress.phase ? <Text dimColor>{progress.phase}</Text> : null}
+      <Text dimColor>Esc / Ctrl+C cancel</Text>
+    </Box>
+  );
+}
+
+function readModelDownloadProgress(
+  choice: ModelDownloadChoice,
+  event: LlamaCppInstallEvent | MlxInstallEvent,
+): ModelDownloadProgress | null {
+  if (event.type === 'progress') {
+    const bytesWritten = 'bytesWrittenAll' in event ? event.bytesWrittenAll : event.bytesWritten;
+    const totalBytes = 'totalBytesAll' in event ? event.totalBytesAll : event.totalBytes;
+    return {
+      choice,
+      bytesWritten,
+      totalBytes,
+      pct: totalBytes > 0 ? Math.min(100, Math.floor((bytesWritten / totalBytes) * 100)) : null,
+      phase: 'downloading and verifying model files',
+    };
+  }
+  if (event.type === 'companion') {
+    return {
+      choice,
+      bytesWritten: event.bytesWritten,
+      totalBytes: event.totalBytes,
+      pct:
+        event.totalBytes > 0
+          ? Math.min(100, Math.floor((event.bytesWritten / event.totalBytes) * 100))
+          : null,
+      phase: `downloading ${event.name}`,
+    };
+  }
+  return null;
+}
+
+function formatModelBytes(bytes: number): string {
+  return bytes >= 1_000_000_000
+    ? `${(bytes / 1_000_000_000).toFixed(1)} GB`
+    : `${Math.max(0, Math.round(bytes / 1_000_000))} MB`;
 }
 
 function errMsg(err: unknown): string {

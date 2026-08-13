@@ -71,6 +71,34 @@ describe('BootstrapGate interactions', () => {
     });
   });
 
+  it('does not accept any shared model as proof that the pinned model exists', async () => {
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'missing-gemma' },
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'shared-gemma', name: 'Shared Gemma' }],
+      }),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Choose a local chat model');
+      expect(harness.text()).toContain('Use Shared Gemma');
+      expect(harness.text()).not.toContain('READY');
+    });
+    await chooseFirst(harness, 'Use Shared Gemma');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.updateConfig).toHaveBeenCalledWith({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'shared-gemma' },
+      firstRunInstallError: null,
+    });
+  });
+
   it('hands Ctrl+C ownership to the child once setup is ready', async () => {
     const onCtrlC = vi.fn();
     const client = createClient();
@@ -131,7 +159,7 @@ function createClient(overrides: Record<string, unknown> = {}) {
   const config = {
     provider: 'llama-cpp',
     firstRunCompleted: true,
-    defaultModel: { 'llama-cpp': 'old-model' },
+    defaultModel: { 'llama-cpp': 'installed' },
   } as ConfigResponse;
   return {
     getMemoryProfile: vi.fn().mockResolvedValue({

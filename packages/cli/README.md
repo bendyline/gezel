@@ -24,6 +24,11 @@ choices:
 Downloads show live progress and activate inside the running daemon, so setup
 continues directly into the TUI without a restart.
 
+If the per-user or machine-shared store already has the configured model, the
+TUI uses it without downloading another copy. A stale recommendation never
+counts merely because some other shared model exists: setup asks you to use an
+available model or download the recommendation instead.
+
 ## Which Gezel service the CLI uses
 
 With no connection flags, the CLI follows this order:
@@ -150,7 +155,10 @@ gezel-owned active tasks for the current project. Night Shift is managed with
 `/nightshift start`, `/nightshift stop`, and `/nightshift list`; the command
 wordwheel exposes all three subcommands. `/mode` opens a picker for the same
 four activity levels as the one-shot command; `/mode reactive+tasks` (for
-example) switches directly. Project edit permissions are available through
+example) switches directly. `/model` lists every installed user/shared model
+and includes **Download a new model**; `/model download` opens that device-ranked
+download list directly. A completed download is selected for the active gezel
+and starts a fresh chat. Project edit permissions are available through
 `/allow` and `/disallow`: use `edits` for built-in tools and background work,
 `codexedits` for Codex sessions, or `claudeedits` for Claude sessions. For
 example, `/disallow edits` makes Gezel-managed access to the current project

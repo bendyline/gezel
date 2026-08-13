@@ -185,6 +185,50 @@ describe('App interactions', () => {
     });
   });
 
+  it('opens model downloads from the model picker, then uses the result', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/model');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Choose engine + model');
+      expect(harness.text()).toContain('Download a new model…');
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    harness.write('\u001B[B');
+    await harness.waitUntilRenderFlush();
+    harness.write('\r');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Download and use an on-device model');
+      expect(harness.text()).toContain('Fresh Gemma');
+    });
+    harness.write('\r');
+
+    await vi.waitFor(() => {
+      expect(client.installLlamaCppModel).toHaveBeenCalledWith('fresh-gemma', expect.any(Function));
+      expect(client.updateGezelSettings).toHaveBeenCalledWith('foreman', {
+        provider: 'llama-cpp',
+        model: 'fresh-gemma',
+        reasoningEffort: null,
+      });
+    });
+    expect(harness.text()).toContain('model → llama.cpp · Fresh Gemma');
+  });
+
+  it('opens the same download picker directly with /model download', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/model download');
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Download and use an on-device model');
+      expect(harness.text()).toContain('Fresh Gemma');
+    });
+  });
+
   it('allows and disallows managed project edits', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -429,6 +473,10 @@ function createClient(opts?: {
       ...projects.find((project) => project.id === id),
       ...patch,
     })),
+    updateGezelSettings: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
+      ...gezels.find((gezel) => gezel.id === id),
+      ...patch,
+    })),
     createChatSession: vi.fn(async ({ gezelId, projectId }) => ({
       id: `session-${projectId}-${gezelId}`,
       gezelId,
@@ -455,10 +503,64 @@ function createClient(opts?: {
     }),
     invokeSessionTool: vi.fn().mockResolvedValue({ text: 'contents of README.md' }),
     listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    getCopilotStatus: vi.fn().mockResolvedValue({ available: false }),
+    getMemoryProfile: vi.fn().mockResolvedValue({
+      platform: 'win32',
+      totalRamBytes: 32 * 1024 ** 3,
+      gpuVramBytes: 12 * 1024 ** 3,
+      usableBytes: 10 * 1024 ** 3,
+    }),
+    listProviderModels: vi.fn(async (provider: string) => ({
+      models:
+        provider === 'llama-cpp'
+          ? [{ id: 'installed-gemma', name: 'Installed Gemma' }]
+          : provider === 'openai'
+            ? [{ id: 'gpt-test', name: 'GPT Test' }]
+            : [],
+    })),
+    listCatalogItems: vi.fn().mockResolvedValue({ items: [downloadableChatModel()] }),
+    installLlamaCppModel: vi.fn(async (_id: string, onEvent: (event: unknown) => void) => {
+      onEvent({ type: 'done', id: 'fresh-gemma' });
+    }),
+    installMlxModel: vi.fn(),
+    cancelLlamaCppModelInstall: vi.fn().mockResolvedValue({ aborted: true }),
+    cancelMlxModelInstall: vi.fn().mockResolvedValue({ aborted: true }),
     getChatSession: vi.fn(),
     cancelChatSessionTurn: vi.fn(),
     cancelTerminalRun: vi.fn(),
     sendTerminalInput: vi.fn(),
+  };
+}
+
+function downloadableChatModel() {
+  const bytes = 2 * 1024 ** 3;
+  return {
+    sourceId: 'test',
+    kind: 'chat-model',
+    manifest: {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id: 'fresh-gemma',
+      name: 'Fresh Gemma',
+      description: '',
+      tags: [],
+      maintainer: { name: 'test' },
+      licenseClass: 'open',
+      recoScore: 100,
+      version: '1.0.0',
+      releasedAt: '2026-01-01',
+      parameterSize: '2B',
+      approxSizeBytes: bytes,
+      supportsTools: true,
+      llamaCpp: {
+        huggingfaceRepo: 'test/model',
+        filename: 'model.gguf',
+        sha256: '0'.repeat(64),
+        approxSizeBytes: bytes,
+        residentBytes: bytes,
+      },
+      availableVersions: [],
+    },
   };
 }
 

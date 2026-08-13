@@ -68,6 +68,10 @@ const NIGHT_SHIFT_SUBCOMMANDS = [
   { name: 'list', description: 'show current and upcoming night-shift work' },
 ] as const;
 
+const MODEL_SUBCOMMANDS = [
+  { name: 'download', description: 'choose and download a new on-device model' },
+] as const;
+
 export const PROJECT_PERMISSIONS = [
   {
     name: 'edits',
@@ -105,6 +109,18 @@ export function suggestSlashWordwheel(
   input: string,
   craftbooks: ReadonlyArray<CraftbookSummary>,
 ): ReadonlyArray<SlashWordwheelSuggestion> {
+  const modelMatch = input.match(/^\/model\s+(.*)$/i);
+  if (modelMatch) {
+    const query = (modelMatch[1] ?? '').trim().toLowerCase();
+    return MODEL_SUBCOMMANDS.filter((command) => command.name.startsWith(query)).map((command) => ({
+      key: `model:${command.name}`,
+      label: `/model ${command.name}`,
+      description: command.description,
+      submit: `/model ${command.name}`,
+      completion: `/model ${command.name}`,
+    }));
+  }
+
   const permissionMatch = input.match(/^\/(allow|disallow)\s+(.*)$/i);
   if (permissionMatch) {
     const command = (permissionMatch[1] ?? '').toLowerCase() as 'allow' | 'disallow';

@@ -92,6 +92,15 @@ describe('suggestSlashWordwheel', () => {
     ]);
   });
 
+  it('offers the model download subcommand after /model', () => {
+    expect(suggestSlashWordwheel('/model ', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/model download',
+        description: 'choose and download a new on-device model',
+      }),
+    ]);
+  });
+
   it('offers the project edit permission after /allow and /disallow', () => {
     expect(suggestSlashWordwheel('/allow ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
       '/allow edits',

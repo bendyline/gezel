@@ -250,6 +250,57 @@ describe('bootstrapOnDeviceFirstRun', () => {
     expect(calls).toEqual([]);
   });
 
+  it('pins an actually installed shared model instead of an unavailable recommendation', async () => {
+    const { manager, calls } = fakeModelManager([], [{ id: 'gemma4-e4b-q4' }]);
+    await bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: manager,
+      mlxModels: fakeMlxManager().manager,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+
+    const config = await store.readConfig();
+    expect(config.provider).toBe('llama-cpp');
+    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e4b-q4');
+    expect(config.firstRunCompleted).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('publishes the recommendation before slow shared-model verification finishes', async () => {
+    let releaseInstalled: (models: Array<{ id: string }>) => void = () => {};
+    const installed = new Promise<Array<{ id: string }>>((resolve) => {
+      releaseInstalled = resolve;
+    });
+    const manager = {
+      listInstalled: () => installed,
+      getActiveInstalls: () => [],
+    } as unknown as LlamaCppModelManager;
+    const run = bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: manager,
+      mlxModels: fakeMlxManager().manager,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+
+    let provisional = await store.readConfig();
+    for (let attempt = 0; !provisional.firstRunCompleted && attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      provisional = await store.readConfig();
+    }
+    releaseInstalled([{ id: 'shared-after-verification' }]);
+    await run;
+
+    expect(provisional.provider).toBe('llama-cpp');
+    expect(provisional.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect((await store.readConfig()).defaultModel?.['llama-cpp']).toBe(
+      'shared-after-verification',
+    );
+  });
+
   it('pins provider to mlx and a recommended default on darwin-arm64 without auto-installing', async () => {
     const { manager: llamaMgr, calls: llamaCalls } = fakeModelManager();
     const { manager: mlxMgr, calls: mlxCalls } = fakeMlxManager();

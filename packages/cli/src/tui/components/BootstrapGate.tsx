@@ -47,6 +47,11 @@ interface BootstrapContext {
 
 interface ModelPlan {
   context: BootstrapContext;
+  installedChatModels: Array<{
+    id: string;
+    name?: string;
+    approxSizeBytes?: number;
+  }>;
   chatModels: BootstrapChatModel[];
   accessories: BootstrapAccessoryModel[];
 }
@@ -74,6 +79,7 @@ type Screen =
 type ModelChoice =
   | { kind: 'bundle'; model: BootstrapChatModel }
   | { kind: 'chat'; model: BootstrapChatModel }
+  | { kind: 'installed'; modelId: string }
   | { kind: 'skip' };
 
 const MAX_ALTERNATIVE_MODELS = 6;
@@ -112,7 +118,8 @@ export function BootstrapGate(props: {
         context.provider === 'mlx'
           ? await client.listMlxModels()
           : await client.listLlamaCppModels();
-      if (installedChat.models.length > 0) {
+      const pinnedModel = context.config.defaultModel?.[context.provider];
+      if (pinnedModel && installedChat.models.some((model) => model.id === pinnedModel)) {
         setScreen({ kind: 'ready' });
         return;
       }
@@ -138,8 +145,13 @@ export function BootstrapGate(props: {
         client.listInstalledTtsModels().catch(() => ({ models: [] })),
         client.listInstalledRecognitionModels().catch(() => ({ models: [] })),
       ]);
-      const chatModels = rankChatModels(context.chatCatalog, context.device, context.provider);
-      if (chatModels.length === 0) {
+      const installedIds = new Set(installedChat.models.map((model) => model.id));
+      const chatModels = rankChatModels(
+        context.chatCatalog,
+        context.device,
+        context.provider,
+      ).filter((model) => !installedIds.has(model.id));
+      if (chatModels.length === 0 && installedChat.models.length === 0) {
         setScreen({
           kind: 'error',
           title: 'No compatible local models found',
@@ -164,7 +176,15 @@ export function BootstrapGate(props: {
         },
         context.device,
       );
-      setScreen({ kind: 'model-choice', plan: { context, chatModels, accessories } });
+      setScreen({
+        kind: 'model-choice',
+        plan: {
+          context,
+          installedChatModels: installedChat.models,
+          chatModels,
+          accessories,
+        },
+      });
     },
     [client],
   );
@@ -266,6 +286,19 @@ export function BootstrapGate(props: {
       }
       const retry = () => void installModels(plan, choice);
       try {
+        if (choice.kind === 'installed') {
+          const updated = await client.updateConfig({
+            provider: plan.context.provider,
+            defaultModel: {
+              ...plan.context.config.defaultModel,
+              [plan.context.provider]: choice.modelId,
+            },
+            firstRunInstallError: null,
+          });
+          plan.context.config = updated;
+          setScreen({ kind: 'ready' });
+          return;
+        }
         if (choice.kind === 'bundle') {
           const missing = missingToolkit(await client.getNativeEngineStatus());
           if (missing.length > 0) {
@@ -367,39 +400,65 @@ export function BootstrapGate(props: {
     );
   }
   if (screen.kind === 'model-choice') {
-    const best = screen.plan.chatModels[0]!;
+    const best = screen.plan.chatModels[0];
     const accessoryBytes = screen.plan.accessories.reduce(
       (sum, model) => sum + model.approxSizeBytes,
       0,
     );
     const options = [
-      {
-        label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
-        hint: formatDownloadSize(best.approxSizeBytes + accessoryBytes),
-        value: 'bundle',
-      },
-      {
-        label: `${best.name} only`,
-        hint: `best chat model · ${formatDownloadSize(best.approxSizeBytes)}`,
-        value: `chat:${best.id}`,
-      },
+      ...screen.plan.installedChatModels.map((model) => ({
+        label: `Use ${model.name ?? model.id}`,
+        hint: `already available on this machine${
+          model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
+        }`,
+        value: `installed:${model.id}`,
+      })),
+      ...(best
+        ? [
+            {
+              label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
+              hint: formatDownloadSize(best.approxSizeBytes + accessoryBytes),
+              value: 'bundle',
+            },
+            {
+              label: `Download ${best.name} only`,
+              hint: `best chat model · ${formatDownloadSize(best.approxSizeBytes)}`,
+              value: `chat:${best.id}`,
+            },
+          ]
+        : []),
       ...screen.plan.chatModels.slice(1, MAX_ALTERNATIVE_MODELS + 1).map((model) => ({
-        label: `${model.name} only`,
+        label: `Download ${model.name} only`,
         hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
         value: `chat:${model.id}`,
       })),
       { label: 'Not now', hint: 'open the TUI without a local model', value: 'skip' },
     ];
     return (
-      <BootstrapFrame title="No local chat model is installed">
-        <Text>Pick a setup for this device. Downloads stay under your Gezel home folder.</Text>
+      <BootstrapFrame
+        title={
+          screen.plan.installedChatModels.length > 0
+            ? 'Choose a local chat model'
+            : 'No local chat model is installed'
+        }
+      >
+        <Text>
+          {screen.plan.installedChatModels.length > 0
+            ? 'These models are already available in your Gezel or shared machine store. You can use one now or download another.'
+            : 'Pick a setup for this device. Downloads stay under Gezel model storage.'}
+        </Text>
         <BootstrapChoiceList
           options={options}
           onSelect={(value) => {
             if (value === 'skip') {
               void installModels(screen.plan, { kind: 'skip' });
             } else if (value === 'bundle') {
-              void installModels(screen.plan, { kind: 'bundle', model: best });
+              if (best) void installModels(screen.plan, { kind: 'bundle', model: best });
+            } else if (value.startsWith('installed:')) {
+              void installModels(screen.plan, {
+                kind: 'installed',
+                modelId: value.slice('installed:'.length),
+              });
             } else {
               const id = value.slice('chat:'.length);
               const model = screen.plan.chatModels.find((candidate) => candidate.id === id);
