@@ -39,6 +39,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as tar from 'tar';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
@@ -113,6 +114,71 @@ function logicalTreeBytes(root) {
     else total += lstatSync(path).size;
   }
   return total;
+}
+
+function auditTarballArchive(tarball) {
+  const names = new Set();
+  tar.list({
+    file: tarball,
+    sync: true,
+    onReadEntry(entry) {
+      const path = entry.path.replaceAll('\\', '/');
+      if (
+        !path.startsWith('package/') ||
+        path.startsWith('/') ||
+        path.split('/').includes('..')
+      ) {
+        fail(`${basename(tarball)} contains an unsafe archive path: ${JSON.stringify(path)}`);
+      }
+      if (!['File', 'Directory'].includes(entry.type)) {
+        fail(`${basename(tarball)} contains unexpected ${entry.type} entry ${path}`);
+      }
+      if (names.has(path)) fail(`${basename(tarball)} contains duplicate archive entry ${path}`);
+      names.add(path);
+      entry.resume();
+    },
+  });
+}
+
+const SENSITIVE_PATH = /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.yarnrc|id_(?:rsa|dsa|ecdsa|ed25519)|credentials?(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|jks|keystore|key))(?:$|\/)/i;
+const SECRET_PATTERNS = [
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{30,255}\b/,
+  /\bnpm_[A-Za-z0-9]{36}\b/,
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/,
+];
+
+function auditInstalledPackage(root, packageName) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      const relative = path.slice(root.length + 1).replaceAll('\\', '/');
+      if (entry.isSymbolicLink()) {
+        fail(`${packageName} contains a symlink: ${relative}`);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        pending.push(path);
+        continue;
+      }
+      if (SENSITIVE_PATH.test(relative)) {
+        fail(`${packageName} contains a credential-like path: ${relative}`);
+      }
+      const content = readFileSync(path);
+      // Skip binary payloads. Packed text is small enough to scan in full.
+      if (content.includes(0)) continue;
+      const text = content.toString('utf8');
+      for (const pattern of SECRET_PATTERNS) {
+        if (pattern.test(text)) {
+          fail(`${packageName} contains high-confidence secret material in ${relative}`);
+        }
+      }
+    }
+  }
 }
 
 function run(command, args, options = {}) {
@@ -208,6 +274,8 @@ try {
   } else {
     ok(`packed ${tarballs.length} tarballs`);
   }
+  for (const tarball of tarballs) auditTarballArchive(tarball);
+  ok('tarball archives contain only unique, package-scoped regular files and directories');
 
   // ── 2. Install into a plain npm project ────────────────────────────────
   step('installing into a non-workspace consumer');
@@ -260,6 +328,11 @@ try {
   const coreVersion = installedManifests.get('@bendyline/gezel')?.version;
   if (!coreVersion) fail('could not determine installed @bendyline/gezel version');
   else ok(`all internal runtime pins match the ${coreVersion} release set`);
+
+  for (const name of PUBLISHED_NAMES) {
+    auditInstalledPackage(join(consumer, 'node_modules', ...name.split('/')), name);
+  }
+  ok('installed package payloads contain no symlinks, credential-like paths, or known token forms');
 
   const spectralRoot = join(consumer, 'node_modules', '@bendyline', 'gezel-connectors-spectral');
   for (const relative of [
