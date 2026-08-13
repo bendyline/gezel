@@ -110,6 +110,22 @@ describe('collapseCraftbookForTier', () => {
     expect(combined.onReject).toBe(result.steps[1]!.id);
   });
 
+  it('carries and de-duplicates required inputs from every merged member', () => {
+    const book = sixStepBook();
+    book.steps[0]!.consumes = [{ file: 'inputs/brief.md' }];
+    book.steps[1]!.consumes = [
+      { file: 'inputs/brief.md' },
+      { file: 'research/notes.md', artifact: true },
+    ];
+    book.steps[1]!.prompt =
+      'First call `read_artifact({ path: "research/notes.md" })`, then write brief.md.';
+    const result = collapseCraftbookForTier(book, { tier: 'tiny' });
+    expect(result.steps[0]!.consumes).toEqual([
+      { file: 'inputs/brief.md' },
+      { file: 'research/notes.md', artifact: true },
+    ]);
+  });
+
   it('rewritten prompts are single-action imperatives with the gate bullets', () => {
     const result = collapseCraftbookForTier(sixStepBook(), { tier: 'tiny' });
     const draft = result.steps[0]!;

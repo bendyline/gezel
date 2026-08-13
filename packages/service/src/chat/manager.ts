@@ -303,6 +303,58 @@ const log = createLogger('chat');
 const memLog = createLogger('memory');
 const oneShotLog = createLogger('one-shot');
 
+function oneShotTimeoutError(timeoutMs: number): Error {
+  const duration = timeoutMs < 1_000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1_000)}s`;
+  const err = new Error(
+    `one-shot timed out after ${duration} (including provider setup and queue wait)`,
+  );
+  err.name = 'TimeoutError';
+  return err;
+}
+
+/**
+ * Bound setup stages that do not natively accept an AbortSignal. The original
+ * promise remains observed after cancellation (so it cannot reject unhandled),
+ * and callers may clean up a resource that resolves after the deadline.
+ */
+function awaitOneShotStage<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  abortError: () => Error,
+  onLateResolve?: (value: T) => void,
+): Promise<T> {
+  if (signal.aborted) {
+    void promise.then(onLateResolve, () => {});
+    return Promise.reject(abortError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(abortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        if (settled) {
+          onLateResolve?.(value);
+          return;
+        }
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 function latestUserMessageContent(messages: readonly ChatMessage[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -9225,14 +9277,28 @@ export class ChatManager {
     } = {},
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
+    const deadlineAt = Date.now() + timeoutMs;
+    const deadlineSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
+    const oneShotSignal = opts.signal
+      ? AbortSignal.any([opts.signal, deadlineSignal])
+      : deadlineSignal;
+    const abortError = () => {
+      if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs);
+      if (opts.signal?.reason instanceof Error) return opts.signal.reason;
+      const err = new Error('one-shot cancelled by caller');
+      err.name = 'AbortError';
+      return err;
+    };
+    const wait = <T>(promise: Promise<T>, onLateResolve?: (value: T) => void) =>
+      awaitOneShotStage(promise, oneShotSignal, abortError, onLateResolve);
     let { gezelId } = opts;
     let actorLabel = opts.actorLabel?.trim() || undefined;
-    const config = await this.store.readConfig();
+    const config = await wait(this.store.readConfig());
     let personaAbout: string | undefined;
     if (opts.useKlerk) {
       actorLabel ??= 'Klerk';
       if (config.klerkGezelId) {
-        const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
+        const klerk = await wait(this.store.getGezel(config.klerkGezelId).catch(() => null));
         if (klerk) {
           gezelId = klerk.id;
           personaAbout = klerk.about?.trim() || undefined;
@@ -9242,7 +9308,9 @@ export class ChatManager {
     if (opts.useKeurmeester) {
       actorLabel ??= 'Keurmeester';
       if (config.keurmeesterGezelId) {
-        const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
+        const keurmeester = await wait(
+          this.store.getGezel(config.keurmeesterGezelId).catch(() => null),
+        );
         if (keurmeester) {
           gezelId = keurmeester.id;
           personaAbout = keurmeester.about?.trim() || undefined;
@@ -9250,19 +9318,19 @@ export class ChatManager {
       }
     }
     if (opts.useGezelPersona && gezelId) {
-      const persona = await this.store.getGezel(gezelId).catch(() => null);
+      const persona = await wait(this.store.getGezel(gezelId).catch(() => null));
       if (persona) {
         personaAbout = persona.about?.trim() || undefined;
         actorLabel ??= persona.name;
       }
     }
     if (!actorLabel && !gezelId) actorLabel = 'System';
-    const providerName = opts.providerName ?? (await this.resolveProviderName(gezelId));
+    const providerName = opts.providerName ?? (await wait(this.resolveProviderName(gezelId)));
     let model = opts.model ?? config.defaultModel?.[providerName];
     let reasoningEffort = config.defaultReasoningEffort?.[providerName];
     let pinnedByGezel = false;
     if (gezelId && !opts.model) {
-      const gezel = await this.store.getGezel(gezelId).catch(() => null);
+      const gezel = await wait(this.store.getGezel(gezelId).catch(() => null));
       if (gezel?.parsed.frontmatter.model) {
         model = gezel.parsed.frontmatter.model;
         pinnedByGezel = true;
@@ -9285,10 +9353,10 @@ export class ChatManager {
     let effectiveProviderName = providerName;
     let provider: LLMProvider;
     const modelWasPinned = Boolean(opts.model) || pinnedByGezel;
-    const bgTarget = modelWasPinned ? null : await this.selectEngineForTask(providerName);
+    const bgTarget = modelWasPinned ? null : await wait(this.selectEngineForTask(providerName));
     if (bgTarget) {
       try {
-        provider = await this.getProviderForModel(bgTarget.provider, bgTarget.modelId);
+        provider = await wait(this.getProviderForModel(bgTarget.provider, bgTarget.modelId));
         effectiveProviderName = bgTarget.provider;
         model = bgTarget.modelId;
         reasoningEffort = config.defaultReasoningEffort?.[bgTarget.provider];
@@ -9298,15 +9366,16 @@ export class ChatManager {
           }`,
         );
       } catch (err) {
+        if (oneShotSignal.aborted) throw abortError();
         oneShotLog.warn(
           `background route to ${bgTarget.provider}:${bgTarget.modelId} failed; using ${providerName}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        provider = await this.resolveOneShotProvider(providerName, model);
+        provider = await wait(this.resolveOneShotProvider(providerName, model));
       }
     } else {
-      provider = await this.resolveOneShotProvider(providerName, model);
+      provider = await wait(this.resolveOneShotProvider(providerName, model));
     }
 
     // Ambient chores must never COLD-LOAD a local engine into a machine
@@ -9331,18 +9400,25 @@ export class ChatManager {
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
     const sessionDefaults = opts.tuningProfileId
-      ? await this.resolveModelSessionDefaults(effectiveProviderName, model, {
-          tuningProfileId: opts.tuningProfileId,
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-        })
+      ? await wait(
+          this.resolveModelSessionDefaults(effectiveProviderName, model, {
+            tuningProfileId: opts.tuningProfileId,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          }),
+        )
       : null;
-    const session = await provider.createSession({
+    const sessionPromise = provider.createSession({
       systemMessage,
       model,
       reasoningEffort,
       ...(sessionDefaults
         ? { profile: sessionDefaults.profile, tuning: sessionDefaults.tuning }
         : {}),
+    });
+    const session = await wait(sessionPromise, (lateSession) => {
+      void lateSession.disconnect().catch((err) => {
+        oneShotLog.warn('late session disconnect error:', err);
+      });
     });
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),
@@ -9357,18 +9433,20 @@ export class ChatManager {
       // a user's active chat turn. Also thread gezelId where available
       // so the affinity bonus keeps the KV cache warm when a gezel is
       // mid-batch of tasks.
-      const content = await session.sendAndWait(prompt, {
-        timeoutMs,
-        queue: {
-          lane: 'background',
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          ...(opts.ambient ? { ambient: true } : {}),
-          ...(gezelId ? { gezelId } : {}),
-          ...(actorLabel ? { actorLabel } : {}),
-          ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
-          ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
-        },
-      });
+      const content = await wait(
+        session.sendAndWait(prompt, {
+          timeoutMs: Math.max(1, deadlineAt - Date.now()),
+          queue: {
+            lane: 'background',
+            signal: oneShotSignal,
+            ...(opts.ambient ? { ambient: true } : {}),
+            ...(gezelId ? { gezelId } : {}),
+            ...(actorLabel ? { actorLabel } : {}),
+            ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
+            ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
+          },
+        }),
+      );
       oneShotLog.info(`completed (${content.length} chars)`);
       return content;
     } finally {

@@ -316,6 +316,45 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('"startLine":12');
   });
 
+  it('redirects an exact artifact collision after read_file misses without opening it', async () => {
+    handler = (url, method) => {
+      if (url.pathname === '/api/projects/project-a/workspace/read') {
+        expect(method).toBe('GET');
+        return { __status: 404, body: { error: 'file not found' } };
+      }
+      if (url.pathname === '/api/projects/project-a/artifacts/slice') {
+        expect(method).toBe('GET');
+        expect(url.searchParams.get('path')).toBe('security/review-scope.md');
+        expect(url.searchParams.get('head')).toBe('0');
+        return {
+          kind: 'found',
+          content: 'THIS CONTENT MUST NOT LEAK THROUGH read_file',
+          path: 'security/review-scope.md',
+          fuzzy: false,
+          linesReturned: 0,
+          totalLines: 42,
+          bytesReturned: 0,
+          totalBytes: 1024,
+          hasMore: true,
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { path: 'security/review-scope.md' },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? '';
+    expect(result.isError).toBe(true);
+    expect(text).toContain('A project artifact exists at "security/review-scope.md"');
+    expect(text).toContain(
+      'call read_artifact({ path: "security/review-scope.md" }) instead of read_file',
+    );
+    expect(text).toContain('The artifact was not opened automatically.');
+    expect(text).not.toContain('THIS CONTENT MUST NOT LEAK');
+  });
+
   it('reads common paths batches, keeps an all-path status index first, and exposes metadata', async () => {
     handler = (url, method, body) => {
       expect(url.pathname).toBe('/api/projects/project-a/tools/read-files');

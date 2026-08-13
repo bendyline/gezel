@@ -58,8 +58,14 @@ export async function ensureGezel(args: {
   store: Store;
   catalog: CatalogService;
   chat: ChatManager;
+  /**
+   * Task orchestration must not invoke another model from inside an active
+   * model's tool call. Use `static` there; interactive/user-facing creation
+   * keeps the authored one-shot fallback.
+   */
+  bespokeMode?: 'generated' | 'static';
 }): Promise<EnsureGezelResult> {
-  const { opts, store, catalog, chat } = args;
+  const { opts, store, catalog, chat, bespokeMode = 'generated' } = args;
   const query = opts.jobTitle.trim();
   if (!query) throw new Error('ensureGezel: jobTitle is required');
 
@@ -121,10 +127,15 @@ export async function ensureGezel(args: {
     };
   }
 
-  // 3. Bespoke fallback — generate a real about.md from jobTitle.
-  // Failures here surface up: we'd rather fail loudly than create a
-  // placeholder-about gezel that performs worse than nothing.
-  const bespokeAbout = await generateGezelAbout(chat, opts.jobTitle);
+  // 3. Bespoke fallback. Interactive recruitment gets a Klerk-authored
+  // about.md. Runtime task routing uses the deterministic version: a task
+  // transition happens inside another gezel's MCP call, so synchronously
+  // asking the same local engine to author a persona can queue behind the
+  // caller and deadlock the transition.
+  const bespokeAbout =
+    bespokeMode === 'static'
+      ? staticSpecialistAbout(opts.jobTitle)
+      : await generateGezelAbout(chat, opts.jobTitle);
   const { name: chosenName, gender: chosenGender } = pickNameAndGender({
     preferredName: opts.preferredName,
   });
@@ -140,6 +151,37 @@ export async function ensureGezel(args: {
     role: created.role ?? opts.jobTitle,
     action: 'created-bespoke',
   };
+}
+
+/**
+ * Safe last-resort persona for runtime recruitment when no curated template
+ * matches. It is intentionally useful but generic: the exact role remains in
+ * the identity and the task/craftbook prompt supplies the concrete procedure.
+ * A later explicit edit can still replace this about.md with a richer persona.
+ */
+export function staticSpecialistAbout(jobTitle: string): string {
+  const role = jobTitle
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[*_`#[\]<>]/g, '')
+    .slice(0, 160);
+  return `## Identity
+
+You are the crew's **${role || 'specialist'}**. You bring focused professional judgment to tasks that call for this role.
+
+## Working style
+
+- Read the project brief, task notes, and current step before acting.
+- Work from concrete evidence in the project files; distinguish facts from assumptions.
+- Produce the deliverable requested by the active step, then verify it against the stated checks.
+- Keep changes scoped and explain material risks, uncertainty, or missing inputs plainly.
+
+## Collaboration
+
+- Respect project permissions and the task's trust boundaries.
+- Leave concise handoff notes so the next crew member can continue without reconstructing your work.
+- Ask for help when a required decision or authority belongs to the user.
+`;
 }
 
 export interface GildeTemplateResolution {

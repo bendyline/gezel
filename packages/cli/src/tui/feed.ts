@@ -17,6 +17,11 @@ export interface FeedRow {
   kind: 'user' | 'pending' | 'assistant' | 'tool' | 'note' | 'error' | 'shell';
   text: string;
   open: boolean;
+  /** Structured actor metadata for client-side task-summary name rendering. */
+  taskEvent?: {
+    kind: string;
+    gezelId?: string;
+  };
 }
 
 const MAX_ROWS = 200;
@@ -143,6 +148,10 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
           kind: 'note',
           text: `task · ${event.summary}`,
           open: false,
+          taskEvent: {
+            kind: event.kind,
+            ...(event.gezelId ? { gezelId: event.gezelId } : {}),
+          },
         },
       ]);
 
@@ -389,8 +398,9 @@ function toolRowText(call: {
 
 /**
  * Display label for a gezel. In boring mode this uses the role-based name
- * only, never the friendly name. Falls back to the raw id when the gezel
- * isn't in the roster snapshot.
+ * only, never the friendly name. While a newly recruited gezel is not yet
+ * in the roster snapshot, boring mode uses a neutral placeholder rather
+ * than exposing the name-derived raw id.
  */
 export function gezelLabel(
   gezelId: string,
@@ -398,7 +408,7 @@ export function gezelLabel(
   boring: boolean,
 ): string {
   const g = gezels.find((x) => x.id === gezelId);
-  if (!g) return gezelId;
+  if (!g) return boring ? 'gezel' : gezelId;
   if (boring) return g.roleBasedName ?? g.role ?? g.id;
   return g.role ? `${g.name} · ${g.role}` : g.name;
 }

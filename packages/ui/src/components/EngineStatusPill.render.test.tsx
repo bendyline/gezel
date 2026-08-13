@@ -156,6 +156,46 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     }
   });
 
+  it('shows the active gezel and live output estimate using the boring-mode name', async () => {
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'llama-cpp',
+          phase: 'generating',
+          label: 'Generating',
+          gezelId: 'liesel',
+          outputChars: 400,
+          startedAt: Date.now(),
+          lastEventAt: Date.now(),
+        },
+      ],
+    ]);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'talkie-1930-13b-q4' },
+      roleBasedNameOnlyMode: true,
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'liesel',
+          name: 'Liesel',
+          roleBasedName: 'technical-writer',
+          updatedAt: '2026-08-13T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<EngineStatusPill />);
+
+    const pill = await screen.findByRole('button', { name: /technical-writer.*Generating/i });
+    expect(pill).toHaveTextContent('technical-writer · Generating · ≈100 tok');
+    expect(pill).not.toHaveTextContent('Liesel');
+    expect(pill.getAttribute('title')).toContain('about 100 output tokens');
+  });
+
   it('persists the Observe/Manage choice from the engine pill', async () => {
     const user = userEvent.setup();
     vi.mocked(api.updateConfig).mockResolvedValue({

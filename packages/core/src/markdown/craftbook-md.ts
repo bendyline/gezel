@@ -90,6 +90,7 @@ const STEP_FENCE_KEYS = [
   'deliverable',
   'onEnter',
   'onExit',
+  'consumes',
   'advanceWhen',
   'gate',
   'next',

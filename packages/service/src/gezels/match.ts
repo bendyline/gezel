@@ -33,6 +33,24 @@ export const ROLE_ALIASES: Record<string, string[]> = {
   meester: ['concierge', 'guildmaster', 'host'],
 };
 
+/**
+ * Multi-word titles whose generic head noun would otherwise dilute the
+ * specialist signal below {@link MATCH_THRESHOLD}. Apply these before the
+ * token-level aliases: "application security engineer" is a security role,
+ * not a generic developer role with two unrelated modifiers.
+ *
+ * Keep this deliberately narrow. Phrase aliases should express an established
+ * role family backed by a shipped Gilde template, never guess from one broad
+ * word such as "application" or "engineer" on its own.
+ */
+const ROLE_PHRASE_ALIASES: Array<[RegExp, string]> = [
+  [/\b(?:application|app|product|software|cyber|information)\s+security\b/gi, 'security'],
+  [
+    /\bsecurity\s+(?:engineer|specialist|analyst|architect|reviewer|auditor|lead|officer)\b/gi,
+    'security',
+  ],
+];
+
 /** Invert the alias map for fast lookup: `dev` → `developer`, etc. */
 const ALIAS_TO_CANONICAL: Record<string, string> = (() => {
   const out: Record<string, string> = {};
@@ -50,7 +68,11 @@ const ALIAS_TO_CANONICAL: Record<string, string> = (() => {
  */
 export function roleTokens(text: string): Set<string> {
   if (!text) return new Set();
-  const raw = text
+  let normalized = text;
+  for (const [pattern, replacement] of ROLE_PHRASE_ALIASES) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+  const raw = normalized
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length > 0 && !STOPWORDS.has(t));

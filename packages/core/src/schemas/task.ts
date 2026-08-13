@@ -8,6 +8,7 @@ import {
   CraftbookSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
+  CraftbookStepInputSchema,
   CraftbookStepSchema,
   CraftbookToolsetNeedSchema,
   ModelTierSchema,
@@ -644,6 +645,8 @@ export const UpdateTaskStepRequestSchema = z.object({
   /** Step automation hooks (single ref or ordered list). `null` detaches. */
   onEnter: ScriptRefListSchema.nullable().optional(),
   onExit: ScriptRefListSchema.nullable().optional(),
+  /** Required file inputs for the step. `null` clears the declaration. */
+  consumes: z.array(CraftbookStepInputSchema).min(1).nullable().optional(),
   /** Auto-advance contract. `null` clears it. */
   advanceWhen: AdvanceWhenSchema.nullable().optional(),
   /** The end-of-step gate (current or legacy shape). `null` clears it. */

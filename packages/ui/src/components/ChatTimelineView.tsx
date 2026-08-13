@@ -426,8 +426,12 @@ export interface ChatTimelineViewProps {
    * timeline so the artifact is looked up in the right project.
    */
   onArtifactReference?: (path: string, projectId?: string) => void;
+  /** Passively remembers parsed artifact mentions for `/open` MRU suggestions. */
+  onArtifactSeen?: (path: string, projectId?: string) => void;
   /** Opens a verified terminal workspace-file reference in the right rail. */
   onWorkspaceReference?: (path: string, projectId?: string) => void;
+  /** Passively remembers persisted workspace tool paths for `/open` MRU suggestions. */
+  onWorkspaceSeen?: (path: string, projectId?: string) => void;
   /**
    * Forwarded from {@link ChatReferences} so the right rail's "Task" tab
    * can surface the work context. The timeline feeds it two ways: every
@@ -559,7 +563,9 @@ export function ChatTimelineView({
   onFocusSession,
   onToolActivity,
   onArtifactReference,
+  onArtifactSeen,
   onWorkspaceReference,
+  onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
   loadTimeline,
@@ -650,6 +656,40 @@ export function ChatTimelineView({
       }
     }
   }, [messages, activeSessionId, onTaskReference]);
+  // Rebuild the file-reference MRU from persisted chat rows as history loads.
+  // This complements the live tool-event path: parsed artifact mentions and
+  // tool calls from before a remount remain available to `/open`, but passive
+  // registration never steals focus from the conversation.
+  useEffect(() => {
+    if (!onArtifactSeen && !onWorkspaceSeen) return;
+    for (const message of messages) {
+      for (const path of message.referencedArtifacts ?? []) {
+        onArtifactSeen?.(path, message.projectId);
+      }
+      for (const tool of message.toolCalls ?? []) {
+        if (!tool.success) continue;
+        for (const media of [
+          ...(tool.images ?? []),
+          ...(tool.audios ?? []),
+          ...(tool.videos ?? []),
+        ]) {
+          onArtifactSeen?.(media.path, message.projectId);
+        }
+        const paths = tool.paths?.length ? tool.paths : tool.path ? [tool.path] : [];
+        for (const path of paths) {
+          if (tool.name === 'read_artifact' || tool.name === 'write_artifact') {
+            onArtifactSeen?.(path, message.projectId);
+          } else if (
+            tool.name === 'read_file' ||
+            tool.name === 'read_files' ||
+            tool.name === 'write_file'
+          ) {
+            onWorkspaceSeen?.(path, message.projectId);
+          }
+        }
+      }
+    }
+  }, [messages, onArtifactSeen, onWorkspaceSeen]);
   /**
    * Terminal entries delivered alongside chat messages on project-scoped
    * surfaces. Empty on global / per-gezel timelines. Mutated on initial

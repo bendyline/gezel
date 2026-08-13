@@ -257,6 +257,29 @@ export function App(props: {
     [],
   );
 
+  // A task launch can recruit a new gezel after the TUI's initial roster
+  // load. Keep ids in a ref so the project-event callback can detect that
+  // actor without being recreated for every roster update, and coalesce the
+  // burst of task + chat events into one refresh.
+  const gezelIds = useRef<Set<string>>(new Set());
+  const gezelRefreshInFlight = useRef(false);
+  const applyGezelSnapshot = useCallback((next: GezelSummary[]) => {
+    gezelIds.current = new Set(next.map((gezel) => gezel.id));
+    setGezels(next);
+  }, []);
+  const refreshGezels = useCallback(async () => {
+    if (gezelRefreshInFlight.current) return;
+    gezelRefreshInFlight.current = true;
+    try {
+      const result = await client.listGezels();
+      applyGezelSnapshot(result.gezels);
+    } catch {
+      /* retain the last good snapshot; the next unknown actor retries */
+    } finally {
+      gezelRefreshInFlight.current = false;
+    }
+  }, [applyGezelSnapshot, client]);
+
   const taskLoadSequence = useRef(0);
   const refreshTasks = useCallback(async () => {
     const sequence = ++taskLoadSequence.current;
@@ -290,6 +313,9 @@ export function App(props: {
       (env) => {
         setRows((r) => reduceFeed(r, env));
         setTurns((t) => reduceTurns(t, env));
+        const eventGezelId =
+          env.gezelId || (env.event.type === 'task_event' ? env.event.gezelId : undefined);
+        if (eventGezelId && !gezelIds.current.has(eventGezelId)) void refreshGezels();
         if (env.event.type === 'task_event') void refreshTasks();
         if (env.event.type === 'user_message' && env.sessionId === ownSessionId) {
           const nextTitle = env.event.message.content.slice(0, 60).trim() || 'Untitled';
@@ -307,7 +333,7 @@ export function App(props: {
           setPendingQuestions((questions) => updatePendingQuestion(questions, question));
         }
       },
-      [ownSessionId, refreshTasks],
+      [ownSessionId, refreshGezels, refreshTasks],
     ),
   );
   useTerminalEvents(
@@ -521,7 +547,7 @@ export function App(props: {
         ]);
         if (cancelled) return;
         setConfig(cfg);
-        setGezels(gz.gezels);
+        applyGezelSnapshot(gz.gezels);
         const projectRows = pj.projects.map((p) => ({
           id: p.id,
           name: p.name,
@@ -645,7 +671,10 @@ export function App(props: {
     for (const r of rows) {
       if (r.sessionId === 'local' || r.sessionId.startsWith('term-')) continue;
       if (!seen.has(r.sessionId)) {
-        const label = gezels.find((g) => g.id === r.gezelId)?.name ?? (r.gezelId || r.sessionId);
+        const gezel = gezels.find((candidate) => candidate.id === r.gezelId);
+        const label = boring
+          ? gezelLabel(r.gezelId, gezels, true)
+          : (gezel?.name ?? (r.gezelId || r.sessionId));
         seen.set(r.sessionId, label);
       }
     }
@@ -656,7 +685,7 @@ export function App(props: {
       items.push({ label, value: sid });
     }
     return items;
-  }, [rows, gezels, ownSessionId, gezelLine]);
+  }, [rows, gezels, ownSessionId, gezelLine, boring]);
 
   // Cancel everything in flight: open chat turns + running shell commands.
   const cancelActive = useCallback(async () => {
@@ -1731,7 +1760,7 @@ function taskAssigneeLabel(
   if (task.assignee.kind === 'user') return 'you';
   const gezelId = task.assignee.gezelId;
   const gezel = gezels.find((item) => item.id === gezelId);
-  if (!gezel) return gezelId;
+  if (!gezel) return boring ? 'gezel' : gezelId;
   return boring ? (gezel.roleBasedName ?? gezel.role ?? gezel.id) : gezel.name;
 }
 

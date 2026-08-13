@@ -468,6 +468,40 @@ describe('ChatReferences task picker', () => {
 });
 
 describe('ChatReferences reference picker', () => {
+  it('exposes parsed and tool-backed files in most-recent-first order', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactSeen, onWorkspaceSeen, recentReferences }) => (
+          <>
+            <button type="button" onClick={() => onArtifactSeen('reports/first.md')}>
+              See first
+            </button>
+            <button type="button" onClick={() => onWorkspaceSeen('security/review-scope.md')}>
+              See scope
+            </button>
+            <output data-testid="recent-reference-paths">
+              {recentReferences.map((reference) => reference.path).join('|')}
+            </output>
+          </>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'See first' }));
+    await user.click(screen.getByRole('button', { name: 'See scope' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'security/review-scope.md|reports/first.md',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'See first' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'reports/first.md|security/review-scope.md',
+    );
+  });
+
   it('renders global HTML documents as inert source rather than srcDoc', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

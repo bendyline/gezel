@@ -510,6 +510,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       summary: event.summary,
       at: event.at,
       ...(typeof ref === 'string' ? { taskRef: ref } : {}),
+      ...(event.gezelId ? { gezelId: event.gezelId } : {}),
     });
   });
   // Shared gezels can be recruited from inside a chat (`ensure_gezel`), by
@@ -1113,6 +1114,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         store,
         catalog,
         chat,
+        // Role resolution runs inside advance_task_step's HTTP/MCP request.
+        // Never synchronously invoke the local model that is waiting for this
+        // tool result; curated Gilde templates still win above this fallback.
+        bespokeMode: 'static',
       });
       // Pull the resolved gezel onto the project roster so the step
       // assignee is actually a project member — without this the

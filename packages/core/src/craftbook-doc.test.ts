@@ -41,6 +41,7 @@ const FULL_DOC: CraftbookDoc = {
       name: 'Fetch data',
       prompt: 'Pull the raw price data.\n\nUse the seeded credentials.',
       capabilityFloor: 'small',
+      consumes: [{ file: 'inputs/catalog.csv' }],
       deliverable: { path: 'prices.csv', kind: 'data-file', minBytes: 200 },
       next: 'report',
     },

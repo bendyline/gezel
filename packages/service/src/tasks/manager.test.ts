@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from './manager.js';
@@ -990,6 +990,47 @@ describe('TaskManager — suggestedRole auto-assignment', () => {
     // Newly-activated step picks up its own role.
     expect(seen).toEqual(['reviewer', 'developer']);
     expect(advanced.craftbook.steps[1]!.suggestedGezelId).toBe('developer-id');
+  });
+
+  it('persists the transition before slow recruitment and joins concurrent retries', async () => {
+    let releaseDeveloper!: (value: { gezelId: string }) => void;
+    const developer = new Promise<{ gezelId: string }>((resolve) => {
+      releaseDeveloper = resolve;
+    });
+    const seen: string[] = [];
+    tasks.setRoleResolver(async (role) => {
+      seen.push(role);
+      if (role === 'reviewer') return { gezelId: 'reviewer-id' };
+      return developer;
+    });
+    const task = await tasks.create('website', {
+      title: 'Review then recruit',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'review', name: 'Review', suggestedRole: 'reviewer' },
+        { id: 'ship', name: 'Ship', suggestedRole: 'developer' },
+      ],
+      entryStepId: 'review',
+    });
+
+    const first = tasks.completeStepChecked('website', task.num, 'review');
+    await vi.waitFor(() => expect(seen).toEqual(['reviewer', 'developer']));
+
+    // The completed step is already durable even though recruitment has not
+    // returned. This is the state the MCP retry observes.
+    const durable = await tasks.get('website', task.num);
+    expect(durable?.activeStepId).toBe('ship');
+    expect(durable?.craftbook.steps[0]!.completedAt).toBeTruthy();
+    expect(durable?.craftbook.steps[1]!.suggestedGezelId).toBeUndefined();
+
+    const replay = tasks.completeStepChecked('website', task.num, 'review');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(seen).toEqual(['reviewer', 'developer']);
+
+    releaseDeveloper({ gezelId: 'developer-id' });
+    const [advanced, replayed] = await Promise.all([first, replay]);
+    expect(advanced).toEqual(replayed);
+    expect(advanced.task.craftbook.steps[1]!.suggestedGezelId).toBe('developer-id');
   });
 
   it('no-ops when no resolver is wired', async () => {

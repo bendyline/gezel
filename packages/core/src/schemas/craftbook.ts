@@ -122,6 +122,19 @@ export const AdvanceWhenSchema = z.object({
 export type AdvanceWhen = z.infer<typeof AdvanceWhenSchema>;
 
 /**
+ * A file a step must read before it can do its work. Declaring the drawer
+ * here keeps handoffs unambiguous: the runtime can name the exact read tool
+ * instead of asking the model to infer provenance from a bare relative path.
+ */
+export const CraftbookStepInputSchema = z.object({
+  /** Path relative to the selected drawer's root. */
+  file: z.string().min(1),
+  /** Read from the artifacts drawer instead of the project workspace. */
+  artifact: z.boolean().optional(),
+});
+export type CraftbookStepInput = z.infer<typeof CraftbookStepInputSchema>;
+
+/**
  * Wire twin of {@link ModelTier} (roles/tier.ts) — derived from the
  * canonical `MODEL_TIER_ORDER` tuple so the two can never drift.
  */
@@ -166,6 +179,8 @@ export const CraftbookStepSchema = z.object({
    * read the LAST ref's output (legacy routing; prefer gate routing).
    */
   onExit: ScriptRefListSchema.optional(),
+  /** Required file inputs for this step, in the order they should be opened. */
+  consumes: z.array(CraftbookStepInputSchema).min(1).optional(),
   /** See {@link AdvanceWhenSchema}. */
   advanceWhen: AdvanceWhenSchema.optional(),
   /** The end-of-step decision. See {@link StepGateSchema} (current) / {@link GateSpecSchema} (legacy). */
@@ -248,6 +263,17 @@ export function validateCraftbookGraph(cb: {
       if (s.terminal) problems.push(`step "${s.id}" is terminal but also has advanceWhen`);
       if (s.advanceWhen.goto && !ids.has(s.advanceWhen.goto)) {
         problems.push(`step "${s.id}" advanceWhen.goto "${s.advanceWhen.goto}" missing from steps`);
+      }
+    }
+    for (const input of s.consumes ?? []) {
+      if (!input.artifact) continue;
+      // The structured field drives runtime prompting, while the explicit
+      // authored call keeps the procedure self-contained for older runtimes
+      // and makes the small-model first-action scanner choose correctly.
+      if (!/`read_artifact(?:`|\()/.test(s.prompt ?? '')) {
+        problems.push(
+          `step "${s.id}" consumes artifact "${input.file}" but its prompt does not explicitly call \`read_artifact\``,
+        );
       }
     }
     if (s.gate) {
@@ -715,6 +741,7 @@ export const NewCraftbookStepSchema = z.object({
   assignee: TaskAssigneeSchema.optional(),
   onEnter: ScriptRefListSchema.optional(),
   onExit: ScriptRefListSchema.optional(),
+  consumes: z.array(CraftbookStepInputSchema).min(1).optional(),
   advanceWhen: AdvanceWhenSchema.optional(),
   gate: StepGateUnionSchema.optional(),
   /** See {@link StepDeliverableSchema} — one field attaches the enforced gate. */
@@ -909,6 +936,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),
       ...(s.onExit ? { onExit: s.onExit } : {}),
+      ...(s.consumes && s.consumes.length > 0 ? { consumes: s.consumes } : {}),
       ...(s.advanceWhen ? { advanceWhen: s.advanceWhen } : {}),
       ...(s.gate ? { gate: s.gate } : {}),
       ...(s.next ? { next: s.next } : {}),
@@ -1034,6 +1062,7 @@ export interface StepPatch {
   suggestedGezelId?: string | null;
   onEnter?: ScriptRefList | null;
   onExit?: ScriptRefList | null;
+  consumes?: CraftbookStepInput[] | null;
   advanceWhen?: AdvanceWhen | null;
   gate?: StepGateUnion | null;
   next?: string | null;
@@ -1085,6 +1114,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
     if (patch.onExit === null || (Array.isArray(patch.onExit) && patch.onExit.length === 0)) {
       delete updated.onExit;
     } else updated.onExit = patch.onExit;
+  }
+  if (patch.consumes !== undefined) {
+    if (patch.consumes === null || patch.consumes.length === 0) delete updated.consumes;
+    else updated.consumes = patch.consumes;
   }
   if (patch.advanceWhen !== undefined) {
     if (patch.advanceWhen === null) delete updated.advanceWhen;

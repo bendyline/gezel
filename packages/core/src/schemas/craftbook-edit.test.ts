@@ -32,6 +32,16 @@ describe('resolveSteps', () => {
     const [bare] = resolveSteps([{ name: 'Build' }]);
     expect('capabilityFloor' in bare!).toBe(false);
   });
+  it('carries declared file inputs (silent-drop trap: this field list is explicit)', () => {
+    const [step] = resolveSteps([
+      {
+        name: 'Audit',
+        prompt: 'First call `read_artifact`.',
+        consumes: [{ file: 'security/scope.md', artifact: true }],
+      },
+    ]);
+    expect(step?.consumes).toEqual([{ file: 'security/scope.md', artifact: true }]);
+  });
 });
 
 describe('capabilityFloor schema', () => {
@@ -69,6 +79,20 @@ describe('validateCraftbookGraph', () => {
     expect(validateCraftbookGraph({ steps: s, entryStepId: 'build' })).toContain(
       'step "ship" is terminal but also has next/branches',
     );
+  });
+  it('requires artifact-consuming procedures to name read_artifact explicitly', () => {
+    const artifactStep: CraftbookStep = {
+      id: 'audit',
+      name: 'Audit',
+      prompt: 'Use security/scope.md, then write the report with `write_artifact`.',
+      consumes: [{ file: 'security/scope.md', artifact: true }],
+      terminal: true,
+    };
+    expect(validateCraftbookGraph({ steps: [artifactStep], entryStepId: 'audit' })).toContain(
+      'step "audit" consumes artifact "security/scope.md" but its prompt does not explicitly call `read_artifact`',
+    );
+    artifactStep.prompt = 'First call `read_artifact({ path: "security/scope.md" })`.';
+    expect(validateCraftbookGraph({ steps: [artifactStep], entryStepId: 'audit' })).toEqual([]);
   });
 });
 
@@ -128,6 +152,15 @@ describe('applyStepPatch', () => {
     expect(untouched.capabilityFloor).toBe('medium');
     const cleared = applyStepPatch(set, { capabilityFloor: null });
     expect('capabilityFloor' in cleared).toBe(false);
+  });
+  it('sets and clears declared inputs', () => {
+    const base: CraftbookStep = { id: 'a', name: 'A', prompt: 'Call `read_artifact`.' };
+    const set = applyStepPatch(base, {
+      consumes: [{ file: 'security/scope.md', artifact: true }],
+    });
+    expect(set.consumes).toEqual([{ file: 'security/scope.md', artifact: true }]);
+    const cleared = applyStepPatch(set, { consumes: null });
+    expect('consumes' in cleared).toBe(false);
   });
 });
 

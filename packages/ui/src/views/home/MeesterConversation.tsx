@@ -98,7 +98,15 @@ export function MeesterConversation({
         projectId={projectId}
         skillsProjectId={projectId === 'default' ? undefined : projectId}
       >
-        {({ onToolActivity, onArtifactReference, onTaskReference }) => (
+        {({
+          onToolActivity,
+          onArtifactReference,
+          onArtifactSeen,
+          onWorkspaceSeen,
+          recentReferences,
+          onOpenReference,
+          onTaskReference,
+        }) => (
           <>
             <GlobalTimeline
               activeSessionId={sessionId || undefined}
@@ -109,6 +117,8 @@ export function MeesterConversation({
               }}
               onToolActivity={onToolActivity}
               onArtifactReference={onArtifactReference}
+              onArtifactSeen={onArtifactSeen}
+              onWorkspaceSeen={onWorkspaceSeen}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}
             />
@@ -131,6 +141,8 @@ export function MeesterConversation({
                 setSessionRefreshKey((k) => k + 1);
               }}
               onToolActivity={onToolActivity}
+              recentReferences={recentReferences}
+              onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
               belowAddressLine={
                 <SessionSwitcher

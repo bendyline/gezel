@@ -301,6 +301,83 @@ describe('buildInstructions connected data', () => {
   });
 });
 
+describe('buildInstructions structured step inputs', () => {
+  it('renders artifact provenance and makes read_artifact the first small-model action', () => {
+    const step = {
+      id: 'audit',
+      name: 'Audit controls',
+      prompt: 'Write findings with `write_artifact`, then re-read them with `read_artifact`.',
+      consumes: [{ file: 'security/review-scope.md', artifact: true }],
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Ebere',
+      role: 'Application Security Engineer',
+      about: 'Audit the project.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['read_file', 'read_artifact', 'write_artifact', 'advance_task_step'].map(
+        (name) => ({ name, description: `${name} tool` }),
+      ),
+      task: {
+        task: {
+          ref: 'gezel/1',
+          title: 'Security Architecture Review',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'ebere' },
+          craftbook: { steps: [step], entryStepId: 'audit' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('#### Required inputs');
+    expect(rendered).toContain(
+      '`security/review-scope.md` — required input in the **artifacts drawer**',
+    );
+    expect(rendered).toContain(
+      '`read_artifact({ path: "security/review-scope.md" })`; do not try the other drawer',
+    );
+    expect(rendered).toContain(
+      'First action: call `read_artifact` exactly as the procedure specifies.',
+    );
+    expect(rendered).not.toContain(
+      'First action: call `write_artifact` exactly as the procedure specifies.',
+    );
+  });
+
+  it('surfaces a missing drawer read capability without calling the input missing', () => {
+    const step = {
+      id: 'audit',
+      name: 'Audit controls',
+      prompt: 'First call `read_artifact({ path: "security/review-scope.md" })`.',
+      consumes: [{ file: 'security/review-scope.md', artifact: true }],
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Ebere',
+      role: 'Application Security Engineer',
+      about: 'Audit the project.',
+      project: { id: 'gezel', name: 'Gezel' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: [{ name: 'read_file', description: 'workspace reader' }],
+      task: {
+        task: {
+          ref: 'gezel/1',
+          title: 'Security Architecture Review',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'ebere' },
+          craftbook: { steps: [step], entryStepId: 'audit' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain('`read_artifact` is not wired this turn');
+    expect(rendered).toContain('Do not claim it is missing');
+  });
+});
+
 describe('buildInstructions assigned pronouns', () => {
   const soloProject = {
     id: 'solo-job',

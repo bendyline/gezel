@@ -3713,7 +3713,30 @@ describe('ChatManager — one-shot attribution', () => {
     });
 
     const send = mock.calls.find((call) => call.kind === 'send');
-    expect(send?.sendOpts?.queue?.signal).toBe(controller.signal);
+    const forwarded = send?.sendOpts?.queue?.signal;
+    expect(forwarded).toBeDefined();
+    expect(forwarded).not.toBe(controller.signal);
+    expect(forwarded?.aborted).toBe(false);
+    controller.abort(new Error('cancel test'));
+    expect(forwarded?.aborted).toBe(true);
+  });
+
+  it('applies the one-shot deadline to provider setup, before generation starts', async () => {
+    const gate = mock.gateNextCreateSession();
+    const pending = manager.oneShotCompletion('draft a persona', 30);
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'TimeoutError',
+      message: expect.stringContaining('including provider setup and queue wait'),
+    });
+
+    // A provider that finishes setup after the caller timed out must not leak
+    // the ephemeral session.
+    gate.release();
+    await vi.waitFor(
+      () => expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true),
+      { timeout: 2_000, interval: 10 },
+    );
   });
 
   it('resolves and forwards an explicit one-shot tuning profile', async () => {

@@ -89,7 +89,13 @@ export function ChatFeed(props: {
                   {': '}
                 </Text>
                 <Text color={KIND_COLOR[row.kind]} dimColor={row.kind === 'pending'}>
-                  {clip(row.kind === 'assistant' ? humanizeToolMarkup(row.text) : row.text)}
+                  {clip(
+                    row.taskEvent
+                      ? taskEventText(row, gezels, boring)
+                      : row.kind === 'assistant'
+                        ? humanizeToolMarkup(row.text)
+                        : row.text,
+                  )}
                 </Text>
               </Text>
             </Box>
@@ -98,6 +104,34 @@ export function ChatFeed(props: {
       )}
     </Box>
   );
+}
+
+/**
+ * History summaries deliberately keep friendly names. Rewrite only the
+ * actor-bearing task phrases from structured event metadata, leaving the
+ * durable audit prose untouched while respecting this CLI's fixed naming
+ * mode. The generic placeholder prevents a one-render name flash while a
+ * newly recruited gezel is being added to the live roster snapshot.
+ */
+function taskEventText(row: FeedRow, gezels: ReadonlyArray<GezelSummary>, boring: boolean): string {
+  const event = row.taskEvent;
+  if (!boring || !event?.gezelId) return row.text;
+  const actor = gezelLabel(event.gezelId, gezels, true);
+  switch (event.kind) {
+    case 'task.entry.dispatched':
+      return row.text.replace(/ handed to .*$/, ` handed to ${actor}`);
+    case 'tasknote.appended':
+      return row.text.replace(/^task · .*? noted on /, `task · ${actor} noted on `);
+    case 'tasknote.deleted':
+      return row.text.replace(
+        /^task · .*? removed a note from /,
+        `task · ${actor} removed a note from `,
+      );
+    case 'tasknote.updated':
+      return row.text.replace(/^task · .*? edited a note on /, `task · ${actor} edited a note on `);
+    default:
+      return row.text;
+  }
 }
 
 /**

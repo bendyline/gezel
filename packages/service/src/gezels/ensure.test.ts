@@ -143,6 +143,19 @@ describe('ensureGezel — gilde creation', () => {
     expect(res.name).toBeTruthy();
     expect(res.name.length).toBeGreaterThan(1);
   });
+
+  it('maps application security engineer to the shipped veiligheidsmeester', async () => {
+    const res = await ensureGezel({
+      opts: { jobTitle: 'application security engineer' },
+      store,
+      catalog,
+      chat: manager,
+    });
+    expect(res.action).toBe('created-from-gilde');
+    expect(res.templateId).toBe('veiligheidsmeester');
+    expect(res.role).toBe('Chief Security Officer');
+    expect(mock.calls.some((call) => call.kind === 'send')).toBe(false);
+  });
 });
 
 describe('ensureGezel — bespoke fallback', () => {
@@ -165,6 +178,21 @@ describe('ensureGezel — bespoke fallback', () => {
     expect(res.role).toBe('marine biologist');
     const onDisk = await store.getGezel(res.gezelId);
     expect(onDisk?.about).toContain('marine biologist');
+  });
+
+  it('uses a deterministic persona for task-safe bespoke recruitment', async () => {
+    const res = await ensureGezel({
+      opts: { jobTitle: 'submarine acoustician' },
+      store,
+      catalog,
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(res.action).toBe('created-bespoke');
+    const onDisk = await store.getGezel(res.gezelId);
+    expect(onDisk?.about).toContain("crew's **submarine acoustician**");
+    expect(onDisk?.about).toContain('task notes');
+    expect(mock.calls.some((call) => call.kind === 'send')).toBe(false);
   });
 });
 

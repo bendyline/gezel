@@ -136,6 +136,85 @@ describe('ChatComposer keyboard hints', () => {
   });
 });
 
+describe('ChatComposer /open command', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.revealProject).mockResolvedValue({ ok: true, path: '/tmp/project' });
+  });
+
+  it.each(['workspace', 'artifacts'] as const)(
+    'opens the project %s folder locally without sending a chat turn',
+    async (folder) => {
+      render(
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="project-1"
+          sessionId="session-1"
+        />,
+      );
+
+      fireEvent.change(screen.getByLabelText('Message'), {
+        target: { value: `/open ${folder}` },
+      });
+      expect(screen.getByRole('menuitem', { name: `Open ${folder} folder` })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+
+      await waitFor(() => expect(api.revealProject).toHaveBeenCalledWith('project-1', folder));
+      expect(api.sendToChatSession).not.toHaveBeenCalled();
+      expect(api.createChatSession).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByTestId('editor-draft')).toHaveTextContent(''));
+    },
+  );
+
+  it('offers and opens a recent chat file in the References viewer', async () => {
+    const onOpenReference = vi.fn();
+    const reference = {
+      key: 'workspace:project-1:security/review-scope.md',
+      kind: 'workspace' as const,
+      path: 'security/review-scope.md',
+      projectId: 'project-1',
+    };
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="project-1"
+        sessionId="session-1"
+        recentReferences={[reference]}
+        onOpenReference={onOpenReference}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: '/open scope' } });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open security/review-scope.md' }));
+
+    expect(onOpenReference).toHaveBeenCalledWith(reference);
+    expect(api.revealProject).not.toHaveBeenCalled();
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('editor-draft')).toHaveTextContent(''));
+  });
+
+  it('keeps an unknown target in the editor and explains how to recover', async () => {
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="project-1"
+        sessionId="session-1"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: '/open missing.md' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+
+    expect(await screen.findByText(/no recent file matches/i)).toBeTruthy();
+    expect(screen.getByTestId('editor-draft')).toHaveTextContent('/open missing.md');
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('ChatComposer lossless draft submission', () => {
   beforeEach(() => {
     vi.clearAllMocks();

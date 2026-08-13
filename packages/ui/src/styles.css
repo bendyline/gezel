@@ -1361,6 +1361,12 @@ html.embedded-chat #root {
 .engine-pill-kind {
   margin-right: 0.4rem;
 }
+.engine-pill-actor {
+  font-weight: 600;
+}
+.engine-pill-live-tokens {
+  opacity: 0.78;
+}
 
 /* Compact prefill progress bar — replaces the verbose "X / Y tokens
    · Z tok/s" label when an `engine_phase` event carries a progress
@@ -7635,6 +7641,85 @@ button.danger {
   /* Keep editor-owned overlays (mentions and Monaco suggestions) free to
      escape the compose surface. Internal clipping belongs to Squisq's
      content panes, not this host wrapper. */
+}
+
+/* Local `/open` command suggestions. The tray sits inside the compose frame
+   and follows the editor's width instead of using a body portal, so it remains
+   anchored in compact/embedded chat hosts as well as the desktop project view. */
+.chat-open-command-menu {
+  margin: 0.25rem 1px 0.35rem;
+  padding: 0.35rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, var(--accent) 24%);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.chat-open-command-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.1rem 0.3rem 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-open-command-heading code {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chat-open-command-items {
+  display: grid;
+  gap: 0.2rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.chat-open-command-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.38rem 0.5rem;
+  color: var(--text);
+  background: var(--key-bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  text-align: left;
+}
+
+.chat-open-command-item:hover,
+.chat-open-command-item:focus-visible {
+  background: var(--key-bg-hover);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.chat-open-command-item code,
+.chat-open-command-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-open-command-item code {
+  font-size: var(--text-sm);
+}
+
+.chat-open-command-item span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-open-command-empty {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 /* EditorShell sets overflow:hidden inline to contain document-sized editor

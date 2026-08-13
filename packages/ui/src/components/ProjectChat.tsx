@@ -425,7 +425,16 @@ function ProjectChatBody({
         />
       )}
     >
-      {({ onToolActivity, onArtifactReference, onWorkspaceReference, onTaskReference }) => (
+      {({
+        onToolActivity,
+        onArtifactReference,
+        onArtifactSeen,
+        onWorkspaceReference,
+        onWorkspaceSeen,
+        recentReferences,
+        onOpenReference,
+        onTaskReference,
+      }) => (
         <>
           <ProjectTimeline
             projectId={project.id}
@@ -433,7 +442,9 @@ function ProjectChatBody({
             onFocusSession={(sid, gid) => focusThread(sid, gid, null)}
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
+            onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
+            onWorkspaceSeen={onWorkspaceSeen}
             onTaskReference={onTaskReference}
             onTerminalWorkingDirChanged={(_threadId, next) => {
               // Display-only: keep the routing anchor stable so the
@@ -476,6 +487,8 @@ function ProjectChatBody({
                     setSessionRefreshKey((k) => k + 1);
                   }}
                   onToolActivity={onToolActivity}
+                  recentReferences={recentReferences}
+                  onOpenReference={onOpenReference}
                   placeholder={placeholder}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another

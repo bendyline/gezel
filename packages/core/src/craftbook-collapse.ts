@@ -213,6 +213,16 @@ export function collapseCraftbookForTier<S extends CraftbookStep>(
       0,
       ...members.map((m) => (m.gate ? (normalizeStepGate(m.gate).maxAttempts ?? 0) : 0)),
     );
+    const consumes = members
+      .flatMap((member) => member.consumes ?? [])
+      .filter(
+        (input, index, all) =>
+          all.findIndex(
+            (candidate) =>
+              candidate.file === input.file &&
+              Boolean(candidate.artifact) === Boolean(input.artifact),
+          ) === index,
+      );
     const isLast = groupIdx === groups.length - 1;
     const nextGroupAnchor = groups[groupIdx + 1];
     const nextId = nextGroupAnchor
@@ -233,6 +243,7 @@ export function collapseCraftbookForTier<S extends CraftbookStep>(
     const step: S = {
       ...anchor,
       prompt: collapsedPrompt({ anchor, mergedNames, checks }),
+      ...(consumes.length > 0 ? { consumes } : { consumes: undefined }),
       gate,
       // Terminal + advanceWhen is an illegal combination; the terminal
       // group keeps only its completion gate.
@@ -247,7 +258,7 @@ export function collapseCraftbookForTier<S extends CraftbookStep>(
           }),
     };
     // Strip undefined-valued keys so schema round-trips stay clean.
-    for (const key of ['terminal', 'advanceWhen', 'next'] as const) {
+    for (const key of ['terminal', 'advanceWhen', 'next', 'consumes'] as const) {
       if (step[key] === undefined) delete step[key];
     }
     if (step.advanceWhen && step.advanceWhen.goto === undefined) {

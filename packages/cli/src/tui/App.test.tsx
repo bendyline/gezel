@@ -161,6 +161,72 @@ describe('App interactions', () => {
     expect(harness.text()).toContain('pending: please also inspect the tests');
   });
 
+  it('uses role-based labels for other live threads and focus targets', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    projectEventHandler()({
+      sessionId: 'session-studio-builder',
+      gezelId: 'builder',
+      projectId: 'studio',
+      event: { type: 'delta', content: 'I am checking the implementation.' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Developer: I am checking the implementation.');
+    });
+    expect(harness.text()).not.toContain('Bo: I am checking the implementation.');
+
+    await submit(harness, '/focus');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Send into which chat?');
+      expect(harness.text()).toContain('Developer');
+    });
+    expect(harness.text()).not.toContain('Bo');
+  });
+
+  it('refreshes the roster for task-recruited gezels and rewrites assignment updates', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    client.testGezels.push({
+      id: 'vasile',
+      name: 'Vasile',
+      role: 'Security Architect',
+      roleBasedName: 'security-architect',
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    });
+    projectEventHandler()({
+      sessionId: '',
+      gezelId: '',
+      projectId: 'studio',
+      event: {
+        type: 'task_event',
+        eventId: 'event-1',
+        kind: 'task.entry.dispatched',
+        summary: 'Task studio/1 entry step "model-system" handed to Vasile',
+        at: '2026-08-13T12:00:00.000Z',
+        taskRef: 'studio/1',
+        gezelId: 'vasile',
+      },
+    });
+    projectEventHandler()({
+      sessionId: 'task-session-1',
+      gezelId: 'vasile',
+      projectId: 'studio',
+      event: { type: 'delta', content: 'I am mapping the trust boundaries.' },
+    });
+
+    await vi.waitFor(() => {
+      expect(client.listGezels).toHaveBeenCalledTimes(2);
+      expect(harness.text()).toContain('handed to security-architect');
+      expect(harness.text()).toContain('security-architect: I am mapping the trust boundaries.');
+    });
+    expect(harness.text()).not.toContain('handed to Vasile');
+    expect(harness.text()).not.toContain('vasile: I am mapping');
+  });
+
   it('changes the install-wide engagement mode by name or through the picker', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -465,9 +531,10 @@ function createClient(opts?: {
   ];
 
   return {
+    testGezels: gezels,
     getConfig: vi.fn().mockResolvedValue(config),
     updateConfig: vi.fn(async (patch: Partial<ConfigResponse>) => ({ ...config, ...patch })),
-    listGezels: vi.fn().mockResolvedValue({ gezels }),
+    listGezels: vi.fn(async () => ({ gezels: [...gezels] })),
     listProjects: vi.fn().mockResolvedValue({ projects }),
     updateProject: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
       ...projects.find((project) => project.id === id),

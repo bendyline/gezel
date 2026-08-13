@@ -12,6 +12,11 @@ describe('roleTokens', () => {
     expect([...roleTokens('QA engineer')]).toEqual(['reviewer', 'developer']);
   });
 
+  it('collapses compound application-security titles to the security role family', () => {
+    expect([...roleTokens('Application Security Engineer')]).toEqual(['security']);
+    expect([...roleTokens('Product Security Architect')]).toEqual(['security']);
+  });
+
   it('preserves unknown tokens as-is', () => {
     expect([...roleTokens('Senior marine biologist')]).toEqual(['senior', 'marine', 'biologist']);
   });
@@ -35,6 +40,16 @@ describe('scoreCandidate', () => {
     // Query tokens after expansion + dedup: { designer }. Candidate role
     // tokens: { designer }. Exact hit → 1.0 / 1 = 1.
     expect(res.score).toBe(1);
+  });
+
+  it('matches an application-security specialist to a security template', () => {
+    const res = scoreCandidate('application security engineer', {
+      id: 'veiligheidsmeester',
+      role: 'Chief Security Officer',
+      tags: ['security', 'ciso', 'audit'],
+    });
+    expect(res.score).toBe(1);
+    expect(res.score).toBeGreaterThanOrEqual(MATCH_THRESHOLD);
   });
 
   it('returns zero when nothing overlaps', () => {

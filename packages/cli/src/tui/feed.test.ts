@@ -15,6 +15,7 @@ describe('reduceFeed task events', () => {
         summary: 'Task default/4 → complete',
         at: '2026-08-08T12:00:00.000Z',
         taskRef: 'default/4',
+        gezelId: 'reviewer',
       },
     };
 
@@ -23,6 +24,7 @@ describe('reduceFeed task events', () => {
         sessionId: 'local',
         kind: 'note',
         text: 'task · Task default/4 → complete',
+        taskEvent: { kind: 'task.status.changed', gezelId: 'reviewer' },
       }),
     ]);
   });
