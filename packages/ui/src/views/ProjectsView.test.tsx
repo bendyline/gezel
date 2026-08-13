@@ -7,6 +7,36 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
+const chatComposerMocks = vi.hoisted(() => ({ queueComposerPrefill: vi.fn() }));
+vi.mock('../components/ChatComposer.js', () => ({
+  queueComposerPrefill: chatComposerMocks.queueComposerPrefill,
+}));
+
+const editorMocks = vi.hoisted(() => ({
+  setActiveView: vi.fn(),
+  setSelection: vi.fn(),
+  revealLineInCenter: vi.fn(),
+  focus: vi.fn(),
+  getLineCount: vi.fn(() => 20),
+  getLineMaxColumn: vi.fn(() => 24),
+}));
+
+const trackedWorkspaceIssue = {
+  id: 'issue-1',
+  ref: 'BW-1',
+  fingerprint: 'review-fingerprint',
+  path: 'notes/audit.md',
+  severity: 'minor' as const,
+  category: 'clarity',
+  message: 'The conclusion does not identify an owner.',
+  line: 12,
+  status: 'open' as const,
+  seen: false,
+  stale: false,
+  createdAt: '2026-08-11T12:00:00.000Z',
+  lastSeenAt: '2026-08-11T12:00:00.000Z',
+};
+
 vi.mock('@bendyline/squisq-editor-react', () => ({
   EditorShell: ({
     initialMarkdown,
@@ -29,6 +59,19 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       <div data-testid="editor-status-bar-right">{statusBarSlotRight}</div>
     </div>
   ),
+  useEditorContext: () => ({
+    activeView: 'raw',
+    setActiveView: editorMocks.setActiveView,
+    monacoEditor: {
+      getModel: () => ({
+        getLineCount: editorMocks.getLineCount,
+        getLineMaxColumn: editorMocks.getLineMaxColumn,
+      }),
+      setSelection: editorMocks.setSelection,
+      revealLineInCenter: editorMocks.revealLineInCenter,
+      focus: editorMocks.focus,
+    },
+  }),
   JsonEditor: ({
     onChange,
   }: {
@@ -136,6 +179,11 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    chatComposerMocks.queueComposerPrefill.mockClear();
+    editorMocks.setActiveView.mockClear();
+    editorMocks.setSelection.mockClear();
+    editorMocks.revealLineInCenter.mockClear();
+    editorMocks.focus.mockClear();
     window.localStorage.removeItem('gezel.projectsSidebarCollapsed');
     window.localStorage.removeItem('gezel:project-output-fraction');
     window.localStorage.removeItem('gezel:project-output-fraction:v2');
@@ -148,7 +196,7 @@ describe('ProjectsView', () => {
           id,
           name: id === 'pj-alpha' ? 'Alpha' : 'default',
           packages: [],
-          allowGezelWrites: false,
+          managedWorkspaceWritePolicy: 'deny',
         }) as never,
     );
     vi.mocked(api.listProjectWorkspace).mockResolvedValue({ files: [] } as never);
@@ -272,7 +320,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       voormanGezelId: 'tomas',
       gezelIds: ['tomas', 'yusuf'],
     } as never);
@@ -312,7 +360,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       gezelIds: ['tomas'],
     } as never);
     vi.mocked(api.addGezelToProject).mockResolvedValue({
@@ -351,7 +399,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       gezelIds: ['tomas'],
     } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({
@@ -461,7 +509,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       gezelIds: ['tomas'],
     } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({
@@ -551,7 +599,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       grantedCredentials: ['github.token'],
     } as never);
 
@@ -706,7 +754,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       about: 'Original about',
       missionObjectives: 'Original mission',
     };
@@ -734,7 +782,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       about: 'Original about',
       missionObjectives: 'Original mission',
     };
@@ -772,7 +820,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Alpha',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       nudgeConfig: {
         enabled: false,
         slowIntervalMs: 21_600_000,
@@ -821,7 +869,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Checkers',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       indexingEnabled: false,
     };
     vi.mocked(api.getProject).mockResolvedValue(project as never);
@@ -847,6 +895,27 @@ describe('ProjectsView', () => {
   });
 
   it('shows workspace indexing issues and toggles the Boekwachter results pane', async () => {
+    const editableProject = {
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'allow',
+      gezelIds: ['willa'],
+    };
+    vi.mocked(api.getProject).mockResolvedValue(editableProject as never);
+    vi.mocked(api.updateProject).mockImplementation(
+      async (_id, patch) => ({ ...editableProject, ...patch }) as never,
+    );
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'willa', name: 'Willa', role: 'Writer' }],
+    } as never);
+    vi.mocked(api.fixBoekwachterIssue).mockResolvedValue({
+      issue: { ...trackedWorkspaceIssue, status: 'in_progress', seen: true, taskRef: 'pj-alpha/3' },
+      taskRef: 'pj-alpha/3',
+      gezelId: 'willa',
+      gezelName: 'Willa',
+      enqueued: true,
+    });
     vi.mocked(api.listProjectWorkspace).mockResolvedValue({
       files: [{ name: 'audit.md', path: 'notes/audit.md', isDirectory: false }],
       truncated: false,
@@ -866,15 +935,7 @@ describe('ProjectsView', () => {
       },
     } as never);
     vi.mocked(api.toolListFileIssues).mockResolvedValue({
-      issues: [
-        {
-          path: 'notes/audit.md',
-          severity: 'minor',
-          category: 'clarity',
-          message: 'The conclusion does not identify an owner.',
-          line: 12,
-        },
-      ],
+      issues: [trackedWorkspaceIssue],
       counts: { total: 1, bySeverity: { minor: 1 }, byCategory: { clarity: 1 } },
       truncated: false,
       indexed: true,
@@ -901,6 +962,7 @@ describe('ProjectsView', () => {
         gezelName: 'Boekwachter',
         reviewedAt: '2026-08-11T12:00:00.000Z',
       },
+      trackedIssues: [trackedWorkspaceIssue],
     } as never);
 
     render(<ProjectsView forceProjectId="pj-alpha" />);
@@ -927,9 +989,189 @@ describe('ProjectsView', () => {
       within(pane).getByText('The conclusion does not identify an owner.'),
     ).toBeInTheDocument();
     expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
+    expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
+
+    const editsSelect = () =>
+      screen
+        .getAllByTestId('mock-select')
+        .find((select) => within(select).queryByRole('option', { name: 'Can edit' }));
+    fireEvent.change(editsSelect()!, { target: { value: 'off' } });
+    await waitFor(() => {
+      expect(within(pane).queryByRole('button', { name: 'Fix' })).toBeNull();
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
+        managedWorkspaceWritePolicy: 'deny',
+      });
+    });
+
+    fireEvent.change(editsSelect()!, { target: { value: 'on' } });
+    await waitFor(() => {
+      expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(pane).getByRole('button', { name: /Line 12/ }));
+    await waitFor(() => {
+      expect(editorMocks.setSelection).toHaveBeenCalledWith({
+        startLineNumber: 12,
+        startColumn: 1,
+        endLineNumber: 12,
+        endColumn: 24,
+      });
+      expect(editorMocks.revealLineInCenter).toHaveBeenCalledWith(12);
+      expect(editorMocks.focus).toHaveBeenCalled();
+    });
 
     fireEvent.click(within(pane).getByRole('button', { name: 'Close Boekwachter index pane' }));
     expect(screen.queryByRole('complementary', { name: 'Boekwachter index results' })).toBeNull();
+
+    fireEvent.click(toggle);
+    const reopenedPane = await screen.findByRole('complementary', {
+      name: 'Boekwachter index results',
+    });
+    fireEvent.click(within(reopenedPane).getByRole('button', { name: 'Fix' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('combobox', { name: 'Assigned role' })).toHaveValue('writer');
+    expect(within(dialog).getByRole('option', { name: 'Willa — Writer' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Message' })).toHaveValue(
+      '@writer, can you address BW-1 in notes/audit.md at line 12: The conclusion does not identify an owner.',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+    await waitFor(() => {
+      expect(api.fixBoekwachterIssue).toHaveBeenCalledWith('pj-alpha', {
+        ref: 'BW-1',
+        gezelId: 'willa',
+        message:
+          '@writer, can you address BW-1 in notes/audit.md at line 12: The conclusion does not identify an owner.',
+      });
+    });
+    expect(await screen.findByTestId('project-chat')).toBeInTheDocument();
+  });
+
+  it('offers a Boekwachter fix when Codex Edit can write past the scoped workspace gate', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'codex-cli' } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+      codexPermissionMode: 'edit',
+      gezelIds: ['willa'],
+    } as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'willa', name: 'Willa', role: 'Writer' }],
+    } as never);
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [{ name: 'audit.md', path: 'notes/audit.md', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.readProjectWorkspaceFile).mockResolvedValue({
+      path: 'notes/audit.md',
+      content: '# Audit',
+    } as never);
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      enrichment: {
+        eligible: 1,
+        summarized: 1,
+        embedded: 1,
+        pending: 0,
+        reviews: { eligible: 1, reviewed: 1, stale: 0, pending: 0 },
+      },
+    } as never);
+    vi.mocked(api.toolListFileIssues).mockResolvedValue({
+      issues: [trackedWorkspaceIssue],
+      counts: { total: 1, bySeverity: { minor: 1 }, byCategory: { clarity: 1 } },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 1,
+      eligibleFiles: 1,
+    } as never);
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'notes/audit.md',
+      found: true,
+      review: {
+        notesMd: '',
+        issues: [
+          {
+            severity: 'minor',
+            category: 'clarity',
+            message: 'The conclusion does not identify an owner.',
+            line: 12,
+          },
+        ],
+        health: 8,
+        healthReason: 'One actionable omission.',
+        model: 'gpt-test',
+        provider: 'codex-cli',
+        gezelName: 'Boekwachter',
+        reviewedAt: '2026-08-11T12:00:00.000Z',
+      },
+      trackedIssues: [trackedWorkspaceIssue],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'audit.md' }));
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Show Boekwachter index pane, 1 issue in this file',
+      }),
+    );
+
+    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    const codexModeSelect = screen
+      .getAllByTestId('mock-select')
+      .find((select) => within(select).queryByRole('option', { name: 'Plan' }));
+    const managedAccessSelect = screen
+      .getAllByTestId('mock-select')
+      .find((select) => within(select).queryByRole('option', { name: 'Can edit' }));
+    expect(managedAccessSelect).toHaveValue('off');
+    expect(codexModeSelect).toHaveValue('edit');
+    expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
+  });
+
+  it('shows and persists Claude access only when Claude is represented in the project', async () => {
+    const project = {
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+      gezelIds: ['claude-writer'],
+    };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      anthropicCli: { defaultPermissionMode: 'acceptEdits' },
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue(project as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'claude-writer',
+          name: 'Claude Writer',
+          role: 'Writer',
+          provider: 'anthropic-cli',
+        },
+      ],
+    } as never);
+    vi.mocked(api.updateProject).mockImplementation(
+      async (_id, patch) => ({ ...project, ...patch }) as never,
+    );
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+
+    const claudeModeSelect = screen
+      .getAllByTestId('mock-select')
+      .find((select) => within(select).queryByRole('option', { name: 'Ask' }));
+    expect(claudeModeSelect).toHaveValue('acceptEdits');
+    expect(screen.queryByRole('option', { name: 'Reviewed' })).not.toBeInTheDocument();
+
+    fireEvent.change(claudeModeSelect!, { target: { value: 'plan' } });
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
+        claudePermissionMode: 'plan',
+      });
+    });
   });
 
   it('hides optional project tabs and lets Settings turn them back on', async () => {
@@ -937,7 +1179,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Checkers',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       tabVisibility: {
         overview: false,
         tasks: false,
@@ -987,7 +1229,7 @@ describe('ProjectsView', () => {
       id: 'pj-alpha',
       name: 'Writing',
       packages: [],
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
       projectTypeId: 'content-writing',
       tabVisibility: { map: true },
     } as never);
@@ -1152,7 +1394,7 @@ describe('ProjectsView', () => {
         id: 'pj-spanish',
         name: 'Spanish practice',
         packages: [],
-        allowGezelWrites: false,
+        managedWorkspaceWritePolicy: 'deny',
       },
       applied: {
         typeId: 'language-trainer',

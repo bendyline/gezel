@@ -20,6 +20,22 @@ const TABS = [
 ];
 
 test.describe('projects IDE', () => {
+  test('restored Default workspace stays named in the project navigation', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        'gezel:nav:selection',
+        JSON.stringify({ kind: 'project', id: 'default', at: Date.now(), order: 0 }),
+      );
+    });
+    await page.goto('/');
+
+    await expect(page.getByTestId('project-tab-chat')).toBeVisible({ timeout: 15_000 });
+    const currentProject = page.locator(
+      '.app-sidebar-proj-row.active > .app-sidebar-item[aria-current="page"]',
+    );
+    await expect(currentProject.locator('.app-sidebar-item-label')).toHaveText('Default');
+  });
+
   test('tab tour', async ({ page, world }) => {
     test.skip(!world, 'requires the seeded world');
     await gotoHome(page);

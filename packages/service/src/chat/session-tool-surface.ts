@@ -94,7 +94,7 @@ export interface ResolveSessionToolSurfaceOptions {
   isGitRepo: boolean;
   securityPolicy?: ResolvedSecurityPolicy;
   /**
-   * Effective per-project workspace writability (`projectWorkspaceWritable`
+   * Effective managed workspace writability (`projectManagedWorkspaceWritable`
    * in core). `false` strips the `workspace-fs-write` group — the
    * per-project replacement for the old global `allowFileEdits` ceiling.
    */

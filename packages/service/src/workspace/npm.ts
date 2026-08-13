@@ -431,14 +431,14 @@ export async function applyNpmInstallApprovals(
   // rest of the workspace-fs surface. Post the Phase-1 resolver
   // unification this is equivalent to `projectWorkspaceDir` for the dir
   // value, but it also surfaces a denial if the user has an external
-  // `workingDir` without `allowGezelWrites` — installing packages into
+  // external `workingDir` without managed-write consent — installing packages into
   // their folder without permission was a real footgun that this gate
   // closes for free.
   const gate = await store.assertWorkspaceWritable(projectId);
   if (!gate.ok) {
     return gate.reason === 'disabled-by-project'
       ? '[npm_install follow-up: workspace not writable (disabled-by-project). Gezel writes are turned off for this project in Project → Settings; packages cannot be installed until the user re-enables them.]'
-      : `[npm_install follow-up: workspace not writable (${gate.reason}). The user's external workingDir needs allowGezelWrites=true before packages can be installed.]`;
+      : `[npm_install follow-up: workspace not writable (${gate.reason}). The user's external workingDir needs managed workspace writes enabled before packages can be installed.]`;
   }
   const workspaceDir = gate.workspaceDir;
 

@@ -107,7 +107,7 @@ describe('project-local @project gezel', () => {
     expect(await readFile(iconPath, 'utf8')).toBe(malicious);
   });
 
-  it('refuses to write into an external workingDir without allowGezelWrites', async () => {
+  it('refuses to write into an external workingDir without managed-write consent', async () => {
     const external = await mkdtemp(join(tmpdir(), 'lv-ext-'));
     try {
       const project = await store.createProject({ name: 'Ext', workingDir: external });

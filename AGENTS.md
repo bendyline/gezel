@@ -107,6 +107,7 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │   └── {id}/
 │       ├── project.json     name, description, workingDir?, packages
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
+│       ├── boekwachter-issues.json durable BW issue refs, stale anchors, lifecycle + task links
 │       ├── artifacts/       read-write user/agent outputs
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories

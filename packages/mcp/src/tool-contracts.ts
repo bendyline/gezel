@@ -332,6 +332,7 @@ const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
   'search_code',
   'file_review',
   'list_file_issues',
+  'get_file_issue',
   'security_overview',
   'scan_findings',
   'map_attack_surface',

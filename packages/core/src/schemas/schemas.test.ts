@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AskQuestionRequestSchema,
+  BoekwachterIssueSchema,
   ChatEventSchema,
   ChatMessageSchema,
   CraftbookTemplateIdentitySchema,
@@ -16,6 +17,7 @@ import {
   ProjectFileEntrySchema,
   ProjectSchema,
   TaskStatusSchema,
+  UpdateBoekwachterIssueRequestSchema,
   UpdateProjectRequestSchema,
   UpdateTaskRequestSchema,
   parseTaskRef,
@@ -58,6 +60,49 @@ describe('DocumentMediaExportRequestSchema', () => {
         selectedFile: '../outside.md',
         format: 'gif',
         source: { kind: 'project-artifacts', projectId: 'project-1' },
+      }),
+    ).toThrow();
+  });
+});
+
+describe('Boekwachter issue schemas', () => {
+  const issue = {
+    id: 'issue-3',
+    ref: 'BW-3',
+    fingerprint: 'fingerprint',
+    path: 'docs/guide.md',
+    line: 14,
+    severity: 'minor',
+    category: 'clarity',
+    message: 'The owner is unclear.',
+    status: 'open',
+    seen: false,
+    stale: true,
+    createdAt: '2026-08-12T00:00:00.000Z',
+    lastSeenAt: '2026-08-12T00:00:00.000Z',
+  };
+
+  it('accepts a durable issue with an explicitly historical line anchor', () => {
+    expect(BoekwachterIssueSchema.parse(issue)).toMatchObject({ ref: 'BW-3', stale: true });
+    expect(() => BoekwachterIssueSchema.parse({ ...issue, ref: 'issue-3' })).toThrow();
+  });
+
+  it('requires a dismissal reason only for dismissed lifecycle updates', () => {
+    expect(
+      UpdateBoekwachterIssueRequestSchema.parse({
+        ref: 'BW-3',
+        status: 'dismissed',
+        dismissalReason: 'not_an_issue',
+      }),
+    ).toMatchObject({ status: 'dismissed' });
+    expect(() =>
+      UpdateBoekwachterIssueRequestSchema.parse({ ref: 'BW-3', status: 'dismissed' }),
+    ).toThrow();
+    expect(() =>
+      UpdateBoekwachterIssueRequestSchema.parse({
+        ref: 'BW-3',
+        status: 'resolved',
+        dismissalReason: 'not_an_issue',
       }),
     ).toThrow();
   });
@@ -375,6 +420,26 @@ describe('UpdateProjectRequestSchema', () => {
     expect(UpdateProjectRequestSchema.parse({ indexingEnabled: false }).indexingEnabled).toBe(
       false,
     );
+  });
+
+  it('accepts the named managed workspace-write policy', () => {
+    expect(
+      UpdateProjectRequestSchema.parse({ managedWorkspaceWritePolicy: 'deny' })
+        .managedWorkspaceWritePolicy,
+    ).toBe('deny');
+    expect(() =>
+      UpdateProjectRequestSchema.parse({ managedWorkspaceWritePolicy: 'sometimes' }),
+    ).toThrow();
+  });
+
+  it('accepts provider-native project permission overrides', () => {
+    expect(UpdateProjectRequestSchema.parse({ codexPermissionMode: 'reviewed' })).toMatchObject({
+      codexPermissionMode: 'reviewed',
+    });
+    expect(
+      UpdateProjectRequestSchema.parse({ claudePermissionMode: 'bypassPermissions' }),
+    ).toMatchObject({ claudePermissionMode: 'bypassPermissions' });
+    expect(() => UpdateProjectRequestSchema.parse({ claudePermissionMode: 'reviewed' })).toThrow();
   });
 
   it('accepts a per-project Meester progress-check override', () => {

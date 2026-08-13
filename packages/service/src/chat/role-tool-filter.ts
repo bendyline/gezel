@@ -636,7 +636,7 @@ export function computeToolAllowlist(opts: {
   securityPolicy?: ResolvedSecurityPolicy;
   /**
    * Effective per-project workspace writability (see
-   * `projectWorkspaceWritable` in core). Explicit `false` strips the
+   * `projectManagedWorkspaceWritable` in core). Explicit `false` strips the
    * `workspace-fs-write` tool group — the per-project replacement for
    * the old global `allowFileEdits` ceiling, so an internal-workspace
    * project keeps its write tools under super-lockdown while an
@@ -1263,7 +1263,7 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
  * onto the surface. It only ever removes tools.
  *
  * `workspace-fs-write` is stripped when the PROJECT is not writable for
- * gezels (`projectWorkspaceWritable === false`) — the global policy's
+ * gezels (`projectManagedWorkspaceWritable === false`) — the global policy's
  * `allowFileEdits` no longer factors in, so internal-workspace projects
  * keep their write tools under super-lockdown. `code-execution` is
  * stripped by group so the set tracks the catalog; `artifacts` is

@@ -109,8 +109,12 @@ import type {
   FindSymbolResponse,
   FireReportActionRequest,
   FireReportActionResponse,
+  FixBoekwachterIssueRequest,
+  FixBoekwachterIssueResponse,
   GenerateGezelAboutRequest,
   GenerateGezelIconRequest,
+  GetBoekwachterIssueRequest,
+  GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
   GezelGender,
   GezelGrowthResponse,
@@ -314,6 +318,8 @@ import type {
   TransformStreamEvent,
   TransformTextRequest,
   UnifiedSearchResponse,
+  UpdateBoekwachterIssueRequest,
+  UpdateBoekwachterIssueResponse,
   UpdateConfigRequest,
   UpdateCraftbookRequest,
   UpdateGezelAboutRequest,
@@ -5132,7 +5138,7 @@ export class GezelClient {
     );
   }
 
-  // ── workspace (CRUD — writes gated by project.allowGezelWrites) ──
+  // ── workspace (CRUD — writes gated by the managed workspace-write policy) ──
 
   listProjectWorkspace(
     id: string,
@@ -5363,6 +5369,39 @@ export class GezelClient {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(id)}/tools/list-file-issues`,
+      body,
+    );
+  }
+
+  getBoekwachterIssue(
+    id: string,
+    body: GetBoekwachterIssueRequest,
+  ): Promise<GetBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/get-file-issue`,
+      body,
+    );
+  }
+
+  updateBoekwachterIssue(
+    id: string,
+    body: UpdateBoekwachterIssueRequest,
+  ): Promise<UpdateBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/update-file-issue`,
+      body,
+    );
+  }
+
+  fixBoekwachterIssue(
+    id: string,
+    body: FixBoekwachterIssueRequest,
+  ): Promise<FixBoekwachterIssueResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/fix-file-issue`,
       body,
     );
   }

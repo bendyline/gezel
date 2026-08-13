@@ -3,6 +3,7 @@ import {
   type ExecutionDensity,
   type ExpectedDeliverable,
   type GezelGender,
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ProjectFileEntry,
   type Task,
   type TaskCraftbookStep,
@@ -310,9 +311,9 @@ export interface BuildInstructionsOptions {
    */
   retrievalFirstHint?: boolean;
   /**
-   * Effective per-project workspace writability (`projectWorkspaceWritable`
+   * Effective managed workspace writability (`projectManagedWorkspaceWritable`
    * in core). When explicitly `false` — external workingDir without the
-   * `allowGezelWrites` opt-in, or a project the user set to "edits off" —
+   * an explicit managed-write opt-in, or a project the user set to "edits off" —
    * every role's workspace-write tools are stripped, so the prompt injects
    * a "file edits are off" note and suppresses any "call `write_file`"
    * deliverable guidance: the voorman doesn't delegate writes and the
@@ -1329,10 +1330,10 @@ ${artifactsLine}
     const fileDeliverableBlocked =
       wantsFile && (fileEditsDisabled || missingRequiredFileTools.length > 0);
     const fileBlockReason = fileEditsDisabled
-      ? 'this project has **gezel file edits turned off**'
+      ? 'this session’s **built-in workspace file tools are read-only**'
       : `the required ${missingRequiredFileTools.map((tool) => `\`${tool}\``).join(' / ')} tool surface is **not wired on your roster this turn**`;
     const fileBlockRecovery = fileEditsDisabled
-      ? 'the asker can enable "Allow gezels to modify the workspace directory" in Project → Settings'
+      ? `the asker can enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings`
       : 'the asker must route this deliverable to a gezel whose roster includes that tool';
     const deliverableBullet = fileDeliverableBlocked
       ? `- **You cannot write the file this turn.** The asker expected a file at ${filePathClause}, but ${fileBlockReason}. Do NOT claim you wrote it. Reply in chat that the file deliverable is blocked (${fileBlockRecovery}); give your answer as prose if that's still useful.`
@@ -1406,17 +1407,17 @@ ${artifactsLine}
       ? `- **A write or scaffold** — use your role-appropriate workspace-write tool for source or shippable files${artifactScratchClause}. If the task implies a browser/site/app deliverable and \`write_file\` is on your roster, land \`index.html\` before asking another Developer/Builder/Designer for advice.${imageHandoffLine}
 - **A direct chat reply** — for opinion or recommendation questions ("what stack?", "what approach?"), answer from your own expertise. There's no workspace file or artifact to consult; that's what your domain knowledge is for.`
       : '- **A direct chat reply** — no workspace-write tool is wired this turn. If the request needs a file, explain that it is blocked instead of claiming a save.';
-  // Write-posture note. On a non-writable project every role loses its
-  // workspace-write tools, but the rest of the prompt (and the asker's
+  // Managed write-posture note. On a non-writable project this session loses
+  // its built-in workspace-write tools, but the rest of the prompt (and the asker's
   // delegation) still talks as if files can be written — which is how a
   // developer ends up calling a stripped `write_file` and then claiming a
   // save that never happened. This note, in the high-attention recency
-  // band, tells the WHOLE team the posture so they respond coherently:
-  // the voorman stops delegating writes, the developer stops trying, and
-  // someone tells the user plainly. Empty string when edits are allowed,
-  // so the prompt is byte-identical in the normal case.
+  // band, makes the current session's actual tool surface explicit without
+  // claiming provider-native sessions (for example Codex) share this gate.
+  // Empty string when edits are allowed, so the prompt is byte-identical in
+  // the normal case.
   const fileEditsDisabledNote = fileEditsDisabled
-    ? `\n\n---\n\n## ⚠️ File edits are OFF for this project\n\nGezel workspace writes are turned off for this project. **No gezel on this project can create or edit workspace files right now** — \`write_file\`, \`replace_in_file\`, \`append_to_file\`, \`generate_image\`, and the other write tools are not on anyone's roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a file** — you can't, and the runtime flags the false claim.\n- **Do not delegate or hand off file-writing work** (every gezel on this project is blocked too), and don't call \`write_file\`/\`message_gezel\` expecting a file to land.\n- If the request needs a file change, **say so plainly**: it's blocked because gezel edits are turned off for this project, and the user can re-enable them via **"Allow gezels to modify the workspace directory" in Project → Settings**. Reading, reviewing, analysis, and planning still work — do those if they move things forward.`
+    ? `\n\n---\n\n## ⚠️ Built-in file tools are read-only for this session\n\nThis project does not currently allow Gezel-managed workspace writes. **This session cannot create or edit workspace files** — \`write_file\`, \`replace_in_file\`, \`append_to_file\`, \`generate_image\`, and the other managed write tools are not on your roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a workspace file** — you can't, and the runtime flags the false claim.\n- **Do not call unavailable workspace-write tools.** Reading, reviewing, analysis, and planning still work.\n- If the request needs a file change, **say so plainly**: this session's built-in tools are read-only, and the user can enable them via **"${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings**.\n- **Do not generalize this to every gezel.** Provider-native sessions such as Codex may have separate project access.`
     : '';
   const freshProjectAddendum = isFreshProject
     ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`

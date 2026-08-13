@@ -180,6 +180,8 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'search_code',
   'file_review',
   'list_file_issues',
+  'get_file_issue',
+  'set_file_issue_status',
 
   // Security intelligence (static security analysis over the index)
   'security_scan',

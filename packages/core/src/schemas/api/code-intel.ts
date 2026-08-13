@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from '../file-review.js';
+import {
+  BoekwachterIssueDismissalReasonSchema,
+  BoekwachterIssueSchema,
+  BoekwachterIssueStatusSchema,
+  FileReviewIssueSeveritySchema,
+  FileReviewWireSchema,
+} from '../file-review.js';
 
 // ── code-intel (workspace code intelligence) ────────────────────────────────
 // Every result carries 1-based inclusive line ranges so the model's next move
@@ -196,6 +202,11 @@ export const FileReviewResponseSchema = z.object({
   pending: z.boolean().optional(),
   review: FileReviewWireSchema.optional(),
   /**
+   * Durable lifecycle records for this path. Unlike `review.issues`, these
+   * survive file edits; `stale` says their old line/message needs rechecking.
+   */
+  trackedIssues: z.array(BoekwachterIssueSchema).optional(),
+  /**
    * False when no rubric covers this file's kind — it will NEVER be reviewed,
    * as opposed to `pending` ("not yet"). Absent on found responses and on
    * older daemons.
@@ -209,20 +220,15 @@ export const ListFileIssuesRequestSchema = z.object({
   category: z.string().optional(),
   /** Repo-relative path prefix filter. */
   path: z.string().optional(),
+  status: BoekwachterIssueStatusSchema.optional(),
+  /** Closed records are retained for history but hidden by default. */
+  includeClosed: z.boolean().optional(),
   maxResults: z.number().int().positive().max(1000).optional(),
 });
 export type ListFileIssuesRequest = z.infer<typeof ListFileIssuesRequestSchema>;
 
 export const ListFileIssuesResponseSchema = z.object({
-  issues: z.array(
-    z.object({
-      path: z.string(),
-      severity: FileReviewIssueSeveritySchema,
-      category: z.string(),
-      message: z.string(),
-      line: z.number().int().positive().optional(),
-    }),
-  ),
+  issues: z.array(BoekwachterIssueSchema),
   counts: z.object({
     total: z.number().int().nonnegative(),
     bySeverity: z.record(z.string(), z.number().int().nonnegative()),
@@ -247,6 +253,56 @@ export const ListFileIssuesResponseSchema = z.object({
     .optional(),
 });
 export type ListFileIssuesResponse = z.infer<typeof ListFileIssuesResponseSchema>;
+
+export const GetBoekwachterIssueRequestSchema = z.object({
+  ref: z.string().regex(/^BW-[1-9]\d*$/),
+});
+export type GetBoekwachterIssueRequest = z.infer<typeof GetBoekwachterIssueRequestSchema>;
+
+export const GetBoekwachterIssueResponseSchema = z.object({
+  issue: BoekwachterIssueSchema,
+});
+export type GetBoekwachterIssueResponse = z.infer<typeof GetBoekwachterIssueResponseSchema>;
+
+export const UpdateBoekwachterIssueRequestSchema = z
+  .object({
+    ref: z.string().regex(/^BW-[1-9]\d*$/),
+    status: BoekwachterIssueStatusSchema.optional(),
+    seen: z.boolean().optional(),
+    dismissalReason: BoekwachterIssueDismissalReasonSchema.optional(),
+  })
+  .refine((value) => value.status !== undefined || value.seen !== undefined, {
+    message: 'status or seen is required',
+  })
+  .refine(
+    (value) =>
+      value.status === 'dismissed'
+        ? value.dismissalReason !== undefined
+        : value.dismissalReason === undefined,
+    { message: 'dismissalReason is required only when status is dismissed' },
+  );
+export type UpdateBoekwachterIssueRequest = z.infer<typeof UpdateBoekwachterIssueRequestSchema>;
+
+export const UpdateBoekwachterIssueResponseSchema = z.object({
+  issue: BoekwachterIssueSchema,
+});
+export type UpdateBoekwachterIssueResponse = z.infer<typeof UpdateBoekwachterIssueResponseSchema>;
+
+export const FixBoekwachterIssueRequestSchema = z.object({
+  ref: z.string().regex(/^BW-[1-9]\d*$/),
+  gezelId: z.string().min(1),
+  message: z.string().min(1),
+});
+export type FixBoekwachterIssueRequest = z.infer<typeof FixBoekwachterIssueRequestSchema>;
+
+export const FixBoekwachterIssueResponseSchema = z.object({
+  issue: BoekwachterIssueSchema,
+  taskRef: z.string().min(1),
+  gezelId: z.string().min(1),
+  gezelName: z.string().min(1),
+  enqueued: z.boolean(),
+});
+export type FixBoekwachterIssueResponse = z.infer<typeof FixBoekwachterIssueResponseSchema>;
 
 export const MapRepoRequestSchema = z.object({
   path: z.string().optional(),

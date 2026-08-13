@@ -61,7 +61,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'workspace-fs-read',
     name: 'Workspace File Reading',
     description:
-      "Read, list, search, and diff files in the project workspace. Mirrors Node's `fs` reads plus content/glob search. Diagnose-only — pair with `workspace-fs-write` to actually mutate.",
+      "Read, list, search, and diff files in the project workspace, and retrieve a referenced Boekwachter issue's durable metadata. Mirrors Node's `fs` reads plus content/glob search. Diagnose-only — pair with `workspace-fs-write` to actually mutate.",
     tools: [
       'list_dir',
       'read_file',
@@ -71,6 +71,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'grep_files',
       'find_files',
       'diff_files',
+      'get_file_issue',
     ],
   },
   {
@@ -87,6 +88,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'search_code',
       'file_review',
       'list_file_issues',
+      'set_file_issue_status',
     ],
   },
   {

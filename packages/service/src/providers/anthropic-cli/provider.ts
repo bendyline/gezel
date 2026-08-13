@@ -72,7 +72,8 @@ const HARDCODED_MODELS: ModelInfo[] = [
   },
 ];
 
-export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+/** Shared core contract, re-exported here for provider consumers. */
+export type ClaudePermissionMode = import('@bendyline/gezel').ClaudePermissionMode;
 
 /**
  * Default worker-pool cap (= default queue concurrency). Workers spawn on

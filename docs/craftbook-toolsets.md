@@ -57,7 +57,9 @@ catalog manifest and unions its `tools[].name`:
   `{ behavior: 'allow' }` immediately, skipping the approval prompt.
 
 A coarser per-gezel lever for CLI gezels remains the `claudePermissionMode`
-frontmatter (`acceptEdits` / `bypassPermissions`).
+frontmatter (`acceptEdits` / `bypassPermissions`). A project's status-bar Claude
+control writes `project.claudePermissionMode` and takes precedence over that
+per-gezel value for sessions in the project.
 
 ## Example: an existing craftbook
 

@@ -1,7 +1,10 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
+  BoekwachterIssue,
+  BoekwachterIssueDismissalReason,
+  BoekwachterIssueStatus,
   DescribeFolderResponse,
   FileContextFinding,
   FileContextResponse,
@@ -52,7 +55,7 @@ import {
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import { safeJoin } from '../fs/safe-paths.js';
-import type { Store } from '../fs/store.js';
+import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
@@ -1359,7 +1362,13 @@ export class ContentIndex {
           },
           () => wedged,
         );
-        if (wedged) return { files, reviewed };
+        if (wedged) break;
+      }
+      if (reviewed > 0) {
+        await this.store.observeProjectBoekwachterReviews(
+          projectId,
+          index.currentFileReviewIssues(),
+        );
       }
       return { files, reviewed };
     } finally {
@@ -1387,12 +1396,38 @@ export class ContentIndex {
   /** One file's boekwachter review (`file_review` tool). */
   async fileReview(projectId: string, relPath: string): Promise<FileReviewResponse> {
     const opened = await this.open(projectId);
-    if (!opened) return { path: relPath, found: false };
+    if (!opened) {
+      const trackedIssues = (await this.store.listProjectBoekwachterIssues(projectId))
+        .filter((record) => record.path === relPath)
+        .map((record) => toBoekwachterIssueWire(record, null));
+      return {
+        path: relPath,
+        found: false,
+        ...(trackedIssues.length > 0 ? { trackedIssues } : {}),
+      };
+    }
     try {
       const fileRec = opened.index.getFile(relPath);
-      if (!fileRec?.hash) return { path: relPath, found: false };
-      const row = opened.index.getFileReview(fileRec.hash);
-      if (row) return { path: relPath, found: true, review: toReviewWire(row) };
+      const currentHash = await currentIndexedHash(opened.index, opened.workspaceDir, relPath);
+      const currentObservations = opened.index.currentFileReviewIssues();
+      await this.store.observeProjectBoekwachterReviews(projectId, currentObservations);
+      const trackedIssues = await this.boekwachterIssuesForPath(projectId, relPath, currentHash);
+      if (!fileRec?.hash) {
+        return {
+          path: relPath,
+          found: false,
+          ...(trackedIssues.length > 0 ? { trackedIssues } : {}),
+        };
+      }
+      const row = currentHash ? opened.index.getFileReview(currentHash) : undefined;
+      if (row) {
+        return {
+          path: relPath,
+          found: true,
+          review: toReviewWire(row),
+          ...(trackedIssues.length > 0 ? { trackedIssues } : {}),
+        };
+      }
       // `pending` is a promise ("the boekwachter studies files when idle") —
       // only make it for files a rubric will actually reach. Everything else
       // (data/other kinds, images, trivial blobs, reviews disabled) reports
@@ -1402,8 +1437,21 @@ export class ContentIndex {
         !fileRec.trivial &&
         REVIEWABLE_MODALITIES.has(fileRec.modality ?? '') &&
         rubrics.has(fileRec.kind ?? '');
-      if (!eligible) return { path: relPath, found: false, eligible: false };
-      return { path: relPath, found: false, pending: true, eligible: true };
+      if (!eligible) {
+        return {
+          path: relPath,
+          found: false,
+          eligible: false,
+          ...(trackedIssues.length > 0 ? { trackedIssues } : {}),
+        };
+      }
+      return {
+        path: relPath,
+        found: false,
+        pending: true,
+        eligible: true,
+        ...(trackedIssues.length > 0 ? { trackedIssues } : {}),
+      };
     } finally {
       opened.index.close();
     }
@@ -1424,27 +1472,57 @@ export class ContentIndex {
     };
     const rubrics = await resolveRubrics(this.store);
     const opened = await this.open(projectId);
-    if (!opened) return empty;
+    if (!opened) {
+      const limit = Math.min(req.maxResults ?? 200, 1000);
+      const matching = filterAndSortBoekwachterIssues(
+        (await this.store.listProjectBoekwachterIssues(projectId)).map((record) =>
+          toBoekwachterIssueWire(record, null),
+        ),
+        req,
+      );
+      return {
+        ...empty,
+        issues: matching.slice(0, limit),
+        counts: {
+          total: matching.length,
+          bySeverity: tallyBoekwachterIssues(matching, (issue) => issue.severity),
+          byCategory: tallyBoekwachterIssues(matching, (issue) => issue.category),
+        },
+        truncated: matching.length > limit,
+      };
+    }
     const { index } = opened;
     try {
       const limit = Math.min(req.maxResults ?? 200, 1000);
-      const { issues, counts, reviewers } = index.fileIssues({
+      await this.store.observeProjectBoekwachterReviews(projectId, index.currentFileReviewIssues());
+      const { reviewers } = index.fileIssues({
         ...(req.severity ? { severity: req.severity } : {}),
         ...(req.category ? { category: req.category } : {}),
         ...(req.path ? { pathPrefix: req.path } : {}),
-        limit: limit + 1,
+        limit: 1,
       });
+      const records = await this.store.listProjectBoekwachterIssues(projectId);
+      const matching = filterAndSortBoekwachterIssues(
+        await Promise.all(
+          records.map(async (record) =>
+            toBoekwachterIssueWire(
+              record,
+              await currentIndexedHash(index, opened.workspaceDir, record.path),
+            ),
+          ),
+        ),
+        req,
+      );
+      const counts = {
+        total: matching.length,
+        bySeverity: tallyBoekwachterIssues(matching, (issue) => issue.severity),
+        byCategory: tallyBoekwachterIssues(matching, (issue) => issue.category),
+      };
       const rc = index.reviewCounts(rubricKeys(rubrics), MAX_REVIEW_ATTEMPTS);
       return {
-        issues: issues.slice(0, limit).map((i) => ({
-          path: i.path,
-          severity: toIssueSeverity(i.severity),
-          category: i.category,
-          message: i.message,
-          ...(i.line !== undefined ? { line: i.line } : {}),
-        })),
+        issues: matching.slice(0, limit),
         counts,
-        truncated: issues.length > limit,
+        truncated: matching.length > limit,
         indexed: index.fileCount() > 0,
         reviewedFiles: rc.reviewed,
         eligibleFiles: rc.eligible,
@@ -1453,6 +1531,70 @@ export class ContentIndex {
     } finally {
       index.close();
     }
+  }
+
+  async getBoekwachterIssue(projectId: string, ref: string): Promise<BoekwachterIssue | null> {
+    const opened = await this.open(projectId);
+    if (!opened) {
+      const record = await this.store.getProjectBoekwachterIssue(projectId, ref);
+      return record ? toBoekwachterIssueWire(record, null) : null;
+    }
+    try {
+      await this.store.observeProjectBoekwachterReviews(
+        projectId,
+        opened.index.currentFileReviewIssues(),
+      );
+      const record = await this.store.getProjectBoekwachterIssue(projectId, ref);
+      return record
+        ? toBoekwachterIssueWire(
+            record,
+            await currentIndexedHash(opened.index, opened.workspaceDir, record.path),
+          )
+        : null;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  async updateBoekwachterIssue(
+    projectId: string,
+    ref: string,
+    patch: {
+      status?: BoekwachterIssueStatus;
+      seen?: boolean;
+      taskRef?: string;
+      dismissalReason?: BoekwachterIssueDismissalReason;
+    },
+  ): Promise<BoekwachterIssue | null> {
+    const record = await this.store.updateProjectBoekwachterIssue(projectId, ref, patch);
+    if (!record) return null;
+    const opened = await this.open(projectId);
+    try {
+      return toBoekwachterIssueWire(
+        record,
+        opened ? await currentIndexedHash(opened.index, opened.workspaceDir, record.path) : null,
+      );
+    } finally {
+      opened?.index.close();
+    }
+  }
+
+  async settleBoekwachterIssuesForTask(
+    projectId: string,
+    taskRef: string,
+    outcome: 'complete' | 'canceled',
+  ): Promise<number> {
+    return this.store.settleProjectBoekwachterIssuesForTask(projectId, taskRef, outcome);
+  }
+
+  private async boekwachterIssuesForPath(
+    projectId: string,
+    path: string,
+    currentHash: string | null,
+  ): Promise<BoekwachterIssue[]> {
+    return (await this.store.listProjectBoekwachterIssues(projectId))
+      .filter((record) => record.path === path)
+      .map((record) => toBoekwachterIssueWire(record, currentHash));
   }
 
   // ── doc-intel ────────────────────────────────────────────────────────────
@@ -2039,12 +2181,92 @@ function toReviewWire(row: FileReviewRow): FileReviewWire {
   };
 }
 
-function rubricKeys(rubrics: Map<string, ResolvedRubric>): Array<{ kind: string; hash: string }> {
-  return [...rubrics.values()].map((r) => ({ kind: r.kind, hash: r.hash }));
+function toBoekwachterIssueWire(
+  record: ProjectBoekwachterIssueRecord,
+  currentContentHash: string | null,
+): BoekwachterIssue {
+  return {
+    id: record.id,
+    ref: record.ref,
+    fingerprint: record.fingerprint,
+    path: record.path,
+    severity: record.severity,
+    category: record.category,
+    message: record.message,
+    ...(record.line !== undefined ? { line: record.line } : {}),
+    status: record.status,
+    seen: record.seenAt !== undefined,
+    stale: currentContentHash === null || currentContentHash !== record.lastSeenContentHash,
+    ...(record.taskRef ? { taskRef: record.taskRef } : {}),
+    ...(record.dismissalReason ? { dismissalReason: record.dismissalReason } : {}),
+    createdAt: record.createdAt,
+    lastSeenAt: record.lastSeenAt,
+    ...(record.lastCheckedAt ? { lastCheckedAt: record.lastCheckedAt } : {}),
+    ...(record.seenAt ? { seenAt: record.seenAt } : {}),
+    ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}),
+    ...(record.dismissedAt ? { dismissedAt: record.dismissedAt } : {}),
+  };
 }
 
-function toIssueSeverity(s: string): FileReviewIssueSeverity {
-  return s === 'major' || s === 'minor' || s === 'info' ? s : 'info';
+/**
+ * The indexer updates asynchronously after a save. Compare its cheap change
+ * gate with the live file before trusting the indexed hash so a freshly edited
+ * file marks old BW anchors stale immediately, not one index tick later.
+ */
+async function currentIndexedHash(
+  index: IndexStore,
+  workspaceDir: string,
+  path: string,
+): Promise<string | null> {
+  const indexed = index.getFile(path);
+  if (!indexed?.hash) return null;
+  const absolute = safeJoin(workspaceDir, path);
+  if (!absolute) return null;
+  const live = await stat(absolute).catch(() => null);
+  if (!live || !live.isFile()) return null;
+  return live.size === indexed.size && live.mtimeMs === indexed.mtimeMs ? indexed.hash : null;
+}
+
+function issueSeverityRank(severity: FileReviewIssueSeverity): number {
+  return severity === 'major' ? 0 : severity === 'minor' ? 1 : 2;
+}
+
+function tallyBoekwachterIssues(
+  issues: readonly BoekwachterIssue[],
+  key: (issue: BoekwachterIssue) => string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const issue of issues) {
+    const value = key(issue);
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function filterAndSortBoekwachterIssues(
+  issues: BoekwachterIssue[],
+  req: ListFileIssuesRequest,
+): BoekwachterIssue[] {
+  return issues
+    .filter((issue) => {
+      if (!req.includeClosed && issue.status !== 'open' && issue.status !== 'in_progress') {
+        return false;
+      }
+      if (req.status && issue.status !== req.status) return false;
+      if (req.severity && issue.severity !== req.severity) return false;
+      if (req.category && issue.category !== req.category) return false;
+      if (req.path && !issue.path.startsWith(req.path)) return false;
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        issueSeverityRank(a.severity) - issueSeverityRank(b.severity) ||
+        a.ref.localeCompare(b.ref, undefined, { numeric: true }),
+    );
+}
+
+function rubricKeys(rubrics: Map<string, ResolvedRubric>): Array<{ kind: string; hash: string }> {
+  return [...rubrics.values()].map((r) => ({ kind: r.kind, hash: r.hash }));
 }
 
 /** Breadth-first reachable set from `start` over `adj`, bounded by hops + a cap. */

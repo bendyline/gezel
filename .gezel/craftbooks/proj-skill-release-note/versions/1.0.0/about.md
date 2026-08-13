@@ -4,5 +4,5 @@ Produces one article under `docs/handboek/whats-new/`. That section is the runni
 
 This is the only place in the repo where you write outward-facing prose about engineering work. Getting the voice right matters as much as getting the facts right.
 
-> Converted from `.claude\skills\release-note\SKILL.md` (skill "release-note").
+> Converted from `.claude/skills/release-note/SKILL.md` (skill "release-note").
 > - 2 shell block(s) kept as prose (not statically convertible)

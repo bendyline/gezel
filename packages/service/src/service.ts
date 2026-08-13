@@ -1784,6 +1784,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
+    await contentIndex
+      .settleBoekwachterIssuesForTask(projectId, task.ref, outcome)
+      .catch((err) =>
+        log.warn(`[service] Boekwachter issue settle failed for ${task.ref}: ${String(err)}`),
+      );
     await codeReviews
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));

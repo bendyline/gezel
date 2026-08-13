@@ -2,8 +2,11 @@ import type { GezelSummary } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   type AiProviderEditabilityConfig,
-  projectEditableViaAiProvider,
+  projectNativeWorkspaceWritable,
+  projectUsesClaude,
   projectUsesCodex,
+  resolveProjectClaudePermissionMode,
+  resolveProjectWorkspaceAccess,
 } from './project-ai-editability.js';
 
 function gezel(id: string, overrides: Partial<GezelSummary> = {}): GezelSummary {
@@ -21,10 +24,10 @@ function editable(
   gezelIds: string[] = [],
   localGezels: GezelSummary[] = [],
 ): boolean {
-  return projectEditableViaAiProvider({ gezelIds }, globalGezels, localGezels, config);
+  return projectNativeWorkspaceWritable({ gezelIds }, globalGezels, localGezels, config);
 }
 
-describe('projectEditableViaAiProvider', () => {
+describe('projectNativeWorkspaceWritable', () => {
   it('treats an editable Codex or Claude CLI install default as implicit edit access', () => {
     expect(editable({ provider: 'codex-cli' })).toBe(true);
     expect(editable({ provider: 'anthropic-cli' })).toBe(true);
@@ -48,16 +51,33 @@ describe('projectEditableViaAiProvider', () => {
 
   it('lets the project Codex posture override install and legacy gezel defaults', () => {
     expect(
-      projectEditableViaAiProvider({ gezelIds: [], codexPermissionMode: 'plan' }, [], [], {
+      projectNativeWorkspaceWritable({ gezelIds: [], codexPermissionMode: 'plan' }, [], [], {
         provider: 'codex-cli',
         codexCli: { defaultPermissionMode: 'full' },
       }),
     ).toBe(false);
     expect(
-      projectEditableViaAiProvider({ gezelIds: [], codexPermissionMode: 'reviewed' }, [], [], {
+      projectNativeWorkspaceWritable({ gezelIds: [], codexPermissionMode: 'reviewed' }, [], [], {
         provider: 'codex-cli',
         codexCli: { defaultPermissionMode: 'plan' },
       }),
+    ).toBe(true);
+  });
+
+  it('lets the project Claude posture override install and gezel defaults', () => {
+    expect(
+      projectNativeWorkspaceWritable({ gezelIds: [], claudePermissionMode: 'plan' }, [], [], {
+        provider: 'anthropic-cli',
+        anthropicCli: { defaultPermissionMode: 'bypassPermissions' },
+      }),
+    ).toBe(false);
+    expect(
+      projectNativeWorkspaceWritable(
+        { gezelIds: [], claudePermissionMode: 'acceptEdits' },
+        [],
+        [],
+        { provider: 'anthropic-cli', anthropicCli: { defaultPermissionMode: 'plan' } },
+      ),
     ).toBe(true);
   });
 
@@ -107,6 +127,43 @@ describe('projectEditableViaAiProvider', () => {
   });
 });
 
+describe('resolveProjectWorkspaceAccess', () => {
+  it('reports managed, native, and effective access without conflating them', () => {
+    expect(
+      resolveProjectWorkspaceAccess(
+        {
+          workingDir: '/repo',
+          managedWorkspaceWritePolicy: 'deny',
+          codexPermissionMode: 'edit',
+          gezelIds: [],
+        },
+        [],
+        [],
+        { provider: 'codex-cli' },
+      ),
+    ).toEqual({ managedWritable: false, nativeWritable: true, effectiveWritable: true });
+  });
+
+  it('does not let managed defaults make a Codex Plan-only project look editable', () => {
+    expect(
+      resolveProjectWorkspaceAccess({ codexPermissionMode: 'plan', gezelIds: [] }, [], [], {
+        provider: 'codex-cli',
+      }),
+    ).toEqual({ managedWritable: true, nativeWritable: false, effectiveWritable: false });
+  });
+
+  it('counts a managed-surface gezel in a mixed-provider project', () => {
+    expect(
+      resolveProjectWorkspaceAccess(
+        { codexPermissionMode: 'plan', gezelIds: ['writer'] },
+        [gezel('writer', { provider: 'openai' })],
+        [],
+        { provider: 'codex-cli' },
+      ).effectiveWritable,
+    ).toBe(true);
+  });
+});
+
 describe('projectUsesCodex', () => {
   it('detects the install default and assigned Codex overrides', () => {
     expect(projectUsesCodex({ gezelIds: [] }, [], [], { provider: 'codex-cli' })).toBe(true);
@@ -130,5 +187,45 @@ describe('projectUsesCodex', () => {
     expect(
       projectUsesCodex({ gezelIds: ['renderer'] }, [renderer], [], { provider: 'ollama' }),
     ).toBe(false);
+  });
+});
+
+describe('projectUsesClaude', () => {
+  it('detects only effective Claude CLI project participants', () => {
+    expect(projectUsesClaude({ gezelIds: [] }, [], [], { provider: 'anthropic-cli' })).toBe(true);
+    const claude = gezel('claude', { provider: 'anthropic-cli' });
+    expect(projectUsesClaude({ gezelIds: [] }, [claude], [], { provider: 'ollama' })).toBe(false);
+    expect(projectUsesClaude({ gezelIds: ['claude'] }, [claude], [], { provider: 'ollama' })).toBe(
+      true,
+    );
+  });
+});
+
+describe('resolveProjectClaudePermissionMode', () => {
+  it('reports a project override or the effective assigned modes', () => {
+    const claudePlan = gezel('planner', {
+      provider: 'anthropic-cli',
+      claudePermissionMode: 'plan',
+    });
+    const claudeBuilder = gezel('builder', {
+      provider: 'anthropic-cli',
+      claudePermissionMode: 'acceptEdits',
+    });
+    expect(
+      resolveProjectClaudePermissionMode(
+        { gezelIds: ['planner'], claudePermissionMode: 'bypassPermissions' },
+        [claudePlan],
+        [],
+        { provider: 'ollama' },
+      ),
+    ).toBe('bypassPermissions');
+    expect(
+      resolveProjectClaudePermissionMode(
+        { gezelIds: ['planner', 'builder'] },
+        [claudePlan, claudeBuilder],
+        [],
+        { provider: 'ollama' },
+      ),
+    ).toBe('mixed');
   });
 });

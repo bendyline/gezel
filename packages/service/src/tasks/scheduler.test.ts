@@ -364,7 +364,7 @@ describe('TaskScheduler — ambient project nudges', () => {
         rapidAttemptsBeforeBackoff?: number;
       };
       workingDir?: string;
-      allowGezelWrites?: boolean;
+      managedWorkspaceWritePolicy?: 'auto' | 'allow' | 'deny';
     } = {},
   ): Promise<void> {
     // Overwrite project.json directly so we can set updatedAt to a
@@ -382,7 +382,9 @@ describe('TaskScheduler — ambient project nudges', () => {
     // about the project's age. Tests that DO care override it.
     raw.createdAt = opts.createdAt ?? '2020-01-01T00:00:00Z';
     if (opts.workingDir !== undefined) raw.workingDir = opts.workingDir;
-    if (opts.allowGezelWrites !== undefined) raw.allowGezelWrites = opts.allowGezelWrites;
+    if (opts.managedWorkspaceWritePolicy !== undefined) {
+      raw.managedWorkspaceWritePolicy = opts.managedWorkspaceWritePolicy;
+    }
     if (opts.lastNudgedAt || opts.consecutiveRapidNudges !== undefined) {
       raw.nudgeState = {
         ...(opts.lastNudgedAt ? { lastNudgedAt: opts.lastNudgedAt } : {}),
@@ -578,7 +580,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       voormanGezelId: 'leo',
       meesterGezelId: 'meester-1',
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({
@@ -600,7 +602,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       meesterGezelId: 'meester-1',
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
       workingDir: join(home, 'external-workspace'),
-      allowGezelWrites: false,
+      managedWorkspaceWritePolicy: 'deny',
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({
@@ -622,7 +624,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       meesterGezelId: 'meester-1',
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
       workingDir: join(home, 'external-workspace'),
-      allowGezelWrites: true,
+      managedWorkspaceWritePolicy: 'allow',
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({

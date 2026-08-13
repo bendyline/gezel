@@ -218,6 +218,12 @@ export interface FileReviewRow {
   reviewedAt: string | null;
 }
 
+export interface CurrentFileReviewIssues {
+  path: string;
+  contentHash: string;
+  issues: FileReviewIssue[];
+}
+
 export interface OpenOptions {
   collectionId: string;
   kind: CollectionKind;
@@ -1258,6 +1264,28 @@ export class IndexStore {
       appVersion: row.app_version,
       reviewedAt: row.reviewed_at,
     };
+  }
+
+  /**
+   * Current file-hash review observations, including clean reviews. The
+   * durable Boekwachter registry consumes these so a later file edit cannot
+   * erase identity/lifecycle merely by invalidating `file_reviews`.
+   */
+  currentFileReviewIssues(): CurrentFileReviewIssues[] {
+    return this.db
+      .prepare(
+        `SELECT f.path, f.hash AS content_hash, r.issues
+         FROM files f
+         JOIN file_reviews r ON r.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.hash IS NOT NULL AND r.notes_md IS NOT NULL
+         ORDER BY f.path`,
+      )
+      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId)
+      .map((row) => ({
+        path: row.path,
+        contentHash: row.content_hash,
+        issues: parseIssuesJson(row.issues),
+      }));
   }
 
   /**

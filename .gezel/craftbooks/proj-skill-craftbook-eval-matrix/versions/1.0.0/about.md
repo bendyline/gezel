@@ -27,5 +27,5 @@ The deliverable is a strategic report whose spine is a four-way diagnosis:
 
 ---
 
-> Converted from `.claude\skills\craftbook-eval-matrix\SKILL.md` (skill "craftbook-eval-matrix").
+> Converted from `.claude/skills/craftbook-eval-matrix/SKILL.md` (skill "craftbook-eval-matrix").
 > - 7 shell block(s) kept as prose (not statically convertible)

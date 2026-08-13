@@ -21,7 +21,7 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowFileEdits',
     label: 'Edit files',
-    help: 'Gate the file-adjacent model powers: git tools and shared-document writes from scripts. Workspace file writes are decided per project — internal workspaces stay writable, folders you opened stay read-only until you opt them in via each project\'s "Allow gezellen to modify the workspace directory" switch.',
+    help: "Gate the file-adjacent model powers: git tools and shared-document writes from scripts. Gezel-managed workspace writes are decided per project — internal workspaces start writable, while folders you opened require explicit consent. Provider-native CLI access follows that provider's project posture.",
   },
   {
     key: 'allowExternalChat',

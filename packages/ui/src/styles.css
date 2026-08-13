@@ -6233,6 +6233,11 @@ button.danger {
   font-size: var(--text-xs);
 }
 
+.workspace-index-show-closed {
+  margin-top: 0.35rem;
+  font-size: var(--text-2xs);
+}
+
 .workspace-index-issues ul {
   display: flex;
   flex-direction: column;
@@ -6243,10 +6248,111 @@ button.danger {
 }
 
 .workspace-index-issues li {
-  padding: 0.5rem 0.55rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel);
+}
+
+.workspace-index-issues li[data-status="resolved"],
+.workspace-index-issues li[data-status="dismissed"] {
+  opacity: 0.72;
+}
+
+.workspace-index-issue-content {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+}
+
+.workspace-index-issue-fix.gz-key {
+  padding: 0.2rem 0.45rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+.workspace-index-issue-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  min-width: 5.4rem;
+  padding: 0.4rem;
+}
+
+.workspace-index-issue-actions .link-button {
+  max-width: 9rem;
+  padding: 0;
+  font-size: var(--text-2xs);
+  line-height: 1.25;
+  text-align: right;
+}
+
+.gz-dialog.workspace-issue-fix-dialog {
+  width: min(34rem, 90vw);
+}
+
+.workspace-issue-fix-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.workspace-issue-fix-form label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.workspace-issue-fix-form label > select,
+.workspace-issue-fix-form .gezel-picker-trigger {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.workspace-issue-fix-form label > select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.workspace-issue-fix-form textarea {
+  min-height: 7rem;
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.workspace-issue-fix-missing {
+  margin: -0.2rem 0 0;
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.workspace-index-issue-selectable {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.workspace-index-issue-selectable:hover {
+  background: var(--key-bg-hover);
+}
+
+.workspace-index-issue-selectable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .workspace-index-issue-meta {
@@ -6262,6 +6368,21 @@ button.danger {
 .workspace-index-issue-meta span + span::before {
   margin-right: 0.35rem;
   content: "·";
+}
+
+.workspace-index-issue-meta .workspace-index-issue-ref {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.workspace-index-issue-meta .workspace-index-issue-unread {
+  color: var(--warning);
+}
+
+.workspace-index-issue-error {
+  margin-top: 0.5rem;
+  font-size: var(--text-xs);
 }
 
 .workspace-index-issues li p,
@@ -10103,10 +10224,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--muted);
 }
 
-/* Per-project gezel-edits dropdown — sibling of the status select. "Edits
-   on" is the quiet default; "Edits off" tints muted so the read-only
-   posture is visible from every tab without alarming. Provider-level edit
-   access uses the same muted face plus the shared disabled treatment. */
+/* Per-project permission dropdowns — siblings of the status select. Managed
+   tools and Codex stay visibly scoped because they are independent runtime
+   surfaces in mixed-provider crews. */
 .project-writes-select.gz-select-trigger {
   flex: 0 0 auto;
   padding: 0.2rem 0.5rem;
@@ -10121,6 +10241,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   align-items: center;
   gap: 0.5rem;
   flex: 0 0 auto;
+}
+
+.project-permission-scope {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
 }
 
 /* The ellipsis is dormant until the status bar's own container—not the
@@ -10236,8 +10362,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-writes-select-off.gz-select-trigger,
-.project-writes-select-provider.gz-select-trigger,
-.project-codex-mode-plan.gz-select-trigger {
+.project-codex-mode-plan.gz-select-trigger,
+.project-claude-mode-plan.gz-select-trigger,
+.project-claude-mode-mixed.gz-select-trigger {
   color: var(--text-muted, var(--text));
   background: rgba(127, 127, 127, 0.1);
 }
@@ -10248,6 +10375,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .project-codex-mode-full.gz-select-trigger {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  color: color-mix(in srgb, var(--warning) 72%, var(--text));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.project-claude-mode-bypassPermissions.gz-select-trigger {
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
   color: color-mix(in srgb, var(--warning) 72%, var(--text));
   background: color-mix(in srgb, var(--warning) 10%, transparent);

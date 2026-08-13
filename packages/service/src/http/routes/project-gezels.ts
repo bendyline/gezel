@@ -185,7 +185,7 @@ export function projectGezelRoutes(ctx: ServiceContext): Hono {
 
 // biome-ignore lint/suspicious/noExplicitAny: hono context type isn't exported cleanly here
 function writeError(c: any, err: unknown) {
-  // External workingDir writes need `allowGezelWrites` — surface as 403.
+  // External workingDir writes need managed-write consent — surface as 403.
   if (err instanceof WorkspaceWriteDeniedError) {
     return c.json({ error: err.message, workingDir: err.workingDir }, 403);
   }

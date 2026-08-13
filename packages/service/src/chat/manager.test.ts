@@ -5149,6 +5149,45 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
   });
 
+  it('threads Claude policy into sessions and rebuilds when the project mode changes', async () => {
+    await manager.shutdown();
+    mock = new MockProvider({ name: 'copilot' });
+    manager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['anthropic-cli', mock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    await store.writeConfig({
+      provider: 'anthropic-cli',
+      defaultModel: { 'anthropic-cli': 'sonnet' },
+      anthropicCli: { defaultPermissionMode: 'acceptEdits' },
+    });
+    await store.updateGezelSettings('ada', { claudePermissionMode: 'bypassPermissions' });
+    await store.updateProject('default', { claudePermissionMode: 'plan' });
+
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    mock.script('planned');
+    await manager.send(session.id, 'Inspect the project without editing it.');
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    expect(create!.opts!.claudeCliContext?.permissionModeOverride).toBe('plan');
+
+    await store.updateProject('default', { claudePermissionMode: 'acceptEdits' });
+    mock.script('edited');
+    await manager.send(session.id, 'Now update it.');
+
+    const creates = mock.calls.filter((call) => call.kind === 'create');
+    expect(creates).toHaveLength(2);
+    expect(creates[1]!.opts!.claudeCliContext?.permissionModeOverride).toBe('acceptEdits');
+    expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
+  });
+
   it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {
     await manager.shutdown();
     mock = new MockProvider({ name: 'copilot' });
@@ -5666,12 +5705,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(sys).toContain('`list_dir`');
     expect(sys).toContain('If a path appears in `### Workspace files`');
     // No lockdown note when file edits are allowed (the default).
-    expect(sys).not.toContain('File edits are OFF');
+    expect(sys).not.toContain('Built-in file tools are read-only');
   });
 
-  it('injects a "file edits are off" note when the project disables gezel writes', async () => {
-    // A non-writable project strips every role's workspace-write tools.
-    // The prompt must tell the team so the developer doesn't try a
+  it('injects a managed-tools read-only note when the project disables managed writes', async () => {
+    // A non-writable project strips this session's managed workspace-write tools.
+    // The prompt must tell the recipient so the developer doesn't try a
     // stripped `write_file` (then hallucinate a save) — see
     // fileEditsDisabledNote.
     await store.createGezel({ name: 'Dev', role: 'developer' });
@@ -5679,7 +5718,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       name: 'Atari Combat Game',
       about: 'A new arcade-style combat game.',
     });
-    await store.updateProject(proj.id, { allowGezelWrites: false });
+    await store.updateProject(proj.id, { managedWorkspaceWritePolicy: 'deny' });
 
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
     mock.script('on it');
@@ -5687,9 +5726,13 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
     const create = mock.calls.find((c) => c.kind === 'create');
     const sys = create!.opts!.systemMessage!;
-    expect(sys).toContain('File edits are OFF for this project');
+    expect(sys).toContain('Built-in file tools are read-only for this session');
+    expect(sys).toContain('Allow built-in tools and background work to modify the workspace');
     expect(sys).toContain('Project → Settings');
     expect(sys).toContain('Do not claim you wrote');
+    expect(sys).toContain(
+      'Provider-native sessions such as Codex may have separate project access',
+    );
   });
 
   it('keeps internal-workspace projects writable under super-lockdown (no edits-off note)', async () => {
@@ -5706,7 +5749,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
     const snapshot = await manager.getSessionDebug(session.id);
-    expect(snapshot.systemPrompt).not.toContain('File edits are OFF');
+    expect(snapshot.systemPrompt).not.toContain('Built-in file tools are read-only');
   });
 
   it('exposes on-disk diagnostics paths in the debug snapshot', async () => {

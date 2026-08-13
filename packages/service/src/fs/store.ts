@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFile,
   chmod,
@@ -15,6 +15,8 @@ import {
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  type BoekwachterIssueDismissalReason,
+  type BoekwachterIssueStatus,
   type ChatModelTuning,
   type ChatSession,
   ChatSessionSchema,
@@ -23,6 +25,7 @@ import {
   CraftbookSchema,
   CraftbookStepSchema,
   type CraftbookSummary,
+  type FileReviewIssue,
   type GezelConfig,
   GezelConfigSchema,
   type GezelDetail,
@@ -55,6 +58,7 @@ import {
   type ProjectGitHub,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
+  type ProjectManagedWorkspaceWritePolicy,
   type ProjectNudgeConfig,
   ProjectSchema,
   type ProjectTabVisibility,
@@ -81,6 +85,7 @@ import {
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
+  projectManagedWorkspaceWritePolicy,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
@@ -106,6 +111,7 @@ import {
   meesterStatusStateFile,
   projectActivityFile,
   projectArtifactsDir,
+  projectBoekwachterIssuesFile,
   projectDir,
   projectDocsDir,
   projectFindingLifecycleFile,
@@ -193,6 +199,47 @@ export type ProjectFindingLifecycle = Record<string, ProjectFindingLifecycleEntr
 interface ProjectFindingLifecycleFile {
   version: 1;
   findings: ProjectFindingLifecycle;
+}
+
+export interface ProjectBoekwachterIssueRecord extends FileReviewIssue {
+  id: string;
+  ref: string;
+  fingerprint: string;
+  path: string;
+  status: BoekwachterIssueStatus;
+  taskRef?: string;
+  dismissalReason?: BoekwachterIssueDismissalReason;
+  createdAt: string;
+  lastSeenAt: string;
+  lastSeenContentHash: string;
+  lastCheckedAt?: string;
+  lastCheckedContentHash?: string;
+  seenAt?: string;
+  resolvedAt?: string;
+  dismissedAt?: string;
+}
+
+interface ProjectBoekwachterIssuesFile {
+  version: 1;
+  nextNumber: number;
+  issues: Record<string, ProjectBoekwachterIssueRecord>;
+}
+
+export interface BoekwachterReviewObservation {
+  path: string;
+  contentHash: string;
+  issues: FileReviewIssue[];
+}
+
+/** Stable across line movement; the content hash tracks the exact occurrence separately. */
+export function boekwachterIssueFingerprint(path: string, issue: FileReviewIssue): string {
+  const normalized = [
+    'boekwachter-v1',
+    path.replaceAll('\\', '/').trim(),
+    issue.category.trim().toLocaleLowerCase(),
+    issue.message.trim().toLocaleLowerCase().replace(/\s+/g, ' '),
+  ].join('\0');
+  return createHash('sha256').update(normalized).digest('hex');
 }
 
 export interface StoreOptions {
@@ -302,6 +349,7 @@ export class Store {
   private readonly taskFiles: TaskFilesStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new Map<string, Promise<unknown>>();
+  private readonly boekwachterIssueLocks = new Map<string, Promise<unknown>>();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -1483,10 +1531,7 @@ export class Store {
         ...(wasMember ? { gezelIds: project.gezelIds!.filter((gezelId) => gezelId !== id) } : {}),
         updatedAt: nowIso(),
       };
-      await writeFileAtomic(
-        projectMetaFile(this.home, project.id),
-        `${JSON.stringify(updated, null, 2)}\n`,
-      );
+      await this.writeProjectMeta(updated);
     }
 
     const config = await this.readConfig();
@@ -2481,10 +2526,7 @@ export class Store {
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };
-      await writeFileAtomic(
-        projectMetaFile(this.home, id),
-        `${JSON.stringify(project, null, 2)}\n`,
-      );
+      await this.writeProjectMeta(project);
       // Required metadata per the new schema — any caller going through
       // `CreateProjectRequestSchema` supplies both. Keep them as *optional*
       // at the Store boundary so internal callers (e.g. `ensureDefaultProject`)
@@ -2649,6 +2691,279 @@ export class Store {
     });
   }
 
+  /**
+   * Materialize current review output into durable BW records. Review rows are
+   * disposable and content-hash keyed; these records intentionally are not.
+   */
+  async observeProjectBoekwachterReviews(
+    id: string,
+    observations: readonly BoekwachterReviewObservation[],
+  ): Promise<void> {
+    if (observations.length === 0) return;
+    await this.withBoekwachterIssueLock(id, async () => {
+      const state = await this.readProjectBoekwachterIssuesFile(id);
+      let changed = false;
+      const at = nowIso();
+
+      for (const observation of observations) {
+        const path = observation.path.replaceAll('\\', '/');
+        const pathRecords = Object.values(state.issues).filter((record) => record.path === path);
+        for (const record of pathRecords) {
+          if (record.lastCheckedContentHash === observation.contentHash) continue;
+          record.lastCheckedContentHash = observation.contentHash;
+          record.lastCheckedAt = at;
+          changed = true;
+        }
+
+        for (const issue of observation.issues) {
+          const fingerprint = boekwachterIssueFingerprint(path, issue);
+          const record = Object.values(state.issues).find(
+            (candidate) => candidate.path === path && candidate.fingerprint === fingerprint,
+          );
+          if (!record) {
+            const ref = `BW-${state.nextNumber++}`;
+            const created: ProjectBoekwachterIssueRecord = {
+              id: randomUUID(),
+              ref,
+              fingerprint,
+              path,
+              severity: issue.severity,
+              category: issue.category,
+              message: issue.message,
+              ...(issue.line !== undefined ? { line: issue.line } : {}),
+              status: 'open',
+              createdAt: at,
+              lastSeenAt: at,
+              lastSeenContentHash: observation.contentHash,
+              lastCheckedAt: at,
+              lastCheckedContentHash: observation.contentHash,
+            };
+            state.issues[created.id] = created;
+            changed = true;
+            continue;
+          }
+
+          const seenOnNewContent = record.lastSeenContentHash !== observation.contentHash;
+          if (record.severity !== issue.severity) {
+            record.severity = issue.severity;
+            changed = true;
+          }
+          if (record.category !== issue.category) {
+            record.category = issue.category;
+            changed = true;
+          }
+          if (record.message !== issue.message) {
+            record.message = issue.message;
+            changed = true;
+          }
+          if (record.line !== issue.line) {
+            if (issue.line === undefined) delete record.line;
+            else record.line = issue.line;
+            changed = true;
+          }
+          if (seenOnNewContent) {
+            record.lastSeenContentHash = observation.contentHash;
+            record.lastSeenAt = at;
+            changed = true;
+            // A resolved lead reported again by a genuinely fresh review is a
+            // recurrence. A user dismissal is an explicit opinion and stays
+            // dismissed until they reopen it.
+            if (record.status === 'resolved') {
+              record.status = 'open';
+              delete record.taskRef;
+              delete record.resolvedAt;
+            }
+          }
+          if (record.lastCheckedContentHash !== observation.contentHash) {
+            record.lastCheckedContentHash = observation.contentHash;
+            record.lastCheckedAt = at;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) await this.writeProjectBoekwachterIssuesFile(id, state);
+    });
+  }
+
+  async listProjectBoekwachterIssues(id: string): Promise<ProjectBoekwachterIssueRecord[]> {
+    const state = await this.readProjectBoekwachterIssuesFile(id);
+    return Object.values(state.issues).sort(
+      (a, b) => Number(a.ref.slice(3)) - Number(b.ref.slice(3)),
+    );
+  }
+
+  async getProjectBoekwachterIssue(
+    id: string,
+    ref: string,
+  ): Promise<ProjectBoekwachterIssueRecord | null> {
+    return (await this.listProjectBoekwachterIssues(id)).find((issue) => issue.ref === ref) ?? null;
+  }
+
+  async updateProjectBoekwachterIssue(
+    id: string,
+    ref: string,
+    patch: {
+      status?: BoekwachterIssueStatus;
+      seen?: boolean;
+      taskRef?: string;
+      dismissalReason?: BoekwachterIssueDismissalReason;
+    },
+  ): Promise<ProjectBoekwachterIssueRecord | null> {
+    return this.withBoekwachterIssueLock(id, async () => {
+      const state = await this.readProjectBoekwachterIssuesFile(id);
+      const record = Object.values(state.issues).find((issue) => issue.ref === ref);
+      if (!record) return null;
+      const at = nowIso();
+
+      if (patch.seen !== undefined) {
+        if (patch.seen) record.seenAt = at;
+        else delete record.seenAt;
+      }
+      if (patch.status !== undefined) {
+        record.status = patch.status;
+        if (patch.status === 'resolved') {
+          record.resolvedAt = at;
+          delete record.dismissedAt;
+          delete record.dismissalReason;
+        } else if (patch.status === 'dismissed') {
+          record.dismissedAt = at;
+          record.dismissalReason = patch.dismissalReason ?? 'not_an_issue';
+          delete record.resolvedAt;
+          delete record.taskRef;
+        } else {
+          delete record.resolvedAt;
+          delete record.dismissedAt;
+          delete record.dismissalReason;
+          if (patch.status === 'open') delete record.taskRef;
+        }
+      }
+      if (patch.taskRef) record.taskRef = patch.taskRef;
+      await this.writeProjectBoekwachterIssuesFile(id, state);
+      return record;
+    });
+  }
+
+  async settleProjectBoekwachterIssuesForTask(
+    id: string,
+    taskRef: string,
+    outcome: 'complete' | 'canceled',
+  ): Promise<number> {
+    return this.withBoekwachterIssueLock(id, async () => {
+      const state = await this.readProjectBoekwachterIssuesFile(id);
+      let changed = 0;
+      const at = nowIso();
+      for (const record of Object.values(state.issues)) {
+        if (record.taskRef !== taskRef || record.status !== 'in_progress') continue;
+        if (outcome === 'complete') {
+          record.status = 'resolved';
+          record.resolvedAt = at;
+        } else {
+          record.status = 'open';
+          delete record.taskRef;
+        }
+        changed++;
+      }
+      if (changed > 0) await this.writeProjectBoekwachterIssuesFile(id, state);
+      return changed;
+    });
+  }
+
+  private async readProjectBoekwachterIssuesFile(
+    id: string,
+  ): Promise<ProjectBoekwachterIssuesFile> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(projectBoekwachterIssuesFile(this.home, id), 'utf8'));
+    } catch {
+      return { version: 1, nextNumber: 1, issues: {} };
+    }
+    const root = parsed as { nextNumber?: unknown; issues?: unknown } | null;
+    const raw = root?.issues;
+    const issues: Record<string, ProjectBoekwachterIssueRecord> = {};
+    let maxNumber = 0;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      for (const [id, value] of Object.entries(raw)) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (
+          typeof row.ref !== 'string' ||
+          !/^BW-[1-9]\d*$/.test(row.ref) ||
+          typeof row.fingerprint !== 'string' ||
+          typeof row.path !== 'string' ||
+          typeof row.category !== 'string' ||
+          typeof row.message !== 'string' ||
+          (row.severity !== 'info' && row.severity !== 'minor' && row.severity !== 'major') ||
+          (row.status !== 'open' &&
+            row.status !== 'in_progress' &&
+            row.status !== 'resolved' &&
+            row.status !== 'dismissed') ||
+          typeof row.createdAt !== 'string' ||
+          typeof row.lastSeenAt !== 'string' ||
+          typeof row.lastSeenContentHash !== 'string'
+        ) {
+          continue;
+        }
+        const stableId = typeof row.id === 'string' && row.id ? row.id : id;
+        issues[stableId] = {
+          id: stableId,
+          ref: row.ref,
+          fingerprint: row.fingerprint,
+          path: row.path,
+          severity: row.severity,
+          category: row.category,
+          message: row.message,
+          ...(typeof row.line === 'number' && row.line >= 1 ? { line: Math.round(row.line) } : {}),
+          status: row.status,
+          ...(typeof row.taskRef === 'string' ? { taskRef: row.taskRef } : {}),
+          ...(row.dismissalReason === 'not_an_issue' ||
+          row.dismissalReason === 'duplicate' ||
+          row.dismissalReason === 'wont_fix'
+            ? { dismissalReason: row.dismissalReason }
+            : {}),
+          createdAt: row.createdAt,
+          lastSeenAt: row.lastSeenAt,
+          lastSeenContentHash: row.lastSeenContentHash,
+          ...(typeof row.lastCheckedAt === 'string' ? { lastCheckedAt: row.lastCheckedAt } : {}),
+          ...(typeof row.lastCheckedContentHash === 'string'
+            ? { lastCheckedContentHash: row.lastCheckedContentHash }
+            : {}),
+          ...(typeof row.seenAt === 'string' ? { seenAt: row.seenAt } : {}),
+          ...(typeof row.resolvedAt === 'string' ? { resolvedAt: row.resolvedAt } : {}),
+          ...(typeof row.dismissedAt === 'string' ? { dismissedAt: row.dismissedAt } : {}),
+        };
+        maxNumber = Math.max(maxNumber, Number(row.ref.slice(3)) || 0);
+      }
+    }
+    const requestedNext =
+      typeof root?.nextNumber === 'number' && Number.isInteger(root.nextNumber)
+        ? root.nextNumber
+        : 1;
+    return { version: 1, nextNumber: Math.max(maxNumber + 1, requestedNext, 1), issues };
+  }
+
+  private async writeProjectBoekwachterIssuesFile(
+    id: string,
+    state: ProjectBoekwachterIssuesFile,
+  ): Promise<void> {
+    await writeFileAtomic(
+      projectBoekwachterIssuesFile(this.home, id),
+      `${JSON.stringify(state, null, 2)}\n`,
+    );
+  }
+
+  private async withBoekwachterIssueLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.boekwachterIssueLocks.get(id) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tracked: Promise<unknown> = run.finally(() => {
+      if (this.boekwachterIssueLocks.get(id) === tracked) {
+        this.boekwachterIssueLocks.delete(id);
+      }
+    });
+    this.boekwachterIssueLocks.set(id, tracked);
+    return run;
+  }
+
   private async withFindingLifecycleLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.findingLifecycleLocks.get(id) ?? Promise.resolve();
     const run = previous.then(fn, fn);
@@ -2661,11 +2976,35 @@ export class Store {
     return run;
   }
 
+  /**
+   * Persist project metadata through one compatibility boundary. Any write to
+   * a legacy project transparently replaces `allowGezelWrites` with the named
+   * managed-write policy, so old input remains readable without letting the
+   * deprecated field spread through newly written project files.
+   */
+  private async writeProjectMeta(project: Project): Promise<void> {
+    const { allowGezelWrites, ...current } = project;
+    const normalized: Project = {
+      ...current,
+      ...(current.managedWorkspaceWritePolicy
+        ? {}
+        : allowGezelWrites === true
+          ? { managedWorkspaceWritePolicy: 'allow' }
+          : allowGezelWrites === false
+            ? { managedWorkspaceWritePolicy: 'deny' }
+            : {}),
+    };
+    await writeFileAtomic(
+      projectMetaFile(this.home, normalized.id),
+      `${JSON.stringify(normalized, null, 2)}\n`,
+    );
+  }
+
   async touchProject(id: string): Promise<void> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) return;
     const updated: Project = { ...meta, updatedAt: nowIso() };
-    await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    await this.writeProjectMeta(updated);
   }
 
   /**
@@ -2707,7 +3046,7 @@ export class Store {
       ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
       updatedAt: nowIso(),
     };
-    await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    await this.writeProjectMeta(updated);
     const detail = await this.getProject(id);
     if (!detail) throw new Error(`project ${id} not found after update`);
     return detail;
@@ -2733,8 +3072,11 @@ export class Store {
       github?: { url?: string; branch?: string } | null;
       /** External-data connector bindings — `null` clears them. */
       connectors?: import('@bendyline/gezel').ProjectConnectorBinding[] | null;
+      managedWorkspaceWritePolicy?: ProjectManagedWorkspaceWritePolicy;
+      /** @deprecated Compatibility input; translated into the named policy. */
       allowGezelWrites?: boolean;
       codexPermissionMode?: import('@bendyline/gezel').CodexPermissionMode;
+      claudePermissionMode?: import('@bendyline/gezel').ClaudePermissionMode;
       /** Replaces the stored per-project ambient nudge override. */
       nudgeConfig?: ProjectNudgeConfig;
       /** Replaces the optional project-tab visibility overrides. */
@@ -2784,6 +3126,13 @@ export class Store {
     }
     const nextArchived = patch.archived ?? meta.archived ?? false;
     const nextStatus = nextArchived ? 'inactive' : patch.status;
+    const nextManagedWorkspaceWritePolicy =
+      patch.managedWorkspaceWritePolicy ??
+      (patch.allowGezelWrites === true
+        ? 'allow'
+        : patch.allowGezelWrites === false
+          ? 'deny'
+          : undefined);
     const updated: Project = {
       ...meta,
       updatedAt: nowIso(),
@@ -2808,9 +3157,17 @@ export class Store {
         : patch.connectors !== undefined
           ? { connectors: patch.connectors }
           : {}),
-      ...(patch.allowGezelWrites !== undefined ? { allowGezelWrites: patch.allowGezelWrites } : {}),
+      ...(nextManagedWorkspaceWritePolicy !== undefined
+        ? {
+            managedWorkspaceWritePolicy: nextManagedWorkspaceWritePolicy,
+            allowGezelWrites: undefined,
+          }
+        : {}),
       ...(patch.codexPermissionMode !== undefined
         ? { codexPermissionMode: patch.codexPermissionMode }
+        : {}),
+      ...(patch.claudePermissionMode !== undefined
+        ? { claudePermissionMode: patch.claudePermissionMode }
         : {}),
       ...(patch.nudgeConfig !== undefined ? { nudgeConfig: patch.nudgeConfig } : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
@@ -2853,7 +3210,7 @@ export class Store {
     if (updated.properties && Object.keys(updated.properties).length === 0) {
       delete (updated as Partial<Project>).properties;
     }
-    await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    await this.writeProjectMeta(updated);
     if (patch.properties !== undefined) {
       await this.history?.log({
         kind: 'project.properties.updated',
@@ -2984,16 +3341,22 @@ export class Store {
         });
       }
     }
-    if (patch.allowGezelWrites !== undefined && patch.allowGezelWrites !== meta.allowGezelWrites) {
+    if (
+      nextManagedWorkspaceWritePolicy !== undefined &&
+      nextManagedWorkspaceWritePolicy !== projectManagedWorkspaceWritePolicy(meta)
+    ) {
       await this.history?.log({
         kind: 'workspace.allow-writes.changed',
         projectId: id,
-        summary: patch.allowGezelWrites
-          ? `Enabled gezel workspace writes on "${detail.name}"`
-          : `Disabled gezel workspace writes on "${detail.name}"`,
+        summary:
+          nextManagedWorkspaceWritePolicy === 'allow'
+            ? `Enabled managed workspace writes on "${detail.name}"`
+            : nextManagedWorkspaceWritePolicy === 'deny'
+              ? `Disabled managed workspace writes on "${detail.name}"`
+              : `Reset managed workspace writes to automatic on "${detail.name}"`,
         details: {
-          previousValue: meta.allowGezelWrites ?? false,
-          value: patch.allowGezelWrites,
+          previousPolicy: projectManagedWorkspaceWritePolicy(meta),
+          policy: nextManagedWorkspaceWritePolicy,
           workingDir: detail.workingDir,
         },
       });
@@ -3010,6 +3373,21 @@ export class Store {
           field: 'codexPermissionMode',
           previousValue: meta.codexPermissionMode,
           value: patch.codexPermissionMode,
+        },
+      });
+    }
+    if (
+      patch.claudePermissionMode !== undefined &&
+      patch.claudePermissionMode !== meta.claudePermissionMode
+    ) {
+      await this.history?.log({
+        kind: 'project.updated',
+        projectId: id,
+        summary: `Set Claude to ${patch.claudePermissionMode} on "${detail.name}"`,
+        details: {
+          field: 'claudePermissionMode',
+          previousValue: meta.claudePermissionMode,
+          value: patch.claudePermissionMode,
         },
       });
     }
@@ -3122,10 +3500,7 @@ export class Store {
       ...meta,
       gezelIds: [...current, gezelId],
     };
-    await writeFileAtomic(
-      projectMetaFile(this.home, projectId),
-      `${JSON.stringify(updated, null, 2)}\n`,
-    );
+    await this.writeProjectMeta(updated);
     const gezel = await this.getGezel(gezelId).catch(() => null);
     await this.history?.log({
       kind: 'project.gezel.joined',
@@ -3160,10 +3535,7 @@ export class Store {
       ...meta,
       gezelIds: current.filter((id) => id !== gezelId),
     };
-    await writeFileAtomic(
-      projectMetaFile(this.home, projectId),
-      `${JSON.stringify(updated, null, 2)}\n`,
-    );
+    await this.writeProjectMeta(updated);
     const gezel = await this.getGezel(gezelId).catch(() => null);
     await this.history?.log({
       kind: 'project.gezel.left',
@@ -3196,10 +3568,7 @@ export class Store {
       ...(next.length > 0 ? { suggestedWorkDismissed: next } : {}),
     };
     if (next.length === 0) delete (updated as Partial<Project>).suggestedWorkDismissed;
-    await writeFileAtomic(
-      projectMetaFile(this.home, projectId),
-      `${JSON.stringify(updated, null, 2)}\n`,
-    );
+    await this.writeProjectMeta(updated);
     return { changed: true };
   }
 
@@ -3216,7 +3585,7 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) return;
     const updated: Project = { ...meta, nudgeState };
-    await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    await this.writeProjectMeta(updated);
   }
 
   /**
@@ -3285,7 +3654,7 @@ export class Store {
       updatedAt: nowIso(),
       github: nextGitHub,
     };
-    await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    await this.writeProjectMeta(updated);
     if (patch.lastSyncedAt) {
       await this.history?.log({
         kind: 'project.github.synced',
@@ -3759,13 +4128,13 @@ export class Store {
   /**
    * Gate mutations. Uses the same {@link resolveWorkspaceDir} as the
    * read path, then applies the per-project writability contract
-   * (`projectWorkspaceWritable` in core):
+   * (`projectManagedWorkspaceWritable` in core):
    *
    *   - `internal` / `githubCheckout`: writable unless the project
-   *     explicitly set `allowGezelWrites: false` (the per-project
+   *     explicitly set the managed-write policy to `deny` (the per-project
    *     "edits off" switch — gezel-initiated writes only; app-internal
    *     `.gezel` bookkeeping and user-initiated writes stay exempt).
-   *   - `workingDir`: writable iff `allowGezelWrites === true`. The
+   *   - `workingDir`: writable iff the managed-write policy is `allow`. The
    *     user has to explicitly opt gezels into mutating their own folder.
    *
    * The global security policy deliberately does not factor in — the
@@ -3786,16 +4155,17 @@ export class Store {
     | { ok: true; workspaceDir: string; external: boolean }
     | {
         ok: false;
-        reason: 'missing-flag-external' | 'disabled-by-project';
+        reason: 'external-consent-required' | 'disabled-by-project';
         workingDir: string;
       }
   > {
     const meta = await this.tryGetProjectMeta(id);
     const resolved = this.resolveWorkspaceDir(id, meta);
-    if (resolved.source === 'workingDir' && meta?.allowGezelWrites !== true) {
-      return { ok: false, reason: 'missing-flag-external', workingDir: resolved.dir };
+    const managedWritePolicy = projectManagedWorkspaceWritePolicy(meta);
+    if (resolved.source === 'workingDir' && managedWritePolicy !== 'allow') {
+      return { ok: false, reason: 'external-consent-required', workingDir: resolved.dir };
     }
-    if (opts?.initiatedByGezel && meta?.allowGezelWrites === false) {
+    if (opts?.initiatedByGezel && managedWritePolicy === 'deny') {
       return { ok: false, reason: 'disabled-by-project', workingDir: resolved.dir };
     }
     return {

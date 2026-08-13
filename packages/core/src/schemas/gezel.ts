@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
+import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
 import { GezelGrowthSummarySchema } from './growth.js';
@@ -224,10 +225,11 @@ export const GezelFrontmatterSchema = z.object({
    *   - `plan`: read-only — useful for review-style gezels.
    *   - `bypassPermissions`: yolo — every tool call auto-approved including
    *     Bash. Reserve for builder gezels you trust to run shell commands.
-   * When unset, inherits `config.anthropicCli.defaultPermissionMode` (which
-   * itself defaults to `acceptEdits`). Other providers: ignored.
+   * When unset, inherits the project override and then
+   * `config.anthropicCli.defaultPermissionMode` (which itself defaults to
+   * `acceptEdits`). Other providers: ignored.
    */
-  claudePermissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']).optional(),
+  claudePermissionMode: ClaudePermissionModeSchema.optional(),
   /**
    * `codex-cli`-only execution posture. New writes use Plan / Edit /
    * Reviewed / Full; legacy Codex values remain readable for compatibility.
@@ -310,7 +312,7 @@ export const GezelSummarySchema = z.object({
   /** Mirrors `GezelFrontmatter.sandboxCopilot`. */
   sandboxCopilot: z.boolean().optional(),
   /** Mirrors `GezelFrontmatter.claudePermissionMode`. */
-  claudePermissionMode: z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']).optional(),
+  claudePermissionMode: ClaudePermissionModeSchema.optional(),
   /** Mirrors `GezelFrontmatter.codexPermissionMode`. */
   codexPermissionMode: CodexPermissionModeCompatSchema.optional(),
   /**

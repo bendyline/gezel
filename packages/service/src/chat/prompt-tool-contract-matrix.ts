@@ -104,7 +104,7 @@ interface MatrixScenario {
   securityPolicy: ResolvedSecurityPolicy;
   /**
    * Per-project workspace writability for the scenario (see
-   * `projectWorkspaceWritable`). `false` exercises the edits-off prompt
+   * `projectManagedWorkspaceWritable`). `false` exercises the edits-off prompt
    * contract (write tools stripped + posture note); omitted → writable.
    */
   workspaceWritable?: boolean;

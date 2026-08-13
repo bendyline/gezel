@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ChatMessageToolCall,
   type ChatSession,
+  type ClaudePermissionMode,
   type CodexPermissionMode,
   type ExpectedDeliverable,
   type GezelConfig,
@@ -14,6 +15,7 @@ import {
   type GezelGender,
   type HookSpec,
   type InstalledToolset,
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type ModelTier,
   NEW_THREAD_TITLE,
   type ProjectFileEntry,
@@ -40,7 +42,7 @@ import {
   parseTaskRef,
   profileKind,
   projectGezelId,
-  projectWorkspaceWritable,
+  projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
   resolveExecutionDensity,
@@ -511,6 +513,8 @@ interface LiveSessionState {
   catalogContentSnapshot: string | null;
   /** Effective Codex execution mode baked into the live CLI session. */
   codexPermissionModeSnapshot?: CodexPermissionMode;
+  /** Effective Claude CLI permission mode baked into the live CLI session. */
+  claudePermissionModeSnapshot?: ClaudePermissionMode;
   /**
    * The emergency "missing index.html" tool clamp is derived from the
    * latest user message, so it can change between queued turns without
@@ -3566,7 +3570,7 @@ export class ChatManager {
     const deliverableAnnotation = formatExpectedDeliverableAnnotation(
       args.expectedDeliverable,
       args.expectedDeliverable
-        ? !projectWorkspaceWritable(await this.store.getProject(projectId))
+        ? !projectManagedWorkspaceWritable(await this.store.getProject(projectId))
         : false,
       args.text,
     );
@@ -3954,7 +3958,7 @@ export class ChatManager {
       const deliverableAnnotation = formatExpectedDeliverableAnnotation(
         expectedDeliverable,
         expectedDeliverable
-          ? !projectWorkspaceWritable(await this.store.getProject(projectId))
+          ? !projectManagedWorkspaceWritable(await this.store.getProject(projectId))
           : false,
         args.text,
       );
@@ -11964,6 +11968,9 @@ export class ChatManager {
       const codexPermissionMode = gezel
         ? await this.resolveCodexPermissionMode(existing.record, gezel)
         : undefined;
+      const claudePermissionMode = gezel
+        ? await this.resolveClaudePermissionMode(existing.record, gezel)
+        : undefined;
       if (
         gezel &&
         (gezel.about !== existing.aboutSnapshot ||
@@ -11975,7 +11982,8 @@ export class ChatManager {
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
           projectOrchestrationConstrained !== existing.projectOrchestrationConstrained ||
           gateRepairConstrained !== existing.gateRepairConstrained ||
-          codexPermissionMode !== existing.codexPermissionModeSnapshot)
+          codexPermissionMode !== existing.codexPermissionModeSnapshot ||
+          claudePermissionMode !== existing.claudePermissionModeSnapshot)
       ) {
         if (this.catalog.contentRoot() !== existing.catalogContentSnapshot) {
           log.debug(
@@ -12016,6 +12024,12 @@ export class ChatManager {
           log.info(
             `codex: execution mode changed for ${existing.record.gezelId} ` +
               `(${existing.codexPermissionModeSnapshot ?? 'n/a'} → ${codexPermissionMode ?? 'n/a'})`,
+          );
+        }
+        if (claudePermissionMode !== existing.claudePermissionModeSnapshot) {
+          log.info(
+            `claude: permission mode changed for ${existing.record.gezelId} ` +
+              `(${existing.claudePermissionModeSnapshot ?? 'n/a'} → ${claudePermissionMode ?? 'n/a'})`,
           );
         }
         try {
@@ -12236,6 +12250,9 @@ export class ChatManager {
             ),
           }
         : {}),
+      ...(sessionOpts.claudeCliContext?.permissionModeOverride
+        ? { claudePermissionModeSnapshot: sessionOpts.claudeCliContext.permissionModeOverride }
+        : {}),
       immediateFileWriteConstrained,
       directFileWorkConstrained,
       scenarioFileRepairConstrained,
@@ -12290,6 +12307,24 @@ export class ChatManager {
         frontmatter.codexPermissionMode ??
         frontmatter.claudePermissionMode ??
         config.codexCli?.defaultPermissionMode,
+    );
+  }
+
+  /** Resolve the mode that a Claude CLI session will actually receive. */
+  private async resolveClaudePermissionMode(
+    record: ChatSession,
+    gezel: GezelDetail,
+  ): Promise<ClaudePermissionMode | undefined> {
+    if (record.providerName !== 'anthropic-cli') return undefined;
+    const [project, config] = await Promise.all([
+      this.store.getProject(record.projectId),
+      this.store.readConfig(),
+    ]);
+    return (
+      project?.claudePermissionMode ??
+      gezel.parsed.frontmatter.claudePermissionMode ??
+      config.anthropicCli?.defaultPermissionMode ??
+      'acceptEdits'
     );
   }
 
@@ -13162,10 +13197,10 @@ export class ChatManager {
     }
 
     // Per-project workspace writability — the single write gate (see
-    // projectWorkspaceWritable in core). Drives the workspace-fs-write
+    // projectManagedWorkspaceWritable in core). Drives the workspace-fs-write
     // tool strip and the prompt's "edits off" posture note; the global
     // allowFileEdits deliberately does not.
-    const workspaceWritable = projectWorkspaceWritable(project);
+    const workspaceWritable = projectManagedWorkspaceWritable(project);
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
     const directFileWorkConstrained = gezel
@@ -14321,7 +14356,7 @@ export class ChatManager {
     // Claude CLI provider needs a few extras the other providers don't:
     // a working directory (the project's `workingDir` if set, otherwise the
     // internal fallback workspace under `~/.gezel/projects/<id>/workspace`),
-    // the resolved per-gezel `claudePermissionMode` override, and the
+    // the resolved project/gezel/install `claudePermissionMode`, and the
     // (sessionId, gezelId, projectId) triple so it can pick a stable runtime
     // `.mcp.json` path. We populate those once at session-build time so the
     // session class doesn't need a Store handle.
@@ -14333,7 +14368,11 @@ export class ChatManager {
 
     if (record.providerName === 'anthropic-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
-      const permissionModeOverride = gezelFm?.claudePermissionMode;
+      const permissionModeOverride =
+        project?.claudePermissionMode ??
+        gezelFm?.claudePermissionMode ??
+        config.anthropicCli?.defaultPermissionMode ??
+        'acceptEdits';
       // Compute the Claude CLI built-ins to disallow AND to auto-allow
       // from the same role+toolsets data the gezel-mcp filter uses. The
       // disallowed list is what the model literally can't reach
@@ -14874,7 +14913,7 @@ function formatExpectedDeliverableAnnotation(
   // that leads to a stripped-tool call and a hallucinated save. Flag the
   // block instead; the recipient's system prompt carries the fuller note.
   if (fileEditsDisabled) {
-    return '\n\n[Note: gezel file edits are turned OFF for this project, so this file deliverable cannot be written. Do not call `write_file` or claim the file was saved — reply that it is blocked until "Allow gezels to modify the workspace directory" is enabled in Project → Settings.]';
+    return `\n\n[Note: this recipient's built-in workspace file tools are read-only, so it cannot write this deliverable. Do not call \`write_file\` or claim the file was saved — reply that this session is blocked until "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" is enabled in Project → Settings. Provider-native sessions such as Codex may have separate access.]`;
   }
   const path = deliverable.filePath?.trim();
   const pathClause = path

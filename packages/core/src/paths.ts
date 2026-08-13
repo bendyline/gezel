@@ -441,6 +441,11 @@ export function projectFindingLifecycleFile(root: string, projectId: string): st
   return join(projectPrivateDir(root, projectId), 'finding-lifecycle.json');
 }
 
+/** Durable Boekwachter issue identity + lifecycle. Account-private. */
+export function projectBoekwachterIssuesFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'boekwachter-issues.json');
+}
+
 /** Durable per-project code-review records for this account. */
 export function projectCodeReviewsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'code-reviews.json');

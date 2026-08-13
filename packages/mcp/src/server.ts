@@ -9758,6 +9758,20 @@ server.tool(
     try {
       const res = await api.toolFileReview(projectId, args);
       if (!res.found || !res.review) {
+        if (res.trackedIssues?.length) {
+          const tracked = res.trackedIssues.map(
+            (issue) =>
+              `${issue.ref} [${issue.status}]${issue.stale ? ' [needs recheck]' : ''} ${issue.category} — ${issue.message}${issue.line ? ` (${issue.stale ? 'previously ' : ''}L${issue.line})` : ''}${issue.taskRef ? ` — task ${issue.taskRef}` : ''}`,
+          );
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `${res.path} has no current review, but its durable tracked issues remain:\n${tracked.join('\n')}`,
+              },
+            ],
+          };
+        }
         const why =
           res.eligible === false
             ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
@@ -9769,9 +9783,14 @@ server.tool(
         };
       }
       const r = res.review;
-      const issues = r.issues.map(
-        (i) => `[${i.severity}] ${i.category} — ${i.message}${i.line ? ` (L${i.line})` : ''}`,
-      );
+      const issues = res.trackedIssues?.length
+        ? res.trackedIssues.map(
+            (i) =>
+              `${i.ref} [${i.status}]${i.stale ? ' [needs recheck]' : ''} [${i.severity}] ${i.category} — ${i.message}${i.line ? ` (${i.stale ? 'previously ' : ''}L${i.line})` : ''}${i.taskRef ? ` — task ${i.taskRef}` : ''}`,
+          )
+        : r.issues.map(
+            (i) => `[${i.severity}] ${i.category} — ${i.message}${i.line ? ` (L${i.line})` : ''}`,
+          );
       const provenance = formatReviewProvenance(r);
       const text = [
         `${res.path} — health ${r.health}/10 — ${r.healthReason}`,
@@ -9786,6 +9805,76 @@ server.tool(
       const msg = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: 'text' as const, text: `file_review failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'get_file_issue',
+  'Retrieve the durable metadata for one Boekwachter issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
+  {
+    ref: z
+      .string()
+      .regex(/^BW-[1-9]\d*$/)
+      .describe('Project-scoped reference, e.g. BW-17.'),
+  },
+  async (args) => {
+    try {
+      const { issue } = await api.getBoekwachterIssue(projectId, args);
+      const location = issue.line
+        ? `${issue.path}:${issue.line}${issue.stale ? ' (previous anchor; needs recheck)' : ''}`
+        : issue.path;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: [
+              `${issue.ref} — ${issue.status} — ${location}`,
+              `[${issue.severity}] ${issue.category} — ${issue.message}`,
+              `read: ${issue.seen ? 'yes' : 'no'}${issue.taskRef ? ` — task: ${issue.taskRef}` : ''}`,
+            ].join('\n'),
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `get_file_issue failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'set_file_issue_status',
+  'Update a tracked Boekwachter issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
+  {
+    ref: z
+      .string()
+      .regex(/^BW-[1-9]\d*$/)
+      .describe('Project-scoped reference, e.g. BW-17.'),
+    status: z.enum(['open', 'in_progress', 'resolved', 'dismissed']).optional(),
+    seen: z.boolean().optional().describe('true marks read; false marks unread.'),
+    dismissalReason: z.enum(['not_an_issue', 'duplicate', 'wont_fix']).optional(),
+  },
+  async (args) => {
+    try {
+      const { issue } = await api.updateBoekwachterIssue(projectId, args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `${issue.ref} is ${issue.status} and ${issue.seen ? 'read' : 'unread'}${issue.taskRef ? ` (task ${issue.taskRef})` : ''}.`,
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: 'text' as const, text: `set_file_issue_status failed: ${msg}` }],
         isError: true,
       };
     }
@@ -10106,12 +10195,14 @@ server.tool(
     severity: z.enum(['info', 'minor', 'major']).optional(),
     category: z.string().optional().describe('e.g. bug, smell, error-handling, grammar, clarity.'),
     path: z.string().optional().describe('Restrict to a path prefix.'),
+    status: z.enum(['open', 'in_progress', 'resolved', 'dismissed']).optional(),
+    includeClosed: z.boolean().optional().describe('Include resolved and dismissed history.'),
     maxResults: z.number().int().positive().max(1000).optional(),
   },
   async (args) => {
     try {
       const res = await api.toolListFileIssues(projectId, args);
-      if (!res.indexed) {
+      if (!res.indexed && res.counts.total === 0) {
         return {
           content: [{ type: 'text' as const, text: 'list_file_issues: index not built yet.' }],
         };
@@ -10119,7 +10210,7 @@ server.tool(
       const head = `${res.counts.total} issue${res.counts.total === 1 ? '' : 's'} across ${res.reviewedFiles}/${res.eligibleFiles} reviewed files${res.truncated ? ' (truncated)' : ''}`;
       const lines = res.issues.map(
         (i) =>
-          `${i.path}${i.line ? `:${i.line}` : ''}  [${i.severity}] ${i.category} — ${i.message}`,
+          `${i.ref}  ${i.path}${i.line ? `:${i.line}${i.stale ? ' (previous)' : ''}` : ''}  [${i.status}]${i.stale ? ' [needs recheck]' : ''} [${i.severity}] ${i.category} — ${i.message}${i.taskRef ? ` — task ${i.taskRef}` : ''}`,
       );
       const tail =
         res.reviewedFiles < res.eligibleFiles
@@ -10687,7 +10778,7 @@ server.tool(
 
 server.tool(
   'extract_archive',
-  'Extract a `.zip`, `.tar`, or `.tar.gz` archive into a directory inside the project workspace. Destination is created if it does not exist. Requires the workspace to be writable (internal workspace or `project.allowGezelWrites` on external).',
+  'Extract a `.zip`, `.tar`, or `.tar.gz` archive into a directory inside the project workspace. Destination is created if it does not exist. Requires Gezel-managed workspace writes to be allowed.',
   {
     path: z.string().min(1),
     outputPath: z.string().min(1),

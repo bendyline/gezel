@@ -1,8 +1,10 @@
 import type {
   ChatSessionSummary,
+  ClaudePermissionMode,
   CodexPermissionMode,
   GezelSummary,
   NightShiftTasksResponse,
+  Project,
   Question,
   Task,
   TaskStatus,
@@ -87,8 +89,11 @@ interface ProjectRow {
   name: string;
   workingDir?: string;
   voormanGezelId?: string;
+  managedWorkspaceWritePolicy?: Project['managedWorkspaceWritePolicy'];
+  /** @deprecated Compatibility with project files written before the named policy. */
   allowGezelWrites?: boolean;
   codexPermissionMode?: CodexPermissionMode;
+  claudePermissionMode?: ClaudePermissionMode;
 }
 interface TaskTextPrompt {
   kind: 'create' | 'title' | 'description';
@@ -419,8 +424,10 @@ export function App(props: {
             name: p.name,
             workingDir: p.workingDir,
             voormanGezelId: p.voormanGezelId,
+            managedWorkspaceWritePolicy: p.managedWorkspaceWritePolicy,
             allowGezelWrites: p.allowGezelWrites,
             codexPermissionMode: p.codexPermissionMode,
+            claudePermissionMode: p.claudePermissionMode,
           })),
         );
         const gezelId = props.initialGezelId;

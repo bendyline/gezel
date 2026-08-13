@@ -145,8 +145,9 @@ const AREA_LINKS: RecentTabArea[] = [
 
 // The built-in "Default" project is an always-present scratchpad, not a
 // user-created project. Hide it from the sidebar's Projects group so the
-// list only shows projects the user actually started. It's still
-// reachable as the implicit target for ambient/scratch chats.
+// list only shows projects the user actually started — unless it is the
+// current destination. A restored workspace must always have a visible
+// selected row naming the project that occupies the canvas.
 const HIDDEN_PROJECT_IDS = new Set<string>(['default']);
 const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
   projects: 'Projects',
@@ -217,9 +218,13 @@ export function Sidebar({
   const [projects, setProjects] = useState<Project[]>([]);
   // The project whose pending-question resolution dialog is open, if any.
   const [resolveProjectId, setResolveProjectId] = useState<string | null>(null);
+  const selectedProjectId = selection?.kind === 'project' ? selection.id : null;
   const visibleProjects = useMemo(
-    () => projects.filter((p) => !HIDDEN_PROJECT_IDS.has(p.id) && !p.archived),
-    [projects],
+    () =>
+      projects.filter(
+        (p) => p.id === selectedProjectId || (!HIDDEN_PROJECT_IDS.has(p.id) && !p.archived),
+      ),
+    [projects, selectedProjectId],
   );
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>(undefined);
@@ -703,6 +708,7 @@ export function Sidebar({
                     className={`app-sidebar-item app-sidebar-subitem${activeKey === key ? ' active' : ''}`}
                     onClick={select}
                     title={p.name}
+                    aria-current={activeKey === key ? 'page' : undefined}
                   >
                     <span
                       className="app-sidebar-item-icon app-sidebar-proj-badge"
