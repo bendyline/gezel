@@ -530,6 +530,7 @@ export class TaskManager {
   private onTaskSettled?: TaskSettledHook;
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
+  private readonly autoPreparedConnectorTypes = new Set<string>();
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
@@ -664,8 +665,15 @@ export class TaskManager {
    * still enforced (a required, unbound connector fails the launch), but
    * nothing syncs.
    */
-  setConnectorPrepHook(fn: ConnectorPrepHook): void {
+  setConnectorPrepHook(
+    fn: ConnectorPrepHook,
+    opts: { autoPreparedTypes?: readonly string[] } = {},
+  ): void {
     this.onConnectorPrep = fn;
+    this.autoPreparedConnectorTypes.clear();
+    for (const typeId of opts.autoPreparedTypes ?? []) {
+      this.autoPreparedConnectorTypes.add(typeId);
+    }
   }
 
   /**
@@ -929,6 +937,12 @@ export class TaskManager {
           .filter((b) => !b.disabled)
           .map((b) => b.type),
       );
+      // Some native connectors need no new account/configuration and can be
+      // provisioned by launch prep itself. GitHub Pulls is the motivating
+      // case: the project is already GitHub-linked and the adapter reuses
+      // that credential chain, so a setup dialog would add ceremony without
+      // adding authority.
+      for (const typeId of this.autoPreparedConnectorTypes) bound.add(typeId);
       const missing = unmetConnectors(mainBook.connectors, bound);
       if (missing.length > 0) {
         throw new ConnectorSetupRequiredError(input.craftbookId ?? mainBook.id, missing);

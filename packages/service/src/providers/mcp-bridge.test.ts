@@ -162,6 +162,48 @@ describe('McpBridge', () => {
     expect(bridge.hasTool('definitely_not_a_tool')).toBe(false);
   });
 
+  it('reads the whole task-note feed by default from a step-scoped session', async () => {
+    const task = await svc.context.tasks.create('default', {
+      title: 'Cross-step notes',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        { id: 'scope', name: 'Scope' },
+        { id: 'report', name: 'Report' },
+      ],
+    });
+    await svc.context.tasks.appendNote('default', task.num, {
+      stepId: 'scope',
+      text: '## Scope — PR #28',
+      author: { kind: 'gezel', gezelId: 'ada', name: 'Ada' },
+    });
+
+    const scopedBridge = new McpBridge();
+    await scopedBridge.start({
+      command: 'node',
+      args: [mcpPath],
+      env: {
+        ...bridgeEnv,
+        GEZEL_TASK_REF: task.ref,
+        GEZEL_STEP_ID: 'report',
+      },
+    });
+
+    try {
+      const wholeTask = await scopedBridge.callTool('read_task_notes', { ref: task.ref });
+      expect(wholeTask).toContain(`Loaded 1 note for ${task.ref}.`);
+      expect(wholeTask).toContain('## Scope — PR #28');
+
+      const reportOnly = await scopedBridge.callTool('read_task_notes', {
+        ref: task.ref,
+        stepId: 'report',
+      });
+      expect(reportOnly).toContain(`Loaded 0 notes for ${task.ref}/report.`);
+      expect(reportOnly).not.toContain('## Scope — PR #28');
+    } finally {
+      await scopedBridge.stop();
+    }
+  });
+
   it('accepts legacy and miscased spellings end-to-end (alias dispatch)', async () => {
     // Pinned gilde role prompts still teach `readFile`/`readdir`, and small
     // models guess spellings from training priors — either must reach the

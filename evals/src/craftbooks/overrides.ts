@@ -1660,16 +1660,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
   },
   'pull-request-review': {
-    existingScenarioId: 'squisq-review',
+    existingScenarioId: 'large-pr-review',
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8 against the hand-authored squisq-review scenario. The review grader passed with grounded sections and 11 source citations. A future fake GitHub/MCP harness should exercise pull-request-review directly.',
+        'Hand-authored large-pr-review scenario seeds a deterministic 120-file, >80 KB artifact corpus with an early API use, late valid definition, and final-file authorization defect. It gates exact path coverage, the late finding, no false missing-API claim, verdict, and unchanged source; a local-model validation has not run yet.',
     },
-    gaps: [
-      'Replace task-equivalent link with fake GitHub PR simulator for direct craftbook validation.',
-    ],
+    gaps: ['Run the large-pr-review scenario across the installed local-model matrix.'],
   },
   'pwa-offline': {
     coverage: {

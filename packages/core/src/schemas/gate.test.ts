@@ -11,6 +11,18 @@ import {
   validateCraftbookGraph,
 } from './index.js';
 
+describe('GateCheckSchema — connector coverage', () => {
+  it('parses a workspace ledger against an artifact corpus', () => {
+    expect(
+      GateCheckSchema.parse({
+        kind: 'corpusCoverage',
+        file: 'pr-review-coverage.json',
+        corpusDir: 'artifacts/data/github-pulls/pr-52',
+      }),
+    ).toMatchObject({ kind: 'corpusCoverage' });
+  });
+});
+
 describe('TaskCraftbookStepSchema — plateau-trail back-compat', () => {
   it('parses persisted steps without the new escalation fields, and with them', async () => {
     const { TaskCraftbookStepSchema } = await import('./task.js');

@@ -45,6 +45,7 @@ import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
+import { summarizeCacheEntries } from './cacheDisplay.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
@@ -476,7 +477,7 @@ function EngineStatusPillForProvider({
   const cacheState =
     cacheEntry && cacheEntry.warmSessionCount > 0
       ? {
-          warmSessionCount: cacheEntry.warmSessionCount,
+          entrySummary: summarizeCacheEntries(cacheEntry.sessions, cacheEntry.warmSessionCount),
           totalBytes: cacheEntry.totalBytes,
           budgetBytes: cacheEntry.budgetBytes,
           recentHitRate: cacheEntry.recentHitRate,
@@ -1105,9 +1106,8 @@ function EngineStatusPillForProvider({
               <>
                 <dt>Cache</dt>
                 <dd>
-                  {cacheState.warmSessionCount}{' '}
-                  {cacheState.warmSessionCount === 1 ? 'thread' : 'threads'} ·{' '}
-                  {formatBytes(cacheState.totalBytes)} of {formatBytes(cacheState.budgetBytes)}
+                  {cacheState.entrySummary.label} · {formatBytes(cacheState.totalBytes)} of{' '}
+                  {formatBytes(cacheState.budgetBytes)}
                   {cacheState.recentHitRate > 0 && (
                     <> · {Math.round(cacheState.recentHitRate * 100)}% hit rate</>
                   )}

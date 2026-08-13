@@ -86,6 +86,7 @@ export interface ProviderCacheStats {
   providerName: string;
   totalBytes: number;
   budgetBytes: number;
+  /** All entries, including reusable `prefix-*` entries; legacy field name. */
   warmSessionCount: number;
   hits: number;
   misses: number;

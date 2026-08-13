@@ -273,6 +273,34 @@ test('dependency security floors fix B3 while CI blocks only on critical advisor
   );
 });
 
+test('PR and release gates share serialized unit and CLI TUI stability contracts', async () => {
+  const [rootPackageSource, quality, publish] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+  ]);
+  const scripts = JSON.parse(rootPackageSource).scripts;
+  const validateSteps = scripts['validate:unlocked'].split(' && ');
+
+  assert.ok(validateSteps.includes('pnpm test:ci'), 'validate must use the serialized CI suite');
+  assert.ok(
+    !validateSteps.includes('pnpm test'),
+    'validate must not restore release-only parallel package contention',
+  );
+  assert.equal(
+    scripts['test:stability:tui'],
+    'pnpm --filter @bendyline/gezel-cli exec vitest run src/tui/App.test.tsx',
+  );
+  assert.equal(
+    scripts['test:stability'].match(/pnpm test:stability:tui/g)?.length,
+    2,
+    'stability passes 2 and 3 must both exercise the CLI interaction suite',
+  );
+  assert.match(quality, /run: pnpm test:ci/);
+  assert.match(quality, /run: pnpm test:stability/);
+  assert.match(publish, /run: xvfb-run -a pnpm validate/);
+});
+
 test('macOS release installs the finished PKG and exercises recovery', async () => {
   const workflow = await readFile(
     join(root, '.github', 'workflows', 'release-electron.yml'),

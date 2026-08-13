@@ -138,9 +138,14 @@ describe('GitHubPullsAdapter', () => {
     expect(overview.frontmatter.url).toContain('/pull/52');
     expect(overview.bodyMarkdown).toContain('Adds an auth fallback.');
     expect(overview.bodyMarkdown).toContain('`src/auth.ts`');
+    expect(overview.bodyMarkdown).toContain('## Review batches');
     // The full diff rides along as an attachment so a reviewer can read the
     // whole change without one record per hunk.
     expect(overview.attachments?.[0]?.filename).toBe('pr-52.diff');
+    expect(overview.attachments?.[1]?.filename).toBe('pr-52-files.json');
+    expect(new TextDecoder().decode(overview.attachments?.[1]?.content)).toContain(
+      '"path": "src/auth.ts"',
+    );
 
     const file = await adapter.fetchRecord('pr-52', batch.records[1]!);
     expect(file.dirSegments).toEqual(['files']);
@@ -156,6 +161,37 @@ describe('GitHubPullsAdapter', () => {
     await adapter.ensureAuth();
     await adapter.listChangesSince('pr-52', undefined);
     expect(patchLimits).toEqual([Number.POSITIVE_INFINITY]);
+  });
+
+  it('replaces a list-files patch prefix with the complete full-diff segment', async () => {
+    const adapter = new GitHubPullsAdapter(
+      binding(),
+      deps(),
+      runtime({
+        files: [
+          {
+            filename: 'src/auth.ts',
+            status: 'modified',
+            additions: 2,
+            deletions: 1,
+            patch: '@@ -1 +1,2 @@\n-old\n+early-prefix',
+          },
+        ],
+        diff: [
+          'diff --git a/src/auth.ts b/src/auth.ts',
+          '--- a/src/auth.ts',
+          '+++ b/src/auth.ts',
+          '@@ -1 +1,2 @@',
+          '-old',
+          '+early-prefix',
+          '+late-line-from-full-diff',
+        ].join('\n'),
+      }),
+    );
+    await adapter.ensureAuth();
+    const batch = await adapter.listChangesSince('pr-52', undefined);
+    const file = await adapter.fetchRecord('pr-52', batch.records[1]!);
+    expect(file.bodyMarkdown).toContain('late-line-from-full-diff');
   });
 
   it('re-syncs nothing while the pull request is unchanged', async () => {
@@ -184,18 +220,28 @@ describe('launch prep', () => {
     const prep = connectorTaskPrepFor('github-pulls');
     expect(prep).toBeDefined();
 
-    const synced: { bindingId: string; scopes?: readonly string[] }[] = [];
+    const synced: {
+      bindingId: string;
+      scopes?: readonly string[];
+      backfillLimit?: number;
+    }[] = [];
     const result = await prep!({
       project: project(),
       binding: { id: 'pulls-binding', type: 'github-pulls', corpusDir: 'data/github-pulls' },
       params: {},
       sync: async (bindingId, opts) => {
-        synced.push({ bindingId, ...(opts?.scopes ? { scopes: opts.scopes } : {}) });
+        synced.push({
+          bindingId,
+          ...(opts?.scopes ? { scopes: opts.scopes } : {}),
+          ...(opts?.backfillLimit ? { backfillLimit: opts.backfillLimit } : {}),
+        });
         return { written: 2, quarantined: 0, skipped: 0, pruned: 0, errors: 0, cursor: undefined };
       },
     });
 
-    expect(synced).toEqual([{ bindingId: 'pulls-binding', scopes: ['pr-52'] }]);
+    expect(synced).toEqual([
+      { bindingId: 'pulls-binding', scopes: ['pr-52'], backfillLimit: 3_001 },
+    ]);
     expect(result.params).toEqual({
       number: '52',
       corpusScope: 'artifacts/data/github-pulls/pr-52',

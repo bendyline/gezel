@@ -85,7 +85,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - name: Install Chromium
-        # The evals suite (run by `pnpm test`) launches a real headless
+        # The evals suite (run by `pnpm test:ci`) launches a real headless
         # chromium for its runtime-validation scenarios (petshop, tictactoe,
         # codebase-evolution). Same playwright version as the app package, so
         # this populates the shared ~/.cache/ms-playwright the evals import uses.
@@ -152,7 +152,7 @@ jobs:
           src/machine-engine/bridge.integration.test.ts
 
   stability:
-    name: Test stability (UI and service repeats)
+    name: Test stability (UI, service, and CLI TUI repeats)
     needs: workflow-policy
     runs-on: ubuntu-latest
     # Passes 2 and 3 run here rather than tailing the `unit` job, which
@@ -160,6 +160,9 @@ jobs:
     # 2026-07-27. The two repeats then ran ui+service concurrently in 19.7
     # min; serialising them (see test:stability) trades roughly 4 min of wall
     # clock for timings that do not depend on what else shares the 4 vCPUs.
+    # The CLI repeat is intentionally limited to its interaction-heavy App
+    # suite; repeating daemon integration here would consume the timeout
+    # without adding coverage for render/input timing regressions.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,7 +177,7 @@ jobs:
         # Without this the repeat passes would silently skip tests that pass 1
         # runs, which is precisely the flake this job exists to catch.
         run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
-      - name: Repeat UI and service suites (stability passes 2 and 3)
+      - name: Repeat UI, service, and CLI TUI suites (stability passes 2 and 3)
         run: pnpm test:stability
 
   packaged-bundle:

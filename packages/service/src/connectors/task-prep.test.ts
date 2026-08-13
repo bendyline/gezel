@@ -27,6 +27,54 @@ const input = {
 };
 
 describe('runConnectorTaskPrep', () => {
+  it('can provision a required zero-config native binding before syncing', async () => {
+    let provisioned = false;
+    let syncedBinding = '';
+    const result = await runConnectorTaskPrep(
+      {
+        getProject: async () =>
+          ({
+            id: 'p1',
+            name: 'Review project',
+            github: { url: 'https://github.com/acme/widget' },
+            connectors: [],
+          }) as unknown as ProjectDetail,
+        allowExternalServices: async () => true,
+        ensureBinding: async (_project, need) => {
+          provisioned = need.typeId === 'github-pulls';
+          return {
+            id: 'pulls-auto',
+            type: 'github-pulls',
+            sourceId: 'bundled',
+            version: '1.0.1',
+            corpusDir: 'data/github-pulls',
+            config: {},
+          };
+        },
+        sync: async (_project, bindingId) => {
+          syncedBinding = bindingId;
+          return {
+            written: 2,
+            quarantined: 0,
+            skipped: 0,
+            pruned: 0,
+            errors: 0,
+            cursor: undefined,
+          };
+        },
+      },
+      {
+        projectId: 'p1',
+        craftbookId: 'pull-request-review',
+        connectors: [{ typeId: 'github-pulls' }],
+        params: {},
+      },
+    );
+    expect(provisioned).toBe(true);
+    expect(syncedBinding).toBe('pulls-auto');
+    expect(result.params).toEqual({});
+  });
+
   it('does not launch a generic connector task after a record-level sync failure', async () => {
     await expect(
       runConnectorTaskPrep(

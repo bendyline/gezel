@@ -1948,18 +1948,30 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return project;
     },
   });
-  tasks.setConnectorPrepHook(async ({ projectId, craftbookId, connectors: needs, params }) => {
-    const prep = await runConnectorTaskPrep(
-      {
-        getProject: (id) => store.getProject(id),
-        sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
-        allowExternalServices: async () =>
-          resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
-      },
-      { projectId, craftbookId, connectors: needs, params },
-    );
-    return { params: prep.params, ...(prep.note ? { note: prep.note } : {}) };
-  });
+  tasks.setConnectorPrepHook(
+    async ({ projectId, craftbookId, connectors: needs, params }) => {
+      const prep = await runConnectorTaskPrep(
+        {
+          getProject: (id) => store.getProject(id),
+          sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
+          allowExternalServices: async () =>
+            resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
+          ensureBinding: async (project, need) => {
+            if (need.typeId !== 'github-pulls') return null;
+            if (!project.github?.url) return null;
+            return connectors.bind(project, {
+              type: 'github-pulls',
+              displayName: 'GitHub Pull Requests',
+              config: {},
+            });
+          },
+        },
+        { projectId, craftbookId, connectors: needs, params },
+      );
+      return { params: prep.params, ...(prep.note ? { note: prep.note } : {}) };
+    },
+    { autoPreparedTypes: ['github-pulls'] },
+  );
 
   // In-chat terminal: per-(project, workingDir) thread manager + its
   // own pub/sub bus. Separate from `chatEvents` because the chat

@@ -143,6 +143,29 @@ export function ChatPillRow({
         <div className="chat-pill-row-scroll" ref={scrollRef} onScroll={overflowBar.onScroll}>
           {empty && <span className="chat-pill-row-empty muted small">No recent threads</span>}
 
+          {/* Active work leads the strip. Task files are returned newest-first,
+              so a task created through Do+ remains visible at the left edge
+              even when recent chat and terminal cards overflow horizontally. */}
+          {tasks.map((task) => {
+            const latestThread = taskPills.get(task.ref);
+            const gezelNames = latestThread
+              ? namesFor(latestThread)
+              : task.assignee.kind === 'gezel'
+                ? nameFor(task.assignee.gezelId)
+                : 'You';
+            return (
+              <TaskPillButton
+                key={task.ref}
+                task={task}
+                latestThread={latestThread}
+                gezels={gezels}
+                gezelNames={gezelNames}
+                active={task.ref === activeTaskRef}
+                onFocus={onFocusTask}
+              />
+            );
+          })}
+
           {pills.map((pill) => (
             <ThreadPillButton
               key={pill.sessionId}
@@ -188,26 +211,6 @@ export function ChatPillRow({
                 onFocus={onFocusTerminal}
               />
             ))}
-
-          {tasks.map((task) => {
-            const latestThread = taskPills.get(task.ref);
-            const gezelNames = latestThread
-              ? namesFor(latestThread)
-              : task.assignee.kind === 'gezel'
-                ? nameFor(task.assignee.gezelId)
-                : 'You';
-            return (
-              <TaskPillButton
-                key={task.ref}
-                task={task}
-                latestThread={latestThread}
-                gezels={gezels}
-                gezelNames={gezelNames}
-                active={task.ref === activeTaskRef}
-                onFocus={onFocusTask}
-              />
-            );
-          })}
         </div>
         {overflowBar.node}
       </div>

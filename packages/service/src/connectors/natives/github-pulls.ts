@@ -20,7 +20,7 @@ import type { GitHubPullComment, GitHubPullDetail, GitHubPullFile } from '@bendy
 import { createLogger } from '@bendyline/gezel';
 import type { ProjectDetail } from '@bendyline/gezel';
 import { prioritizePullsForCurrentBranch } from '@bendyline/gezel-mcp';
-import type { GitHubPrs } from '../../github/prs.js';
+import { type GitHubPrs, filterUnifiedDiffByPath } from '../../github/prs.js';
 import { registerNativeAdapter } from '../registry.js';
 import { assertConnectorTaskSync, registerConnectorTaskPrep } from '../task-prep.js';
 import type {
@@ -37,6 +37,8 @@ const log = createLogger('connectors');
 
 /** Newest-N open pull requests the ambient pass mirrors when unconfigured. */
 const DEFAULT_MAX_PULLS = 20;
+/** GitHub caps one PR at 3,000 changed files; overview adds one record. */
+const TASK_PR_RECORD_LIMIT = 3_001;
 
 /** A scope name is the durable handle a task launch uses to target one PR. */
 export function pullScope(num: number): string {
@@ -192,13 +194,56 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
           return '';
         }),
     ]);
-    const bundle: PullBundle = { detail, files, comments, diff };
+    // GitHub's list-files endpoint may itself clip or omit `patch` for a
+    // large file. Prefer the exact segment from the full diff whenever it is
+    // available so the durable per-file record is not just a second copy of
+    // that API limitation.
+    const completeFiles = diff
+      ? files.map((file) => {
+          const patch = filterUnifiedDiffByPath(diff, file.filename);
+          return patch
+            ? {
+                ...file,
+                patch,
+                patchChars: patch.length,
+                patchTruncated: false,
+              }
+            : file;
+        })
+      : files;
+    const bundle: PullBundle = { detail, files: completeFiles, comments, diff };
     this.bundles.set(num, bundle);
     return bundle;
   }
 
   private overviewRecord(num: number, bundle: PullBundle): NormalizedRecord {
     const { detail, files, comments, diff } = bundle;
+    const batches = Array.from({ length: Math.ceil(files.length / 25) }, (_, index) => {
+      const start = index * 25;
+      const slice = files.slice(start, start + 25);
+      return {
+        number: index + 1,
+        start: start + 1,
+        end: start + slice.length,
+        paths: slice.map((file) => file.filename),
+      };
+    });
+    const manifest = {
+      schemaVersion: 1,
+      pullRequest: num,
+      totalFiles: files.length,
+      batchSize: 25,
+      batches,
+      files: files.map((file, index) => ({
+        ordinal: index + 1,
+        path: file.filename,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+        changes: file.changes,
+        ...(file.previousFilename ? { previousPath: file.previousFilename } : {}),
+      })),
+    };
     const body = [
       `# PR #${num}: ${detail.title}`,
       '',
@@ -212,6 +257,15 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       '## Changed files',
       '',
       ...files.map((f) => `- \`${f.filename}\` (${f.status}, +${f.additions} / -${f.deletions})`),
+      '',
+      '## Review batches',
+      '',
+      ...batches.map(
+        (batch) =>
+          `- Batch ${batch.number}: files ${batch.start}–${batch.end} (${batch.paths.length} path${batch.paths.length === 1 ? '' : 's'})`,
+      ),
+      '',
+      `The machine-readable manifest is attached as \`pr-${num}-files.json\`. Review every batch and record every exact path in the coverage ledger; the completion gate compares that ledger with the per-file corpus records.`,
     ];
     if (comments.length > 0) {
       body.push('', '## Comments', '');
@@ -245,17 +299,21 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       scanOrigin: 'github-pulls',
       quarantineNamespace: 'github-pulls',
       quarantineLabel: `GitHub pull request #${num}`,
-      ...(diff
-        ? {
-            attachments: [
+      attachments: [
+        ...(diff
+          ? [
               {
                 filename: `pr-${num}.diff`,
                 content: new TextEncoder().encode(diff),
                 size: Buffer.byteLength(diff, 'utf8'),
               },
-            ],
-          }
-        : {}),
+            ]
+          : []),
+        {
+          filename: `pr-${num}-files.json`,
+          content: new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`),
+        },
+      ],
     };
   }
 
@@ -336,7 +394,10 @@ export function registerGitHubPullsAdapters(runtime: GitHubPullsRuntime): void {
   registerConnectorTaskPrep('github-pulls', async (ctx) => {
     const num = await resolveLaunchPullNumber(runtime, ctx.project, ctx.params);
     const scope = pullScope(num);
-    const result = await ctx.sync(ctx.binding.id, { scopes: [scope] });
+    const result = await ctx.sync(ctx.binding.id, {
+      scopes: [scope],
+      backfillLimit: TASK_PR_RECORD_LIMIT,
+    });
     assertConnectorTaskSync(result, `PR #${num}`);
     // `corpusScope` is the path the craftbook's step prompts and gate
     // checks interpolate, so a recipe never hard-codes the corpus name.

@@ -1,6 +1,7 @@
 import type { Project } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
@@ -797,7 +798,10 @@ describe('ProjectsView', () => {
 
     const editors = await screen.findAllByTestId('editor-emit');
     fireEvent.click(editors[0]!);
-    const failedChip = await screen.findByText('Save failed', {}, { timeout: 1800 });
+    await act(async () => {
+      await flushSerializedAutosave('project:pj-alpha:about').catch(() => {});
+    });
+    const failedChip = screen.getByText('Save failed');
     expect(failedChip).toHaveAttribute('title', 'write failed');
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -822,7 +826,10 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     const firstEditors = await screen.findAllByTestId('editor-emit');
     fireEvent.click(firstEditors[0]!);
-    const offlineChip = await screen.findByText('Save failed', {}, { timeout: 1800 });
+    await act(async () => {
+      await flushSerializedAutosave('project:pj-alpha:about').catch(() => {});
+    });
+    const offlineChip = screen.getByText('Save failed');
     expect(offlineChip).toHaveAttribute('title', 'still offline');
     firstView.unmount();
     expect(api.updateProject).toHaveBeenCalledTimes(1);

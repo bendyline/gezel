@@ -63,9 +63,10 @@ jobs:
   verify:
     name: Verify release
     runs-on: ubuntu-latest
-    # `pnpm validate` deliberately serializes three test passes plus the full
-    # Electron/browser E2E suites. It was still progressing at the old 60 min
-    # ceiling on 2026-08-11; 90 min leaves headroom for normal runner variance.
+    # `pnpm validate` deliberately uses the same serialized unit pass as PR CI,
+    # then repeats the UI, service, and interaction-heavy CLI TUI suites before
+    # the full Electron/browser E2E suites. It was still progressing at the old
+    # 60 min ceiling on 2026-08-11; 90 min leaves headroom for runner variance.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -18,6 +18,29 @@ import { parseGitHubUrl } from './url.js';
  */
 
 const REVIEW_PATCH_LIMIT = 8_000;
+const REVIEW_FILE_PAGE_LIMIT = 100;
+const REVIEW_DIFF_PAGE_LIMIT = 48_000;
+
+export interface GitHubPullFilesPage {
+  files: GitHubPullFile[];
+  allFiles: number;
+  totalFiles: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  nextOffset?: number;
+  includesPatch: boolean;
+}
+
+export interface GitHubPullDiffPage {
+  diff: string;
+  path?: string;
+  offset: number;
+  returnedChars: number;
+  totalChars: number;
+  truncated: boolean;
+  nextOffset?: number;
+}
 
 export class GitHubPrs {
   constructor(private readonly manager: GitManager) {}
@@ -92,7 +115,7 @@ export class GitHubPrs {
   async listFiles(
     project: ProjectDetail,
     num: number,
-    opts?: { patchLimit?: number },
+    opts?: { patchLimit?: number; includePatch?: boolean },
   ): Promise<GitHubPullFile[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
@@ -103,15 +126,65 @@ export class GitHubPrs {
       pull_number: num,
       per_page: 100,
     });
-    return res.map((f) => ({
-      filename: f.filename,
-      status: f.status,
-      additions: f.additions,
-      deletions: f.deletions,
-      changes: f.changes,
-      ...(f.patch ? { patch: truncate(f.patch, limit) } : {}),
-      ...(f.previous_filename ? { previousFilename: f.previous_filename } : {}),
-    }));
+    const includePatch = opts?.includePatch !== false;
+    return res.map((f) => {
+      const patch = f.patch && includePatch ? truncateWithMeta(f.patch, limit) : null;
+      return {
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+        changes: f.changes,
+        ...(patch
+          ? {
+              patch: patch.text,
+              patchChars: patch.totalChars,
+              patchTruncated: patch.truncated,
+            }
+          : {}),
+        ...(f.previous_filename ? { previousFilename: f.previous_filename } : {}),
+      };
+    });
+  }
+
+  /**
+   * A bounded, explicitly paginated view for API/tool consumers. Metadata is
+   * complete for the selected page before any optional patch bodies appear,
+   * so a bridge cap can no longer erase the existence of later files.
+   */
+  async listFilesPage(
+    project: ProjectDetail,
+    num: number,
+    opts: {
+      offset?: number;
+      limit?: number;
+      paths?: readonly string[];
+      includePatch?: boolean;
+      patchLimit?: number;
+    } = {},
+  ): Promise<GitHubPullFilesPage> {
+    const includePatch = opts.includePatch === true;
+    const all = await this.listFiles(project, num, {
+      includePatch,
+      patchLimit: opts.patchLimit ?? REVIEW_PATCH_LIMIT,
+    });
+    const wanted = new Set((opts.paths ?? []).map((path) => path.trim()).filter(Boolean));
+    const selected = wanted.size > 0 ? all.filter((file) => wanted.has(file.filename)) : all;
+    const offset = clampInteger(opts.offset, 0, selected.length, 0);
+    const limit = clampInteger(opts.limit, 1, 200, REVIEW_FILE_PAGE_LIMIT);
+    const files = selected.slice(offset, offset + limit);
+    const nextOffset = offset + files.length;
+    const hasMore = nextOffset < selected.length;
+    return {
+      files,
+      allFiles: all.length,
+      totalFiles: selected.length,
+      offset,
+      limit,
+      hasMore,
+      ...(hasMore ? { nextOffset } : {}),
+      includesPatch: includePatch,
+    };
   }
 
   async listComments(project: ProjectDetail, num: number): Promise<GitHubPullComment[]> {
@@ -164,6 +237,22 @@ export class GitHubPrs {
     });
     const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
     return truncate(body, opts?.limit ?? REVIEW_PATCH_LIMIT * 8);
+  }
+
+  /** Bounded diff page with machine-readable continuation metadata. */
+  async getPullRequestDiffPage(
+    project: ProjectDetail,
+    num: number,
+    opts: { offset?: number; limit?: number; path?: string } = {},
+  ): Promise<GitHubPullDiffPage> {
+    const full = await this.getPullRequestDiff(project, num, { limit: Number.POSITIVE_INFINITY });
+    const path = opts.path?.trim();
+    const selected = path ? filterUnifiedDiffByPath(full, path) : full;
+    if (path && selected.length === 0) {
+      throw new Error(`Changed path not found in pull request #${num}: ${path}`);
+    }
+    const page = sliceTextPage(selected, opts.offset, opts.limit);
+    return { ...page, ...(path ? { path } : {}) };
   }
 
   /**
@@ -279,4 +368,70 @@ export class GitHubPrs {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max)}\n… (${s.length - max} more chars truncated)`;
+}
+
+function truncateWithMeta(
+  text: string,
+  max: number,
+): { text: string; totalChars: number; truncated: boolean } {
+  if (!Number.isFinite(max) || text.length <= max) {
+    return { text, totalChars: text.length, truncated: false };
+  }
+  return {
+    text: text.slice(0, Math.max(0, max)),
+    totalChars: text.length,
+    truncated: true,
+  };
+}
+
+function clampInteger(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+/** Pure helper exported for the pagination regression tests. */
+export function sliceTextPage(
+  text: string,
+  offsetInput?: number,
+  limitInput?: number,
+): Omit<GitHubPullDiffPage, 'path'> {
+  const offset = clampInteger(offsetInput, 0, text.length, 0);
+  const limit = clampInteger(limitInput, 1, 60_000, REVIEW_DIFF_PAGE_LIMIT);
+  const diff = text.slice(offset, offset + limit);
+  const nextOffset = offset + diff.length;
+  const truncated = nextOffset < text.length;
+  return {
+    diff,
+    offset,
+    returnedChars: diff.length,
+    totalChars: text.length,
+    truncated,
+    ...(truncated ? { nextOffset } : {}),
+  };
+}
+
+/**
+ * Select one file's complete segment from a raw unified diff. We key from the
+ * `+++ b/<path>` header instead of trying to parse shell-quoted `diff --git`
+ * paths, which keeps spaces and renames deterministic.
+ */
+export function filterUnifiedDiffByPath(diff: string, path: string): string {
+  const normalized = path.replace(/^b\//, '');
+  const starts = [...diff.matchAll(/^diff --git /gm)].map((match) => match.index ?? 0);
+  if (starts.length === 0) return '';
+  starts.push(diff.length);
+  for (let index = 0; index < starts.length - 1; index++) {
+    const segment = diff.slice(starts[index]!, starts[index + 1]!);
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`^\\+\\+\\+ b/${escaped}$`, 'm').test(segment)) return segment.trimEnd();
+    // Deleted files use /dev/null on the new side; the old-side header is
+    // still authoritative for the requested changed path.
+    if (new RegExp(`^--- a/${escaped}$`, 'm').test(segment)) return segment.trimEnd();
+  }
+  return '';
 }

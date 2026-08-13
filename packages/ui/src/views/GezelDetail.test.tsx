@@ -3,6 +3,7 @@ import { poppetjeFromSeed } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
@@ -253,7 +254,10 @@ describe('GezelDetail', () => {
     await screen.findByRole('heading', { name: 'Maya' });
     fireEvent.click(screen.getByRole('tab', { name: 'About' }));
     fireEvent.click(screen.getByTestId('editor-emit'));
-    await waitFor(() => expect(api.updateGezelAbout).toHaveBeenCalledTimes(1), { timeout: 1800 });
+    act(() => {
+      void flushSerializedAutosave('gezel:gz-maya:about');
+    });
+    expect(api.updateGezelAbout).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId('apply-template'));
     expect(api.updateGezelAbout).toHaveBeenCalledTimes(1);
@@ -280,7 +284,10 @@ describe('GezelDetail', () => {
     await screen.findByRole('heading', { name: 'Maya' });
     fireEvent.click(screen.getByRole('tab', { name: 'About' }));
     fireEvent.click(screen.getByTestId('editor-emit'));
-    await waitFor(() => expect(api.updateGezelAbout).toHaveBeenCalledTimes(1), { timeout: 1800 });
+    act(() => {
+      void flushSerializedAutosave('gezel:gz-maya:about');
+    });
+    expect(api.updateGezelAbout).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Draft from role' }));
     expect(api.generateGezelAbout).not.toHaveBeenCalled();
@@ -375,7 +382,10 @@ describe('GezelDetail', () => {
     await screen.findByRole('heading', { name: 'Maya' });
     fireEvent.click(screen.getByRole('tab', { name: 'About' }));
     fireEvent.click(screen.getByTestId('editor-emit'));
-    await waitFor(() => expect(api.updateGezelAbout).toHaveBeenCalledTimes(1), { timeout: 1800 });
+    act(() => {
+      void flushSerializedAutosave('gezel:gz-maya:about');
+    });
+    expect(api.updateGezelAbout).toHaveBeenCalledTimes(1);
 
     rerender(<GezelDetail gezelId="gz-bob" />);
     await screen.findByRole('heading', { name: 'Bob' });
@@ -384,7 +394,10 @@ describe('GezelDetail', () => {
     });
 
     fireEvent.click(screen.getByTestId('editor-emit'));
-    await waitFor(() => expect(api.updateGezelAbout).toHaveBeenCalledTimes(2), { timeout: 1800 });
+    act(() => {
+      void flushSerializedAutosave('gezel:gz-bob:about');
+    });
+    expect(api.updateGezelAbout).toHaveBeenCalledTimes(2);
     expect(api.updateGezelAbout).toHaveBeenLastCalledWith('gz-bob', { source: 'new about' });
   });
 

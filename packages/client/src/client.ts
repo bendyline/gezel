@@ -612,8 +612,9 @@ export interface QueueStatusResponse {
   sessions: SessionQueueState[];
   /**
    * Per-provider prompt-cache stats. Empty array when no local provider
-   * has been initialized or no controller is wired. Surfaced by the
-   * EngineStatusPill popover as "warm sessions: N, cache memory: X MB".
+   * has been initialized or no controller is wired. Entries may represent
+   * chat-specific state or reusable `prefix-*` state; renderers must use the
+   * included session ids when they need to distinguish the two.
    */
   cache: ProviderCacheStatsResponse[];
   /** Latest normalized accelerator health used by the local-engine pill. */
@@ -724,6 +725,7 @@ export interface ProviderCacheStatsResponse {
   defaultBudgetBytes?: number;
   /** Physical system RAM — upper bound for the Settings budget slider. */
   systemRamBytes?: number;
+  /** All entries, including reusable `prefix-*` entries; legacy field name. */
   warmSessionCount: number;
   hits: number;
   misses: number;
@@ -2128,7 +2130,7 @@ export class GezelClient {
     return this.request('POST', '/api/cache/evict', { sessionId });
   }
 
-  /** Drop all warm sessions for a provider. Operator escape hatch. */
+  /** Drop all chat and shared-prefix cache entries for a provider. */
   clearProviderCache(provider: string): Promise<{ ok: boolean; provider: string }> {
     return this.request('POST', '/api/cache/clear', { provider });
   }
@@ -5961,8 +5963,26 @@ export class GezelClient {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}`);
   }
 
-  listProjectGitHubPullFiles(id: string, num: number): Promise<ListGitHubPullFilesResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/files`);
+  listProjectGitHubPullFiles(
+    id: string,
+    num: number,
+    opts: {
+      offset?: number;
+      limit?: number;
+      paths?: readonly string[];
+      includePatch?: boolean;
+    } = {},
+  ): Promise<ListGitHubPullFilesResponse> {
+    const params = new URLSearchParams();
+    if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts.includePatch !== undefined) params.set('includePatch', String(opts.includePatch));
+    for (const path of opts.paths ?? []) params.append('path', path);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/files${query}`,
+    );
   }
 
   listProjectGitHubPullComments(id: string, num: number): Promise<ListGitHubPullCommentsResponse> {
@@ -5972,8 +5992,20 @@ export class GezelClient {
     );
   }
 
-  getProjectGitHubPullDiff(id: string, num: number): Promise<GitHubPullDiffResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/diff`);
+  getProjectGitHubPullDiff(
+    id: string,
+    num: number,
+    opts: { offset?: number; limit?: number; path?: string } = {},
+  ): Promise<GitHubPullDiffResponse> {
+    const params = new URLSearchParams();
+    if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts.path) params.set('path', opts.path);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/diff${query}`,
+    );
   }
 
   createProjectGitHubPullComment(

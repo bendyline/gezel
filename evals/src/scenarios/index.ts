@@ -19,6 +19,7 @@ import { incidentPostmortemScenario } from './incident-postmortem.ts';
 import { indexBenchScenario } from './index-bench.ts';
 import { interfaceContractScenario } from './interface-contract.ts';
 import { jobHuntScenario } from './job-hunt.ts';
+import { largePrReviewScenario } from './large-pr-review.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
@@ -107,6 +108,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [squisqCodebaseQaScenario.id]: squisqCodebaseQaScenario,
   [selfCorrectionScenario.id]: selfCorrectionScenario,
   [squisqReviewScenario.id]: squisqReviewScenario,
+  [largePrReviewScenario.id]: largePrReviewScenario,
   // Three "push-harder" scenarios added — each exercises a
   // capability dimension the legacy trio doesn't cover: multi-file
   // planning + execution, structured-output validation, and dense

@@ -132,8 +132,12 @@ export const GitHubPullFileSchema = z.object({
   additions: z.number().int(),
   deletions: z.number().int(),
   changes: z.number().int(),
-  /** Truncated unified diff hunk, if returned by GitHub. */
+  /** Unified diff hunk, if requested and returned by GitHub. */
   patch: z.string().optional(),
+  /** Character count before Gezel's local patch budget was applied. */
+  patchChars: z.number().int().nonnegative().optional(),
+  /** True when Gezel clipped `patch`; callers must request the file/diff directly. */
+  patchTruncated: z.boolean().optional(),
   /** Prior path when `status === 'renamed'`. */
   previousFilename: z.string().optional(),
 });
@@ -141,6 +145,15 @@ export type GitHubPullFile = z.infer<typeof GitHubPullFileSchema>;
 
 export const ListGitHubPullFilesResponseSchema = z.object({
   files: z.array(GitHubPullFileSchema),
+  /** Total files in the PR before an optional path filter. */
+  allFiles: z.number().int().nonnegative().optional(),
+  /** Total files selected by the optional path filter. */
+  totalFiles: z.number().int().nonnegative().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  limit: z.number().int().positive().optional(),
+  hasMore: z.boolean().optional(),
+  nextOffset: z.number().int().nonnegative().optional(),
+  includesPatch: z.boolean().optional(),
 });
 export type ListGitHubPullFilesResponse = z.infer<typeof ListGitHubPullFilesResponseSchema>;
 
@@ -164,6 +177,13 @@ export type ListGitHubPullCommentsResponse = z.infer<typeof ListGitHubPullCommen
 export const GitHubPullDiffResponseSchema = z.object({
   number: z.number().int(),
   diff: z.string(),
+  /** Exact changed path when this is a file-scoped diff. */
+  path: z.string().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  returnedChars: z.number().int().nonnegative().optional(),
+  totalChars: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
+  nextOffset: z.number().int().nonnegative().optional(),
 });
 export type GitHubPullDiffResponse = z.infer<typeof GitHubPullDiffResponseSchema>;
 

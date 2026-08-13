@@ -1073,6 +1073,40 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain('Design');
   });
 
+  it('injects predecessor-step notes into a newly created successor session', async () => {
+    const { TaskManager } = await import('../tasks/manager.js');
+    const taskMgr = new TaskManager(store);
+    const task = await taskMgr.create('default', {
+      title: 'Pull Request Review',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        { id: 'scope', name: 'Scope the pull request' },
+        { id: 'report', name: 'Review and write the report' },
+      ],
+    });
+    await taskMgr.appendNote('default', task.num, {
+      stepId: 'scope',
+      text: '## Scope — PR #28\n\nReview https://github.com/bendyline/gezel/pull/28.',
+      author: { kind: 'gezel', gezelId: 'ada', name: 'Ada' },
+    });
+    await taskMgr.completeStep('default', task.num, 'scope');
+
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: 'report',
+    });
+    mock.script('ok');
+    await manager.send(session.id, 'continue');
+
+    const create = mock.calls.find((c) => c.kind === 'create');
+    const sys = create!.opts!.systemMessage!;
+    expect(sys).toContain('Active step: **Review and write the report**');
+    expect(sys).toContain('## Scope — PR #28');
+    expect(sys).toContain('https://github.com/bendyline/gezel/pull/28');
+  });
+
   it('anchors a paused task as blocked instead of telling the gezel to continue its step', async () => {
     const { TaskManager } = await import('../tasks/manager.js');
     const taskMgr = new TaskManager(store);

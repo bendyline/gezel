@@ -368,6 +368,16 @@ print("Model and processor loaded successfully.", flush=True)
 # never piles KV past the point where a Metal command-buffer allocation aborts
 # the whole python process. 0 = unset (no ceiling → admit on width alone).
 _MEM_LIMIT_BYTES = 0
+# The resident-set target supplied by the TS capacity broker. Keep this
+# separately from the allocation ceiling: mlx_lm's BatchGenerator currently
+# overwrites the process wired limit with Metal's full recommended working set
+# during construction, so the Gezel policy must be reapplied afterwards.
+_WIRED_LIMIT_BYTES = 0
+# MLX keeps freed Metal buffers for reuse in a process-global cache. That is
+# useful, but an unbounded pool made a ~62 GB working set retain another
+# ~45 GB until mlx_lm's coarse 512-step clear, producing a 65 -> 120 GB
+# sawtooth. This cap is intentionally distinct from the prompt/KV cache budget.
+_MLX_BUFFER_CACHE_LIMIT_BYTES = 0
 # Throttle a multi-sub wave down to serial once live allocation reaches this
 # fraction of the ceiling. Leaves headroom for the wave's own prefill/compute
 # activation buffers, which land on top of already-resident weights + KV.
@@ -407,7 +417,15 @@ def _safe_cache_memory() -> int:
         return 0
 
 
-def _log_memory(phase: str) -> None:
+def _safe_peak_memory() -> int:
+    """Peak MLX allocation in bytes, or 0 if unavailable."""
+    try:
+        return int(mx.get_peak_memory())
+    except Exception:  # noqa: BLE001 — introspection is best-effort
+        return 0
+
+
+def _log_memory(phase: str, cache_before: Optional[int] = None) -> None:
     """One line of memory truth per turn.
 
     Nothing observed this engine between startup and the next restart, so a
@@ -418,15 +436,89 @@ def _log_memory(phase: str) -> None:
     """
     active = _safe_active_memory()
     cached = _safe_cache_memory()
+    peak = _safe_peak_memory()
     if active <= 0 and cached <= 0:
         return
     mb = 1024 * 1024
     ceiling = f", ceiling={_MEM_LIMIT_BYTES // mb}MB" if _MEM_LIMIT_BYTES > 0 else ""
+    wired = f", wired_limit={_WIRED_LIMIT_BYTES // mb}MB" if _WIRED_LIMIT_BYTES > 0 else ""
+    cache_limit = (
+        f", cache_limit={_MLX_BUFFER_CACHE_LIMIT_BYTES // mb}MB"
+        if _MLX_BUFFER_CACHE_LIMIT_BYTES > 0
+        else ""
+    )
+    peak_text = f" peak={peak // mb}MB" if peak > 0 else ""
+    reclaimed_text = (
+        f" cache_before={cache_before // mb}MB"
+        if cache_before is not None and cache_before > cached
+        else ""
+    )
     print(
         f"[mem] {phase}: active={active // mb}MB cache={cached // mb}MB "
-        f"total={(active + cached) // mb}MB{ceiling}",
+        f"total={(active + cached) // mb}MB{peak_text}{reclaimed_text}"
+        f"{ceiling}{wired}{cache_limit}",
         flush=True,
     )
+
+
+def _apply_mlx_memory_policy(phase: str) -> None:
+    """Apply Gezel's process-wide MLX memory policy.
+
+    This is deliberately idempotent. In particular it is called immediately
+    after BatchGenerator construction because mlx_lm resets the wired limit in
+    its constructor. Every MLX call is guarded for older sidecar runtimes.
+    """
+    if _WIRED_LIMIT_BYTES > 0:
+        set_wired = getattr(mx, "set_wired_limit", None)
+        if set_wired is not None:
+            try:
+                set_wired(_WIRED_LIMIT_BYTES)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[mem] {phase} set_wired_limit skipped: {exc}", flush=True)
+    if _MLX_BUFFER_CACHE_LIMIT_BYTES > 0:
+        set_cache = getattr(mx, "set_cache_limit", None)
+        if set_cache is not None:
+            try:
+                set_cache(_MLX_BUFFER_CACHE_LIMIT_BYTES)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[mem] {phase} set_cache_limit skipped: {exc}", flush=True)
+
+
+def _reclaim_mlx_buffer_cache(
+    phase: str, force: bool = False, log: bool = False
+) -> bool:
+    """Release MLX's free-buffer pool at a safe boundary or under pressure.
+
+    Active allocations (model weights and live KV state) are untouched.
+    `force` is used once a batch turn is fully drained; during generation we
+    clear only when total MLX memory crosses the admission threshold or the
+    runtime has temporarily exceeded the configured free-buffer cap.
+    """
+    active = _safe_active_memory()
+    cached = _safe_cache_memory()
+    under_pressure = (
+        _MEM_LIMIT_BYTES > 0
+        and active + cached >= _MEM_LIMIT_BYTES * _MEM_ADMIT_FRACTION
+    )
+    over_cache_limit = (
+        _MLX_BUFFER_CACHE_LIMIT_BYTES > 0
+        and cached > _MLX_BUFFER_CACHE_LIMIT_BYTES
+    )
+    reclaimed = False
+    if force or under_pressure or over_cache_limit:
+        clear_cache = getattr(mx, "clear_cache", None)
+        if clear_cache is not None:
+            try:
+                clear_cache()
+                reclaimed = True
+            except Exception as exc:  # noqa: BLE001
+                print(f"[mem] {phase} clear_cache skipped: {exc}", flush=True)
+    # Turn boundaries and actual pressure events are useful telemetry. A
+    # healthy periodic probe should stay silent instead of writing one line
+    # every 32 decode steps.
+    if log or force or under_pressure or over_cache_limit:
+        _log_memory(phase, cache_before=cached if reclaimed else None)
+    return reclaimed
 
 
 def _setup_gpu_memory_ceiling() -> None:
@@ -445,31 +537,42 @@ def _setup_gpu_memory_ceiling() -> None:
     resident, not what the engine is allowed to allocate. Falls back to the
     ceiling only when the supervisor passed no plan (unreadable geometry).
     """
-    global _MEM_LIMIT_BYTES
+    global _MEM_LIMIT_BYTES, _WIRED_LIMIT_BYTES, _MLX_BUFFER_CACHE_LIMIT_BYTES
     recommended = _metal_recommended_working_set()
     arg_limit = max(0, int(getattr(ARGS, "gpu_memory_limit_mb", 0) or 0)) * 1024 * 1024
     candidates = [b for b in (recommended, arg_limit) if b > 0]
     _MEM_LIMIT_BYTES = min(candidates) if candidates else 0
     planned = max(0, int(getattr(ARGS, "wired_limit_mb", 0) or 0)) * 1024 * 1024
-    wired_target = min(planned, _MEM_LIMIT_BYTES) if planned > 0 else _MEM_LIMIT_BYTES
-    # Wire the resident set so it isn't paged out under pressure — Apple's
-    # recommended setting for steady-state inference. Guarded: harmless to
-    # skip if the call is missing or rejects the value.
-    if wired_target > 0:
-        set_wired = getattr(mx, "set_wired_limit", None)
-        if set_wired is not None:
-            try:
-                set_wired(wired_target)
-            except Exception as exc:  # noqa: BLE001
-                print(f"[mem] set_wired_limit skipped: {exc}", flush=True)
+    _WIRED_LIMIT_BYTES = (
+        min(planned, _MEM_LIMIT_BYTES)
+        if planned > 0 and _MEM_LIMIT_BYTES > 0
+        else planned or _MEM_LIMIT_BYTES
+    )
+    # Retain a small amount of free Metal storage for fast reuse, scaled to
+    # the planned working set but never allowed to become a second model-sized
+    # pool. Current 27B geometry resolves to just under 4 GB.
+    cache_scale = _WIRED_LIMIT_BYTES or _MEM_LIMIT_BYTES
+    if cache_scale > 0:
+        _MLX_BUFFER_CACHE_LIMIT_BYTES = max(
+            256 * 1024 * 1024,
+            min(4 * 1024 * 1024 * 1024, cache_scale // 16),
+        )
+    else:
+        _MLX_BUFFER_CACHE_LIMIT_BYTES = 1024 * 1024 * 1024
+    _apply_mlx_memory_policy("startup")
     print(
         f"[mem] gpu ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB "
         f"(budget={arg_limit // (1024 * 1024)}MB, "
         f"metal_recommended={recommended // (1024 * 1024)}MB, "
-        f"wired={wired_target // (1024 * 1024)}MB, "
+        f"wired={_WIRED_LIMIT_BYTES // (1024 * 1024)}MB, "
+        f"buffer_cache_limit={_MLX_BUFFER_CACHE_LIMIT_BYTES // (1024 * 1024)}MB, "
         f"active={_safe_active_memory() // (1024 * 1024)}MB)",
         flush=True,
     )
+    # Model loading happened before this policy was known. Drop any free
+    # compilation/loading buffers it left behind so the first turn starts from
+    # the same bounded baseline as every later turn.
+    _reclaim_mlx_buffer_cache("startup-ready", force=True)
 
 
 _setup_gpu_memory_ceiling()
@@ -981,6 +1084,10 @@ class BatchEngine:
             prefill_batch_size=self._max,
             prefill_step_size=ARGS.prefill_step_size,
         )
+        # mlx_lm BatchGenerator sets the wired limit to Metal's entire
+        # recommended working set in its constructor. Restore the smaller
+        # resident-set plan and free-buffer cap selected by Gezel.
+        _apply_mlx_memory_policy("batch-init")
         self._subs = {}            # uid -> _Sub
         self._pending = []         # _Sub awaiting insert
         self._wake = asyncio.Event()
@@ -1004,6 +1111,7 @@ class BatchEngine:
         self._prefill_total = 0      # new tokens the active wave is prefilling
         self._prefill_done = {}      # uid → tokens prefilled so far (this wave)
         self._last_prefill_emit = 0.0
+        self._memory_check_steps = 0
         print(
             f"[batch] engine ready max_concurrency={self._max} "
             f"stop_tokens={len(stop_tokens)} (+{len(eos_from_cfg)} from generation_config"
@@ -1017,6 +1125,10 @@ class BatchEngine:
             self._worker = asyncio.ensure_future(self._run())
         self._pending.append(sub)
         self._wake.set()
+
+    def is_idle(self):
+        """True once no live or queued batch sub can still use scratch buffers."""
+        return not self._subs and not self._pending
 
     def _sampler_for(self, request):
         from mlx_lm.sample_utils import make_sampler
@@ -1138,10 +1250,7 @@ class BatchEngine:
         if active >= threshold:
             # Already tight before this wave even starts — reclaim any freed
             # buffer cache and re-check once before forcing serial.
-            try:
-                mx.clear_cache()
-            except Exception:  # noqa: BLE001
-                pass
+            _reclaim_mlx_buffer_cache("batch-admission", force=True)
             active = _safe_active_memory()
         return 1 if active >= threshold else pending
 
@@ -1244,6 +1353,14 @@ class BatchEngine:
                         sub.queue.put_nowait(("err", str(exc)))
                     self._subs.clear()
                     continue
+                # set_cache_limit bounds future reuse, while this periodic
+                # pressure check also catches temporary overshoot during a
+                # long prefill/decode. It replaces reliance on mlx_lm's much
+                # coarser 512-generation-step cache clear.
+                self._memory_check_steps += 1
+                if self._memory_check_steps >= 32:
+                    self._memory_check_steps = 0
+                    _reclaim_mlx_buffer_cache("batch-pressure")
                 for pr in prompt_responses:
                     progress = getattr(pr, "progress", None)
                     has_progress = isinstance(progress, tuple) and len(progress) == 2
@@ -1499,6 +1616,12 @@ async def _batched_stream_iter(sub: "_Sub"):
         # Release the eviction pins taken for this turn's cache + prefix.
         _unmark_inflight(sub.pinned_cache_ids)
         sub.pinned_cache_ids = []
+        engine = _BATCH_ENGINE
+        _reclaim_mlx_buffer_cache(
+            "batch-turn-end",
+            force=engine is None or engine.is_idle(),
+            log=True,
+        )
 
 
 async def _await_batched_completion(sub: "_Sub") -> None:
@@ -1520,6 +1643,12 @@ async def _await_batched_completion(sub: "_Sub") -> None:
             sub.cancelled = True
         _unmark_inflight(sub.pinned_cache_ids)
         sub.pinned_cache_ids = []
+        engine = _BATCH_ENGINE
+        _reclaim_mlx_buffer_cache(
+            "batch-warm-end",
+            force=engine is None or engine.is_idle(),
+            log=True,
+        )
 
 
 _BATCH_ENGINE: "Optional[BatchEngine]" = None
@@ -2440,13 +2569,16 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                         flush=True,
                     )
             else:
-                mx.clear_cache()
-                print("Stream finished, cleared cache.", flush=True)
+                print("Stream finished without a prompt-cache save.", flush=True)
             # Release the eviction pins taken for this turn — AFTER the save
             # above, so this turn's own _save_cache → _enforce_budget can't
             # evict the entry it just wrote.
             _unmark_inflight(pinned_cache_ids)
-            _log_memory("turn-end")
+            # Agentic tool loops issue multiple HTTP sub-turns inside one user
+            # turn. Reclaim scratch buffers at every one of those boundaries,
+            # including the cache-preserving path above; prompt KV remains an
+            # active allocation and is not touched by clear_cache().
+            _reclaim_mlx_buffer_cache("turn-end", force=True, log=True)
 
     return StreamingResponse(
         stream_iter(),
