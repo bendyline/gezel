@@ -35,7 +35,7 @@ export class NodePtyUnavailableError extends Error {
 
   constructor(cause: unknown) {
     super(
-      'Interactive terminal support is unavailable because the optional node-pty runtime could not be loaded. Reinstall Gezel with optional dependencies enabled.',
+      'Interactive terminal support requires node-pty, but it is not installed or could not be loaded. Install it alongside Gezel, then retry: npm install node-pty',
       { cause },
     );
     this.name = 'NodePtyUnavailableError';

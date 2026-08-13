@@ -10,9 +10,9 @@
  *   1. A missing runtime dependency. It resolves in the workspace because
  *      some sibling hoisted it; it is absent in a consumer's tree.
  *   2. A native/prebuild install failure. `@bendyline/gezel-service` pulls
- *      optional node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and
- *      playwright-core. The heavyweight Transformers/Kokoro stack is an
- *      optional peer for npm consumers and is tested in complete bundles.
+ *      @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and playwright-core.
+ *      node-pty and the heavyweight Transformers/Kokoro stack are optional
+ *      peers for npm consumers and are tested separately in complete bundles.
  *
  * So: pnpm pack (which resolves `workspace:*`), then `npm install` into an
  * empty non-workspace directory, then exercise it.
@@ -213,7 +213,15 @@ try {
     fail(`npm install of the tarballs failed\n${install.stdout}\n${install.stderr}`);
     throw new Error('cannot continue without a successful install');
   }
-  ok('npm install succeeded (including the native prebuild chain)');
+  const installOutput = `${install.stdout}\n${install.stderr}`;
+  const installedNodePty = join(consumer, 'node_modules', 'node-pty', 'package.json');
+  if (existsSync(installedNodePty)) {
+    fail('npm unexpectedly auto-installed the optional node-pty peer');
+  } else if (/node-pty/i.test(installOutput)) {
+    fail(`default npm install mentioned node-pty\n${installOutput}`);
+  } else {
+    ok('npm install succeeded without installing or warning about node-pty');
+  }
 
   const installedBytes = logicalTreeBytes(join(consumer, 'node_modules'));
   const installedMiB = installedBytes / 1024 / 1024;
@@ -285,30 +293,9 @@ try {
     else ok(`gezel ${args.join(' ')}`);
   }
 
-  // ── 6. Boot the installed daemon and drive one chat turn ───────────────
+  // ── 6. Default install: boot without the optional PTY peer ─────────────
   if (process.env.GEZEL_CONSUMER_SKIP_DAEMON === '1') {
-    step('daemon smoke (skipped via GEZEL_CONSUMER_SKIP_DAEMON=1)');
-  } else {
-    step('booting the installed daemon');
-    await daemonSmoke(consumer);
-  }
-
-  // ── 7. Omit just the optional PTY runtime ──────────────────────────────
-  // Dynamic import is only half the contract. Simulate npm's allowed outcome
-  // when this ONE optional native package fails to install, then prove the
-  // daemon still boots and the first terminal command returns a stable
-  // capability error rather than taking down gezeld.
-  //
-  // Do not use `npm install --omit=optional`: packages such as
-  // @napi-rs/keyring publish their required per-platform native binding as an
-  // optional dependency too, so that flag deliberately creates a daemon with
-  // several unrelated native capabilities removed. This targeted deletion is
-  // the exact tree shape produced by a node-pty-only optional install failure.
-  step('simulating an omitted optional node-pty and rechecking the daemon');
-  rmSync(join(consumer, 'node_modules', 'node-pty'), { recursive: true, force: true });
-  if (existsSync(join(consumer, 'node_modules', 'node-pty', 'package.json'))) {
-    fail('could not remove node-pty from the temporary packed consumer');
-  } else if (process.env.GEZEL_CONSUMER_SKIP_DAEMON === '1') {
+    step('daemon smoke without node-pty (skipped via GEZEL_CONSUMER_SKIP_DAEMON=1)');
     const probe = run(
       process.execPath,
       ['--input-type=module', '-e', "await import('@bendyline/gezel-service')"],
@@ -317,8 +304,33 @@ try {
     if (probe.status !== 0) fail(`service import without node-pty failed\n${probe.stderr}`);
     else ok('service imports without node-pty');
   } else {
-    ok('removed only node-pty from the temporary packed consumer');
+    step('booting the default install without node-pty');
     await daemonSmoke(consumer, { pty: 'unavailable' });
+  }
+
+  // ── 7. Explicit terminal opt-in ────────────────────────────────────────
+  // Optional peers are never auto-installed by npm. Prove the instruction in
+  // the terminal error is sufficient: install node-pty beside Gezel and then
+  // exercise the real terminal path through the same packed daemon.
+  step('installing the optional terminal peer explicitly');
+  const ptyInstall = runPackageManager(
+    'npm',
+    ['install', '--no-save', '--no-audit', '--no-fund', 'node-pty@^1.1.0'],
+    { cwd: consumer },
+  );
+  if (ptyInstall.status !== 0) {
+    fail(`explicit npm install node-pty failed\n${ptyInstall.stdout}\n${ptyInstall.stderr}`);
+    throw new Error('cannot continue without the explicit terminal peer');
+  }
+  if (!existsSync(installedNodePty)) {
+    fail('npm install node-pty succeeded but the package is absent');
+  } else {
+    ok('npm install node-pty supplied the optional terminal peer');
+  }
+
+  if (process.env.GEZEL_CONSUMER_SKIP_DAEMON !== '1') {
+    step('restarting the installed daemon with node-pty');
+    await daemonSmoke(consumer, { pty: 'available' });
   }
 } finally {
   if (keep) console.log(`\nleft the consumer project at ${root}`);
@@ -333,11 +345,10 @@ console.log('\npacked-consumer checks passed');
 
 /**
  * The end-to-end proof: the daemon a consumer installed from npm actually
- * boots, serves its API, and creates a gezel. With the default options it also
- * runs a macOS terminal command through the installed node-pty. The optional
- * runtime pass instead proves the daemon stays healthy and returns a stable
- * terminal-unavailable result when node-pty was omitted. Uses the mock
- * provider so no credentials and no network are involved.
+ * boots, serves its API, and creates a gezel. The default npm install proves
+ * the daemon stays healthy and returns an actionable terminal-unavailable
+ * result without node-pty. The explicit opt-in pass runs a real PTY command on
+ * macOS. Uses the mock provider so no credentials and no network are involved.
  */
 async function daemonSmoke(consumerDir, opts = {}) {
   const pty = opts.pty ?? 'available';
@@ -422,9 +433,9 @@ async function daemonSmoke(consumerDir, opts = {}) {
       if (
         terminalOutput?.exitCode === -1 &&
         terminalOutput.errorMessage === 'shell-failed' &&
-        /optional node-pty runtime could not be loaded/i.test(terminalOutput.content)
+        /npm install node-pty/i.test(terminalOutput.content)
       ) {
-        ok('terminal reports optional node-pty is unavailable without crashing the daemon');
+        ok('terminal gives npm install instructions without crashing the daemon');
       } else {
         fail(`missing-node-pty terminal result was not stable\n${JSON.stringify(terminalOutput)}`);
       }

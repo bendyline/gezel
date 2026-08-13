@@ -86,8 +86,8 @@ async function main() {
     label: 'build-service-bundle',
   });
 
-  // Public npm consumers opt into the large local-ML stack. Installer builds
-  // remain full-featured by merging the private deployment-only package.
+  // Public npm consumers opt into native/large optional peers. Installer
+  // builds remain full-featured by merging the private deployment-only package.
   await deployMlRuntime(repoRoot, target, 'build-service-bundle');
 
   const gezeldBin = join(target, 'dist', 'bin', 'gezeld.js');
@@ -188,11 +188,11 @@ async function verifyBundleRuntime(root) {
     { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
 
-  // node-pty is optional for public npm consumers and dynamically imported on
-  // the first terminal command. Complete app bundles are not optional-feature
-  // installs: the desktop terminal must be present. Import the deployed module
-  // explicitly so an optional native install failure cannot pass the now-lazy
-  // service-entry check and silently ship a terminal-less application.
+  // node-pty is an optional peer for public npm consumers and dynamically
+  // imported on the first terminal command. Complete app bundles are not
+  // optional-feature installs: the desktop terminal must be present. Import
+  // the deployed module explicitly so the deployment-only merge cannot
+  // silently ship a terminal-less application.
   const nodePtyUrl = pathToFileURL(join(root, 'node_modules', 'node-pty', 'lib', 'index.js')).href;
   await exec(
     process.execPath,

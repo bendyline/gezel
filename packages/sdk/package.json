@@ -3,14 +3,7 @@
   "version": "1.0.1",
   "description": "SDK imported by scripts running in the Gezel sandbox. Exposes the `gezel` object and `defineScript` helper.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "sdk",
-    "extensions"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "extensions"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -54,10 +47,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "!dist/**/*.map"
-  ],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

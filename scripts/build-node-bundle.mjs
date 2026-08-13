@@ -80,7 +80,7 @@ async function main() {
   });
 
   // Like the Electron artifact, the relocatable Node bundle is a complete
-  // distribution even though the public service package keeps ML optional.
+  // distribution even though the public service package uses optional peers.
   await deployMlRuntime(repoRoot, target, 'build-node-bundle');
 
   // Verify the three things that make this bundle actually runnable.
@@ -150,10 +150,10 @@ async function main() {
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 
-  // Public npm installs may omit node-pty; this complete relocatable bundle
-  // must not. The service now imports it lazily, so exercise the deployed
-  // native module explicitly or an optional-install failure would stay hidden
-  // until a user ran their first terminal command.
+  // Public npm installs do not receive the optional node-pty peer; this
+  // complete relocatable bundle must. The service imports it lazily, so
+  // exercise the deployed native module explicitly or a deployment-only merge
+  // failure would stay hidden until a user ran their first terminal command.
   const nodePtyUrl = pathToFileURL(
     join(target, 'node_modules', 'node-pty', 'lib', 'index.js'),
   ).href;

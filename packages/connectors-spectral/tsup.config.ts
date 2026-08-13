@@ -1,5 +1,11 @@
 import { defineConfig } from 'tsup';
 
+const prismaticLegalBanner = `/*!
+ * Includes modified portions of prismatic-io/components, licensed under
+ * Apache-2.0 and modified by Bendyline for off-platform use in Gezel.
+ * See ../NOTICE.md and ../THIRD_PARTY_LICENSES/Apache-2.0.txt.
+ */`;
+
 export default defineConfig({
   entry: ['src/index.ts', 'src/run-action.ts'],
   format: ['cjs'],
@@ -9,6 +15,10 @@ export default defineConfig({
   // types out of the vendored components' transitive axios, which is not
   // portable.
   clean: true,
+  // Apache-2.0 section 4(b) requires the modified object-form files we ship
+  // to carry a prominent change notice. Put it in every compiled entry point;
+  // NOTICE.md carries the detailed per-component provenance.
+  banner: { js: prismaticLegalBanner },
   // Bundle the vendored components + shims; keep spectral external (resolved
   // from this package's own node_modules at runtime).
   external: ['@prismatic-io/spectral'],

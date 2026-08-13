@@ -174,6 +174,13 @@ external data sources into a project. Two upstreams are involved:
   likewise derives connector authentication config from this same Apache-2.0
   source.
 
+  The standalone npm package distributes its own `NOTICE.md`, the full
+  Apache-2.0 text under `THIRD_PARTY_LICENSES/`, and the machine-readable
+  `vendor/provenance.json` ledger. Both compiled entry points carry a prominent
+  banner identifying the modified Apache-derived portions. The npm legal-payload
+  gate packs the package and rejects a release if any of those files or banners
+  is missing.
+
 Component read-slices vendored so far:
 
 | Component | Upstream | License |

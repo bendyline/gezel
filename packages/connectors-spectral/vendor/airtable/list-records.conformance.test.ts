@@ -52,7 +52,7 @@ const recorded = JSON.parse(
   ),
 ) as { responses: unknown[] };
 
-describe('airtable/listRecords conformance (pinned spectral 10.17.1)', () => {
+describe('airtable/listRecords conformance (pinned spectral 10.23.0)', () => {
   beforeEach(() => {
     hoisted.clientConfig = undefined;
     hoisted.requests = [];

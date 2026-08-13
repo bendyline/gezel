@@ -16,9 +16,11 @@ import { loadPublishedPackages } from './_packages';
 const service = loadPublishedPackages().find((pkg) => pkg.name === '@bendyline/gezel-service')!;
 
 describe('optional service runtimes', () => {
-  it('declares node-pty as optional rather than a hard runtime dependency', () => {
+  it('declares node-pty as an optional peer rather than an installed dependency', () => {
     expect(service.pkg.dependencies?.['node-pty']).toBeUndefined();
-    expect(service.pkg.optionalDependencies?.['node-pty']).toBe('^1.1.0');
+    expect(service.pkg.optionalDependencies?.['node-pty']).toBeUndefined();
+    expect(service.pkg.peerDependencies?.['node-pty']).toBe('^1.1.0');
+    expect(service.pkg.peerDependenciesMeta?.['node-pty']).toEqual({ optional: true });
   });
 
   it('imports the built service module without resolving node-pty', () => {

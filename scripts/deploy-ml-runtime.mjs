@@ -44,9 +44,9 @@ export async function mergeNodeModules(sourceModules, targetModules) {
 }
 
 /**
- * Merge the deployment-only Transformers/Kokoro graph into a full runtime
- * bundle. Public npm packages intentionally expose these as optional peers;
- * desktop and relocatable-node artifacts remain full-featured.
+ * Merge the deployment-only optional runtime graph into a full bundle. Public
+ * npm packages intentionally expose Transformers, Kokoro, and node-pty as
+ * optional peers; desktop and relocatable-node artifacts remain full-featured.
  */
 export async function deployMlRuntime(repoRoot, target, label) {
   const staging = await mkdtemp(join(tmpdir(), 'gezel-ml-runtime-'));
@@ -65,6 +65,7 @@ export async function deployMlRuntime(repoRoot, target, label) {
     for (const relative of [
       ['@huggingface', 'transformers', 'package.json'],
       ['kokoro-js', 'package.json'],
+      ['node-pty', 'package.json'],
       ['onnxruntime-node', 'package.json'],
     ]) {
       const expected = join(targetModules, ...relative);
