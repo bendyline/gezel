@@ -1,1 +1,3 @@
+## @bendyline/gezel-plugin-sdk [1.0.1](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-plugin-sdk%401.0.0...%40bendyline%2Fgezel-plugin-sdk%401.0.1) (2026-08-13)
+
 ## @bendyline/gezel-plugin-sdk 1.0.0 (2026-08-12)
