@@ -51,7 +51,7 @@ export * from './thread-title.js';
  * The package version is embedded into health responses and logs so clients
  * can surface it in the UI.
  */
-export const GEZEL_VERSION = '0.0.0';
+export const GEZEL_VERSION = '1.0.1';
 
 /**
  * The date-based line this build sits on, for content compatibility only.
@@ -73,7 +73,7 @@ export const GEZEL_VERSION = '0.0.0';
  * build and never gates. Keep it out of anything user-facing —
  * `GEZEL_VERSION` is what `gezel --version` and `/api/health` report.
  */
-export const GEZEL_CONTENT_COMPAT = '0.0.0';
+export const GEZEL_CONTENT_COMPAT = '1.26225';
 
 /**
  * Default ISO-timestamp helper so every package produces the same shape.
