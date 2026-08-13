@@ -123,11 +123,7 @@ function auditTarballArchive(tarball) {
     sync: true,
     onReadEntry(entry) {
       const path = entry.path.replaceAll('\\', '/');
-      if (
-        !path.startsWith('package/') ||
-        path.startsWith('/') ||
-        path.split('/').includes('..')
-      ) {
+      if (!path.startsWith('package/') || path.startsWith('/') || path.split('/').includes('..')) {
         fail(`${basename(tarball)} contains an unsafe archive path: ${JSON.stringify(path)}`);
       }
       if (!['File', 'Directory'].includes(entry.type)) {
@@ -140,7 +136,8 @@ function auditTarballArchive(tarball) {
   });
 }
 
-const SENSITIVE_PATH = /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.yarnrc|id_(?:rsa|dsa|ecdsa|ed25519)|credentials?(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|jks|keystore|key))(?:$|\/)/i;
+const SENSITIVE_PATH =
+  /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.yarnrc|id_(?:rsa|dsa|ecdsa|ed25519)|credentials?(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|jks|keystore|key))(?:$|\/)/i;
 const SECRET_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\bAKIA[0-9A-Z]{16}\b/,
