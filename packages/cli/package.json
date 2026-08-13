@@ -3,15 +3,7 @@
   "version": "1.0.2",
   "description": "The `gezel` command-line tool.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "cli",
-    "terminal",
-    "tui"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -39,10 +31,7 @@
   "exports": {
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "!dist/**/*.map"
-  ],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

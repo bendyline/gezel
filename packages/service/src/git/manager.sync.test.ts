@@ -12,8 +12,10 @@ import { GitManager } from './manager.js';
 
 // Each case builds a real bare remote, shared clone, worktree, and colleague
 // clone. They finish quickly in isolation, but their many git subprocesses can
-// be starved past the integration pool's 10s default during the full suite.
-vi.setConfig({ testTimeout: 30_000 });
+// be starved past the integration pool's 30s default during the full suite.
+// Keep the extra headroom local to this process-heavy suite instead of relaxing
+// the timeout for every integration test.
+vi.setConfig({ testTimeout: 60_000 });
 
 /**
  * Real-git integration tests for the changes / sync / merge surface. A
