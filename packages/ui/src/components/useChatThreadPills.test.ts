@@ -27,7 +27,7 @@ function run(input: {
   inflight?: string[];
   errored?: Array<[string, string]>;
   pinnedSessionId?: string;
-  suppressedTaskRefs?: string[];
+  groupedTaskRefs?: string[];
 }) {
   return selectThreadPills({
     sessions: input.sessions,
@@ -35,7 +35,7 @@ function run(input: {
     errored: new Map(input.errored ?? []),
     now: NOW,
     ...(input.pinnedSessionId ? { pinnedSessionId: input.pinnedSessionId } : {}),
-    ...(input.suppressedTaskRefs ? { suppressedTaskRefs: new Set(input.suppressedTaskRefs) } : {}),
+    ...(input.groupedTaskRefs ? { groupedTaskRefs: new Set(input.groupedTaskRefs) } : {}),
   });
 }
 
@@ -57,6 +57,13 @@ describe('selectThreadPills recency', () => {
       ],
     });
     expect(ids(pills)).toEqual(['edge']);
+  });
+
+  it('always keeps the newest independent thread even after the recency window', () => {
+    const { pills } = run({
+      sessions: [session('last-independent', 30 * 24 * HOUR)],
+    });
+    expect(ids(pills)).toEqual(['last-independent']);
   });
 
   it('keeps ancient threads that are streaming or errored — state beats recency', () => {
@@ -140,24 +147,50 @@ describe('selectThreadPills cap and overflow', () => {
     expect(ids(pills)).toContain('pinned');
     expect(ids(overflow)).not.toContain('pinned');
   });
+
+  it('keeps the newest independent thread inline past the cap', () => {
+    const sessions = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        session(`task-${i}`, (i + 1) * 60_000, { taskRef: `p1/${i + 1}` }),
+      ),
+      session('independent', 2 * HOUR),
+    ];
+    const { pills, overflow } = run({ sessions });
+    expect(ids(pills)).toContain('independent');
+    expect(ids(overflow)).not.toContain('independent');
+  });
 });
 
-describe('selectThreadPills task de-duplication', () => {
-  it('suppresses an idle thread whose task already has a pill', () => {
-    const { pills } = run({
+describe('selectThreadPills task grouping', () => {
+  it('groups an idle thread into its task instead of returning a second pill', () => {
+    const { pills, taskPills } = run({
       sessions: [session('t', 1 * HOUR, { taskRef: 'p1/4' })],
-      suppressedTaskRefs: ['p1/4'],
+      groupedTaskRefs: ['p1/4'],
     });
     expect(pills).toEqual([]);
+    expect(taskPills.get('p1/4')?.sessionId).toBe('t');
   });
 
-  it('keeps that thread when it is streaming — the state is what the task pill cannot show', () => {
-    const { pills } = run({
+  it('keeps streaming state on the unified task pill without returning a second pill', () => {
+    const { pills, taskPills } = run({
       sessions: [session('t', 1 * HOUR, { taskRef: 'p1/4' })],
       inflight: ['t'],
-      suppressedTaskRefs: ['p1/4'],
+      groupedTaskRefs: ['p1/4'],
     });
-    expect(ids(pills)).toEqual(['t']);
+    expect(pills).toEqual([]);
+    expect(taskPills.get('p1/4')).toMatchObject({ sessionId: 't', state: 'inflight' });
+  });
+
+  it('uses the newest non-archived chat for each task', () => {
+    const { taskPills } = run({
+      sessions: [
+        session('new', 1 * HOUR, { taskRef: 'p1/4' }),
+        session('archived-newer', 30_000, { taskRef: 'p1/4', archived: true }),
+        session('old', 2 * HOUR, { taskRef: 'p1/4' }),
+      ],
+      groupedTaskRefs: ['p1/4'],
+    });
+    expect(taskPills.get('p1/4')?.sessionId).toBe('new');
   });
 });
 

@@ -1,4 +1,4 @@
-import type { GezelSummary, Task, TaskNote } from '@bendyline/gezel';
+import type { GezelSummary, Task, TaskNote, TaskStatus } from '@bendyline/gezel';
 import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
@@ -204,6 +204,7 @@ export function ChatReferences({
   chatKey,
   skillsProjectId,
   compact = false,
+  onTaskChanged,
   banner,
   children,
 }: {
@@ -229,6 +230,11 @@ export function ChatReferences({
    * Chat, Task, Skills, and References become full-width tabs instead.
    */
   compact?: boolean;
+  /**
+   * Reports task mutations made from the compact rail card. Project chat
+   * uses this to refresh its active-task chips immediately.
+   */
+  onTaskChanged?: (task: Task) => void;
   /**
    * Optional full-width band above both panes (the project chat's pill
    * row). It gets the same reference API as `children` because focusing a
@@ -667,6 +673,7 @@ export function ChatReferences({
               <TaskRailCard
                 key={effectiveTaskRef}
                 taskRef={effectiveTaskRef}
+                onTaskChanged={onTaskChanged}
                 onOpenTask={(ref) =>
                   window.dispatchEvent(
                     new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -817,6 +824,7 @@ export function ChatReferences({
                   <TaskRailCard
                     key={effectiveTaskRef}
                     taskRef={effectiveTaskRef}
+                    onTaskChanged={onTaskChanged}
                     onOpenTask={(ref) =>
                       window.dispatchEvent(
                         new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -864,15 +872,19 @@ export function ChatReferences({
 function TaskRailCard({
   taskRef,
   onOpenTask,
+  onTaskChanged,
 }: {
   taskRef: string;
   onOpenTask?: (ref: string) => void;
+  onTaskChanged?: (task: Task) => void;
 }) {
   const [task, setTask] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [notes, setNotes] = useState<TaskNote[]>([]);
   const [notesState, setNotesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -893,6 +905,7 @@ function TaskRailCard({
     let cancelled = false;
     setLoaded(false);
     setTask(null);
+    setStatusError(null);
     api
       .getTaskByRef(taskRef)
       .then((t) => {
@@ -950,14 +963,74 @@ function TaskRailCard({
   const legacyTitleMatch = /^(.*) — \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(task.title);
   const legacyGeneratedTitle = cb && legacyTitleMatch?.[1] === cb.id;
   const displayTitle = legacyGeneratedTitle ? cb.name : task.title;
+  const statusOptions: Array<Exclude<TaskStatus, 'draft'>> =
+    task.origin?.kind === 'system-job'
+      ? ['active', 'paused']
+      : ['active', 'paused', 'complete', 'canceled'];
+  const changeStatus = async (status: Exclude<TaskStatus, 'draft'>) => {
+    if (status === task.status || statusBusy) return;
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      const updated = await api.setTaskStatus(task.projectId, task.num, status);
+      setTask(updated);
+      onTaskChanged?.(updated);
+    } catch (err) {
+      setStatusError((err as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  };
   return (
     <div className="chat-rail-task">
       <div className="chat-rail-task-topbar">
         <header className="chat-rail-task-header">
           <code className="chat-rail-task-ref">{task.ref}</code>
-          <span className={`chat-rail-task-status chat-rail-task-status-${task.status}`}>
-            {task.status}
-          </span>
+          {task.status === 'draft' ? (
+            <span className="chat-rail-task-status chat-rail-task-status-draft">draft</span>
+          ) : (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className={`chat-rail-task-status chat-rail-task-status-trigger chat-rail-task-status-${task.status}`}
+                  disabled={statusBusy}
+                  aria-label={`Task status: ${taskStatusLabel(task.status)}. Change status`}
+                  aria-busy={statusBusy}
+                >
+                  <span>{taskStatusLabel(task.status)}</span>
+                  <DropdownChevron />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="app-nav-menu chat-rail-task-status-menu"
+                  align="start"
+                  sideOffset={4}
+                >
+                  {statusOptions.map((status) => {
+                    const current = status === task.status;
+                    return (
+                      <DropdownMenu.Item
+                        key={status}
+                        className={`app-nav-menu-item chat-rail-task-status-option${current ? ' is-current' : ''}`}
+                        disabled={current || statusBusy}
+                        aria-current={current ? 'true' : undefined}
+                        onSelect={() => void changeStatus(status)}
+                      >
+                        <span
+                          className={`task-status-dot task-status-${status}`}
+                          aria-hidden="true"
+                        />
+                        <span>{taskStatusLabel(status)}</span>
+                        {current && <span className="sr-only"> (current)</span>}
+                      </DropdownMenu.Item>
+                    );
+                  })}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
         </header>
         <button
           type="button"
@@ -967,6 +1040,11 @@ function TaskRailCard({
           Open full task
         </button>
       </div>
+      {statusError && (
+        <p className="error small chat-rail-task-status-error" role="alert">
+          Couldn't change task status: {statusError}
+        </p>
+      )}
       <h4 className="chat-rail-task-title">{displayTitle}</h4>
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
@@ -1037,6 +1115,10 @@ function TaskRailCard({
       </section>
     </div>
   );
+}
+
+function taskStatusLabel(status: TaskStatus): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function formatTaskNoteTime(at: string): string {

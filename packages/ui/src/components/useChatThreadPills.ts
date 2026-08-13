@@ -94,10 +94,11 @@ function applyLatestMessage(
  * where the inline list stops. Split out from the hook so the rules are
  * testable without a DOM or a fake clock.
  *
- * `suppressedTaskRefs` carries the task refs that already have their own
- * task pill on the row. An *idle* thread for such a task is redundant with
- * that pill, so it's dropped — but a streaming or failed one is kept,
- * because that state is exactly what the task pill can't show.
+ * `groupedTaskRefs` carries the active tasks that own a unified task/chat
+ * pill on the row. Their newest non-archived thread is returned through
+ * `taskPills` and never appears as a separate thread pill, regardless of
+ * state. The newest independent thread is always retained, even after the
+ * ordinary recency window, so the bar keeps one route back to unscoped chat.
  */
 export function selectThreadPills(input: {
   sessions: ChatSessionSummary[];
@@ -105,33 +106,41 @@ export function selectThreadPills(input: {
   errored: ReadonlyMap<string, string>;
   now: number;
   pinnedSessionId?: string | undefined;
-  suppressedTaskRefs?: ReadonlySet<string>;
+  groupedTaskRefs?: ReadonlySet<string>;
   maxInline?: number;
-}): { pills: ThreadPill[]; overflow: ThreadPill[] } {
+}): {
+  pills: ThreadPill[];
+  overflow: ThreadPill[];
+  taskPills: ReadonlyMap<string, ThreadPill>;
+} {
   const {
     sessions,
     inflight,
     errored,
     now,
     pinnedSessionId,
-    suppressedTaskRefs,
+    groupedTaskRefs,
     maxInline = MAX_INLINE_THREAD_PILLS,
   } = input;
 
   const candidates: ThreadPill[] = [];
+  const taskPills = new Map<string, ThreadPill>();
+  const latestIndependentSessionId = sessions
+    .filter((session) => !session.archived && !session.taskRef)
+    .reduce<ChatSessionSummary | null>((latest, session) => {
+      if (!latest || activityMs(session.lastActivityAt) > activityMs(latest.lastActivityAt)) {
+        return session;
+      }
+      return latest;
+    }, null)?.id;
+
   for (const s of sessions) {
     if (s.archived) continue;
 
     const error = errored.get(s.id) ?? s.lastTurnError;
     const state: ThreadPillState = inflight.has(s.id) ? 'inflight' : error ? 'errored' : 'idle';
 
-    const pinned = pinnedSessionId !== undefined && s.id === pinnedSessionId;
-    if (state === 'idle' && !pinned) {
-      if (now - activityMs(s.lastActivityAt) > RECENT_THREAD_WINDOW_MS) continue;
-      if (s.taskRef && suppressedTaskRefs?.has(s.taskRef)) continue;
-    }
-
-    candidates.push({
+    const pill: ThreadPill = {
       sessionId: s.id,
       gezelId: s.gezelId,
       title: plainTitle(displayThreadTitle(s.title)),
@@ -142,7 +151,23 @@ export function selectThreadPills(input: {
       ...(s.lastMessagePreview ? { lastMessagePreview: s.lastMessagePreview } : {}),
       ...(s.taskRef ? { taskRef: s.taskRef } : {}),
       ...(error ? { error } : {}),
-    });
+    };
+
+    if (s.taskRef && groupedTaskRefs?.has(s.taskRef)) {
+      const current = taskPills.get(s.taskRef);
+      if (!current || activityMs(pill.lastActivityAt) > activityMs(current.lastActivityAt)) {
+        taskPills.set(s.taskRef, pill);
+      }
+      continue;
+    }
+
+    const pinned = pinnedSessionId !== undefined && s.id === pinnedSessionId;
+    const latestIndependent = s.id === latestIndependentSessionId;
+    if (state === 'idle' && !pinned && !latestIndependent) {
+      if (now - activityMs(s.lastActivityAt) > RECENT_THREAD_WINDOW_MS) continue;
+    }
+
+    candidates.push(pill);
   }
 
   candidates.sort((a, b) => {
@@ -155,14 +180,16 @@ export function selectThreadPills(input: {
   // `maxInline` OR to the end of the live/errored run, whichever is longer.
   const attentionCount = candidates.filter((p) => p.state !== 'idle').length;
   let cut = Math.max(maxInline, attentionCount);
-  // The pinned thread is the one the composer posts into — it must stay
-  // visible even when it sorts past the cut.
-  if (pinnedSessionId !== undefined) {
-    const pinnedAt = candidates.findIndex((p) => p.sessionId === pinnedSessionId);
-    if (pinnedAt >= cut) cut = pinnedAt + 1;
+  // The pinned thread is the one the composer posts into, and the newest
+  // independent thread is the persistent route back out of task scope.
+  // Both must stay inline even when they sort past the normal cut.
+  for (const requiredId of [pinnedSessionId, latestIndependentSessionId]) {
+    if (requiredId === undefined) continue;
+    const requiredAt = candidates.findIndex((p) => p.sessionId === requiredId);
+    if (requiredAt >= cut) cut = requiredAt + 1;
   }
 
-  return { pills: candidates.slice(0, cut), overflow: candidates.slice(cut) };
+  return { pills: candidates.slice(0, cut), overflow: candidates.slice(cut), taskPills };
 }
 
 /**
@@ -183,15 +210,20 @@ export function useChatThreadPills({
   projectId,
   gezelId,
   pinnedSessionId,
-  suppressedTaskRefs,
+  groupedTaskRefs,
   refreshKey,
 }: {
   projectId: string;
   gezelId?: string | undefined;
   pinnedSessionId?: string | undefined;
-  suppressedTaskRefs?: ReadonlySet<string> | undefined;
+  groupedTaskRefs?: ReadonlySet<string> | undefined;
   refreshKey?: number | undefined;
-}): { pills: ThreadPill[]; overflow: ThreadPill[]; loading: boolean } {
+}): {
+  pills: ThreadPill[];
+  overflow: ThreadPill[];
+  taskPills: ReadonlyMap<string, ThreadPill>;
+  loading: boolean;
+} {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const sessionsRef = useRef<ChatSessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -345,7 +377,7 @@ export function useChatThreadPills({
   }, [projectId, gezelId, loadSessions]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: ageTick is the recompute trigger for the recency cutoff — the body reads Date.now(), not the tick.
-  const { pills, overflow } = useMemo(
+  const { pills, overflow, taskPills } = useMemo(
     () =>
       selectThreadPills({
         sessions,
@@ -353,10 +385,10 @@ export function useChatThreadPills({
         errored,
         now: Date.now(),
         pinnedSessionId,
-        ...(suppressedTaskRefs ? { suppressedTaskRefs } : {}),
+        ...(groupedTaskRefs ? { groupedTaskRefs } : {}),
       }),
-    [sessions, inflight, errored, pinnedSessionId, suppressedTaskRefs, ageTick],
+    [sessions, inflight, errored, pinnedSessionId, groupedTaskRefs, ageTick],
   );
 
-  return { pills, overflow, loading };
+  return { pills, overflow, taskPills, loading };
 }

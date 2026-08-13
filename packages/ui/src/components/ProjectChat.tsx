@@ -323,6 +323,16 @@ function ProjectChatBody({
     [focusThread, requestSessionFocus],
   );
 
+  const handleTaskChanged = useCallback((updated: Task) => {
+    // The rail can close a task without leaving the project chat. Re-read the
+    // active-task strip immediately instead of waiting for its debounced SSE
+    // reconciliation, and leave the closed task's composer scope behind.
+    setPillRefreshKey((key) => key + 1);
+    if (updated.status === 'complete' || updated.status === 'canceled') {
+      setActiveTask((current) => (current?.ref === updated.ref ? null : current));
+    }
+  }, []);
+
   // Reset session selection when the user switches gezel OR project. The
   // session id is scoped to a (gezel, project) pair; keeping it stable
   // across a project switch would send the next message to whichever
@@ -371,6 +381,7 @@ function ProjectChatBody({
       skillsProjectId={project.id}
       compact={compact}
       chatKey={`${project.id}:timeline`}
+      onTaskChanged={handleTaskChanged}
       // The pill row is the status band for the whole conversation, not just
       // the message column, so it spans the context pane as well.
       banner={({ onTaskReference }) => (

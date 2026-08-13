@@ -5,7 +5,7 @@ import type {
   ProjectDetail,
   Task,
 } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,14 +48,20 @@ vi.mock('./TerminalComposer.js', () => ({
 // task refs they were asked to focus. `banner` carries the pill row, so a
 // mock that only rendered `children` would drop every pill under test.
 const railFocusCalls = vi.hoisted(() => [] as Array<{ ref: string; focus?: boolean }>);
+const railTaskChange = vi.hoisted(() => ({
+  callback: undefined as ((task: Task) => void) | undefined,
+}));
 vi.mock('./ChatReferences.js', () => ({
   ChatReferences: ({
     banner,
     children,
+    onTaskChanged,
   }: {
     banner?: (api: Record<string, unknown>) => ReactNode;
     children: (api: Record<string, unknown>) => ReactNode;
+    onTaskChanged?: (task: Task) => void;
   }) => {
+    railTaskChange.callback = onTaskChanged;
     const api = {
       onToolActivity: vi.fn(),
       onArtifactReference: vi.fn(),
@@ -140,6 +146,7 @@ const TASK = {
 
 beforeEach(() => {
   railFocusCalls.length = 0;
+  railTaskChange.callback = undefined;
   vi.mocked(api.listGezels).mockResolvedValue({ gezels: GEZELS });
   vi.mocked(api.listInflightTurns).mockResolvedValue({ inflight: [] });
   vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [] });
@@ -162,7 +169,7 @@ describe('ProjectChat task pill focus', () => {
     const user = userEvent.setup();
     render(<ProjectChat project={PROJECT} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Task p1/4: Ship the game' }));
+    await user.click(await screen.findByRole('button', { name: /^Task p1\/4: Ship the game\./ }));
 
     await waitFor(
       () => {
@@ -179,6 +186,37 @@ describe('ProjectChat task pill focus', () => {
     expect(screen.getByTestId('composer')).toHaveAttribute('data-session', 'task-thread');
   });
 
+  it('keeps the latest independent chat visible after focusing a unified task chip', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [TASK] });
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [
+        session('task-thread', 'g2', { taskRef: 'p1/4', title: 'Task handoff' }),
+        session('lobby-g1', 'g1', { title: 'Independent planning' }),
+      ],
+    });
+    vi.mocked(api.listTaskSessions).mockResolvedValue({
+      sessions: [session('task-thread', 'g2', { taskRef: 'p1/4' })],
+    });
+
+    const user = userEvent.setup();
+    render(<ProjectChat project={PROJECT} />);
+
+    const independent = await screen.findByRole('button', {
+      name: /^Esra: Independent planning\./,
+    });
+    const taskChip = await screen.findByRole('button', {
+      name: /^Task p1\/4: Ship the game\. Latest chat with Wren: Task handoff\./,
+    });
+    await user.click(taskChip);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('composer')).toHaveAttribute('data-session', 'task-thread');
+      expect(taskChip).toHaveAttribute('aria-pressed', 'true');
+    });
+    expect(independent).toBeVisible();
+    expect(screen.queryByRole('button', { name: /^Wren: Task handoff\./ })).toBeNull();
+  });
+
   it('scopes the composer and the switcher to the task', async () => {
     vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [TASK] });
     vi.mocked(api.listTaskSessions).mockResolvedValue({
@@ -187,7 +225,7 @@ describe('ProjectChat task pill focus', () => {
 
     const user = userEvent.setup();
     render(<ProjectChat project={PROJECT} />);
-    await user.click(await screen.findByRole('button', { name: 'Task p1/4: Ship the game' }));
+    await user.click(await screen.findByRole('button', { name: /^Task p1\/4: Ship the game\./ }));
 
     await waitFor(() => {
       expect(screen.getByTestId('composer')).toHaveAttribute('data-task', 'p1/4');
@@ -203,8 +241,32 @@ describe('ProjectChat task pill focus', () => {
     const user = userEvent.setup();
     render(<ProjectChat project={PROJECT} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Task p1/4: Ship the game' }));
+    await user.click(await screen.findByRole('button', { name: /^Task p1\/4: Ship the game\./ }));
     expect(railFocusCalls).toContainEqual({ ref: 'p1/4', focus: true });
+  });
+
+  it('removes a closed task chip and leaves its composer scope', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [TASK] });
+    const user = userEvent.setup();
+    render(<ProjectChat project={PROJECT} />);
+
+    const taskChip = await screen.findByRole('button', {
+      name: /^Task p1\/4: Ship the game\./,
+    });
+    await user.click(taskChip);
+    await waitFor(() => {
+      expect(screen.getByTestId('composer')).toHaveAttribute('data-task', 'p1/4');
+    });
+
+    vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [] });
+    act(() => {
+      railTaskChange.callback?.({ ...TASK, status: 'complete' } as Task);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^Task p1\/4: Ship the game\./ })).toBeNull();
+      expect(screen.getByTestId('composer')).toHaveAttribute('data-task', '');
+    });
   });
 
   it('leaves the composer unscoped when a task has no thread yet', async () => {
@@ -213,7 +275,7 @@ describe('ProjectChat task pill focus', () => {
 
     const user = userEvent.setup();
     render(<ProjectChat project={PROJECT} />);
-    await user.click(await screen.findByRole('button', { name: 'Task p1/4: Ship the game' }));
+    await user.click(await screen.findByRole('button', { name: /^Task p1\/4: Ship the game\./ }));
 
     await waitFor(() => {
       const composer = screen.getByTestId('composer');
@@ -235,7 +297,7 @@ describe('ProjectChat task pill focus', () => {
     const user = userEvent.setup();
     render(<ProjectChat project={PROJECT} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Task p1/4: Ship the game' }));
+    await user.click(await screen.findByRole('button', { name: /^Task p1\/4: Ship the game\./ }));
     await waitFor(() => {
       expect(screen.getByTestId('composer')).toHaveAttribute('data-task', 'p1/4');
     });
