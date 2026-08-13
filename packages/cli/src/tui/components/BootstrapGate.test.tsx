@@ -37,7 +37,16 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await chooseFirst(harness, 'Install the native toolkit');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain(
+        'The Gezel native toolkit -- needed to run AI models locally -- is not installed yet',
+      );
+      expect(harness.text()).toContain('Install the Gezel native toolkit');
+      expect(harness.text()).toContain(
+        'Downloaded from https://github.com/bendyline/gezel/releases/',
+      );
+    });
+    await chooseFirst(harness, 'Install the Gezel native toolkit');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.getNativeEngineStatus).toHaveBeenCalledTimes(2);

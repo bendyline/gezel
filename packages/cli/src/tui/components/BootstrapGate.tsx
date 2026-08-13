@@ -269,7 +269,7 @@ export function BootstrapGate(props: {
       } catch (error) {
         setScreen({
           kind: 'error',
-          title: 'Native toolkit install failed',
+          title: 'Gezel native toolkit install failed',
           message: errorMessage(error),
           retry,
         });
@@ -373,16 +373,19 @@ export function BootstrapGate(props: {
   if (screen.kind === 'native-choice') {
     const labels = screen.missing.map(nativeLabel).join(', ');
     return (
-      <BootstrapFrame title="Local tools are not installed yet">
+      <BootstrapFrame title="The Gezel native toolkit -- needed to run AI models locally -- is not installed yet">
+        <Text>{`Gezel can install the verified Gezel native toolkit (native-v${screen.context.nativeStatus.release}) for this device.`}</Text>
         <Text>
-          Gezel can install the verified native-v{screen.context.nativeStatus.release} toolkit for
-          this device.
+          Downloaded from{' '}
+          <Text bold color="cyan">
+            https://github.com/bendyline/gezel/releases/
+          </Text>
         </Text>
         <Text dimColor>Missing: {labels}</Text>
         <BootstrapChoiceList
           options={[
             {
-              label: 'Install the native toolkit',
+              label: 'Install the Gezel native toolkit',
               hint: 'recommended · engines for chat, images, speech, and local model helpers',
               value: 'install',
             },
@@ -589,7 +592,7 @@ async function installNativeToolkit(
           index,
           missing.length,
           event,
-          `Installing native-v${status.release}`,
+          `Installing the Gezel native toolkit (native-v${status.release})`,
         );
       },
       engine === 'llama-server' ? status.llamaBackend : undefined,

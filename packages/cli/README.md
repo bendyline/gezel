@@ -13,8 +13,9 @@ gezel
 ```
 
 On a clean machine, the TUI stays in first-time setup until you decide what to
-install. It offers the verified native toolkit first, then device-ranked model
-choices:
+install. It offers the verified Gezel native toolkit first, downloaded from
+the [Gezel GitHub Releases](https://github.com/bendyline/gezel/releases/), then
+device-ranked model choices:
 
 1. The best chat model plus every recommended image, speech, reading, and video
    helper that fits this device.
