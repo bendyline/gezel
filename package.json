@@ -35,6 +35,7 @@
     "test:coverage": "node scripts/check-test-surface.mjs --json artifacts/test-surface-coverage.json",
     "test:published": "vitest run --config vitest.published.config.ts",
     "check:packages": "node scripts/check-package-consumers.mjs",
+    "check:npm-release-candidate": "pnpm build && node scripts/rehearse-npm-release.mjs",
     "check:release-toolchain": "node scripts/check-release-toolchain.mjs",
     "check:workspace-deps": "node scripts/check-workspace-dependencies.mjs",
     "release": "multi-semantic-release",

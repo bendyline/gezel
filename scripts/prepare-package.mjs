@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
 import { writeReleasePackageState } from './release-package-state.mjs';
 import {
+  findWorkspaceDependencies,
   findWorkspaceDependencyViolations,
   normalizeWorkspaceManifest,
   readWorkspaceManifests,
@@ -76,19 +77,24 @@ if (!currentRecord) {
 }
 
 const dependencyChanges = findWorkspaceDependencyViolations(currentRecord.manifest, workspaceNames);
+const workspaceDependencies = findWorkspaceDependencies(currentRecord.manifest, workspaceNames);
+// Preserve state for every package with local edges, even when msr left those
+// edges as workspace:*. publish-package.mjs deliberately fails closed without
+// this hand-off, so a dropped/misordered prepare hook cannot silently fall back
+// to whichever sibling versions happen to be on disk.
+if (!dryRun && workspaceDependencies.length > 0) {
+  writeReleasePackageState({
+    repoRoot,
+    packageName: currentRecord.manifest.name,
+    packageVersion: currentRecord.manifest.version,
+    source: currentRecord.source,
+  });
+}
 if (dependencyChanges.length > 0) {
   const action = dryRun ? 'would restore' : 'restored';
   console.log(
     `prepare-package: ${action} ${dependencyChanges.length} workspace dependency specifier(s) in ${currentRecord.manifest.name}`,
   );
-  if (!dryRun) {
-    writeReleasePackageState({
-      repoRoot,
-      packageName: currentRecord.manifest.name,
-      packageVersion: currentRecord.manifest.version,
-      source: currentRecord.source,
-    });
-  }
 }
 if (!dryRun && dependencyChanges.length > 0)
   normalizeWorkspaceManifest(currentRecord, workspaceNames);

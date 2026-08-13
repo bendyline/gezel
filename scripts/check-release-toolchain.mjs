@@ -71,6 +71,8 @@ for (const relativePath of [
   'scripts/release-package-state.mjs',
   'scripts/workspace-dependencies.mjs',
   'scripts/check-workspace-dependencies.mjs',
+  'scripts/rehearse-npm-release.mjs',
+  'scripts/verify-published-npm-release.mjs',
 ]) {
   const path = resolve(repoRoot, relativePath);
   try {
@@ -122,6 +124,12 @@ try {
   }
   if (!workflow.includes('pnpm install --lockfile-only --frozen-lockfile')) {
     failures.push('publish-npm.yml must verify frozen lockfile consistency after release');
+  }
+  if (!workflow.includes('node scripts/rehearse-npm-release.mjs')) {
+    failures.push('publish-npm.yml must rehearse release-stamped tarballs before publishing');
+  }
+  if (!workflow.includes('node scripts/verify-published-npm-release.mjs')) {
+    failures.push('publish-npm.yml must verify exact registry artifacts after publishing');
   }
   if (/^\s*args=.*--sequential-prepare/m.test(workflow)) {
     failures.push(

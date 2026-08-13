@@ -31,6 +31,7 @@ import {
   clearReleasePackageState,
   materializeReleasePackageState,
 } from './release-package-state.mjs';
+import { findWorkspaceDependencies, readWorkspaceManifests } from './workspace-dependencies.mjs';
 
 const packageDir = process.cwd();
 const manifestPath = resolve(packageDir, 'package.json');
@@ -80,6 +81,23 @@ try {
 
 if (materialized.materialized) {
   console.log('publish-package: materialized dependency versions selected for this release');
+}
+
+let workspaceDependencies;
+try {
+  const workspace = readWorkspaceManifests(repoRoot);
+  workspaceDependencies = findWorkspaceDependencies(pkg, workspace.names);
+} catch (err) {
+  materialized.restore();
+  console.error(`publish-package: cannot inspect workspace dependency graph: ${err.message}`);
+  process.exit(1);
+}
+if (workspaceDependencies.length > 0 && !materialized.materialized) {
+  materialized.restore();
+  console.error(
+    `publish-package: refusing to publish ${pkg.name} without prepare-time release state for ${workspaceDependencies.length} local dependency edge(s)`,
+  );
+  process.exit(1);
 }
 
 let result;

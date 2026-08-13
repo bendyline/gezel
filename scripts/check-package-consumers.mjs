@@ -31,6 +31,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -41,6 +42,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
+const requireReleaseStamp = process.argv.includes('--require-release-stamp');
 const tarballDirFlag = process.argv.indexOf('--tarball-dir');
 const suppliedTarballDir =
   tarballDirFlag === -1 ? null : resolve(process.argv[tarballDirFlag + 1] ?? '');
@@ -63,6 +65,13 @@ const PUBLISHED = [
   'script-stdlib',
   'cli',
 ];
+const PUBLISHED_NAMES = PUBLISHED.map((dir) => {
+  const manifest = JSON.parse(
+    readFileSync(resolve(repoRoot, 'packages', dir, 'package.json'), 'utf8'),
+  );
+  return manifest.name;
+});
+const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
 
 /**
  * Subpaths a consumer must be able to `import()` under plain node. Kept to
@@ -223,6 +232,52 @@ try {
     ok('npm install succeeded without installing or warning about node-pty');
   }
 
+  step('validating the installed Gezel release graph');
+  const installedManifests = new Map(
+    PUBLISHED_NAMES.map((name) => {
+      const path = join(consumer, 'node_modules', ...name.split('/'), 'package.json');
+      if (!existsSync(path)) {
+        fail(`installed release set is missing ${name}`);
+        return [name, null];
+      }
+      return [name, JSON.parse(readFileSync(path, 'utf8'))];
+    }),
+  );
+  for (const [name, manifest] of installedManifests) {
+    if (!manifest) continue;
+    for (const field of RUNTIME_DEPENDENCY_FIELDS) {
+      for (const [dependency, range] of Object.entries(manifest[field] ?? {})) {
+        const sibling = installedManifests.get(dependency);
+        if (!sibling) continue;
+        if (range !== sibling.version) {
+          fail(
+            `${name} → ${dependency} in ${field} is ${range}; release set has ${sibling.version}`,
+          );
+        }
+      }
+    }
+  }
+  const coreVersion = installedManifests.get('@bendyline/gezel')?.version;
+  if (!coreVersion) fail('could not determine installed @bendyline/gezel version');
+  else ok(`all internal runtime pins match the ${coreVersion} release set`);
+
+  const spectralRoot = join(consumer, 'node_modules', '@bendyline', 'gezel-connectors-spectral');
+  for (const relative of [
+    'NOTICE.md',
+    'THIRD_PARTY_LICENSES/Apache-2.0.txt',
+    'vendor/provenance.json',
+  ]) {
+    if (!existsSync(join(spectralRoot, relative)))
+      fail(`installed Spectral host is missing ${relative}`);
+  }
+  for (const relative of ['dist/index.js', 'dist/run-action.js']) {
+    const source = readFileSync(join(spectralRoot, relative), 'utf8');
+    if (!source.includes('Includes modified portions of prismatic-io/components')) {
+      fail(`installed Spectral host ${relative} is missing its Apache modification banner`);
+    }
+  }
+  ok('installed Spectral host carries its Apache license, notice, provenance, and banners');
+
   const installedBytes = logicalTreeBytes(join(consumer, 'node_modules'));
   const installedMiB = installedBytes / 1024 / 1024;
   if (installedBytes > MAX_NODE_MODULES_BYTES) {
@@ -261,6 +316,42 @@ try {
   if (imported.status !== 0) fail(`import probe failed\n${imported.stderr}`);
   else ok(`imported ${IMPORTABLE.length} subpaths`);
 
+  step('typechecking installed declarations with skipLibCheck=false');
+  const typeProbe = join(consumer, 'probe-types.mts');
+  writeFileSync(
+    typeProbe,
+    `${IMPORTABLE.map((specifier) => `import ${JSON.stringify(specifier)};`).join('\n')}\n`,
+  );
+  writeFileSync(
+    join(consumer, 'tsconfig.consumer.json'),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          skipLibCheck: false,
+          noEmit: true,
+          types: ['node'],
+        },
+        files: ['./probe-types.mts'],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const typecheck = run(
+    process.execPath,
+    [join(consumer, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.consumer.json'],
+    { cwd: consumer },
+  );
+  if (typecheck.status !== 0) {
+    fail(`installed declaration typecheck failed\n${typecheck.stdout}\n${typecheck.stderr}`);
+  } else {
+    ok('installed declarations typecheck without skipping library errors');
+  }
+
   // ── 4. The runtime-resolved specifiers ─────────────────────────────────
   step('resolving the runtime-resolved specifiers');
   const resolveProbe = join(consumer, 'probe-resolve.mjs');
@@ -281,10 +372,74 @@ try {
   if (resolved.status !== 0) fail(`resolve probe failed\n${resolved.stderr}`);
   else ok('daemon, MCP server, spectral host, stdlib and SDK all resolve');
 
+  step('running installed MCP and Spectral subprocess protocols');
+  const mcpProbe = join(consumer, 'probe-mcp.mjs');
+  writeFileSync(
+    mcpProbe,
+    [
+      "import { Client } from '@modelcontextprotocol/sdk/client/index.js';",
+      "import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';",
+      `const server = ${JSON.stringify(join(consumer, 'node_modules', '@bendyline', 'gezel-mcp', 'dist', 'server.js'))};`,
+      'const transport = new StdioClientTransport({',
+      '  command: process.execPath,',
+      '  args: [server],',
+      '  env: {',
+      "    GEZEL_BASE_URL: 'http://127.0.0.1:9',",
+      "    GEZEL_TOKEN: 'consumer-smoke',",
+      "    GEZEL_AGENT_ID: 'consumer-smoke',",
+      "    GEZEL_PROJECT_ID: 'default',",
+      `    GEZEL_HOME: ${JSON.stringify(join(root, 'mcp-home'))},`,
+      '  },',
+      '});',
+      "const client = new Client({ name: 'package-smoke', version: '0.0.0' });",
+      'await client.connect(transport);',
+      'const result = await client.listTools();',
+      "if (!Array.isArray(result.tools) || result.tools.length < 100) throw new Error('MCP tool surface is incomplete');",
+      'console.log(result.tools.length);',
+      'await client.close();',
+    ].join('\n'),
+  );
+  const mcp = run(process.execPath, [mcpProbe], { cwd: consumer });
+  if (mcp.status !== 0) fail(`MCP stdio smoke failed\n${mcp.stdout}\n${mcp.stderr}`);
+  else ok(`MCP initialized over stdio and listed ${mcp.stdout.trim()} tools`);
+
+  const spectralEntry = join(spectralRoot, 'dist', 'run-action.js');
+  const spectral = run(process.execPath, [spectralEntry], {
+    cwd: consumer,
+    input: JSON.stringify({
+      component: 'echo',
+      action: 'list',
+      inputs: { records: [{ id: 'consumer-smoke' }] },
+    }),
+  });
+  let spectralData;
+  try {
+    spectralData = JSON.parse(spectral.stdout).data;
+  } catch {
+    // The failure below includes stdout/stderr.
+  }
+  if (spectral.status !== 0 || spectralData?.[0]?.id !== 'consumer-smoke') {
+    fail(`Spectral subprocess smoke failed\n${spectral.stdout}\n${spectral.stderr}`);
+  } else {
+    ok('Spectral subprocess executed echo/list through its packed entry point');
+  }
+
   // ── 5. The CLI binary ──────────────────────────────────────────────────
   step('running the installed CLI');
   const bin = join(consumer, 'node_modules', '@bendyline', 'gezel-cli', 'dist', 'bin', 'gezel.js');
-  for (const args of [['--version'], ['--help'], ['native', '--help']]) {
+  const cliVersionResult = run(process.execPath, [bin, '--version'], {
+    cwd: consumer,
+    env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },
+  });
+  const cliVersion = cliVersionResult.stdout.trim();
+  if (cliVersionResult.status !== 0) {
+    fail(`gezel --version\n${cliVersionResult.stderr}`);
+  } else if (requireReleaseStamp && cliVersion !== coreVersion) {
+    fail(`gezel --version printed ${JSON.stringify(cliVersion)}; expected ${coreVersion}`);
+  } else {
+    ok(`gezel --version (${cliVersion})`);
+  }
+  for (const args of [['--help'], ['native', '--help']]) {
     const result = run(process.execPath, [bin, ...args], {
       cwd: consumer,
       env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },
@@ -305,7 +460,10 @@ try {
     else ok('service imports without node-pty');
   } else {
     step('booting the default install without node-pty');
-    await daemonSmoke(consumer, { pty: 'unavailable' });
+    await daemonSmoke(consumer, {
+      pty: 'unavailable',
+      expectedVersion: requireReleaseStamp ? coreVersion : undefined,
+    });
   }
 
   // ── 7. Explicit terminal opt-in ────────────────────────────────────────
@@ -330,7 +488,10 @@ try {
 
   if (process.env.GEZEL_CONSUMER_SKIP_DAEMON !== '1') {
     step('restarting the installed daemon with node-pty');
-    await daemonSmoke(consumer, { pty: 'available' });
+    await daemonSmoke(consumer, {
+      pty: 'available',
+      expectedVersion: requireReleaseStamp ? coreVersion : undefined,
+    });
   }
 } finally {
   if (keep) console.log(`\nleft the consumer project at ${root}`);
@@ -352,6 +513,7 @@ console.log('\npacked-consumer checks passed');
  */
 async function daemonSmoke(consumerDir, opts = {}) {
   const pty = opts.pty ?? 'available';
+  const expectedVersion = opts.expectedVersion;
   const home = mkdtempSync(join(tmpdir(), 'gezel-consumer-home-'));
   const entry = join(
     consumerDir,
@@ -408,6 +570,8 @@ async function daemonSmoke(consumerDir, opts = {}) {
     const health = await client.health();
     if (!health) {
       fail('health probe returned nothing');
+    } else if (expectedVersion && health.version !== expectedVersion) {
+      fail(`daemon health reports ${health.version ?? 'unknown'}; expected ${expectedVersion}`);
     } else {
       ok(
         pty === 'unavailable'
