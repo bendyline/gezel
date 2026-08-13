@@ -30,7 +30,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCENARIOS } from '../scenarios/index.ts';
 import { maybeJudgeTrial } from '../trial-llm-judge.ts';
-import { parseArgs } from './args.ts';
+import { assertKnownFlags, parseArgs } from './args.ts';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -59,6 +59,7 @@ function mean(values: number[]): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  assertKnownFlags(args.flags, ['dry-run', 'run-id']);
   const runId = typeof args.flags['run-id'] === 'string' ? args.flags['run-id'] : null;
   if (!runId) {
     console.error('--run-id <id> is required (see evals/runs/scorecard-*)');

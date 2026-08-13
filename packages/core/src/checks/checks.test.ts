@@ -134,6 +134,42 @@ describe('markdownHeadingsMatch', () => {
     expect(result.documentHeadings).toHaveLength(3);
   });
 
+  it('names the heading LEVEL when the deck uses a title plus ## sections', async () => {
+    // The deck converts with slideBreak h1, so ## slides render as one
+    // slide. A bare "has 1, locks 3" reads as "add two slides" and models
+    // re-emit the same shape until the repair budget is gone.
+    const result = await markdownHeadingsMatch(
+      ws({
+        'notes/outline.md': outline,
+        'deck.md': [
+          '# Trafalgar deck',
+          '## Battle of Trafalgar',
+          '## Strategic stakes',
+          '## What Trafalgar teaches us',
+        ].join('\n'),
+      }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('slides are split on H1');
+    expect(result.detail).toContain('single slide');
+  });
+
+  it('keeps the plain count message when the level is right but the count is not', async () => {
+    const result = await markdownHeadingsMatch(
+      ws({
+        'notes/outline.md': outline,
+        'deck.md': '# Battle of Trafalgar\n# Strategic stakes',
+      }),
+      'deck.md',
+      'notes/outline.md',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('2 H1 slide headings');
+    expect(result.detail).not.toContain('single slide');
+  });
+
   it('rejects merged/missing slides and title reordering', async () => {
     const missing = await markdownHeadingsMatch(
       ws({

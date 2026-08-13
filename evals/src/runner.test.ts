@@ -1539,7 +1539,29 @@ describe('sniffArtifactHasScored', () => {
   });
 
   it('guards a score-0 near-miss once the checker observed real artifact bytes', () => {
-    expect(sniffArtifactHasScored({ key: 'deck', score: 0, bytes: 2017 }, new Set())).toBe(true);
+    // Bytes count as a near-miss only when they belong to an identified
+    // repair target — that is what makes the model a stubborn REWRITER.
+    expect(
+      sniffArtifactHasScored(
+        { key: 'deck', score: 0, bytes: 2017, repairFilePath: 'deck.md' },
+        new Set(),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat another deliverable's bytes as the missing artifact", () => {
+    // Regression: on a multi-deliverable scenario the sniff reads
+    // 0 bytes for the target but non-zero overall, because sibling
+    // deliverables exist. Counting those armed the 8-minute stubborn-
+    // rewriter path against a file nobody had written yet — six of fifteen
+    // powerpoint-deck trials died that way with 14-30 tool calls still
+    // landing. No repair target means nothing to be stubborn about.
+    expect(
+      sniffArtifactHasScored(
+        { key: 'craftbook-powerpoint-deck', score: 0, bytes: 2728, repairFilePath: undefined },
+        new Set(),
+      ),
+    ).toBe(false);
   });
 
   it('treats a score-0 regression as an existing artifact once that sniff key scored', () => {

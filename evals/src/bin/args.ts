@@ -40,6 +40,64 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 /**
+ * Flags consumed by the shared resolvers rather than read directly from
+ * `flags` in a bin, so a bin's own flag list would otherwise miss them.
+ */
+export const SHARED_FLAGS = ['provider', 'engine', 'render-mode', 'keurmeester'] as const;
+
+function editDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) rows[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      rows[i]![j] =
+        a[i - 1] === b[j - 1]
+          ? rows[i - 1]![j - 1]!
+          : 1 + Math.min(rows[i - 1]![j]!, rows[i]![j - 1]!, rows[i - 1]![j - 1]!);
+    }
+  }
+  return rows[a.length]![b.length]!;
+}
+
+/**
+ * Reject flags this bin does not understand.
+ *
+ * An unrecognized flag is silently dropped by `parseArgs`, so the run
+ * proceeds on defaults while LOOKING like the experiment you asked for.
+ * `--models a,b,c` on `eval:all` (which takes singular `--model`) spent
+ * fifty minutes measuring the default model and produced a clean-looking
+ * 0/3; the same class of mistake had `--llm-judge` riding along on every
+ * scorecard sweep, read by nobody. Both are indistinguishable from a valid
+ * result after the fact, which is exactly why this has to fail at argv
+ * time rather than be caught by a careful reader.
+ *
+ * Value-level typos already exit here (see `resolveProviderFlag` and
+ * friends); this is the same guarantee for the flag NAME.
+ */
+export function assertKnownFlags(
+  flags: Record<string, string | boolean>,
+  known: readonly string[],
+): void {
+  const allowed = new Set<string>([...known, ...SHARED_FLAGS]);
+  const unknown = Object.keys(flags).filter((key) => !allowed.has(key));
+  if (unknown.length === 0) return;
+  for (const key of unknown) {
+    const near = [...allowed]
+      .map((candidate) => ({ candidate, distance: editDistance(key, candidate) }))
+      .filter((entry) => entry.distance <= Math.max(2, Math.floor(key.length / 3)))
+      .sort((a, b) => a.distance - b.distance)[0];
+    console.error(`Unknown flag --${key}${near ? ` (did you mean --${near.candidate}?)` : ''}`);
+  }
+  console.error(
+    `\nKnown flags: ${[...allowed]
+      .sort()
+      .map((k) => `--${k}`)
+      .join(', ')}`,
+  );
+  process.exit(2);
+}
+
+/**
  * Parse a duration string like `30s`, `5m`, `2h`, or a raw millisecond
  * number. Returns ms.
  */

@@ -20,6 +20,33 @@ function documentH1s(markdown: string): string[] {
   return [...markdown.matchAll(/^#\s+(.+?)\s*$/gm)].map((match) => match[1]!.trim());
 }
 
+function documentH2s(markdown: string): string[] {
+  return [...markdown.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) => match[1]!.trim());
+}
+
+/**
+ * Name the "document title + `##` sections" shape when we see it.
+ *
+ * H1-per-slide is not a style preference — the deck is converted with
+ * `slideBreak: "h1"`, so a deck whose slides are H2 renders as ONE slide.
+ * But models default hard to the ordinary Markdown habit of one H1 title
+ * followed by H2 sections, and the bare count mismatch ("has 1, locks 8")
+ * reads as "add seven slides" rather than "change the heading level" — so
+ * they re-emit the same shape until the repair budget runs out. Six of
+ * fifteen powerpoint-deck trials produced exactly this, two of them with an
+ * H2 count already matching the outline exactly.
+ */
+function headingLevelHint(
+  file: string,
+  documentHeadings: string[],
+  h2s: string[],
+  expected: number,
+): string | null {
+  if (documentHeadings.length > 1 || h2s.length !== expected || expected === 0) return null;
+  const title = documentHeadings.length === 1 ? ` and \`# ${documentHeadings[0]}\` as a title` : '';
+  return `${file} puts its ${expected} slides at \`##\`${title}, but slides are split on H1 — as written this converts to a single slide. Promote each \`## Slide\` heading to \`# \` and drop the document title.`;
+}
+
 function outlineSlideHeadings(markdown: string): string[] {
   const headings: string[] = [];
   for (const match of markdown.matchAll(/^#{2,6}\s+(.+?)\s*$/gm)) {
@@ -68,9 +95,12 @@ export async function markdownHeadingsMatch(
     };
   }
   if (actual.length !== expected.length) {
+    const levelHint = headingLevelHint(file, actual, documentH2s(document), expected.length);
     return {
       ok: false,
-      detail: `${file} has ${actual.length} H1 slide headings, but ${outlineFile} locks ${expected.length}. Add or remove slides without merging outline items.`,
+      detail:
+        levelHint ??
+        `${file} has ${actual.length} H1 slide headings, but ${outlineFile} locks ${expected.length}. Add or remove slides without merging outline items.`,
       outlineHeadings: expected,
       documentHeadings: actual,
     };

@@ -26,6 +26,7 @@ import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { maybeJudgeTrial } from '../trial-llm-judge.ts';
 import type { EvalScenario } from '../types.ts';
 import {
+  assertKnownFlags,
   parseArgs,
   parseDuration,
   printScenarios,
@@ -37,6 +38,21 @@ import {
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
+  assertKnownFlags(args.flags, [
+    'cache-root',
+    'decode-rate',
+    'force-behaviors',
+    'image-bin',
+    'image-model',
+    'list',
+    'llama-bin',
+    'llm-judge',
+    'mlx-source-home',
+    'model',
+    'remove-behaviors',
+    'runs-dir',
+    'timeout',
+  ]);
 
   if (args.flags.list) {
     printScenarios(listScenarios());

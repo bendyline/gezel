@@ -109,20 +109,20 @@ Two things to know before starting it. Worst case is **6h05m at
 `--count 1`**, so a `--count 3` scorecard is a ~18h job — and below n=3
 the harness refuses to quote a pass *rate* at all (it prints a raw count),
 so `--count 1` is a spot check, not a score. And most members carry an
-advisory judge, so `--llm-judge` is where the qualitative signal lives.
+advisory judge, so `eval:judge-sweep` is where the qualitative signal lives.
 
 ```bash
 # Full scorecard. Budget the wall-clock first.
-pnpm eval:all --suite productivity --count 3 --model gemma4-e4b-q4 --llm-judge
+pnpm eval:all --suite productivity --count 3 --model gemma4-e4b-q4
 
 # ~1h15m pulse check instead — one of each gate kind (prose, arithmetic
 # oracle, real DOCX through DocBlocks).
-pnpm eval:all --suite productivity-smoke --count 1 --model gemma4-e4b-q4 --llm-judge
+pnpm eval:all --suite productivity-smoke --count 1 --model gemma4-e4b-q4
 
 # Or a named subset of any suite — runs in suite order, and an id that
 # isn't a member of that suite is an error rather than a silent no-op.
 pnpm eval:all --suite productivity --scenarios meeting-followup,wikipedia-research-brief \
-  --count 3 --model gemma4-e4b-q4 --llm-judge
+  --count 3 --model gemma4-e4b-q4
 ```
 
 ## The published scorecard
