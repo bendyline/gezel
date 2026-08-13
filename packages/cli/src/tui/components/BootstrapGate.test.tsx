@@ -37,8 +37,7 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await vi.waitFor(() => expect(harness.text()).toContain('Install the native toolkit'));
-    harness.write('\r');
+    await chooseFirst(harness, 'Install the native toolkit');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.getNativeEngineStatus).toHaveBeenCalledTimes(2);
@@ -61,8 +60,7 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await vi.waitFor(() => expect(harness.text()).toContain('Recommended workshop set'));
-    harness.write('\r');
+    await chooseFirst(harness, 'Recommended workshop set');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).toHaveBeenCalledWith('chat-model', expect.any(Function));
@@ -106,6 +104,17 @@ function mountGate(
   );
   mounted.push(harness);
   return harness;
+}
+
+async function chooseFirst(harness: InkHarness, marker: string): Promise<void> {
+  await vi.waitFor(() => expect(harness.text()).toContain(marker));
+  // Ink can paint the choice list just before React commits useInput's
+  // subscription. Under a fully parallel workspace run, writing in that tiny
+  // gap drops the synthetic keypress and leaves this test on the selector.
+  // Give the effect one event-loop turn, then use the explicit quick-select
+  // key so this tests the same public interaction without racing the commit.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  harness.write('1');
 }
 
 function nativeStatus(installed: boolean): NativeEngineStatusResponse {
