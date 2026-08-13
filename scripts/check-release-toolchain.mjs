@@ -68,6 +68,7 @@ try {
 for (const relativePath of [
   'scripts/prepare-package.mjs',
   'scripts/publish-package.mjs',
+  'scripts/release-package-state.mjs',
   'scripts/workspace-dependencies.mjs',
   'scripts/check-workspace-dependencies.mjs',
 ]) {
@@ -121,6 +122,11 @@ try {
   }
   if (!workflow.includes('pnpm install --lockfile-only --frozen-lockfile')) {
     failures.push('publish-npm.yml must verify frozen lockfile consistency after release');
+  }
+  if (/^\s*args=.*--sequential-prepare/m.test(workflow)) {
+    failures.push(
+      'publish-npm.yml passes unsupported --sequential-prepare; preserve computed dependency versions through the release-state bridge instead',
+    );
   }
 } catch (err) {
   failures.push(`could not validate publish-npm.yml: ${err.message}`);

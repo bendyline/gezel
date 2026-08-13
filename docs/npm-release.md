@@ -107,24 +107,27 @@ through `@semantic-release/exec`.
 
 Two consequences worth knowing:
 
-- `--sequential-prepare` is **required**, not cosmetic. pnpm resolves
-  `workspace:*` against a sibling's *current* version, so a dependency must
-  have its new version written before a dependent is packed.
 - Published cross-deps end up **exact** (`1.4.0`, not `^1.4.0`). For packages
   this interdependent that is the coupling we want.
+- Do not pass `--sequential-prepare`. `multi-semantic-release@3.1.0` has no
+  such option; it silently forwards unknown flags to semantic-release. Its
+  built-in synchronizer already serializes each package's prepare+publish pair,
+  which means a dependent can be packed before a dependency has its new
+  version on disk.
 
 `multi-semantic-release` has its own prepare-time dependency rewrite and turns
 local `workspace:*` declarations into concrete versions in the source
 manifest. That source rewrite must not reach Git: it makes the workspace
 lockfile stale and disables pnpm's explicit local-package contract.
 [`scripts/prepare-package.mjs`](../scripts/prepare-package.mjs) therefore
-restores every local dependency to `workspace:*` after
-`multi-semantic-release` computes the release graph but before
-`@semantic-release/git` commits `package.json`. Package version fields remain
-stamped, so the later `pnpm publish` still resolves each workspace dependency
-against the exact sibling version selected for the release. Plugin ordering in
-`.releaserc.json` is load-bearing: the exec prepare hook must stay before the
-git plugin.
+records the computed manifest outside the checkout, then restores every local
+dependency to `workspace:*` before `@semantic-release/git` commits
+`package.json`. [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
+briefly materializes that recorded manifest while `pnpm publish` packs the
+tarball, then restores the workspace source even if publishing fails. This
+preserves exact dependency versions without relying on sibling release order.
+Plugin ordering in `.releaserc.json` is load-bearing: the exec prepare hook must
+stay before the git plugin.
 
 Both `pnpm validate` and the end of the npm release workflow run
 `pnpm check:workspace-deps`; the post-release gate also performs a frozen,

@@ -144,10 +144,13 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # --sequential-prepare is required, not cosmetic: pnpm rewrites
-      # `workspace:*` to a sibling's CURRENT version at pack time, so every
-      # dependency must have its new version written before a dependent is
-      # packed.
+      # multi-semantic-release serializes each package's prepare+publish pair.
+      # prepare-package.mjs therefore preserves its computed dependency
+      # upgrades outside the checkout before restoring workspace:* for the
+      # release commit; publish-package.mjs materializes those versions only
+      # while pnpm packs that package. Do not add `--sequential-prepare`: the
+      # installed multi-semantic-release has no such option and silently
+      # forwards unknown flags to semantic-release.
       #
       # packages/sharp-compat is ignored rather than left to its `private: true`
       # flag. That flag stops the publish, but multi-semantic-release would
@@ -161,7 +164,7 @@ jobs:
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,packages/ml-runtime,evals --sequential-prepare)
+          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,packages/ml-runtime,evals)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi
