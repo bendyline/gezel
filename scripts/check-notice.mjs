@@ -315,7 +315,7 @@ async function checkFontInventory(notice) {
       throw new Error(`NOTICE font ${match[1].trim()} does not link to a local license text`);
     }
   }
-  const dependencySection = markdownSubsection(notice, 'Icon fonts carried inside dependencies');
+  const dependencySection = markdownSection(notice, 'Icon fonts carried inside dependencies');
   const dependencyRows = parseMarkdownTable(dependencySection).filter(
     (cells) => cells[0] !== 'Asset' && cells.length >= 4,
   );

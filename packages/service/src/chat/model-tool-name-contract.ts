@@ -141,12 +141,15 @@ const SOURCE_IGNORES = [
  * renamed, or relocated occurrence changes the fingerprint and fails CI.
  */
 const PINNED_GILDE_TOOL_NAME_DEBT = {
-  count: 153,
+  // Temporary baseline for the exact @bendyline/gilde@0.1.23 payload. The
+  // corrected catalog release replaces the three new run_script occurrences
+  // and will intentionally require this fingerprint to be reviewed again.
+  count: 156,
   // SHA-256 of sorted `relative-source|line|json-pointer|rule|tool`
   // occurrences. This makes the waiver exact without checking a 150-line
   // generated list into Gezel: a new, removed, renamed, or relocated
   // occurrence changes the digest and fails CI.
-  sha256: '2eaeafed194f801cf6398a2f5b4a6fd390ef617340305d92d5953f23e0a4aae2',
+  sha256: '435a0629e370648a80e432a7424cfd09a8656f19f91490c8e4c7263db3731d43',
 } as const;
 
 /**
