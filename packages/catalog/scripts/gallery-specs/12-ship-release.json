@@ -4,13 +4,7 @@
     "role": "general",
     "name": "Release Notes",
     "description": "Turn a raw set of merged commits, pull requests, and ticket IDs into polished, human-readable release notes for a versioned release — grouped by theme (Features, Improvements, Bug Fixes, Breaking Changes), written for users rather than engineers, with upgrade/migration callouts surfaced first. The ordering is deliberate: a developer gathers and de-noises the change inventory before any prose is written, a copywriter turns that inventory into benefit-led notes in a consistent voice, and a reviewer verifies every shipped change is represented and nothing internal-only or unreleased leaked in. Use this for GitHub Releases, product announcement posts, or the user-facing notes that ship alongside a tagged version.",
-    "tags": [
-      "release",
-      "release-notes",
-      "changelog",
-      "announcement",
-      "versioning"
-    ],
+    "tags": ["release", "release-notes", "changelog", "announcement", "versioning"],
     "triggers": [
       "write release notes",
       "release notes for v2",
@@ -71,13 +65,7 @@
     "role": "general",
     "name": "Changelog Cut",
     "description": "Cut a new versioned section into a Keep a Changelog / CHANGELOG.md style file for a release — moving entries out of the Unreleased section into a dated, semver-stamped version block under the standard Added / Changed / Deprecated / Removed / Fixed / Security headings, with a fresh empty Unreleased section left behind. A developer gathers the unreleased entries and reconciles them against actual merged changes before a copywriter normalizes them into terse, consistent changelog lines and stamps the version block. Use this whenever you 'cut a release', 'update the changelog', or roll the Unreleased section into a tagged version while keeping the file append-only and machine-comparable.",
-    "tags": [
-      "changelog",
-      "release",
-      "semver",
-      "keep-a-changelog",
-      "versioning"
-    ],
+    "tags": ["changelog", "release", "semver", "keep-a-changelog", "versioning"],
     "triggers": [
       "cut a changelog",
       "update CHANGELOG.md",
@@ -127,14 +115,7 @@
     "role": "general",
     "name": "Deploy Checklist",
     "description": "Author and then actually execute a pre-deploy verification checklist for shipping a release to production — the concrete gates that must be green before the deploy button is pressed: tests passing, build clean, migrations reviewed, config/secrets present, feature flags set, rollback path confirmed, and observability/alerts ready. A planner scopes the checklist tailored to this service and risk level, a developer runs each item and records real evidence (command output, links, screenshots) for pass or fail, and a reviewer signs off go/no-go. Use this before a production deploy, a release cut-over, or any 'are we ready to ship?' gate where skipping a step causes outages.",
-    "tags": [
-      "deploy",
-      "release",
-      "checklist",
-      "pre-flight",
-      "production",
-      "verification"
-    ],
+    "tags": ["deploy", "release", "checklist", "pre-flight", "production", "verification"],
     "triggers": [
       "pre-deploy checklist",
       "are we ready to deploy",
@@ -195,14 +176,7 @@
     "role": "general",
     "name": "Rollback Plan",
     "description": "Author a concrete, tested rollback plan for a release so that when a deploy goes wrong the team can revert FAST and safely without improvising under pressure — covering the trigger conditions that mean 'roll back', the exact reversal steps (redeploy previous artifact, down-migrations, flag flips, cache/CDN invalidation), data-safety and forward/backward-compatibility considerations, the recovery-time estimate, and a post-rollback verification. A planner scopes the failure modes and triggers, a developer writes the precise step-by-step runbook with real commands, and a reviewer dry-runs it for correctness and irreversible-data hazards. Use this alongside any risky deploy, migration, or feature launch where 'how do we undo this' must be answered before, not during, an incident.",
-    "tags": [
-      "rollback",
-      "release",
-      "runbook",
-      "recovery",
-      "deploy",
-      "incident"
-    ],
+    "tags": ["rollback", "release", "runbook", "recovery", "deploy", "incident"],
     "triggers": [
       "write a rollback plan",
       "how do we roll back this release",
@@ -263,14 +237,7 @@
     "role": "maintenance-review",
     "name": "Hotfix Flow",
     "description": "Drive an expedited production hotfix from red to green: reproduce the live defect with a failing test, apply the smallest safe fix that makes it pass without scope-creeping into a refactor, and verify the fix plus a clean regression check before it ships out-of-band. The ordering is the whole discipline — reproduce FIRST (a failing test that captures the bug is the contract the fix must satisfy), then fix minimally, then verify the new test passes and nothing else broke. Use this for urgent production bugs, expedited patch releases, and out-of-band fixes where speed matters but a regression would be worse than the original bug.",
-    "tags": [
-      "hotfix",
-      "bug-fix",
-      "tdd",
-      "release",
-      "patch",
-      "regression"
-    ],
+    "tags": ["hotfix", "bug-fix", "tdd", "release", "patch", "regression"],
     "triggers": [
       "hotfix this bug",
       "urgent production fix",
@@ -331,14 +298,7 @@
     "role": "general",
     "name": "Version Bump",
     "description": "Perform a coordinated, semver-correct version bump across a project — deciding MAJOR/MINOR/PATCH from the actual change set, then updating every place the version is stamped in lockstep (package manifest(s), version constant, lockfile, badges, docs) plus the changelog header, so nothing drifts out of sync. A planner determines the correct semver level and enumerates every file that carries the version, a developer applies the bump everywhere consistently, and a reviewer verifies no location was missed and the new version is internally consistent. Use this when 'bumping the version', preparing a tag, or releasing a new package version where a half-applied bump (manifest says 2.0.0 but the constant says 1.9.0) is a classic ship bug.",
-    "tags": [
-      "version",
-      "semver",
-      "release",
-      "bump",
-      "versioning",
-      "tagging"
-    ],
+    "tags": ["version", "semver", "release", "bump", "versioning", "tagging"],
     "triggers": [
       "bump the version",
       "release a new version",
@@ -399,14 +359,7 @@
     "role": "maintenance-review",
     "name": "Incident Postmortem",
     "description": "Write a blameless incident postmortem after a production outage or degradation — a structured, factual document covering the impact, a precise timeline (detection → diagnosis → mitigation → resolution), the root cause and contributing factors via a five-whys analysis, what went well and what went poorly, and concrete, owned, dated action items that prevent recurrence. A researcher assembles the verified timeline and evidence from logs/alerts/chat, a copywriter writes the blameless narrative and root-cause analysis, and a reviewer checks the timeline is accurate, the analysis reaches a true root cause, and every action item is specific and owned. Use this for outage retrospectives, severity-incident reviews, and any 'what happened and how do we prevent it' writeup.",
-    "tags": [
-      "postmortem",
-      "incident",
-      "outage",
-      "retrospective",
-      "root-cause",
-      "blameless"
-    ],
+    "tags": ["postmortem", "incident", "outage", "retrospective", "root-cause", "blameless"],
     "triggers": [
       "write a postmortem",
       "incident retrospective",
@@ -467,14 +420,7 @@
     "role": "maintenance-review",
     "name": "Release Pipeline (CI/CD)",
     "description": "Author a CI/CD release workflow as a YAML pipeline (GitHub Actions style) that takes a tagged commit and turns it into a published release — running tests and build as gates, then on a version tag building the artifact, generating release notes, publishing the package/image, and creating the GitHub Release, with the dangerous publish steps gated behind the green test/build stages and the tag trigger. A planner scopes the trigger, stages, secrets, and the publish target, a developer writes the valid pipeline YAML wiring the stages in the safe order, and a reviewer validates the syntax and that publishing cannot run before tests pass. Use this to set up automated releases, a publish-on-tag workflow, or a deploy pipeline from scratch.",
-    "tags": [
-      "ci",
-      "cd",
-      "release",
-      "pipeline",
-      "github-actions",
-      "yaml"
-    ],
+    "tags": ["ci", "cd", "release", "pipeline", "github-actions", "yaml"],
     "triggers": [
       "set up a release pipeline",
       "ci/cd for releases",
@@ -535,14 +481,7 @@
     "role": "general",
     "name": "Release Announcement",
     "description": "Write a public-facing release announcement that turns a shipped version into a compelling story for users — a blog-post / email-style piece that leads with the headline value, shows the marquee features with concrete before/after benefits, links to the full release notes and upgrade path, and ends with a clear call to action. A planner picks the 2-4 things actually worth announcing and the audience/channel, a copywriter writes the benefit-led announcement in the brand voice, and a reviewer checks it is accurate, on-message, and that every claim traces to a real shipped change. Use this for product launch posts, 'what's new' announcements, version launch emails, and changelog-to-marketing translations.",
-    "tags": [
-      "announcement",
-      "release",
-      "marketing",
-      "launch",
-      "copywriting",
-      "whats-new"
-    ],
+    "tags": ["announcement", "release", "marketing", "launch", "copywriting", "whats-new"],
     "triggers": [
       "announce the release",
       "what's new post",
@@ -603,14 +542,7 @@
     "role": "general",
     "name": "Release Readiness Review",
     "description": "Run a go/no-go release readiness review (a release sign-off / 'launch readiness' gate) that audits a release candidate across every dimension before it ships — functional QA status, performance, security, docs, support readiness, rollback plan, monitoring, and stakeholder sign-offs — and produces a single defensible GO or NO-GO with the open risks and their owners. A planner defines the readiness dimensions and bar for this release, a reviewer audits each dimension and records evidence and status, and a second reviewer adjudicates the final decision with conditions. Use this for launch sign-off meetings, release gate reviews, and any high-stakes ship where multiple areas must all be green.",
-    "tags": [
-      "release",
-      "readiness",
-      "go-no-go",
-      "sign-off",
-      "launch",
-      "gate"
-    ],
+    "tags": ["release", "readiness", "go-no-go", "sign-off", "launch", "gate"],
     "triggers": [
       "release readiness review",
       "go/no-go review",
@@ -671,14 +603,7 @@
     "role": "general",
     "name": "Feature Flag Release Plan",
     "description": "Plan and document a progressive feature-flag rollout for shipping a change behind a flag — defining the flag and its default-off state, the staged ramp (internal → 1% → 10% → 50% → 100%) with the success and guardrail metrics that gate each step, the automatic rollback/kill-switch criteria, and the cleanup that removes the flag once fully rolled out. A planner scopes the flag, ramp stages, and metrics, a developer writes the rollout runbook with the exact flag changes and the kill-switch procedure, and a reviewer verifies each ramp step has a measurable gate and a safe abort. Use this for gradual rollouts, canary releases, dark launches, percentage-based ramps, and de-risking a risky change behind a toggle.",
-    "tags": [
-      "feature-flag",
-      "rollout",
-      "canary",
-      "release",
-      "progressive-delivery",
-      "kill-switch"
-    ],
+    "tags": ["feature-flag", "rollout", "canary", "release", "progressive-delivery", "kill-switch"],
     "triggers": [
       "feature flag rollout plan",
       "gradual rollout",

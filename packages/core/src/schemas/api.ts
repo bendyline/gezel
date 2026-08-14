@@ -2363,7 +2363,7 @@ export const GezelConfigSchema = z.object({
    *    crew with granular per-step craftbooks. Right for raw-completion
    *    local models, where gezel's loop IS the agent.
    *  - `flat`: route concrete asks to a single generalist (`start_job` →
-   *    solo "ambachtsman", which already collapses the craftbook onto the
+   *    solo Builder, which already collapses the craftbook onto the
    *    one specialist). Right for self-orchestrating providers (codex-cli,
    *    anthropic-cli, copilot) that bring their own agent loop — the crew
    *    + granular steps are mostly redundant overhead for them (eval data:
@@ -3675,7 +3675,7 @@ export const CreateProjectRequestSchema = z.object({
     .describe('Concrete success criteria — usually a bullet list. What does "done" look like?'),
   /**
    * Project shape. `crew` (default) → traditional voorman-coordinates-
-   * specialists. `solo` → a "job": one specialist (the ambachtsman) does
+   * specialists. `solo` → a "job": one Builder does
    * everything themselves; team-management tools are filtered out for
    * sessions on this project.
    */

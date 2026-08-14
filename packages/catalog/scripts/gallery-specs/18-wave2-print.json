@@ -4,13 +4,7 @@
     "role": "general",
     "name": "Thank-You Note Batch",
     "description": "Clear the owed-thanks list with notes that sound like you: read who is owed and for what from the correspondence roster, draft one note per person that names the actual gift or kindness — no template smell — then log every note so nobody who mattered goes unanswered. Locks the household voice and the coverage rules FIRST, then drafts the batch, then records it in the roster with a short run summary. Use for thank-you notes, clearing the owed-thanks list, 'we owe thank yous from the party', and post-holiday gratitude sweeps.",
-    "tags": [
-      "correspondence",
-      "thank-you",
-      "letters",
-      "household",
-      "batch"
-    ],
+    "tags": ["correspondence", "thank-you", "letters", "household", "batch"],
     "triggers": [
       "draft the thank you notes",
       "clear the owed thanks list",
@@ -69,13 +63,7 @@
     "role": "general",
     "name": "Holiday Card Run",
     "description": "Make the December run a pleasure instead of a panic: sweep the address list while there is still time to fix it, settle the card message, and produce the print-ready card and the address sheet in one sitting. Locks the roster sweep and the message criteria FIRST, then builds the card, then the address sheet, then reports the gaps that still need a human. Use for holiday cards, the annual card run, 'time for the holiday cards', address list cleanup before card season, and the December mailing.",
-    "tags": [
-      "correspondence",
-      "holiday",
-      "cards",
-      "print",
-      "household"
-    ],
+    "tags": ["correspondence", "holiday", "cards", "print", "household"],
     "triggers": [
       "run the holiday cards",
       "time for the holiday cards",
@@ -167,13 +155,7 @@
     "role": "general",
     "name": "Design the Invitations",
     "description": "Produce the invitation the day deserves and get the facts beyond doubt: the date, time, venue, and RSVP instructions checked letter-for-letter against the event record — because a beautiful card with the wrong date is the classic disaster. Locks the fact checklist and the look brief FIRST, then designs the print-ready invitation, then proofs every fact against the record before anything reaches a printer. Use for party invitations, designing the invites, birthday and anniversary invitations, and 'make the invitation printable'.",
-    "tags": [
-      "event",
-      "invitation",
-      "print",
-      "design",
-      "celebration"
-    ],
+    "tags": ["event", "invitation", "print", "design", "celebration"],
     "triggers": [
       "design the invitations",
       "make the party invites",
@@ -240,13 +222,7 @@
     "role": "general",
     "name": "Post-Event Thank-You Sweep",
     "description": "Close the event the way it deserves: every gift-giver and every helper matched to a personal note, drafted in one sitting and tracked to sent — so 'the thank-yous actually go out' becomes a checklist instead of a lingering guilt. Locks the coverage rule FIRST — every giver, every helper, one personal detail each — then drafts the batch, then records each note to sent in the event's books. Use for post-event thank-yous, thanking the helpers after a party, gift thank-you notes, and 'the party's done, sweep the thank yous'.",
-    "tags": [
-      "event",
-      "thank-you",
-      "letters",
-      "gifts",
-      "follow-up"
-    ],
+    "tags": ["event", "thank-you", "letters", "gifts", "follow-up"],
     "triggers": [
       "sweep the thank yous",
       "post event thank yous",
@@ -305,13 +281,7 @@
     "role": "general",
     "name": "Forge a Crossword",
     "description": "Construct a personalized crossword and prove it works before anyone's pencil touches it: the grid actually interlocks, every entry sits in the grid exactly where its number says, every clue is tuned to the solver — and the whole thing ships as a printable page with the solution kept decently out of sight. Locks the theme and the word list FIRST, then constructs the mechanically-verified grid, then renders the printable puzzle. Use for making a crossword, a personalized puzzle for the family, 'a crossword with the grandkids' names in it', and printable puzzle gifts.",
-    "tags": [
-      "puzzle",
-      "crossword",
-      "games",
-      "print",
-      "personalized"
-    ],
+    "tags": ["puzzle", "crossword", "games", "print", "personalized"],
     "triggers": [
       "make a crossword",
       "crossword for the family",
@@ -387,13 +357,7 @@
     "role": "general",
     "name": "Lay Out the Puzzle Pack",
     "description": "Bind the month's puzzles into one print-ready pack: a cover, a page per puzzle, and the solutions gathered in the back where they belong — the thing that lands on the kitchen table and disappears into pencil marks. Locks the shelf inventory and the page rules FIRST, then lays out the pack, then proofs that every puzzle made it in and no solution leaks next to its puzzle. Use for laying out the puzzle pack, binding the month's puzzles, a printable puzzle booklet, and 'put the puzzles into one pack'.",
-    "tags": [
-      "puzzle",
-      "pack",
-      "layout",
-      "print",
-      "booklet"
-    ],
+    "tags": ["puzzle", "pack", "layout", "print", "booklet"],
     "triggers": [
       "lay out the puzzle pack",
       "bind the puzzles into a pack",
@@ -454,13 +418,7 @@
     "role": "general",
     "name": "Lay Out the Cookbook",
     "description": "Assemble the heirloom: every tested recipe in its chapter, the provenance kept beside the food — whose recipe it was, what table it came from — chapter intros in the family's voice, print-ready pages. The book that exists because someone finally sat down and made it. Locks the inclusion rule FIRST — tested recipes in, untested listed for the next round, never silently dropped — then lays out the chapters, then proofs every eligible recipe made it in with its story intact. Use for laying out the family cookbook, the heirloom recipe book, 'print the cookbook', and a recipe book for the grandchildren.",
-    "tags": [
-      "recipes",
-      "cookbook",
-      "family",
-      "print",
-      "heirloom"
-    ],
+    "tags": ["recipes", "cookbook", "family", "print", "heirloom"],
     "triggers": [
       "lay out the cookbook",
       "make the family cookbook",

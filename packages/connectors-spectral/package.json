@@ -6,15 +6,7 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "connectors",
-    "spectral",
-    "prismatic"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "connectors", "spectral", "prismatic"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"

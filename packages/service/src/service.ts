@@ -1511,9 +1511,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           await (newStep.advanceWhen?.artifact
             ? store.writeProjectArtifact(projectId, advanceFile, manifest)
             : store.writeProjectWorkspaceFile(projectId, advanceFile, manifest)
-          ).catch((err) =>
-            log.warn(`[fanout] ${task.ref}: could not write ${advanceFile}:`, err),
-          );
+          ).catch((err) => log.warn(`[fanout] ${task.ref}: could not write ${advanceFile}:`, err));
         }
         const nextStep = newStep.advanceWhen?.goto ?? newStep.next;
         if (nextStep) {

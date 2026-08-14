@@ -3302,7 +3302,7 @@ export class Store {
       });
       // Promoting a gezel to voorman implies project membership. The
       // roster is advisory, so we do this even for solo projects (the
-      // ambachtsman is the only member). Idempotent — no-op when the
+      // Builder is the only member). Idempotent — no-op when the
       // gezel was already on the roster from a prior interaction.
       if (patch.voormanGezelId) {
         await this.addGezelToProject(id, patch.voormanGezelId, {

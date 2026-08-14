@@ -4,13 +4,7 @@
     "role": "maintenance-review",
     "name": "Pull Request Review",
     "description": "Run a rigorous staff-engineer code review on a pull request or local diff and emit a structured, actionable review report. First reads the PR description and the full diff to scope intent and a reviewer checklist (correctness, edge cases, tests, security, style, scope-creep), then audits the diff hunk-by-hunk against that checklist tracing data flow and failure modes, then writes a prioritized report with blocking vs non-blocking findings, each pinned to file:line with a concrete fix. Use this for code review, PR review, reviewing a diff, a second pair of eyes on a change, or a pre-merge sign-off — it catches bugs, missing tests, and risky changes before merge rather than rubber-stamping.",
-    "tags": [
-      "review",
-      "code-review",
-      "pull-request",
-      "quality",
-      "diff"
-    ],
+    "tags": ["review", "code-review", "pull-request", "quality", "diff"],
     "triggers": [
       "review this PR",
       "code review",
@@ -72,13 +66,7 @@
     "role": "maintenance-review",
     "name": "Live Browser QA Pass",
     "description": "Run a hands-on quality-assurance pass on a running web app or page by actually exercising it in a browser, then emit a defect report with reproduction steps and severity. First derives a test plan and acceptance criteria from the app's intended behavior (happy paths, edge cases, error states, responsive/console health), then drives the UI step-by-step clicking and typing through each flow while watching the console and network for errors, then writes a bug report where every defect has numbered repro steps, expected vs actual, and severity. Use this for QA, manual testing, smoke testing, exploratory testing, click-testing a build, or verifying a feature works in the real browser before shipping — it finds broken flows, console errors, and visual breakage that unit tests miss.",
-    "tags": [
-      "qa",
-      "testing",
-      "browser",
-      "manual-test",
-      "smoke-test"
-    ],
+    "tags": ["qa", "testing", "browser", "manual-test", "smoke-test"],
     "triggers": [
       "qa this",
       "run a qa pass",
@@ -140,13 +128,7 @@
     "role": "maintenance-review",
     "name": "Root-Cause Investigation",
     "description": "Debug a defect or production incident down to its true root cause and document the diagnosis with evidence, instead of patching the first symptom. First reproduces the failure reliably and locks what 'understood' means (a confirmed repro, the failing assertion, the exact trigger condition), then narrows the cause by forming and testing hypotheses, bisecting, reading stack traces and logs, and tracing the data path until one hypothesis is proven, then writes a root-cause report with the evidence chain, the smallest fix, and how to prevent recurrence. Use this for debugging, root-cause analysis, investigating a bug or flaky test, diagnosing an incident, or figuring out why something breaks — it produces a proven cause backed by evidence, not a guess.",
-    "tags": [
-      "debugging",
-      "investigation",
-      "root-cause",
-      "incident",
-      "diagnosis"
-    ],
+    "tags": ["debugging", "investigation", "root-cause", "incident", "diagnosis"],
     "triggers": [
       "investigate this bug",
       "root cause this",
@@ -208,13 +190,7 @@
     "role": "maintenance-review",
     "name": "Security Review of a Diff",
     "description": "Perform a focused security review of a code change or diff and produce a vulnerability report mapped to a threat checklist. First scopes the change's attack surface and locks a security checklist (injection, authn/authz, secrets, deserialization, SSRF, crypto misuse, input validation, dependency risk), then audits the diff against each class while tracing tainted data from untrusted sources to dangerous sinks, then writes a findings report rating each issue by severity and likelihood with a concrete remediation. Use this for a security review, secure code review, vulnerability assessment of a diff, an AppSec pass, or checking a change for injection/auth/secret-leak risks before merge — it surfaces exploitable flaws tied to specific lines rather than generic security platitudes.",
-    "tags": [
-      "security",
-      "review",
-      "appsec",
-      "vulnerability",
-      "diff"
-    ],
+    "tags": ["security", "review", "appsec", "vulnerability", "diff"],
     "triggers": [
       "security review",
       "is this change secure",
@@ -347,13 +323,7 @@
     "role": "maintenance-review",
     "name": "UX & Visual Design Review",
     "description": "Critique a UI's user experience and visual design and produce a prioritized design-review report. First scopes the screens and flows and locks a heuristic checklist (visual hierarchy, spacing rhythm and alignment, typographic scale, color and contrast, consistency, affordance and feedback, empty/loading/error states, and the primary task's friction), then reviews each screen against those heuristics with a designer's eye for both polish and usability, then writes a findings report rating each issue by impact with a concrete, specific design fix. Use this for a design review, UX critique, visual QA, design feedback, a heuristic evaluation, or 'does this look and feel right' — it gives actionable, specific design fixes (exact spacing, color, hierarchy changes) rather than 'make it pop'.",
-    "tags": [
-      "design",
-      "ux",
-      "visual",
-      "review",
-      "critique"
-    ],
+    "tags": ["design", "ux", "visual", "review", "critique"],
     "triggers": [
       "design review",
       "ux critique",
@@ -415,13 +385,7 @@
     "role": "maintenance-review",
     "name": "Editorial & Tone Review",
     "description": "Run an editorial review on a piece of content for clarity, correctness, and brand voice, then produce a line-edit report and a clean revised version. First scopes the audience, purpose, and voice/style rules and locks an editorial checklist (grammar and spelling, clarity and concision, consistent terminology, active voice, reading level, tone match, scannability, and CTA strength), then reviews the copy line-by-line against those rules marking every issue with a suggested rewrite, then writes a report of categorized edits plus a clean revised draft. Use this for a copy review, editorial pass, proofreading, line edit, tone/voice review, or tightening writing — it returns specific tracked edits with rewrites and a polished final draft rather than 'tighten this up'.",
-    "tags": [
-      "copy",
-      "editorial",
-      "writing",
-      "review",
-      "proofreading"
-    ],
+    "tags": ["copy", "editorial", "writing", "review", "proofreading"],
     "triggers": [
       "copy review",
       "editorial review",
@@ -483,13 +447,7 @@
     "role": "maintenance-review",
     "name": "Performance Audit",
     "description": "Audit an application or page for performance problems with measurements, then produce a report of the highest-impact optimizations. First scopes the workloads and locks a performance budget and checklist (load time and Core Web Vitals, bundle/asset weight, render and main-thread cost, network waterfall and request count, server/query latency, memory and re-render churn), then MEASURES each against a baseline using real profiling rather than guessing, then writes a report that ranks bottlenecks by impact-vs-effort with a specific fix and the expected gain for each. Use this for a performance audit, speed optimization, finding bottlenecks, a Lighthouse-style review, reducing load time, or profiling slowness — it grounds every recommendation in a measured number and an estimated payoff, not 'it feels slow'.",
-    "tags": [
-      "performance",
-      "audit",
-      "optimization",
-      "profiling",
-      "speed"
-    ],
+    "tags": ["performance", "audit", "optimization", "profiling", "speed"],
     "triggers": [
       "performance audit",
       "why is this slow",
@@ -696,13 +654,7 @@
     "name": "Lightweight Threat Model",
     "artifactNote": "Every deliverable lands in the project's **artifacts drawer** (`write_artifact`),\nnot the shipped workspace — a threat model is review/analysis output, not\nproduct source — and each is gated for size/shape there exactly as a workspace\nfile would be.",
     "description": "Produce a lightweight threat model for a feature or system using a structured method (STRIDE over a simple data-flow diagram) and output a prioritized mitigation plan. First scopes the system by drawing its data-flow — actors, processes, data stores, and trust boundaries — and locks what is in scope, then enumerates threats per element using STRIDE (spoofing, tampering, repudiation, info-disclosure, denial-of-service, elevation-of-privilege) and rates each by likelihood and impact, then writes a threat-model report mapping each credible threat to a concrete mitigation and an owner. Use this for a threat model, security design review, STRIDE analysis, attack-surface mapping, or thinking through what could go wrong before building a feature — it yields a structured, prioritized set of threats and mitigations rather than an ad-hoc list of worries.",
-    "tags": [
-      "security",
-      "threat-model",
-      "stride",
-      "design",
-      "risk"
-    ],
+    "tags": ["security", "threat-model", "stride", "design", "risk"],
     "triggers": [
       "threat model this",
       "STRIDE analysis",
@@ -770,13 +722,7 @@
     "sourceDiscipline": "Source discipline:\n\n- Extract only checkable claims that appear in the supplied content.\n- Verify against the supplied or fetched sources; never create extra claims, companies, metrics, quotes, or source sections to make the report longer.\n- Preserve enough of the original claim text that a reader can trace each verdict back to the draft.\n- Mark unsupported but plausible claims as `UNVERIFIABLE` or `FALSE` according to the evidence, not as true by assumption.",
     "name": "Content Accuracy Review",
     "description": "Fact-check a piece of content for accuracy and produce a claim-by-claim verification report. First scopes the content and extracts every checkable claim (statistics, dates, quotes, attributions, causal and factual statements) and locks a verification standard, then verifies each claim against authoritative sources rating it true/false/misleading/unverifiable with the supporting evidence, then writes a report flagging every inaccuracy with the correction and source plus an overall trust rating. Use this for a fact-check, accuracy review, content verification, checking claims and statistics, source-checking an article, or vetting content before publishing — it returns a claim-level verdict backed by cited sources rather than a vague 'seems accurate'.",
-    "tags": [
-      "fact-check",
-      "accuracy",
-      "content",
-      "review",
-      "verification"
-    ],
+    "tags": ["fact-check", "accuracy", "content", "review", "verification"],
     "triggers": [
       "fact check this",
       "accuracy review",
@@ -909,13 +855,7 @@
     "role": "maintenance-review",
     "name": "Release Readiness Review",
     "description": "Run a go/no-go release readiness review against a structured pre-launch checklist and produce a sign-off report with a clear ship decision. First scopes the release and locks a readiness checklist (acceptance criteria met, tests and CI green, no open blockers, migrations and rollback ready, monitoring and alerts in place, docs and changelog updated, feature flags and config set, and on-call/comms prepared), then verifies each item by inspecting the actual state rather than assuming, then writes a go/no-go report listing every blocker that must clear before ship and the residual risks. Use this for a release readiness review, a go/no-go decision, a pre-launch checklist, a ship-readiness gate, a launch review, or deciding if a change is safe to deploy — it produces an evidence-backed ship decision rather than a gut-feel 'looks good'.",
-    "tags": [
-      "release",
-      "readiness",
-      "go-no-go",
-      "review",
-      "launch"
-    ],
+    "tags": ["release", "readiness", "go-no-go", "review", "launch"],
     "triggers": [
       "release readiness review",
       "are we ready to ship",

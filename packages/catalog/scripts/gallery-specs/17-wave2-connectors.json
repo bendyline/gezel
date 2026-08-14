@@ -4,14 +4,7 @@
     "role": "general",
     "name": "Plan the Week",
     "description": "Start Monday with the week already shaped: every meeting seen, the ones needing prep flagged, the conflicts and overload called out, and real focus blocks defended — a plan you made once, on purpose, instead of a calendar you react to all week. Locks the week's events and the planning rules FIRST, then shapes the days, then writes the plan with its prep queue. Use for weekly planning, monday morning planning, 'what does my week look like', calendar reviews, and defending focus time.",
-    "tags": [
-      "calendar",
-      "week",
-      "planning",
-      "meetings",
-      "focus",
-      "ritual"
-    ],
+    "tags": ["calendar", "week", "planning", "meetings", "focus", "ritual"],
     "triggers": [
       "plan the week",
       "plan my week",
@@ -69,13 +62,7 @@
     "role": "general",
     "name": "Meeting Prep Brief",
     "description": "Walk into the meeting already warm: who's in the room, what was promised last time, what you want out of this one, and the two questions worth asking — one page, read in the elevator. Locks the target meeting and the one-page criteria FIRST, then compiles from the calendar and the prior notes, so every claim in the brief traces to something real instead of memory. Use for meeting prep, 'prep me for the meeting', pre-meeting briefs, vendor and client syncs, and walking in warm.",
-    "tags": [
-      "calendar",
-      "meetings",
-      "brief",
-      "prep",
-      "one-page"
-    ],
+    "tags": ["calendar", "meetings", "brief", "prep", "one-page"],
     "triggers": [
       "prep me for the meeting",
       "meeting prep brief",
@@ -122,14 +109,7 @@
     "role": "general",
     "name": "Morning Topic Brief",
     "description": "Be informed without the doomscroll: this morning's items per watched topic, each with its source named, rumor separated from reporting, and yesterday's noise skipped — five minutes that replace an hour of feeds. Locks the brief rules FIRST, then gathers from the feeds, then writes the dated brief into the archive next to the previous ones. Use for morning briefs, daily topic digests, 'what happened overnight', news catch-ups on watched topics, and staying informed without the scroll.",
-    "tags": [
-      "news",
-      "feeds",
-      "brief",
-      "morning",
-      "topics",
-      "digest"
-    ],
+    "tags": ["news", "feeds", "brief", "morning", "topics", "digest"],
     "triggers": [
       "morning brief",
       "what happened overnight",
@@ -182,14 +162,7 @@
     "role": "maintenance-review",
     "name": "Source Quality Audit",
     "description": "Once a month, make the reading list earn its place: score each source on what it actually delivered — accuracy, originality, noise — and keep, demote, or drop with evidence, so the brief stays sharp as the feeds drift. Locks the audit criteria FIRST, then builds the per-source scorecard from the month's briefs, then writes the verdict table with the changes to make. Use for source audits, pruning the feed list, 'the brief feels noisy', monthly reading-list reviews, and deciding which feeds to drop.",
-    "tags": [
-      "news",
-      "feeds",
-      "sources",
-      "audit",
-      "monthly",
-      "review"
-    ],
+    "tags": ["news", "feeds", "sources", "audit", "monthly", "review"],
     "triggers": [
       "audit the sources",
       "the brief feels noisy",
@@ -234,10 +207,7 @@
             {
               "kind": "tableShape",
               "file": "report.md",
-              "requiredColumns": [
-                "Source",
-                "Verdict"
-              ],
+              "requiredColumns": ["Source", "Verdict"],
               "minRows": 3
             }
           ]
@@ -258,13 +228,7 @@
     "role": "general",
     "name": "Curate an Album",
     "description": "Turn a thousand camera-roll photos into the forty that tell the story: cull the near-duplicates, keep the keepers for honest reasons, caption what matters, and leave an album manifest the family will actually revisit. Locks the occasion and the selection criteria FIRST, then curates the manifest one moment at a time, then writes the album's short story. Use for curating an album, photo culling, 'make an album from the weekend', picking the keepers, and turning imports into albums.",
-    "tags": [
-      "photos",
-      "album",
-      "curation",
-      "captions",
-      "family"
-    ],
+    "tags": ["photos", "album", "curation", "captions", "family"],
     "triggers": [
       "curate an album",
       "make an album from these photos",
@@ -318,14 +282,7 @@
     "role": "general",
     "name": "Year in Review",
     "description": "Build the year-in-review that makes someone cry the good way: every month represented or its gap acknowledged, the people balanced, the closing image chosen on purpose — the annual ritual the whole photo archive exists for. Locks the year and the coverage criteria FIRST, then curates the selection month by month, then narrates the year's thread. Use for year-in-review albums, annual photo retrospectives, 'the year in photos', December album rituals, and closing out the year's archive.",
-    "tags": [
-      "photos",
-      "album",
-      "year-in-review",
-      "annual",
-      "curation",
-      "ritual"
-    ],
+    "tags": ["photos", "album", "year-in-review", "annual", "curation", "ritual"],
     "triggers": [
       "year in review album",
       "the year in photos",

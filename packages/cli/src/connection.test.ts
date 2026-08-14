@@ -296,6 +296,7 @@ describe('project folder resolution', () => {
       description: `CLI workspace at ${folder}`,
       about: `new-workspace — working directory ${folder}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
       missionObjectives: 'new-workspace — fill in concrete success criteria for this project.',
+      mode: 'solo',
       workingDir: folder,
     });
     expect(setProjectWorkingDir).not.toHaveBeenCalled();
@@ -401,5 +402,34 @@ describe('CLI project lead', () => {
 
     await expect(ensureCliProjectLead(client, 'game')).resolves.toBe('player');
     expect(listGezels).not.toHaveBeenCalled();
+  });
+
+  it('repairs a folder-backed solo project with a Builder', async () => {
+    const updateProject = vi.fn().mockResolvedValue({
+      id: 'folder',
+      name: 'Folder',
+      mode: 'solo',
+      workingDir: '/work/folder',
+      voormanGezelId: 'builder',
+    });
+    const createGezelFromTemplate = vi.fn();
+    const client = makeClient({
+      getProject: vi.fn().mockResolvedValue({
+        id: 'folder',
+        name: 'Folder',
+        mode: 'solo',
+        workingDir: '/work/folder',
+        gezelIds: [],
+      }),
+      listGezels: vi.fn().mockResolvedValue({
+        gezels: [{ id: 'builder', name: 'Ada', role: 'Builder', templateId: 'builder' }],
+      }),
+      createGezelFromTemplate,
+      updateProject,
+    });
+
+    await expect(ensureCliProjectLead(client, 'folder')).resolves.toBe('builder');
+    expect(updateProject).toHaveBeenCalledWith('folder', { voormanGezelId: 'builder' });
+    expect(createGezelFromTemplate).not.toHaveBeenCalled();
   });
 });

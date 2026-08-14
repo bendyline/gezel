@@ -2007,7 +2007,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   type="button"
                   className="area-toolbar-btn"
                   onClick={() => setCreateMode('solo')}
-                  title="A solo project — one ambachtsman handles everything"
+                  title="A solo project — one Builder handles everything"
                 >
                   + New Job
                 </button>
@@ -2433,7 +2433,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </div>
                             <small className="muted">
                               {selected.mode === 'solo'
-                                ? 'The single gezel who handles this entire job — the ambachtsman. Mentioned in the system prompt for any chat scoped here. Team-management tools are stripped from their thread.'
+                                ? 'The single gezel who handles this entire job — the Builder. Mentioned in the system prompt for any chat scoped here. Team-management tools are stripped from their thread.'
                                 : 'The gezel who acts as voorman (foreman) of this project. Mentioned in the system prompt for any chat scoped here.'}
                             </small>
                           </label>

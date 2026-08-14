@@ -4,13 +4,7 @@
     "role": "general",
     "name": "Cited Research Report",
     "description": "Produce a rigorously cited research report that answers a specific question end to end: a planner first decomposes the question into sub-questions and locks the scope, then a researcher gathers and logs primary and secondary sources with inline citations, then a copywriter writes a structured markdown report (executive summary, findings, evidence, limitations, references). The ordering matters because a small model that writes before scoping rambles and a model that writes without a source log fabricates citations; locking sub-questions and a source table first turns the report into a fill-in-the-evidence exercise. Use this for literature-backed analysis, deep dives, investigative write-ups, background research, and any 'find out and write it up with sources' task where every claim must trace to a citation.",
-    "tags": [
-      "research",
-      "report",
-      "citations",
-      "analysis",
-      "writing"
-    ],
+    "tags": ["research", "report", "citations", "analysis", "writing"],
     "triggers": [
       "write a research report",
       "research this question with sources",
@@ -71,13 +65,7 @@
     "role": "general",
     "name": "Literature Review",
     "description": "Survey the existing literature on a topic and synthesize it into a structured review: a planner sets the scope, inclusion criteria, and the themes to organize around, then a researcher gathers and characterizes each source (method, finding, quality), then a copywriter synthesizes them thematically rather than source-by-source, surfacing consensus, disagreement, and gaps. The ordering matters because a review written without inclusion criteria becomes an arbitrary pile, and one written source-by-source reads like a list of summaries instead of a synthesis; locking themes and a source matrix first forces the comparative analysis that makes a real lit review. Use this for academic-style literature surveys, state-of-the-art reviews, 'what does the research say' questions, and synthesizing a body of papers or articles.",
-    "tags": [
-      "research",
-      "literature-review",
-      "synthesis",
-      "academic",
-      "writing"
-    ],
+    "tags": ["research", "literature-review", "synthesis", "academic", "writing"],
     "triggers": [
       "literature review",
       "what does the research say",
@@ -138,13 +126,7 @@
     "role": "general",
     "name": "Competitive Analysis",
     "description": "Compare a set of competitors across consistent dimensions and turn the comparison into an actionable analysis: a planner locks the competitor set and the evaluation dimensions, a researcher fills a feature/positioning matrix with evidence-backed cells, and a copywriter writes the analysis with a clear recommendation and competitive gaps. The ordering matters because dimensions chosen after the research are cherry-picked, and a write-up without a complete matrix has holes a reader will spot; locking the same dimensions for every competitor up front forces an apples-to-apples comparison. Use this for competitor teardowns, market positioning, win/loss analysis, 'how do we compare to X and Y' questions, and feature/pricing comparisons across rivals.",
-    "tags": [
-      "research",
-      "competitive-analysis",
-      "strategy",
-      "market",
-      "comparison"
-    ],
+    "tags": ["research", "competitive-analysis", "strategy", "market", "comparison"],
     "triggers": [
       "competitive analysis",
       "compare competitors",
@@ -205,13 +187,7 @@
     "role": "general",
     "name": "Market & Landscape Scan",
     "description": "Survey a market or landscape and write a scan that sizes it, maps the players, and surfaces trends: a planner scopes the market boundary and the lenses (size, segments, players, trends, drivers, risks), a researcher gathers sized figures and landscape facts with sources, and a copywriter writes a structured landscape report. The ordering matters because a scan without a defined boundary mixes adjacent markets and inflates numbers, and one without locked lenses skips the dimensions a decision-maker needs; fixing boundary and lenses first keeps the scan focused and comparable. Use this for market landscape scans, industry overviews, TAM/segmentation reads, trend analyses, and 'give me the lay of the land in X' requests.",
-    "tags": [
-      "research",
-      "market",
-      "landscape",
-      "industry",
-      "trends"
-    ],
+    "tags": ["research", "market", "landscape", "industry", "trends"],
     "triggers": [
       "market scan",
       "landscape overview",
@@ -272,13 +248,7 @@
     "role": "maintenance-review",
     "name": "Fact-Check a Set of Claims",
     "description": "Verify a set of claims one by one and produce a verdict report: a planner extracts and itemizes every checkable claim and locks the rating scale, a researcher independently verifies each claim against primary sources and logs the evidence, and a reviewer compiles a per-claim verdict report with ratings and corrections. The ordering matters because verifying before itemizing lets claims slip through unchecked, and a report without a fixed rating scale gives inconsistent verdicts; isolating each atomic claim and locking the scale first makes the check exhaustive and auditable. Use this for fact-checking articles or statements, verifying claims, debunking, accuracy passes, and 'is this true' / 'check these facts' requests.",
-    "tags": [
-      "research",
-      "fact-check",
-      "verification",
-      "accuracy",
-      "review"
-    ],
+    "tags": ["research", "fact-check", "verification", "accuracy", "review"],
     "triggers": [
       "fact-check this",
       "verify these claims",
@@ -340,13 +310,7 @@
     "sourceDiscipline": "Source discipline:\n\n- Synthesize only claims that appear in the supplied corpus or extraction notes.\n- Preserve source ids such as `[1]`, `[2]`, `[3]`, and `[4]` on synthesized points so readers can trace them.\n- Do not invent systems, timelines, metrics, risks, or implementation details to make the report longer.\n- When the corpus leaves a gap, name it as an open question instead of filling it with plausible detail.",
     "name": "Corpus Synthesis",
     "description": "Read a provided corpus of documents and synthesize it into a single coherent overview: a planner sets the synthesis question and the extraction schema, a researcher reads every document and extracts structured notes keyed back to each source, and a copywriter synthesizes the extracts into a unified narrative organized by idea rather than by document. The ordering matters because synthesizing before reading everything privileges the first few documents, and a write-up keyed to documents instead of ideas just summarizes each file; locking a synthesis question and per-document extraction first guarantees full coverage and a real cross-document synthesis. Use this for synthesizing a folder of docs/notes/papers, 'pull together everything we know about X', cross-document summaries, knowledge consolidation, and meeting/research-note synthesis.",
-    "tags": [
-      "research",
-      "synthesis",
-      "corpus",
-      "knowledge",
-      "summary"
-    ],
+    "tags": ["research", "synthesis", "corpus", "knowledge", "summary"],
     "triggers": [
       "synthesize these documents",
       "pull together everything on",
@@ -407,13 +371,7 @@
     "role": "general",
     "name": "Option Comparison Matrix",
     "description": "Compare a set of options against weighted criteria and ship an interactive HTML comparison matrix with a recommendation: a planner locks the options, the criteria, and their weights, a researcher fills every cell with an evidence-backed value, and a developer builds a single-file HTML page with a sortable/filterable comparison table and a scored recommendation. The ordering matters because criteria and weights chosen after seeing the data bias the winner, and a static table buries the decision; locking weighted criteria first makes the comparison fair and lets the build compute a transparent score. Use this for option/tool/vendor comparisons, decision matrices, buying guides, 'help me choose between X, Y, Z', and weighted pros/cons tables.",
-    "tags": [
-      "research",
-      "comparison",
-      "decision-matrix",
-      "html",
-      "evaluation"
-    ],
+    "tags": ["research", "comparison", "decision-matrix", "html", "evaluation"],
     "triggers": [
       "comparison matrix",
       "help me choose between",
@@ -490,13 +448,7 @@
     "role": "general",
     "name": "Due-Diligence Brief",
     "description": "Produce a structured due-diligence brief on an entity (company, vendor, investment, partner): a planner locks the diligence dimensions and red-flag criteria, a researcher gathers verifiable facts and risk signals per dimension with sources, and a copywriter writes a decision-oriented brief with findings, risks, and an overall read. The ordering matters because diligence without locked dimensions misses a category (e.g. legal, financial, reputational) and a brief without a red-flag rubric buries the risks; fixing the dimensions and what counts as a flag first makes the brief decision-ready and defensible. Use this for vendor/partner due diligence, investment diligence, background briefs on a company or person, risk assessments, and 'should we work with / invest in X' questions.",
-    "tags": [
-      "research",
-      "due-diligence",
-      "risk",
-      "business",
-      "brief"
-    ],
+    "tags": ["research", "due-diligence", "risk", "business", "brief"],
     "triggers": [
       "due diligence brief",
       "diligence on this company",
@@ -557,13 +509,7 @@
     "role": "general",
     "name": "Topic Explainer",
     "description": "Explain a complex topic clearly for a defined audience: a planner pins the audience, their assumed prior knowledge, and the concepts that must be taught, a researcher gathers accurate facts and good analogies with sources, and a copywriter writes a progressively-structured explainer that builds from fundamentals to the full picture. The ordering matters because an explainer written without a fixed audience either condescends or loses people, and one written without a concept map skips a prerequisite; locking the audience and a concept dependency order first guarantees the explanation actually lands. Use this for 'explain X like I'm a beginner/expert', concept explainers, how-it-works guides, ELI5/ELI-expert pieces, and turning a hard topic into an accessible read.",
-    "tags": [
-      "research",
-      "explainer",
-      "education",
-      "writing",
-      "accessible"
-    ],
+    "tags": ["research", "explainer", "education", "writing", "accessible"],
     "triggers": [
       "explain this topic",
       "how does X work",
@@ -625,13 +571,7 @@
     "sourceDiscipline": "Source discipline:\n\n- Audit only claims that appear in the supplied draft or source bundle.\n- Keep the draft's citation labels verbatim, such as `Claim [A]`, so each verdict is traceable.\n- Treat uncited factual sentences in the draft as `Uncited-Claim`; do not create new claims to make the report longer.\n- If a source excerpt is missing or contradicts the draft, say that directly and propose a correction or citation fix.",
     "name": "Citation Audit",
     "description": "Audit an existing document's claims against its citations and report every mismatch: a reviewer pairs each cited claim with the citation it depends on and locks the audit rubric, a researcher opens each cited source and verifies the claim is actually supported, and a reviewer compiles a per-citation audit report with verdicts and fixes. The ordering matters because auditing without first pairing claims to citations misses unsupported claims, and a report without a fixed verdict scale is inconsistent; building the claim-citation pairing and rubric first makes the audit exhaustive and the report actionable. Use this for checking that citations support their claims, source-verification of a draft, catching citation drift or unsupported statements, and 'do these references actually back up the text' reviews.",
-    "tags": [
-      "research",
-      "citations",
-      "audit",
-      "verification",
-      "review"
-    ],
+    "tags": ["research", "citations", "audit", "verification", "review"],
     "triggers": [
       "audit the citations",
       "check citations support the claims",
@@ -692,13 +632,7 @@
     "role": "general",
     "name": "Domain Glossary",
     "description": "Build a consistent, accurate glossary for a domain: a planner sets the domain scope, the term-selection criteria, and the entry template, a researcher gathers the canonical definition and usage for each term with sources, and a copywriter writes the alphabetized glossary with cross-references and consistent entries. The ordering matters because terms picked ad hoc leave gaps and inconsistent entries confuse readers; locking the scope, what makes a term in-scope, and a fixed entry template first guarantees coverage and a uniform, cross-linked glossary. Use this for building a domain or product glossary, a terms/definitions reference, an acronym list, onboarding vocabulary, and 'define all the key terms in X' requests.",
-    "tags": [
-      "research",
-      "glossary",
-      "definitions",
-      "reference",
-      "documentation"
-    ],
+    "tags": ["research", "glossary", "definitions", "reference", "documentation"],
     "triggers": [
       "build a glossary",
       "define the key terms",
@@ -759,13 +693,7 @@
     "role": "general",
     "name": "Curated Annotated Reading List",
     "description": "Curate an annotated reading list on a topic for a defined reader: a planner sets the reader, their goal, and the selection and ordering criteria, then a researcher curates and annotates each pick with why it matters, what it covers, and a suggested reading order. The ordering matters because a list assembled without a reader and a goal becomes a random link dump, and one without annotations forces the reader to guess what to read first; fixing who it is for and what 'good for this reader' means up front turns it into a guided learning path. Use this for curated reading lists, a syllabus or learning path, 'what should I read to learn X', resource roundups, and annotated bibliographies of recommended materials.",
-    "tags": [
-      "research",
-      "reading-list",
-      "curation",
-      "learning-path",
-      "resources"
-    ],
+    "tags": ["research", "reading-list", "curation", "learning-path", "resources"],
     "triggers": [
       "curate a reading list",
       "what should I read to learn",
@@ -815,13 +743,7 @@
     "role": "general",
     "name": "Annotated Bibliography",
     "description": "Build a formal annotated bibliography for a research topic: a planner locks the scope, the citation style, and the annotation rubric (summary + evaluation + relevance), then a researcher locates each source and writes a consistent, properly-formatted annotation that summarizes, critically evaluates, and situates it for the research question. The ordering matters because annotations written without a fixed rubric vary wildly in depth and a bibliography assembled without a citation style is inconsistent; locking style and the three-part annotation rubric first yields a uniform, scholarly, reusable artifact. Use this for annotated bibliographies, a sourced reference list with summaries, research source logs, literature foundations for a paper, and 'list and evaluate my sources' requests.",
-    "tags": [
-      "research",
-      "bibliography",
-      "citations",
-      "academic",
-      "sources"
-    ],
+    "tags": ["research", "bibliography", "citations", "academic", "sources"],
     "triggers": [
       "annotated bibliography",
       "list and evaluate sources",
@@ -882,13 +804,7 @@
     "role": "general",
     "name": "Decision Evidence Brief",
     "description": "Answer a specific decision question with a weighted, confidence-rated evidence brief: a planner frames the decision and the options, locks the evidence criteria and a confidence scale, a researcher gathers evidence for and against each option and rates the strength of each piece, and a copywriter writes a decision-oriented brief that states a recommendation with explicit confidence levels and the key uncertainties. The ordering matters because evidence gathered before framing the decision is unfocused and a recommendation without a confidence scale hides how strong the case really is; fixing the question, the options, and a confidence rubric first produces an honest, decision-ready brief. Use this for evidence-based decision support, 'what does the evidence say we should do about X', recommendation memos, weighing options with confidence levels, and policy/strategy briefs grounded in sources.",
-    "tags": [
-      "research",
-      "evidence",
-      "decision-support",
-      "recommendation",
-      "brief"
-    ],
+    "tags": ["research", "evidence", "decision-support", "recommendation", "brief"],
     "triggers": [
       "evidence brief",
       "what does the evidence say we should do",

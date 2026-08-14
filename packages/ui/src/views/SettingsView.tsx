@@ -15,8 +15,8 @@ import type {
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';

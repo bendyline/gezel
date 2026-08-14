@@ -4,13 +4,7 @@
     "role": "project-starter",
     "name": "REST API Service",
     "description": "Build a RESTful HTTP API service with resource endpoints, JSON request/response bodies, status codes, validation, and error handling. Locks the contract FIRST — resources, routes, verbs, request/response shapes, status-code map, auth, and pagination — so the implementation has a fixed target, then builds the server, then writes endpoint tests that exercise every route and error case. Covers CRUD endpoints, RESTful routing, OpenAPI-style contract, HTTP status codes, input validation, JSON serialization, and integration tests against the running handler.",
-    "tags": [
-      "api",
-      "rest",
-      "http",
-      "backend",
-      "server"
-    ],
+    "tags": ["api", "rest", "http", "backend", "server"],
     "triggers": [
       "build a rest api",
       "create an http api",
@@ -71,13 +65,7 @@
     "role": "project-starter",
     "name": "GraphQL API",
     "description": "Build a GraphQL API with a typed schema (SDL), resolvers, queries, mutations, and input validation. Designs the schema FIRST — types, fields, nullability, query/mutation operations, and the resolver-to-data mapping — because in GraphQL the schema IS the contract, then implements resolvers, then writes operation tests covering each query, mutation, and error. Covers GraphQL schema definition language, resolvers, nullable vs non-null fields, mutations, query arguments, N+1 awareness, and error handling.",
-    "tags": [
-      "api",
-      "graphql",
-      "schema",
-      "backend",
-      "resolvers"
-    ],
+    "tags": ["api", "graphql", "schema", "backend", "resolvers"],
     "triggers": [
       "build a graphql api",
       "graphql schema and resolvers",
@@ -137,13 +125,7 @@
     "role": "project-starter",
     "name": "Command-Line Tool",
     "description": "Build a command-line tool with subcommands, flags, arguments, help text, and proper exit codes. Designs the CLI UX FIRST — the command surface, flags with defaults, positional args, help/usage output, and exit-code conventions — because a CLI's contract is its interface, then implements argument parsing and command logic, then writes tests for parsing, help, happy paths, and error exits. Covers argv parsing, subcommands, --flags and -short forms, --help, stdin/stdout/stderr conventions, and non-zero exit codes on error.",
-    "tags": [
-      "cli",
-      "command-line",
-      "tool",
-      "terminal",
-      "argv"
-    ],
+    "tags": ["cli", "command-line", "tool", "terminal", "argv"],
     "triggers": [
       "build a cli tool",
       "command line tool",
@@ -204,13 +186,7 @@
     "role": "project-starter",
     "name": "Reusable Library Package",
     "description": "Build a reusable library/SDK with a clean public API surface, sensible defaults, and published documentation. Designs the public API FIRST — exported functions/classes, signatures, types, error contract, and what stays internal — because a library's API is a long-lived promise, then implements it, then writes user-facing docs with installation, quickstart, and a worked example per public function. Covers public-vs-private surface, function signatures, JSDoc/typedoc, README, semantic versioning posture, and usage examples.",
-    "tags": [
-      "library",
-      "sdk",
-      "package",
-      "api",
-      "module"
-    ],
+    "tags": ["library", "sdk", "package", "api", "module"],
     "triggers": [
       "build a library",
       "create an sdk",
@@ -271,13 +247,7 @@
     "role": "project-starter",
     "name": "Inbound Webhook Handler",
     "description": "Build a handler that receives inbound webhook events, verifies their authenticity, parses the payload, and dispatches by event type — idempotently and resiliently. Locks the webhook contract FIRST — the event types, payload shapes, signature-verification scheme, idempotency key, and required 2xx-fast-ack behavior — then implements verification + routing + handlers, then tests valid/invalid signatures, each event type, replays, and malformed payloads. Covers HMAC signature verification, payload parsing, event-type dispatch, idempotency/dedupe, fast 2xx acknowledgement, and retry-safe processing.",
-    "tags": [
-      "webhook",
-      "http",
-      "integration",
-      "events",
-      "backend"
-    ],
+    "tags": ["webhook", "http", "integration", "events", "backend"],
     "triggers": [
       "build a webhook handler",
       "receive webhooks",
@@ -338,13 +308,7 @@
     "role": "project-starter",
     "name": "Scheduled Batch Job",
     "description": "Build a scheduled batch job that runs on a cadence, processes a unit of work, is safe to re-run, and reports its outcome. Scopes the job FIRST — trigger cadence, the work it does, batch/chunk size, idempotency, failure/partial-failure handling, and observable output — then implements the runnable job, then tests a clean run, an empty run, a partial-failure run, and re-run safety. Covers cron scheduling semantics, batch processing, idempotent reruns, chunking, structured logging, exit codes, and graceful partial-failure handling.",
-    "tags": [
-      "cron",
-      "batch",
-      "scheduled-job",
-      "automation",
-      "backend"
-    ],
+    "tags": ["cron", "batch", "scheduled-job", "automation", "backend"],
     "triggers": [
       "build a cron job",
       "scheduled batch job",
@@ -405,13 +369,7 @@
     "role": "project-starter",
     "name": "ETL / Ingest Pipeline",
     "description": "Build an extract-transform-load pipeline that ingests source data, reshapes it to a target schema, and loads it with validation at every stage. Locks the schemas FIRST — source shape, target shape, the field-by-field transform/mapping, type coercions, and the data-quality rules — then implements extract→transform→load with row-level error capture, then a reviewer validates output conformance, row counts, and reject handling. Covers ETL stages, schema mapping, type coercion, data validation, idempotent loads, dead-letter/reject rows, and reconciliation counts.",
-    "tags": [
-      "etl",
-      "pipeline",
-      "data",
-      "ingest",
-      "transform"
-    ],
+    "tags": ["etl", "pipeline", "data", "ingest", "transform"],
     "triggers": [
       "build an etl pipeline",
       "ingest and transform data",
@@ -472,13 +430,7 @@
     "role": "maintenance-review",
     "name": "Schema / Type Migration",
     "description": "Plan and execute a multi-file schema or type migration safely — changing a data model, type definition, or interface across the codebase while keeping everything compiling and consistent. Plans the migration FIRST — the before/after shape, every call-site and file touched, the ordering that never leaves the tree broken, and the backout — then applies the change file-by-file, then a reviewer verifies the tree still builds and nothing referencing the old shape remains. Covers find-all-references, safe edit ordering, backward-compatibility shims, codemod-style changes, and compile/test-green verification.",
-    "tags": [
-      "migration",
-      "refactor",
-      "schema",
-      "types",
-      "codemod"
-    ],
+    "tags": ["migration", "refactor", "schema", "types", "codemod"],
     "triggers": [
       "migrate a schema",
       "change a type everywhere",
@@ -539,13 +491,7 @@
     "role": "maintenance-review",
     "name": "Behavior-Preserving Refactor",
     "description": "Refactor a module to improve its structure, readability, or design WITHOUT changing observable behavior — the defining constraint is that the tests stay green throughout. Plans the refactor FIRST — the target structure, the seams to introduce, the safe step sequence, and the green-tests guardrail — then refactors in small reversible steps, then a reviewer confirms behavior is unchanged and the code is genuinely cleaner. Covers extract-function/module, dependency seams, removing duplication, naming, and test-green-as-invariant refactoring.",
-    "tags": [
-      "refactor",
-      "cleanup",
-      "code-quality",
-      "maintainability",
-      "tests"
-    ],
+    "tags": ["refactor", "cleanup", "code-quality", "maintainability", "tests"],
     "triggers": [
       "refactor this module",
       "clean up the code",
@@ -606,13 +552,7 @@
     "role": "maintenance-review",
     "name": "Reproduce-Then-Fix a Bug",
     "description": "Fix a bug the disciplined way: first write a failing test that reproduces it, then make the smallest change that turns the test green without breaking others, then verify and guard against regression. Reproduces FIRST with a red test that captures the exact wrong behavior — because a bug you cannot reproduce you cannot prove fixed — then applies the minimal fix, then a reviewer confirms the new test passes, root cause is addressed, and the suite is green. Covers test-driven bug fixing, regression tests, minimal diffs, root-cause vs symptom, and red-green verification.",
-    "tags": [
-      "bug-fix",
-      "tdd",
-      "regression-test",
-      "debugging",
-      "tests"
-    ],
+    "tags": ["bug-fix", "tdd", "regression-test", "debugging", "tests"],
     "triggers": [
       "fix this bug",
       "reproduce and fix",
@@ -673,13 +613,7 @@
     "role": "maintenance-review",
     "name": "Test Suite Backfill",
     "description": "Add a meaningful test suite to existing untested (or under-tested) code, prioritizing the highest-risk behavior and edge cases over vanity coverage. Scopes coverage FIRST — the public surface, the critical paths, the edge/error cases, and the target the tests must hit — then writes characterization and edge-case tests that pin real behavior and would catch real regressions. Covers test prioritization, characterization tests, edge/error-case coverage, arrange-act-assert structure, and coverage-that-matters over line-count chasing.",
-    "tags": [
-      "tests",
-      "coverage",
-      "testing",
-      "quality",
-      "regression"
-    ],
+    "tags": ["tests", "coverage", "testing", "quality", "regression"],
     "triggers": [
       "add tests to this code",
       "backfill tests",
@@ -729,13 +663,7 @@
     "role": "maintenance-review",
     "name": "Targeted Performance Fix",
     "description": "Make a measured, targeted performance improvement — profile to find the real bottleneck, optimize it, then prove the speedup with before/after numbers while keeping behavior correct. Profiles FIRST and locks a measurable target, because optimizing without measuring is guessing, then applies the focused change, then a reviewer confirms the improvement is real, behavior is unchanged, and the code is not needlessly obfuscated. Covers profiling/benchmarking, hotspot identification, algorithmic vs micro optimization, before/after measurement, and correctness-preserving speedups.",
-    "tags": [
-      "performance",
-      "optimization",
-      "profiling",
-      "benchmark",
-      "speed"
-    ],
+    "tags": ["performance", "optimization", "profiling", "benchmark", "speed"],
     "triggers": [
       "optimize performance",
       "make this faster",
@@ -796,13 +724,7 @@
     "role": "maintenance-review",
     "name": "Type-Safety Pass",
     "description": "Tighten the types of a module — eliminate `any`/implicit-any, add precise annotations, narrow unions, and make illegal states unrepresentable — without changing runtime behavior. Audits FIRST to inventory every loose type, unsafe cast, and missing annotation, then replaces them with precise types, then a reviewer confirms the type-checker is clean under strict settings and behavior is unchanged. Covers killing `any`, strict null checks, discriminated unions, generics, type narrowing, removing unsafe casts, and compile-clean-under-strict verification.",
-    "tags": [
-      "types",
-      "typescript",
-      "type-safety",
-      "strict",
-      "refactor"
-    ],
+    "tags": ["types", "typescript", "type-safety", "strict", "refactor"],
     "triggers": [
       "tighten the types",
       "kill any types",
@@ -863,13 +785,7 @@
     "role": "maintenance-review",
     "name": "Containerize a Service",
     "description": "Containerize an application with a production-grade Dockerfile — small, secure, reproducible, and buildable — plus the supporting files to run it. Scopes the container contract FIRST — base image, build vs runtime stages, dependencies, exposed port, entrypoint, env config, and the size/security bar — then writes the Dockerfile + .dockerignore + compose, then a reviewer confirms it builds, runs, and meets the bar. Covers multi-stage builds, slim base images, layer caching, non-root user, .dockerignore, healthchecks, EXPOSE/ENTRYPOINT, and reproducible image builds.",
-    "tags": [
-      "docker",
-      "container",
-      "devops",
-      "dockerfile",
-      "deployment"
-    ],
+    "tags": ["docker", "container", "devops", "dockerfile", "deployment"],
     "triggers": [
       "dockerize this app",
       "write a dockerfile",
@@ -930,13 +846,7 @@
     "role": "maintenance-review",
     "name": "CI Pipeline from Scratch",
     "description": "Build a continuous-integration pipeline that installs, lints, tests, and builds on every push/PR — fast, cached, and gating merges on green. Scopes the pipeline contract FIRST — triggers, the job/stage graph, the matrix, caching strategy, and the gates — then writes the CI workflow YAML, then a reviewer validates the syntax, stage ordering, caching, and that it actually fails on a broken build. Covers CI triggers, job/stage dependencies, dependency caching, build matrices, status checks, fail-fast gating, and a valid workflow file.",
-    "tags": [
-      "ci",
-      "devops",
-      "pipeline",
-      "automation",
-      "github-actions"
-    ],
+    "tags": ["ci", "devops", "pipeline", "automation", "github-actions"],
     "triggers": [
       "set up ci",
       "create a ci pipeline",
@@ -997,13 +907,7 @@
     "role": "project-starter",
     "name": "Project Config Scaffold",
     "description": "Bootstrap a project's configuration — the tooling, linter, formatter, tsconfig/compiler, scripts, and ignore files — into a coherent, conflict-free baseline that actually works together. Scopes the config surface FIRST — every tool, its config file, the settings, and how they must agree (formatter vs linter, strict compiler) — then writes the config files and scripts, then verifies the toolchain runs clean with no conflicts. Covers linter/formatter config, compiler/tsconfig, package scripts, editorconfig, gitignore, and ensuring tools do not fight each other.",
-    "tags": [
-      "config",
-      "bootstrap",
-      "tooling",
-      "scaffold",
-      "setup"
-    ],
+    "tags": ["config", "bootstrap", "tooling", "scaffold", "setup"],
     "triggers": [
       "scaffold project config",
       "set up linting and formatting",
@@ -1053,13 +957,7 @@
     "role": "project-starter",
     "name": "Typed SDK Wrapper for an External API",
     "description": "Wrap a third-party HTTP API as a clean, typed client library — studying the real API surface first so the wrapper matches reality, not guesses. Studies the API FIRST — endpoints, auth, request/response shapes, rate limits, error formats, and pagination from the actual docs — then builds a typed client with sensible methods and error handling, then tests each method against a mocked API including auth and error paths. Covers reading API docs, typed request/response models, auth handling, retry/rate-limit awareness, pagination helpers, error mapping, and a mockable client.",
-    "tags": [
-      "sdk",
-      "api-client",
-      "wrapper",
-      "integration",
-      "http"
-    ],
+    "tags": ["sdk", "api-client", "wrapper", "integration", "http"],
     "triggers": [
       "wrap an api",
       "build an sdk client",
@@ -1120,13 +1018,7 @@
     "role": "project-starter",
     "name": "Model a Flow as a State Machine",
     "description": "Model a stateful flow (checkout, order lifecycle, connection, wizard) as an explicit finite state machine with named states, guarded transitions, and rejected illegal moves — making impossible states impossible. Models the machine FIRST — the full state set, the events, the legal transition table, guards, and entry/exit effects — then implements a transition function that rejects illegal events, then tests every legal path and that illegal transitions are refused. Covers states/events/transitions, transition tables, guards, side-effects on entry, illegal-transition rejection, and exhaustive path testing.",
-    "tags": [
-      "state-machine",
-      "fsm",
-      "modeling",
-      "workflow",
-      "transitions"
-    ],
+    "tags": ["state-machine", "fsm", "modeling", "workflow", "transitions"],
     "triggers": [
       "model a state machine",
       "build a finite state machine",
@@ -1187,13 +1079,7 @@
     "role": "project-starter",
     "name": "Parser / DSL for a Small Grammar",
     "description": "Build a parser for a small domain-specific language or data format — tokenize, parse to an AST, and report clear errors on malformed input. Designs the grammar FIRST — the token set, the grammar rules (BNF-style), operator precedence, the AST node shapes, and the error strategy — then implements lexer + parser producing the AST, then tests valid inputs parse to the right AST and invalid inputs fail with useful errors. Covers tokenization/lexing, recursive-descent parsing, grammar rules, operator precedence, AST construction, and helpful parse-error messages.",
-    "tags": [
-      "parser",
-      "dsl",
-      "grammar",
-      "lexer",
-      "ast"
-    ],
+    "tags": ["parser", "dsl", "grammar", "lexer", "ast"],
     "triggers": [
       "build a parser",
       "parse a dsl",
@@ -1254,13 +1140,7 @@
     "role": "general",
     "name": "Auth / Session Implementation",
     "description": "Implement an authentication and session flow — login, session/token issuance, verification, and logout — with the security fundamentals baked in. Threat-models FIRST to lock the security requirements — credential hashing, token/session strategy, expiry, CSRF/XSS posture, and the attacks in scope — then implements registration/login/verify/logout to those requirements, then a security-minded reviewer audits for the classic auth pitfalls. Covers password hashing (bcrypt/argon2), session vs JWT, token expiry/refresh, secure cookie flags, timing-safe comparison, CSRF protection, and brute-force throttling.",
-    "tags": [
-      "auth",
-      "authentication",
-      "session",
-      "security",
-      "login"
-    ],
+    "tags": ["auth", "authentication", "session", "security", "login"],
     "triggers": [
       "implement login",
       "build an auth flow",
@@ -1321,13 +1201,7 @@
     "role": "maintenance-review",
     "name": "Flagged Feature Rollout",
     "description": "Add a new feature behind a feature flag so it can ship dark, be toggled per-environment/user, and roll back instantly without a deploy. Plans the flag contract FIRST — the flag name/default, the toggle points, the on/off behavior, the targeting (env/percentage/user), and the cleanup plan — then implements the flagged code with both paths working, then a reviewer verifies both states behave and the off-state default is safe. Covers feature flags, toggle points, percentage/targeted rollout, default-off safety, dark launches, and flag-cleanup discipline.",
-    "tags": [
-      "feature-flag",
-      "rollout",
-      "toggle",
-      "release",
-      "experiment"
-    ],
+    "tags": ["feature-flag", "rollout", "toggle", "release", "experiment"],
     "triggers": [
       "add a feature flag",
       "ship behind a flag",
@@ -1388,13 +1262,7 @@
     "role": "maintenance-review",
     "name": "Diagnose + Add Database Indexes",
     "description": "Diagnose slow database queries and add the right indexes — driven by the query plan, not by hunches — then prove the speedup without harming writes. Analyzes FIRST with EXPLAIN/query plans to find the actual full scans and missing indexes, then adds the targeted indexes (right columns, right order, covering where it helps), then a reviewer confirms the plans now use the index and queries are faster. Covers EXPLAIN/query plans, full-table-scan detection, composite index column order, covering indexes, selectivity, and the write-amplification tradeoff.",
-    "tags": [
-      "database",
-      "indexes",
-      "performance",
-      "sql",
-      "query-tuning"
-    ],
+    "tags": ["database", "indexes", "performance", "sql", "query-tuning"],
     "triggers": [
       "add database indexes",
       "speed up slow queries",
@@ -1455,13 +1323,7 @@
     "role": "general",
     "name": "Build + Test a Tricky Regex",
     "description": "Build a regular expression that matches exactly the right strings and rejects the wrong ones — specified with concrete should-match and should-NOT-match cases before a single character is written. Specs the cases FIRST — the positive examples, the tricky negative examples, edge cases, and the anchoring/flags — then builds the regex incrementally against those cases, then tests the full matrix including catastrophic-backtracking safety. Covers character classes, quantifiers, anchors, groups/captures, lookahead/behind, escaping, flags, and ReDoS-safe patterns validated by a should-match / should-not-match table.",
-    "tags": [
-      "regex",
-      "pattern",
-      "validation",
-      "string-matching",
-      "regexp"
-    ],
+    "tags": ["regex", "pattern", "validation", "string-matching", "regexp"],
     "triggers": [
       "build a regex",
       "write a regular expression",
@@ -1522,13 +1384,7 @@
     "role": "general",
     "name": "One-Off Automation Script",
     "description": "Write a one-off automation script that reliably does a repetitive task — process files, call an API, transform data — with arguments, a dry-run, idempotency, and clear logging so it is safe to run. Scopes the task FIRST — inputs/outputs, side-effects, the dry-run, idempotency, and failure handling — then implements the runnable script with args and a dry-run mode, then a reviewer confirms it does the job, is safe to re-run, and fails loudly. Covers argument handling, dry-run/preview mode, idempotent side-effects, progress logging, error handling, and safe-to-rerun automation.",
-    "tags": [
-      "automation",
-      "script",
-      "scripting",
-      "tooling",
-      "task"
-    ],
+    "tags": ["automation", "script", "scripting", "tooling", "task"],
     "triggers": [
       "write an automation script",
       "automate a task",
@@ -1589,13 +1445,7 @@
     "role": "project-starter",
     "name": "gRPC Service",
     "description": "Build a gRPC service from a Protocol Buffers contract — define the .proto service and messages, implement the server handlers, and verify with client calls including streaming and status codes. Designs the proto contract FIRST — the service, RPC methods, request/response messages, field numbers, and the streaming kinds — because the .proto is the binding contract across languages, then implements the handlers, then tests unary/streaming calls and gRPC status codes. Covers protobuf service/message definitions, field numbering, unary vs server/client/bidi streaming, gRPC status codes, deadlines, and a client-driven test.",
-    "tags": [
-      "grpc",
-      "protobuf",
-      "rpc",
-      "api",
-      "backend"
-    ],
+    "tags": ["grpc", "protobuf", "rpc", "api", "backend"],
     "triggers": [
       "build a grpc service",
       "protobuf service and server",
@@ -1656,13 +1506,7 @@
     "role": "project-starter",
     "name": "Message Queue Consumer / Worker",
     "description": "Build a queue consumer/worker that pulls messages off a queue, processes them reliably, and handles failures with retries and a dead-letter path — at-least-once delivery done right. Scopes the messaging contract FIRST — the message schema, ack/nack semantics, idempotency key, retry/backoff policy, dead-letter rules, and concurrency — then implements the consumer loop with ack-after-success and DLQ routing, then tests success, retry, poison-message, and duplicate-delivery handling. Covers queue consumers, at-least-once vs at-most-once, ack/nack, idempotent processing, retry with backoff, dead-letter queues, and poison-message isolation.",
-    "tags": [
-      "queue",
-      "worker",
-      "messaging",
-      "consumer",
-      "backend"
-    ],
+    "tags": ["queue", "worker", "messaging", "consumer", "backend"],
     "triggers": [
       "build a queue consumer",
       "message worker",

@@ -4,13 +4,7 @@
     "role": "general",
     "name": "Plan the Episode",
     "description": "Turn the idea backlog and last episode's loose threads into a locked plan for the next episode: a rundown with timed segments, what to prep, and a record date — so the show ships on rhythm instead of on adrenaline. Locks the episode goal and the acceptance checklist FIRST, then builds the timed rundown, then writes the brief with prep owners and the record date. Use for planning the next episode, episode rundowns, show planning, and 'what's the next episode'.",
-    "tags": [
-      "podcast",
-      "episode",
-      "planning",
-      "rundown",
-      "show"
-    ],
+    "tags": ["podcast", "episode", "planning", "rundown", "show"],
     "triggers": [
       "plan the next episode",
       "episode plan",
@@ -71,13 +65,7 @@
     "role": "general",
     "name": "Transcript to Shownotes",
     "description": "Take a finished recording from raw transcript to publishable shownotes: a clean transcript on file, timestamped chapters, a summary listeners actually read, and the links mentioned — the per-episode ritual that turns audio into an archive. Locks the shownotes checklist FIRST (chapters timestamped, every link captured, names spelled right), then gets the transcript on file, then writes the shownotes from it. Use for episode shownotes, transcribing an episode, chapter timestamps, and 'turn this recording into shownotes'.",
-    "tags": [
-      "podcast",
-      "shownotes",
-      "transcript",
-      "chapters",
-      "archive"
-    ],
+    "tags": ["podcast", "shownotes", "transcript", "chapters", "archive"],
     "triggers": [
       "turn the recording into shownotes",
       "shownotes for the episode",
@@ -142,13 +130,7 @@
     "role": "general",
     "name": "Memory Session",
     "description": "Run one guided memory session and bank it properly: pick the theme the timeline is hungriest for, follow the thread of feeling through the recorded conversation, and file the session with the follow-up questions that keep the next one alive. Locks the theme and question set FIRST, then captures the session in the teller's own words, then files it in the store with the threads to pull next time. Use for memory sessions, filing an interview with a parent or grandparent, memoir capture, and 'what should I ask next time'.",
-    "tags": [
-      "memoir",
-      "memory",
-      "session",
-      "interview",
-      "capture"
-    ],
+    "tags": ["memoir", "memory", "session", "interview", "capture"],
     "triggers": [
       "file the memory session",
       "run a memory session",
@@ -207,13 +189,7 @@
     "role": "general",
     "name": "Weave a Chapter",
     "description": "Weave the banked sessions into one memoir chapter in the teller's voice: every scene traceable to something actually said, gaps marked for a future session instead of invented — the ritual that turns interviews into a book. Locks the chapter's arc and the no-invention rules FIRST, then drafts from session material only, with a faithfulness pass that loops until every detail traces. Use for drafting a memoir chapter, weaving sessions into a story, and 'turn the interviews into a chapter'.",
-    "tags": [
-      "memoir",
-      "chapter",
-      "writing",
-      "faithfulness",
-      "voice"
-    ],
+    "tags": ["memoir", "chapter", "writing", "faithfulness", "voice"],
     "triggers": [
       "weave the sessions into a chapter",
       "draft a memoir chapter",
@@ -255,13 +231,7 @@
     "role": "general",
     "name": "Log the Practice Session",
     "description": "Close out today's practice properly: log what was actually worked with honest minutes and tempo marks, and set up tomorrow's session so the next sit-down starts with intent instead of noodling. Locks the honest picture of the session FIRST, then logs it into the practice record, then writes tomorrow's targeted plan. Use for logging a practice session, ending today's practice, planning tomorrow's practice, and 'log my practice'.",
-    "tags": [
-      "music",
-      "practice",
-      "log",
-      "coaching",
-      "daily"
-    ],
+    "tags": ["music", "practice", "log", "coaching", "daily"],
     "triggers": [
       "log my practice",
       "log today's session",
@@ -320,13 +290,7 @@
     "role": "maintenance-review",
     "name": "Monthly Recording Review",
     "description": "Sit with the month's recordings the way a teacher would: compare each against last month's marks, hear the progress your own ears stopped noticing, and pick next month's one focus — proof over impression, once a month. Locks the review criteria FIRST (every recording assessed, deltas versus last month, exactly one focus), then assesses each recording with evidence, then writes the month's review. Use for monthly practice reviews, listening back to recordings, progress checks, and 'how did this month go'.",
-    "tags": [
-      "music",
-      "practice",
-      "recordings",
-      "review",
-      "monthly"
-    ],
+    "tags": ["music", "practice", "recordings", "review", "monthly"],
     "triggers": [
       "monthly recording review",
       "review this month's recordings",
@@ -387,13 +351,7 @@
     "role": "general",
     "name": "Record a Relative",
     "description": "Bank an elder's interview while the telling is fresh: file the transcript, pull the people, places, and dates into the family record with their source, and write the follow-up questions — because the questions you didn't ask are the ones that vanish. Locks the extraction rules FIRST (every fact carries its quote, uncertain stays uncertain), then files the transcript, then updates the tree and surfaces the conflicts. Use for filing a family interview, recording a relative's stories, pulling facts into the tree, and 'we interviewed grandma'.",
-    "tags": [
-      "family-history",
-      "interview",
-      "genealogy",
-      "transcript",
-      "archive"
-    ],
+    "tags": ["family-history", "interview", "genealogy", "transcript", "archive"],
     "triggers": [
       "file the interview with oma",
       "we interviewed grandma",
@@ -452,13 +410,7 @@
     "role": "general",
     "name": "Family Story Chapter",
     "description": "Write one chapter of the family story from the record you actually have — interviews and tree facts woven into narrative, speculation clearly dressed as speculation — the ritual that turns an archive into the book every family means to write. Locks the chapter's arc and the sourcing rules FIRST, then drafts from the record only, with a faithfulness pass that loops until every event traces. Use for drafting a family history chapter, writing up the emigration years, turning interviews into narrative, and 'write the family story'.",
-    "tags": [
-      "family-history",
-      "chapter",
-      "narrative",
-      "writing",
-      "provenance"
-    ],
+    "tags": ["family-history", "chapter", "narrative", "writing", "provenance"],
     "triggers": [
       "write the family story chapter",
       "draft the emigration chapter",

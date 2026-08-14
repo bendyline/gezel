@@ -66,7 +66,11 @@ import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.j
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
-import { type EnsureVoormanResult, ensureProjectVoorman } from '../../workspace/import-sync.js';
+import {
+  type EnsureProjectLeadResult,
+  ensureFolderProjectBuilder,
+  ensureProjectVoorman,
+} from '../../workspace/import-sync.js';
 import { readJournalTail } from '../../workspace/journal.js';
 import {
   type NpmInstallPackageRequest,
@@ -125,19 +129,19 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.post('/', async (c) => {
     const body = CreateProjectRequestSchema.parse(await c.req.json());
     const created = await ctx.store.createProject(body);
-    // Give the project a voorman up front (unless it's solo), so the chat
-    // pane opens on a designated lead instead of the "pick anyone → first
-    // alphabetical gezel" fallback. Reuses an existing voorman when one
-    // exists, else mints one. Runs synchronously here — the background
-    // index scan also calls this, but that's delayed, and the New Project
-    // dialog opens Chat immediately. Best-effort; never blocks creation.
-    const ensured = await ensureProjectVoorman(
+    // Give the project its lead up front so Chat never opens on an arbitrary
+    // alphabetical gezel. Folder-backed solo projects get a hands-on Builder;
+    // crew projects retain their Voorman. Runs synchronously because both the
+    // CLI and desktop open Chat immediately. Best-effort; never blocks creation.
+    const ensureLead =
+      body.workingDir && body.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
+    const ensured = await ensureLead(
       { store: ctx.store, chat: ctx.chat, home: ctx.home, catalog: ctx.catalog },
       created.id,
     ).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
-      log.warn(`[projects] ensure-voorman failed for ${created.id}: ${message}`);
-      return {} as EnsureVoormanResult;
+      log.warn(`[projects] ensure-lead failed for ${created.id}: ${message}`);
+      return {} as EnsureProjectLeadResult;
     });
     if (ensured.createdGezel) {
       ctx.chatEvents.publishGlobalEvent({
@@ -209,7 +213,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       ).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         log.warn(`[projects] ensure-voorman failed for ${response.project.id}: ${message}`);
-        return {} as EnsureVoormanResult;
+        return {} as EnsureProjectLeadResult;
       });
       if (ensured.createdGezel) {
         ctx.chatEvents.publishGlobalEvent({

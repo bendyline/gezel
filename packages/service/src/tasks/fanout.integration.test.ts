@@ -69,6 +69,9 @@ describe('declarative per-item fanout (invoice-run)', () => {
     expect(detail?.manifest.kind).toBe('craftbook-template');
     if (detail?.manifest.kind !== 'craftbook-template') throw new Error('wrong kind');
     expect(detail.manifest.spawn?.overFile).toBe('notes/billables.json');
+    if (process.env.GEZEL_GILDE_DATA_DIR) {
+      expect(detail.manifest.spawn?.overArtifact).toBe(true);
+    }
     expect(detail.manifest.spawn?.steps.length).toBeGreaterThan(0);
   });
 
@@ -76,12 +79,19 @@ describe('declarative per-item fanout (invoice-run)', () => {
     const { store, tasks } = svc.context;
     const project = await store.createProject({ name: 'Fieldnote Office' });
 
+    const detail = await svc.context.catalog.get('craftbook-template', 'invoice-run');
+    if (detail?.manifest.kind !== 'craftbook-template' || !detail.manifest.spawn) {
+      throw new Error('invoice-run has no spawn block');
+    }
+    const spawn = detail.manifest.spawn;
+
     // Seed the machine list the scope step would normally produce.
-    await store.writeProjectWorkspaceFile(
-      project.id,
-      'notes/billables.json',
-      JSON.stringify(BILLABLES, null, 2),
-    );
+    const billables = JSON.stringify(BILLABLES, null, 2);
+    if (spawn.overArtifact) {
+      await store.writeProjectArtifact(project.id, spawn.overFile, billables);
+    } else {
+      await store.writeProjectWorkspaceFile(project.id, spawn.overFile, billables);
+    }
 
     // Create the spawn host the way the HTTP create route / MCP
     // invoke_craftbook / eval harness do: by craftbookId ALONE, with NO
@@ -99,6 +109,7 @@ describe('declarative per-item fanout (invoice-run)', () => {
     // snapshot carries the spawn config the runtime reads at fanout time.
     expect(task.spawnsCraftbook).toBeDefined();
     expect(task.craftbook.spawn?.overFile).toBe('notes/billables.json');
+    expect(task.craftbook.spawn?.overArtifact).toBe(spawn.overArtifact);
     expect(task.activeStepId).toBe('scope');
 
     // Advance scope -> draft (force past scope's gate). Activating the
@@ -125,7 +136,10 @@ describe('declarative per-item fanout (invoice-run)', () => {
     }
 
     // The runtime stamped the step's advanceWhen deliverable and advanced.
-    const draftManifest = await store.readProjectWorkspaceFile(project.id, 'notes/draft.md');
+    const draftStep = task.craftbook.steps.find((step) => step.id === 'draft');
+    const draftManifest = draftStep?.advanceWhen?.artifact
+      ? await store.readProjectArtifact(project.id, 'notes/draft.md')
+      : await store.readProjectWorkspaceFile(project.id, 'notes/draft.md');
     expect(draftManifest).toBeTruthy();
 
     // Idempotency: re-activating the draft step must not double-spawn. The

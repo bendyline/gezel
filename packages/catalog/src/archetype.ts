@@ -183,9 +183,7 @@ const DRAWER_DEFAULT_KINDS: ReadonlySet<DeliverableKind> = new Set([
   'security-report',
 ]);
 
-function withArtifactDefault<
-  T extends { path: string; kind: DeliverableKind; artifact?: boolean },
->(
+function withArtifactDefault<T extends { path: string; kind: DeliverableKind; artifact?: boolean }>(
   produces: T,
 ): T {
   if (isAccessoryArtifactPath(produces.path)) return { ...produces, artifact: true };

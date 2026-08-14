@@ -241,6 +241,7 @@ describe('NewProjectDialog GitHub repository drafting', () => {
         name: 'sample-workspace',
         about: '',
         missionObjectives: '',
+        mode: 'solo',
         workingDir: folder,
       }),
     );

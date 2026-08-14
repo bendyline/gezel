@@ -979,7 +979,7 @@ const ProjectTypeCompositionShape = {
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
    * Project shape for instances of this type. `solo` marks a single-gezel
-   * "ambachtsman" experience (games, the chat room): the one roster gezel
+   * "Builder" experience (games, the chat room): the one roster gezel
    * does everything, no separate overseer voorman is recruited, and the UI
    * collapses the crew picker to that lead. Maps onto the project's `mode`
    * at adoption. Omit for the default crew shape.
@@ -987,9 +987,9 @@ const ProjectTypeCompositionShape = {
   mode: z.enum(['crew', 'solo']).optional(),
   /**
    * Custom label for this type's project lead, shown wherever the generic
-   * "Voorman" / "Ambachtsman" would appear (the chat chip, project
+   * "Voorman" / "Builder" would appear (the chat chip, project
    * settings) — e.g. checkers uses "Opponent". Aimed at solo types that
-   * want a domain word instead of "Ambachtsman". The underlying data field
+   * want a domain word instead of "Builder". The underlying data field
    * stays `voormanGezelId`; only the rendered label changes.
    */
   leadLabel: z.string().min(1).optional(),

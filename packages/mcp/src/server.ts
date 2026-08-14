@@ -6653,7 +6653,7 @@ function normalizeSpecialistRole(value: string | undefined): string {
   }
   const resolved = resolveRoleId(lower) ?? resolveRoleId(normalized);
   if (resolved && resolved !== 'meester' && resolved !== 'voorman') return resolved;
-  return 'developer';
+  return 'builder';
 }
 
 function repoFetchRedirectForMacro(input: {
@@ -7401,11 +7401,11 @@ async function runFlatProject(
       mode: 'solo',
     });
     const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
-    const ambachtsman = await api.createGezelFromTemplate(effectiveSpecialistRole, {
+    const builder = await api.createGezelFromTemplate(effectiveSpecialistRole, {
       name: gezelName,
       gender: gezelGender,
     });
-    await api.updateProject(project.id, { voormanGezelId: ambachtsman.id });
+    await api.updateProject(project.id, { voormanGezelId: builder.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
       ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
@@ -7422,13 +7422,13 @@ async function runFlatProject(
     const craftbookPick = await pickCraftbookForBrief(project.id, brief);
     const soloLoop = craftbookPick
       ? await buildSoloLoopSteps(
-          ambachtsman.id,
+          builder.id,
           sourceDeliverablePath ?? 'index.html',
           `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
         )
       : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to the
-    // ambachtsman as a task-scoped handoff — no separate chat notify. The
+    // Builder as a task-scoped handoff — no separate chat notify. The
     // old notify's advisory expectedDeliverable becomes an ENFORCED step
     // gate on the ad-hoc fallback (the pinned loop already gates it).
     const task = soloLoop
@@ -7436,7 +7436,7 @@ async function runFlatProject(
           ...sessionTaskNamingMode,
           title: taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
-          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          assignee: { kind: 'gezel', gezelId: builder.id },
           steps: soloLoop.steps,
           entryStepId: soloLoop.entryStepId,
           dispatchEntry: true,
@@ -7445,7 +7445,7 @@ async function runFlatProject(
           ...sessionTaskNamingMode,
           title: taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
-          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          assignee: { kind: 'gezel', gezelId: builder.id },
           steps: [
             {
               name: 'Plan and execute',
@@ -7455,7 +7455,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${ambachtsman.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${ambachtsman.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${ambachtsman.name} is on it and they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project.`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [

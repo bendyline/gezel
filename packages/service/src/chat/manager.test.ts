@@ -6061,11 +6061,11 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     );
   });
 
-  it('injects mission objectives into the solo-mode ambachtsman', async () => {
-    // Solo projects (mode: 'solo') have a single ambachtsman who plays
+  it('injects mission objectives into the solo-mode Builder', async () => {
+    // Solo projects (mode: 'solo') have a single Builder who plays
     // the voorman role — they own everything. The same gating rule
     // applies: voormanGezelId === gezelId, regardless of project mode.
-    await store.createGezel({ name: 'Sam', role: 'ambachtsman' });
+    await store.createGezel({ name: 'Sam', role: 'Builder' });
     const proj = await store.createProject({
       name: 'My side project',
       mode: 'solo',

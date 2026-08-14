@@ -169,9 +169,9 @@ async function seedCatalog(): Promise<void> {
     },
   );
 
-  // A solo (ambachtsman) project type with a custom lead label — the shape
+  // A solo (Builder) project type with a custom lead label — the shape
   // checkers/games use: a single roster gezel, no separate voorman, and a
-  // domain word ("Opponent") in place of "Ambachtsman".
+  // domain word ("Opponent") in place of "Builder".
   await writeItem(
     'project-types',
     'solo-game',
@@ -232,7 +232,7 @@ describe('applyProjectType', () => {
       { store, catalog, home },
       { projectId: project.id, typeId: 'solo-game' },
     );
-    // Single-gezel roster: the one gezel is the lead (the ambachtsman).
+    // Single-gezel roster: the one gezel is the lead (the Builder).
     expect(applied.gezelsCreated).toHaveLength(1);
     expect(applied.gezelsCreated[0]?.voorman).toBe(true);
 

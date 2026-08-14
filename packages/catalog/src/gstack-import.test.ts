@@ -489,9 +489,7 @@ describe('applyOverlay', () => {
 
     expect(byId.get('scope')?.advanceWhen).toMatchObject({ artifact: true });
     expect(byId.get('build')?.advanceWhen).not.toHaveProperty('artifact');
-    expect(byId.get('build')?.consumes).toEqual([
-      { file: 'notes/scope.md', artifact: true },
-    ]);
+    expect(byId.get('build')?.consumes).toEqual([{ file: 'notes/scope.md', artifact: true }]);
     expect(byId.get('evaluate')?.consumes).toEqual([
       { file: 'src/index.ts' },
       { file: 'notes/scope.md', artifact: true },

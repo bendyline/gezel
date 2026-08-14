@@ -21,6 +21,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
+import { resolveGildeTemplateForRole } from '../gezels/ensure.js';
 import { pickRosterVoorman } from '../gezels/roster.js';
 import { writeGeneratedScript } from '../scripts/install.js';
 import { resolveInstructionAbout, sha256 } from './instruction-scanner.js';
@@ -38,8 +39,10 @@ export interface ImportSyncDeps {
 
 /** The gezel-template instantiated as a project's voorman when none can be promoted. */
 const VOORMAN_TEMPLATE_ID = 'voorman';
+/** The hands-on lead for a folder-backed solo project. */
+const BUILDER_TEMPLATE_ID = 'builder';
 
-export interface EnsureVoormanResult {
+export interface EnsureProjectLeadResult {
   /**
    * A freshly-minted voorman gezel, set only when {@link ensureProjectVoorman}
    * had to create one (no roster member to promote and no existing voorman to
@@ -47,6 +50,45 @@ export interface EnsureVoormanResult {
    * SSE stream so the sidebar + Gezellen roster fold it in.
    */
   createdGezel?: { id: string; name: string };
+}
+
+/**
+ * Ensure a newly attached folder opens on a hands-on Builder. Unlike generic
+ * solo project types (games, chat rooms), a folder has no type-provided roster,
+ * so it needs an explicit lead. Reuse the user's existing Builder when one is
+ * available; otherwise instantiate the curated Builder template.
+ */
+export async function ensureFolderProjectBuilder(
+  deps: ImportSyncDeps,
+  projectId: string,
+): Promise<EnsureProjectLeadResult> {
+  const { store, catalog } = deps;
+  if (!projectId || projectId === 'default') return {};
+  const project = await store.getProject(projectId).catch(() => null);
+  if (!project || project.mode !== 'solo' || !project.workingDir) return {};
+  if (project.voormanGezelId) return {};
+
+  const gezels = await store.listGezels().catch(() => []);
+  const existing = gezels.find(
+    (gezel) =>
+      gezel.templateId === BUILDER_TEMPLATE_ID ||
+      gezel.role?.trim().toLowerCase() === BUILDER_TEMPLATE_ID,
+  );
+  const recruited = existing
+    ? null
+    : await recruitFromTemplate(store, catalog, BUILDER_TEMPLATE_ID).catch((err) => {
+        log.warn(`[import-sync] ${projectId}: Builder recruit failed: ${describe(err)}`);
+        return null;
+      });
+  const builder = existing ?? recruited;
+  if (!builder) return {};
+
+  await store.updateProject(projectId, {
+    voormanGezelId: builder.id,
+    voormanAutoAssignedAt: nowIso(),
+  });
+  log.info(`[import-sync] ${projectId}: assigned ${builder.id} as Builder`);
+  return recruited ? { createdGezel: recruited } : {};
 }
 
 /**
@@ -231,7 +273,7 @@ async function mergeInstructionIntoAbout(
 export async function ensureProjectVoorman(
   deps: ImportSyncDeps,
   projectId: string,
-): Promise<EnsureVoormanResult> {
+): Promise<EnsureProjectLeadResult> {
   const { store, catalog } = deps;
   if (!projectId || projectId === 'default') return {};
   const project = await store.getProject(projectId).catch(() => null);
@@ -263,7 +305,7 @@ export async function ensureProjectVoorman(
   }
 
   // Solo projects (games, the chat room) never get a separate recruited
-  // lead — the single roster gezel (the ambachtsman) IS the lead. If there
+  // lead — the single roster gezel (the Builder) IS the lead. If there
   // was nobody to promote above, leave the voorman unset rather than
   // minting a voorman-template gezel that shows up as a confusing second
   // "person" alongside the game's own gezel (the checkers Damspeler).
@@ -318,16 +360,26 @@ async function recruitVoorman(
   store: Store,
   catalog: CatalogService,
 ): Promise<{ id: string; name: string } | null> {
-  const detail = await catalog.get('gezel-template', VOORMAN_TEMPLATE_ID).catch(() => null);
-  if (!detail || detail.manifest.kind !== 'gezel-template') return null;
+  return recruitFromTemplate(store, catalog, VOORMAN_TEMPLATE_ID);
+}
+
+/** Instantiate an exact curated role template with a randomly-drawn identity. */
+async function recruitFromTemplate(
+  store: Store,
+  catalog: CatalogService,
+  templateId: string,
+): Promise<{ id: string; name: string } | null> {
+  const template = await resolveGildeTemplateForRole(catalog, templateId).catch(() => null);
+  if (!template || template.templateId !== templateId) return null;
   const { name, gender } = pickRandomNameWithGender();
   const created = await store.createGezel({
     name,
-    role: detail.manifest.role,
+    role: template.role,
     gender,
-    about: detail.about ?? '',
-    templateId: VOORMAN_TEMPLATE_ID,
-    templateVersion: detail.manifest.version,
+    about: template.about,
+    templateId,
+    templateVersion: template.templateVersion,
+    ...(template.frontmatter ? { frontmatter: template.frontmatter } : {}),
   });
   return { id: created.id, name: created.name };
 }

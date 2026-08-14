@@ -4,14 +4,7 @@
     "role": "maintenance-review",
     "name": "Edit Notes Pass",
     "description": "Review the footage like an editor: timestamped notes on pacing and cuts read against the transcript and the media index, then a machine-readable cut list the assembly step can execute — opinion upstream, precision downstream. Locks the review criteria FIRST (every keep or cut carries a timecode and a reason, b-roll gaps get named), then writes the edit notes, then distills them into the cut list — so the creative call and the executable record never drift apart. Use for edit passes, footage reviews, 'what should we cut', cutlist prep, and tightening a video that drags.",
-    "tags": [
-      "video",
-      "editing",
-      "cutlist",
-      "footage",
-      "review",
-      "ritual"
-    ],
+    "tags": ["video", "editing", "cutlist", "footage", "review", "ritual"],
     "triggers": [
       "edit pass",
       "review the footage",
@@ -103,14 +96,7 @@
     "role": "general",
     "name": "Rough Cut Assembly",
     "description": "Execute the cut list and prove it ran: every clip verified against the media index before anything renders, the assembly driven through the project's media pipeline with a run log, and the result checked against the expected duration — an assembly you can trust unwatched. Locks the pre-flight checks FIRST (clips exist, in and out points sit inside their durations, failure handling decided), then runs the assembly, then verifies and reports. Use for rough cuts, assembling a cutlist, executing an edit pass, render runs, and 'put the cut together'.",
-    "tags": [
-      "video",
-      "assembly",
-      "render",
-      "cutlist",
-      "pipeline",
-      "ritual"
-    ],
+    "tags": ["video", "assembly", "render", "cutlist", "pipeline", "ritual"],
     "triggers": [
       "assemble the rough cut",
       "run the cutlist",
@@ -191,14 +177,7 @@
     "role": "general",
     "name": "Transcribe and Index a Tape",
     "description": "Give one tape the ten-second-findability treatment: transcript on file, then every moment worth finding indexed with its timecode and people tags — so 'the clip of Opa's 80th toast' becomes a query, not an afternoon of scrubbing. Locks the tape's metadata and the indexing rules FIRST (timecoded moments, people tags drawn from the family roster, searchable descriptions), then lands the transcript, then the clip records, then a tape summary with the highlights. Use for indexing a digitized tape, making home videos searchable, cataloging family footage, and 'what is on this tape'.",
-    "tags": [
-      "archive",
-      "video",
-      "transcript",
-      "index",
-      "family",
-      "ritual"
-    ],
+    "tags": ["archive", "video", "transcript", "index", "family", "ritual"],
     "triggers": [
       "index the tape",
       "transcribe the tape",
@@ -292,14 +271,7 @@
     "role": "general",
     "name": "Anniversary Cut",
     "description": "Build the highlight reel for the occasion: the archive queried for the person and the years that matter, clips chosen with stated reasons, assembled through the project's media pipeline with a run log, and delivered with a chapter list and a dedication — the reel that makes the birthday. Locks the occasion and the selection criteria FIRST (era coverage, the famous moments in, a length budget), then selects from the archive with no invented footage, then assembles, then writes the presentation notes. Use for birthday reels, anniversary videos, memorial montages, 'make a highlight reel', and milestone tributes.",
-    "tags": [
-      "archive",
-      "video",
-      "highlight-reel",
-      "family",
-      "assembly",
-      "ritual"
-    ],
+    "tags": ["archive", "video", "highlight-reel", "family", "assembly", "ritual"],
     "triggers": [
       "make a highlight reel",
       "anniversary video",
@@ -347,9 +319,7 @@
             {
               "kind": "valuesSubsetOf",
               "file": "cutlist.json",
-              "sourceFiles": [
-                "clips.json"
-              ],
+              "sourceFiles": ["clips.json"],
               "pattern": "\"clip\"\\s*:\\s*\"([^\"]+)\"",
               "label": "every selected clip id exists in the archive — no invented footage"
             }
@@ -368,9 +338,7 @@
           "extraChecks": [
             {
               "kind": "fileCount",
-              "ext": [
-                "mp4"
-              ],
+              "ext": ["mp4"],
               "min": 1,
               "dir": "renders"
             },
@@ -420,14 +388,7 @@
     "role": "general",
     "name": "Narrate a Chapter",
     "description": "Take one chapter from manuscript to narrated audio, deliberately: a narration script with pronunciations and pauses marked before anything renders, the audio driven through the project's narration capabilities with a run log, and a listen-check against the text — no skipped paragraphs, no mangled names. Locks the chapter and the style sheet FIRST (voice, pace, every proper noun's pronunciation), then preps the script, then renders, then checks coverage. Use for narrating a chapter, audiobook recording runs, text-to-speech passes, and 'read chapter two aloud'.",
-    "tags": [
-      "audiobook",
-      "narration",
-      "tts",
-      "audio",
-      "chapter",
-      "ritual"
-    ],
+    "tags": ["audiobook", "narration", "tts", "audio", "chapter", "ritual"],
     "triggers": [
       "narrate the chapter",
       "record chapter two",
@@ -493,14 +454,7 @@
     "role": "general",
     "name": "Master the Audiobook",
     "description": "Assemble the finished chapters into a release: completeness swept against the manuscript first, the metadata manifest built and verified chapter by chapter, the master assembled through the project's media pipeline with a run log, and the listener-facing description written — the moment the folder of takes becomes a book. Locks the packaging rules FIRST (order, metadata fields, total duration), then the manifest, then the master, then the release copy. Use for mastering an audiobook, packaging the chapters, audiobook release prep, and 'all the chapters are rendered, now what'.",
-    "tags": [
-      "audiobook",
-      "mastering",
-      "release",
-      "audio",
-      "packaging",
-      "ritual"
-    ],
+    "tags": ["audiobook", "mastering", "release", "audio", "packaging", "ritual"],
     "triggers": [
       "master the audiobook",
       "package the chapters",
@@ -608,14 +562,7 @@
     "role": "project-starter",
     "name": "Scaffold a Mod",
     "description": "Start the mod right: a correctly-shaped Minecraft datapack — pack.mcmeta carrying the right format number for the target game version, namespaced folders laid out properly, and one working example of the mod's core idea — plus install steps a twelve-year-old can follow. Locks the idea and the version's structure rules FIRST, then scaffolds the tree, then writes the README. Use for starting a datapack, scaffolding a mod, 'my kid wants a mod that…', datapack setup, and first-mod projects.",
-    "tags": [
-      "mod",
-      "minecraft",
-      "datapack",
-      "scaffold",
-      "gamedev",
-      "ritual"
-    ],
+    "tags": ["mod", "minecraft", "datapack", "scaffold", "gamedev", "ritual"],
     "triggers": [
       "scaffold a mod",
       "start a datapack",
@@ -653,10 +600,7 @@
             },
             {
               "kind": "fileCount",
-              "ext": [
-                "json",
-                "mcfunction"
-              ],
+              "ext": ["json", "mcfunction"],
               "min": 3,
               "dir": "data"
             }
@@ -704,14 +648,7 @@
     "role": "maintenance-review",
     "name": "Compatibility Check",
     "description": "Answer 'does it still work on the new version?' with a matrix, not a shrug: the datapack's files checked against each target version's format rules, every break named with the exact file and the exact fix, and the upgrade path written down in order. Locks the target version list and the compat criteria FIRST (format numbers, renamed folders, changed identifiers), then checks version by version, then writes the matrix and the fixes. Use for version compatibility checks, 'does the mod work on 1.21', update breakage sweeps, and upgrade planning.",
-    "tags": [
-      "mod",
-      "minecraft",
-      "datapack",
-      "compatibility",
-      "upgrade",
-      "ritual"
-    ],
+    "tags": ["mod", "minecraft", "datapack", "compatibility", "upgrade", "ritual"],
     "triggers": [
       "check compatibility",
       "does it work on the new version",
@@ -756,10 +693,7 @@
             {
               "kind": "tableShape",
               "file": "report.md",
-              "requiredColumns": [
-                "Version",
-                "Status"
-              ],
+              "requiredColumns": ["Version", "Status"],
               "minRows": 2
             }
           ]

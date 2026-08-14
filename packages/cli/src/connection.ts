@@ -761,6 +761,7 @@ export async function ensureProjectForFolder(
     description: `CLI workspace at ${wd}`,
     about: `${name} — working directory ${wd}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
     missionObjectives: `${name} — fill in concrete success criteria for this project.`,
+    mode: 'solo',
     workingDir: wd,
   });
   return created.id;
@@ -769,9 +770,9 @@ export async function ensureProjectForFolder(
 /**
  * Resolve (and, for an old/incomplete project record, repair) the lead the
  * CLI should open on. The terminal is a project workspace, so its front door
- * is the project's voorman rather than the install-wide Meester.
+ * is the project's lead rather than the install-wide Meester.
  *
- * New projects already get a voorman synchronously in the service. The
+ * New folder projects already get a Builder synchronously in the service. The
  * recovery path here covers older projects and interrupted first-time setup
  * without ever falling back to the Meester and silently regaining the
  * cross-project `start_project` surface.
@@ -786,7 +787,28 @@ export async function ensureCliProjectLead(
   // Solo projects intentionally have no separate voorman: their one gezel is
   // the lead. This also keeps an explicit `/project` switch to a game/chat
   // project from recruiting a confusing second character.
-  if (project.mode === 'solo' && project.gezelIds?.[0]) return project.gezelIds[0];
+  if (project.mode === 'solo') {
+    if (project.gezelIds?.[0]) return project.gezelIds[0];
+
+    // Folder projects created by older/partially-upgraded services may be solo
+    // without their Builder. Repair that state here so CLI boot still lands on
+    // a working lead instead of falling through to Voorman recruitment.
+    if (project.workingDir) {
+      const { gezels } = await client.listGezels();
+      let builder = gezels.find(
+        (gezel) => gezel.templateId === 'builder' || gezel.role?.trim().toLowerCase() === 'builder',
+      );
+      if (!builder) {
+        const { name, gender } = pickRandomNameWithGender();
+        builder = await client.createGezelFromTemplate('builder', { name, gender });
+      }
+      const updated = await client.updateProject(projectId, { voormanGezelId: builder.id });
+      if (!updated.voormanGezelId) {
+        throw new CliError(`project "${updated.name}" has no Builder`);
+      }
+      return updated.voormanGezelId;
+    }
+  }
 
   const { gezels } = await client.listGezels();
   let voorman = gezels.find(

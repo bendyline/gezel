@@ -10,6 +10,7 @@ import { Store } from '../fs/store.js';
 import {
   type ImportSyncDeps,
   approvePendingImport,
+  ensureFolderProjectBuilder,
   ensureProjectVoorman,
   syncProjectImports,
 } from './import-sync.js';
@@ -186,7 +187,7 @@ describe('ensureProjectVoorman', () => {
   });
 
   it('never recruits a separate voorman for a solo project with nobody to promote', async () => {
-    // Solo types (games, the chat room) run one gezel — the ambachtsman IS
+    // Solo types (games, the chat room) run one gezel — the Builder IS
     // the lead. A solo project with an empty roster must be left voorman-less
     // rather than getting a confusing second recruited "person".
     const project = await store.createProject({ name: 'Checkers', mode: 'solo' });
@@ -226,6 +227,34 @@ describe('ensureProjectVoorman', () => {
     await ensureProjectVoorman(deps(), project.id);
     detail = await store.getProject(project.id);
     expect(detail?.voormanGezelId).toBeUndefined();
+  });
+});
+
+describe('ensureFolderProjectBuilder', () => {
+  it('assigns the curated Builder to a folder-backed solo project', async () => {
+    const project = await store.createProject({
+      name: 'Workspace',
+      mode: 'solo',
+      workingDir: join(home, 'workspace'),
+    });
+
+    const result = await ensureFolderProjectBuilder(deps(), project.id);
+
+    const detail = await store.getProject(project.id);
+    const builder = await store.getGezel(detail?.voormanGezelId ?? '');
+    expect(builder?.role).toBe('Builder');
+    expect(builder?.templateId).toBe('builder');
+    expect(detail?.gezelIds).toContain(builder?.id);
+    expect(result.createdGezel?.id).toBe(builder?.id);
+  });
+
+  it('does not add a Builder to a non-folder solo project', async () => {
+    const project = await store.createProject({ name: 'Checkers', mode: 'solo' });
+
+    await ensureFolderProjectBuilder(deps(), project.id);
+
+    expect((await store.getProject(project.id))?.voormanGezelId).toBeUndefined();
+    expect(await store.listGezels()).toHaveLength(0);
   });
 });
 

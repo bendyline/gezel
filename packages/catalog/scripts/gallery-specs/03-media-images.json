@@ -4,13 +4,7 @@
     "role": "general",
     "name": "Index & Describe an Image Set",
     "description": "Catalog a folder of images into a structured, searchable index — one row per image with a caption, tags from a controlled vocabulary, dominant colors, and content flags — then validate coverage and consistency. Scope the schema and output format BEFORE describing a single image so every row is uniform and machine-readable; this ordering is what turns a pile of files into something you can search, filter, generate alt-text from, or feed to a downstream pipeline. Covers image cataloging, visual search, asset management, photo library organization, and bulk captioning.",
-    "tags": [
-      "images",
-      "index",
-      "catalog",
-      "vision",
-      "metadata"
-    ],
+    "tags": ["images", "index", "catalog", "vision", "metadata"],
     "triggers": [
       "index a folder of images",
       "describe my images",
@@ -71,13 +65,7 @@
     "role": "general",
     "name": "Logo & Variant Set",
     "description": "Generate a coherent logo and the full set of variants a real brand needs — primary mark, horizontal lockup, stacked lockup, icon-only/favicon, plus light-on-dark and monochrome versions — from a written brief. Lock the brief (concept, geometry, palette, typography, do/don'ts) BEFORE generating pixels so every variant shares one visual DNA instead of looking like five unrelated logos; then assemble them into a delivered folder with a contact sheet. Covers logo design, brand mark, wordmark, logo variations, and brand-asset packs.",
-    "tags": [
-      "logo",
-      "branding",
-      "image-generation",
-      "identity",
-      "assets"
-    ],
+    "tags": ["logo", "branding", "image-generation", "identity", "assets"],
     "triggers": [
       "design a logo",
       "make a logo set",
@@ -138,13 +126,7 @@
     "role": "general",
     "name": "Coherent Icon Pack",
     "description": "Produce a coherent set of UI icons that look like they belong to one family — consistent grid, stroke weight, corner radius, optical sizing, and metaphor language — from a named list of concepts. Lock the style system (grid, stroke, padding, keyline shapes) BEFORE drawing any icon, because icon-set quality is almost entirely about consistency: a pack of individually-nice icons with mismatched strokes looks broken. Then generate every icon to the system and assemble a previewable sheet. Covers icon sets, UI icons, SVG icon libraries, glyph packs, and design systems.",
-    "tags": [
-      "icons",
-      "ui",
-      "svg",
-      "design-system",
-      "image-generation"
-    ],
+    "tags": ["icons", "ui", "svg", "design-system", "image-generation"],
     "triggers": [
       "make an icon pack",
       "design a set of icons",
@@ -205,13 +187,7 @@
     "role": "general",
     "name": "Marketing Hero Image",
     "description": "Create a single high-impact marketing hero image from a brief and place it into a working hero section. Lock the brief FIRST — aspect ratio, subject, mood, palette, focal point, and crucially the safe zone where headline and CTA text will overlay — because a beautiful hero that has no room for copy (or whose focal point sits under the button) is useless. Then generate the image to the brief and place it behind real overlaid text to prove it works. Covers hero banners, marketing imagery, landing-page art, website headers, and key visuals.",
-    "tags": [
-      "hero",
-      "marketing",
-      "image-generation",
-      "banner",
-      "landing"
-    ],
+    "tags": ["hero", "marketing", "image-generation", "banner", "landing"],
     "triggers": [
       "make a hero image",
       "marketing banner",
@@ -272,13 +248,7 @@
     "role": "general",
     "name": "Batch Image Transform",
     "description": "Apply a consistent transform across a whole folder of images — resize, crop to a ratio, convert format, compress, watermark, or recolor — and verify every file came out correct. Scope the exact transform and a verification rule FIRST (target dimensions, format, quality, naming) so the batch is deterministic and reproducible, then process every file and prove the output count, dimensions, and format match the spec. Covers bulk image processing, resizing, format conversion, compression, watermarking, and folder-wide edits.",
-    "tags": [
-      "images",
-      "batch",
-      "transform",
-      "resize",
-      "processing"
-    ],
+    "tags": ["images", "batch", "transform", "resize", "processing"],
     "triggers": [
       "batch edit images",
       "resize a folder of images",
@@ -339,13 +309,7 @@
     "role": "general",
     "name": "Alt-Text Pass",
     "description": "Generate accurate, WCAG-appropriate alt text for every image referenced by a site or folder and apply it back into the markup. Scope FIRST which images are content vs decorative (decorative images get empty alt, not a description) and the voice/length rules, because the most common alt-text failure is verbose, redundant, or wrong-purpose descriptions. Then caption each content image from what is actually visible and write the alt attributes back into the HTML. Covers accessibility, alt text, image descriptions, WCAG compliance, screen-reader support, and a11y retrofits.",
-    "tags": [
-      "accessibility",
-      "alt-text",
-      "a11y",
-      "wcag",
-      "images"
-    ],
+    "tags": ["accessibility", "alt-text", "a11y", "wcag", "images"],
     "triggers": [
       "add alt text",
       "generate alt text for images",
@@ -406,13 +370,7 @@
     "role": "general",
     "name": "Thumbnail Generator",
     "description": "Derive a consistent set of thumbnails or responsive size-variants from a folder of source images — square crops for grids, srcset widths for the web, smart-cropped to keep the subject centered — and emit them with predictable names. Scope the target sizes, crop strategy, and naming convention FIRST so the output plugs straight into a gallery or srcset, then build every variant and confirm the matrix is complete. Covers thumbnails, responsive images, srcset, image variants, gallery tiles, and preview generation.",
-    "tags": [
-      "thumbnails",
-      "images",
-      "responsive",
-      "srcset",
-      "processing"
-    ],
+    "tags": ["thumbnails", "images", "responsive", "srcset", "processing"],
     "triggers": [
       "generate thumbnails",
       "make responsive image variants",
@@ -462,13 +420,7 @@
     "role": "general",
     "name": "Visual Moodboard",
     "description": "Compose a visual moodboard that captures a direction — palette, textures, type vibe, imagery, and reference tiles — from a written brief, so a team can align on a look before any production work begins. Lock the brief and the explicit dimensions of the mood (e.g. 'warm/editorial/handmade' vs 'cool/technical/precise') FIRST, then assemble a coherent grid of generated or sourced tiles plus a swatch strip and keyword callouts. Covers moodboards, style boards, visual direction, design inspiration, brand mood, and look-and-feel exploration.",
-    "tags": [
-      "moodboard",
-      "visual-direction",
-      "image-generation",
-      "branding",
-      "inspiration"
-    ],
+    "tags": ["moodboard", "visual-direction", "image-generation", "branding", "inspiration"],
     "triggers": [
       "make a moodboard",
       "create a style board",
@@ -518,13 +470,7 @@
     "role": "general",
     "name": "Game Sprite Sheet",
     "description": "Produce a game-ready sprite sheet — a character or object with its animation frames (idle, walk, jump, attack) on a uniform grid — plus the frame metadata (JSON atlas) a game engine needs to slice it. Lock the style and the frame inventory FIRST (cell size, pivot, palette, which animations and how many frames each) because a sprite sheet is only usable if every cell is the same size and the pivot is consistent; then generate the frames and pack them into a sheet with a matching atlas. Covers sprite sheets, game art, animation frames, texture atlases, pixel-art characters, and 2D game assets.",
-    "tags": [
-      "sprite",
-      "game-art",
-      "animation",
-      "image-generation",
-      "atlas"
-    ],
+    "tags": ["sprite", "game-art", "animation", "image-generation", "atlas"],
     "triggers": [
       "make a sprite sheet",
       "game character sprites",
@@ -585,13 +531,7 @@
     "role": "general",
     "name": "Image Dedup & Cluster",
     "description": "Find and group near-duplicate images across a folder — exact dupes, resized/re-encoded copies, and visually similar shots from the same burst — using perceptual hashing or visual similarity, then report clusters with a recommended keeper per group. Lock the similarity definition and thresholds FIRST (what counts as a duplicate vs merely similar) because the whole result hinges on that line; then analyze pairwise, cluster, and produce a human-reviewable report. Covers deduplication, near-duplicate detection, perceptual hashing, image clustering, burst grouping, and library cleanup.",
-    "tags": [
-      "dedup",
-      "images",
-      "clustering",
-      "perceptual-hash",
-      "cleanup"
-    ],
+    "tags": ["dedup", "images", "clustering", "perceptual-hash", "cleanup"],
     "triggers": [
       "find duplicate images",
       "cluster similar photos",
@@ -652,13 +592,7 @@
     "role": "general",
     "name": "OCR a Folder of Scans",
     "description": "Extract the text from a folder of scanned documents or photographed pages into clean, structured text — preserving reading order, paragraph breaks, and per-file provenance — then verify the extraction against the source images. Scope FIRST the languages, output structure (one file per scan vs a combined doc), and how to handle tables/columns/low-confidence regions, because OCR quality is dominated by handling layout and flagging uncertainty; then run extraction and verify a sample reads correctly. Covers OCR, text extraction, scanned documents, digitizing paper, receipt/invoice text, and image-to-text.",
-    "tags": [
-      "ocr",
-      "text-extraction",
-      "scans",
-      "documents",
-      "vision"
-    ],
+    "tags": ["ocr", "text-extraction", "scans", "documents", "vision"],
     "triggers": [
       "ocr a folder of scans",
       "extract text from images",
@@ -719,13 +653,7 @@
     "role": "general",
     "name": "Diagram from Text",
     "description": "Render a clear technical diagram — flowchart, architecture, sequence, ER, or org chart — from a plain-language description, as code-defined (Mermaid/Graphviz/SVG) so it is editable and version-controllable rather than a flat picture. Spec FIRST the diagram type, the exact nodes and edges, and the layout direction, because diagrams fail when relationships are wrong or the graph is an unreadable tangle; then build the diagram so it renders, with every described entity and relationship present and labeled. Covers flowcharts, architecture diagrams, sequence diagrams, ER diagrams, org charts, mind maps, and diagram-as-code.",
-    "tags": [
-      "diagram",
-      "flowchart",
-      "mermaid",
-      "visualization",
-      "architecture"
-    ],
+    "tags": ["diagram", "flowchart", "mermaid", "visualization", "architecture"],
     "triggers": [
       "make a diagram from this description",
       "draw a flowchart",
@@ -775,13 +703,7 @@
     "role": "general",
     "name": "Photo Cull & Rank",
     "description": "Rank and cull a set of photos by objective quality — sharpness/focus, exposure, composition, eyes-open/expression for people, and duplicate-of-a-better-shot — to surface the keepers and justify the rejects. Lock the scoring CRITERIA and weights FIRST (what 'good' means for this set: a portrait shoot weights expression, a landscape weights sharpness and horizon) because an unstated rubric makes the cull arbitrary; then score every photo and produce a ranked report with keep/reject and reasons. Covers photo culling, image quality ranking, best-shot selection, photo curation, and burst/best-of selection.",
-    "tags": [
-      "photo",
-      "culling",
-      "quality",
-      "ranking",
-      "curation"
-    ],
+    "tags": ["photo", "culling", "quality", "ranking", "curation"],
     "triggers": [
       "cull my photos",
       "rank photos by quality",
@@ -842,13 +764,7 @@
     "role": "general",
     "name": "Image SEO Rename & Tag",
     "description": "Rename and tag a folder of images for SEO and findability — descriptive, hyphenated, keyword-rich filenames plus consistent metadata (title, caption, keyword tags) — driven by what each image actually depicts, while preserving a mapping back to the originals so links don't break silently. Scope FIRST the naming convention, keyword strategy, and collision/mapping rules, because bulk-renaming without a plan creates duplicate-name clashes and broken references; then process the folder and emit the rename map. Covers image SEO, filename optimization, descriptive renaming, alt/metadata tagging, and asset findability.",
-    "tags": [
-      "seo",
-      "images",
-      "rename",
-      "metadata",
-      "tagging"
-    ],
+    "tags": ["seo", "images", "rename", "metadata", "tagging"],
     "triggers": [
       "rename images for seo",
       "make descriptive image filenames",
@@ -898,13 +814,7 @@
     "role": "general",
     "name": "Image Palette Extraction",
     "description": "Extract a usable color palette from an image or a set of images — the dominant and accent colors as hex/RGB with proportions — and emit it as design tokens (CSS variables / JSON) plus a swatch preview, so a brand or theme can be built from a reference photo. Lock FIRST how many colors, the color space and clustering method, and accessibility constraints (e.g. text/background pairs must meet a contrast ratio) because a raw dominant-color dump is rarely directly usable as a theme; then extract, name, and present the palette. Covers color extraction, palette generation, design tokens, theme-from-image, dominant colors, and brand color sampling.",
-    "tags": [
-      "color",
-      "palette",
-      "design-tokens",
-      "images",
-      "theme"
-    ],
+    "tags": ["color", "palette", "design-tokens", "images", "theme"],
     "triggers": [
       "extract colors from an image",
       "make a palette from a photo",
@@ -954,13 +864,7 @@
     "role": "general",
     "name": "Favicon & App-Icon Set",
     "description": "Generate the complete favicon and app-icon set a modern site needs — the multi-size favicon, Apple touch icon, Android/maskable icons, and the web app manifest plus the exact HTML link/meta tags — from a single source mark, ensuring the icon stays legible at 16px and the maskable variant survives platform cropping. Lock FIRST the source mark, the exact size matrix, and the safe-area/padding rules (maskable icons need extra padding or platforms clip them) because favicon sets fail when the icon is illegible tiny or gets cropped on Android; then generate every size and emit the manifest + install snippet. Covers favicons, app icons, PWA icons, touch icons, maskable icons, and the web app manifest.",
-    "tags": [
-      "favicon",
-      "app-icon",
-      "pwa",
-      "manifest",
-      "image-generation"
-    ],
+    "tags": ["favicon", "app-icon", "pwa", "manifest", "image-generation"],
     "triggers": [
       "generate a favicon set",
       "make app icons",

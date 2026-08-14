@@ -4,14 +4,7 @@
     "role": "general",
     "name": "Receipt Intake",
     "description": "Empty the shoebox inbox properly: every waiting receipt becomes a dated, categorized ledger entry that names its source file, likely duplicates get flagged instead of double-counted, and the genuinely ambiguous ones become owner questions instead of guesses. Locks the intake rules FIRST, then works the inbox receipt by receipt, then reports the totals and the question list — the year-round habit that makes April an afternoon. Use for receipt intake, emptying the receipt inbox, 'get these into the ledger', and monthly shoebox catch-ups.",
-    "tags": [
-      "tax",
-      "receipts",
-      "ledger",
-      "intake",
-      "household",
-      "finance"
-    ],
+    "tags": ["tax", "receipts", "ledger", "intake", "household", "finance"],
     "triggers": [
       "process the receipt inbox",
       "get these receipts into the ledger",
@@ -98,14 +91,7 @@
     "role": "general",
     "name": "Quarterly Shoebox Summary",
     "description": "Close the quarter the way your accountant wishes everyone did: totals by category computed from the ledger entries themselves, the missing-documentation list naming each entry that lacks its paperwork, and the estimated-payment reminder in plain words. Locks the target quarter and the checks FIRST, then reconciles the numbers, then writes the summary — twenty minutes, four times a year, instead of an April archaeology dig. Use for quarterly tax summaries, 'how did the quarter shake out', estimated payment prep, and shoebox quarter closes.",
-    "tags": [
-      "tax",
-      "quarterly",
-      "summary",
-      "ledger",
-      "household",
-      "finance"
-    ],
+    "tags": ["tax", "quarterly", "summary", "ledger", "household", "finance"],
     "triggers": [
       "quarterly shoebox summary",
       "how did the quarter shake out",
@@ -150,10 +136,7 @@
             {
               "kind": "tableShape",
               "file": "report.md",
-              "requiredColumns": [
-                "Category",
-                "Total"
-              ],
+              "requiredColumns": ["Category", "Total"],
               "minRows": 3
             }
           ]
@@ -174,14 +157,7 @@
     "role": "general",
     "name": "Capture a Recipe Card",
     "description": "Rescue a handwritten recipe card without sanding off its soul: transcribe the original faithfully — spelling quirks, margin notes, and all — standardize quantities in a separate block alongside (never instead of) the original wording, and pin the provenance note: whose card, whose kitchen, what they always changed. Locks the capture rules FIRST, then captures each card into the book, then logs what needs a test-cook and what to ask the family. Use for capturing recipe cards, 'get oma's cards into the book', preserving family recipes, and recipe transcription.",
-    "tags": [
-      "recipes",
-      "family",
-      "capture",
-      "archive",
-      "kitchen",
-      "household"
-    ],
+    "tags": ["recipes", "family", "capture", "archive", "kitchen", "household"],
     "triggers": [
       "capture a recipe card",
       "get this recipe into the book",
@@ -213,9 +189,7 @@
           "extraChecks": [
             {
               "kind": "fileCount",
-              "ext": [
-                "md"
-              ],
+              "ext": ["md"],
               "min": 1,
               "dir": "recipes"
             }
@@ -249,13 +223,7 @@
     "role": "general",
     "name": "Catalog an Item",
     "description": "Take new arrivals from shoebox to catalog: identify each item from its photo notes, record it with condition and an honest value basis, and flag what needs a better photo or an expert eye — uncertain identification stays uncertain in the record instead of becoming confident fiction. Locks the record fields and the honesty rule FIRST, then catalogs each item, then reports confidence and follow-ups. Use for cataloging new items, collection intake, 'catalog these arrivals', and adding finds to the collection.",
-    "tags": [
-      "collection",
-      "catalog",
-      "intake",
-      "archive",
-      "household"
-    ],
+    "tags": ["collection", "catalog", "intake", "archive", "household"],
     "triggers": [
       "catalog new items",
       "catalog these arrivals",
@@ -341,13 +309,7 @@
     "role": "general",
     "name": "Insurance Inventory",
     "description": "Compile the inventory nobody has until the day they desperately need it: every cataloged item with its value, photo reference, and acquisition info in one document, the gaps (no photo, no value) named instead of papered over, and the total stated with its basis. Locks the completeness criteria FIRST, then compiles the full table, then writes the cover note — the quiet payoff of keeping the catalog honest. Use for insurance inventories, 'our agent wants a full inventory', documenting the collection for coverage, and preparing a collection record for a claim.",
-    "tags": [
-      "collection",
-      "insurance",
-      "inventory",
-      "household",
-      "report"
-    ],
+    "tags": ["collection", "insurance", "inventory", "household", "report"],
     "triggers": [
       "insurance inventory",
       "full inventory with values",
@@ -381,11 +343,7 @@
             {
               "kind": "tableShape",
               "file": "insurance-inventory.md",
-              "requiredColumns": [
-                "Item",
-                "Value",
-                "Photo"
-              ],
+              "requiredColumns": ["Item", "Value", "Photo"],
               "minRows": 3
             }
           ]
@@ -418,13 +376,7 @@
     "role": "general",
     "name": "Weekly Garden Walkthrough",
     "description": "Walk the beds once a week with a plan instead of a vague worry: what each bed needs this week derived from the plantings and the season, the walkthrough ordered so it actually gets done, and the observations and harvests logged so the almanac accrues. Locks the week's due list FIRST, then plans the route, then logs what happened and seeds next week. Use for weekly garden walkthroughs, 'what does the garden need this week', weekend garden sessions, and garden check-ins.",
-    "tags": [
-      "garden",
-      "weekly",
-      "walkthrough",
-      "almanac",
-      "household"
-    ],
+    "tags": ["garden", "weekly", "walkthrough", "almanac", "household"],
     "triggers": [
       "weekly garden walkthrough",
       "what does the garden need this week",
@@ -482,13 +434,7 @@
     "role": "general",
     "name": "Pest & Problem Diagnosis",
     "description": "Turn 'something is wrong with the tomatoes' into a ranked differential: the likely culprits with the evidence for each, the gentlest treatment first, what to watch to confirm the diagnosis, and when to call in a professional — a garden clinic visit without the guesswork. Locks the diagnostic criteria FIRST, then builds the differential from the symptom notes and the plantings, then writes the treatment and monitoring plan. Use for garden pest problems, plant disease diagnosis, 'what is eating my plants', and sick-plant triage.",
-    "tags": [
-      "garden",
-      "pests",
-      "diagnosis",
-      "almanac",
-      "household"
-    ],
+    "tags": ["garden", "pests", "diagnosis", "almanac", "household"],
     "triggers": [
       "diagnose a garden pest",
       "what is eating my plants",

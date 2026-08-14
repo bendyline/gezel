@@ -200,7 +200,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
   const maxReviewRounds = workflow.maxReviewRounds ?? 3;
   const usesArtifacts = (path: string, explicit?: boolean): boolean => {
     if (isAccessoryArtifactPath(path)) return true;
-    return explicit ?? (workflow.storage === 'artifacts');
+    return explicit ?? workflow.storage === 'artifacts';
   };
   const surfaceInput = (path: string, artifact: boolean) => ({
     file: path,
@@ -248,9 +248,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
 
   const relatedPaths = workflow.review.relatedPaths ?? [];
   const reviewTargetPaths = [workflow.review.artifactPath, ...relatedPaths];
-  const reviewTargets = reviewTargetPaths
-    .map((path) => `\`${path}\``)
-    .join(', ');
+  const reviewTargets = reviewTargetPaths.map((path) => `\`${path}\``).join(', ');
   const phaseOutputs = new Map(
     workflow.phases.map((phase) => [
       phase.output.path,
@@ -287,7 +285,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       : 'in the workspace with `write_file`.'
   }`;
   const repairLocationInstruction =
-    'Make changes on each file\'s declared surface (`write_artifact` for artifact inputs, `write_file` for workspace inputs), not in task notes or a reply.';
+    "Make changes on each file's declared surface (`write_artifact` for artifact inputs, `write_file` for workspace inputs), not in task notes or a reply.";
   const reviewReadTool = reviewOutputIsArtifact ? ' with `read_artifact`' : ' with `read_file`';
   const finalOutputIsArtifact =
     phaseOutputs.get(workflow.review.artifactPath) ??
@@ -332,10 +330,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       description: 'Fix only the concrete gaps from the latest independent review.',
       prompt: `Read \`${workflow.review.reviewPath}\`${reviewReadTool} and repair every failed criterion in ${reviewTargets}. ${repairLocationInstruction} Preserve evidence that already passed. Re-run or re-check anything the reviewer found unproven. Ensure \`${workflow.review.artifactPath}\` is genuinely updated this turn so the repair is observable, then hand it back for independent evaluation.`,
       suggestedRole: workflow.review.repairRole ?? workflow.phases.at(-1)!.suggestedRole,
-      consumes: [
-        surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact),
-        ...reviewInputs,
-      ],
+      consumes: [surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact), ...reviewInputs],
       advanceWhen: {
         file: workflow.review.artifactPath,
         minBytes: lastOutput.minBytes,

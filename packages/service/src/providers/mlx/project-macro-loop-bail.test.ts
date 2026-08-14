@@ -15,9 +15,9 @@ describe('deriveProjectMacroClosing', () => {
     expect(closing).toContain('this thread');
   });
 
-  it('parses a start_job success result into an ambachtsman closing', () => {
+  it('parses a start_job success result into a Builder closing', () => {
     const firstResult =
-      'Started job "Logo Iteration" (logo-iteration). Recruited Maya as ambachtsman (template: designer). Created task logo-iteration/1 ("Build Logo Iteration"). Maya is on it — their reply will land in your next turn.';
+      'Started job "Logo Iteration" (logo-iteration). Recruited Maya as Builder (template: builder). Created task logo-iteration/1 ("Build Logo Iteration"). Maya is on it — their reply will land in your next turn.';
     const closing = deriveProjectMacroClosing(firstResult);
     expect(closing).toContain('Logo Iteration');
     expect(closing).toContain('Maya');
