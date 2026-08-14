@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-catalog",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Gezel catalog loader: sources, install pipeline, and authoring scripts over the external @bendyline/gilde content package.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "catalog", "models", "craftbooks"],
