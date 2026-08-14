@@ -288,11 +288,19 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
     'validate must not restore release-only parallel package contention',
   );
   assert.equal(
+    scripts['test:stability'],
+    'node scripts/run-with-dependency-lease.mjs test:stability:unleased',
+  );
+  assert.equal(
     scripts['test:stability:tui'],
+    'node scripts/run-with-dependency-lease.mjs test:stability:tui:unleased',
+  );
+  assert.equal(
+    scripts['test:stability:tui:unleased'],
     'pnpm --filter @bendyline/gezel-cli exec vitest run src/tui/App.test.tsx',
   );
   assert.equal(
-    scripts['test:stability'].match(/pnpm test:stability:tui/g)?.length,
+    scripts['test:stability:unleased'].match(/pnpm test:stability:tui/g)?.length,
     2,
     'stability passes 2 and 3 must both exercise the CLI interaction suite',
   );
