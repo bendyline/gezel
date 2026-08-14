@@ -1,4 +1,12 @@
+import { availableParallelism } from 'node:os';
 import { defineConfig } from 'vitest/config';
+
+// Vitest otherwise scales its fork pool to nearly every available core. This
+// suite includes CPU-heavy calibration cases and tests that launch nested
+// Vitest, TypeScript, and Node processes, so an unbounded pool can exhaust a
+// host during a recursive workspace test run and make an otherwise-green fork
+// disappear during teardown (`[vitest-pool]: Worker forks emitted error`).
+const MAX_WORKERS = Math.max(1, Math.min(8, availableParallelism()));
 
 /**
  * Without an explicit `exclude`, vitest discovers any `*.test.ts` file
@@ -16,5 +24,6 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     exclude: ['node_modules/**', 'dist/**', 'runs/**'],
+    maxWorkers: MAX_WORKERS,
   },
 });

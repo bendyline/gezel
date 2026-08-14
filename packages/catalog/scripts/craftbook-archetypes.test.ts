@@ -15,11 +15,11 @@ describe('revised seed craftbooks', () => {
     expect(revised).toHaveLength(revisedIds.size);
 
     const expectedVersions = new Map([
-      ['branding-website', '1.1.0'],
-      ['content-deck', '1.2.0'],
-      ['corpus-email-digest', '1.2.0'],
-      ['html-arcade-game', '1.2.0'],
-      ['image-set-index', '1.2.0'],
+      ['branding-website', '1.1.1'],
+      ['content-deck', '1.2.1'],
+      ['corpus-email-digest', '1.2.1'],
+      ['html-arcade-game', '1.2.1'],
+      ['image-set-index', '1.2.1'],
     ]);
 
     for (const spec of revised) {

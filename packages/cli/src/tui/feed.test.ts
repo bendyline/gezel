@@ -1,6 +1,71 @@
 import type { ChatEventEnvelope } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { appendShellChunk, finalizeShellRun, reduceFeed, sessionToFeedRows } from './feed.js';
+import {
+  type TurnMap,
+  appendShellChunk,
+  finalizeShellRun,
+  reduceFeed,
+  reduceTurns,
+  sessionToFeedRows,
+} from './feed.js';
+
+describe('reduceTurns live status', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('shows an approximate live token count while output streams', () => {
+    let turns: TurnMap = new Map();
+    turns = reduceTurns(
+      turns,
+      envelope({
+        type: 'user_message',
+        message: { role: 'user', content: 'Write it', at: '2026-08-14T12:00:00.000Z' },
+      }),
+    );
+    turns = reduceTurns(turns, envelope({ type: 'delta', content: '12345678901234567890' }));
+    turns = reduceTurns(turns, envelope({ type: 'reasoning_delta', content: '12345678' }));
+
+    expect(turns.get('s1')).toMatchObject({
+      label: 'generating · ~7 tokens',
+      outputChars: 28,
+    });
+  });
+
+  it('shows the concrete tool name as soon as its arguments start streaming', () => {
+    let turns: TurnMap = new Map();
+    turns = reduceTurns(
+      turns,
+      envelope({ type: 'tool_args_delta', name: 'write_artifact', content: '{"path":' }),
+    );
+    turns = reduceTurns(
+      turns,
+      envelope({ type: 'tool_args_delta', name: '', content: '"report.md"}' }),
+    );
+
+    expect(turns.get('s1')).toMatchObject({
+      label: 'running tool · write_artifact',
+      activeToolName: 'write_artifact',
+    });
+  });
+
+  it('keeps the concrete tool name on the completed tool event', () => {
+    const turns = reduceTurns(
+      new Map(),
+      envelope({
+        type: 'tool',
+        name: 'write_artifact',
+        durationMs: 12,
+        success: true,
+      }),
+    );
+
+    expect(turns.get('s1')?.label).toBe('running tool · write_artifact');
+  });
+});
 
 describe('reduceFeed task events', () => {
   it('renders a project task update as a system feed row', () => {

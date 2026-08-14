@@ -4,7 +4,13 @@
     "role": "general",
     "name": "Tailor Résumé to a Posting",
     "description": "Adapt an EXISTING résumé to a specific job posting — a fit map of must-hit requirements first, then a tailored variant that re-orders and re-words real experience without inventing any. Distinct from building a résumé from scratch (see Résumé / CV): this book starts from a base résumé plus a posting and produces the targeted variant along with honest gap notes for the cover letter and interview. Use per serious application in a job search.",
-    "tags": ["career", "job", "resume", "cv", "tailoring"],
+    "tags": [
+      "career",
+      "job",
+      "resume",
+      "cv",
+      "tailoring"
+    ],
     "triggers": [
       "tailor my resume",
       "adapt my resume to this job",
@@ -38,13 +44,23 @@
         "role": "copywriter",
         "summary": "the tailored variant — re-ordered, re-worded, nothing invented",
         "prompt": "Produce the tailored variant as resume-tailored.md, working strictly from the base résumé and the fit map. Step 1: rewrite the professional summary to target this posting, weaving must-hit keywords naturally. Step 2: re-order experience bullets so the most relevant impact leads each role; re-word partial matches to surface the evidence the posting asks for — same facts, sharper framing. Step 3: cut or compress roles and bullets irrelevant to this posting rather than exceeding the base résumé's page count. Step 4: NEVER invent experience, titles, dates, or metrics — a gap identified in the fit map stays a gap. Step 5: keep the base résumé's format conventions (headings, date style) so the variant is drop-in. On a loop-back, fix ONLY the named issues. Write a short note confirming keyword coverage and page parity via write_task_note.",
-        "produces": { "path": "resume-tailored.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "resume-tailored.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the tailored résumé against the base and the fit map. Step 1: diff-read resume-tailored.md against the base résumé — FAIL immediately on any claim, title, date, or metric that the base does not support. Step 2: check keyword coverage — every strong/partial must-hit from the fit map appears naturally in the variant. Step 3: confirm the page count did not grow and the summary targets the posting's role. Step 4: confirm the Gaps section items were NOT smuggled into the résumé. Write PASS/FAIL per criterion with the specific line for any FAIL.",
       "loopBackTo": "tailor",
-      "deliverable": { "path": "resume-tailored.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "resume-tailored.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -52,7 +68,14 @@
     "role": "general",
     "name": "Company Research Brief",
     "description": "A sharp, dated, sourced brief on a company before an interview or application — what they do and how they make money, recent signals, team and role context, culture as evidenced, likely interview themes, and five specific questions to ask THEM. Skimmable in ten minutes; every claim dated or marked UNKNOWN rather than guessed. Use before any serious interview or when deciding whether to apply.",
-    "tags": ["career", "job", "interview", "company", "research", "brief"],
+    "tags": [
+      "career",
+      "job",
+      "interview",
+      "company",
+      "research",
+      "brief"
+    ],
     "triggers": [
       "research this company",
       "company brief before my interview",
@@ -66,7 +89,10 @@
         "role": "planner",
         "summary": "sections, sourcing rules, and what a ten-minute skim must deliver",
         "prompt": "Lock the shape before researching. Step 1: confirm the target company, role, and interview round from the project record or the user (briefly). Step 2: lock the brief's section template: what they do + business model; recent news and signals (each dated); team and role context; culture as evidenced by concrete facts (not the careers-page adjectives); likely interview themes for this role; five sharp questions to ask THEM. Step 3: set the sourcing rules — every claim carries a date or a source, anything unverifiable is marked UNKNOWN, nothing is guessed. Step 4: set the size budget: skimmable in ten minutes. Step 5: write an acceptance-criteria checklist ('every section present', 'claims dated/sourced or UNKNOWN', 'questions specific to this company — would not fit a competitor', 'ten-minute skim'). Write the template + checklist via write_task_note AND to notes/brief-scope.md.",
-        "produces": { "path": "notes/brief-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/brief-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -74,7 +100,10 @@
         "role": "researcher",
         "summary": "dated, sourced notes keyed to the template sections",
         "prompt": "Gather facts for every template section. Step 1: use the web research capabilities on your current roster when available; otherwise work from materials in the project and say so at the top of the notes. Step 2: collect facts into structured notes keyed by template section, each with its date and source. Step 3: hunt specifically for recent signals — funding, launches, leadership changes, layoffs, public filings, engineering-blog themes — and for evidence of how the team actually works. Step 4: mark anything you could not verify as UNKNOWN rather than filling the hole with a plausible guess. Step 5: note two or three observations that could become sharp questions to ask them. Write the notes via write_task_note AND to notes/research-notes.md.",
-        "produces": { "path": "notes/research-notes.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/research-notes.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -99,7 +128,14 @@
     "evaluate": {
       "prompt": "QA the brief. Step 1: check every template section is present and filled from the notes — no section silently dropped. Step 2: spot-check claims against the research notes for dating/sourcing; FAIL any undated claim that isn't marked UNKNOWN. Step 3: read the five questions as the interviewer would — FAIL any that could be asked of any company. Step 4: time the skim — if it reads past ten minutes, FAIL with what to cut. Write PASS/FAIL per criterion.",
       "loopBackTo": "write",
-      "deliverable": { "path": "reports/company-brief.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "reports/company-brief.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -107,7 +143,12 @@
     "role": "general",
     "name": "Mock Interview",
     "description": "A realistic practice interview run live with the candidate — planned questions calibrated to the target role and round, a real-time interview with pressure follow-ups, and a kind, specific debrief: strengths in the candidate's own words, fixes with sketched stronger answers, one drill, and an honest readiness read. The debrief is the deliverable. Use before any real interview round.",
-    "tags": ["career", "interview", "practice", "debrief"],
+    "tags": [
+      "career",
+      "interview",
+      "practice",
+      "debrief"
+    ],
     "triggers": [
       "mock interview",
       "practice interview",
@@ -121,7 +162,10 @@
         "role": "Oefen-interviewer",
         "summary": "six to ten calibrated questions with planned follow-up chains",
         "prompt": "Build the interview plan. Step 1: establish the target role, company, and round — read the project's pipeline record and company brief when present; otherwise ask, briefly. Step 2: draft six to ten questions mixing behavioral and role-specific, calibrated to the round (a recruiter screen is not a final loop). Step 3: for each major expected claim, plan a follow-up chain — the 'what did YOU do?' probe. At least one chain must apply real pressure. Step 4: define the debrief contract up front: two or three strengths quoting the candidate, two or three fixes each with a sketched stronger answer, exactly one drill, and a readiness read. Step 5: write an acceptance-criteria checklist ('questions specific to the target role', 'at least one pressure follow-up chain', 'debrief contract stated'). Write the plan + checklist via write_task_note AND to notes/interview-plan.md.",
-        "produces": { "path": "notes/interview-plan.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/interview-plan.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "conduct",
@@ -129,7 +173,10 @@
         "role": "Oefen-interviewer",
         "summary": "the live practice round, transcribed as it runs",
         "prompt": "Run the interview live with the user. Step 1: set the frame in one line ('I'm your interviewer for a <round> for <role> — ready?') then go in character. Step 2: one question per turn, through the user-interaction capabilities on your current roster; wait for the answer before the next. Step 3: use the planned follow-up chains on vague or team-credited answers; stay realistic, never cruel — if the candidate is rattled, step out of character, steady them, resume when ready. Step 4: after each exchange, append a condensed record to notes/interview-transcript.md: the question, the gist of the answer, your one-line read. Step 5: end the roleplay explicitly ('Stepping out of character now') once the planned questions or the candidate's energy are spent. The transcript file is the phase's deliverable — keep it current as you go, not reconstructed after.",
-        "produces": { "path": "notes/interview-transcript.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/interview-transcript.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "debrief",
@@ -160,8 +207,15 @@
     "evaluate": {
       "prompt": "Review the debrief as the candidate's coach. Step 1: cross-check every fix and strength against notes/interview-transcript.md — FAIL any point that does not trace to an actual exchange. Step 2: check the tone — kind and concrete; FAIL generic advice ('be more confident') that names no moment and sketches no stronger answer. Step 3: confirm exactly one drill, actionable tonight. Step 4: confirm the readiness read is honest about whether another round is needed. Write PASS/FAIL per criterion.",
       "loopBackTo": "debrief",
-      "deliverable": { "path": "reports/interview-debrief.md", "kind": "markdown-report" },
+      "deliverable": {
+        "path": "reports/interview-debrief.md",
+        "kind": "markdown-report"
+      },
       "reviewer": "Loopbaancoach"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -169,7 +223,13 @@
     "role": "general",
     "name": "Offer Comparison",
     "description": "Turn competing job offers into one honest decision sheet — every offer normalized into the same fact grid (comp, equity with vesting caveats, benefits, level, location, growth, deadlines), unknowns marked UNKNOWN instead of guessed, computed year-1 and 4-year views under stated assumptions, a weighted read against the candidate's OWN priorities, and a recommendation that separates arithmetic from judgment. Use when any second offer (or a strong counter) lands.",
-    "tags": ["career", "job", "offer", "compensation", "decision"],
+    "tags": [
+      "career",
+      "job",
+      "offer",
+      "compensation",
+      "decision"
+    ],
     "triggers": [
       "compare my offers",
       "which offer should I take",
@@ -183,7 +243,10 @@
         "role": "planner",
         "summary": "one fact grid across every offer, unknowns honest, the user's own weights elicited",
         "prompt": "Build the fact sheet before any comparison. Step 1: collect every offer's terms from the user or project documents into one grid: base, bonus (target and realism), equity (kind, vesting schedule, valuation caveats), benefits, PTO, level/title, location/remote terms, team and manager, growth story, response deadline. Step 2: mark every unknown as UNKNOWN — never estimate a number the offer letter does not state; list the UNKNOWNs as questions to ask each company. Step 3: elicit the user's OWN decision weights — what actually matters to them (comp, growth, stability, location, mission, team) — do not invent or assume weights. Step 4: state the assumptions any computed view will use (equity valuation basis, bonus attainment). Step 5: write an acceptance-criteria checklist ('every offer covered on every factor', 'unknowns marked UNKNOWN', 'weights are the user's own words', 'assumptions stated'). Write the fact sheet + checklist via write_task_note AND to notes/offer-facts.md.",
-        "produces": { "path": "notes/offer-facts.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/offer-facts.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "compare",
@@ -208,7 +271,14 @@
     "evaluate": {
       "prompt": "Audit the decision sheet. Step 1: recompute the year-1 and 4-year lines from the fact sheet — FAIL on any arithmetic that does not reproduce, or any computed number whose assumption is not stated beside it. Step 2: check every offer appears in every table row and that fact-sheet UNKNOWNs were not silently replaced with guesses. Step 3: trace the weighted read to the user's stated priorities — FAIL a rubric the user never gave. Step 4: confirm the recommendation separates arithmetic from judgment and takes a clear position. Write PASS/FAIL per criterion.",
       "loopBackTo": "compare",
-      "deliverable": { "path": "reports/offer-compare.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "reports/offer-compare.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -216,7 +286,13 @@
     "role": "maintenance-review",
     "name": "Weekly Pipeline Review",
     "description": "The weekly walk of a job-search pipeline — a grounded snapshot of every application (what moved in the last seven days, what went stale, which follow-ups are due), then a review that chases or consciously parks every stalled item and commits to exactly three concrete priorities for next week. Built for the Job Hunt project's weekly cadence; also runs on demand whenever the pipeline feels foggy.",
-    "tags": ["career", "job", "review", "follow-up", "cadence"],
+    "tags": [
+      "career",
+      "job",
+      "review",
+      "follow-up",
+      "cadence"
+    ],
     "triggers": [
       "weekly pipeline review",
       "review my job pipeline",
@@ -230,7 +306,10 @@
         "role": "Loopbaancoach",
         "summary": "the grounded state: per-stage counts, movement, staleness, follow-ups due",
         "prompt": "Ground the review in the real record — invent nothing. Step 1: read the live pipeline through the pipeline status capability on your current roster when available; otherwise read the workspace pipeline.json and activity.json records directly. Step 2: snapshot per-stage counts and list every application with its stage and last-touched date. Step 3: mark movement — anything whose stage changed in the last seven days. Step 4: mark staleness — any active application untouched for more than seven days. Step 5: list follow-ups due — logged follow-up events due within the next seven days or overdue. Step 6: note materials debt: serious applications missing a tailored résumé or company brief. Write the snapshot via write_task_note AND to notes/pipeline-snapshot.md.",
-        "produces": { "path": "notes/pipeline-snapshot.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/pipeline-snapshot.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "review",
@@ -261,7 +340,14 @@
     "evaluate": {
       "prompt": "Audit the review against the snapshot. Step 1: cross-check — every application in the snapshot is accounted for in the review; FAIL any active application that appears in neither Moved, Stalled, nor Follow-ups. Step 2: check the carry-over rule — every stale item has an explicit chase, park-with-reason, or close. Step 3: count the next-week priorities — FAIL unless exactly three, each concrete enough to start tomorrow. Step 4: every follow-up line has a who, a what, and a when. Write PASS/FAIL per criterion.",
       "loopBackTo": "review",
-      "deliverable": { "path": "reports/weekly-pipeline-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "reports/weekly-pipeline-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

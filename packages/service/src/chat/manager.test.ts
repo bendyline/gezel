@@ -1917,6 +1917,51 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(mayaDisk!.messages[0]?.content).toBe('[Message from Ada]: status?');
   });
 
+  it("inherits a task's boring mode when a relay opens a task-scoped thread", async () => {
+    await store.createGezel({ name: 'Maya', role: 'Voorman' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'default',
+      num: 1,
+      ref: 'default/1',
+      title: 'Boring task relay',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'maya' },
+      craftbook: {
+        id: 'relay',
+        name: 'Relay',
+        steps: [{ id: 'build', name: 'Build', createdAt: now }],
+        entryStepId: 'build',
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'build',
+      roleBasedNameOnlyMode: true,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('On it.');
+
+    const res = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      taskRef: 'default/1',
+      stepId: 'build',
+      text: 'status?',
+    });
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', res.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+
+    const mayaDisk = await store.getSession('maya', res.sessionId);
+    expect(mayaDisk?.roleBasedNameOnlyMode).toBe(true);
+    expect(mayaDisk?.messages[0]?.content).toBe('[Message from developer]: status?');
+  });
+
   it('renders relay names role-based everywhere when the config flag is on', async () => {
     await store.writeConfig({ provider: 'copilot', roleBasedNameOnlyMode: true });
     await store.createGezel({ name: 'Maya', role: 'Voorman' });

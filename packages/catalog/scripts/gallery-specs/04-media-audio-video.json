@@ -4,7 +4,13 @@
     "role": "general",
     "name": "Text-to-Speech a Folder",
     "description": "Turn a folder of text files (articles, chapters, notes, markdown) into a set of spoken audio files using text-to-speech, so a reading list becomes a listening list. Scopes the voice, file mapping, and chunking rules FIRST so long inputs do not get truncated or mispronounced, then synthesizes one audio artifact per source file with a consistent voice, then verifies every file was rendered and is audible. The scope-before-synthesize ordering is the point: deciding chunk size, file naming, and a manifest up front is what keeps a batch TTS run complete and re-runnable instead of half-finished.",
-    "tags": ["audio", "tts", "text-to-speech", "batch", "narration"],
+    "tags": [
+      "audio",
+      "tts",
+      "text-to-speech",
+      "batch",
+      "narration"
+    ],
     "triggers": [
       "convert text to audio",
       "text to speech a folder",
@@ -19,7 +25,10 @@
         "role": "planner",
         "summary": "voice, file mapping, chunking, output manifest",
         "prompt": "Plan the batch BEFORE synthesizing anything. Step 1: list the source folder and record every text file (path, byte size). Step 2: pick ONE voice/engine (record the exact voice id and language) so all outputs sound consistent. Step 3: decide the input->output mapping (e.g. `article-01.md` -> `audio/article-01.mp3`) and the audio format/sample rate. Step 4: decide a chunking rule for long files (split on paragraph/sentence boundaries under the engine's character limit, then concatenate) so nothing is truncated. Step 5: decide pronunciation/normalization rules (expand numbers, abbreviations, URLs spoken-or-skipped). Write an acceptance-criteria checklist (one audio file per source file, all use the same voice, none is silent/zero-length, a manifest maps source->output->duration, long files are fully spoken not truncated) and the decisions to `notes/scope.md` via write_task_note AND to the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "synthesize",
@@ -27,13 +36,24 @@
         "role": "developer",
         "summary": "render one audio file per source file with the locked voice",
         "prompt": "Render the audio to satisfy the scope. Step 1: for each source file, read its text and apply the normalization rules from scope. Step 2: split into chunks under the engine's limit on sentence boundaries, synthesize each chunk with the locked voice, and concatenate into the single mapped output file under `audio/`. Step 3: write outputs incrementally (one finished file at a time) so progress is observable and a crash is resumable. Step 4: as you go, append a row to `audio/manifest.json` or a manifest table: source path, output path, voice id, approximate duration, byte size. Do not skip files; do not change voice mid-batch. On a loop-back, re-render only the files the reviewer flagged (missing, silent, truncated) and leave passing files untouched. write_task_note the audio directory path and a coverage count (rendered vs source files).",
-        "produces": { "path": "audio", "kind": "image-set", "extraChecks": [] }
+        "produces": {
+          "path": "audio",
+          "kind": "image-set",
+          "extraChecks": []
+        }
       }
     ],
     "evaluate": {
       "prompt": "Verify the batch is complete and audible. Step 1: count audio files in `audio/` vs source text files — every source must have an output (PASS/FAIL coverage). Step 2: confirm none is zero-length/silent (check byte size > a sane floor; sample-listen if an audio capability exists). Step 3: confirm the manifest maps each source->output with a plausible duration. Step 4: spot-check that the LONGEST source produced audio whose duration is consistent with its length (not truncated). Step 5: confirm all files share the locked voice/format. Write PASS/FAIL per criterion.",
       "loopBackTo": "synthesize",
-      "deliverable": { "path": "audio", "kind": "image-set" }
+      "deliverable": {
+        "path": "audio",
+        "kind": "image-set"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -41,7 +61,13 @@
     "role": "general",
     "name": "Transcribe Audio or Video",
     "description": "Convert an audio or video recording into an accurate, readable transcript using speech-to-text, with speaker labels and timestamps. Scopes the output format, speaker-labeling, and timestamp granularity FIRST so the transcript is usable downstream (search, subtitles, minutes), then transcribes the full recording end-to-end, then verifies coverage against the recording's duration and checks for dropped segments. The scope-first ordering matters because deciding timestamp cadence and speaker handling up front is what separates a clean, searchable transcript from a wall of unattributed text.",
-    "tags": ["audio", "video", "transcription", "speech-to-text", "stt"],
+    "tags": [
+      "audio",
+      "video",
+      "transcription",
+      "speech-to-text",
+      "stt"
+    ],
     "triggers": [
       "transcribe this audio",
       "transcribe a video",
@@ -56,7 +82,10 @@
         "role": "planner",
         "summary": "format, speaker labels, timestamp cadence, glossary",
         "prompt": "Define what a good transcript looks like BEFORE transcribing. Step 1: record the source file (path, format, duration in seconds). Step 2: pick the output format (plain markdown, or timestamped blocks like `[00:01:23] Speaker 1: ...`) and the timestamp cadence (per-utterance, every N seconds, or per-paragraph). Step 3: decide speaker handling (diarize into Speaker 1/2…, or single-speaker) and how to label them. Step 4: build a small glossary of names/terms/acronyms likely in the audio so they transcribe correctly. Step 5: decide cleanup level (verbatim with ums, or lightly edited for readability). Write an acceptance-criteria checklist (transcript spans the full duration with a final timestamp near the end, every block is timestamped, speakers are labeled consistently, glossary terms spelled correctly, output parses as the chosen format) and decisions to `notes/scope.md` via write_task_note AND to the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "transcribe",
@@ -64,13 +93,23 @@
         "role": "developer",
         "summary": "run STT over the full file, label speakers, timestamp",
         "prompt": "Produce the transcript to the locked format. Step 1: run the speech-to-text capability over the WHOLE file (chunk long files on silence boundaries and stitch, keeping running timestamps so they stay monotonic across chunks). Step 2: apply speaker labels and the chosen timestamp cadence. Step 3: apply the glossary — correct names/terms the recognizer got wrong. Step 4: apply the chosen cleanup level. Step 5: write the result to `transcript.md` in the locked format and confirm it parses. write_task_note the transcript path, its final timestamp, and the recording duration so coverage is checkable. On a loop-back, fix only the flagged gaps (missing tail, mislabeled speakers, glossary misspellings).",
-        "produces": { "path": "transcript.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "transcript.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Check accuracy and coverage. Step 1: confirm the LAST timestamp is within a small margin of the recording's duration (no dropped tail) — PASS/FAIL coverage. Step 2: confirm every block is timestamped and speakers are labeled consistently throughout. Step 3: spot-check 3 timestamps against the audio (if an audio capability exists) — does the text match what is said there? Step 4: confirm glossary terms/names are spelled correctly. Step 5: confirm the file parses as the chosen format. Write PASS/FAIL per criterion.",
       "loopBackTo": "transcribe",
-      "deliverable": { "path": "transcript.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "transcript.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -78,7 +117,14 @@
     "role": "general",
     "name": "Subtitle & Caption Generator",
     "description": "Generate time-synced subtitles/captions for a video in a standard caption format (SRT or WebVTT), so the video is accessible and watchable without sound. Scopes the caption format and timing/reading-speed rules FIRST, transcribes the audio with precise word timings, then formats those into properly cued, line-length-limited caption cues. The transcribe-then-format split is deliberate: getting accurate text and timings is a different skill from chunking them into readable, on-screen-friendly cues that respect reading speed and never overlap.",
-    "tags": ["subtitles", "captions", "srt", "vtt", "accessibility", "video"],
+    "tags": [
+      "subtitles",
+      "captions",
+      "srt",
+      "vtt",
+      "accessibility",
+      "video"
+    ],
     "triggers": [
       "generate subtitles",
       "make captions for a video",
@@ -93,7 +139,10 @@
         "role": "planner",
         "summary": "format (SRT/VTT), timing rules, line limits, language",
         "prompt": "Lock the caption rules BEFORE generating. Step 1: record the source video (path, duration) and the language. Step 2: pick the format — SRT (`HH:MM:SS,mmm`) or WebVTT (`HH:MM:SS.mmm` with a `WEBVTT` header). Step 3: set readability rules: max ~42 chars per line, max 2 lines per cue, min ~1s and max ~7s per cue, reading speed under ~17 chars/second, and a small gap between cues so none overlap. Step 4: decide how to handle non-speech (e.g. `[music]`, `[applause]`) and speaker IDs if multiple speakers. Write an acceptance-criteria checklist (valid SRT/VTT that a player can load, sequential cue numbering, monotonic non-overlapping timecodes, lines within the char limit, last cue ends near video duration) and decisions to `notes/scope.md` via write_task_note AND to the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "transcribe",
@@ -101,7 +150,10 @@
         "role": "developer",
         "summary": "STT the audio into word/segment timestamps",
         "prompt": "Produce timed text the formatter can chunk. Step 1: extract/take the audio track and run speech-to-text over the WHOLE recording to get segments with start/end timestamps (word-level if the engine supports it — it makes cue splitting far cleaner). Step 2: keep timestamps monotonic across any chunk boundaries. Step 3: mark non-speech events per the scope rules. Step 4: write the raw timed segments to `notes/timed-segments.json` (each: text, start, end) via write_task_note and the produces path so the format phase has structured input, not prose. Do not chunk into final cues yet — that is the next phase. On a loop-back from format, fix timing/coverage gaps here only if the issue is bad source timings.",
-        "produces": { "path": "notes/timed-segments.json", "kind": "json" }
+        "produces": {
+          "path": "notes/timed-segments.json",
+          "kind": "json"
+        }
       },
       {
         "id": "format",
@@ -109,13 +161,25 @@
         "role": "developer",
         "summary": "chunk timed text into valid SRT/VTT cues",
         "prompt": "Turn timed segments into a valid caption file. Step 1: emit the format header (none for SRT; `WEBVTT` for VTT). Step 2: walk the timed segments and pack words into cues that respect the scope's char/line/duration/reading-speed limits — split a long segment into multiple cues at natural pauses, splitting timecodes proportionally. Step 3: number cues sequentially (SRT) and write each cue's `start --> end` timecode in the EXACT format, then 1-2 text lines. Step 4: ensure no two cues overlap and the last cue ends at/just before the video duration. Step 5: write `captions.srt` (or `.vtt`) and validate it parses (try loading it, or re-parse the structure). write_task_note the caption path and cue count. On a loop-back, fix only the flagged cues (overlap, over-long lines, bad timecode format).",
-        "produces": { "path": "captions.srt", "kind": "generic-file", "minBytes": 200 }
+        "produces": {
+          "path": "captions.srt",
+          "kind": "generic-file",
+          "minBytes": 200
+        }
       }
     ],
     "evaluate": {
       "prompt": "Validate the caption file like a player would. Step 1: parse it — valid header (VTT), sequential numbering (SRT), and every timecode in the exact `HH:MM:SS,mmm`/`.mmm` format (PASS/FAIL). Step 2: confirm timecodes are monotonic and NO two cues overlap. Step 3: confirm cue durations and line lengths are within the scoped limits (sample several). Step 4: confirm the final cue ends within a small margin of the video duration (no dropped tail). Step 5: spot-check 3 cues against the audio if possible — text and timing align. Write PASS/FAIL per criterion.",
       "loopBackTo": "format",
-      "deliverable": { "path": "captions.srt", "kind": "generic-file", "minBytes": 200 }
+      "deliverable": {
+        "path": "captions.srt",
+        "kind": "generic-file",
+        "minBytes": 200
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -123,7 +187,14 @@
     "role": "general",
     "name": "Narrated Slideshow Video",
     "description": "Build a self-playing narrated slideshow — slides that auto-advance in sync with spoken narration, delivered as a single playable HTML page (slides + per-slide audio + timed auto-advance). Outlines the narrative and per-slide script FIRST, designs a consistent slide look, then builds the synced player so visuals, voiceover, and timing land together. The outline-then-design-then-build ordering keeps narration and slides telling ONE story instead of two unsynced tracks, which is the hard part of a narrated deck.",
-    "tags": ["video", "slideshow", "narration", "presentation", "html", "tts"],
+    "tags": [
+      "video",
+      "slideshow",
+      "narration",
+      "presentation",
+      "html",
+      "tts"
+    ],
     "triggers": [
       "narrated slideshow",
       "slides with voiceover",
@@ -138,7 +209,10 @@
         "role": "planner",
         "summary": "narrative arc + per-slide bullets + narration script",
         "prompt": "Plan the story BEFORE any design or code. Step 1: read the source content and define the narrative arc (title -> setup -> 3-5 points -> takeaway). Step 2: for each slide write (a) the 2-4 on-screen bullets and (b) the narration script for that slide — spoken sentences, ~12-20 seconds each, written for the ear not the eye. Step 3: estimate each slide's duration from its narration so the build can auto-advance. Step 4: pick ONE narration voice. Write an acceptance-criteria checklist (opens with a title slide, one idea per slide, every slide has both bullets and a narration line, slides auto-advance roughly in sync with the audio, ends on a takeaway, plays start-to-finish with no console error) and the full per-slide script to `notes/outline.md` via write_task_note AND to the produces path.",
-        "produces": { "path": "notes/outline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/outline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -146,7 +220,10 @@
         "role": "designer",
         "summary": "one consistent slide template + transition + caption style",
         "prompt": "Design one reusable slide look, no content yet. Step 1: define the slide template — title position, bullet layout, palette (hex), type scale, and a subtle slide-to-slide transition. Step 2: define a caption/subtitle style so the current narration line can show on-screen (accessibility + watchable muted). Step 3: define the progress affordance (slide N of M, a progress bar) and the play/pause control. Step 4: keep it self-contained (CSS only, no external assets). Write the template spec to `notes/design.md` via write_task_note AND to the produces path so the build applies it uniformly across every slide.",
-        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -154,13 +231,25 @@
         "role": "developer",
         "summary": "single index.html: slides + per-slide audio + auto-advance",
         "prompt": "Build the narrated slideshow as a single `index.html` (inline CSS + JS). Step 1: synthesize per-slide narration audio with the locked voice (embed as base64 data-URIs or write `audio/slide-N.*` and reference them) so the page is self-contained/playable. Step 2: render every slide from the outline using the locked template uniformly. Step 3: implement the player — play the current slide's narration, show its caption, and AUTO-ADVANCE to the next slide when its audio ends (use the audio `ended` event, not a fixed guess), with working play/pause and a progress indicator. Step 4: ensure it starts on the title slide and finishes cleanly on the takeaway. Step 5: confirm no console errors. write_task_note the path and slide count. On a loop-back, fix only the flagged gaps (out-of-sync timing, missing audio, broken advance).",
-        "produces": { "path": "index.html", "kind": "html-page", "minBytes": 2000 }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page",
+          "minBytes": 2000
+        }
       }
     ],
     "evaluate": {
       "prompt": "Play it like a viewer. Step 1: load `index.html`; it must start on a title slide with no console error (PASS/FAIL). Step 2: confirm each slide has on-screen bullets AND plays narration, with the caption matching the audio. Step 3: confirm slides AUTO-ADVANCE when narration ends (driven by audio end, in rough sync) rather than jumping early/late. Step 4: confirm play/pause and the progress indicator work. Step 5: confirm it ends on the takeaway and the story tracks the outline. Write PASS/FAIL per criterion.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page", "minBytes": 2000 }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page",
+        "minBytes": 2000
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -168,7 +257,13 @@
     "role": "general",
     "name": "Podcast Chapters & Show Notes",
     "description": "Turn a podcast episode into navigable chapter markers plus publish-ready show notes — timestamped chapter titles, an episode summary, key takeaways, and linked mentions. Scopes the chapter format and show-notes structure FIRST, analyzes the transcript to find real topic boundaries with timestamps, then writes the listener-facing notes in the show's voice. Separating boundary-detection (analysis) from the write-up (copy) is what yields chapters that land on actual topic shifts and notes that read like a human wrote them.",
-    "tags": ["podcast", "audio", "chapters", "show-notes", "timestamps"],
+    "tags": [
+      "podcast",
+      "audio",
+      "chapters",
+      "show-notes",
+      "timestamps"
+    ],
     "triggers": [
       "podcast chapters",
       "chapter markers for my episode",
@@ -183,7 +278,10 @@
         "role": "planner",
         "summary": "chapter format, count, show-notes sections, voice",
         "prompt": "Define the deliverable BEFORE analyzing. Step 1: record the source (episode title, transcript path or audio, duration). Step 2: pick the chapter marker format — the widely-supported `HH:MM:SS Title` lines (Apple/YouTube style), where the FIRST chapter must be `00:00:00`. Step 3: set chapter density (e.g. 5-12 chapters, min ~60s apart, titles ≤ ~40 chars). Step 4: define the show-notes structure: one-paragraph episode summary, 3-6 key takeaways, the timestamped chapter list, and a 'mentioned in this episode' links list. Step 5: capture the show's voice. Write an acceptance-criteria checklist (first chapter is 00:00:00, timestamps monotonic and within duration, titles concise and descriptive, notes have all four sections, every claim traces to the transcript) and decisions to `notes/scope.md` via write_task_note AND to the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -191,7 +289,10 @@
         "role": "developer",
         "summary": "detect topic shifts, assign timestamps + titles",
         "prompt": "Find where topics actually change. Step 1: read the transcript with its timestamps. Step 2: detect topic boundaries — points where the subject clearly shifts (new question, new segment, ad break, guest change) — not arbitrary fixed intervals. Step 3: for each boundary record the start timestamp (rounded to the second) and a short descriptive title; force the first to `00:00:00`. Step 4: enforce the scoped density/spacing/title-length rules, merging boundaries that are too close. Step 5: write the structured chapter list to `notes/chapters.json` (each: start `HH:MM:SS`, title, a one-line topic note) via write_task_note AND the produces path so the writer has structured input. On a loop-back, adjust only the flagged boundaries.",
-        "produces": { "path": "notes/chapters.json", "kind": "json" }
+        "produces": {
+          "path": "notes/chapters.json",
+          "kind": "json"
+        }
       },
       {
         "id": "write",
@@ -199,13 +300,23 @@
         "role": "copywriter",
         "summary": "summary, takeaways, chapter list, links in the show voice",
         "prompt": "Write the publish-ready notes from the analysis. Step 1: open with a one-paragraph episode summary in the show's voice. Step 2: list 3-6 key takeaways as tight bullets. Step 3: render the chapter list as plain `HH:MM:SS Title` lines (paste-ready into a podcast host / YouTube description) directly from `notes/chapters.json`, first line `00:00:00`. Step 4: add a 'Mentioned in this episode' section with the people/links/resources referenced. Step 5: assemble all of it into `show-notes.md` with clear section headers. Do not invent facts not in the transcript. write_task_note the path and chapter count. On a loop-back, fix only the flagged sections.",
-        "produces": { "path": "show-notes.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "show-notes.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Check the chapters and notes. Step 1: confirm the chapter list's FIRST line is `00:00:00` and all timestamps are monotonic, spaced per scope, and within the episode duration (PASS/FAIL). Step 2: spot-check 3 chapter timestamps against the transcript — does each land on a real topic shift? Step 3: confirm show-notes.md has all four sections (summary, takeaways, chapters, mentions). Step 4: confirm claims trace to the transcript (nothing invented) and the voice matches the show. Step 5: confirm titles are concise and descriptive. Write PASS/FAIL per criterion.",
       "loopBackTo": "write",
-      "deliverable": { "path": "show-notes.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "show-notes.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -213,7 +324,13 @@
     "role": "general",
     "name": "Audio Highlight Reel",
     "description": "Cut a long recording (podcast, interview, talk, stream) down to a short highlight reel of its best moments, delivered as a single stitched audio clip plus a cue sheet of the segments used. Locks selection criteria and target length FIRST, selects the strongest timestamped segments against those criteria, then assembles them into one clean reel with smooth joins. Defining 'what makes a highlight' and the runtime budget before cutting is what keeps the reel tight and on-theme instead of a random montage.",
-    "tags": ["audio", "highlights", "editing", "clip", "reel"],
+    "tags": [
+      "audio",
+      "highlights",
+      "editing",
+      "clip",
+      "reel"
+    ],
     "triggers": [
       "highlight reel from audio",
       "cut the best moments",
@@ -228,7 +345,10 @@
         "role": "planner",
         "summary": "what counts as a highlight, target length, ordering",
         "prompt": "Decide what to keep BEFORE cutting. Step 1: record the source (path, duration, transcript if available). Step 2: define the target reel length (e.g. 90-120s) and segment count/length bounds (e.g. 4-8 clips, each 8-25s). Step 3: write concrete selection criteria — what makes a moment a highlight here (a strong quote, a laugh, a key insight, an emotional beat, a clear answer) — so selection is judgeable, not vibes. Step 4: decide ordering (chronological, or hook-first) and whether to add short fades/gaps between clips. Step 5: decide intro/outro handling. Write an acceptance-criteria checklist (reel within ±15% of target length, N segments within bounds, each chosen segment matches a stated criterion, joins are clean with no mid-word cuts, a cue sheet lists each segment's source in/out) and decisions to `notes/criteria.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/criteria.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/criteria.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "select",
@@ -236,7 +356,10 @@
         "role": "developer",
         "summary": "score candidates, pick segments with in/out timestamps",
         "prompt": "Choose the segments against the criteria. Step 1: scan the transcript/audio and identify candidate moments, each with a precise in/out timestamp and the criterion it satisfies. Step 2: score/rank candidates and pick the set that fits the target length and segment bounds, trimming each in/out to natural pauses so no clip cuts a word in half. Step 3: order them per the scope (hook-first or chronological). Step 4: write the chosen segments to `notes/segments.json` (each: source in, out, criterion, one-line why) via write_task_note AND the produces path. Do not exceed the segment count or length budget. On a loop-back, swap only the flagged segments.",
-        "produces": { "path": "notes/segments.json", "kind": "json" }
+        "produces": {
+          "path": "notes/segments.json",
+          "kind": "json"
+        }
       },
       {
         "id": "assemble",
@@ -244,13 +367,23 @@
         "role": "developer",
         "summary": "cut + stitch segments into one audio file + cue sheet",
         "prompt": "Build the reel from the selected segments. Step 1: cut each segment from the source at its in/out, apply short fade-in/out at joins (and gaps if scoped) so transitions are smooth. Step 2: concatenate in the chosen order into one audio file `reel.mp3` (or the source format). Step 3: normalize loudness so clips don't jump in volume. Step 4: write a human-readable cue sheet `reel-cues.md` listing each segment: reel timecode, source in/out, and the highlight reason. Step 5: confirm the reel's total duration is within the target window. write_task_note the reel path, the cue sheet path, and the final duration. On a loop-back, re-cut only the flagged joins/segments.",
-        "produces": { "path": "reel.mp3", "kind": "audio-file" }
+        "produces": {
+          "path": "reel.mp3",
+          "kind": "audio-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Listen to and measure the reel. Step 1: confirm `reel.mp3` exists, is non-silent, and its duration is within ±15% of the target (PASS/FAIL). Step 2: confirm the cue sheet lists each segment with reel timecode + source in/out + reason, and the count is within bounds. Step 3: sample-listen (if an audio capability exists) for clean joins — no mid-word cuts, no volume jumps. Step 4: confirm each kept segment maps to a stated highlight criterion. Step 5: confirm ordering matches the scope. Write PASS/FAIL per criterion.",
       "loopBackTo": "assemble",
-      "deliverable": { "path": "reel.mp3", "kind": "audio-file" }
+      "deliverable": {
+        "path": "reel.mp3",
+        "kind": "audio-file"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -258,7 +391,13 @@
     "role": "general",
     "name": "Voiceover / TTS Script",
     "description": "Write a voiceover script tuned for spoken delivery — by a human VO artist or a text-to-speech engine — for a video, ad, explainer, or narration, with pacing, pronunciation, and timing baked in. Briefs the audience, runtime, and voice FIRST, then drafts a performance-ready script with scene/segment breaks, [pause] and emphasis cues, phonetic spellings for tricky words, and a per-segment word count that fits the target seconds. The brief-then-draft ordering ensures the script is written for the EAR and the clock, not the page — short sentences, read-aloud rhythm, and a runtime that actually fits.",
-    "tags": ["script", "voiceover", "tts", "narration", "copywriting"],
+    "tags": [
+      "script",
+      "voiceover",
+      "tts",
+      "narration",
+      "copywriting"
+    ],
     "triggers": [
       "write a voiceover script",
       "narration script",
@@ -273,7 +412,10 @@
         "role": "copywriter",
         "summary": "audience, runtime, voice/tone, pronunciation list",
         "prompt": "Lock the brief BEFORE drafting. Step 1: capture the purpose, audience, and the single takeaway the listener must leave with. Step 2: set the target runtime in seconds and translate it to a word budget (~150 words/minute for natural narration; record the budget). Step 3: define the voice/tone (warm, authoritative, energetic) and the delivery (single narrator vs dialogue). Step 4: list tricky names/terms/numbers with their intended pronunciation (phonetic respelling) and how numbers/units should be spoken. Step 5: decide the segment structure (hook -> body beats -> CTA). Write an acceptance-criteria checklist (total words within ±10% of the budget, sentences short and read-aloud friendly, every segment has a target second count, pause/emphasis cues present, tricky words have phonetics, ends on the CTA) and decisions to `notes/brief.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/brief.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/brief.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -281,13 +423,23 @@
         "role": "copywriter",
         "summary": "performance-ready script with cues, pacing, timing",
         "prompt": "Write the performance-ready script to the brief. Step 1: structure it into labeled segments (e.g. `[0:00-0:08] HOOK`) each with a target second count and an inline running word count. Step 2: write for the ear — short declarative sentences, active voice, one idea per line, conversational rhythm; read each line aloud in your head and cut anything that trips the tongue. Step 3: add performance cues inline: `[pause]`, `[beat]`, emphasis via *asterisks* or CAPS-for-stress, and tone notes per segment. Step 4: use the brief's phonetic respellings for tricky words and write numbers/units as they should be SPOKEN (e.g. 'twenty twenty-six', 'three hundred dollars'). Step 5: end on the locked CTA. Write the full script to `voiceover-script.md` with the segment headers and a final total word count + estimated runtime. On a loop-back, fix only the flagged segments (over-budget, hard-to-say, missing cues).",
-        "produces": { "path": "voiceover-script.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "voiceover-script.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read it aloud and time it. Step 1: confirm total word count is within ±10% of the brief's budget and the stated runtime matches at ~150 wpm (PASS/FAIL). Step 2: confirm each segment is labeled with a target second count and the running counts add up. Step 3: read several lines aloud — are sentences short and natural, with no tongue-twisters? Step 4: confirm pause/emphasis cues are present and tricky words use the phonetic respellings. Step 5: confirm numbers are written spoken-style and it ends on the CTA. Write PASS/FAIL per criterion.",
       "loopBackTo": "draft",
-      "deliverable": { "path": "voiceover-script.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "voiceover-script.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -295,7 +447,13 @@
     "role": "general",
     "name": "Meeting Recording to Minutes & Actions",
     "description": "Turn a meeting recording into structured minutes plus a clear action-item list — who agreed to do what by when — derived from the audio. Transcribes the recording FIRST (with speaker labels so attribution is possible), then summarizes into decisions, discussion, and assigned action items with owners and due dates. The transcribe-then-summarize ordering is essential: you cannot reliably attribute decisions and owners without first knowing who said what, and minutes without owners are useless.",
-    "tags": ["meeting", "minutes", "audio", "transcription", "action-items"],
+    "tags": [
+      "meeting",
+      "minutes",
+      "audio",
+      "transcription",
+      "action-items"
+    ],
     "triggers": [
       "meeting minutes from recording",
       "summarize this meeting",
@@ -310,7 +468,10 @@
         "role": "developer",
         "summary": "STT with speaker labels + timestamps",
         "prompt": "Get an attributable transcript BEFORE summarizing. Step 1: record the source (path, duration, and attendee names if known). Step 2: run speech-to-text over the WHOLE recording with diarization, labeling speakers (map to real names where you can infer them from introductions). Step 3: timestamp utterances so decisions/actions can cite a moment. Step 4: lightly clean filler for readability but keep commitments verbatim. Step 5: write the labeled transcript to `notes/transcript.md` via write_task_note AND the produces path, and note its final timestamp vs the duration so coverage is checkable. On a loop-back, fix only flagged attribution/coverage gaps.",
-        "produces": { "path": "notes/transcript.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "notes/transcript.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "summarize",
@@ -318,13 +479,23 @@
         "role": "copywriter",
         "summary": "decisions, discussion, action items with owners + dates",
         "prompt": "Write the minutes from the transcript. Step 1: lead with meeting metadata (title, date if known, attendees). Step 2: write a 'Decisions' section — each decision a tight bullet, with who made/agreed it. Step 3: write a 'Discussion' section summarizing key points by topic (not a re-transcription). Step 4: write an 'Action Items' section as a checklist where EVERY item has an explicit owner and a due date (write 'owner: TBD' / 'due: TBD' only if truly unstated — never silently drop the field). Step 5: add an 'Open Questions' section for anything unresolved. Do not invent commitments not in the transcript; attribute owners only when the transcript supports it. Write it all to `minutes.md` with clear headers. write_task_note the path and the action-item count. On a loop-back, fix only the flagged sections.",
-        "produces": { "path": "minutes.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "minutes.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Check the minutes against the recording. Step 1: confirm `minutes.md` has Decisions, Discussion, Action Items, and Open Questions sections with metadata up top (PASS/FAIL). Step 2: confirm EVERY action item has an owner and a due-date field (explicit or TBD) — no item missing the fields. Step 3: spot-check 3 decisions/actions against the transcript — each is real and attributed correctly, nothing invented. Step 4: confirm the summary is condensed (not a re-transcription) yet covers the major topics. Step 5: confirm transcript coverage reached the end of the recording. Write PASS/FAIL per criterion.",
       "loopBackTo": "summarize",
-      "deliverable": { "path": "minutes.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "minutes.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -332,7 +503,14 @@
     "role": "general",
     "name": "Music Library Metadata Tagging",
     "description": "Tag and organize a folder of audio files with consistent, correct metadata — title, artist, album, track number, year, genre — so the library is clean, sortable, and player-friendly. Locks the tag schema and naming/foldering convention FIRST, applies tags and a consistent file/folder layout across the whole library, then verifies every file is fully and consistently tagged. Defining the schema and the source of truth before touching files is what prevents a half-tagged, inconsistently-named mess.",
-    "tags": ["audio", "music", "metadata", "tags", "id3", "library"],
+    "tags": [
+      "audio",
+      "music",
+      "metadata",
+      "tags",
+      "id3",
+      "library"
+    ],
     "triggers": [
       "tag my music",
       "fix audio metadata",
@@ -347,7 +525,10 @@
         "role": "planner",
         "summary": "required fields, vocab, file/folder naming rules",
         "prompt": "Define the schema BEFORE tagging. Step 1: list the audio folder and record every file (path, format, current tags if readable). Step 2: define the required tag fields (title, artist, album, album-artist, track number, disc, year, genre) and which are mandatory. Step 3: define controlled vocabularies/formatting: genre list, title-case rules, how 'feat.' is written, track-number padding (01, 02…). Step 4: define the file/folder convention (e.g. `Artist/Album/01 - Title.ext`). Step 5: name the source of truth for correcting tags (existing tags, filename parsing, or a lookup). Write an acceptance-criteria checklist (every file has all mandatory fields, genres drawn from the vocab, track numbers padded and sequential within an album, files follow the naming convention, a report lists before/after per file) and decisions to `notes/schema.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/schema.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/schema.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "tag",
@@ -355,13 +536,23 @@
         "role": "developer",
         "summary": "write metadata + rename/foldering per the schema",
         "prompt": "Apply the schema across the library. Step 1: for each file, derive correct field values from the source of truth, normalizing to the controlled vocab and formatting rules. Step 2: write the metadata tags to the file. Step 3: rename/move the file to match the naming convention, padding track numbers and grouping into Artist/Album folders. Step 4: process incrementally and append a row to `tag-report.csv` per file: old path, new path, and the final field values — so the run is observable and re-runnable. Step 5: do not skip files; flag any you cannot confidently tag rather than guessing wildly. write_task_note the report path and a coverage count. On a loop-back, re-tag only the flagged files.",
-        "produces": { "path": "tag-report.csv", "kind": "data-file" }
+        "produces": {
+          "path": "tag-report.csv",
+          "kind": "data-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Audit the tagged library. Step 1: confirm `tag-report.csv` covers every source file (count match) — PASS/FAIL coverage. Step 2: confirm every file has all MANDATORY fields populated. Step 3: confirm genres come from the controlled vocab and track numbers are padded and sequential within each album. Step 4: confirm files follow the naming convention (Artist/Album/NN - Title). Step 5: spot-check 3 files by reading back their tags — do they match the report? Write PASS/FAIL per criterion.",
       "loopBackTo": "tag",
-      "deliverable": { "path": "tag-report.csv", "kind": "data-file" }
+      "deliverable": {
+        "path": "tag-report.csv",
+        "kind": "data-file"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -369,7 +560,13 @@
     "role": "general",
     "name": "Video Storyboard from a Script",
     "description": "Turn a video script into a shot-by-shot storyboard — each scene broken into shots with a framing sketch/description, camera direction, on-screen action, the matching script line, and timing — so a shoot or animation has a clear visual plan. Scopes the script into scenes and shot list FIRST, then designs each storyboard panel visually. The script-scope-then-storyboard ordering ensures every shot maps to a real script beat and the timing adds up to the script's runtime, instead of pretty panels that drift from the words.",
-    "tags": ["video", "storyboard", "shots", "preproduction", "visual-design"],
+    "tags": [
+      "video",
+      "storyboard",
+      "shots",
+      "preproduction",
+      "visual-design"
+    ],
     "triggers": [
       "storyboard my script",
       "shot list from a script",
@@ -384,7 +581,10 @@
         "role": "planner",
         "summary": "scenes, shot breakdown, timing, panel fields",
         "prompt": "Break the script down BEFORE drawing. Step 1: read the script and segment it into scenes; record the script's total target runtime. Step 2: break each scene into shots, each mapped to specific script line(s) and an estimated duration so the shot durations sum to the runtime. Step 3: define the panel fields every storyboard cell must carry: shot number, framing (WS/MS/CU), camera move (static/pan/zoom), on-screen action, the script/VO line, and seconds. Step 4: number shots sequentially across scenes. Write an acceptance-criteria checklist (every script line maps to ≥1 shot, every shot has all panel fields, shot durations sum to ~the runtime, shots numbered sequentially, a clear opening and closing shot) and the shot list to `notes/script-scope.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/script-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/script-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "storyboard",
@@ -392,13 +592,25 @@
         "role": "visual-designer",
         "summary": "render panels per shot: sketch/description + directions",
         "prompt": "Produce the storyboard from the shot list as a single viewable `storyboard.html` (inline CSS). Step 1: render one panel per shot in script order, each panel showing a framing visual (an SVG/CSS sketch of the composition, or generate a thumbnail if image tools exist — show subject placement, headroom, rule-of-thirds) plus the shot number. Step 2: under each panel list the fields from scope: framing, camera move, on-screen action, the script/VO line, and the shot's seconds. Step 3: group panels by scene with scene headers, and show a running timecode. Step 4: keep a consistent panel template/aspect ratio across the whole board. Step 5: confirm it opens cleanly with no console error. write_task_note the path and panel count. On a loop-back, fix only the flagged panels (missing fields, wrong framing, timing that doesn't sum).",
-        "produces": { "path": "storyboard.html", "kind": "html-page", "minBytes": 1500 }
+        "produces": {
+          "path": "storyboard.html",
+          "kind": "html-page",
+          "minBytes": 1500
+        }
       }
     ],
     "evaluate": {
       "prompt": "Review the storyboard like a director. Step 1: open `storyboard.html` — it renders panels in order with no console error (PASS/FAIL). Step 2: confirm EVERY panel carries all fields (framing, camera move, action, script line, seconds) and a framing visual. Step 3: confirm every script line maps to at least one shot and shot durations sum to ~the script runtime. Step 4: confirm shots are numbered sequentially and grouped by scene with a running timecode. Step 5: confirm there is a clear opening and closing shot. Write PASS/FAIL per criterion.",
       "loopBackTo": "storyboard",
-      "deliverable": { "path": "storyboard.html", "kind": "html-page", "minBytes": 1500 }
+      "deliverable": {
+        "path": "storyboard.html",
+        "kind": "html-page",
+        "minBytes": 1500
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -406,7 +618,14 @@
     "role": "general",
     "name": "Audio Ad Spot",
     "description": "Produce a short broadcast/podcast audio ad spot (15s/30s/60s) — a tightly-timed script with a hook, value, and a single call-to-action, synthesized into a finished, runtime-accurate voiced spot with optional music bed cue. Scopes the offer, exact runtime, and mandatory disclaimers FIRST, then synthesizes a voiced spot that hits the time target. Locking the runtime and CTA before recording is what makes a spot land in its slot and drive one action instead of overrunning or rambling.",
-    "tags": ["audio", "advertising", "ad-spot", "tts", "radio", "podcast"],
+    "tags": [
+      "audio",
+      "advertising",
+      "ad-spot",
+      "tts",
+      "radio",
+      "podcast"
+    ],
     "triggers": [
       "make a radio ad",
       "audio ad spot",
@@ -421,7 +640,10 @@
         "role": "planner",
         "summary": "offer, exact runtime, single CTA, disclaimers, voice",
         "prompt": "Lock the spot BEFORE writing or voicing. Step 1: capture the product/offer, the ONE target action (the single CTA), and the audience. Step 2: pick the EXACT runtime slot (15/30/60s) and derive the word budget (~2.5 words/second for ad reads — record it). Step 3: capture any mandatory disclaimer/legal line and how the brand/CTA must be stated. Step 4: pick the voice and tone, and whether a music bed cue is wanted. Step 5: define the arc: hook (first ~3s) -> value -> CTA -> brand/disclaimer. Write an acceptance-criteria checklist (finished audio within ±1s of the slot, opens with a hook in the first 3s, states exactly one CTA, includes the disclaimer, brand named clearly, not silent) and decisions to `notes/scope.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "script",
@@ -429,7 +651,10 @@
         "role": "copywriter",
         "summary": "timed ad script with hook, CTA, disclaimer, cues",
         "prompt": "Write the spot to the scope. Step 1: write to the word budget so the read lands in the slot — open with the hook in the first ~3 seconds. Step 2: keep one clear value message and exactly ONE CTA, stated plainly. Step 3: include the brand name and the mandatory disclaimer (a quick read at the end is fine, but it counts against the time). Step 4: add VO cues (`[pause]`, emphasis, pace) and a music-bed cue if scoped, and write numbers/phone/URLs as they should be SPOKEN. Step 5: write the script to `notes/ad-script.md` with a running word count and estimated runtime via write_task_note AND the produces path. On a loop-back, trim/expand only to fix the time or a missing element.",
-        "produces": { "path": "notes/ad-script.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/ad-script.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "produce",
@@ -437,13 +662,23 @@
         "role": "developer",
         "summary": "synthesize the voiced spot to the exact runtime",
         "prompt": "Render the finished spot. Step 1: synthesize the approved script with the locked voice/tone via the text-to-speech capability. Step 2: measure the rendered duration; if it is outside ±1s of the slot, adjust pacing or trim the script (loop the copy phase if it cannot fit) until it lands. Step 3: if a music bed was scoped, mix a low ducked bed under the VO and apply gentle fades. Step 4: normalize loudness to a broadcast-sane level so it is not too quiet/hot. Step 5: write the finished audio to `ad-spot.mp3` and note its exact measured duration. write_task_note the path and duration. On a loop-back, fix only the flagged issue (over/under time, missing CTA/disclaimer, silence).",
-        "produces": { "path": "ad-spot.mp3", "kind": "audio-file" }
+        "produces": {
+          "path": "ad-spot.mp3",
+          "kind": "audio-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Time it and listen. Step 1: confirm `ad-spot.mp3` exists, is non-silent, and its duration is within ±1s of the target slot (PASS/FAIL). Step 2: sample-listen (if audio capability exists) or check the script — does it open with a hook in the first ~3s? Step 3: confirm exactly ONE CTA is stated and the brand is named clearly. Step 4: confirm the mandatory disclaimer is present. Step 5: confirm loudness is reasonable (and the music bed, if any, is ducked under the VO). Write PASS/FAIL per criterion.",
       "loopBackTo": "produce",
-      "deliverable": { "path": "ad-spot.mp3", "kind": "audio-file" }
+      "deliverable": {
+        "path": "ad-spot.mp3",
+        "kind": "audio-file"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -451,7 +686,14 @@
     "role": "general",
     "name": "YouTube Chapters & SEO Metadata",
     "description": "Turn a video (or its transcript) into a complete, paste-ready YouTube publishing kit — SEO title options, an optimized description with timestamped chapters, tags/keywords, and thumbnail text ideas — so an upload ranks and is navigable. Scopes the target keyword and metadata limits FIRST, analyzes the transcript for chapter boundaries, then writes the SEO-optimized metadata kit. Doing keyword research and pulling real chapter timestamps before writing is what makes the description both discoverable and accurate, instead of clickbait that doesn't match the video.",
-    "tags": ["youtube", "video", "seo", "chapters", "metadata", "description"],
+    "tags": [
+      "youtube",
+      "video",
+      "seo",
+      "chapters",
+      "metadata",
+      "description"
+    ],
     "triggers": [
       "youtube description and chapters",
       "seo title for my video",
@@ -466,7 +708,10 @@
         "role": "planner",
         "summary": "target keyword, limits, sections, chapter format",
         "prompt": "Lock the SEO plan BEFORE writing. Step 1: record the video (title intent, transcript path, duration) and the primary target keyword/phrase plus 2-3 secondary ones the audience would search. Step 2: capture the platform limits as hard rules: title ≤ 100 chars (front-load the keyword), description first ~150 chars are the visible/snippet zone, chapters need ≥3 markers with the FIRST at `00:00`, tags within the char budget. Step 3: define the description structure (hook line with keyword -> 2-3 sentence summary -> CHAPTERS list -> links/CTA -> hashtags). Step 4: define thumbnail-text guidance (≤4 punchy words). Write an acceptance-criteria checklist (title ≤100 chars with keyword up front, description opens with the keyword in the first line, ≥3 chapters with first at 00:00 and monotonic timestamps within duration, tag list present, 3 title options, thumbnail text ideas) and decisions to `notes/scope.md` via write_task_note AND the produces path.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -474,7 +719,10 @@
         "role": "data-analyst",
         "summary": "topic-shift timestamps + keyword extraction",
         "prompt": "Mine the transcript for structure and terms. Step 1: read the transcript with timestamps and detect topic boundaries where the subject clearly shifts. Step 2: for each boundary record a `MM:SS`/`HH:MM:SS` timestamp and a short keyword-aware title; force the first to `00:00`. Step 3: enforce ≥3 chapters, monotonic timestamps within the duration, and reasonable spacing. Step 4: extract the recurring topics/terms the video actually covers (frequency + relevance) to inform tags and ensure the title/description match the content. Step 5: write the chapters and a candidate keyword/tag list to `notes/analysis.json` via write_task_note AND the produces path. On a loop-back, adjust only the flagged chapters/terms.",
-        "produces": { "path": "notes/analysis.json", "kind": "json" }
+        "produces": {
+          "path": "notes/analysis.json",
+          "kind": "json"
+        }
       },
       {
         "id": "write",
@@ -482,13 +730,23 @@
         "role": "copywriter",
         "summary": "title options, description+chapters, tags, thumbnail text",
         "prompt": "Assemble the paste-ready kit from the analysis. Step 1: write 3 title options, each ≤100 chars with the primary keyword front-loaded; mark a recommended one. Step 2: write the description: a hook FIRST line containing the keyword (this is the search snippet), a 2-3 sentence summary, then the CHAPTERS block as plain `00:00 Title` lines (first line `00:00`) pasted from the analysis, then a links/CTA section, then 3-5 hashtags. Step 3: write a comma-separated tags line from the keyword analysis within the budget. Step 4: give 2-3 thumbnail text ideas (≤4 words each). Step 5: assemble everything into `youtube-metadata.md` under clear headers. Keep claims accurate to the video — no clickbait that the content does not deliver. write_task_note the path and chapter count. On a loop-back, fix only the flagged sections.",
-        "produces": { "path": "youtube-metadata.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "youtube-metadata.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Validate the kit against platform rules. Step 1: confirm `youtube-metadata.md` has all sections (3 titles, description, chapters, tags, thumbnail text) — PASS/FAIL. Step 2: confirm each title is ≤100 chars with the keyword front-loaded, and the description's FIRST line contains the keyword. Step 3: confirm the chapters block has ≥3 markers, the first is `00:00`, timestamps are monotonic and within the video duration. Step 4: spot-check 2 chapter timestamps against the transcript — real topic shifts? Step 5: confirm tags fit the budget and titles/description honestly match the content (no clickbait). Write PASS/FAIL per criterion.",
       "loopBackTo": "write",
-      "deliverable": { "path": "youtube-metadata.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "youtube-metadata.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

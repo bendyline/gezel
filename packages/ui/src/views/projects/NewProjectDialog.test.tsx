@@ -212,4 +212,38 @@ describe('NewProjectDialog GitHub repository drafting', () => {
     expect(await screen.findByRole('radio', { name: 'Social Feed' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'E-Mail' })).toBeInTheDocument();
   });
+
+  it('creates an existing-folder project with the folder on the initial request', async () => {
+    const folder = 'D:\\work\\sample-workspace';
+    vi.mocked(api.previewFolder).mockResolvedValue({
+      name: 'sample-workspace',
+    } as never);
+    vi.mocked(api.createProject).mockResolvedValue({
+      id: 'sample-workspace',
+      name: 'sample-workspace',
+      workingDir: folder,
+      nudgeConfig: { enabled: false },
+    } as never);
+
+    render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+    fireEvent.click(await screen.findByRole('radio', { name: 'Existing Folder' }));
+    const folderInput = screen.getByRole('textbox', { name: /^Folder/ });
+    fireEvent.change(folderInput, { target: { value: folder } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'sample-workspace' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(api.createProject).toHaveBeenCalledWith({
+        name: 'sample-workspace',
+        about: '',
+        missionObjectives: '',
+        workingDir: folder,
+      }),
+    );
+    expect(api.setProjectWorkingDir).not.toHaveBeenCalled();
+  });
 });

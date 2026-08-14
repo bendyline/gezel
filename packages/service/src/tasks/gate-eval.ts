@@ -297,16 +297,15 @@ async function evalCheckInner(
   // back to a never-found view so the check fails loudly rather than reading
   // the wrong tree.
   const usesArtifact = (c as { artifact?: boolean }).artifact === true;
-  const reader: WorkspaceLike = usesArtifact
-    ? {
-        read: ws.readArtifact ?? (async () => null),
-        list: ws.listArtifacts ?? (async () => []),
-        // Carry the byte reader across the artifact swap; without it a
-        // `verifyImageBytes` check on an artifact deliverable would report
-        // "no binary reads" even though the surface supports them.
-        ...(ws.readArtifactBytes ? { readBytes: ws.readArtifactBytes.bind(ws) } : {}),
-      }
-    : ws;
+  const artifactReader: WorkspaceLike = {
+    read: ws.readArtifact ?? (async () => null),
+    list: ws.listArtifacts ?? (async () => []),
+    // Carry the byte reader across the artifact swap; without it a
+    // `verifyImageBytes` check on an artifact deliverable would report
+    // "no binary reads" even though the surface supports them.
+    ...(ws.readArtifactBytes ? { readBytes: ws.readArtifactBytes.bind(ws) } : {}),
+  };
+  const reader: WorkspaceLike = usesArtifact ? artifactReader : ws;
   switch (c.kind) {
     case 'minBytes': {
       const r = await fileMinBytes(reader, c.file, c.bytes);
@@ -775,7 +774,12 @@ async function evalCheckInner(
       };
     }
     case 'markdownHeadingsMatch': {
-      const result = await markdownHeadingsMatch(reader, c.file, c.outlineFile);
+      const result = await markdownHeadingsMatch(
+        reader,
+        c.file,
+        c.outlineFile,
+        c.outlineArtifact ? artifactReader : ws,
+      );
       return {
         ok: result.ok,
         detail: result.detail,

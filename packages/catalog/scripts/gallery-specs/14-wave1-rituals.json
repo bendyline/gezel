@@ -4,7 +4,14 @@
     "role": "general",
     "name": "Close the Month",
     "description": "Close out a month of household spending against the project's ledger: sweep the month's entries for category strays and surprises, compute the in/out/net totals and category breakdown, compare against the prior month, and write a short honest month summary with one concrete action for next month. Locks the target month and the reconciliation checks FIRST, then reconciles the entries, then writes the summary — so the close is a repeatable ritual with the same shape every month, not an ad-hoc glance at the numbers. Use for monthly budget close, month-end money review, 'how did we do this month', and household spending retrospectives.",
-    "tags": ["budget", "finance", "monthly", "close", "household", "report"],
+    "tags": [
+      "budget",
+      "finance",
+      "monthly",
+      "close",
+      "household",
+      "report"
+    ],
     "triggers": [
       "close the month",
       "monthly budget review",
@@ -19,7 +26,10 @@
         "role": "data-analyst",
         "summary": "target month, reconciliation checks, comparison baseline",
         "prompt": "Define the close before touching the numbers. Step 1: read ledger.json from the workspace and identify the target month (default: the most recently ended calendar month) and the prior month as the comparison baseline. Step 2: define the reconciliation checks — entries with a missing or clearly wrong category, amounts that look like typos (an order of magnitude off that category's normal range), and any income expected but not recorded. Step 3: define what the summary must report — in/out/net for the month, the top 3 spending categories, the largest single expense, and the delta versus the prior month per major category. Step 4: write an acceptance-criteria checklist ('every entry in the month has a sensible category', 'totals computed from the ledger, not estimated', 'prior-month comparison per major category', 'one concrete next-month action named', 'no number in the summary that is not in the ledger'). Call write_task_note with the target month + checks + checklist and write notes/scope.md. No reconciling yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "reconcile",
@@ -27,7 +37,10 @@
         "role": "data-analyst",
         "summary": "sweep entries, fix strays, compute totals and deltas",
         "prompt": "Reconcile the target month against the locked checks. Step 1: list every ledger entry in the month and apply the checks — note each category stray or suspect amount, and where the owner's intent is clear, record the correction; where it is not, list the question for the owner instead of guessing. Step 2: compute the month's totals — in, out, net, and the per-category breakdown — directly from the entries. Step 3: compute the prior-month comparison per major category and flag any category that moved by more than a third. Step 4: identify the largest single expense and any new recurring-looking charges worth a look. Step 5: write the structured findings to notes/reconcile.md so the summary phase has clean inputs, and call write_task_note with the net figure, the biggest mover, and the number of strays found.",
-        "produces": { "path": "notes/reconcile.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/reconcile.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -35,13 +48,23 @@
         "role": "copywriter",
         "summary": "honest month summary with one next-month action",
         "prompt": "Write the month summary from the reconciliation. Step 1: open with the headline — in, out, net for the month, in one plain sentence. Step 2: give the category picture — the top 3 spending categories with amounts, and the notable movers versus last month with the direction and size of the change. Step 3: name the largest single expense and anything new or surprising, without judgment. Step 4: close with ONE concrete, small action for next month, grounded in the data (a category to watch, a charge to question, a habit that worked). Step 5: keep it under a page, warm and factual — this is a household ritual, not an audit finding. Write report.md and call write_task_note with the report path and the headline net.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/reconcile.md and verify every criterion from notes/scope.md: every entry in the month carries a sensible category (or is listed as an owner question), the in/out/net and category totals trace to the ledger entries (re-add one category to check), the prior-month comparison covers the major categories, exactly one concrete next-month action is named, and no number in the summary lacks a ledger source. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -49,7 +72,14 @@
     "role": "maintenance-review",
     "name": "Annual Document Review",
     "description": "Walk a life binder's document roster once a year: inventory what is present and missing, confirm each present document is still current (right beneficiaries, right address, not expired), record the review so staleness tracking resets, and produce a prioritized to-do for the gaps. Locks the currency criteria per document kind FIRST, then verifies each record, then reports — so the binder's completeness claim is re-earned annually instead of rotting silently. Use for annual life-binder reviews, estate document checkups, 'is our paperwork still right', and insurance/beneficiary reviews.",
-    "tags": ["documents", "binder", "review", "annual", "estate", "household"],
+    "tags": [
+      "documents",
+      "binder",
+      "review",
+      "annual",
+      "estate",
+      "household"
+    ],
     "triggers": [
       "annual document review",
       "review the binder",
@@ -64,7 +94,10 @@
         "role": "reviewer",
         "summary": "inventory the roster, currency criteria per document kind",
         "prompt": "Define the review before checking anything. Step 1: read documents.json from the workspace and inventory the roster — which documents are present, which are missing, and when each present one was last reviewed. Step 2: define the currency criteria per document kind — e.g. a will is current if it reflects today's family situation and executor; insurance is current if coverage amounts and beneficiaries are right; contact lists and password locations are current if verified within the year; anything expired or superseded is not current. Step 3: define what counts as done for a missing document — a concrete next step (who to call, what to draft), not just 'get one'. Step 4: write an acceptance-criteria checklist ('every roster record verified with the owner or explicitly deferred', 'every verified document gets its review recorded so staleness resets', 'every missing document has a named next step', 'the report ranks gaps by consequence, not alphabetically'). Call write_task_note with the inventory counts + criteria + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -72,7 +105,10 @@
         "role": "reviewer",
         "summary": "walk the roster with the owner, record reviews, list gaps",
         "prompt": "Verify the roster against the locked criteria. Step 1: walk each present document with the owner — ask the kind-specific currency questions from the scope and record the answer. Step 2: for each document confirmed current, record the review through the project's binder capabilities (or note the update for documents.json) so the reviewedAt tracking resets. Step 3: for each document that fails its criteria, record what specifically is out of date. Step 4: for each missing document, confirm the next step with the owner and capture it. Step 5: write the structured results — verified, out-of-date (with why), missing (with next step) — to notes/verify.md, and call write_task_note with the counts per bucket.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -80,13 +116,23 @@
         "role": "copywriter",
         "summary": "binder health report with a ranked to-do",
         "prompt": "Write the binder health report from the verification. Step 1: open with the headline — how many documents are in place and current, out of the full roster. Step 2: list what was verified current this review, one line each. Step 3: give the ranked to-do — out-of-date and missing documents ordered by consequence (what happens to the family if this one is needed and wrong), each with its concrete next step and who acts. Step 4: note the next review date one year out. Step 5: keep the tone calm and practical — the binder exists to make a hard day easier, and the report should read that way. Write report.md and call write_task_note with the report path and the to-do count.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/verify.md and verify every criterion from notes/scope.md: every roster record was verified or explicitly deferred, every verified document had its review recorded (spot-check two against the roster), every missing or out-of-date document carries a concrete named next step, and the to-do is ranked by consequence with a stated rationale. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -94,7 +140,14 @@
     "role": "maintenance-review",
     "name": "Seasonal Maintenance Sweep",
     "description": "Run a season's home-care sweep against the project's systems roster: work out what care is due or overdue from each system's interval, plan the walkthrough in a sensible order with supplies, then log the completed care and flag what needs a professional — leaving the roster's due-tracking reset and a short sweep report. Locks the season's scope and the due list FIRST, then plans, then logs — so seasonal care becomes a checklist ritual instead of a vague worry. Use for spring/fall home maintenance, seasonal checkups, 'what does the house need', and pre-winter prep.",
-    "tags": ["home", "maintenance", "seasonal", "sweep", "checklist", "household"],
+    "tags": [
+      "home",
+      "maintenance",
+      "seasonal",
+      "sweep",
+      "checklist",
+      "household"
+    ],
     "triggers": [
       "seasonal maintenance sweep",
       "what does the house need",
@@ -109,7 +162,10 @@
         "role": "planner",
         "summary": "season, due and overdue list from the roster intervals",
         "prompt": "Define the sweep before planning it. Step 1: read systems.json from the workspace and determine the current season and which systems' care is due or overdue from each record's interval and last-done date, plus anything already flagged for attention. Step 2: with the owner, add any season-specific care the roster doesn't carry yet (gutters before the rains, hose bibs before frost) so the roster grows with each sweep. Step 3: split the list into owner-doable versus needs-a-professional. Step 4: write an acceptance-criteria checklist ('every due or overdue system is in the plan or explicitly deferred with a reason', 'each completed item gets its care logged so the due-tracking resets', 'professional items produce a booking note, not a vague intention', 'the report states what was done, deferred, and flagged'). Call write_task_note with the due counts + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "plan",
@@ -117,7 +173,10 @@
         "role": "planner",
         "summary": "ordered walkthrough with steps and supplies per system",
         "prompt": "Plan the walkthrough from the locked list. Step 1: order the due items into a sensible route (outside before weather turns, top of the house down, wet work last). Step 2: for each item, write the short concrete care steps and what supplies or tools it needs, so the owner can walk the list without stopping to think. Step 3: batch the supply needs into one shopping line. Step 4: for the professional items, draft the booking note per trade — what is wrong or due, and the questions to ask. Step 5: write the ordered plan to notes/plan.md and call write_task_note with the item count and the supply list length.",
-        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/plan.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "log",
@@ -125,13 +184,23 @@
         "role": "copywriter",
         "summary": "record completed care, flag findings, write the sweep report",
         "prompt": "Close the sweep once the owner reports what got done. Step 1: for each completed item, log the maintenance through the project's house capabilities so the system's due-tracking resets. Step 2: for anything the walkthrough surfaced (a drip, a crack, a filter worse than expected), flag the system for attention with a note. Step 3: record what was deferred and why. Step 4: write the sweep report — done, deferred, flagged, and the professional bookings to make — short enough to read in a minute. Step 5: end with the next season's earliest due item so the ritual has a natural next date. Write report.md and call write_task_note with the done/deferred/flagged counts.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/plan.md and verify every criterion from notes/scope.md: every due or overdue system appears as done, deferred-with-reason, or flagged; every completed item's care was logged so its due-tracking reset (spot-check two against the roster); professional items carry a booking note; and the report states done/deferred/flagged plainly. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to log.",
       "loopBackTo": "log",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -139,7 +208,14 @@
     "role": "general",
     "name": "Plan the Week's Dinners",
     "description": "Turn the pantry's real state into a planned week of dinners and one grocery list: check what is stocked, low, and out, plan seven dinners that use what is on hand and fit the household's tastes and schedule, write the menu onto the week, and produce a grocery list that covers the gaps. Locks the household constraints and the pantry picture FIRST, then plans the menu, then writes the list — so the weekly food question is answered once, on purpose, instead of nightly at 5pm. Use for weekly meal planning, menu planning, grocery list making, and 'what are we eating this week'.",
-    "tags": ["meals", "menu", "pantry", "grocery", "weekly", "household"],
+    "tags": [
+      "meals",
+      "menu",
+      "pantry",
+      "grocery",
+      "weekly",
+      "household"
+    ],
     "triggers": [
       "plan the week's dinners",
       "weekly meal plan",
@@ -154,7 +230,10 @@
         "role": "planner",
         "summary": "pantry picture, household constraints, week shape",
         "prompt": "Define the week before planning a single meal. Step 1: read pantry.json and menu.json from the workspace — what is stocked, what is low or out, and whether any dinners are already set for the week. Step 2: confirm the household constraints with the owner — how many people, dietary lines that cannot be crossed, nights that need a fast meal or no meal (out, leftovers), and anything they are tired of. Step 3: set the planning rules — prefer meals that use stocked and low items before they turn, repeat no main protein two nights running, at most N new-recipe nights. Step 4: write an acceptance-criteria checklist ('all seven nights planned or explicitly marked out/leftovers', 'each dinner names its main ingredients', 'every ingredient not stocked appears on the grocery list', 'the list is grouped for one store walk', 'constraints respected on every night'). Call write_task_note with the pantry gap count + constraints + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "plan",
@@ -162,7 +241,10 @@
         "role": "chef",
         "summary": "seven dinners against the pantry and the constraints",
         "prompt": "Plan the seven dinners against the locked rules. Step 1: draft the week — a dinner per night, honoring the fast-night and out-night shape, using stocked and low pantry items first. Step 2: for each dinner, list the main ingredients and mark which are on hand versus needed. Step 3: sanity-check variety (proteins, cuisines, effort spread across the week) and swap where it clumps. Step 4: confirm the draft with the owner and adjust. Step 5: write the confirmed menu onto the week through the project's kitchen capabilities (set each day's dinner), write the per-dinner ingredient breakdown to notes/menu.md, and call write_task_note with the seven dinners in one line each.",
-        "produces": { "path": "notes/menu.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/menu.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "list",
@@ -170,13 +252,23 @@
         "role": "copywriter",
         "summary": "one gap-covering list, grouped for the store",
         "prompt": "Write the grocery list from the menu and the pantry. Step 1: collect every menu ingredient marked needed, plus every pantry item at low or out that the household actually uses. Step 2: dedupe and size the quantities to the week (and note which low staples are worth topping up while there). Step 3: group the list the way a store walks — produce, meat/fish, dairy, dry goods, frozen, household. Step 4: put the week's menu at the top of the page so the list explains itself at the store. Step 5: keep it one page. Write report.md and call write_task_note with the item count.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/menu.md and verify every criterion from notes/scope.md: all seven nights are planned or explicitly out/leftovers, each dinner names its main ingredients, every needed ingredient (and every low/out staple in use) appears exactly once on the grocery list, the list is store-grouped, and every night respects the household constraints. Cross-check the written week against the menu store — the days set through the kitchen capabilities must match the report. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to list.",
       "loopBackTo": "list",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -184,7 +276,14 @@
     "role": "general",
     "name": "Care Visit Prep",
     "description": "Prepare a one-page brief for a medical or care appointment from the project's care record: compile everything logged since the last visit, the current medication list with doses, the changes and symptoms worth raising, and a prioritized question list — so the ten minutes in the room get spent on what matters. Locks the target appointment and the brief's sections FIRST, then compiles from the record, then writes the brief. Use for doctor visit prep, specialist appointments, care-team check-ins, and 'what do we need to tell the doctor'.",
-    "tags": ["caregiving", "visit", "appointment", "brief", "medical", "prep"],
+    "tags": [
+      "caregiving",
+      "visit",
+      "appointment",
+      "brief",
+      "medical",
+      "prep"
+    ],
     "triggers": [
       "prep for the appointment",
       "visit prep",
@@ -199,7 +298,10 @@
         "role": "planner",
         "summary": "target appointment, brief sections, what counts as raise-worthy",
         "prompt": "Define the prep before compiling. Step 1: read care.json and meds.json from the workspace and identify the target appointment (the next upcoming one, or the one the owner names) and the last visit before it — the window between them is the compile range. Step 2: fix the brief's sections — current medications with doses; changes since last visit (meds started/stopped, new symptoms, incidents); patterns worth raising (sleep, appetite, mood, falls); the question list; and logistics (who attends, what to bring). Step 3: agree with the owner what counts as raise-worthy versus noise so the brief stays one page. Step 4: write an acceptance-criteria checklist ('every appointment-window event considered', 'med list matches the active roster exactly', 'each raised item cites the logged entry behind it', 'questions ranked, most important first', 'one page'). Call write_task_note with the appointment + window + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "compile",
@@ -207,7 +309,10 @@
         "role": "data-analyst",
         "summary": "window events, med list, changes, draft questions",
         "prompt": "Compile the brief's raw material from the record. Step 1: pull every care-log entry in the window and sort it into the agreed sections — changes, symptoms, patterns, noise. Step 2: pull the active medication list with doses from the meds roster and note anything started, stopped, or changed in the window. Step 3: for each raise-worthy item, attach the dates and the logged entries behind it so the clinician gets specifics, not vibes. Step 4: draft the question list from the raised items plus anything the owner adds, and rank it most-important-first. Step 5: write the compiled material to notes/compile.md and call write_task_note with the counts — window events, meds, raised items, questions.",
-        "produces": { "path": "notes/compile.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/compile.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "brief",
@@ -215,13 +320,23 @@
         "role": "copywriter",
         "summary": "one-page visit brief, questions first",
         "prompt": "Write the one-page visit brief from the compiled material. Step 1: header — who the visit is for, the appointment, who attends. Step 2: the ranked questions, numbered, at the top — the room time goes here first. Step 3: current medications with doses, flagging window changes. Step 4: since-last-visit summary — the raised items with their dates, briefest sufficient wording. Step 5: close with logistics and space for the clinician's answers. One page, printable, calm. Write report.md and call write_task_note with the report path and the top question.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/compile.md and verify every criterion from notes/scope.md: the medication list matches the active meds roster exactly (check every med and dose), every raised item traces to a logged entry with a date, every window event was sorted or consciously set aside, the questions are ranked with the most important first, and the brief fits one page. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to brief.",
       "loopBackTo": "brief",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -229,7 +344,14 @@
     "role": "general",
     "name": "Pre-Departure Countdown",
     "description": "Audit a trip's readiness in the final stretch before departure: verify documents and bookings, close the packing gaps against the packing roster, sweep home-prep tasks, and produce a day-by-day countdown checklist to the departure date — so the last week runs on a list, not on 3am worry. Locks the audit areas and the days remaining FIRST, then audits each area against the trip record, then writes the countdown. Use for pre-trip checks, departure prep, 'are we ready for the trip', and travel countdown checklists.",
-    "tags": ["travel", "trip", "departure", "checklist", "packing", "countdown"],
+    "tags": [
+      "travel",
+      "trip",
+      "departure",
+      "checklist",
+      "packing",
+      "countdown"
+    ],
     "triggers": [
       "are we ready for the trip",
       "pre departure checklist",
@@ -244,7 +366,10 @@
         "role": "planner",
         "summary": "days remaining, audit areas, readiness criteria",
         "prompt": "Define the audit before checking anything. Step 1: read trip.json and packing.json from the workspace — the destination, the departure date and days remaining, the planned days, and the packing roster's packed/unpacked split. Step 2: fix the audit areas — documents (passports/IDs valid, visas if needed), bookings (transport, lodging, the first day's plan), packing (the roster, plus anything the itinerary implies that isn't on it), money and phones (cards that work there, plans that roam), and home prep (mail, plants, locks, who has a key). Step 3: agree the readiness criterion per area — what 'checked' concretely means. Step 4: write an acceptance-criteria checklist ('every area audited with its criterion', 'every itinerary-implied item is on the packing roster', 'every open item lands on a specific countdown day', 'the checklist ends at walk-out-the-door'). Call write_task_note with days-remaining + areas + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -252,7 +377,10 @@
         "role": "reviewer",
         "summary": "check each area, grow the packing roster, list open items",
         "prompt": "Audit each area against its criterion. Step 1: walk documents, bookings, money/phones, and home prep with the owner — record each as ready or open-with-what's-missing. Step 2: read the itinerary's planned days and derive what they imply for packing (boots for the walking day, adapters, medications for the length of the trip); add anything missing to the packing roster through the project's trip capabilities. Step 3: list the packing roster's remaining unpacked items. Step 4: for every open item, capture the concrete closing action and how long it takes (some need a week — expedited documents; some need an hour). Step 5: write the audit results to notes/audit.md and call write_task_note with ready/open counts per area.",
-        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/audit.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "countdown",
@@ -260,13 +388,23 @@
         "role": "copywriter",
         "summary": "day-by-day checklist to departure",
         "prompt": "Write the day-by-day countdown from the audit. Step 1: place every open item and every unpacked-item batch onto a specific day between now and departure, longest-lead-time first, packing finishing the day before, not the morning of. Step 2: keep each day's load honest — a few items a day beats a heroic final evening. Step 3: write the departure-day section — the walk-out list (documents in hand, phone charged, home-prep final steps) in the order they happen. Step 4: top the page with the trip, the departure date, and the days remaining, so the list orients anyone who picks it up. Step 5: keep it one page. Write report.md and call write_task_note with the report path and the heaviest day.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/audit.md and verify every criterion from notes/scope.md: every audit area appears as ready or open, every itinerary-implied packing item made it onto the roster (spot-check two planned days), every open item and unpacked batch sits on a specific countdown day with lead times respected (nothing week-long scheduled for the last day), and the departure-day walk-out list is present and ordered. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to countdown.",
       "loopBackTo": "countdown",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -274,7 +412,14 @@
     "role": "general",
     "name": "Fundraiser Wrap-Up",
     "description": "Close a fundraising drive properly: verify the final numbers against the donation ledger, confirm every donor was thanked (or finish the thank-yous now), and write the wrap-up story — the total, what the money does, and the people who made it happen — ready to share with the community and hand to the next organizer. Locks the wrap-up's claims and the thank-you completeness check FIRST, then verifies against the ledger, then writes the story. Use for ending a fundraiser, drive wrap-up reports, final fundraising totals, and community thank-you posts.",
-    "tags": ["fundraiser", "wrapup", "donations", "community", "report", "thanks"],
+    "tags": [
+      "fundraiser",
+      "wrapup",
+      "donations",
+      "community",
+      "report",
+      "thanks"
+    ],
     "triggers": [
       "wrap up the fundraiser",
       "close the drive",
@@ -289,7 +434,10 @@
         "role": "planner",
         "summary": "final claims to verify, thank-you completeness, audiences",
         "prompt": "Define the wrap-up before writing a word of it. Step 1: read donations.json from the workspace — the goal, the entry count, and the thanked/unthanked split. Step 2: fix the claims the wrap-up will make and that must be verified — the final total, the percent of goal, the gift count, the largest gift (if the owner wants it named), and the impact statement (what the money concretely does). Step 3: set the thank-you rule — the drive does not close with unthanked donors; either the thank-yous go out during this wrap-up or each remaining one is assigned to a named person. Step 4: identify the audiences — the community post, and the handoff note for whoever runs the next drive. Step 5: write an acceptance-criteria checklist ('every number in the wrap-up recomputed from the ledger', 'zero unthanked donors or each assigned by name', 'impact stated concretely, not vaguely', 'donors thanked collectively in the story, individually in the record', 'handoff note tells the next organizer what worked'). Call write_task_note with the totals + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -297,7 +445,10 @@
         "role": "data-analyst",
         "summary": "recompute totals, close the thank-you debt",
         "prompt": "Verify every claim against the ledger. Step 1: recompute the total raised, the gift count, and the percent of goal directly from the donation entries — the wrap-up uses these numbers, not remembered ones. Step 2: list every unthanked donor; draft each missing thank-you for the owner to send now, and record each as thanked through the project's drive capabilities once it goes out (or assign it by name if it truly cannot go now). Step 3: pull the drive's story beats from the record — the first gift, the day the thermometer moved most, the moment the goal broke. Step 4: confirm the impact statement math (what the total actually buys) with the owner. Step 5: write the verified numbers and beats to notes/verify.md and call write_task_note with the final total and the remaining thank-you count (target: zero).",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -305,13 +456,23 @@
         "role": "copywriter",
         "summary": "the community story plus the organizer handoff",
         "prompt": "Write the wrap-up from the verified record. Step 1: the community story — open with the total and what it does, in one warm sentence; tell the drive's arc through the verified beats; thank the givers and the helpers collectively and specifically enough to feel real; end with what happens next with the money. Celebration, not accounting. Step 2: the organizer handoff — the final numbers, what worked and what didn't, the timing and asks that pulled best, and the one thing to do differently — honest and short. Step 3: keep the story shareable as-is (no internal notes in it) and put the handoff under its own heading after it. Write report.md and call write_task_note with the report path and the headline total.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/verify.md and verify every criterion from notes/scope.md: every number in the wrap-up matches the ledger recomputation (re-add the total yourself), the thank-you debt is zero or each remaining one is assigned by name, the impact statement is concrete, the community story stands alone without internal notes, and the handoff names what worked and the one change for next time. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

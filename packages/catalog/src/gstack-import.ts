@@ -11,6 +11,7 @@ import {
   skillToCraftbookDoc,
 } from '@bendyline/gezel';
 import { z } from 'zod';
+import { isAccessoryArtifactPath } from './artifact-surface.js';
 import type { GstackWaveBook, GstackWaveConfig } from './gstack-authoring.js';
 
 /**
@@ -77,6 +78,8 @@ export const QualityOutputSchema = z
     requiredPatterns: z.array(QualityPatternSchema).optional(),
     /** Extra domain checks such as htmlLint or totalMinBytes. */
     additionalChecks: z.array(GateCheckSchema).optional(),
+    /** Opt a non-accessory output into/out of the artifacts drawer. */
+    artifact: z.boolean().optional(),
   })
   .strict();
 export type QualityOutput = z.infer<typeof QualityOutputSchema>;
@@ -100,6 +103,8 @@ export const QualityReviewSchema = z
     /** Other files the reviewer must inspect and the repairer must keep aligned. */
     relatedPaths: z.array(z.string().min(1)).optional(),
     reviewPath: z.string().min(1),
+    /** Opt a non-accessory review output into/out of the artifacts drawer. */
+    reviewArtifact: z.boolean().optional(),
     reviewerRole: z.string().min(1).optional(),
     repairRole: z.string().min(1).optional(),
     minReviewBytes: z.number().int().positive().optional(),
@@ -193,48 +198,100 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
 
   const maxGateAttempts = workflow.maxGateAttempts ?? 3;
   const maxReviewRounds = workflow.maxReviewRounds ?? 3;
-  const usesArtifacts = workflow.storage === 'artifacts';
-  const outputLocation = usesArtifacts
-    ? "the project's artifacts drawer with `write_artifact`"
-    : 'the workspace';
-  const rereadInstruction = usesArtifacts
-    ? 'Re-read it with `read_artifact` before finishing this phase'
-    : 'Re-read it before finishing this phase';
+  const usesArtifacts = (path: string, explicit?: boolean): boolean => {
+    if (isAccessoryArtifactPath(path)) return true;
+    return explicit ?? (workflow.storage === 'artifacts');
+  };
+  const surfaceInput = (path: string, artifact: boolean) => ({
+    file: path,
+    ...(artifact ? { artifact: true } : {}),
+  });
   const phases = workflow.phases.map((phase, index): NewCraftbookStep => {
     const next = workflow.phases[index + 1]?.id ?? 'evaluate';
+    const outputIsArtifact = usesArtifacts(phase.output.path, phase.output.artifact);
+    const outputLocation = outputIsArtifact
+      ? "the project's artifacts drawer with `write_artifact`"
+      : 'the workspace with `write_file`';
+    const rereadInstruction = outputIsArtifact
+      ? 'Re-read it with `read_artifact` before finishing this phase'
+      : 'Re-read it with `read_file` before finishing this phase';
+    const priorInputs = workflow.phases
+      .slice(0, index)
+      .filter((prior) => phase.prompt.includes(prior.output.path))
+      .map((prior) =>
+        surfaceInput(prior.output.path, usesArtifacts(prior.output.path, prior.output.artifact)),
+      );
+    const artifactInputs = priorInputs.filter((input) => input.artifact).map((input) => input.file);
+    const inputInstruction =
+      artifactInputs.length > 0 && !phase.prompt.includes('read_artifact')
+        ? ` Before working, open ${artifactInputs.map((path) => `\`${path}\``).join(', ')} with \`read_artifact\`.`
+        : '';
     return {
       id: phase.id,
       name: phase.name,
       description: phase.description,
-      prompt: `${phase.prompt.trim()}\n\nObservable handoff: write the completed result to \`${phase.output.path}\` in ${outputLocation}. Do not merely describe what the file would contain. ${rereadInstruction} and repair any incomplete sections.`,
+      prompt: `${phase.prompt.trim()}${inputInstruction}\n\nObservable handoff: write the completed result to \`${phase.output.path}\` in ${outputLocation}. Do not merely describe what the file would contain. ${rereadInstruction} and repair any incomplete sections.`,
       suggestedRole: phase.suggestedRole,
+      ...(priorInputs.length > 0 ? { consumes: priorInputs } : {}),
       advanceWhen: {
         file: phase.output.path,
         minBytes: phase.output.minBytes,
         sniff: 'nonempty',
         requireChange: true,
         goto: next,
-        ...(usesArtifacts ? { artifact: true } : {}),
+        ...(outputIsArtifact ? { artifact: true } : {}),
       },
-      gate: qualityOutputGate(phase.output, phase.id, maxGateAttempts, usesArtifacts),
+      gate: qualityOutputGate(phase.output, phase.id, maxGateAttempts, outputIsArtifact),
       next,
     };
   });
 
   const relatedPaths = workflow.review.relatedPaths ?? [];
-  const reviewTargets = [workflow.review.artifactPath, ...relatedPaths]
+  const reviewTargetPaths = [workflow.review.artifactPath, ...relatedPaths];
+  const reviewTargets = reviewTargetPaths
     .map((path) => `\`${path}\``)
     .join(', ');
+  const phaseOutputs = new Map(
+    workflow.phases.map((phase) => [
+      phase.output.path,
+      usesArtifacts(phase.output.path, phase.output.artifact),
+    ]),
+  );
+  const reviewInputs = reviewTargetPaths.map((path) =>
+    surfaceInput(path, phaseOutputs.get(path) ?? isAccessoryArtifactPath(path)),
+  );
+  const reviewArtifactInputs = reviewInputs.filter((input) => input.artifact);
+  const reviewWorkspaceInputs = reviewInputs.filter((input) => !input.artifact);
+  const reviewOutputIsArtifact = usesArtifacts(
+    workflow.review.reviewPath,
+    workflow.review.reviewArtifact,
+  );
   const criteria = workflow.review.criteria
     .map((criterion, i) => `${i + 1}. ${criterion}`)
     .join('\n');
-  const reviewReadInstruction = usesArtifacts
-    ? `Open every review target with \`read_artifact\`. Write the evidence-backed review to \`${workflow.review.reviewPath}\` in the artifacts drawer with \`write_artifact\`.`
-    : `Write an evidence-backed review to \`${workflow.review.reviewPath}\`.`;
-  const repairLocationInstruction = usesArtifacts
-    ? 'Make the changes in the actual artifact files with `write_artifact`, not in the workspace, task notes, or a reply.'
-    : 'Make the changes in the actual workspace files, not just in task notes or a reply.';
-  const reviewReadTool = usesArtifacts ? ' with `read_artifact`' : '';
+  const readClauses = [
+    ...(reviewArtifactInputs.length > 0
+      ? [
+          `Open ${reviewArtifactInputs.map((input) => `\`${input.file}\``).join(', ')} with \`read_artifact\`.`,
+        ]
+      : []),
+    ...(reviewWorkspaceInputs.length > 0
+      ? [
+          `Open ${reviewWorkspaceInputs.map((input) => `\`${input.file}\``).join(', ')} with \`read_file\`.`,
+        ]
+      : []),
+  ];
+  const reviewReadInstruction = `${readClauses.join(' ')} Write the evidence-backed review to \`${workflow.review.reviewPath}\` ${
+    reviewOutputIsArtifact
+      ? 'in the artifacts drawer with `write_artifact`.'
+      : 'in the workspace with `write_file`.'
+  }`;
+  const repairLocationInstruction =
+    'Make changes on each file\'s declared surface (`write_artifact` for artifact inputs, `write_file` for workspace inputs), not in task notes or a reply.';
+  const reviewReadTool = reviewOutputIsArtifact ? ' with `read_artifact`' : ' with `read_file`';
+  const finalOutputIsArtifact =
+    phaseOutputs.get(workflow.review.artifactPath) ??
+    isAccessoryArtifactPath(workflow.review.artifactPath);
 
   return [
     ...phases,
@@ -245,6 +302,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
         'Independently grade the observable deliverable and route it to finish, repair, or user escalation.',
       prompt: `Review ${reviewTargets} against every criterion below. Inspect the underlying evidence files named by the workflow; do not grade from the author's summary alone.\n\n${criteria}\n\n${reviewReadInstruction} Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. Then use \`advance_task_step\` for the active task: PASS routes to \`finish\`; REVISE routes to \`repair\` for review rounds 1 through ${Math.max(1, maxReviewRounds - 1)}, and the ${maxReviewRounds}th REVISE routes to \`needs-user\`. Never route to finish while a criterion is unmet.`,
       suggestedRole: workflow.review.reviewerRole ?? 'reviewer',
+      consumes: reviewInputs,
       gate: {
         at: 'completion',
         checks: [
@@ -252,7 +310,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
             kind: 'minBytes',
             file: workflow.review.reviewPath,
             bytes: workflow.review.minReviewBytes ?? 400,
-            ...(usesArtifacts ? { artifact: true } : {}),
+            ...(reviewOutputIsArtifact ? { artifact: true } : {}),
           },
           {
             kind: 'contains',
@@ -260,7 +318,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
             pattern: 'Verdict:\\s*(?:PASS|REVISE)',
             flags: 'i',
             label: 'explicit PASS or REVISE verdict',
-            ...(usesArtifacts ? { artifact: true } : {}),
+            ...(reviewOutputIsArtifact ? { artifact: true } : {}),
           },
         ],
         onReject: 'evaluate',
@@ -274,15 +332,19 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       description: 'Fix only the concrete gaps from the latest independent review.',
       prompt: `Read \`${workflow.review.reviewPath}\`${reviewReadTool} and repair every failed criterion in ${reviewTargets}. ${repairLocationInstruction} Preserve evidence that already passed. Re-run or re-check anything the reviewer found unproven. Ensure \`${workflow.review.artifactPath}\` is genuinely updated this turn so the repair is observable, then hand it back for independent evaluation.`,
       suggestedRole: workflow.review.repairRole ?? workflow.phases.at(-1)!.suggestedRole,
+      consumes: [
+        surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact),
+        ...reviewInputs,
+      ],
       advanceWhen: {
         file: workflow.review.artifactPath,
         minBytes: lastOutput.minBytes,
         sniff: 'nonempty',
         requireChange: true,
         goto: 'evaluate',
-        ...(usesArtifacts ? { artifact: true } : {}),
+        ...(finalOutputIsArtifact ? { artifact: true } : {}),
       },
-      gate: qualityOutputGate(lastOutput, 'repair', maxGateAttempts, usesArtifacts),
+      gate: qualityOutputGate(lastOutput, 'repair', maxGateAttempts, finalOutputIsArtifact),
       next: 'evaluate',
     },
     {
@@ -291,6 +353,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       description: 'All deterministic and reviewer criteria passed.',
       prompt: `The independent review passed. Read \`${workflow.review.reviewPath}\`${reviewReadTool}, then use \`write_task_note\` to record a concise DONE summary with the final deliverable paths (${reviewTargets}) and the evidence that each acceptance criterion passed. Report DONE without starting new work.`,
       suggestedRole: 'project lead',
+      consumes: [surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact)],
       terminal: true,
     },
     {
@@ -299,6 +362,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       description: 'The bounded repair loop ended without a defensible pass.',
       prompt: `The deliverable did not pass after ${maxReviewRounds} review rounds. Do not claim success. Read \`${workflow.review.reviewPath}\`${reviewReadTool}, then use \`write_task_note\` to record DONE_WITH_CONCERNS: the unmet criteria, what was attempted, the affected paths, and the smallest user decision or missing input needed to continue.`,
       suggestedRole: 'project lead',
+      consumes: [surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact)],
       terminal: true,
     },
   ];

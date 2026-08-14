@@ -65,6 +65,13 @@ import {
   loadModelDownloadChoices,
   modelProviderLabel,
 } from './model-picker.js';
+import {
+  type CliOpenReference,
+  cliOpenReferencesFromEvent,
+  cliOpenReferencesFromSession,
+  rememberCliOpenReferences,
+  resolveCliOpenTarget,
+} from './open-command.js';
 import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
@@ -135,6 +142,7 @@ const HELP = [
   '/disallow codexedits|claudeedits — put that provider in read-only plan mode',
   '/mode — choose read-only, reactive, reactive+tasks, or full-play AI activity',
   '/thread — switch or start a chat thread',
+  '/open workspace|artifacts|<recent file> — open a folder or file from chat',
   '/task — list, inspect, create, edit, assign, or change task status',
   '/do — choose a craftbook and start it as a task',
   '/continue — process due schedules and active tasks in this project',
@@ -196,6 +204,8 @@ export function App(props: {
   const [value, setValue] = useState('');
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [turns, setTurns] = useState<TurnMap>(() => new Map());
+  const [recentOpenReferences, setRecentOpenReferences] = useState<CliOpenReference[]>([]);
+  const recentOpenReferencesRef = useRef<ReadonlyArray<CliOpenReference>>([]);
   const [status, setStatus] = useState<string | null>('Connecting…');
   const [history, setHistory] = useState<string[]>([]);
   const [activeRuns, setActiveRuns] = useState<Set<string>>(() => new Set());
@@ -211,7 +221,7 @@ export function App(props: {
   const shellColumns = Math.min(500, Math.max(20, termColumns - 2));
   const wordwheelCount =
     overlay === null && !pendingInput && !pendingQuestion
-      ? suggestSlashWordwheel(value, craftbooks).length
+      ? suggestSlashWordwheel(value, craftbooks, recentOpenReferences).length
       : 0;
   const wordwheelRows =
     wordwheelCount > 0 ? Math.min(SLASH_COMMAND_WORDWHEEL_SIZE, wordwheelCount) + 1 : 0;
@@ -246,16 +256,19 @@ export function App(props: {
     (effectiveProvider ? config?.defaultModel?.[effectiveProvider] : undefined);
   const statusLabel = useMemo(() => {
     if (turns.size === 0) return undefined;
-    return (
+    const turn =
       (focusedSessionId && turns.get(focusedSessionId)) ||
       (ownSessionId && turns.get(ownSessionId)) ||
-      turns.values().next().value
-    );
+      turns.values().next().value;
+    return turn?.label;
   }, [turns, focusedSessionId, ownSessionId]);
   const note = useCallback(
     (text: string, kind: FeedRow['kind'] = 'note') => setRows((r) => appendNote(r, text, kind)),
     [],
   );
+  useEffect(() => {
+    recentOpenReferencesRef.current = recentOpenReferences;
+  }, [recentOpenReferences]);
 
   // A task launch can recruit a new gezel after the TUI's initial roster
   // load. Keep ids in a ref so the project-event callback can detect that
@@ -313,6 +326,12 @@ export function App(props: {
       (env) => {
         setRows((r) => reduceFeed(r, env));
         setTurns((t) => reduceTurns(t, env));
+        const observedReferences = cliOpenReferencesFromEvent(env);
+        if (observedReferences.length > 0) {
+          setRecentOpenReferences((current) =>
+            rememberCliOpenReferences(current, observedReferences),
+          );
+        }
         const eventGezelId =
           env.gezelId || (env.event.type === 'task_event' ? env.event.gezelId : undefined);
         if (eventGezelId && !gezelIds.current.has(eventGezelId)) void refreshGezels();
@@ -406,6 +425,7 @@ export function App(props: {
         setProjectName(project.name);
         setActiveGezelId(gezelId);
         setRows([]);
+        setRecentOpenReferences([]);
         setTurns(new Map());
         setActiveRuns(new Set());
         setPendingInput(null);
@@ -507,6 +527,7 @@ export function App(props: {
         setFocusedSessionId(session.id);
         setActiveThreadTitle(displayThreadTitle(session.title));
         setRows(sessionToFeedRows(session));
+        setRecentOpenReferences(cliOpenReferencesFromSession(session));
       } catch (err) {
         note(`could not switch thread: ${errMsg(err)}`, 'error');
       }
@@ -527,6 +548,7 @@ export function App(props: {
       setFocusedSessionId(session.id);
       setActiveThreadTitle(displayThreadTitle(session.title));
       setRows([]);
+      setRecentOpenReferences([]);
       setThreads((current) => [session, ...current.filter((item) => item.id !== session.id)]);
     } catch (err) {
       note(`could not start a thread: ${errMsg(err)}`, 'error');
@@ -769,7 +791,10 @@ export function App(props: {
       setOverlay(null);
       note(`starting ${book.name}…`);
       try {
-        const created = await client.createTask(projectId, craftbookStartRequest(book));
+        const created = await client.createTask(projectId, {
+          ...craftbookStartRequest(book),
+          roleBasedNameOnlyMode: boring,
+        });
         rememberTask(created);
         setManagedTaskRef(created.ref);
         note(`started ${created.ref} — ${created.title}`);
@@ -777,7 +802,7 @@ export function App(props: {
         note(`could not start ${book.name}: ${errMsg(err)}`, 'error');
       }
     },
-    [client, note, projectId, rememberTask],
+    [boring, client, note, projectId, rememberTask],
   );
 
   const submitTaskPrompt = useCallback(
@@ -798,6 +823,7 @@ export function App(props: {
             description: `${text} — complete this task and verify that the result meets the requested outcome.`,
             assignee: { kind: 'user' },
             steps: [{ name: 'Main' }],
+            roleBasedNameOnlyMode: boring,
           });
           rememberTask(created);
           setManagedTaskRef(created.ref);
@@ -816,7 +842,7 @@ export function App(props: {
         note(`task update failed: ${errMsg(err)}`, 'error');
       }
     },
-    [client, note, projectId, rememberTask, taskPrompt, tasks],
+    [boring, client, note, projectId, rememberTask, taskPrompt, tasks],
   );
 
   const applyTaskStatus = useCallback(
@@ -990,6 +1016,33 @@ export function App(props: {
         case 'thread':
           await openThreadPicker();
           return;
+        case 'open': {
+          const target = resolveCliOpenTarget(rest, recentOpenReferencesRef.current);
+          if (!target) {
+            return note(
+              'usage: /open workspace|artifacts|<recent file> (type /open and a space to browse)',
+              'error',
+            );
+          }
+          try {
+            if (target.type === 'folder') {
+              const result = await client.revealProject(projectId, target.folder);
+              note(`opened ${target.folder}: ${result.path}`);
+            } else {
+              const result = await client.revealProjectReference(target.reference.projectId, {
+                kind: target.reference.kind,
+                path: target.reference.path,
+              });
+              setRecentOpenReferences((current) =>
+                rememberCliOpenReferences(current, [target.reference]),
+              );
+              note(`revealed ${target.reference.path}: ${result.path}`);
+            }
+          } catch (err) {
+            note(`open failed: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
         case 'task':
           setManagedTaskRef(null);
           return setOverlay('task');
@@ -1596,6 +1649,7 @@ export function App(props: {
         }
         history={history}
         craftbooks={craftbooks}
+        recentOpenReferences={recentOpenReferences}
         pendingPrompt={pendingInput?.promptLine ?? taskPrompt?.promptLine}
         pendingMode={pendingInput?.mode ?? (taskPrompt ? 'text' : undefined)}
         onChange={setValue}

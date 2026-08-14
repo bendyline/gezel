@@ -4,7 +4,13 @@
     "role": "maintenance-review",
     "name": "Pull Request Review",
     "description": "Run a rigorous staff-engineer code review on a pull request or local diff and emit a structured, actionable review report. First reads the PR description and the full diff to scope intent and a reviewer checklist (correctness, edge cases, tests, security, style, scope-creep), then audits the diff hunk-by-hunk against that checklist tracing data flow and failure modes, then writes a prioritized report with blocking vs non-blocking findings, each pinned to file:line with a concrete fix. Use this for code review, PR review, reviewing a diff, a second pair of eyes on a change, or a pre-merge sign-off — it catches bugs, missing tests, and risky changes before merge rather than rubber-stamping.",
-    "tags": ["review", "code-review", "pull-request", "quality", "diff"],
+    "tags": [
+      "review",
+      "code-review",
+      "pull-request",
+      "quality",
+      "diff"
+    ],
     "triggers": [
       "review this PR",
       "code review",
@@ -20,7 +26,10 @@
         "role": "reviewer",
         "summary": "read the PR + diff, lock a review checklist",
         "prompt": "Step 1: Read the PR title, description, and linked issue to capture the INTENT — what is this change supposed to do? Step 2: Run `git diff` (or fetch the PR diff) and list every file touched with a one-line note on what changed in each. Step 3: Note the change size (lines added/removed) and flag any file that is surprisingly large or out of scope for the stated intent. Step 4: Write an acceptance-criteria checklist of 6-10 concrete, checkable review dimensions tuned to THIS diff, e.g. 'each new branch has a test', 'no nullable value is dereferenced without a guard', 'no secret/credential is logged or committed', 'error paths return/throw rather than silently swallow', 'public API changes are backward-compatible or version-bumped', 'no obvious N+1 / unbounded loop'. Step 5: Record key decisions (what is in scope to review vs explicitly out of scope, e.g. unrelated formatting). Write the intent summary, file list, and the checklist to notes via `write_task_note` AND to `notes/scope.md`. No findings yet — this phase only defines what 'a clean PR' means here.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -28,7 +37,10 @@
         "role": "reviewer",
         "summary": "walk every hunk against the checklist, trace failure modes",
         "prompt": "Step 1: Walk the diff hunk-by-hunk. For each meaningful change, trace the data flow: where do the inputs come from, what happens on the empty/null/error/concurrent case, and what is the blast radius if it is wrong. Step 2: For EACH checklist item from scope, look for violations in the changed code and in the call sites the change affects. Step 3: For every issue found, capture file:line, a one-sentence description of the bug or risk, its severity (blocking / non-blocking / nit), and a concrete suggested fix. Step 4: Explicitly check the tests: does each new code path have a test, do the tests actually assert behavior (not just that it runs), and would they fail if the logic regressed. Step 5: Note anything you could NOT verify (e.g. needs a running DB) so the report is honest. Good looks like: specific, reproducible findings tied to lines — never vague 'consider improving error handling'. Stage your running findings list to `write_task_note` so progress is observable. Do not write the final report yet.",
-        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/audit.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -36,13 +48,23 @@
         "role": "reviewer",
         "summary": "emit a prioritized review report",
         "prompt": "Step 1: Open `review.md` and write a 1-2 sentence verdict at the top: Approve / Approve-with-comments / Request-changes, with the single most important reason. Step 2: Add a '## Blocking' section listing every must-fix issue as `file:line — problem — suggested fix`, ordered by severity. Step 3: Add a '## Non-blocking' section for should-fix-soon items, and a '## Nits' section for optional polish. Step 4: Add a '## Tests' section stating whether coverage of the new code is adequate and what tests are missing. Step 5: Add a '## Not verified' section listing anything you could not check and how a human should. Every finding must be specific and pinned to a location; no generic filler. On a loop-back, fix only the gaps the evaluator named (e.g. a missing severity, an unpinned finding) without dropping findings that already passed. `write_task_note` the report path and the count of blocking vs non-blocking findings.",
-        "produces": { "path": "review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `review.md` and grade it against the scope checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) verdict present and justified; (2) every blocking finding is pinned to file:line with a concrete suggested fix; (3) findings are categorized by severity (blocking/non-blocking/nit); (4) the Tests section honestly assesses coverage of the new code; (5) a Not-verified section exists; (6) re-skim the diff and spot-check that no obvious bug (null deref, swallowed error, missing test on a new branch) was missed; (7) no vague filler findings. If any criterion fails, name the exact gap.",
       "loopBackTo": "report",
-      "deliverable": { "path": "review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -50,7 +72,13 @@
     "role": "maintenance-review",
     "name": "Live Browser QA Pass",
     "description": "Run a hands-on quality-assurance pass on a running web app or page by actually exercising it in a browser, then emit a defect report with reproduction steps and severity. First derives a test plan and acceptance criteria from the app's intended behavior (happy paths, edge cases, error states, responsive/console health), then drives the UI step-by-step clicking and typing through each flow while watching the console and network for errors, then writes a bug report where every defect has numbered repro steps, expected vs actual, and severity. Use this for QA, manual testing, smoke testing, exploratory testing, click-testing a build, or verifying a feature works in the real browser before shipping — it finds broken flows, console errors, and visual breakage that unit tests miss.",
-    "tags": ["qa", "testing", "browser", "manual-test", "smoke-test"],
+    "tags": [
+      "qa",
+      "testing",
+      "browser",
+      "manual-test",
+      "smoke-test"
+    ],
     "triggers": [
       "qa this",
       "run a qa pass",
@@ -66,7 +94,10 @@
         "role": "reviewer",
         "summary": "enumerate flows + acceptance criteria to exercise",
         "prompt": "Step 1: Identify what the app/page is supposed to do and how to reach it (URL, dev server, or open the file). Step 2: Enumerate the user flows to exercise: each happy path (e.g. 'submit the form with valid data'), the key edge cases (empty input, very long input, invalid data), and the error states (network failure, 404). Step 3: List the cross-cutting checks: no console errors on load or interaction, no broken images/links, responsive at mobile and desktop widths, keyboard operability of primary controls. Step 4: Write an acceptance-criteria checklist of 6-10 concrete, checkable behaviors, e.g. 'submitting valid data shows a success state', 'submitting empty data shows an inline validation error, not a crash', 'no red console errors during any flow'. Step 5: Note test data to use and any setup needed. Write the flow list + checklist to `write_task_note` AND `notes/plan.md`. No testing yet.",
-        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/plan.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "exercise",
@@ -74,7 +105,10 @@
         "role": "reviewer",
         "summary": "drive each flow in a browser, capture defects",
         "prompt": "Step 1: Open the app (use the browser/automation capability if available — navigate, click, type, screenshot; otherwise trace the rendered DOM and JS by reading the source and reason about each interaction). Step 2: Run each planned flow step-by-step, recording the exact actions taken. Step 3: After every action, check the result against the acceptance criterion AND watch the console/network for errors or failed requests. Step 4: For every defect, capture: the flow, numbered reproduction steps, the EXPECTED result, the ACTUAL result, the severity (critical = blocks the flow / major = wrong but workaroundable / minor = cosmetic), and a screenshot or console excerpt if available. Step 5: Also record what PASSED so the report shows coverage, not just failures. Good looks like: a defect a developer can reproduce on the first try from your steps. Stage findings to `write_task_note` as you go. Do not write the final report yet.",
-        "produces": { "path": "notes/exercise.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/exercise.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -82,13 +116,23 @@
         "role": "reviewer",
         "summary": "emit a defect report with repro + severity",
         "prompt": "Step 1: Open `qa-report.md` and write a top-line verdict: Pass / Pass-with-issues / Fail, plus the count of defects by severity. Step 2: Add a '## Defects' section; for each defect write `### [SEVERITY] short title` followed by numbered repro steps, an Expected line, an Actual line, and any console/screenshot evidence. Order by severity. Step 3: Add a '## Passed' section listing the flows that worked, so coverage is visible. Step 4: Add a '## Not tested' section for anything you could not reach and why. Every defect must have reproducible steps and an expected-vs-actual — no vague 'it seems broken'. On a loop-back, fix only the named gaps without dropping verified defects. `write_task_note` the report path and the defect counts by severity.",
-        "produces": { "path": "qa-report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "qa-report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `qa-report.md` and grade it against the plan checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every planned flow is marked tested with a result; (2) each defect has numbered, reproducible steps; (3) each defect states Expected vs Actual; (4) each defect has a severity; (5) console/network health was actually checked, not assumed; (6) a Passed section shows coverage and a Not-tested section is honest; (7) the verdict matches the findings (no 'Pass' with an open critical). If any criterion fails, name the exact gap.",
       "loopBackTo": "report",
-      "deliverable": { "path": "qa-report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "qa-report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -96,7 +140,13 @@
     "role": "maintenance-review",
     "name": "Root-Cause Investigation",
     "description": "Debug a defect or production incident down to its true root cause and document the diagnosis with evidence, instead of patching the first symptom. First reproduces the failure reliably and locks what 'understood' means (a confirmed repro, the failing assertion, the exact trigger condition), then narrows the cause by forming and testing hypotheses, bisecting, reading stack traces and logs, and tracing the data path until one hypothesis is proven, then writes a root-cause report with the evidence chain, the smallest fix, and how to prevent recurrence. Use this for debugging, root-cause analysis, investigating a bug or flaky test, diagnosing an incident, or figuring out why something breaks — it produces a proven cause backed by evidence, not a guess.",
-    "tags": ["debugging", "investigation", "root-cause", "incident", "diagnosis"],
+    "tags": [
+      "debugging",
+      "investigation",
+      "root-cause",
+      "incident",
+      "diagnosis"
+    ],
     "triggers": [
       "investigate this bug",
       "root cause this",
@@ -112,7 +162,10 @@
         "role": "reviewer",
         "summary": "get a reliable repro, lock what 'understood' means",
         "prompt": "Step 1: Capture the symptom precisely — the exact error message, stack trace, failing test, or observed wrong behavior, and the environment it occurs in. Step 2: Establish a RELIABLE reproduction: the minimal steps/inputs that trigger the failure every time. If it is intermittent, note the frequency and any conditions that change it. Step 3: Pin down the boundary — what is the last known-good state (commit, input, version) and the first known-bad state. Step 4: Write an acceptance-criteria checklist for the investigation, e.g. 'the repro triggers the failure deterministically', 'the exact failing line/assertion is identified', 'the cause is proven by evidence, not asserted', 'the proposed fix is the smallest change that resolves the repro'. Step 5: Record the repro steps and the known-good/known-bad boundary to `write_task_note` AND `notes/reproduce.md`. No fix yet — confirm you can make it fail on demand first.",
-        "produces": { "path": "notes/reproduce.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/reproduce.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "narrow",
@@ -120,7 +173,10 @@
         "role": "reviewer",
         "summary": "form + test hypotheses until one is proven",
         "prompt": "Step 1: From the repro, list 2-4 concrete hypotheses for the cause, each falsifiable (e.g. 'the input is undefined here', 'the off-by-one is in this index', 'the race is between A and B'). Step 2: Test the cheapest hypothesis first — add logging/asserts, set a breakpoint, bisect the diff (`git bisect` or binary-search the change), or read the implicated code and trace the data path. Step 3: Record what each experiment PROVED or DISPROVED — do not move on from a hypothesis on a hunch; require evidence. Step 4: Iterate until exactly one hypothesis is proven: you can point to the precise line and explain the mechanism (why this input + this code produces this failure). Step 5: Confirm the root cause by predicting a NEW case it explains and verifying that prediction. Good looks like: an evidence chain from symptom → mechanism → root line, not 'I think it is the cache'. Stage the hypothesis log to `write_task_note`. Do not write the final report yet.",
-        "produces": { "path": "notes/narrow.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/narrow.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -128,13 +184,23 @@
         "role": "reviewer",
         "summary": "diagnosis, evidence chain, smallest fix, prevention",
         "prompt": "Step 1: Open `root-cause.md` and write a one-paragraph '## Summary' stating the root cause in plain language and where it lives (file:line). Step 2: Add '## Reproduction' with the deterministic repro steps. Step 3: Add '## Evidence' as an ordered chain: symptom → each experiment and its result → the proven mechanism. Step 4: Add '## Fix' describing the SMALLEST change that resolves the repro (and why a smaller/larger fix is wrong), with the diff or exact edit. Step 5: Add '## Prevention' — the test or guard that would have caught this and should be added. Every claim in the evidence chain must be backed by an experiment result, not assertion. On a loop-back, fix only the named gaps. `write_task_note` the report path and the proven root-cause location.",
-        "produces": { "path": "root-cause.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "root-cause.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `root-cause.md` and grade it against the reproduce checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) the reproduction is deterministic and documented; (2) the root cause is pinned to a specific file:line/mechanism, not a vague subsystem; (3) the evidence chain actually proves the cause (each link backed by an experiment result); (4) the proposed fix is the smallest change that addresses the cause and would resolve the repro; (5) a prevention test/guard is specified; (6) the diagnosis is a proven mechanism, not a guess. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "root-cause.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "root-cause.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -142,7 +208,13 @@
     "role": "maintenance-review",
     "name": "Security Review of a Diff",
     "description": "Perform a focused security review of a code change or diff and produce a vulnerability report mapped to a threat checklist. First scopes the change's attack surface and locks a security checklist (injection, authn/authz, secrets, deserialization, SSRF, crypto misuse, input validation, dependency risk), then audits the diff against each class while tracing tainted data from untrusted sources to dangerous sinks, then writes a findings report rating each issue by severity and likelihood with a concrete remediation. Use this for a security review, secure code review, vulnerability assessment of a diff, an AppSec pass, or checking a change for injection/auth/secret-leak risks before merge — it surfaces exploitable flaws tied to specific lines rather than generic security platitudes.",
-    "tags": ["security", "review", "appsec", "vulnerability", "diff"],
+    "tags": [
+      "security",
+      "review",
+      "appsec",
+      "vulnerability",
+      "diff"
+    ],
     "triggers": [
       "security review",
       "is this change secure",
@@ -158,7 +230,10 @@
         "role": "reviewer",
         "summary": "map trust boundaries, lock a security checklist",
         "prompt": "Step 1: Read the diff and identify the attack surface it touches: new/changed endpoints, inputs from untrusted sources (HTTP params, headers, files, env, third-party data), data sinks (SQL, shell, filesystem, eval, HTML render, outbound requests), and any auth/permission logic. Step 2: Map the trust boundaries — where does untrusted data enter and where could it reach a dangerous operation. Step 3: Write a security acceptance-criteria checklist tuned to this change, drawn from: injection (SQL/command/template/XSS), broken authn/authz (missing checks, IDOR), secrets handling (no hardcoded keys, no secrets logged), unsafe deserialization, SSRF/path traversal, crypto misuse (weak algo, static IV, no salt), missing input validation, and risky new dependencies. Step 4: For each item, state what 'safe' looks like for THIS diff (e.g. 'all SQL uses parameterized queries', 'the user-supplied filename is canonicalized and confined to the upload dir'). Step 5: Record assumptions and out-of-scope areas. Write the surface map + checklist to `write_task_note` AND `notes/scope.md`. No findings yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -166,7 +241,10 @@
         "role": "reviewer",
         "summary": "trace tainted data to sinks, check each threat class",
         "prompt": "Step 1: For each untrusted input identified in scope, trace it through the code to every sink it can reach — flag any path where it hits a sink without validation/escaping/parameterization (that is the vulnerability). Step 2: Walk EACH checklist threat class against the diff and the code it calls, looking for concrete violations, not theoretical ones. Step 3: For every finding capture: file:line, the vulnerability class, an exploit sketch (how an attacker triggers it), severity (critical/high/medium/low) and likelihood, and a concrete remediation (parameterize this query, add this authz check, move this secret to env). Step 4: Verify the negatives too — confirm the dangerous-looking spots that are actually safe and note WHY (so the report is trustworthy). Step 5: Note anything requiring dynamic testing you could not perform statically. Good looks like: a finding with a real taint path from source to sink, not 'consider validating inputs'. Stage findings to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/audit.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -174,13 +252,23 @@
         "role": "reviewer",
         "summary": "findings with severity, exploit, remediation",
         "prompt": "Step 1: Open `security-review.md` and write a top-line verdict: Safe-to-merge / Merge-after-fixes / Block, with the count of findings by severity. Step 2: Add a '## Findings' section; for each, write `### [SEVERITY] class — file:line` with the exploit sketch, the impact, the likelihood, and the concrete remediation. Order by severity then likelihood. Step 3: Add a '## Verified safe' section noting the threat classes you checked and found clean (so the review's coverage is auditable). Step 4: Add a '## Not statically verifiable' section for anything needing a pentest/runtime check. Every finding must have a concrete taint path or rule violation and a specific fix — no generic advice. On a loop-back, fix only the named gaps without dropping real findings. `write_task_note` the report path and the severity counts.",
-        "produces": { "path": "security-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "security-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `security-review.md` and grade it against the scope checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every threat class in the checklist was assessed (found-and-reported or verified-safe); (2) each finding is pinned to file:line with an exploit sketch; (3) each finding has a severity and a concrete remediation; (4) tainted-data paths from untrusted source to sink are traced where applicable; (5) a Verified-safe section makes coverage auditable; (6) the verdict matches the findings (no 'Safe-to-merge' with an open critical). If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "security-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "security-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -213,7 +301,10 @@
         "role": "reviewer",
         "summary": "enumerate components + lock a WCAG AA checklist",
         "prompt": "Step 1: Identify the page/components and the user flows to audit (navigation, forms, modals, interactive widgets, media). Step 2: Build a WCAG 2.1 AA acceptance-criteria checklist covering: semantic landmarks and heading order (1.3.1), keyboard operability of all controls with no traps (2.1.1/2.1.2), visible focus indicators and logical focus order (2.4.7/2.4.3), text contrast ≥ 4.5:1 and UI/large text ≥ 3:1 (1.4.3/1.4.11), text alternatives for images/icons (1.1.1), programmatic labels for every form field (1.3.1/4.1.2), correct and minimal ARIA (4.1.2), name/role/value for custom widgets, reflow at 320px and 200% zoom (1.4.10/1.4.4), and no information conveyed by color alone (1.4.1). Step 3: For each item, state the pass condition for THIS UI. Step 4: Note the tools/method you will use (DOM inspection, keyboard walk, contrast math, axe if available). Write the component list + WCAG checklist (each item tagged with its SC number) to `write_task_note` AND `notes/scope.md`. No findings yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -221,7 +312,10 @@
         "role": "reviewer",
         "summary": "inspect markup, keyboard, contrast, ARIA per SC",
         "prompt": "Step 1: Open/inspect the UI (use the browser or a11y tooling if available; otherwise read the HTML/CSS/JS and reason about the rendered semantics). Step 2: For EACH checklist criterion, perform the actual check: tab through the page recording focus order and any unreachable/trapped controls; verify each interactive element has an accessible name and correct role; compute contrast ratios for text and UI on their real backgrounds; confirm every image/icon has appropriate alt or is correctly hidden; confirm every input has a programmatic label; validate ARIA usage against the spec (no redundant/invalid roles). Step 3: For each violation capture: the WCAG SC number and level, the selector/element, what is wrong, the user impact (who is blocked and how), severity, and the concrete code fix. Step 4: Record the criteria that PASS so the report shows full coverage. Good looks like: 'SC 1.4.3 FAIL — .btn-primary text #9aa on #fff = 2.1:1, needs ≥4.5:1; darken to #555'. Stage findings to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/audit.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -229,13 +323,23 @@
         "role": "reviewer",
         "summary": "findings keyed to WCAG SCs with fixes",
         "prompt": "Step 1: Open `a11y-report.md` and write a top-line verdict (Conformant / Partially-conformant / Non-conformant to WCAG 2.1 AA) with counts by severity. Step 2: Add a '## Findings' section; for each, write `### [SEVERITY] SC <number> (<Level>) — <element>` with what is wrong, the user impact, and the exact code fix. Order critical-first. Step 3: Add a '## Passing criteria' section listing the SCs checked and met, so coverage is auditable. Step 4: Add a '## Manual verification needed' section for items a static check cannot fully settle (e.g. screen-reader announcement quality). Every finding must cite a specific SC and element with a concrete remedy — no generic 'add ARIA'. On a loop-back, fix only the named gaps. `write_task_note` the report path and the severity counts.",
-        "produces": { "path": "a11y-report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "a11y-report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `a11y-report.md` and grade it against the scope WCAG checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every checklist SC was assessed (found-and-reported or marked passing); (2) each finding cites a specific WCAG success-criterion number and level; (3) each finding names the affected element and a concrete code fix; (4) contrast findings include actual computed ratios; (5) keyboard operability and focus order were actually walked; (6) a passing-criteria section makes coverage auditable; (7) the verdict matches the findings. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "a11y-report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "a11y-report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.1.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -243,7 +347,13 @@
     "role": "maintenance-review",
     "name": "UX & Visual Design Review",
     "description": "Critique a UI's user experience and visual design and produce a prioritized design-review report. First scopes the screens and flows and locks a heuristic checklist (visual hierarchy, spacing rhythm and alignment, typographic scale, color and contrast, consistency, affordance and feedback, empty/loading/error states, and the primary task's friction), then reviews each screen against those heuristics with a designer's eye for both polish and usability, then writes a findings report rating each issue by impact with a concrete, specific design fix. Use this for a design review, UX critique, visual QA, design feedback, a heuristic evaluation, or 'does this look and feel right' — it gives actionable, specific design fixes (exact spacing, color, hierarchy changes) rather than 'make it pop'.",
-    "tags": ["design", "ux", "visual", "review", "critique"],
+    "tags": [
+      "design",
+      "ux",
+      "visual",
+      "review",
+      "critique"
+    ],
     "triggers": [
       "design review",
       "ux critique",
@@ -259,7 +369,10 @@
         "role": "reviewer",
         "summary": "enumerate screens + lock UX/visual heuristics",
         "prompt": "Step 1: Identify the screens/components and the primary user task the design serves. Step 2: Write a design acceptance-criteria checklist covering UX and visual heuristics: clear visual hierarchy (the most important element reads first), consistent spacing rhythm and alignment to a grid, a coherent typographic scale (limited sizes/weights), sufficient color contrast and a disciplined palette, consistency of components/patterns across screens, obvious affordances and immediate feedback on actions, presence and quality of empty/loading/error/success states, and low friction on the primary task (minimal steps, no dead-ends). Step 3: For each heuristic state the pass condition for THIS UI (e.g. 'spacing uses a 4/8px scale, no arbitrary gaps', 'one accent color used only for primary actions'). Step 4: Note how you will evaluate (screenshots via the existing automation if available, else reading the markup/CSS and reasoning about the rendered result). Write the screen list + heuristic checklist to `write_task_note` AND `notes/scope.md`. No critique yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "review",
@@ -267,7 +380,10 @@
         "role": "visual-designer",
         "summary": "critique each screen against the heuristics",
         "prompt": "Step 1: View each screen (capture/screenshot via the existing Playwright specs or browser if available; otherwise render the CSS in your head from the source and reason precisely). Step 2: For EACH heuristic, assess the screen and note specific issues: where the hierarchy is flat or competing, where spacing/alignment is inconsistent (cite the elements and the px values), where type or color breaks the system, where an affordance is missing or feedback is absent, and which states are unhandled. Step 3: For every finding capture: the screen/element, the heuristic violated, the user/visual impact, severity (high = hurts the task or looks broken / medium / low polish), and a CONCRETE fix with values ('increase the card padding from 8px to 16px', 'demote the secondary button to a text link', 'add a skeleton loading state'). Step 4: Note what works well too — a good review reinforces the strong patterns. Good looks like: specific, valued-anchored fixes, never 'make it cleaner'. Stage findings to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -275,13 +391,23 @@
         "role": "reviewer",
         "summary": "prioritized findings with concrete fixes",
         "prompt": "Step 1: Open `design-review.md` and write a 2-3 sentence overall impression: what works, and the single biggest opportunity. Step 2: Add a '## High impact' section (issues that hurt usability or look broken), '## Medium', and '## Polish' — each finding as `screen/element — problem — concrete fix (with values)`. Step 3: Add a '## What's working' section reinforcing the strong patterns to keep. Step 4: If screenshots were captured, reference them per finding. Every fix must be specific and actionable (values, not adjectives). On a loop-back, fix only the named gaps without dropping valid findings. `write_task_note` the report path and the count of findings by impact.",
-        "produces": { "path": "design-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "design-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `design-review.md` and grade it against the scope heuristic checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every heuristic in the checklist was assessed; (2) findings are prioritized by impact (high/medium/polish); (3) each finding names the screen/element and gives a concrete fix with values, not adjectives; (4) empty/loading/error states were evaluated; (5) the primary task's friction was assessed; (6) a What's-working section exists; (7) no vague 'make it pop' filler. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "design-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "design-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -289,7 +415,13 @@
     "role": "maintenance-review",
     "name": "Editorial & Tone Review",
     "description": "Run an editorial review on a piece of content for clarity, correctness, and brand voice, then produce a line-edit report and a clean revised version. First scopes the audience, purpose, and voice/style rules and locks an editorial checklist (grammar and spelling, clarity and concision, consistent terminology, active voice, reading level, tone match, scannability, and CTA strength), then reviews the copy line-by-line against those rules marking every issue with a suggested rewrite, then writes a report of categorized edits plus a clean revised draft. Use this for a copy review, editorial pass, proofreading, line edit, tone/voice review, or tightening writing — it returns specific tracked edits with rewrites and a polished final draft rather than 'tighten this up'.",
-    "tags": ["copy", "editorial", "writing", "review", "proofreading"],
+    "tags": [
+      "copy",
+      "editorial",
+      "writing",
+      "review",
+      "proofreading"
+    ],
     "triggers": [
       "copy review",
       "editorial review",
@@ -305,7 +437,10 @@
         "role": "reviewer",
         "summary": "lock audience, purpose, voice, and an edit checklist",
         "prompt": "Step 1: Read the content and identify the audience, the purpose (inform / persuade / convert / instruct), and the desired voice/tone (e.g. friendly-expert, formal, playful) — infer from any style guide or sample if none is given. Step 2: Write an editorial acceptance-criteria checklist covering: grammar/spelling/punctuation correctness, clarity (no ambiguous or convoluted sentences), concision (cut filler, redundancy, hedging), consistent terminology and capitalization, active voice and strong verbs, an appropriate reading level for the audience, tone matching the target voice, scannability (headings, short paragraphs, lists where helpful), and CTA/heading strength where applicable. Step 3: For each item state the pass condition for THIS piece (e.g. 'reading level ~grade 8', 'product name always rendered as <X>'). Step 4: Note the target word-count direction if length matters. Write the audience/purpose/voice + checklist to `write_task_note` AND `notes/scope.md`. No edits yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "review",
@@ -313,7 +448,10 @@
         "role": "copywriter",
         "summary": "mark every issue with a concrete rewrite",
         "prompt": "Step 1: Read the copy line-by-line. Step 2: For EACH checklist dimension, flag specific issues quoting the offending text and giving a concrete REWRITE, not just a note — e.g. 'ORIGINAL: \"We are committed to leveraging synergies\" → SUGGESTED: \"We connect your tools so they work together\"'. Step 3: Categorize each edit: Correctness (grammar/spelling/fact), Clarity, Concision, Consistency, Voice/Tone, or Structure/Scannability. Step 4: Check global consistency: terminology, capitalization, oxford-comma and number style, heading parallelism. Step 5: Assess the overall tone against the target and note where it drifts. Step 6: Track the substantive vs trivial edits so the report can prioritize. Good looks like: every flagged line has a ready-to-paste rewrite. Stage the edit list to `write_task_note`. Do not write the final report/draft yet.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -321,13 +459,23 @@
         "role": "copywriter",
         "summary": "categorized edits plus a revised draft",
         "prompt": "Step 1: Open `copy-review.md` and write a 2-3 sentence editorial summary: overall clarity/voice verdict and the top theme to fix. Step 2: Add an '## Edits' section grouped by category (Correctness, Clarity, Concision, Consistency, Voice, Structure); each entry shows the ORIGINAL and the SUGGESTED rewrite. Step 3: Add a '## Revised draft' section containing the FULL clean copy with every accepted edit applied — this is the shippable version. Step 4: Note any factual claims you could not verify. The revised draft must read smoothly end-to-end and match the target voice; every edit must include a concrete rewrite — no 'reword this'. On a loop-back, fix only the named gaps without losing good edits. `write_task_note` the report path and the count of edits by category.",
-        "produces": { "path": "copy-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "copy-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `copy-review.md` and grade it against the scope checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every editorial dimension was assessed; (2) each edit includes the original AND a concrete rewrite; (3) edits are categorized; (4) a full revised draft is present and reads cleanly end-to-end; (5) the revised draft matches the target voice and reading level; (6) terminology/consistency was checked globally; (7) no vague 'tighten this' filler. Read the revised draft straight through to confirm it is shippable. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "copy-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "copy-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -335,7 +483,13 @@
     "role": "maintenance-review",
     "name": "Performance Audit",
     "description": "Audit an application or page for performance problems with measurements, then produce a report of the highest-impact optimizations. First scopes the workloads and locks a performance budget and checklist (load time and Core Web Vitals, bundle/asset weight, render and main-thread cost, network waterfall and request count, server/query latency, memory and re-render churn), then MEASURES each against a baseline using real profiling rather than guessing, then writes a report that ranks bottlenecks by impact-vs-effort with a specific fix and the expected gain for each. Use this for a performance audit, speed optimization, finding bottlenecks, a Lighthouse-style review, reducing load time, or profiling slowness — it grounds every recommendation in a measured number and an estimated payoff, not 'it feels slow'.",
-    "tags": ["performance", "audit", "optimization", "profiling", "speed"],
+    "tags": [
+      "performance",
+      "audit",
+      "optimization",
+      "profiling",
+      "speed"
+    ],
     "triggers": [
       "performance audit",
       "why is this slow",
@@ -351,7 +505,10 @@
         "role": "reviewer",
         "summary": "lock workloads, a budget, and a metrics checklist",
         "prompt": "Step 1: Identify the workloads to audit (the slow page/route/endpoint/operation and its typical usage). Step 2: Write a performance acceptance-criteria checklist with concrete budgets, drawn from the relevant metrics: page load and Core Web Vitals (LCP < 2.5s, CLS < 0.1, INP < 200ms), total JS/CSS/image transfer weight, time-to-interactive and main-thread blocking, request count and waterfall serialization, server response and DB query latency (and N+1 detection), and memory growth / excessive re-renders for SPAs. Step 3: For each metric, set the target/budget for THIS app and note the current pain. Step 4: Decide the measurement method and environment (Lighthouse/devtools/profiler/timing logs if available; otherwise read the code and reason about asymptotic and I/O costs). Write the workloads + budgeted checklist + method to `write_task_note` AND `notes/scope.md`. No optimizing yet — define 'fast enough' first.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "measure",
@@ -359,7 +516,10 @@
         "role": "developer",
         "summary": "profile each workload, locate the real bottlenecks",
         "prompt": "Step 1: Establish a baseline by MEASURING each metric in the checklist (run Lighthouse/devtools/a profiler, time the endpoint, inspect the network waterfall and bundle, log query times). If no live env, statically analyze: bundle composition, algorithmic complexity of hot paths, query patterns, and render triggers. Step 2: For each metric over budget, drill into WHY — which asset is heaviest, which function dominates the flame chart, which query is slow or repeated, which component re-renders needlessly. Step 3: Record the actual numbers (e.g. 'LCP 4.1s; main.js is 480KB, 60% is moment.js+lodash'; 'GET /feed: 1.2s, runs 1+N queries, N≈40'). Step 4: For each bottleneck, identify the fix and ESTIMATE the expected gain and the effort. Step 5: Separate confirmed bottlenecks from suspicions you could not measure. Good looks like: every claim has a number behind it. Stage measurements to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/measure.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/measure.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -367,13 +527,23 @@
         "role": "reviewer",
         "summary": "rank optimizations by impact vs effort",
         "prompt": "Step 1: Open `perf-report.md` and write a '## Summary' table of each metric: budget vs measured vs PASS/FAIL. Step 2: Add a '## Recommendations' section ranked by impact-vs-effort; each entry: the bottleneck (with its measured number), the specific fix (e.g. 'code-split the editor route and lazy-load it', 'replace the 1+N with a single JOIN/batch', 'serve images as WebP at 2x and add width/height'), the ESTIMATED gain, and the effort. Step 3: Add a '## Quick wins' callout for the high-impact/low-effort items to do first. Step 4: Add a '## Needs measurement' section for suspicions not yet confirmed. Every recommendation must cite a measured number and an expected payoff — no generic 'optimize images'. On a loop-back, fix only the named gaps. `write_task_note` the report path and the count of failing metrics.",
-        "produces": { "path": "perf-report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "perf-report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `perf-report.md` and grade it against the scope budget checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every metric in the budget was measured (number present, not estimated by feel); (2) each metric shows budget vs measured vs pass/fail; (3) each recommendation is tied to a measured bottleneck with a specific fix; (4) each recommendation has an estimated gain and effort; (5) recommendations are ranked by impact vs effort with quick-wins called out; (6) no hand-wavy advice without a number. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "perf-report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "perf-report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -408,7 +578,10 @@
         "role": "developer",
         "summary": "inventory deps with versions, CVEs, licenses",
         "prompt": "Step 1: Read the manifest and lockfile (package.json/lock, requirements/poetry, go.mod, Cargo.toml, etc.) to inventory direct and notable transitive dependencies. Step 2: For each, gather: installed version vs latest, the semver gap (patch/minor/major behind), known vulnerabilities (run the ecosystem audit tool if available — `npm audit`, `pip-audit`, `cargo audit` — and capture CVE id + severity), license, and maintenance signals (last release date, archived/deprecated, single-maintainer). If the task already provides audit output or dependency notes, treat those files as authoritative evidence and do not replace them with fresh network assumptions. Step 3: Flag duplicates/multiple versions of the same package and obviously unused or trivially-replaceable dependencies. Step 4: Write the acceptance-criteria checklist for the audit, e.g. 'every direct dependency is inventoried', 'all CVEs at high+ are captured with an id', 'each license is recorded and flagged if copyleft/incompatible', 'staleness is measured by both semver gap and release recency'. Step 5: Save the inventory table to `write_task_note` AND `notes/scan.md`. No prioritization yet — this phase is the raw inventory.",
-        "produces": { "path": "notes/scan.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scan.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "assess",
@@ -416,7 +589,10 @@
         "role": "reviewer",
         "summary": "tier each dep by risk and remediation cost",
         "prompt": "Step 1: For each dependency in the inventory, assign a risk tier (Critical / High / Medium / Low) weighing: CVE severity AND whether the vulnerable code path is actually used, how far behind it is, whether the upgrade is a breaking major (and the migration cost), license incompatibility, and abandonment/maintenance risk. Step 2: Decide the remediation per dep: patch-upgrade (safe), minor/major upgrade (note breaking changes to handle), replace (name the alternative), remove (if unused), or defer (if no seeded issue is present). If the evidence says no patched version exists, do not recommend an update-to-patch; recommend replacement, containment, or a human decision instead. Step 3: Determine a sensible ORDER — critical/no-patch security items first, then other high CVEs, then cleanup and low-effort maintenance; do not put unused cleanup or low-risk maintenance ahead of a critical no-patch replacement just because it is easy. Step 4: Distinguish real exposure from theoretical (a CVE in an unreachable code path is lower risk — say so), and distinguish maintenance-only upgrades from security fixes. Step 5: Note anything needing human judgment (license/legal, a major framework bump). Good looks like: a tier justified by both severity and actual exposure, not just the audit tool's color. Stage the tiered list to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/assess.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/assess.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -424,13 +600,23 @@
         "role": "reviewer",
         "summary": "prioritized upgrade/replace/remove plan",
         "prompt": "Step 1: Open `dependency-audit.md` and write a '## Summary' line: total deps, count by risk tier, and the headline risk. Step 2: Add an '## Action plan' ordered by priority; each entry: `package@installed → action (target version / replacement / remove / defer)` with the reason (CVE id + severity, semver gap, license, abandonment, or no seeded issue), the breaking-change note if any, and the migration effort. Keep exact target versions and named replacement alternatives from the evidence; do not downgrade a named maintenance upgrade to vague monitoring or replace a named alternative with generic wording. Step 3: Add a '## License flags' section for any copyleft/incompatible licenses; if the source names GPL/copyleft, the section must name that package and exact license identifier, not say no flags were found. Do not infer missing licenses; say license not provided when the evidence does not name one. Step 4: Add a '## Needs human decision' section for legal/major-bump/no-patch calls. Step 5: Add a one-paragraph '## Recommended order' (what to do this week vs later), keeping critical no-patch CVEs ahead of unused cleanup and low-effort maintenance upgrades. Every action must name a concrete target and a justification — no 'update your packages'. On a loop-back, fix only the named gaps. `write_task_note` the report path and the counts by tier.",
-        "produces": { "path": "dependency-audit.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "dependency-audit.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `dependency-audit.md` and grade it against the scan checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every direct dependency is inventoried with installed vs latest; (2) all high+ CVEs are captured with an id and severity; (3) each risky dep has a concrete action (upgrade target / replacement / remove / defer) and a justification; (4) breaking-change/migration cost is noted for major upgrades; (5) licenses are recorded and incompatibilities flagged, especially any GPL/copyleft source note; (6) the plan is prioritized with a recommended order that puts critical/no-patch security items before unused cleanup and maintenance-only upgrades; (7) risk tiers reflect actual exposure, not just the tool's raw severity; (8) no dependency with no seeded issue is inflated into a security/replacement recommendation; (9) no dependency with no patched version is described as patch-upgradeable. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "dependency-audit.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "dependency-audit.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.1.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -463,7 +649,10 @@
         "role": "reviewer",
         "summary": "map the surface, lock an API design checklist",
         "prompt": "Step 1: Read the contract (OpenAPI/Swagger YAML/JSON, a GraphQL SDL, or the route/handler definitions) and inventory every endpoint/operation/type with its method, path, params, request/response schema, and auth. Step 2: Note whether this is a NEW API or a CHANGE to an existing one (if a change, backward compatibility is a first-class criterion). Step 3: Write an API acceptance-criteria checklist covering: resource naming (nouns, plural collections, consistent casing) and correct HTTP-method semantics; correct and consistent status codes (201 on create, 204 on empty, 4xx vs 5xx); a single consistent error schema across all endpoints; pagination/filtering/sorting conventions applied uniformly; auth declared per operation; explicit versioning and no breaking changes (no removed/renamed fields, no narrowed types, no new required inputs) for changes; idempotency for unsafe-but-retried operations; and schema rigor (required vs optional correct, enums constrained, types precise, examples present). Step 4: State the pass condition for each. Write the surface inventory + checklist to `write_task_note` AND `notes/scope.md`. No findings yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "review",
@@ -471,7 +660,10 @@
         "role": "developer",
         "summary": "check each operation + type against the rules",
         "prompt": "Step 1: Walk EACH endpoint/operation against the checklist: verify the method matches the action, the path is a sensible resource, the status codes are correct and complete (including error codes), the request/response schemas are precise, and auth is declared. Step 2: Walk EACH type/schema: required vs optional fields are right, enums and formats constrain values, nullability is intentional, and naming is consistent. Step 3: Cross-cut the whole surface for consistency: do all errors share one schema, is pagination uniform, is casing consistent, are similar resources modeled the same way. Step 4: For a CHANGE, diff against the prior contract and flag every breaking change. Step 5: For each finding capture: the operation/type, the rule violated, the impact on a client developer, severity, and the CORRECTED snippet (the fixed YAML/SDL/schema fragment). Good looks like: a finding with a before/after contract snippet, not 'improve error handling'. Stage findings to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -479,13 +671,23 @@
         "role": "reviewer",
         "summary": "findings with corrected snippets + compat verdict",
         "prompt": "Step 1: Open `api-review.md` and write a verdict: Approve / Approve-with-changes / Request-changes, and for a change an explicit Backward-compatible: yes/no. Step 2: Add a '## Breaking changes' section first if any (each with the operation and the corrected approach), then '## Blocking' and '## Non-blocking' findings, each as `operation/type — rule — impact — corrected snippet`. Step 3: Add a '## Consistency' section for cross-cutting issues (error schema, pagination, casing). Step 4: Add a '## Strengths' note on what the contract gets right. Every finding must cite the operation/type and include a concrete corrected snippet — no generic advice. On a loop-back, fix only the named gaps. `write_task_note` the report path, the compatibility verdict, and the count of blocking findings.",
-        "produces": { "path": "api-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "api-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `api-review.md` and grade it against the scope checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every endpoint/operation and type was reviewed; (2) HTTP-method/status-code semantics were checked; (3) error schema, pagination, and naming consistency were assessed across the surface; (4) for a change, backward compatibility is explicitly stated and any breaking change is flagged; (5) each finding includes a concrete corrected contract snippet; (6) findings are prioritized (breaking/blocking/non-blocking); (7) the verdict matches the findings. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "api-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "api-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.1.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -494,7 +696,13 @@
     "name": "Lightweight Threat Model",
     "artifactNote": "Every deliverable lands in the project's **artifacts drawer** (`write_artifact`),\nnot the shipped workspace — a threat model is review/analysis output, not\nproduct source — and each is gated for size/shape there exactly as a workspace\nfile would be.",
     "description": "Produce a lightweight threat model for a feature or system using a structured method (STRIDE over a simple data-flow diagram) and output a prioritized mitigation plan. First scopes the system by drawing its data-flow — actors, processes, data stores, and trust boundaries — and locks what is in scope, then enumerates threats per element using STRIDE (spoofing, tampering, repudiation, info-disclosure, denial-of-service, elevation-of-privilege) and rates each by likelihood and impact, then writes a threat-model report mapping each credible threat to a concrete mitigation and an owner. Use this for a threat model, security design review, STRIDE analysis, attack-surface mapping, or thinking through what could go wrong before building a feature — it yields a structured, prioritized set of threats and mitigations rather than an ad-hoc list of worries.",
-    "tags": ["security", "threat-model", "stride", "design", "risk"],
+    "tags": [
+      "security",
+      "threat-model",
+      "stride",
+      "design",
+      "risk"
+    ],
     "triggers": [
       "threat model this",
       "STRIDE analysis",
@@ -550,7 +758,11 @@
         "artifact": true
       }
     },
-    "finishPrompt": "Every acceptance criterion passed. Write a one-paragraph DONE summary to task notes via `write_task_note`: what was built, the deliverable path(s) (the artifacts under `reports/`), and a one-line confirmation that each criterion is met. Then report DONE."
+    "finishPrompt": "Every acceptance criterion passed. Write a one-paragraph DONE summary to task notes via `write_task_note`: what was built, the deliverable path(s) (the artifacts under `reports/`), and a one-line confirmation that each criterion is met. Then report DONE.",
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
+    }
   },
   {
     "id": "content-accuracy-review",
@@ -558,7 +770,13 @@
     "sourceDiscipline": "Source discipline:\n\n- Extract only checkable claims that appear in the supplied content.\n- Verify against the supplied or fetched sources; never create extra claims, companies, metrics, quotes, or source sections to make the report longer.\n- Preserve enough of the original claim text that a reader can trace each verdict back to the draft.\n- Mark unsupported but plausible claims as `UNVERIFIABLE` or `FALSE` according to the evidence, not as true by assumption.",
     "name": "Content Accuracy Review",
     "description": "Fact-check a piece of content for accuracy and produce a claim-by-claim verification report. First scopes the content and extracts every checkable claim (statistics, dates, quotes, attributions, causal and factual statements) and locks a verification standard, then verifies each claim against authoritative sources rating it true/false/misleading/unverifiable with the supporting evidence, then writes a report flagging every inaccuracy with the correction and source plus an overall trust rating. Use this for a fact-check, accuracy review, content verification, checking claims and statistics, source-checking an article, or vetting content before publishing — it returns a claim-level verdict backed by cited sources rather than a vague 'seems accurate'.",
-    "tags": ["fact-check", "accuracy", "content", "review", "verification"],
+    "tags": [
+      "fact-check",
+      "accuracy",
+      "content",
+      "review",
+      "verification"
+    ],
     "triggers": [
       "fact check this",
       "accuracy review",
@@ -574,7 +792,10 @@
         "role": "reviewer",
         "summary": "extract every checkable claim, lock the standard",
         "prompt": "Step 1: Read the content and EXTRACT every checkable claim into a numbered list — statistics and numbers, dates, named quotes and their attributions, causal statements ('X causes Y'), definitions, and any assertion presented as fact. Step 2: For each claim, note what kind it is and what evidence would settle it. Step 3: Separate verifiable facts from opinion/analysis (opinions are out of scope for accuracy but note unsupported opinions stated as fact). Step 4: Write the acceptance-criteria checklist / verification standard, e.g. 'every factual claim is extracted', 'each claim is checked against at least one authoritative source', 'a claim with no reliable source is marked unverifiable, not assumed true', 'corrections cite their source'. Step 5: Note the source quality bar (primary/official sources over secondary). Write the numbered claim list + standard to `write_task_note` AND `notes/scope.md`. No verification yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -582,7 +803,10 @@
         "role": "researcher",
         "summary": "check claims against sources, rate each",
         "prompt": "Step 1: For EACH numbered claim, find authoritative evidence (use web search/fetch if available, prioritizing primary and official sources; otherwise reason from well-established knowledge and clearly mark anything you cannot externally confirm). Step 2: Rate each claim: TRUE (supported), FALSE (contradicted), MISLEADING (technically true but framed to deceive, or missing critical context), or UNVERIFIABLE (no reliable source found). Step 3: For every claim capture: the rating, the supporting source(s) with title/URL, a one-line evidence note, and — for false/misleading — the CORRECT statement. Step 4: Be adversarial: check whether a statistic is current, whether a quote is accurate and in context, and whether an attribution is right. Step 5: Do NOT mark a claim true just because it is plausible — require evidence, and prefer 'unverifiable' to a guess. Good looks like: each claim with a verdict and a citable source. Stage the verified claim table to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -590,13 +814,23 @@
         "role": "reviewer",
         "summary": "claim-by-claim verdicts + corrections",
         "prompt": "Step 1: Open `accuracy-review.md` and write an overall trust rating (e.g. Accurate / Mostly accurate with fixes / Significant inaccuracies) with the count of false/misleading/unverifiable claims. Step 2: Add an '## Issues' section listing every FALSE, MISLEADING, and UNVERIFIABLE claim first: the original claim, the verdict, the correct statement, and the cited source. Step 3: Add a '## Verified claims' section confirming the claims that checked out (with sources), so the review's rigor is visible. Step 4: Add a '## Sources' list of everything consulted. Step 5: Note any claim that needs a subject-matter expert. Every issue must include a correction and a source citation; never assert a correction without evidence. On a loop-back, fix only the named gaps. `write_task_note` the report path and the counts by verdict.",
-        "produces": { "path": "accuracy-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "accuracy-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `accuracy-review.md` and grade it against the scope standard. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every checkable claim from the content was extracted and addressed; (2) each claim has a verdict (true/false/misleading/unverifiable); (3) each false/misleading claim has a correction AND a cited source; (4) verified claims cite their sources; (5) unverifiable claims are marked as such rather than assumed true; (6) a sources list is present; (7) the overall trust rating matches the findings. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "accuracy-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "accuracy-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -629,7 +863,10 @@
         "role": "reviewer",
         "summary": "lock units in scope + a behavioral coverage bar",
         "prompt": "Step 1: Identify the modules/units under review and their behavioral surface — the public functions, the critical paths, the branches, and the failure modes that matter. Step 2: Run the coverage tool if available (`vitest --coverage`, `pytest --cov`, etc.) to get the line/branch numbers as a starting signal — but treat it as a floor, not the goal. Step 3: Write a coverage acceptance-criteria checklist that distinguishes LINE coverage from BEHAVIORAL coverage: 'every critical path has a test that asserts its outcome', 'each conditional branch is exercised', 'edge cases (empty/null/boundary/large) are tested', 'error and exception paths are tested', 'tests assert behavior, not just that code runs without throwing', 'a regression in core logic would fail at least one test'. Step 4: State the target for THIS code (e.g. 'core domain logic ~90% branch + behavioral; glue code lighter'). Write the units + the coverage bar to `write_task_note` AND `notes/scope.md`. No audit yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -637,7 +874,10 @@
         "role": "reviewer",
         "summary": "find untested behavior + weak assertions",
         "prompt": "Step 1: Map the existing tests to the behavioral surface — for each unit, what is tested and what does each test actually ASSERT. Step 2: Flag the gaps: untested public functions, untested branches, missing edge cases (empty/null/boundary/error), and missing regression protection on core logic. Step 3: Flag WEAK tests — tests that only check 'it runs' without asserting outcomes, over-mocked tests that would pass even if the real logic broke, snapshot-only tests of meaningful logic, and tests coupled to implementation rather than behavior. Step 4: Cross-check the coverage numbers: where lines are 'covered' but no assertion verifies the result, call it out (covered ≠ tested). Step 5: For each gap, draft the test to add: the unit, the scenario/input, and the expected assertion. Step 6: Rank by value — core/critical logic and error paths first. Good looks like: 'parseAmount() has no test for negative or non-numeric input → add a test asserting it throws/returns Err', not 'add more tests'. Stage the gap list to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/audit.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -645,13 +885,23 @@
         "role": "reviewer",
         "summary": "prioritized test backlog + quality findings",
         "prompt": "Step 1: Open `coverage-review.md` and write a '## Summary': the coverage numbers, an honest behavioral-coverage assessment, and the biggest gap. Step 2: Add a '## Missing tests' backlog ranked by value; each entry: the unit, the untested scenario, and the assertion the new test should make. Step 3: Add a '## Weak tests' section listing low-value/misleading tests with how to strengthen them. Step 4: Add a '## Well-covered' section noting what is solidly tested (so effort goes where it's needed). Step 5: Add a '## Quick wins' callout for high-value, easy tests to add first. Every recommendation must name a concrete test and its assertion — no 'increase coverage'. On a loop-back, fix only the named gaps. `write_task_note` the report path and the count of missing high-value tests.",
-        "produces": { "path": "coverage-review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "coverage-review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `coverage-review.md` and grade it against the scope coverage bar. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) the review distinguishes line coverage from behavioral coverage rather than chasing a number; (2) untested critical paths, branches, edge cases, and error paths are identified; (3) each missing test is described concretely with the scenario and the assertion to make; (4) weak/misleading tests are flagged with how to strengthen them; (5) the backlog is prioritized by value with quick-wins called out; (6) a well-covered section keeps effort focused; (7) no vague 'add more tests' filler. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "coverage-review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "coverage-review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.1.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -659,7 +909,13 @@
     "role": "maintenance-review",
     "name": "Release Readiness Review",
     "description": "Run a go/no-go release readiness review against a structured pre-launch checklist and produce a sign-off report with a clear ship decision. First scopes the release and locks a readiness checklist (acceptance criteria met, tests and CI green, no open blockers, migrations and rollback ready, monitoring and alerts in place, docs and changelog updated, feature flags and config set, and on-call/comms prepared), then verifies each item by inspecting the actual state rather than assuming, then writes a go/no-go report listing every blocker that must clear before ship and the residual risks. Use this for a release readiness review, a go/no-go decision, a pre-launch checklist, a ship-readiness gate, a launch review, or deciding if a change is safe to deploy — it produces an evidence-backed ship decision rather than a gut-feel 'looks good'.",
-    "tags": ["release", "readiness", "go-no-go", "review", "launch"],
+    "tags": [
+      "release",
+      "readiness",
+      "go-no-go",
+      "review",
+      "launch"
+    ],
     "triggers": [
       "release readiness review",
       "are we ready to ship",
@@ -675,7 +931,10 @@
         "role": "reviewer",
         "summary": "lock the release scope + a go/no-go checklist",
         "prompt": "Step 1: Define the release: what is shipping (features/changes), to whom, and the rollout mechanism (full deploy / staged / flagged). Step 2: Write a readiness acceptance-criteria checklist covering: the feature's own acceptance criteria are met; the test suite and CI are green; there are no open blocking bugs or unresolved review comments; database migrations are reversible and a rollback path exists; monitoring, logging, and alerts cover the new code; user-facing docs, release notes, and changelog are updated; feature flags and config/secrets are set correctly for the target env; and on-call ownership and a comms/rollback plan are ready. Step 3: For each item, state the concrete pass condition and HOW it will be verified (where to look). Step 4: Mark which items are hard blockers vs advisory. Write the release definition + checklist to `write_task_note` AND `notes/scope.md`. No verification yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -683,7 +942,10 @@
         "role": "developer",
         "summary": "check each item against the real state",
         "prompt": "Step 1: For EACH checklist item, VERIFY the actual state — do not assume. Run/inspect the tests and CI status; search for open issues/TODOs/blocking review comments; check that the migration has a down path and that a rollback is documented; confirm alerts/dashboards reference the new code paths; open the docs/changelog/release notes to confirm they are updated; check the flag and config/secret values for the target environment; confirm on-call and the rollback/comms plan exist. Step 2: For each item record PASS/FAIL/NA with the EVIDENCE (the command output, the file, the config value, the issue link) — a claim without evidence is not a pass. Step 3: Classify every FAIL as a hard blocker or an accepted risk. Step 4: Note residual risks even where items pass (e.g. 'migration is reversible but locks the table for ~30s'). Good looks like: every item backed by an observation, not 'should be fine'. Stage the verification log to `write_task_note`. Do not write the report yet.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -691,13 +953,23 @@
         "role": "reviewer",
         "summary": "ship decision + blockers + residual risk",
         "prompt": "Step 1: Open `release-readiness.md` and write the DECISION at the top: GO / NO-GO / GO-WITH-CONDITIONS, in one sentence with the deciding factor. Step 2: Add a '## Checklist' table: each item with PASS/FAIL/NA and its evidence. Step 3: Add a '## Blockers' section listing every must-clear item before ship, with the concrete action to clear it and an owner. Step 4: Add a '## Residual risks' section (accepted risks and watch-items for after deploy) and a '## Rollback' note summarizing how to back out. Step 5: If GO-WITH-CONDITIONS, list the exact conditions. The decision must follow from the evidence — no GO with an open hard blocker. On a loop-back, fix only the named gaps. `write_task_note` the report path, the decision, and the count of open blockers.",
-        "produces": { "path": "release-readiness.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "release-readiness.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `release-readiness.md` and grade it against the scope checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (1) every checklist item has a PASS/FAIL/NA with concrete evidence (not an assumption); (2) tests/CI status was actually checked; (3) migration reversibility and a rollback path are confirmed; (4) monitoring/alerts and docs/changelog were verified; (5) flags/config for the target env were checked; (6) all blockers are listed with an action and owner, and residual risks are stated; (7) the GO/NO-GO decision is consistent with the evidence (no GO with an open hard blocker). If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "release-readiness.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "release-readiness.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -743,7 +1015,10 @@
         "role": "reviewer",
         "summary": "build a whole-system security map from the static index",
         "prompt": "You are starting a deep, whole-codebase security review — take your time and look across the ENTIRE system, not one file. Step 1: Call `security_scan` to build the dependency inventory and run any installed OSS scanners (semgrep / osv-scanner / gitleaks). Step 2: Call `map_repo`, `map_attack_surface`, `security_overview`, and `list_dependencies` to assemble a whole-system picture: languages and top areas; entry points; route/handler files; auth & middleware boundaries; secret touchpoints (config/env/credential files); files that read untrusted input (taint sources); external integrations and data stores; and the dependency inventory with any advisories. Step 3: Identify the trust boundaries — where untrusted data crosses into the system and where privileged/state-changing operations live. Step 4: Record the CANDIDATE SYSTEMIC THEMES that `security_overview` surfaced (categories recurring across many files) as leads to investigate. Write a whole-system surface map — assets, entry points, trust boundaries, the auth model, data stores, external dependencies, and the candidate themes — to `notes/security/surface-map.md`. No findings yet; this phase orients the review across the whole codebase.",
-        "produces": { "path": "notes/security/surface-map.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/security/surface-map.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "threatmodel",
@@ -751,7 +1026,10 @@
         "role": "reviewer",
         "summary": "assets, actors, STRIDE per boundary, highest blast radius",
         "prompt": "Using the surface map, build the system's threat model to decide WHERE systemic weaknesses would hurt most. Step 1: List the assets worth protecting (user data, secrets, money/state-changing operations, admin capability) and the actors/threats (unauthenticated user, authenticated user, insider, compromised dependency). Step 2: For each trust boundary, walk STRIDE (spoofing, tampering, repudiation, information-disclosure, denial-of-service, elevation-of-privilege) and note where a weakness would have the highest BLAST RADIUS across the system. Step 3: Prioritize — which boundaries or assets, if weak, would compromise many parts of the app at once? Those are where systemic issues hide and where the audit should spend its time. Write the threat model — assets, actors, trust zones, STRIDE-per-boundary, and the ranked high-blast-radius areas to focus on — to `notes/security/threat-model.md`.",
-        "produces": { "path": "notes/security/threat-model.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/security/threat-model.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -759,7 +1037,10 @@
         "role": "reviewer",
         "summary": "confirm real source→sink paths and control consistency across all entry points",
         "prompt": "Investigate the high-blast-radius areas for CONCRETE, SYSTEMIC weaknesses — not one-off style nits. Step 1: Use `scan_findings` (filter by severity/category) to pull the static leads, then VERIFY each in the code with `read_symbol` / `read_file` — a regex lead is not a finding until you confirm the vulnerable path. Step 2: For untrusted inputs, use `trace_taint` on the relevant files to see which sinks are reachable, then confirm the actual source→sink path by reading it; flag any path that reaches a dangerous sink without validation, escaping, or parameterization. Step 3: Assess the auth model HOLISTICALLY — is every route behind an auth boundary? Is authorization applied consistently across ALL entry points, or is the same check missing or re-implemented differently in several places (a systemic broken-access / IDOR pattern)? Step 4: Check secrets posture (hardcoded or logged secrets, ad-hoc env reads), crypto usage (weak algorithms, predictable randomness), and dependency risk (advisory-bearing packages from `list_dependencies`). Step 5: For every CONFIRMED finding capture file:line, the vulnerability class, an exploit sketch, severity and likelihood, and a concrete remediation. Prefer findings that RECUR across the codebase — a class of bug appearing in many places is the systemic signal. Stage the running findings list to `notes/security/findings.md`; also note the threat classes you checked and found clean.",
-        "produces": { "path": "notes/security/findings.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/security/findings.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "synthesize",
@@ -767,7 +1048,10 @@
         "role": "reviewer",
         "summary": "group findings by root cause; rank by blast radius",
         "prompt": "Step back from the individual findings and cluster them into SYSTEMIC THEMES — the root-cause patterns that explain many findings at once (e.g. 'input validation is inconsistent across the API routes', 'secrets are loaded ad hoc in several modules with no central config', 'there is no shared authorization layer so each endpoint re-checks access differently'). Step 1: Group the findings by ROOT CAUSE, not by file. Step 2: For each theme, state the root cause (the architectural gap), the BLAST RADIUS (how much of the system it touches and how many findings it explains), and the systemic FIX (the single change that would prevent the whole class). Step 3: Rank the themes by blast radius × severity. Write the themes to `notes/security/themes.md`. A clean codebase with no material findings can say so plainly rather than inventing themes.",
-        "produces": { "path": "notes/security/themes.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/security/themes.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -775,14 +1059,24 @@
         "role": "reviewer",
         "summary": "systemic report + machine-readable findings, all citing real files",
         "prompt": "Write the final deliverable as TWO files in the `security-review/` folder. Step 1: Write `security-review/findings.json` — a JSON array where each finding is an object with: `file` (a REAL workspace path), `line` (a number), `severity` (one of critical, high, medium, low, info), `category`, `title`, `remediation` (a concrete fix), and `theme` (the systemic theme it belongs to). Every `file` MUST be a real path in this workspace and every finding MUST have a line, a severity, and a concrete remediation — no fabricated paths. Step 2: Write `security-review/REPORT.md` with these sections, using those exact headings: `## Verdict` — a one-line top verdict (e.g. Block / Remediate-then-ship / Acceptable) with the count of findings by severity; do NOT say 'safe to merge' while any critical/high finding is open. `## Systemic Themes` — each theme from synthesize with its root cause and blast radius (this is the heart of a deep review). `## Findings` — each finding as `### [SEVERITY] class — file:line` with the exploit sketch, impact, and remediation, ordered by severity then blast radius. `## Verified Safe` — the threat classes you checked and found clean, so coverage is auditable. `## Not Statically Verifiable` — anything needing a pentest or runtime check. On a loop-back, fix ONLY the gaps the evaluator named without dropping findings that already passed.",
-        "produces": { "path": "security-review/REPORT.md", "kind": "security-report" }
+        "produces": {
+          "path": "security-review/REPORT.md",
+          "kind": "security-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open `security-review/REPORT.md` and `security-review/findings.json` and grade the review against its acceptance criteria. Check EACH and write PASS/FAIL with a one-line reason: (1) every finding is pinned to a REAL file:line (no fabricated paths) with a severity and a concrete remediation; (2) the Systemic Themes section names the root-cause patterns with their blast radius — a deep review is about systemic issues, not a list of isolated nits; (3) untrusted-input findings trace a real source→sink path rather than restating a raw scanner hit; (4) the auth model was assessed HOLISTICALLY (consistency across all entry points), not file-by-file; (5) a Verified-safe section makes the review's coverage auditable; (6) the verdict matches the open severity (no 'safe' with an open critical/high); (7) no vague filler like 'consider validating inputs' — every finding is concrete. If any criterion fails, name the exact gap and loop back.",
       "loopBackTo": "report",
-      "deliverable": { "path": "security-review/REPORT.md", "kind": "security-report" }
+      "deliverable": {
+        "path": "security-review/REPORT.md",
+        "kind": "security-report"
+      }
     },
-    "finishPrompt": "The security review passed every acceptance criterion. Write a one-paragraph DONE summary to task notes via `write_task_note`: the top-line verdict, the count of findings by severity, the systemic themes, and the deliverable paths (`security-review/REPORT.md` + `security-review/findings.json`). Then report DONE."
+    "finishPrompt": "The security review passed every acceptance criterion. Write a one-paragraph DONE summary to task notes via `write_task_note`: the top-line verdict, the count of findings by severity, the systemic themes, and the deliverable paths (`security-review/REPORT.md` + `security-review/findings.json`). Then report DONE.",
+    "release": {
+      "version": "1.1.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
+    }
   }
 ]

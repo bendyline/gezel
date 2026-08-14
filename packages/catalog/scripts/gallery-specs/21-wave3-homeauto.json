@@ -4,7 +4,14 @@
     "role": "general",
     "name": "Write an Automation Recipe",
     "description": "Turn 'I wish the house would...' into an inspectable, versioned automation: triggers and actions that name real devices from the house's own inventory, a dry run through the device tools before anything is armed, and a manual override always written in. Locks the owner's intent and the safety rules FIRST (nothing that heats or locks runs unattended without a failsafe, an override path is mandatory, dry-run before arm), then drafts the recipe, then proves it against the devices — so the house only ever does what was actually asked, and never anything it cannot be talked out of. Use for home automations, 'make the lights do X', schedules and scenes, sensor-triggered routines, and wiring up a new smart-home behavior.",
-    "tags": ["home", "automation", "smart-home", "devices", "recipe", "ritual"],
+    "tags": [
+      "home",
+      "automation",
+      "smart-home",
+      "devices",
+      "recipe",
+      "ritual"
+    ],
     "triggers": [
       "set up an automation",
       "make the house do",
@@ -19,7 +26,10 @@
         "role": "huisautomaat",
         "summary": "the owner's intent, the real device inventory, and the safety rules locked",
         "prompt": "Understand the wish and the house before writing a single trigger. Step 1: restate the owner's intent in one plain sentence — when should what happen, and when should it NOT — and confirm it with them if anything is ambiguous. Step 2: pull the device inventory through the project's home capabilities and list the devices this automation actually needs: the sensors that will trigger it, the devices it will act on, each with its exact inventory id and current state. If a device the wish assumes does not exist in the inventory, say so now — never plan around an invented device. Step 3: lock the safety rules — nothing that heats, locks, or opens runs unattended without a stated failsafe; every automation carries a manual override the owner can flip without ceremony; and no recipe is armed before a dry run has exercised it against the devices. Step 4: write an acceptance-criteria checklist ('every device in the recipe exists in the inventory, by exact id', 'trigger, conditions, and actions are all present and specific', 'a manual override is written into the recipe', 'the dry run exercised every action with the tool responses recorded', 'the install notes say how to arm it and how to stop it'). Call write_task_note with the intent sentence + the devices involved + the checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -34,7 +44,10 @@
         "role": "developer",
         "summary": "every trigger and action exercised against the devices, evidence on file",
         "prompt": "Prove the recipe against the real device inventory before anyone arms it. Step 1: for every device the recipe references, read its current state through the project's home capabilities and confirm the device answers — a device that does not exist or does not respond sends you back to the draft, not onward. Step 2: exercise each action through the device tools' dry-run path, so the intended state change is checked without actually switching anything in the house. Step 3: record the evidence in notes/dry-run.md — for each device: its id, the state you read, the dry-run response you got, verbatim — plus a short verdict per action (would fire as intended, or what was off). Step 4: if any action came back wrong, fix the recipe first and dry-run again; the notes must describe the run that matches the final recipe. Call write_task_note with the device count exercised and the verdict.",
-        "produces": { "path": "notes/dry-run.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/dry-run.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -42,12 +55,20 @@
         "role": "copywriter",
         "summary": "what it does, how to arm it, how to stop it, what the dry run proved",
         "prompt": "Write the install notes the owner will actually read. Step 1: open with one warm paragraph saying what the automation does and when — the intent sentence from notes/scope.md, in the owner's language. Step 2: list the devices it touches, each with its friendly name and inventory id, and where the recipe file lives. Step 3: say how to arm it and — just as prominently — how to stop or override it: the manual override path from the recipe, spelled out so it works at 2am. Step 4: summarize what the dry run proved, citing the evidence in notes/dry-run.md — which devices answered, which actions were exercised, and that nothing was actually switched. Step 5: close with what to watch the first week and the one or two ways this automation could misbehave (the safety rules from scope, made concrete). Write report.md and call write_task_note with a one-line DONE summary.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 800
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open automations/, notes/dry-run.md, report.md, and notes/scope.md and verify every criterion from the checklist: the recipe file parses as JSON and carries a trigger, conditions, actions, and a manual override; every device id in the recipe appears in the inventory evidence gathered during scope and dry-run — no invented devices; the dry-run notes show every action exercised with real tool responses recorded, not paraphrased; and the install notes say how to arm the automation, how to stop it, and what the dry run proved. Write PASS/FAIL per criterion; on any failure, name the field or device that is wrong and loop back to draft.",
       "loopBackTo": "draft"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -55,7 +76,14 @@
     "role": "general",
     "name": "Morning House Report",
     "description": "The house says good morning properly: every zone's state read through the device tools, anything unusual surfaced first with one suggested action apiece, and the boring rest compressed to a line or two — glanceable before the first coffee. Locks the report criteria FIRST (every zone covered, anomalies before normals, a suggested action per oddity, short enough to read standing up), then polls the house, then writes the report — so the one morning the garage door stayed open all night is the morning it gets noticed. Use for morning house checks, daily home status, 'anything wrong with the house', overnight anomaly sweeps, and a glanceable device roundup.",
-    "tags": ["home", "smart-home", "devices", "status", "report", "ritual"],
+    "tags": [
+      "home",
+      "smart-home",
+      "devices",
+      "status",
+      "report",
+      "ritual"
+    ],
     "triggers": [
       "morning house report",
       "how is the house",
@@ -70,7 +98,10 @@
         "role": "huisautomaat",
         "summary": "coverage, anomalies-first ordering, and brevity locked as criteria",
         "prompt": "Decide what a good morning report is before reading a single sensor. Step 1: pull the device inventory through the project's home capabilities and note the zones the house actually has — the report must account for every one of them, so nothing quietly falls off the page. Step 2: define what counts as unusual against what is typical for the hour — a door or window open overnight, a battery running low, a sensor that has gone quiet, anything switched on that should not be. Step 3: lock the shape — anything unusual comes FIRST, each oddity with the device, what is off, and one concrete suggested action; the nominal rest is compressed to a line or two, never a device-by-device inventory dump; the whole report reads standing up, before coffee. Step 4: write an acceptance-criteria checklist ('every zone accounted for', 'anomalies surfaced before anything normal', 'each anomaly carries one suggested action', 'every device mentioned exists in the states evidence — nothing invented', 'short and warm'). Call write_task_note with the zone count + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "poll",
@@ -78,7 +109,10 @@
         "role": "developer",
         "summary": "every device's state read and recorded, oddities flagged in the evidence",
         "prompt": "Read the whole house, honestly. Step 1: through the project's home capabilities, read the inventory and the current state of every device — every zone, not just the interesting ones. Step 2: record the evidence in notes/states.md — for each device: its name and id, its zone, the state you read, and the battery level or last-seen time where the house reports one — verbatim from the tool responses, never from memory. Step 3: as you go, flag which readings look unusual against the criteria locked in notes/scope.md, and mark each flagged reading with a short why ('open since 23:41', 'battery 9 percent'). Step 4: end the notes with a one-line tally — devices read, anomalies flagged. Call write_task_note with that tally.",
-        "produces": { "path": "notes/states.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/states.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -86,12 +120,20 @@
         "role": "copywriter",
         "summary": "anomalies first with suggested actions, the calm rest in two lines",
         "prompt": "Write the report the owner reads standing up. Step 1: open with a 'Needs attention' section — every anomaly from notes/states.md, each as one short line: the device, what is off, and one concrete suggested action ('close it', 'charge it today', 'worth a look'). The most urgent first. If nothing is unusual, say so in one honest, pleasant line instead. Step 2: follow with the all-clear — the rest of the house compressed to a line or two by zone, never a device-by-device dump. Step 3: keep every device name and reading traceable to notes/states.md — the report never mentions a device the evidence does not carry. Step 4: keep it warm and short — headings, plain words, no filler; if it does not read in under a minute, trim it. Write report.md and call write_task_note with the anomaly count and the top item.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 800
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md, notes/states.md, and notes/scope.md and verify every criterion from the checklist: every zone in the states evidence is accounted for in the report; every anomaly flagged in the evidence appears in the 'Needs attention' section, before anything normal, each with one concrete suggested action; every device the report mentions exists in notes/states.md with the state the report claims — nothing invented, nothing embellished; and the nominal remainder is compressed rather than dumped. Read it once at speed: if it does not scan before coffee, that is a FAIL on brevity. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

@@ -35,6 +35,7 @@ class FakeDispatcher {
     lane?: 'interactive' | 'background';
     nightShift?: boolean;
     kind?: 'handoff' | 'entry';
+    roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;
   }> = [];
@@ -53,6 +54,7 @@ class FakeDispatcher {
     lane?: 'interactive' | 'background';
     nightShift?: boolean;
     kind?: 'handoff' | 'entry';
+    roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;
   }): Promise<{ sessionId: string }> {
@@ -64,6 +66,9 @@ class FakeDispatcher {
       ...(args.lane ? { lane: args.lane } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(args.kind ? { kind: args.kind } : {}),
+      ...(args.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
+        : {}),
       ...(args.capabilityFloor ? { capabilityFloor: args.capabilityFloor } : {}),
       ...(args.bookCatalogId ? { bookCatalogId: args.bookCatalogId } : {}),
     });
@@ -188,6 +193,7 @@ describe('TaskRunner — dispatch + FIFO', () => {
         { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
       ]),
       activeStepId: 'plan',
+      roleBasedNameOnlyMode: true,
       createdAt: now,
       updatedAt: now,
       createdBy: { kind: 'user' },
@@ -203,6 +209,7 @@ describe('TaskRunner — dispatch + FIFO', () => {
     expect(dispatcher.dispatches).toHaveLength(1);
     expect(dispatcher.dispatches[0]?.taskRef).toBe('p1/1');
     expect(dispatcher.dispatches[0]?.lane).toBe('background');
+    expect(dispatcher.dispatches[0]?.roleBasedNameOnlyMode).toBe(true);
     expect(runner.snapshot().pendingCount).toBe(0);
   });
 

@@ -3650,6 +3650,12 @@ export const ListProjectsResponseSchema = z.object({
 export const CreateProjectRequestSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  /**
+   * Existing local folder to use as the project workspace. Folder-backed
+   * projects are created with ambient Meester progress check-ins disabled;
+   * the user can opt back in from Project Settings.
+   */
+  workingDir: z.string().min(1).optional(),
   // about/missionObjectives are *encouraged, not required* at the wire level.
   // The New Project dialog still enforces the 60/40 richness minimums for the
   // blank/GitHub flows (where the user is authoring context from scratch), but

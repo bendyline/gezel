@@ -23,6 +23,21 @@ const CRAFTBOOKS = [
   },
 ];
 
+const RECENT_REFERENCES = [
+  {
+    key: 'studio:workspace:security/review-scope.md',
+    kind: 'workspace' as const,
+    path: 'security/review-scope.md',
+    projectId: 'studio',
+  },
+  {
+    key: 'studio:artifact:reports/audit.md',
+    kind: 'artifact' as const,
+    path: 'reports/audit.md',
+    projectId: 'studio',
+  },
+];
+
 describe('suggestSlashCommands', () => {
   it('shows every command for the initial slash', () => {
     expect(suggestSlashCommands('/')).toEqual(SLASH_COMMANDS);
@@ -97,6 +112,23 @@ describe('suggestSlashWordwheel', () => {
       expect.objectContaining({
         submit: '/model download',
         description: 'choose and download a new on-device model',
+      }),
+    ]);
+  });
+
+  it('offers project folders and filtered recent files after /open', () => {
+    expect(
+      suggestSlashWordwheel('/open ', CRAFTBOOKS, RECENT_REFERENCES).map((item) => item.submit),
+    ).toEqual([
+      '/open workspace',
+      '/open artifacts',
+      '/open security/review-scope.md',
+      '/open reports/audit.md',
+    ]);
+    expect(suggestSlashWordwheel('/open review', CRAFTBOOKS, RECENT_REFERENCES)).toEqual([
+      expect.objectContaining({
+        submit: '/open security/review-scope.md',
+        description: 'open recent workspace',
       }),
     ]);
   });

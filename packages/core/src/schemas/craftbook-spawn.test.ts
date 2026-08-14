@@ -20,6 +20,7 @@ describe('declarative fanout schema', () => {
   it('parses a CraftbookSpawn block (overFile + itemsPath + steps)', () => {
     const spawn = CraftbookSpawnSchema.parse({
       overFile: 'notes/billables.json',
+      overArtifact: true,
       itemsPath: 'items',
       entryStepId: 'draft-invoice',
       steps: [
@@ -31,6 +32,7 @@ describe('declarative fanout schema', () => {
       ],
     });
     expect(spawn.overFile).toBe('notes/billables.json');
+    expect(spawn.overArtifact).toBe(true);
     expect(spawn.itemsPath).toBe('items');
     expect(spawn.steps).toHaveLength(1);
   });

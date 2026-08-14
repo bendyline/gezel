@@ -87,7 +87,7 @@ describe('ensureProjectForWorkspace', () => {
     expect(setProjectWorkingDir).toHaveBeenCalledWith('p1', expect.any(String));
   });
 
-  it('creates a new project when no match found, then sets workingDir', async () => {
+  it('creates a new folder-backed project when no match is found', async () => {
     const folder = makeFolder(process.cwd());
     const listProjects = vi.fn().mockResolvedValue({ projects: [] });
     const createProject = vi
@@ -109,12 +109,14 @@ describe('ensureProjectForWorkspace', () => {
       about: string;
       missionObjectives: string;
       mode: string;
+      workingDir: string;
     };
     expect(arg.name).toBe(folder.name);
     expect(arg.mode).toBe('crew');
+    expect(arg.workingDir).toBe(process.cwd());
     // Schema requires about ≥ 60 chars, missionObjectives ≥ 40 chars.
     expect(arg.about.length).toBeGreaterThanOrEqual(60);
     expect(arg.missionObjectives.length).toBeGreaterThanOrEqual(40);
-    expect(setProjectWorkingDir).toHaveBeenCalledWith('p-new', expect.any(String));
+    expect(setProjectWorkingDir).not.toHaveBeenCalled();
   });
 });

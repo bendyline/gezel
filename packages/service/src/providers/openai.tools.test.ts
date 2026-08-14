@@ -94,6 +94,7 @@ describe('OpenAISession — external tools', () => {
     const req = recorded[0] as { tools?: Array<{ name: string }> };
     expect(req.tools).toBeTruthy();
     expect(req.tools?.map((t) => t.name)).toContain('get_weather');
+    expect(session.getRegisteredToolNames()).toContain('get_weather');
 
     // Captures surfaced for the route.
     const captured = session.capturedToolCalls();

@@ -300,6 +300,8 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     kind: z.literal('markdownHeadingsMatch'),
     file: z.string().min(1),
     outlineFile: z.string().min(1),
+    /** Read outlineFile from artifacts while file uses the check's primary surface. */
+    outlineArtifact: z.boolean().optional(),
   }),
   /**
    * Named facts in `file` must come from authorized sources: each fact

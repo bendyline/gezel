@@ -348,6 +348,12 @@ describe('CreateProjectRequestSchema', () => {
     ).toBe(false);
   });
 
+  it('accepts an existing folder at creation', () => {
+    expect(
+      CreateProjectRequestSchema.parse({ ...base, workingDir: '/work/sample' }).workingDir,
+    ).toBe('/work/sample');
+  });
+
   // about/missionObjectives are encouraged, not required, at the wire level:
   // the "from folder" flow creates projects without them (context comes from
   // the folder's files). The New Project dialog still enforces richness

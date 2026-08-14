@@ -62,11 +62,13 @@ describe('GildeUpdatesCard', () => {
     expect(screen.getByText(/daemon unreachable/)).toBeTruthy();
   });
 
-  it('disables Check now while off or overridden, kicks a check when usable', async () => {
+  it('hides Check now while off, disables it while overridden, and checks when usable', async () => {
     vi.mocked(api.getGildeUpdateStatus).mockResolvedValue(status({ enabled: false }));
     const { unmount } = render(<GildeUpdatesCard />);
     await screen.findByRole('checkbox');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled());
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Check now' })).not.toBeInTheDocument(),
+    );
     unmount();
 
     vi.mocked(api.getGildeUpdateStatus).mockResolvedValue(

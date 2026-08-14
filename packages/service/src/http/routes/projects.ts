@@ -868,6 +868,45 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  app.post('/:id/reveal-reference', async (c) => {
+    const id = c.req.param('id');
+    const request = ReferenceFileLocationRequestSchema.parse({
+      kind: c.req.query('kind'),
+      path: c.req.query('path'),
+    });
+    const base =
+      request.kind === 'artifact'
+        ? ctx.store.projectArtifactsDir(id)
+        : request.kind === 'workspace'
+          ? await ctx.store.projectWorkspaceDir(id)
+          : ctx.store.documentsDir();
+    const joined = safeJoin(base, request.path);
+    if (!joined || !(await realpathContained(base, joined))) {
+      return c.json({ error: 'path traversal' }, 400);
+    }
+    let path: string;
+    try {
+      const file = await stat(joined);
+      if (!file.isFile()) return c.json({ error: 'not found' }, 404);
+      path = await realpath(joined);
+    } catch {
+      return c.json({ error: 'not found' }, 404);
+    }
+
+    // Reveal the file without launching its OS association. Recent paths can
+    // point at scripts or binaries, and `/open` must not turn an agent-written
+    // reference into an execution surface.
+    const { execFile } = await import('node:child_process');
+    const launcher: { cmd: string; args: string[] } =
+      process.platform === 'darwin'
+        ? { cmd: 'open', args: ['-R', path] }
+        : process.platform === 'win32'
+          ? { cmd: 'explorer', args: ['/select,', path] }
+          : { cmd: 'xdg-open', args: [dirname(path)] };
+    execFile(launcher.cmd, launcher.args, { windowsHide: true }, () => {});
+    return c.json(ReferenceFileLocationResponseSchema.parse({ path }));
+  });
+
   // ── artifacts (read-write, always internal) ──
 
   app.get('/:id/artifacts', async (c) => {

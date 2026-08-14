@@ -63,7 +63,7 @@ describe('ChatManager — voorman-idle stall detection', () => {
     calls.filter(
       (c) =>
         c.kind === 'send' &&
-        /this turn ended with no handoff or proactive tool/i.test(c.prompt ?? ''),
+        /(?:make one quick project check|one project-state check)/i.test(c.prompt ?? ''),
     );
 
   const now = new Date('2026-06-06T00:00:00Z').toISOString();
@@ -89,23 +89,16 @@ describe('ChatManager — voorman-idle stall detection', () => {
       createdBy: { kind: 'user' },
     });
 
-  it('fires a continuation nudge when the project voorman replies with no mutating tool', async () => {
+  it('does not turn a greeting in a fresh taskless project into proactive work', async () => {
     const session = await manager.createSession({ gezelId: 'leo', projectId: 'shop' });
-    // First reply is textually clean (avoids the `looksStalled` text
-    // heuristic) but fires no tool — the voorman-idle check must catch
-    // it on its own.
-    mock.script(
-      'All set. The project is on track and the plan is progressing.',
-      'Advancing the phase now.',
-    );
+    mock.script('Hello! Tell me what you would like to build, and I can help organize it.');
 
-    await manager.send(session.id, 'status?');
+    await manager.send(session.id, 'hello!');
 
-    expect(nudgeSends(mock.calls).length).toBeGreaterThanOrEqual(1);
+    expect(nudgeSends(mock.calls)).toHaveLength(0);
     const disk = await store.getSession('leo', session.id);
     const assistantMsgs = disk!.messages.filter((m) => m.role === 'assistant');
-    // Initial reply + at least one continuation reply.
-    expect(assistantMsgs.length).toBeGreaterThanOrEqual(2);
+    expect(assistantMsgs).toHaveLength(1);
   });
 
   it('does not fire when the responder is not the project voorman', async () => {
@@ -142,7 +135,7 @@ describe('ChatManager — voorman-idle stall detection', () => {
     expect(nudgeSends(mock.calls)).toHaveLength(0);
   });
 
-  it('still fires when a task is active (real work is left to advance)', async () => {
+  it('fires at most one reminder when a task is active (real work is left to advance)', async () => {
     await seedTask('active');
     const session = await manager.createSession({ gezelId: 'leo', projectId: 'shop' });
     mock.script(
@@ -152,7 +145,9 @@ describe('ChatManager — voorman-idle stall detection', () => {
 
     await manager.send(session.id, 'status?');
 
-    expect(nudgeSends(mock.calls).length).toBeGreaterThanOrEqual(1);
+    expect(nudgeSends(mock.calls)).toHaveLength(1);
+    const disk = await store.getSession('leo', session.id);
+    expect(disk!.messages.filter((m) => m.role === 'assistant')).toHaveLength(2);
   });
 
   it('withholds the done/stable escape hatch when nothing has been built', async () => {
@@ -162,6 +157,9 @@ describe('ChatManager — voorman-idle stall detection', () => {
     // the nudge must direct a handoff — NOT hand the weak model the
     // "say it's done and stop" phrase it was parroting.
     await seedTask('active');
+    // A dependency lockfile from `npm install @bendyline/gezel-cli` is
+    // setup metadata, not evidence that the user built a deliverable.
+    await store.writeProjectWorkspaceFile('shop', 'package-lock.json', '{"lockfileVersion":3}');
     const session = await manager.createSession({ gezelId: 'leo', projectId: 'shop' });
     mock.script('My project is in a stable state.', 'Messaging the builder now.');
 
@@ -170,9 +168,11 @@ describe('ChatManager — voorman-idle stall detection', () => {
     const nudges = nudgeSends(mock.calls);
     expect(nudges.length).toBeGreaterThanOrEqual(1);
     const prompt = nudges[0]?.prompt ?? '';
-    expect(prompt).toContain('nothing has been built');
-    // The escape-hatch example sentence from VOORMAN_IDLE_NUDGE must be absent.
-    expect(prompt).not.toContain('in a stable state.');
+    expect(prompt).toContain('no deliverable has been built');
+    // The permissive escape hatch and its canned, easily-parroted example
+    // sentence must both be absent.
+    expect(prompt).not.toContain('waiting on the user');
+    expect(prompt).not.toContain('From my perspective');
   });
 
   it('keeps the done/stable escape hatch once real files exist', async () => {
@@ -191,6 +191,8 @@ describe('ChatManager — voorman-idle stall detection', () => {
 
     const nudges = nudgeSends(mock.calls);
     expect(nudges.length).toBeGreaterThanOrEqual(1);
-    expect(nudges[0]?.prompt ?? '').toContain('in a stable state.');
+    expect(nudges[0]?.prompt ?? '').toContain('waiting on the user');
+    expect(nudges[0]?.prompt ?? '').toContain('Do not invent work');
+    expect(nudges[0]?.prompt ?? '').not.toContain('From my perspective');
   });
 });

@@ -1,5 +1,6 @@
 import type { CraftbookSummary } from '@bendyline/gezel';
 import { CLI_ENGAGEMENT_MODES } from '../engagement-mode.js';
+import { type CliOpenReference, cliOpenBasename, normalizeCliOpenLookup } from './open-command.js';
 
 /**
  * Parse a line of TUI input into an intent. Chat mode treats bare text as a
@@ -31,6 +32,7 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'mode', description: 'set AI activity: read-only through full play' },
   { name: 'model', description: 'switch engine and model' },
   { name: 'thread', description: 'switch the active chat thread' },
+  { name: 'open', description: 'open a project folder or recent chat file' },
   { name: 'task', description: 'list and manage project tasks' },
   { name: 'do', description: 'do a task from a craftbook' },
   { name: 'continue', description: 'process due and active project tasks' },
@@ -108,7 +110,38 @@ export function parseProjectPermissionName(input: string): ProjectPermissionName
 export function suggestSlashWordwheel(
   input: string,
   craftbooks: ReadonlyArray<CraftbookSummary>,
+  recentReferences: ReadonlyArray<CliOpenReference> = [],
 ): ReadonlyArray<SlashWordwheelSuggestion> {
+  const openMatch = input.match(/^\/open\s+(.*)$/i);
+  if (openMatch) {
+    const query = normalizeCliOpenLookup(openMatch[1] ?? '');
+    const matches = (candidate: string) =>
+      !query || normalizeCliOpenLookup(candidate).includes(query);
+    const folders = (['workspace', 'artifacts'] as const).filter(matches).map((folder) => ({
+      key: `open:folder:${folder}`,
+      label: `/open ${folder}`,
+      description: `open the project ${folder} folder`,
+      submit: `/open ${folder}`,
+      completion: `/open ${folder}`,
+    }));
+    const seen = new Set<string>();
+    const files: SlashWordwheelSuggestion[] = [];
+    for (const reference of recentReferences) {
+      if (seen.has(reference.key)) continue;
+      seen.add(reference.key);
+      if (!matches(reference.path) && !matches(cliOpenBasename(reference.path))) continue;
+      files.push({
+        key: `open:reference:${reference.key}`,
+        label: `/open ${reference.path}`,
+        description: `open recent ${reference.kind}`,
+        submit: `/open ${reference.path}`,
+        completion: `/open ${reference.path}`,
+      });
+      if (files.length >= 8) break;
+    }
+    return [...folders, ...files];
+  }
+
   const modelMatch = input.match(/^\/model\s+(.*)$/i);
   if (modelMatch) {
     const query = (modelMatch[1] ?? '').trim().toLowerCase();

@@ -95,11 +95,31 @@ export class PipelineLoadError extends Error {
    * damaged runtime.
    */
   readonly optionalPeerMissing: boolean;
-  constructor(message: string, optionalPeerMissing = false) {
+  /**
+   * Network/model-registry failures can clear without a process restart. The
+   * host uses this bit to apply a short retry cooldown instead of permanently
+   * disabling embeddings after one failed first-use download.
+   */
+  readonly retryable: boolean;
+  constructor(message: string, optionalPeerMissing = false, retryable = false) {
     super(message);
     this.name = 'PipelineLoadError';
     this.optionalPeerMissing = optionalPeerMissing;
+    this.retryable = retryable;
   }
+}
+
+/**
+ * Keep the retry classification deliberately narrow. Bad model ids, missing
+ * native libraries, and incompatible runtimes need operator action; transport
+ * failures and registry throttling commonly recover on their own.
+ */
+export function isRetryablePipelineLoadFailure(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const code = (error as NodeJS.ErrnoException | null | undefined)?.code ?? '';
+  return /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|fetch failed|network(?: request)? failed|socket hang up|timed?\s*out|HTTP\s+(?:408|425|429|5\d\d)|TLS|SSL|certificate)/i.test(
+    `${code} ${message}`,
+  );
 }
 
 let pipelinePromise: Promise<Pipeline> | null = null;
@@ -128,7 +148,11 @@ export async function loadPipeline(): Promise<Pipeline> {
           : err instanceof Error
             ? err.message
             : String(err);
-        throw new PipelineLoadError(message, missing);
+        throw new PipelineLoadError(
+          message,
+          missing,
+          !missing && isRetryablePipelineLoadFailure(err),
+        );
       }
     })();
     // A transient load failure (e.g. network blip during the first download)

@@ -21,6 +21,24 @@ function turnCtx(overrides: Partial<TurnCtx>): TurnCtx {
     providerName: 'mlx' satisfies ProviderName,
     sessionId: 'sess-1',
     isMeester: true,
+    projectId: 'default',
+    messageOrigin: 'direct-user',
+    availableToolNames: [
+      'start_project',
+      'invoke_craftbook',
+      'create_task',
+      'create_gezel',
+      'ensure_gezel',
+      'update_project',
+      'assign_task',
+      'update_task',
+      'write_file',
+      'write_artifact',
+      'append_to_file',
+      'set_step_deliverable',
+      'advance_task_step',
+      'set_task_status',
+    ],
     userText: '',
     drained: [] as ChatMessageToolCall[],
     assistantContent: '',
@@ -212,14 +230,14 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.claim).toBe('created a project');
   });
 
-  it('catches the Ypres "I have initiated the project" wording', () => {
+  it('treats the Ypres "I have initiated the project" wording as current-project work', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have initiated the project "Battle of Ypres Presentation".',
       firedToolNames: ['suggest_craftbook'],
     });
     expect(v.fabricated).toBe(true);
-    expect(v.claim).toBe('created a project');
-    expect(v.requiredTools).toEqual(['start_project']);
+    expect(v.claim).toBe('started work in the current project');
+    expect(v.requiredTools).toEqual(['invoke_craftbook', 'create_task', 'start_project']);
   });
 
   it('catches a recruited voorman claim after lookup-only tools', () => {
@@ -240,14 +258,44 @@ describe('detectFabricatedToolClaim', () => {
     expect(v.fabricated).toBe(false);
   });
 
-  it('covers other project-creation synonyms (set up / spun up / started / made / bootstrapped / kicked off)', () => {
-    for (const verb of ['set up', 'spun up', 'started', 'made', 'bootstrapped', 'kicked off']) {
+  it('covers unambiguous project-creation synonyms', () => {
+    for (const verb of ['set up', 'spun up', 'made', 'bootstrapped']) {
       const v = detectFabricatedToolClaim({
         text: `I have ${verb} the project.`,
         firedToolNames: ['list_projects'],
       });
       expect(v.fabricated, `verb "${verb}" should trigger`).toBe(true);
+      expect(v.claim).toBe('created a project');
     }
+  });
+
+  it('treats started/initiated/kicked off as current-project work', () => {
+    for (const verb of ['started', 'initiated', 'kicked off']) {
+      const v = detectFabricatedToolClaim({
+        text: `I have ${verb} the project.`,
+        firedToolNames: ['list_projects'],
+      });
+      expect(v.fabricated, `verb "${verb}" should trigger`).toBe(true);
+      expect(v.claim).toBe('started work in the current project');
+    }
+  });
+
+  it('accepts invoke_craftbook as evidence that current-project work started', () => {
+    const v = detectFabricatedToolClaim({
+      text: "I've kicked off the project using Build Loop.",
+      firedToolNames: ['suggest_craftbook', 'invoke_craftbook'],
+    });
+    expect(v.fabricated).toBe(false);
+  });
+
+  it('still requires start_project for an explicitly new project', () => {
+    const v = detectFabricatedToolClaim({
+      text: "I've kicked off a new project for the game.",
+      firedToolNames: ['invoke_craftbook'],
+    });
+    expect(v.fabricated).toBe(true);
+    expect(v.claim).toBe('created a project');
+    expect(v.requiredTools).toEqual(['start_project']);
   });
 });
 

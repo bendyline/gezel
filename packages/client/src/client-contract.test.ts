@@ -271,6 +271,16 @@ const cases: ContractCase[] = [
       }),
   },
   {
+    name: 'reveal project reference',
+    method: 'POST',
+    path: '/api/projects/project%2Fone/reveal-reference?kind=artifact&path=reports%2Fone.md',
+    invoke: (c) =>
+      c.revealProjectReference('project/one', {
+        kind: 'artifact',
+        path: 'reports/one.md',
+      }),
+  },
+  {
     name: 'reference preview',
     method: 'GET',
     path: '/api/projects/project%2Fone/reference-preview?kind=workspace&path=decks%2Fone.pptx',

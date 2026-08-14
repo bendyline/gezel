@@ -69,6 +69,7 @@ function buildSession(
   pool: ClaudeWorkerPool,
   initialResumeId?: string,
   reasoningEffort?: ClaudeReasoningEffort,
+  allowedMcpTools?: string[],
 ): AnthropicCliSession {
   const queue = new ProviderQueue({ concurrency: 4 });
   return new AnthropicCliSession({
@@ -77,7 +78,13 @@ function buildSession(
     ...(reasoningEffort ? { reasoningEffort } : {}),
     permissionMode: 'acceptEdits',
     systemMessage: 'You are a test gezel.',
-    context: { sessionId: 'sess-1', gezelId: 'g-1', projectId: 'p-1', cwd: '/tmp' },
+    context: {
+      sessionId: 'sess-1',
+      gezelId: 'g-1',
+      projectId: 'p-1',
+      cwd: '/tmp',
+      ...(allowedMcpTools ? { allowedMcpTools } : {}),
+    },
     runtimeDir: '/tmp/runtime',
     manageRuntimeFiles: false,
     queue,
@@ -87,6 +94,12 @@ function buildSession(
 }
 
 describe('AnthropicCliSession — façade contract', () => {
+  it('reports the configured MCP roster for turn-level prompt guards', () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool, undefined, undefined, ['mcp__gezel__start_project']);
+    expect(session.getRegisteredToolNames()).toContain('mcp__gezel__start_project');
+  });
+
   it('routes sendAndWait through pool.runTurn with the correct spec', async () => {
     const ctrl = makeMockPool();
     const session = buildSession(ctrl.pool);

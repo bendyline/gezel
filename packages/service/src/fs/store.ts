@@ -2486,6 +2486,7 @@ export class Store {
   ): Promise<ProjectDetail> {
     const release = await this.acquireProjectCreationLock();
     try {
+      if (input.workingDir) this.assertSafeWorkingDir(input.workingDir);
       const id =
         opts?.id ?? (await this.uniqueProjectId(slugify(input.name) || randomUUID().slice(0, 8)));
       if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
@@ -2515,14 +2516,24 @@ export class Store {
           projectName: input.name,
         });
       }
+      let github: ProjectGitHub | undefined = input.github?.url
+        ? { url: input.github.url }
+        : undefined;
+      if (input.workingDir) {
+        github = (await autoDetectGitHubLink(input.workingDir, github)) ?? github;
+      }
       const project: Project = {
         id,
         name: input.name,
         description: input.description,
         ...(input.workingDir ? { workingDir: input.workingDir } : {}),
+        // Opening an existing folder is an intake action, not a declaration
+        // that its objectives are ready for active supervision. Keep the
+        // Meester quiet until the user explicitly opts this project back in.
+        ...(input.workingDir ? { nudgeConfig: { enabled: false } } : {}),
         ...(input.mode && input.mode !== 'crew' ? { mode: input.mode } : {}),
         ...(input.indexingEnabled !== undefined ? { indexingEnabled: input.indexingEnabled } : {}),
-        ...(input.github?.url ? { github: { url: input.github.url } } : {}),
+        ...(github ? { github } : {}),
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };

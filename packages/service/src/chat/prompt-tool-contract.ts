@@ -536,3 +536,22 @@ export function filterPromptToolDirectives(args: {
     .join('\n')
     .replace(/\n{4,}/g, '\n\n\n');
 }
+
+/**
+ * Corrective prompts are runtime-authored optional steering. Remove any
+ * directive that contradicts the live roster; if nothing actionable remains,
+ * fall back to a tool-agnostic correction rather than mandating an absent
+ * capability.
+ */
+export function capabilitySafeCorrectivePrompt(args: {
+  prompt: string;
+  availableTools: ReadonlySet<string> | ReadonlyArray<string>;
+}): string {
+  const filtered = filterPromptToolDirectives(args).trim();
+  if (filtered) return filtered;
+  return (
+    'Your previous reply claimed an action succeeded without live evidence. ' +
+    'Use only an appropriate action tool visible in your current roster, or explain that the action cannot be performed here. ' +
+    'Do not repeat the success claim until an available action returns successfully.'
+  );
+}

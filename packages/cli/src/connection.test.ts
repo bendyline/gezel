@@ -296,8 +296,9 @@ describe('project folder resolution', () => {
       description: `CLI workspace at ${folder}`,
       about: `new-workspace — working directory ${folder}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
       missionObjectives: 'new-workspace — fill in concrete success criteria for this project.',
+      workingDir: folder,
     });
-    expect(setProjectWorkingDir).toHaveBeenCalledWith('created', folder);
+    expect(setProjectWorkingDir).not.toHaveBeenCalled();
   });
 });
 

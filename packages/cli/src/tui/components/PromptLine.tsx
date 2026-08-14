@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { type JSX, useEffect, useState } from 'react';
 import { SLASH_COMMAND_WORDWHEEL_SIZE, suggestSlashWordwheel } from '../commands.js';
+import type { CliOpenReference } from '../open-command.js';
 import { EnginePill } from './EnginePill.js';
 
 /**
@@ -26,6 +27,7 @@ export function PromptLine(props: {
   active: boolean;
   history: ReadonlyArray<string>;
   craftbooks: ReadonlyArray<CraftbookSummary>;
+  recentOpenReferences: ReadonlyArray<CliOpenReference>;
   pendingPrompt?: string | undefined;
   pendingMode?: 'text' | 'password' | 'yes-no' | undefined;
   onChange: (v: string) => void;
@@ -45,6 +47,7 @@ export function PromptLine(props: {
     active,
     history,
     craftbooks,
+    recentOpenReferences,
     pendingPrompt,
     pendingMode,
     onChange,
@@ -56,7 +59,8 @@ export function PromptLine(props: {
   // Resets to the end whenever a new line lands in history.
   const [cursor, setCursor] = useState(history.length);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
-  const suggestions = active && !pendingPrompt ? suggestSlashWordwheel(value, craftbooks) : [];
+  const suggestions =
+    active && !pendingPrompt ? suggestSlashWordwheel(value, craftbooks, recentOpenReferences) : [];
   const activeSuggestionIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
   const suggestionWindowStart = Math.min(
     Math.max(0, activeSuggestionIndex - SLASH_COMMAND_WORDWHEEL_SIZE + 1),

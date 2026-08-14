@@ -201,7 +201,7 @@ export const CraftbookStepSchema = z.object({
    * Marks the parent step that triggers a declarative per-item fanout
    * (see {@link CraftbookSpawnSchema}). When this step activates on a
    * spawn-host task, the runtime reads the craftbook's `spawn.overFile`
-   * workspace JSON array and spawns one child task per item — no model
+   * JSON array on its declared surface and spawns one child task per item — no model
    * tool call. Inert unless the craftbook also declares `spawn`.
    */
   spawnFanout: z.boolean().optional(),
@@ -211,7 +211,7 @@ export type CraftbookStep = z.infer<typeof CraftbookStepSchema>;
 /**
  * Declarative per-item fanout config. A craftbook that declares `spawn`
  * becomes a spawn host: when its `spawnFanout` step activates, the runtime
- * reads `overFile` (a workspace-relative JSON file the parent produces),
+ * reads `overFile` (a JSON file the parent produces on the declared surface),
  * extracts the item array (the file IS the array, or the array at the
  * dotted `itemsPath`), and spawns one child task per item from `steps`
  * (each item's fields become the child's `variation.context`, string-
@@ -220,8 +220,10 @@ export type CraftbookStep = z.infer<typeof CraftbookStepSchema>;
  * The runtime fans out; no model tool call is involved.
  */
 export const CraftbookSpawnSchema = z.object({
-  /** Workspace-relative JSON file the parent produces; its array drives the fanout. */
+  /** Surface-relative JSON file the parent produces; its array drives the fanout. */
   overFile: z.string().min(1),
+  /** Read overFile from the artifacts drawer instead of the project workspace. */
+  overArtifact: z.boolean().optional(),
   /** Dotted path to the array inside `overFile`. Absent → the file itself is the array. */
   itemsPath: z.string().optional(),
   /** Entry step id of the child template. Defaults to the first `steps` entry. */

@@ -412,6 +412,7 @@ function resolveMatrixUserPrelude(args: {
   sessionId: string;
   userText: string;
   isMeester: boolean;
+  availableToolNames: string[];
 }): string | null {
   const ctx: TurnCtx = {
     catalogId: args.profile.catalogId,
@@ -421,6 +422,9 @@ function resolveMatrixUserPrelude(args: {
     providerName: args.providerName,
     sessionId: args.sessionId,
     isMeester: args.isMeester,
+    projectId: 'default',
+    messageOrigin: 'direct-user',
+    availableToolNames: args.availableToolNames,
     userText: args.userText,
     drained: [],
     assistantContent: '',
@@ -660,6 +664,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               sessionId: session.id,
               userText: scenario.latestUserMessage,
               isMeester: roleManifest.id === 'meester',
+              availableToolNames: availableTools.map((tool) => tool.name),
             });
             const renderedPrompt = [instructions.full, instructions.volatileContext, userPrelude]
               .filter((part): part is string => Boolean(part))

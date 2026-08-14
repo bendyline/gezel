@@ -761,8 +761,8 @@ export async function ensureProjectForFolder(
     description: `CLI workspace at ${wd}`,
     about: `${name} — working directory ${wd}. Fill in who this project is for, what's in scope, and what's explicitly out of scope.`,
     missionObjectives: `${name} — fill in concrete success criteria for this project.`,
+    workingDir: wd,
   });
-  await client.setProjectWorkingDir(created.id, wd);
   return created.id;
 }
 

@@ -9,11 +9,11 @@
  *   host → worker:  { id, texts }
  *   worker → host:  { id, vectors }                 — success
  *                   { id, error, fatal,             — failure (fatal ⇒ model
- *                     optionalPeerMissing }           unloadable, disable for
+ *                     retryable, optionalPeerMissing } unloadable, disable for
  *                                                     good; optionalPeerMissing
  *                                                     ⇒ the peer is just not
- *                                                     installed, so the host
- *                                                     degrades quietly)
+ *                                                     installed; retryable ⇒ a
+ *                                                     short host-side cooldown)
  */
 
 import { parentPort } from 'node:worker_threads';
@@ -38,7 +38,8 @@ port.on('message', (msg: EmbedRequest) => {
       port.postMessage({
         id: msg.id,
         error: err instanceof Error ? err.message : String(err),
-        fatal: err instanceof PipelineLoadError,
+        fatal: err instanceof PipelineLoadError && !err.retryable,
+        retryable: err instanceof PipelineLoadError && err.retryable,
         optionalPeerMissing: err instanceof PipelineLoadError && err.optionalPeerMissing,
       });
     }

@@ -679,15 +679,10 @@ export function NewProjectDialog({
           about: a,
           missionObjectives: m,
           ...(isSolo ? { mode: 'solo' as const } : {}),
+          ...(kind === 'folder' ? { workingDir: folderPath.trim() } : {}),
           ...(wantsGitHub && repo ? { github: { url: toGitHubUrl(repo) } } : {}),
         });
-        let finalProject = created;
-        if (kind === 'folder' && folderPath.trim()) {
-          finalProject = await api
-            .setProjectWorkingDir(created.id, folderPath.trim())
-            .catch(() => created);
-        }
-        await onCreated(finalProject);
+        await onCreated(created);
         onClose();
       } catch (err) {
         setError((err as Error).message);

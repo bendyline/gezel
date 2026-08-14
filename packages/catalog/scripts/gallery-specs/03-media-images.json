@@ -4,7 +4,13 @@
     "role": "general",
     "name": "Index & Describe an Image Set",
     "description": "Catalog a folder of images into a structured, searchable index — one row per image with a caption, tags from a controlled vocabulary, dominant colors, and content flags — then validate coverage and consistency. Scope the schema and output format BEFORE describing a single image so every row is uniform and machine-readable; this ordering is what turns a pile of files into something you can search, filter, generate alt-text from, or feed to a downstream pipeline. Covers image cataloging, visual search, asset management, photo library organization, and bulk captioning.",
-    "tags": ["images", "index", "catalog", "vision", "metadata"],
+    "tags": [
+      "images",
+      "index",
+      "catalog",
+      "vision",
+      "metadata"
+    ],
     "triggers": [
       "index a folder of images",
       "describe my images",
@@ -19,7 +25,10 @@
         "role": "planner",
         "summary": "fields per image, output schema, controlled vocabulary, criteria",
         "prompt": "1) List the target image folder and count the files so you know the scope. 2) Decide the exact per-image schema: pick fields such as filename, caption (1-2 sentences), tags (3-6), dominant_colors (hex), subject_type, and any flags (e.g. contains_text, is_screenshot, low_quality). 3) Define a CONTROLLED tag vocabulary — a fixed list of ~15-30 allowed tags — so tags are consistent and filterable rather than freeform. 4) Choose the output format (JSON array is the safe default; CSV if the user wants a spreadsheet). 5) Write an acceptance-criteria checklist of 5-8 concrete, checkable items, e.g. 'every image in the folder has exactly one row', 'captions are 1-2 sentences and describe what is visible', 'all tags come from the controlled vocabulary', 'dominant_colors are valid hex', 'the output file parses as valid JSON'. 6) Record the schema, vocabulary, and checklist via write_task_note AND write them to notes/scope.md. Good looks like: a downstream developer could implement the index from your notes alone, with zero ambiguity about fields or allowed values.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "describe",
@@ -27,7 +36,10 @@
         "role": "developer",
         "summary": "read each image and emit the structured fields",
         "prompt": "1) Re-list the folder and iterate every image deterministically (sorted by filename) so none is skipped. 2) For each image, use the available vision capability (read_image_as_base64 plus a vision turn, or the catalog's describe/caption tool) to actually LOOK at it — never guess from the filename. 3) Fill every schema field: a concrete caption of what is visible, tags drawn ONLY from the controlled vocabulary, hex dominant_colors, and the flags. 4) Keep vocabulary and phrasing consistent across images (same concept → same tag). 5) Stage partial results to a working file as you go so progress is observable and a crash loses nothing. 6) Track a running count of images-described vs images-total. Good looks like: every file has complete, accurate, consistently-tagged fields and no image was skipped.",
-        "produces": { "path": "notes/describe.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/describe.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "assemble",
@@ -35,13 +47,23 @@
         "role": "developer",
         "summary": "write the final index file in the chosen format",
         "prompt": "1) Collect all per-image records and serialize them into the single index file in the chosen format (JSON array or CSV) at the agreed path. 2) Validate it parses (valid JSON / well-formed CSV with a header row). 3) Assert coverage: the row count equals the image count from scope; if not, find and describe the missing files. 4) Assert every tag is in the controlled vocabulary and every color is valid hex. 5) On a loop-back, fix ONLY the named gaps (missing rows, off-vocabulary tags, malformed colors) without disturbing rows that already pass. 6) write_task_note the final index path and a coverage line (rows vs images). Good looks like: a clean, parseable index whose row count matches the folder exactly.",
-        "produces": { "path": "index.json", "kind": "json" }
+        "produces": {
+          "path": "index.json",
+          "kind": "json"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open index.json and confirm it parses as valid JSON. 2) Count rows and compare to the folder's image count — every image must have exactly one row (PASS/FAIL). 3) Check each acceptance criterion from scope.md: captions are 1-2 descriptive sentences; tags are all within the controlled vocabulary; dominant_colors are valid hex; flags are present. 4) Spot-check 3-4 records against the actual images (open them) — does the caption match what is visible? 5) Write a PASS/FAIL line per criterion with a one-line reason. Any FAIL → loop back to assemble (or describe if the data itself is wrong).",
       "loopBackTo": "assemble",
-      "deliverable": { "path": "index.json", "kind": "json" }
+      "deliverable": {
+        "path": "index.json",
+        "kind": "json"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -49,7 +71,13 @@
     "role": "general",
     "name": "Logo & Variant Set",
     "description": "Generate a coherent logo and the full set of variants a real brand needs — primary mark, horizontal lockup, stacked lockup, icon-only/favicon, plus light-on-dark and monochrome versions — from a written brief. Lock the brief (concept, geometry, palette, typography, do/don'ts) BEFORE generating pixels so every variant shares one visual DNA instead of looking like five unrelated logos; then assemble them into a delivered folder with a contact sheet. Covers logo design, brand mark, wordmark, logo variations, and brand-asset packs.",
-    "tags": ["logo", "branding", "image-generation", "identity", "assets"],
+    "tags": [
+      "logo",
+      "branding",
+      "image-generation",
+      "identity",
+      "assets"
+    ],
     "triggers": [
       "design a logo",
       "make a logo set",
@@ -64,7 +92,10 @@
         "role": "visual-designer",
         "summary": "lock concept, geometry, palette, type, and the variant list",
         "prompt": "1) Capture the brand essence in one sentence (what it is, the feeling). 2) Decide the core concept and geometry of the mark (e.g. 'abstract folded ribbon', 'monoline fox head') — concrete enough to redraw. 3) Lock the palette with exact hex values and the type treatment for any wordmark. 4) Enumerate the EXACT variant list to produce: primary, horizontal lockup, stacked lockup, icon-only, monochrome (black), and reversed (white on dark) — name each output filename. 5) Write do/don't rules (clear-space, what not to recolor). 6) Write an acceptance-criteria checklist: 'all variants share the same core mark', 'palette is exactly <hex list>', 'icon-only is legible at 32px', 'reversed version works on a dark background', 'at least 5 variant files are produced'. 7) Record everything via write_task_note AND to notes/brief.md. No pixels yet — this is the single source of truth all variants must obey.",
-        "produces": { "path": "notes/brief.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/brief.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "generate",
@@ -72,7 +103,10 @@
         "role": "image-generator",
         "summary": "produce every variant to the locked brief",
         "prompt": "1) Read brief.md. 2) Using the image-generation capability (or hand-authored SVG if no image model is available), produce the PRIMARY mark first and treat it as the master. 3) Derive each remaining variant FROM the primary so geometry and proportions stay identical — horizontal lockup, stacked lockup, icon-only crop, monochrome black, reversed white-on-dark. 4) Honor the exact palette hex values; the monochrome and reversed versions are recolors of the same shape, not redesigns. 5) Save each into the assets/ directory with the filenames named in the brief (e.g. primary.svg, horizontal.svg, icon.svg, mono.svg, reversed.svg). 6) Sanity-check the icon at small size — it must read at 32px. Good looks like: 5+ files that are unmistakably the same logo in different configurations.",
-        "produces": { "path": "assets", "kind": "image-set" }
+        "produces": {
+          "path": "assets",
+          "kind": "image-set"
+        }
       },
       {
         "id": "assemble",
@@ -80,13 +114,23 @@
         "role": "developer",
         "summary": "contact sheet + usage page tying the set together",
         "prompt": "1) Build a single index.html contact sheet that displays every variant on appropriate backgrounds (light variants on white, the reversed variant on a dark panel) at multiple sizes including a tiny 32px row to prove favicon legibility. 2) Include a short usage section restating the palette hex, clear-space, and the do/don'ts from the brief. 3) Reference the real files in assets/ (relative paths) so the page renders the actual marks. 4) On a loop-back, fix only the named gaps (missing variant, wrong background, broken reference). 5) write_task_note the contact-sheet path and the list of variant files. Good looks like: one page a client could approve from, showing the whole coherent set in context.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open assets/ and confirm at least 5 variant files exist matching the brief's filenames (PASS/FAIL). 2) Open index.html and visually verify each variant renders, including the reversed mark on a dark panel and the 32px icon row. 3) Check coherence: do all variants read as the SAME mark (same geometry/concept)? 4) Check the palette matches the brief's exact hex list. 5) Confirm the icon is legible at 32px. 6) Write PASS/FAIL per criterion. Any FAIL → loop back to generate (for missing/wrong marks) or assemble (for presentation issues).",
       "loopBackTo": "assemble",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -94,7 +138,13 @@
     "role": "general",
     "name": "Coherent Icon Pack",
     "description": "Produce a coherent set of UI icons that look like they belong to one family — consistent grid, stroke weight, corner radius, optical sizing, and metaphor language — from a named list of concepts. Lock the style system (grid, stroke, padding, keyline shapes) BEFORE drawing any icon, because icon-set quality is almost entirely about consistency: a pack of individually-nice icons with mismatched strokes looks broken. Then generate every icon to the system and assemble a previewable sheet. Covers icon sets, UI icons, SVG icon libraries, glyph packs, and design systems.",
-    "tags": ["icons", "ui", "svg", "design-system", "image-generation"],
+    "tags": [
+      "icons",
+      "ui",
+      "svg",
+      "design-system",
+      "image-generation"
+    ],
     "triggers": [
       "make an icon pack",
       "design a set of icons",
@@ -109,7 +159,10 @@
         "role": "visual-designer",
         "summary": "lock grid, stroke, radius, padding, and the icon list",
         "prompt": "1) Lock the icon system parameters: canvas/grid size (e.g. 24x24), uniform stroke weight (e.g. 2px), corner radius, end-cap style (round/square), and the safe padding/keyline so every glyph occupies the same optical area. 2) Decide outline vs filled and the metaphor language (e.g. minimal line icons). 3) Enumerate the EXACT icon list to produce (name each, e.g. home, search, settings, user, bell, trash) — aim for at least 6. 4) Write an acceptance-criteria checklist: 'all icons share the same grid and stroke weight', 'all use the same cap/join style', 'each icon is a valid standalone SVG', 'metaphors are conventional and recognizable', 'at least 6 icons produced'. 5) Record the system + list + checklist via write_task_note AND to notes/style-scope.md. No drawing yet.",
-        "produces": { "path": "notes/style-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/style-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "generate",
@@ -117,7 +170,10 @@
         "role": "image-generator",
         "summary": "draw every icon to the locked system",
         "prompt": "1) Read style-scope.md. 2) Author each icon as a standalone SVG on the locked grid (e.g. 24x24 viewBox) with the EXACT stroke weight, cap, and join from the system — set these as shared attributes, not per-path guesses. 3) Keep every glyph within the safe padding so they sit at matching optical weight. 4) Use conventional, instantly-recognizable metaphors. 5) Save each into assets/ as <name>.svg (matching the scoped list). 6) After drawing, eyeball them side by side and fix any that have a heavier stroke or odd padding. Good looks like: laid out in a row, they read as ONE family. Produce all named icons; do not skip any.",
-        "produces": { "path": "assets", "kind": "image-set" }
+        "produces": {
+          "path": "assets",
+          "kind": "image-set"
+        }
       },
       {
         "id": "assemble",
@@ -125,13 +181,23 @@
         "role": "developer",
         "summary": "preview grid + usage snippet",
         "prompt": "1) Build a single index.html that lays every icon out in a uniform grid with its name label, rendered at the intended size and again at a small size (16px) to expose alignment drift. 2) Render each icon on both light and dark backgrounds to confirm the stroke color is themeable. 3) Include a one-line usage note (how to drop an SVG inline) and restate the grid/stroke spec. 4) Reference the real assets/*.svg files. 5) On a loop-back, fix only named gaps. 6) write_task_note the sheet path and icon count. Good looks like: a tidy preview where any inconsistency is obvious.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Confirm assets/ holds at least 6 valid SVG files matching the scoped names (PASS/FAIL). 2) Open index.html and inspect the grid at both sizes: do all icons share stroke weight, cap style, and optical padding (PASS/FAIL — this is the make-or-break criterion)? 3) Check each metaphor is conventional and recognizable. 4) Confirm icons render on light and dark backgrounds. 5) Write PASS/FAIL per criterion. Inconsistent stroke/grid → loop back to generate; presentation issues → assemble.",
       "loopBackTo": "assemble",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -139,7 +205,13 @@
     "role": "general",
     "name": "Marketing Hero Image",
     "description": "Create a single high-impact marketing hero image from a brief and place it into a working hero section. Lock the brief FIRST — aspect ratio, subject, mood, palette, focal point, and crucially the safe zone where headline and CTA text will overlay — because a beautiful hero that has no room for copy (or whose focal point sits under the button) is useless. Then generate the image to the brief and place it behind real overlaid text to prove it works. Covers hero banners, marketing imagery, landing-page art, website headers, and key visuals.",
-    "tags": ["hero", "marketing", "image-generation", "banner", "landing"],
+    "tags": [
+      "hero",
+      "marketing",
+      "image-generation",
+      "banner",
+      "landing"
+    ],
     "triggers": [
       "make a hero image",
       "marketing banner",
@@ -154,7 +226,10 @@
         "role": "visual-designer",
         "summary": "lock ratio, subject, mood, palette, focal point, text safe-zone",
         "prompt": "1) Decide the aspect ratio and target use (e.g. 16:9 full-bleed web hero). 2) Lock the subject and scene, the mood/style, and the palette (hex) so the image will harmonize with the brand. 3) Define the FOCAL POINT and, critically, the TEXT SAFE ZONE — which third of the frame stays low-contrast/empty so an overlaid headline + CTA remains readable. 4) Note the headline and CTA copy that will sit on it (even placeholder) so placement is concrete. 5) Write an acceptance-criteria checklist: 'aspect ratio is <X>', 'focal point is off the text safe zone', 'palette matches <hex>', 'overlaid headline + CTA are readable against the image', 'image is delivered at usable resolution'. 6) Record brief + checklist via write_task_note AND to notes/brief.md. No image yet.",
-        "produces": { "path": "notes/brief.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/brief.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "generate",
@@ -162,7 +237,10 @@
         "role": "image-generator",
         "summary": "render the hero image to the brief",
         "prompt": "1) Read brief.md. 2) Using the image-generation capability (or a tasteful CSS/SVG composition if no image model is available), produce the hero at the locked aspect ratio and palette. 3) Compose so the focal point lands OUTSIDE the declared text safe zone and that zone stays calm enough for overlaid copy. 4) Match the mood and avoid clutter near where text goes. 5) Save it to assets/ (e.g. assets/hero.png or hero.svg) at usable resolution. 6) Generate at least one alternate framing if quick, so placement has options. Good looks like: a striking image with obvious clear space for the headline.",
-        "produces": { "path": "assets", "kind": "image-set" }
+        "produces": {
+          "path": "assets",
+          "kind": "image-set"
+        }
       },
       {
         "id": "place",
@@ -170,13 +248,23 @@
         "role": "developer",
         "summary": "build index.html with the hero behind real overlaid text",
         "prompt": "1) Build a single index.html hero section that uses the generated image as a full-bleed background (object-fit: cover or background-size: cover) at the locked aspect ratio. 2) Overlay the real headline and CTA button positioned within the safe zone, with a subtle scrim/gradient ONLY if needed for contrast. 3) Make it responsive — the focal point must survive a mobile crop. 4) Reference the real assets/ file (relative path). 5) On a loop-back, fix only named gaps (unreadable text, focal point clipped, wrong ratio). 6) write_task_note the page path and image used. Good looks like: a hero you could ship, with crisp, readable copy over the art.",
-        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-marketing-site"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Confirm assets/ contains the hero image (PASS/FAIL). 2) Open index.html and verify the image renders full-bleed at the locked aspect ratio. 3) The decisive check: is the overlaid headline + CTA clearly READABLE against the image and is the focal point clear of the text (PASS/FAIL)? 4) Resize to a narrow viewport — does it survive the mobile crop? 5) Confirm the palette matches the brief. 6) Write PASS/FAIL per criterion. Unreadable/clashing text → loop back to place; bad image/focal point → note it for generate.",
       "loopBackTo": "place",
-      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-marketing-site"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -184,7 +272,13 @@
     "role": "general",
     "name": "Batch Image Transform",
     "description": "Apply a consistent transform across a whole folder of images — resize, crop to a ratio, convert format, compress, watermark, or recolor — and verify every file came out correct. Scope the exact transform and a verification rule FIRST (target dimensions, format, quality, naming) so the batch is deterministic and reproducible, then process every file and prove the output count, dimensions, and format match the spec. Covers bulk image processing, resizing, format conversion, compression, watermarking, and folder-wide edits.",
-    "tags": ["images", "batch", "transform", "resize", "processing"],
+    "tags": [
+      "images",
+      "batch",
+      "transform",
+      "resize",
+      "processing"
+    ],
     "triggers": [
       "batch edit images",
       "resize a folder of images",
@@ -199,7 +293,10 @@
         "role": "planner",
         "summary": "lock the exact transform, output spec, and verify rule",
         "prompt": "1) List the source folder and count/inventory the files and their current formats and sizes. 2) Lock the EXACT transform: target dimensions or max-edge, crop/fit behavior (cover vs contain vs pad), output format and quality, color/orientation handling (respect EXIF rotation), and any watermark. 3) Decide the output location and naming (in-place vs an out/ folder; suffix vs same name). 4) Write an acceptance-criteria checklist: 'every source image has exactly one output', 'all outputs are <format>', 'all outputs are <= target dimensions / exactly <ratio>', 'no output is larger in bytes than its source when compressing', 'originals are preserved if requested'. 5) Record transform + checklist via write_task_note AND to notes/scope.md. Good looks like: a spec precise enough to script.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "process",
@@ -207,7 +304,10 @@
         "role": "developer",
         "summary": "apply the transform to every file",
         "prompt": "1) Read scope.md. 2) Prefer writing a small reproducible script (e.g. using ImageMagick/sharp/Pillow if available) over manual one-offs, so the batch is repeatable and nothing is missed. 3) Iterate every source file deterministically; apply the exact transform, honoring fit behavior and EXIF orientation. 4) Write outputs to the agreed location with the agreed names; preserve originals if requested. 5) Skip or log (never silently drop) any file that fails to decode, and report it. 6) Keep a running output count. 7) write_task_note the output folder and the in/out counts. Good looks like: one correctly-transformed output per input, produced by a rerunnable command.",
-        "produces": { "path": "out", "kind": "image-set" }
+        "produces": {
+          "path": "out",
+          "kind": "image-set"
+        }
       },
       {
         "id": "verify",
@@ -215,13 +315,23 @@
         "role": "reviewer",
         "summary": "confirm count, dimensions, and format per file",
         "prompt": "1) Re-read scope.md's checklist. 2) Count outputs vs inputs — they must match (or match minus any explicitly-logged failures). 3) Sample 4-5 outputs and inspect actual dimensions and format against the spec (use an identify/probe tool or open them). 4) When compressing, confirm output bytes <= source bytes. 5) Confirm originals are intact if preservation was required. 6) Write a verification note: PASS/FAIL per criterion with the measured numbers. On a loop-back the processor fixes only the failing files. write_task_note the verification result.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open out/ and count files vs the source inventory in scope.md — must match (PASS/FAIL). 2) Probe 4-5 outputs: are dimensions and format exactly per spec (PASS/FAIL)? 3) For compression jobs, confirm outputs are smaller than sources. 4) Confirm originals preserved if required. 5) Read verify.md and reconcile its claims with what you actually observe. 6) Write PASS/FAIL per criterion. Any mismatch → loop back to process to fix the offending files.",
       "loopBackTo": "process",
-      "deliverable": { "path": "out", "kind": "image-set" }
+      "deliverable": {
+        "path": "out",
+        "kind": "image-set"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -229,7 +339,13 @@
     "role": "general",
     "name": "Alt-Text Pass",
     "description": "Generate accurate, WCAG-appropriate alt text for every image referenced by a site or folder and apply it back into the markup. Scope FIRST which images are content vs decorative (decorative images get empty alt, not a description) and the voice/length rules, because the most common alt-text failure is verbose, redundant, or wrong-purpose descriptions. Then caption each content image from what is actually visible and write the alt attributes back into the HTML. Covers accessibility, alt text, image descriptions, WCAG compliance, screen-reader support, and a11y retrofits.",
-    "tags": ["accessibility", "alt-text", "a11y", "wcag", "images"],
+    "tags": [
+      "accessibility",
+      "alt-text",
+      "a11y",
+      "wcag",
+      "images"
+    ],
     "triggers": [
       "add alt text",
       "generate alt text for images",
@@ -244,7 +360,10 @@
         "role": "planner",
         "summary": "list images, classify content vs decorative, set rules",
         "prompt": "1) Find every image reference (img tags, CSS background images, picture/source) in the target file(s) or folder and list each with its current alt (if any) and surrounding context. 2) Classify each as CONTENT (conveys information → needs a description) or DECORATIVE (purely visual → must get alt=\"\"). 3) Set the rules: alt text is concise (roughly under ~125 chars), describes purpose/content not 'image of', never duplicates adjacent caption text, and conveys any text embedded in the image. 4) Write an acceptance-criteria checklist: 'every content image has non-empty, purposeful alt', 'every decorative image has alt=\"\"', 'no alt begins with \"image of\"/\"picture of\"', 'embedded text is transcribed', 'no alt is redundant with nearby visible text'. 5) Record the inventory + rules + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "caption",
@@ -252,7 +371,10 @@
         "role": "developer",
         "summary": "write alt text from what is actually visible",
         "prompt": "1) Read scope.md's inventory and rules. 2) For each CONTENT image, use the vision capability to look at the actual image and write alt text that conveys its purpose in context (a chart's takeaway, a product's key detail, a screenshot's salient state) — not a literal pixel inventory. 3) Transcribe any meaningful text baked into the image. 4) Keep each under the length rule and avoid 'image of'/'photo of' openers. 5) For DECORATIVE images, record alt=\"\" (intentional empty). 6) Produce a mapping of image → alt string. write_task_note the mapping. Good looks like: a blind user would understand each image's role from your text alone.",
-        "produces": { "path": "notes/caption.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/caption.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "apply",
@@ -260,13 +382,23 @@
         "role": "developer",
         "summary": "write alt attributes back into the HTML",
         "prompt": "1) Read the caption mapping. 2) Edit the source HTML so every img has the correct alt attribute (content → its description, decorative → alt=\"\"). 3) For CSS background images that carry meaning, add an accessible equivalent (aria-label or a visually-hidden span) since they cannot take alt. 4) Do not alter layout, other attributes, or content — only the accessibility attributes. 5) Confirm the HTML still parses/renders. 6) On a loop-back, fix only the images the reviewer flagged. 7) write_task_note the edited file path and a count of images updated (content vs decorative). The deliverable is the updated index.html.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open index.html and enumerate every image. 2) Cross-check against scope.md: every content image has non-empty purposeful alt; every decorative image has alt=\"\" (PASS/FAIL each class). 3) Verify no alt opens with 'image of'/'picture of' and none is over-long or redundant with adjacent text. 4) Spot-check 3 captions against the real images — accurate and purposeful? 5) Confirm CSS-background meaningful images got an aria equivalent. 6) Write PASS/FAIL per criterion. Any failure → loop back to apply (or caption if a description is wrong).",
       "loopBackTo": "apply",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -274,7 +406,13 @@
     "role": "general",
     "name": "Thumbnail Generator",
     "description": "Derive a consistent set of thumbnails or responsive size-variants from a folder of source images — square crops for grids, srcset widths for the web, smart-cropped to keep the subject centered — and emit them with predictable names. Scope the target sizes, crop strategy, and naming convention FIRST so the output plugs straight into a gallery or srcset, then build every variant and confirm the matrix is complete. Covers thumbnails, responsive images, srcset, image variants, gallery tiles, and preview generation.",
-    "tags": ["thumbnails", "images", "responsive", "srcset", "processing"],
+    "tags": [
+      "thumbnails",
+      "images",
+      "responsive",
+      "srcset",
+      "processing"
+    ],
     "triggers": [
       "generate thumbnails",
       "make responsive image variants",
@@ -289,7 +427,10 @@
         "role": "planner",
         "summary": "lock sizes, crop strategy, format, and naming",
         "prompt": "1) List the source images and their dimensions. 2) Decide the variant matrix: the target sizes (e.g. 1x square 200px for grid tiles, plus srcset widths 320/640/1024), the aspect ratio per variant (square thumb vs preserved ratio), and the crop strategy (center vs subject-aware smart crop). 3) Choose output format(s) (e.g. WebP + JPEG fallback) and quality. 4) Lock a naming convention that encodes size, e.g. <name>-200.jpg, <name>-640w.webp, so it drops into srcset. 5) Write an acceptance-criteria checklist: 'every source yields every named variant', 'square thumbs are exactly NxN and keep the subject', 'srcset widths match the spec', 'filenames follow the convention', 'no upscaling beyond source dimensions'. 6) Record matrix + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -297,13 +438,23 @@
         "role": "developer",
         "summary": "generate every variant per source with the naming convention",
         "prompt": "1) Read scope.md. 2) Prefer a small rerunnable script (ImageMagick/sharp/Pillow) over manual edits. 3) For each source image, generate every variant in the matrix: square thumbs cropped to keep the subject centered (smart-crop if available, else center-crop), srcset widths scaled preserving ratio, in the chosen format(s) and quality. 4) Never upscale past the source's native size — skip-and-log a variant the source is too small for. 5) Write outputs to out/ using the exact naming convention. 6) Build a tiny index.html (optional but encouraged) or at least a manifest line proving the srcset wiring. 7) write_task_note the out/ folder and the produced-vs-expected variant counts. Good looks like: a complete, predictably-named matrix ready for a gallery or srcset.",
-        "produces": { "path": "out", "kind": "image-set" }
+        "produces": {
+          "path": "out",
+          "kind": "image-set"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open out/ and verify the variant matrix is complete: each source has each named variant (PASS/FAIL on count). 2) Probe a sample: square thumbs are exactly the target NxN and the subject is still in frame; srcset widths match spec (PASS/FAIL). 3) Confirm filenames follow the naming convention so they'd work in srcset. 4) Confirm no variant was upscaled beyond its source. 5) Write PASS/FAIL per criterion with measured numbers. Any gap → loop back to build to fill missing/incorrect variants.",
       "loopBackTo": "build",
-      "deliverable": { "path": "out", "kind": "image-set" }
+      "deliverable": {
+        "path": "out",
+        "kind": "image-set"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -311,7 +462,13 @@
     "role": "general",
     "name": "Visual Moodboard",
     "description": "Compose a visual moodboard that captures a direction — palette, textures, type vibe, imagery, and reference tiles — from a written brief, so a team can align on a look before any production work begins. Lock the brief and the explicit dimensions of the mood (e.g. 'warm/editorial/handmade' vs 'cool/technical/precise') FIRST, then assemble a coherent grid of generated or sourced tiles plus a swatch strip and keyword callouts. Covers moodboards, style boards, visual direction, design inspiration, brand mood, and look-and-feel exploration.",
-    "tags": ["moodboard", "visual-direction", "image-generation", "branding", "inspiration"],
+    "tags": [
+      "moodboard",
+      "visual-direction",
+      "image-generation",
+      "branding",
+      "inspiration"
+    ],
     "triggers": [
       "make a moodboard",
       "create a style board",
@@ -326,7 +483,10 @@
         "role": "visual-designer",
         "summary": "lock the mood dimensions, palette, and tile plan",
         "prompt": "1) Distill the direction into 3-5 mood keywords (e.g. warm, editorial, handmade, calm). 2) Lock a palette with hex swatches and the type vibe (serif/sans, weight, feeling). 3) Plan the tile grid: enumerate the tiles you'll include — e.g. 2-3 imagery tiles, a texture tile, a typography specimen tile, a palette strip — and what each should evoke. 4) Note explicit anti-references (what this is NOT) so the board has a point of view. 5) Write an acceptance-criteria checklist: 'board expresses the 3-5 keywords', 'palette swatches show exact hex', 'a typography specimen is present', 'tiles are cohesive (one direction, not a scrapbook)', 'at least 6 tiles'. 6) Record brief + checklist via write_task_note AND to notes/brief.md. No assembly yet.",
-        "produces": { "path": "notes/brief.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/brief.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "assemble",
@@ -334,13 +494,23 @@
         "role": "image-generator",
         "summary": "compose the coherent tile grid into one deliverable",
         "prompt": "1) Read brief.md. 2) Generate or compose each planned tile to express the locked keywords and palette — imagery tiles via the image-generation capability (or curated solid/gradient/texture blocks if no image model is available), a swatch strip rendering the exact hex values, and a type specimen tile showing the chosen pairing with sample words. 3) Assemble everything into ONE deliverable: a single index.html grid (preferred — easy to render and tweak) laying out at least 6 cohesive tiles with the keyword list as a caption. 4) Keep the direction tight: every tile should feel like the same world. 5) Reference any generated files from assets/ if produced. 6) write_task_note the board path and tile count. Good looks like: someone could brief a designer from this board alone.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open index.html and confirm it renders a grid of at least 6 tiles (PASS/FAIL). 2) Check it expresses the 3-5 mood keywords from brief.md — is the direction legible and cohesive, not a random scrapbook (PASS/FAIL)? 3) Confirm a palette swatch strip shows the exact hex values and a typography specimen is present. 4) Verify any referenced image files actually load. 5) Write PASS/FAIL per criterion. Incoherent/off-brief → loop back to assemble.",
       "loopBackTo": "assemble",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -348,7 +518,13 @@
     "role": "general",
     "name": "Game Sprite Sheet",
     "description": "Produce a game-ready sprite sheet — a character or object with its animation frames (idle, walk, jump, attack) on a uniform grid — plus the frame metadata (JSON atlas) a game engine needs to slice it. Lock the style and the frame inventory FIRST (cell size, pivot, palette, which animations and how many frames each) because a sprite sheet is only usable if every cell is the same size and the pivot is consistent; then generate the frames and pack them into a sheet with a matching atlas. Covers sprite sheets, game art, animation frames, texture atlases, pixel-art characters, and 2D game assets.",
-    "tags": ["sprite", "game-art", "animation", "image-generation", "atlas"],
+    "tags": [
+      "sprite",
+      "game-art",
+      "animation",
+      "image-generation",
+      "atlas"
+    ],
     "triggers": [
       "make a sprite sheet",
       "game character sprites",
@@ -363,7 +539,10 @@
         "role": "game-designer",
         "summary": "lock cell size, pivot, palette, and frame inventory",
         "prompt": "1) Lock the sprite style: pixel-art vs vector, the uniform CELL size (e.g. 32x32), the pivot/anchor convention (e.g. bottom-center for ground contact), and a tight palette. 2) Enumerate the animation set and frame counts: e.g. idle (2), walk (4), jump (2), attack (3) — name each and its frame order. 3) Decide sheet layout (one animation per row) and the atlas format (a JSON listing each frame's x/y/w/h and animation grouping). 4) Write an acceptance-criteria checklist: 'all cells are exactly NxN', 'pivot is consistent across frames', 'every named animation has its frame count', 'the JSON atlas indexes every frame', 'frames in an animation read as a smooth loop'. 5) Record style + inventory + checklist via write_task_note AND to notes/style-scope.md. No art yet.",
-        "produces": { "path": "notes/style-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/style-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "generate",
@@ -371,7 +550,10 @@
         "role": "image-generator",
         "summary": "draw each animation frame on the uniform cell",
         "prompt": "1) Read style-scope.md. 2) Draw each frame on the locked cell size with the consistent pivot — the character's feet (or chosen anchor) must sit at the same point every frame so it doesn't jitter when animated. 3) Keep the palette and silhouette consistent across frames; within an animation, make consecutive frames flow (a clean loop for walk/idle). 4) Produce frames for every named animation and frame count. 5) Save the individual frames and/or the packed sheet into assets/ (e.g. assets/spritesheet.png plus frames if helpful). 6) Sanity-check by mentally flipping through each animation. Good looks like: cells that, played in order, animate smoothly with no pivot drift.",
-        "produces": { "path": "assets", "kind": "image-set" }
+        "produces": {
+          "path": "assets",
+          "kind": "image-set"
+        }
       },
       {
         "id": "pack",
@@ -379,13 +561,23 @@
         "role": "developer",
         "summary": "compose the grid sheet and emit the JSON atlas",
         "prompt": "1) Compose all frames into a single sprite sheet image laid out one animation per row on the uniform grid (no padding drift between cells). 2) Emit a JSON atlas at the agreed path: for each frame, its name, x/y/w/h on the sheet, and which animation + order it belongs to; group frames by animation. 3) Build a tiny index.html preview that loads the sheet and plays each animation by stepping its frames (a simple setInterval) so the loop is verifiable. 4) Ensure the atlas JSON parses and every frame's rect actually lands on a real cell. 5) On a loop-back, fix only named gaps (misaligned cell, missing frame, wrong rect). 6) write_task_note the sheet path, atlas path, and frame totals. The gated deliverable is the JSON atlas.",
-        "produces": { "path": "atlas.json", "kind": "json" }
+        "produces": {
+          "path": "atlas.json",
+          "kind": "json"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Confirm assets/ holds the sprite sheet and atlas.json parses as valid JSON (PASS/FAIL). 2) Check the atlas against style-scope.md: every named animation present with its frame count, every frame rect is NxN on a real cell (PASS/FAIL). 3) Open the preview (or trace the sheet) — do frames in each animation align to a consistent pivot and read as a smooth loop (PASS/FAIL)? 4) Confirm cell sizes are uniform with no drift. 5) Write PASS/FAIL per criterion. Misalignment/missing frames → loop back to pack (or generate if art is wrong).",
       "loopBackTo": "pack",
-      "deliverable": { "path": "atlas.json", "kind": "json" }
+      "deliverable": {
+        "path": "atlas.json",
+        "kind": "json"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -393,7 +585,13 @@
     "role": "general",
     "name": "Image Dedup & Cluster",
     "description": "Find and group near-duplicate images across a folder — exact dupes, resized/re-encoded copies, and visually similar shots from the same burst — using perceptual hashing or visual similarity, then report clusters with a recommended keeper per group. Lock the similarity definition and thresholds FIRST (what counts as a duplicate vs merely similar) because the whole result hinges on that line; then analyze pairwise, cluster, and produce a human-reviewable report. Covers deduplication, near-duplicate detection, perceptual hashing, image clustering, burst grouping, and library cleanup.",
-    "tags": ["dedup", "images", "clustering", "perceptual-hash", "cleanup"],
+    "tags": [
+      "dedup",
+      "images",
+      "clustering",
+      "perceptual-hash",
+      "cleanup"
+    ],
     "triggers": [
       "find duplicate images",
       "cluster similar photos",
@@ -408,7 +606,10 @@
         "role": "planner",
         "summary": "define similarity, thresholds, and the keeper rule",
         "prompt": "1) List the folder and count the images. 2) Define the similarity method: exact-bytes hash for true dupes PLUS a perceptual hash (aHash/pHash/dHash) or embedding distance for near-dupes, and set the THRESHOLD (e.g. Hamming distance <= N) that separates 'duplicate' from 'merely similar'. 3) Define the KEEPER rule for a cluster (e.g. highest resolution, largest file, earliest timestamp). 4) Decide the report shape: clusters with member filenames, the chosen keeper, and the would-free byte savings. 5) Write an acceptance-criteria checklist: 'every image appears in exactly one cluster (singletons allowed)', 'the threshold is stated and applied consistently', 'each multi-member cluster names a keeper', 'reported savings are computed from real file sizes', 'no false-merge of clearly different images'. 6) Record method + thresholds + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -416,7 +617,10 @@
         "role": "developer",
         "summary": "hash, compare, and cluster the images",
         "prompt": "1) Read scope.md. 2) Compute the exact and perceptual hashes for every image (prefer a small rerunnable script; fall back to visual comparison via the vision capability for small sets). 3) Compare pairwise and group images whose distance is within the threshold into clusters (transitively — if A~B and B~C, they share a cluster). 4) Apply the keeper rule to each multi-member cluster. 5) Spot-verify a couple of clusters by actually looking at the images to catch false merges. 6) Stage the cluster assignments and per-image metadata (hash, size, dimensions) to a working note. write_task_note the cluster count, duplicate count, and any uncertain merges. Good looks like: tight clusters where members truly are the same shot.",
-        "produces": { "path": "notes/analyze.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/analyze.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -424,13 +628,23 @@
         "role": "developer",
         "summary": "produce the reviewable dedup report",
         "prompt": "1) Read the cluster assignments. 2) Write report.md: a summary (total images, N clusters, M duplicates found, estimated bytes freed), then one section per multi-member cluster listing its members (filename, dimensions, size), the recommended KEEPER (and why), and the ones to remove. 3) Include a short methodology line (method + threshold used) so the result is auditable. 4) List singletons compactly at the end. 5) Be explicit about any low-confidence clusters the human should eyeball. 6) On a loop-back, fix only the named issues (a bad merge, a wrong keeper). 7) write_task_note the report path. The gated deliverable is report.md.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open report.md and confirm it states the method + threshold and a summary with cluster/duplicate counts (PASS/FAIL). 2) Verify every image is accounted for in exactly one cluster or as a singleton (PASS/FAIL). 3) Open 2-3 reported clusters' member images — are they genuinely the same/near-same shot (no false merges) and is the keeper choice sensible (PASS/FAIL)? 4) Confirm byte-savings are computed from real sizes. 5) Write PASS/FAIL per criterion. False merges or unaccounted images → loop back to report (or analyze if clustering is wrong).",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -438,7 +652,13 @@
     "role": "general",
     "name": "OCR a Folder of Scans",
     "description": "Extract the text from a folder of scanned documents or photographed pages into clean, structured text — preserving reading order, paragraph breaks, and per-file provenance — then verify the extraction against the source images. Scope FIRST the languages, output structure (one file per scan vs a combined doc), and how to handle tables/columns/low-confidence regions, because OCR quality is dominated by handling layout and flagging uncertainty; then run extraction and verify a sample reads correctly. Covers OCR, text extraction, scanned documents, digitizing paper, receipt/invoice text, and image-to-text.",
-    "tags": ["ocr", "text-extraction", "scans", "documents", "vision"],
+    "tags": [
+      "ocr",
+      "text-extraction",
+      "scans",
+      "documents",
+      "vision"
+    ],
     "triggers": [
       "ocr a folder of scans",
       "extract text from images",
@@ -453,7 +673,10 @@
         "role": "planner",
         "summary": "languages, output structure, layout & confidence rules",
         "prompt": "1) List the scan folder and note formats and roughly what the pages are (typed, handwritten, mixed, tables). 2) Decide the language(s) for OCR. 3) Lock the output structure: one .txt/.md per source (named to match) and/or a combined document, with each block tagged by source filename for provenance. 4) Decide layout handling — preserve paragraph breaks and reading order, how to render tables (markdown tables or labeled rows), and how to flag low-confidence or unreadable regions (e.g. [illegible]). 5) Write an acceptance-criteria checklist: 'every scan produces an output', 'reading order and paragraph breaks are preserved', 'tables are not scrambled into a single line', 'low-confidence text is flagged not silently dropped', 'output is plain readable text, not garbled'. 6) Record scope + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "extract",
@@ -461,7 +684,10 @@
         "role": "developer",
         "summary": "OCR each scan into structured text",
         "prompt": "1) Read scope.md. 2) For each scan, run OCR — prefer a real OCR engine (Tesseract) or the vision capability reading the image directly. 3) Preserve reading order and paragraph structure; for multi-column pages, read column-by-column not left-to-right across columns. 4) Render tables as the agreed structure rather than collapsing them. 5) Flag uncertain text with the agreed marker instead of inventing words. 6) Write each output to the agreed path with source provenance, and assemble the combined doc if requested. 7) Keep a running count of scans processed. write_task_note the output location and counts. Good looks like: text a human could read as the original document, with uncertainty honestly flagged.",
-        "produces": { "path": "out", "kind": "generic-file" }
+        "produces": {
+          "path": "out",
+          "kind": "generic-file"
+        }
       },
       {
         "id": "verify",
@@ -469,13 +695,23 @@
         "role": "reviewer",
         "summary": "check a sample of outputs against the source images",
         "prompt": "1) Re-read scope.md's checklist. 2) Confirm output count equals scan count (PASS/FAIL). 3) Pick 3-4 scans, open BOTH the image and its extracted text, and compare: is the text accurate, in correct reading order, with paragraphs/tables intact (PASS/FAIL)? 4) Confirm low-confidence regions are flagged, not silently wrong or dropped. 5) Confirm provenance — each block traces to its source file. 6) Write a verification note with PASS/FAIL per criterion and the specific files you checked. On a loop-back the extractor fixes the flagged files. write_task_note the result.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open out/ and confirm every scan has an output (PASS/FAIL). 2) For 3-4 files, open the source image alongside the extracted text and check accuracy, reading order, and that tables/columns are not scrambled (PASS/FAIL). 3) Confirm uncertain text is flagged, not silently dropped or hallucinated. 4) Confirm provenance back to source files. 5) Reconcile verify.md's claims with what you observe. 6) Write PASS/FAIL per criterion. Inaccurate/garbled extraction → loop back to extract.",
       "loopBackTo": "extract",
-      "deliverable": { "path": "out", "kind": "generic-file" }
+      "deliverable": {
+        "path": "out",
+        "kind": "generic-file"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -483,7 +719,13 @@
     "role": "general",
     "name": "Diagram from Text",
     "description": "Render a clear technical diagram — flowchart, architecture, sequence, ER, or org chart — from a plain-language description, as code-defined (Mermaid/Graphviz/SVG) so it is editable and version-controllable rather than a flat picture. Spec FIRST the diagram type, the exact nodes and edges, and the layout direction, because diagrams fail when relationships are wrong or the graph is an unreadable tangle; then build the diagram so it renders, with every described entity and relationship present and labeled. Covers flowcharts, architecture diagrams, sequence diagrams, ER diagrams, org charts, mind maps, and diagram-as-code.",
-    "tags": ["diagram", "flowchart", "mermaid", "visualization", "architecture"],
+    "tags": [
+      "diagram",
+      "flowchart",
+      "mermaid",
+      "visualization",
+      "architecture"
+    ],
     "triggers": [
       "make a diagram from this description",
       "draw a flowchart",
@@ -498,7 +740,10 @@
         "role": "planner",
         "summary": "lock type, nodes, edges, labels, and layout",
         "prompt": "1) Parse the description and choose the right diagram TYPE (flowchart, sequence, ER, class, state, org chart, mind map). 2) Enumerate the exact NODES (entities/steps/actors) with their labels and the exact EDGES (relationships/transitions/messages) with their labels and direction — list them explicitly so nothing is dropped or invented. 3) Decide layout direction (top-down vs left-right) and any grouping/subgraphs. 4) Pick the rendering format (Mermaid is the default for editability; Graphviz/SVG if requested). 5) Write an acceptance-criteria checklist: 'every entity in the description is a node', 'every stated relationship is an edge with correct direction', 'labels match the description', 'the diagram renders without syntax errors', 'layout is readable (no needless crossings)'. 6) Record the node/edge list + checklist via write_task_note AND to notes/spec.md.",
-        "produces": { "path": "notes/spec.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/spec.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -506,13 +751,23 @@
         "role": "developer",
         "summary": "author the renderable diagram to the spec",
         "prompt": "1) Read spec.md's node/edge list. 2) Author the diagram in the chosen format (e.g. a Mermaid graph in an index.html that loads mermaid.js and renders it, so it actually displays). 3) Add EVERY node and EVERY edge from the spec with the correct labels and direction — do not add entities that weren't described and do not omit any. 4) Set the layout direction and use subgraphs/grouping for clarity; choose an arrangement that minimizes edge crossings. 5) Verify the syntax parses (the diagram renders, no error box). 6) On a loop-back, fix only the named gaps (missing edge, wrong arrow direction, syntax error). 7) write_task_note the file path and node/edge counts. The deliverable is index.html that renders the diagram.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open index.html and confirm the diagram actually RENDERS with no syntax/error box (PASS/FAIL). 2) Cross-check against spec.md: every described entity appears as a node and every stated relationship appears as an edge with the correct DIRECTION and label (PASS/FAIL — this is the core check). 3) Confirm no invented nodes/edges. 4) Judge readability — is the layout legible or a tangle? 5) Write PASS/FAIL per criterion. Missing/wrong relationships or a non-rendering diagram → loop back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -520,7 +775,13 @@
     "role": "general",
     "name": "Photo Cull & Rank",
     "description": "Rank and cull a set of photos by objective quality — sharpness/focus, exposure, composition, eyes-open/expression for people, and duplicate-of-a-better-shot — to surface the keepers and justify the rejects. Lock the scoring CRITERIA and weights FIRST (what 'good' means for this set: a portrait shoot weights expression, a landscape weights sharpness and horizon) because an unstated rubric makes the cull arbitrary; then score every photo and produce a ranked report with keep/reject and reasons. Covers photo culling, image quality ranking, best-shot selection, photo curation, and burst/best-of selection.",
-    "tags": ["photo", "culling", "quality", "ranking", "curation"],
+    "tags": [
+      "photo",
+      "culling",
+      "quality",
+      "ranking",
+      "curation"
+    ],
     "triggers": [
       "cull my photos",
       "rank photos by quality",
@@ -535,7 +796,10 @@
         "role": "planner",
         "summary": "lock the quality rubric, weights, and keep threshold",
         "prompt": "1) Understand the set (portraits, landscapes, product, event) and list the photos. 2) Lock the scoring RUBRIC: the dimensions (sharpness/focus, exposure, composition/framing, subject expression & eyes-open for people, noise) and a WEIGHT per dimension appropriate to the set. 3) Define the score scale (e.g. 1-5 per dimension) and the KEEP threshold (and how many keepers are wanted, if capped). 4) Decide near-duplicate handling: among similar shots, keep only the best-scoring one. 5) Write an acceptance-criteria checklist: 'every photo gets a score on every dimension', 'weights are stated and applied', 'keep/reject follows the threshold consistently', 'each reject has a concrete reason', 'among near-dupes only the best is kept'. 6) Record rubric + weights + checklist via write_task_note AND to notes/criteria.md.",
-        "produces": { "path": "notes/criteria.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/criteria.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "score",
@@ -543,7 +807,10 @@
         "role": "developer",
         "summary": "evaluate every photo against the rubric",
         "prompt": "1) Read criteria.md. 2) For each photo, actually LOOK at it via the vision capability (and use a sharpness/blur metric if a tool is available) and assign a 1-5 on each rubric dimension with a one-line justification grounded in what's visible (e.g. 'soft focus on eyes', 'blown highlights sky'). 3) Compute the weighted total per photo. 4) Group near-duplicates and mark the best of each group. 5) Apply the keep threshold (respecting any keeper cap) to set keep/reject. 6) Stage a table of filename → per-dimension scores → total → keep/reject → reason. write_task_note the keep/reject counts. Good looks like: defensible scores a photographer would mostly agree with.",
-        "produces": { "path": "notes/score.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/score.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -551,13 +818,23 @@
         "role": "developer",
         "summary": "produce the ranked keep/reject report",
         "prompt": "1) Read the scored table. 2) Write report.md: a summary (N photos, K keepers, the rubric + weights used), a ranked KEEPERS section (best first, with their scores and a one-line strength), and a REJECTS section grouped by reason (out of focus, underexposed, weaker duplicate, etc.) each with the photo and the concrete reason. 3) Call out near-duplicate groups, showing the kept shot vs the rejected siblings. 4) Make the cull reversible — list filenames so a human can act on it. 5) On a loop-back, fix only the named issues (a misjudged score, an inconsistent threshold). 6) write_task_note the report path. The gated deliverable is report.md.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open report.md and confirm it states the rubric + weights and a keeper/reject summary (PASS/FAIL). 2) Verify every photo is scored on every dimension and keep/reject follows the threshold consistently (PASS/FAIL). 3) Open 3-4 photos and sanity-check their scores against what you see — are obviously soft/blown shots rejected and crisp ones kept (PASS/FAIL)? 4) Confirm each reject has a concrete reason and near-dupe groups keep only the best. 5) Write PASS/FAIL per criterion. Misjudged or inconsistent culls → loop back to report (or score if the scoring is wrong).",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -565,7 +842,13 @@
     "role": "general",
     "name": "Image SEO Rename & Tag",
     "description": "Rename and tag a folder of images for SEO and findability — descriptive, hyphenated, keyword-rich filenames plus consistent metadata (title, caption, keyword tags) — driven by what each image actually depicts, while preserving a mapping back to the originals so links don't break silently. Scope FIRST the naming convention, keyword strategy, and collision/mapping rules, because bulk-renaming without a plan creates duplicate-name clashes and broken references; then process the folder and emit the rename map. Covers image SEO, filename optimization, descriptive renaming, alt/metadata tagging, and asset findability.",
-    "tags": ["seo", "images", "rename", "metadata", "tagging"],
+    "tags": [
+      "seo",
+      "images",
+      "rename",
+      "metadata",
+      "tagging"
+    ],
     "triggers": [
       "rename images for seo",
       "make descriptive image filenames",
@@ -580,7 +863,10 @@
         "role": "planner",
         "summary": "lock naming convention, keywords, and collision/mapping rules",
         "prompt": "1) List the folder and inventory current filenames and formats. 2) Lock the naming CONVENTION: lowercase, hyphen-separated, descriptive, keyword-first, no spaces/underscores/special chars, max length, and whether to keep a stable id suffix to guarantee uniqueness (e.g. red-running-shoe-side-01.jpg). 3) Define the keyword strategy (primary subject + 1-2 descriptive modifiers) and the metadata to attach (title, caption, keyword tags). 4) Lock collision handling (append -01/-02) and require a complete OLD→NEW mapping so references can be updated and nothing is lost. 5) Write an acceptance-criteria checklist: 'every new name is lowercase-hyphenated and describes the image', 'names are unique (no collisions)', 'a complete old→new map exists', 'metadata fields are populated from the image content', 'file extensions are preserved'. 6) Record convention + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "process",
@@ -588,13 +874,23 @@
         "role": "developer",
         "summary": "derive names from content, rename, and emit the map",
         "prompt": "1) Read scope.md. 2) For each image, LOOK at it via the vision capability to derive an accurate descriptive name (primary subject + modifiers) and the metadata (title, caption, keyword tags) — never base the name on a meaningless original name. 3) Apply the naming convention exactly (lowercase, hyphens, keyword-first, extension preserved) and resolve collisions with the agreed suffix scheme. 4) Perform the renames (or stage to an out/ folder if non-destructive is requested) and write a complete OLD→NEW mapping to rename-map.json including the per-image metadata. 5) Validate the JSON parses and that no two new names collide and every original is represented. 6) write_task_note the map path and the count renamed. The gated deliverable is rename-map.json.",
-        "produces": { "path": "rename-map.json", "kind": "json" }
+        "produces": {
+          "path": "rename-map.json",
+          "kind": "json"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open rename-map.json and confirm it parses as valid JSON (PASS/FAIL). 2) Confirm every original file has an entry and the count matches the folder (PASS/FAIL). 3) Check new names against scope.md: lowercase-hyphenated, keyword-first, no collisions, extensions preserved (PASS/FAIL). 4) Spot-check 3-4 entries by opening the images — does the name actually describe the image and are metadata fields populated (PASS/FAIL)? 5) Write PASS/FAIL per criterion. Collisions, generic names, or missing entries → loop back to process.",
       "loopBackTo": "process",
-      "deliverable": { "path": "rename-map.json", "kind": "json" }
+      "deliverable": {
+        "path": "rename-map.json",
+        "kind": "json"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -602,7 +898,13 @@
     "role": "general",
     "name": "Image Palette Extraction",
     "description": "Extract a usable color palette from an image or a set of images — the dominant and accent colors as hex/RGB with proportions — and emit it as design tokens (CSS variables / JSON) plus a swatch preview, so a brand or theme can be built from a reference photo. Lock FIRST how many colors, the color space and clustering method, and accessibility constraints (e.g. text/background pairs must meet a contrast ratio) because a raw dominant-color dump is rarely directly usable as a theme; then extract, name, and present the palette. Covers color extraction, palette generation, design tokens, theme-from-image, dominant colors, and brand color sampling.",
-    "tags": ["color", "palette", "design-tokens", "images", "theme"],
+    "tags": [
+      "color",
+      "palette",
+      "design-tokens",
+      "images",
+      "theme"
+    ],
     "triggers": [
       "extract colors from an image",
       "make a palette from a photo",
@@ -617,7 +919,10 @@
         "role": "planner",
         "summary": "lock count, method, token format, and contrast rules",
         "prompt": "1) Identify the source image(s) and the intended use (web theme, brand palette, chart colors). 2) Lock the palette SIZE (e.g. 5-6 swatches: a primary, 2-3 supports, a neutral, an accent) and the extraction method (k-means/median-cut clustering in a perceptual space) plus how to report proportions. 3) Decide the OUTPUT token format: CSS custom properties and/or a JSON tokens file with named roles (--color-primary, etc.). 4) Lock accessibility constraints: at least one text-on-background pair must meet WCAG AA contrast (4.5:1); if the raw extraction misses it, derive a tweaked tint/shade and note it. 5) Write an acceptance-criteria checklist: 'N named swatches with valid hex', 'proportions reported', 'tokens parse (valid CSS/JSON)', 'at least one AA-contrasting text/bg pair', 'colors are sampled from the actual image'. 6) Record scope + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -625,13 +930,23 @@
         "role": "developer",
         "summary": "extract, name, token-ize, and preview the palette",
         "prompt": "1) Read scope.md. 2) Sample the actual image pixels (prefer a script doing real clustering; otherwise read the image via the vision capability and estimate the dominant colors honestly) to derive the N colors with their approximate proportions. 3) Assign semantic ROLES and names (primary, secondary, accent, neutral, surface) and convert each to hex and RGB. 4) Check the chosen text/background pair for AA contrast; if it fails, derive an adjusted shade and record both the raw and adjusted value. 5) Emit the tokens: a tokens.json (and CSS variables) at the agreed path, AND build a single index.html swatch preview showing each color block with its name, hex, proportion, and a live text-on-color contrast demo. 6) Validate JSON/CSS parse. 7) On a loop-back, fix only named gaps. 8) write_task_note the token + preview paths. The gated deliverable is index.html.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open index.html and confirm it renders N named swatches each with a valid hex and proportion (PASS/FAIL). 2) Confirm the tokens file parses (valid JSON/CSS) and roles are named (PASS/FAIL). 3) Open the source image next to the palette — are the colors genuinely sampled from it, not arbitrary (PASS/FAIL)? 4) Check the contrast demo: at least one text/background pair meets AA 4.5:1 (PASS/FAIL). 5) Write PASS/FAIL per criterion. Off-image colors, failing contrast, or unparseable tokens → loop back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -639,7 +954,13 @@
     "role": "general",
     "name": "Favicon & App-Icon Set",
     "description": "Generate the complete favicon and app-icon set a modern site needs — the multi-size favicon, Apple touch icon, Android/maskable icons, and the web app manifest plus the exact HTML link/meta tags — from a single source mark, ensuring the icon stays legible at 16px and the maskable variant survives platform cropping. Lock FIRST the source mark, the exact size matrix, and the safe-area/padding rules (maskable icons need extra padding or platforms clip them) because favicon sets fail when the icon is illegible tiny or gets cropped on Android; then generate every size and emit the manifest + install snippet. Covers favicons, app icons, PWA icons, touch icons, maskable icons, and the web app manifest.",
-    "tags": ["favicon", "app-icon", "pwa", "manifest", "image-generation"],
+    "tags": [
+      "favicon",
+      "app-icon",
+      "pwa",
+      "manifest",
+      "image-generation"
+    ],
     "triggers": [
       "generate a favicon set",
       "make app icons",
@@ -654,7 +975,10 @@
         "role": "planner",
         "summary": "lock source mark, size matrix, and maskable safe-area",
         "prompt": "1) Identify the source mark/logo (or a simplified glyph version suited to tiny sizes) and the brand background color. 2) Lock the SIZE MATRIX: favicon 16/32/48 (ICO + PNG), apple-touch-icon 180, Android/PWA 192 and 512, plus a 512 MASKABLE variant. 3) Lock the maskable SAFE-AREA rule: the icon content must sit within the central ~80% (≈10% padding each side) so Android's mask doesn't clip it, with a solid background fill. 4) Decide the manifest fields (name, short_name, theme_color, background_color, icons array with purpose: any/maskable). 5) Write an acceptance-criteria checklist: 'all matrix sizes produced', 'icon is legible at 16px (simplified if needed)', 'maskable variant keeps content in the safe area on a filled background', 'manifest.json is valid and lists every icon with correct sizes/purpose', 'the HTML link/meta snippet references the real files'. 6) Record matrix + rules + checklist via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "generate",
@@ -662,7 +986,10 @@
         "role": "image-generator",
         "summary": "render every size, including a safe-area maskable",
         "prompt": "1) Read scope.md. 2) Produce each size in the matrix from the source mark, saving into assets/ with conventional names (favicon-16.png, favicon-32.png, apple-touch-icon.png, icon-192.png, icon-512.png, maskable-512.png, and favicon.ico). 3) For the smallest sizes, use the SIMPLIFIED glyph so it stays legible at 16px — fine detail that vanishes tiny must be dropped. 4) For the maskable variant, render the icon within the central safe area on a solid background fill so platform masks (circle/squircle) never clip it. 5) Keep the mark and colors consistent across sizes. 6) Eyeball the 16px and the masked 512 to confirm legibility and no clipping. write_task_note the produced files. Good looks like: a crisp tiny favicon and a maskable icon that survives any crop.",
-        "produces": { "path": "assets", "kind": "image-set" }
+        "produces": {
+          "path": "assets",
+          "kind": "image-set"
+        }
       },
       {
         "id": "manifest",
@@ -670,13 +997,23 @@
         "role": "developer",
         "summary": "emit manifest.json and the HTML head snippet",
         "prompt": "1) Write manifest.json with name, short_name, theme_color, background_color, and an icons array entry for each generated icon (src, sizes, type, and purpose: \"any\" or \"maskable\" for the maskable one) — referencing the real files in assets/. 2) Build index.html whose <head> contains the full install snippet: the favicon link tags (ICO + PNG sizes), the apple-touch-icon link, the manifest link, and a theme-color meta — all pointing at the real assets/ paths — and whose body shows a small preview rendering each icon at its native size plus a 16px row. 3) Validate manifest.json parses and every src resolves to a real file. 4) On a loop-back, fix only named gaps (missing icon entry, wrong purpose, broken path). 5) write_task_note the manifest and page paths. The gated deliverable is index.html.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "1) Open assets/ and confirm every matrix size exists (16/32/48, 180, 192, 512, maskable-512, favicon.ico) (PASS/FAIL). 2) Open manifest.json — it parses, theme/background colors set, and every icon listed with correct sizes and purpose (any vs maskable) pointing at real files (PASS/FAIL). 3) Open index.html and verify the head snippet links the favicon, apple-touch-icon, and manifest at real paths; view the 16px preview row — is the icon legible tiny (PASS/FAIL)? 4) Inspect the maskable icon — is content within the safe area on a filled background so it won't clip (PASS/FAIL)? 5) Write PASS/FAIL per criterion. Missing sizes, illegible 16px, clipped maskable, or a broken manifest → loop back to manifest (or generate if an icon is wrong).",
       "loopBackTo": "manifest",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

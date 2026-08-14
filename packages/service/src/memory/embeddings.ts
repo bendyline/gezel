@@ -31,10 +31,22 @@ const log = createLogger('memory');
  * first failure.
  */
 export class EmbeddingsDisabledError extends Error {
-  readonly code = 'EMBEDDINGS_DISABLED';
+  readonly code: string = 'EMBEDDINGS_DISABLED';
+  readonly retryable: boolean = false;
   constructor(reason: string) {
     super(`memory embeddings disabled: ${reason}`);
     this.name = 'EmbeddingsDisabledError';
+  }
+}
+
+/** A recoverable model-load outage currently held behind a retry cooldown. */
+export class EmbeddingsUnavailableError extends EmbeddingsDisabledError {
+  override readonly code = 'EMBEDDINGS_UNAVAILABLE';
+  override readonly retryable = true;
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'EmbeddingsUnavailableError';
+    this.message = `memory embeddings temporarily unavailable: ${reason}`;
   }
 }
 
@@ -42,6 +54,11 @@ export class EmbeddingsDisabledError extends Error {
 // Every subsequent call throws the short marker error instead of re-attempting
 // the import and re-printing the full model-load error on every chat turn.
 let disabledReason: string | null = null;
+let unavailableReason: string | null = null;
+let unavailableUntil = 0;
+
+/** Avoid hammering the model registry when a first-use download is offline. */
+const EMBEDDING_RETRY_COOLDOWN_MS = 60_000;
 
 const ENV_DISABLED_REASON = 'disabled by GEZEL_DISABLE_EMBEDDINGS';
 
@@ -51,7 +68,7 @@ function disabledByEnv(): boolean {
 }
 
 export function embeddingsDisabledReason(): string | null {
-  return disabledByEnv() ? ENV_DISABLED_REASON : disabledReason;
+  return disabledByEnv() ? ENV_DISABLED_REASON : (disabledReason ?? currentUnavailableReason());
 }
 
 // ── worker plumbing ───────────────────────────────────────────────────────
@@ -66,6 +83,7 @@ interface WorkerReply {
   vectors?: number[][];
   error?: string;
   fatal?: boolean;
+  retryable?: boolean;
   optionalPeerMissing?: boolean;
 }
 
@@ -119,7 +137,12 @@ function onMessage(msg: WorkerReply): void {
   pending.delete(msg.id);
   if (msg.error) {
     if (msg.fatal) markDisabled(msg.error, msg.optionalPeerMissing ?? false);
-    p.reject(new Error(msg.error));
+    if (msg.retryable) {
+      markTemporarilyUnavailable(msg.error);
+      p.reject(new EmbeddingsUnavailableError(unavailableReason ?? msg.error));
+    } else {
+      p.reject(new Error(msg.error));
+    }
     return;
   }
   p.resolve(msg.vectors ?? []);
@@ -158,11 +181,32 @@ async function embedInProcess(texts: string[]): Promise<number[][]> {
     return await runEmbed(texts);
   } catch (err) {
     if (err instanceof PipelineLoadError) {
+      if (err.retryable) {
+        markTemporarilyUnavailable(err.message);
+        throw new EmbeddingsUnavailableError(unavailableReason ?? err.message);
+      }
       markDisabled(err.message, err.optionalPeerMissing);
       throw new EmbeddingsDisabledError(disabledReason ?? err.message);
     }
     throw err;
   }
+}
+
+function currentUnavailableReason(): string | null {
+  if (!unavailableReason) return null;
+  if (Date.now() < unavailableUntil) return unavailableReason;
+  unavailableReason = null;
+  unavailableUntil = 0;
+  return null;
+}
+
+function markTemporarilyUnavailable(message: string): void {
+  unavailableReason = firstLine(message);
+  unavailableUntil = Date.now() + EMBEDDING_RETRY_COOLDOWN_MS;
+  log.warn(
+    `[memory] embedding model load failed; semantic search will retry after ${Math.ceil(EMBEDDING_RETRY_COOLDOWN_MS / 1_000)}s.`,
+  );
+  log.warn('[memory] underlying transient error:', message);
 }
 
 function markDisabled(message: string, optionalPeerMissing = false): void {
@@ -187,11 +231,16 @@ function markDisabled(message: string, optionalPeerMissing = false): void {
 async function embedMany(texts: string[]): Promise<number[][]> {
   if (disabledByEnv()) throw new EmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
+  const temporaryReason = currentUnavailableReason();
+  if (temporaryReason) throw new EmbeddingsUnavailableError(temporaryReason);
   const w = ensureWorker();
   if (w) {
     try {
       return await sendToWorker(w, texts);
     } catch (err) {
+      // A retryable pipeline-load failure already has a cooldown and should not
+      // immediately repeat the same download in-process.
+      if (err instanceof EmbeddingsUnavailableError) throw err;
       // The model is unloadable — the worker tagged it fatal and we've already
       // set disabledReason. Surface the canonical error.
       if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);

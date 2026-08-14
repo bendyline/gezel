@@ -1033,6 +1033,9 @@ export class TaskManager {
       ...(cron ? { cron } : {}),
       ...(nightShift ? { nightShift } : {}),
       ...(fanout ? { fanout } : {}),
+      ...(input.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: input.roleBasedNameOnlyMode }
+        : {}),
       createdAt: now,
       updatedAt: now,
       createdBy: input.createdBy ?? { kind: 'user' },
@@ -3553,6 +3556,9 @@ export class TaskManager {
       ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
       activeStepId,
       parentTaskRef: parent.ref,
+      ...(parent.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
+        : {}),
       createdAt: now,
       updatedAt: now,
       createdBy: parent.createdBy,

@@ -14,7 +14,7 @@ import type { Logger } from './log.js';
  *   2. Existing project whose `name === basename(folder)` but has no
  *      `workingDir` set. Adopt it by patching its `workingDir`. This recovers
  *      from folder renames in the OS while VSCode is open.
- *   3. Otherwise create a fresh project + setProjectWorkingDir.
+ *   3. Otherwise create a fresh folder-backed project.
  */
 export async function ensureProjectForWorkspace(
   folder: vscode.WorkspaceFolder,
@@ -44,8 +44,8 @@ export async function ensureProjectForWorkspace(
     about: defaultAbout(name, wd),
     missionObjectives: defaultMission(name),
     mode: 'crew',
+    workingDir: wd,
   });
-  await client.setProjectWorkingDir(created.id, wd);
   logger.info(`created project ${created.id} for ${wd}`);
   return created.id;
 }

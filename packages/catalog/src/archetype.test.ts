@@ -309,7 +309,7 @@ describe('archetypeToCraftbook', () => {
     expect(byId.get('evaluate')?.prompt).toContain('read_artifact');
   });
 
-  it('an explicit artifact:false keeps a notes deliverable in the workspace', () => {
+  it('an accessory path stays in artifacts even when a spec tries artifact:false', () => {
     const spec: ArchetypeSpec = {
       ...arcade,
       phases: [
@@ -325,10 +325,41 @@ describe('archetypeToCraftbook', () => {
     };
     const { steps } = archetypeToCraftbook(spec);
     const notes = steps.find((s) => s.id === 'notes');
-    expect((notes?.advanceWhen as { artifact?: boolean } | undefined)?.artifact).toBeUndefined();
-    expect(notes?.prompt).not.toContain('write_artifact');
+    expect((notes?.advanceWhen as { artifact?: boolean } | undefined)?.artifact).toBe(true);
+    expect(notes?.prompt).toContain('write_artifact');
     const checks = notes?.gate && 'checks' in notes.gate ? (notes.gate.checks ?? []) : [];
-    expect(checks.some((c) => (c as { artifact?: boolean }).artifact === true)).toBe(false);
+    expect(checks.every((c) => (c as { artifact?: boolean }).artifact === true)).toBe(true);
+  });
+
+  it('declares referenced prior outputs as surface-aware step inputs', () => {
+    const spec: ArchetypeSpec = {
+      ...arcade,
+      phases: [
+        {
+          id: 'scope',
+          name: 'Scope',
+          role: 'planner',
+          summary: 'scope',
+          prompt: 'Write the scope.',
+          produces: { path: 'notes/scope.md', kind: 'markdown-notes' },
+        },
+        {
+          id: 'build',
+          name: 'Build',
+          role: 'developer',
+          summary: 'build',
+          prompt: 'Use `notes/scope.md` to build the page.',
+          produces: { path: 'index.html', kind: 'html-page' },
+        },
+      ],
+    };
+    const { steps } = archetypeToCraftbook(spec);
+    const build = steps.find((step) => step.id === 'build');
+    expect(build?.consumes).toEqual([{ file: 'notes/scope.md', artifact: true }]);
+    expect(build?.prompt).toContain('`read_artifact`');
+    expect(steps.find((step) => step.id === 'evaluate')?.consumes).toEqual([
+      { file: 'index.html' },
+    ]);
   });
 
   it('drawer-defaulted books get the standing artifact note in the about when the spec has none', () => {

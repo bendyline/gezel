@@ -300,6 +300,12 @@ describe('projects API', () => {
       await realpath(join(svc.context.home, 'projects', 'integtest', 'artifacts', 'notes.md')),
     );
 
+    const unsafeRevealRes = await api(
+      'POST',
+      '/api/projects/integtest/reveal-reference?kind=artifact&path=..%2Foutside.md',
+    );
+    expect(unsafeRevealRes.status).toBe(400);
+
     const delRes = await api('DELETE', '/api/projects/integtest/artifacts/delete?path=notes.md');
     expect(delRes.status).toBe(200);
   });

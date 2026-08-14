@@ -704,7 +704,7 @@ function updateDownloadProgress(
   index: number,
   total: number,
   event: DownloadEvent,
-  title = 'Installing local models',
+  title = 'Downloading local models from Hugging Face (huggingface.co)',
 ): void {
   let pct: number | null = null;
   let detail = job.label;

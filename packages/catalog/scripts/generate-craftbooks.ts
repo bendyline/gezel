@@ -67,6 +67,55 @@ async function loadGallerySpecs(here: string): Promise<ArchetypeSpec[]> {
   return specs;
 }
 
+function compareSemver(a: string, b: string): number {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const delta = (left[i] ?? 0) - (right[i] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+/**
+ * A new immutable craftbook release keeps the previous release's eval
+ * sidecar unless an author has already supplied a test for the new version.
+ * This prevents catalog-wide compiler migrations from silently dropping
+ * evaluation coverage.
+ */
+async function inheritLatestTestSidecar(bookDir: string, targetVersion: string): Promise<void> {
+  const versionsDir = join(bookDir, 'versions');
+  const target = join(versionsDir, targetVersion, 'test.json');
+  try {
+    await readFile(target);
+    return;
+  } catch {
+    // Expected for a new immutable release.
+  }
+
+  let versions: string[];
+  try {
+    versions = (await readdir(versionsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && /^\d+\.\d+\.\d+$/.test(entry.name))
+      .map((entry) => entry.name)
+      .filter((version) => version !== targetVersion)
+      .sort(compareSemver)
+      .reverse();
+  } catch {
+    return;
+  }
+
+  for (const version of versions) {
+    try {
+      const bytes = await readFile(join(versionsDir, version, 'test.json'));
+      await writeFile(target, bytes);
+      return;
+    } catch {
+      // Keep looking for the newest release that carries an eval sidecar.
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const root = join(requireGildeCheckout().dataDir, 'craftbook-templates');
@@ -141,6 +190,8 @@ async function main(): Promise<void> {
         await mkdir(dirname(dest), { recursive: true });
         await writeFile(dest, f.content, 'utf8');
       }
+      const version = spec.release?.version ?? '1.0.0';
+      await inheritLatestTestSidecar(bookDir, version);
       written++;
     } catch (err) {
       // One malformed agent-authored spec must not block the other ~200.

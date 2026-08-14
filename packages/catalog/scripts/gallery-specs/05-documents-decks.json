@@ -4,7 +4,14 @@
     "role": "general",
     "name": "Investor Pitch Deck",
     "description": "Build a fundraising or sales pitch deck that tells a tight investor-grade story: problem, solution, market size, product, business model, traction, go-to-market, competition, team, and the ask. Locks the NARRATIVE arc and per-slide message FIRST (a deck lives or dies on story order, not visuals), then designs a single consistent slide system, then builds a navigable HTML deck — one idea per slide, big claim plus one supporting proof, ending on a crisp ask and use-of-funds. Use for seed/Series-A raises, sales decks, demo days, and investor updates.",
-    "tags": ["deck", "pitch", "investor", "fundraising", "slides", "html"],
+    "tags": [
+      "deck",
+      "pitch",
+      "investor",
+      "fundraising",
+      "slides",
+      "html"
+    ],
     "triggers": [
       "pitch deck",
       "investor deck",
@@ -20,7 +27,10 @@
         "role": "planner",
         "summary": "lock the story order + one message per slide + the ask",
         "prompt": "Design the STORY before any layout or pixels. Step 1: gather the inputs you actually have (problem, who feels it, the product, any traction numbers, the market, the team, and the specific ask amount + use of funds). Step 2: lay out the canonical 10-12 slide arc in order: (1) title/one-liner, (2) problem, (3) solution, (4) how it works / product, (5) market size (TAM/SAM/SOM), (6) business model, (7) traction, (8) go-to-market, (9) competition / why-now, (10) team, (11) the ask + use of funds, (12) closing/contact. Step 3: for EACH slide write exactly one headline claim plus 1-3 supporting bullets or a single number — never a wall of text. Step 4: flag any slide where you lack data and note the assumption you will state. Step 5: write an acceptance-criteria checklist (e.g. 'opens with a one-line value prop title slide', 'problem precedes solution', 'market-size slide gives a concrete number with a stated basis', 'traction slide shows at least one metric or an honest \"pre-launch\" note', 'closes with a specific ask amount + use of funds', 'one core idea per slide, <= 40 words of body each'). Write the slide-by-slide outline + decisions + checklist via write_task_note AND to notes/narrative.md. No design, no HTML yet.",
-        "produces": { "path": "notes/narrative.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/narrative.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "visual-design",
@@ -28,7 +38,10 @@
         "role": "visual-designer",
         "summary": "one reusable slide system: grid, palette, type, number style",
         "prompt": "Design ONE slide system the build will apply uniformly, so the deck reads as designed not assembled. Step 1: pick a palette with exact hex values (one ink, one background, one accent, one muted) and a confident type pairing (display weight for headlines, readable weight for body). Step 2: define the slide grid — title position, body zone, footer with slide number, and generous margins. Step 3: define how each slide ARCHETYPE renders: a hero/title slide, a big-number slide (for market size and traction), a 2-up or 3-up comparison slide (competition), a bullet slide, and a team slide. Step 4: specify one restrained accent treatment (a rule, a colored keyword, or a single accent shape) and a consistent emphasis style for the one big number per data slide. Step 5: write a visual-criteria checklist ('every slide uses the same grid + footer', 'exactly one accent color used consistently', 'big numbers are visually dominant on data slides', 'no slide mixes more than two type sizes for body'). Write the slide-system spec + checklist via write_task_note AND to notes/visual-design.md. No slide content yet.",
-        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/visual-design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -36,13 +49,23 @@
         "role": "developer",
         "summary": "implement a navigable index.html applying the system to the outline",
         "prompt": "Implement the deck as a single self-contained index.html (inline CSS + minimal JS, no external assets or CDNs). Step 1: create one full-viewport section per slide following the locked narrative order. Step 2: apply the slide system exactly — same grid, palette hex values, type pairing, and footer-with-slide-number on every slide; render each slide using its archetype from the visual spec (hero, big-number, comparison, bullet, team). Step 3: wire keyboard navigation (ArrowLeft/ArrowRight or PageUp/PageDown) and visible slide numbers so it is presentable. Step 4: drop in the approved per-slide headline + supporting content from the outline verbatim — do not rewrite the story or invent new metrics. Step 5: make data slides visually lead with their one big number; ensure the ask slide states the concrete amount + use of funds. On a loop-back, fix ONLY the gaps the reviewer named and do not regress slides that already passed. Write the deck path + final slide count via write_task_note.",
-        "produces": { "path": "index.html", "kind": "slide-deck" }
+        "produces": {
+          "path": "index.html",
+          "kind": "slide-deck"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the deck against the locked criteria. Step 1: open/render index.html (or trace the source) and step through every slide with the arrow keys; confirm navigation works and slide numbers show. Step 2: verify the narrative order matches the outline (title -> problem -> solution -> ... -> ask -> close) and that problem precedes solution. Step 3: check EACH acceptance criterion from notes/narrative.md and notes/visual-design.md: one idea per slide and <= 40 words of body each, market-size slide gives a concrete number with a stated basis, traction slide shows a metric or an honest pre-launch note, the deck closes with a specific ask amount + use of funds, every slide shares the same grid/footer and one consistent accent color, big numbers dominate on data slides. Step 4: confirm no invented metrics crept in beyond the outline. Write PASS/FAIL for every criterion with the offending slide noted on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "slide-deck" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "slide-deck"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -50,7 +73,13 @@
     "role": "general",
     "name": "Formatted Report",
     "description": "Produce a polished, print-ready formatted report — quarterly business review, research findings, status report, or analysis writeup — rendered as a clean paginated HTML document that prints cleanly to PDF. Locks the section outline and acceptance criteria FIRST, then a print-aware visual template (cover, headers/footers, page breaks, figure/table styling), then builds the full report so structure, numbered headings, figures, and an executive summary all land in the right order. Use when someone needs a shareable report or PDF rather than loose notes.",
-    "tags": ["report", "pdf", "document", "print", "html"],
+    "tags": [
+      "report",
+      "pdf",
+      "document",
+      "print",
+      "html"
+    ],
     "triggers": [
       "formatted report",
       "make a pdf report",
@@ -66,7 +95,10 @@
         "role": "planner",
         "summary": "section structure, audience, and acceptance criteria",
         "prompt": "Plan the report before writing or styling. Step 1: name the audience and the single decision/takeaway the report must support. Step 2: lay out the section structure in order — cover (title, author, date), executive summary, then the body sections, then conclusion/recommendations, then any appendix. Step 3: for each body section write a one-line purpose and the 2-4 points it must cover; mark which sections need a figure or table. Step 4: decide on numbered headings (1, 1.1, 2 ...) and whether a table of contents is needed. Step 5: write an acceptance-criteria checklist ('has a cover with title/author/date', 'executive summary is <= half a page and stands alone', 'sections are numbered and in the outlined order', 'every figure/table has a caption and is referenced in prose', 'closes with explicit recommendations', 'prints with clean page breaks, no orphaned headings'). Write the outline + checklist via write_task_note AND to notes/outline.md. No styling or body prose yet.",
-        "produces": { "path": "notes/outline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/outline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -74,7 +106,10 @@
         "role": "designer",
         "summary": "print-aware visual template: cover, headers, page breaks, figures",
         "prompt": "Design ONE print-aware template the report will apply throughout. Step 1: define page geometry for print — A4/Letter via an @page CSS rule, margins, and running header/footer (document title + page number). Step 2: specify the cover layout (large title, subtitle, author, date, optional rule). Step 3: define the type scale (H1/H2/H3, body, caption) and a restrained palette with exact hex; body must be high-contrast and readable in print. Step 4: define figure and table styling (bordered/striped tables, captioned figures, consistent width) and a page-break policy (page-break-before on H1 sections, break-inside:avoid on figures/tables so they are never split). Step 5: write a visual-criteria checklist ('cover occupies its own page', 'each top-level section starts on a new page', 'tables/figures never break across pages', 'header/footer with page number on every body page'). Write the template spec + checklist via write_task_note AND to notes/design.md. No body content yet.",
-        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -82,13 +117,23 @@
         "role": "developer",
         "summary": "implement report.html with print CSS, sections, figures, and summary",
         "prompt": "Build the report as a single self-contained report.html (inline CSS including the @page and print rules, no external assets). Step 1: implement the cover page exactly per the template (title, author, date) on its own page. Step 2: write the executive summary so it stands alone in half a page or less. Step 3: write each body section in the outlined order with numbered headings, page-break-before on each top-level section, real prose (not bullet stubs) covering the points from the outline. Step 4: include the marked figures/tables using the template's figure/table styling, each with a caption and an in-prose reference, with break-inside:avoid so they never split. Step 5: add running header/footer with page numbers and, if the outline called for it, a table of contents. Step 6: end with explicit recommendations/conclusion. On a loop-back, fix ONLY the named gaps without regressing passing sections. Write the report path + section count via write_task_note.",
-        "produces": { "path": "report.html", "kind": "html-page" }
+        "produces": {
+          "path": "report.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the report against the locked criteria. Step 1: open/render report.html (or trace source) and, if a print-preview is available, check the paginated layout. Step 2: confirm the cover is on its own page with title/author/date and each top-level section begins on a new page. Step 3: check EACH acceptance criterion: executive summary stands alone and is <= half a page, headings are numbered and in outlined order, every figure/table has a caption and is referenced in prose and does not split across pages, header/footer with page number present, report closes with explicit recommendations. Step 4: confirm the body is real prose covering the outlined points, not placeholder stubs. Write PASS/FAIL for every criterion with the offending section noted on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "report.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "report.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -96,7 +141,13 @@
     "role": "general",
     "name": "One-Pager Brief",
     "description": "Create a single-page brief or summary that fits one printed page and lands one message fast — a product one-pager, executive summary, project brief, or leave-behind. Scopes the single audience + the one thing they must remember FIRST, then designs a tight one-page layout (headline, scannable sections, a sidebar of facts), then writes punchy copy that fits the page — ruthless about cutting anything that pushes past one page. Use when the answer must be skimmable in 60 seconds on a single sheet.",
-    "tags": ["one-pager", "brief", "summary", "marketing", "document"],
+    "tags": [
+      "one-pager",
+      "brief",
+      "summary",
+      "marketing",
+      "document"
+    ],
     "triggers": [
       "one pager",
       "one-page brief",
@@ -112,7 +163,10 @@
         "role": "planner",
         "summary": "one audience, one takeaway, the must-include facts",
         "prompt": "Constrain hard — this is ONE page. Step 1: name the single audience and the one sentence you want them to remember after reading. Step 2: list the must-include facts and cut everything else; a one-pager that needs two pages has failed scoping. Step 3: choose the section set that fits one page: a headline + subhead, a short context paragraph, 3-4 scannable value/benefit points, and a small facts/contact sidebar (stats, pricing, links). Step 4: set a word budget per zone (e.g. subhead <= 15 words, each point <= 20 words) so the page cannot overflow. Step 5: write an acceptance-criteria checklist ('fits on one printed page', 'headline states the one takeaway', '3-4 scannable points, each one line', 'a facts/contact block is present', 'no section exceeds its word budget'). Write the scope + word budgets + checklist via write_task_note AND to notes/scope.md. No layout or final copy yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -120,7 +174,10 @@
         "role": "designer",
         "summary": "one-page grid: headline band, columns, fact sidebar, print rule",
         "prompt": "Design a layout that physically fits one page. Step 1: choose page size (Letter/A4 via @page) with tight margins and a single visual hierarchy: a headline band at top, a main column for the points, and a narrow sidebar for the facts/contact block. Step 2: pick a palette with exact hex (ink, background, one accent) and a type scale where the headline dominates and body stays compact. Step 3: define how the 3-4 points render (icon-less bullets or small labeled blocks) and how the sidebar facts render (label + value rows). Step 4: set the print rule so the whole thing is exactly one page — constrain total height and use break-inside:avoid. Step 5: write a visual-criteria checklist ('single page, no overflow', 'headline is the dominant element', 'sidebar visually distinct from main column', 'consistent accent color'). Write the layout spec + checklist via write_task_note AND to notes/design.md. No copy yet.",
-        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -128,13 +185,23 @@
         "role": "copywriter",
         "summary": "write punchy copy into index.html within the page + word budgets",
         "prompt": "Write the copy and assemble it into the one-page layout as a single self-contained index.html (inline CSS with the @page/print rule). Step 1: write a headline that states the one takeaway and a subhead within its word budget. Step 2: write the short context paragraph and the 3-4 value points, each one line within budget — punchy, benefit-led, no filler. Step 3: fill the facts/contact sidebar with the must-include facts as label/value rows. Step 4: drop everything into the locked layout with the exact palette and type scale; confirm it occupies exactly one page (trim copy if it overflows — cutting words is the job, not adding pages). On a loop-back, fix ONLY the named gaps. Write the path + a note confirming it fits one page via write_task_note.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the one-pager. Step 1: open/render index.html and, if print-preview is available, confirm it is EXACTLY one page with no overflow onto a second sheet. Step 2: check EACH acceptance criterion: headline states the one takeaway, there are 3-4 scannable one-line points, a facts/contact block is present and visually distinct, no zone exceeds its word budget, the accent color is consistent and the headline dominates. Step 3: read it as the target audience and confirm the one message lands in under 60 seconds. Write PASS/FAIL per criterion; if it overflows one page, FAIL the page-fit criterion and loop back to trim.",
       "loopBackTo": "write",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -142,7 +209,13 @@
     "role": "general",
     "name": "Whitepaper",
     "description": "Author a long-form, authoritative whitepaper that makes a researched argument — a technical position paper, industry analysis, or thought-leadership piece with citations. Does the RESEARCH first to ground every claim, then locks a logical section outline and thesis, then writes the full long-form document with an abstract, numbered sections, evidence, figures, and a references list. Use when the deliverable must be credible, sourced, and substantial rather than a quick blog post.",
-    "tags": ["whitepaper", "research", "long-form", "document", "report"],
+    "tags": [
+      "whitepaper",
+      "research",
+      "long-form",
+      "document",
+      "report"
+    ],
     "triggers": [
       "write a whitepaper",
       "white paper",
@@ -158,7 +231,10 @@
         "role": "researcher",
         "summary": "gather and cite the evidence the argument will rest on",
         "prompt": "Ground the paper in evidence before any outline or prose. Step 1: restate the central question/thesis the whitepaper will argue. Step 2: gather the supporting material — use any available web/search/fetch tools, or the provided corpus — capturing for each finding a one-line claim, the source/citation, and a relevance note. Step 3: note counter-arguments and the strongest opposing evidence so the paper can address them honestly. Step 4: identify what data would make a useful figure or table and whether you have it. Step 5: write an evidence log (claim -> source -> note) and a research-criteria checklist ('thesis is stated', 'each major claim has at least one citable source', 'at least one counter-argument captured', 'sources are real and identified, not invented'). Write the evidence log + checklist via write_task_note AND to notes/research.md. Do NOT fabricate sources — if you cannot find support for a claim, mark it as an assumption to soften in the prose.",
-        "produces": { "path": "notes/research.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/research.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "outline",
@@ -166,7 +242,10 @@
         "role": "planner",
         "summary": "thesis + logical section flow mapped to the evidence",
         "prompt": "Turn the evidence into a logical structure. Step 1: write the one-paragraph thesis the paper defends. Step 2: lay out the sections in argument order — abstract, introduction (problem + thesis), background/context, the core argument broken into 2-4 numbered sections, a section addressing counter-arguments, implications/recommendations, and a references section. Step 3: under each section list the evidence-log items (with their citations) that support it, so the writer knows exactly what to cite where. Step 4: mark where figures/tables belong. Step 5: write an acceptance-criteria checklist ('has an abstract that summarizes the whole argument', 'sections are numbered and flow logically to the thesis', 'a counter-argument section is present', 'every major claim cites a source from the evidence log', 'ends with a references list matching the in-text citations'). Write the outline (with evidence mapped per section) + checklist via write_task_note AND to notes/outline.md. No body prose yet.",
-        "produces": { "path": "notes/outline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/outline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -174,13 +253,23 @@
         "role": "copywriter",
         "summary": "write the full long-form report.md with citations and references",
         "prompt": "Write the full whitepaper as report.md in markdown. Step 1: open with an abstract (~150 words) that summarizes problem, argument, and conclusion so it stands alone. Step 2: write each numbered section in outlined order as substantive prose (this is long-form — paragraphs, not bullets), weaving in the mapped evidence and citing each major claim inline (e.g. [1], [2] or author-year) tied to the references list. Step 3: include the marked figures/tables (markdown tables or described figures) with captions referenced in the text. Step 4: write the counter-argument section honestly, then rebut or qualify it. Step 5: close with implications/recommendations, then a numbered References section listing every cited source. Keep an authoritative, measured voice; do not introduce claims that lack support in the evidence log. On a loop-back, fix ONLY the named gaps. Write the path + section/citation counts via write_task_note.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the whitepaper against the locked criteria. Step 1: read report.md end to end. Step 2: confirm the abstract stands alone and summarizes the full argument. Step 3: check EACH acceptance criterion: sections are numbered and flow logically to the thesis, a counter-argument section is present and addressed, every major claim carries an inline citation, and a References section lists every cited source with no orphan or dangling citations. Step 4: spot-check 2-3 citations against the evidence log and confirm no sources were fabricated. Step 5: confirm it reads as substantive long-form prose, not padded bullets. Write PASS/FAIL per criterion, noting the offending section on any FAIL.",
       "loopBackTo": "write",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -188,7 +277,13 @@
     "role": "general",
     "name": "Résumé / CV",
     "description": "Build a clean, ATS-friendly résumé or CV from a person's background, tailored to a target role. Scopes the target role and the highlight reel of achievements FIRST (so the résumé is targeted, not a life history), then designs a single-column, parser-safe layout, then writes impact-led bullets with metrics that fit one to two pages. Use for job applications, LinkedIn-to-résumé conversions, and role-targeted CV rewrites.",
-    "tags": ["resume", "cv", "career", "document", "job"],
+    "tags": [
+      "resume",
+      "cv",
+      "career",
+      "document",
+      "job"
+    ],
     "triggers": [
       "write my resume",
       "build a cv",
@@ -204,7 +299,10 @@
         "role": "planner",
         "summary": "target role, must-hit keywords, and the achievement highlight reel",
         "prompt": "Target before drafting. Step 1: identify the target role/title and, if a job description is provided, extract the must-hit skills and keywords. Step 2: from the person's background, select the experiences that matter for THIS role and set aside the rest — a résumé is a targeted highlight reel, not a complete history. Step 3: choose the section set and order (summary, experience, skills, education, plus optional projects/certs) and decide the length cap (1 page for <10 yrs experience, 2 max). Step 4: for each kept role, note the 2-4 strongest achievements and where a metric exists (numbers, %, scale). Step 5: write an acceptance-criteria checklist ('targeted to the stated role', 'reverse-chronological experience', 'every role has impact bullets, most with a metric', 'must-hit keywords appear naturally', 'fits within the page cap', 'no objective-statement filler'). Write the scope + highlight reel + checklist via write_task_note AND to notes/scope.md. No layout or final bullets yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -212,7 +310,10 @@
         "role": "designer",
         "summary": "single-column ATS-safe template with clean hierarchy",
         "prompt": "Design a layout that BOTH a recruiter and an ATS parser can read. Step 1: choose a single-column layout (multi-column and tables confuse parsers) with a clear header (name, title, contact line) and standard section headings (Experience, Skills, Education) in plain text. Step 2: pick a conservative type scale and a restrained palette (mostly ink-on-white, at most one subtle accent) with strong contrast; no graphics, no icons that carry meaning, web-safe fonts only. Step 3: define the entry format for experience (Company | Title | Dates on one line, bullets beneath) and a compact skills format. Step 4: set print rules (@page, Letter/A4) and a height constraint matching the page cap. Step 5: write a visual-criteria checklist ('single column, no tables for layout', 'standard parser-friendly section headings', 'consistent date alignment', 'fits the page cap in print'). Write the layout spec + checklist via write_task_note AND to notes/design.md. No copy yet.",
-        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -220,13 +321,23 @@
         "role": "copywriter",
         "summary": "write impact bullets into index.html, tailored and within the cap",
         "prompt": "Write the résumé and assemble it into the layout as a single self-contained index.html (inline CSS with print rules). Step 1: write a 1-2 line professional summary tailored to the target role, weaving in must-hit keywords naturally. Step 2: write experience entries in reverse-chronological order with impact-led bullets — each starts with a strong verb and, wherever the highlight reel supplied one, includes a metric (scale, %, $, time saved). Step 3: write a scannable skills section using the role's keywords, and a compact education section. Step 4: cut ruthlessly to fit the page cap; remove dated or irrelevant roles before adding pages. Step 5: ensure no objective-statement filler and no first-person pronouns in bullets. On a loop-back, fix ONLY the named gaps. Write the path + a note confirming page count and that keywords are covered via write_task_note.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the résumé. Step 1: open/render index.html and, if print-preview is available, confirm it is within the page cap. Step 2: check EACH acceptance criterion: targeted to the stated role, single-column parser-safe layout with standard section headings, reverse-chronological experience, every role has impact bullets and most carry a metric, must-hit keywords appear naturally, no objective-statement filler, dates aligned consistently. Step 3: read it as a recruiter for the target role and confirm the fit is obvious in the top third. Write PASS/FAIL per criterion; if it exceeds the page cap, FAIL and loop back to trim.",
       "loopBackTo": "write",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -234,7 +345,13 @@
     "role": "general",
     "name": "Proposal / Statement of Work",
     "description": "Draft a client proposal or statement of work that wins the deal and prevents scope creep — covering objectives, scope, deliverables, timeline/milestones, pricing, assumptions, and acceptance criteria. Scopes the engagement and the in-scope/out-of-scope boundary FIRST (the boundary is what protects both sides), writes persuasive yet precise proposal copy, then formats it into a clean client-ready document with a structured deliverables-and-pricing table. Use for freelance/agency bids, consulting SOWs, and project proposals.",
-    "tags": ["proposal", "sow", "statement-of-work", "client", "document"],
+    "tags": [
+      "proposal",
+      "sow",
+      "statement-of-work",
+      "client",
+      "document"
+    ],
     "triggers": [
       "write a proposal",
       "statement of work",
@@ -250,7 +367,10 @@
         "role": "planner",
         "summary": "objectives, in/out-of-scope boundary, deliverables, milestones, price",
         "prompt": "Define the engagement precisely before any selling prose. Step 1: state the client's objective and the outcome the work delivers. Step 2: enumerate the deliverables concretely, and — critically — draw the IN-SCOPE vs OUT-OF-SCOPE boundary explicitly (the out-of-scope list is what prevents scope creep and disputes). Step 3: lay out the timeline as milestones/phases with rough durations and dependencies. Step 4: decide the pricing model (fixed, T&M, retainer), the amount or rate, and the payment schedule tied to milestones. Step 5: list assumptions and client responsibilities (access, approvals, content) and the per-deliverable acceptance criteria. Step 6: write an acceptance-criteria checklist for the document itself ('objective stated', 'explicit out-of-scope section', 'deliverables map to milestones', 'pricing tied to a payment schedule', 'assumptions + client responsibilities listed', 'acceptance criteria per deliverable'). Write all decisions + checklist via write_task_note AND to notes/scope.md. No prose or formatting yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -258,7 +378,10 @@
         "role": "copywriter",
         "summary": "persuasive, precise proposal copy section by section",
         "prompt": "Write the proposal copy from the locked scope — persuasive about value, precise about commitments. Step 1: open with a short overview that restates the client's objective in their language and frames your approach. Step 2: write the approach/methodology section showing HOW you will deliver, then a deliverables section listing each deliverable with its acceptance criterion. Step 3: write the timeline section as milestones, and a clearly worded scope section with the in-scope list AND a plainly labeled out-of-scope list. Step 4: write the investment/pricing section in client-friendly terms tied to the payment schedule, then the assumptions + client-responsibilities section, and a short next-steps/sign-off close. Step 5: keep the tone confident and specific — no vague 'best efforts' language around commitments. Do not soften or drop the out-of-scope boundary. Write the section-by-section copy via write_task_note AND to notes/write.md.",
-        "produces": { "path": "notes/write.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/write.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "format",
@@ -266,13 +389,23 @@
         "role": "developer",
         "summary": "render proposal.html with cover, deliverables/pricing tables, sign-off",
         "prompt": "Format the approved copy into a client-ready document as a single self-contained proposal.html (inline CSS with print @page rules). Step 1: build a cover/header with the project title, client name, your name/company, and date. Step 2: lay out the sections in proposal order (overview, approach, deliverables, scope incl. out-of-scope, timeline, pricing, assumptions/responsibilities, next steps). Step 3: render the deliverables and the pricing/payment schedule as clean bordered tables (deliverable | acceptance criterion; milestone | amount | due) — these must be unambiguous. Step 4: visually distinguish the out-of-scope list (e.g. its own boxed callout) so it cannot be missed. Step 5: add a sign-off block (signature lines, date) and clean print page breaks. Drop the approved copy in verbatim; do not rewrite commitments. On a loop-back, fix ONLY the named gaps. Write the path + a note confirming the tables and out-of-scope section are present via write_task_note.",
-        "produces": { "path": "proposal.html", "kind": "html-page" }
+        "produces": {
+          "path": "proposal.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the proposal against the locked criteria. Step 1: open/render proposal.html. Step 2: check EACH acceptance criterion: the client objective is stated up front, there is an explicit and visually distinct out-of-scope section, deliverables are listed with acceptance criteria and map to the timeline milestones, pricing is shown as a table tied to a payment schedule, assumptions + client responsibilities are listed, and a sign-off block is present. Step 3: confirm the deliverables and pricing tables are unambiguous and the commitment language is specific (no vague hedging where commitments belong). Step 4: confirm it prints cleanly. Write PASS/FAIL per criterion, noting the offending section on any FAIL.",
       "loopBackTo": "format",
-      "deliverable": { "path": "proposal.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "proposal.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -280,7 +413,13 @@
     "role": "general",
     "name": "Ops Runbook",
     "description": "Write an operational runbook or playbook a tired on-call engineer can follow at 3am without thinking — covering when to use it, prerequisites, numbered step-by-step procedures, verification, rollback, and escalation. Scopes the exact scenarios and prerequisites FIRST, writes unambiguous copy-pasteable steps with expected output and verification at each stage, then has a reviewer pressure-test it for gaps and dangerous ambiguity. Use for incident response, deploy/rollback procedures, and recurring ops tasks.",
-    "tags": ["runbook", "ops", "playbook", "oncall", "document"],
+    "tags": [
+      "runbook",
+      "ops",
+      "playbook",
+      "oncall",
+      "document"
+    ],
     "triggers": [
       "write a runbook",
       "ops playbook",
@@ -296,7 +435,10 @@
         "role": "planner",
         "summary": "trigger scenarios, prerequisites, success/rollback definition",
         "prompt": "Define what the runbook covers before writing steps. Step 1: state the exact scenario(s) this runbook handles and, just as importantly, when NOT to use it. Step 2: list prerequisites — access/permissions, tools, environment, and any 'before you start' safety checks. Step 3: define what SUCCESS looks like (the verification signal that the procedure worked) and the conditions that should trigger a rollback or escalation. Step 4: outline the procedure as named stages in order (e.g. assess -> mitigate -> verify -> communicate), each to be expanded into numbered steps. Step 5: identify the destructive/irreversible steps that need an explicit warning. Step 6: write an acceptance-criteria checklist ('states when to use AND when not to', 'prerequisites + access listed', 'every stage has a verification step', 'a rollback procedure exists', 'escalation path with who/when', 'destructive steps carry a warning'). Write the scope + checklist via write_task_note AND to notes/scope.md. No detailed steps yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -304,7 +446,10 @@
         "role": "copywriter",
         "summary": "numbered, copy-pasteable steps with expected output + verification",
         "prompt": "Write the runbook as runbook.md so a stressed on-call engineer can follow it literally. Step 1: open with a header block — purpose, when to use / when not to use, severity, and an at-a-glance summary. Step 2: write the prerequisites and a pre-flight checklist. Step 3: write each stage as explicitly NUMBERED steps; commands go in fenced code blocks ready to copy-paste, with placeholders clearly marked (e.g. <SERVICE_NAME>), and EACH step states the expected output and how to verify it before moving on. Step 4: add bold warning callouts before any destructive/irreversible step. Step 5: write a dedicated Rollback section (numbered, also verified) and an Escalation section naming who to contact, when, and how. Step 6: end with a 'how to confirm fully resolved' checklist. Keep sentences short and imperative; no ambiguity about which step to run when. On a loop-back, fix ONLY the named gaps. Write the path + stage/step counts via write_task_note.",
-        "produces": { "path": "runbook.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "runbook.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -312,13 +457,23 @@
         "role": "reviewer",
         "summary": "pressure-test the runbook for ambiguity and missing safety rails",
         "prompt": "Pressure-test the runbook as if you must execute it half-asleep. Step 1: read every step and flag any that is ambiguous, assumes unstated context, or could be run out of order. Step 2: verify every destructive step has a warning and every stage has a verification signal. Step 3: confirm the rollback and escalation sections are actionable (real commands/contacts, not placeholders like 'contact the team'). Step 4: list concrete gaps with the exact step number and the fix needed. Step 5: write a review-findings note recording each gap as PASS/FAIL against the scope checklist. Write the findings via write_task_note AND to notes/review.md. If gaps remain, they must be fixed in the write phase before this passes.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the runbook against the locked criteria. Step 1: read runbook.md and simulate following it step by step for the primary scenario. Step 2: check EACH acceptance criterion: states when to use and when not to, prerequisites + access listed, every stage has numbered steps with expected output and a verification, destructive steps carry warnings, a working rollback section exists, and an escalation path names who/when/how. Step 3: confirm there are no ambiguous steps or unresolved placeholders in the rollback/escalation sections. Step 4: incorporate the review findings from notes/review.md. Write PASS/FAIL per criterion with the offending step number on any FAIL.",
       "loopBackTo": "write",
-      "deliverable": { "path": "runbook.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "runbook.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -326,7 +481,13 @@
     "role": "general",
     "name": "Technical Design Doc",
     "description": "Write a technical design document (RFC / engineering design doc) that gets a system change reviewed and approved — covering context and problem, goals and non-goals, the proposed design, alternatives considered, trade-offs, risks, and a rollout plan. Scopes the problem, goals, and explicit non-goals FIRST (non-goals prevent reviewer scope-creep), writes the detailed design with diagrams and alternatives, then has a reviewer check it for completeness and unjustified decisions. Use for RFCs, architecture proposals, and pre-implementation design reviews.",
-    "tags": ["spec", "design-doc", "rfc", "engineering", "document"],
+    "tags": [
+      "spec",
+      "design-doc",
+      "rfc",
+      "engineering",
+      "document"
+    ],
     "triggers": [
       "technical design doc",
       "write an rfc",
@@ -342,7 +503,10 @@
         "role": "planner",
         "summary": "problem, goals, explicit non-goals, constraints, success metrics",
         "prompt": "Frame the problem before proposing a solution. Step 1: write the context and problem statement — what is broken or needed and why now. Step 2: list the GOALS (what the design must achieve) and, explicitly, the NON-GOALS (what it deliberately will not address) — the non-goals keep the review focused. Step 3: capture the constraints (compatibility, performance, deadline, team, existing systems) the design must respect. Step 4: define success metrics — how you will know the change worked. Step 5: note at least one alternative direction worth documenting so the doc shows the decision was considered. Step 6: write an acceptance-criteria checklist ('problem + context stated', 'goals AND non-goals listed', 'constraints captured', 'success metrics defined', 'at least one alternative to document', 'a rollout/migration consideration noted'). Write the framing + checklist via write_task_note AND to notes/scope.md. No detailed design yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -350,7 +514,10 @@
         "role": "developer",
         "summary": "detailed proposed design, alternatives, trade-offs, rollout plan",
         "prompt": "Write the design document as spec.md. Step 1: open with the context/problem, then the goals and non-goals exactly as scoped. Step 2: write the Proposed Design in depth — components and responsibilities, data model/schema changes, APIs/interfaces, and the key flows; include at least one diagram (an ASCII/mermaid block is fine) of the architecture or sequence. Step 3: write an Alternatives Considered section covering each documented alternative with its pros/cons and WHY it was rejected — every significant decision must be justified, not asserted. Step 4: write a Trade-offs and Risks section (what this design gives up, failure modes, mitigations). Step 5: write a Rollout/Migration plan (phasing, flags, backfill, backward compatibility) and a Testing/validation plan tied to the success metrics. Step 6: list open questions. Use numbered headings and keep it concrete with real names. On a loop-back, fix ONLY the named gaps. Write the path + section count via write_task_note.",
-        "produces": { "path": "spec.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "spec.md",
+          "kind": "markdown-report"
+        }
       },
       {
         "id": "review",
@@ -358,13 +525,23 @@
         "role": "reviewer",
         "summary": "check completeness, justified decisions, and risk coverage",
         "prompt": "Review the design as a staff engineer would in an RFC review. Step 1: confirm the proposed design actually satisfies every stated goal and respects every non-goal and constraint. Step 2: check that each significant decision is justified against the documented alternatives — flag any choice asserted without reasoning. Step 3: verify the risks/trade-offs section is honest (not just 'no risks') and the rollout plan addresses backward compatibility and a way to back out. Step 4: confirm a testing/validation plan ties back to the success metrics. Step 5: list concrete gaps with the section and the fix needed, recorded as PASS/FAIL against the scope checklist. Write the findings via write_task_note AND to notes/review.md. Remaining gaps must be fixed in the write phase before this passes.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the design doc against the locked criteria. Step 1: read spec.md end to end. Step 2: check EACH acceptance criterion: problem + context stated, goals AND non-goals present, constraints captured, the proposed design includes a diagram and concrete interfaces/data model, alternatives are documented with reasons for rejection, risks/trade-offs are honest, a rollout/migration plan with a back-out path exists, and a validation plan ties to the success metrics. Step 3: confirm decisions are justified rather than asserted, folding in notes/review.md findings. Write PASS/FAIL per criterion with the offending section on any FAIL.",
       "loopBackTo": "write",
-      "deliverable": { "path": "spec.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "spec.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -372,7 +549,13 @@
     "role": "general",
     "name": "Contract Template (Non-Legal-Advice)",
     "description": "Draft a reusable, plain-language agreement template — service agreement, NDA, freelance contract, or terms — with clearly marked fill-in fields, structured numbered clauses, and a prominent non-legal-advice disclaimer. Scopes the parties, obligations, and risk allocation FIRST, drafts clear enforceable-style clauses with placeholders for the variable terms, then has a reviewer check completeness and flag anything that genuinely needs a lawyer. NOT legal advice — every output must say so. Use for templated agreements you will adapt and have counsel review.",
-    "tags": ["contract", "agreement", "template", "legal", "document"],
+    "tags": [
+      "contract",
+      "agreement",
+      "template",
+      "legal",
+      "document"
+    ],
     "triggers": [
       "contract template",
       "draft an nda",
@@ -388,7 +571,10 @@
         "role": "planner",
         "summary": "parties, obligations, term, payment, risk allocation, fill-in fields",
         "prompt": "Map the deal structure before drafting clauses. Step 1: identify the agreement type and the parties and their roles. Step 2: list each party's core obligations and what each receives. Step 3: define the variable terms that must become FILL-IN FIELDS (names, dates, amounts, term length, jurisdiction) and mark them as placeholders like [PARTY_A_NAME]. Step 4: decide the risk-allocation clauses the template needs (confidentiality, IP ownership, liability limits, termination, dispute resolution, governing law) appropriate to the type. Step 5: note that this is a TEMPLATE and not legal advice — a disclaimer is mandatory in the output. Step 6: write an acceptance-criteria checklist ('all parties + roles defined', 'every variable is a marked fill-in field', 'standard protective clauses present for this type', 'termination + governing-law clauses included', 'a prominent non-legal-advice disclaimer is required'). Write the structure + field list + checklist via write_task_note AND to notes/scope.md. No clause prose yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -396,7 +582,10 @@
         "role": "copywriter",
         "summary": "clear numbered clauses with marked placeholders + disclaimer",
         "prompt": "Draft the agreement as contract.md in clear, plain language. Step 1: lead with a bold, unmissable disclaimer: this is a template for informational purposes, NOT legal advice, and should be reviewed by a qualified attorney before use. Step 2: write a preamble identifying the parties using the [PLACEHOLDER] fields and the effective date. Step 3: write the body as NUMBERED clauses (1, 1.1, 2 ...) — one obligation/topic per clause — covering scope of work/subject, payment terms, term and termination, confidentiality, IP ownership, liability/indemnity, dispute resolution, and governing law, each appropriate to the agreement type. Step 4: keep every variable as a clearly marked fill-in field so the user adapts it safely; add brief [GUIDANCE: ...] notes where a choice must be made. Step 5: end with a signature block (party, name, title, date lines). Use precise but readable language; avoid ambiguity in obligations. On a loop-back, fix ONLY the named gaps. Write the path + clause count via write_task_note.",
-        "produces": { "path": "contract.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "contract.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -404,13 +593,23 @@
         "role": "reviewer",
         "summary": "check clause completeness, placeholders, and lawyer-needed flags",
         "prompt": "Review the template for completeness and honesty about its limits. Step 1: confirm the non-legal-advice disclaimer is present and prominent. Step 2: verify every scoped clause type is present and every variable term is a clearly marked fill-in field (no hard-coded names/amounts leaked in). Step 3: check the signature block and that termination + governing-law clauses exist. Step 4: flag any clause that genuinely requires a lawyer's judgment (e.g. liability caps, jurisdiction-specific enforceability) with a [LAWYER REVIEW] note rather than overstating certainty. Step 5: list concrete gaps with the clause number and fix, recorded as PASS/FAIL against the scope checklist. Write the findings via write_task_note AND to notes/review.md. Gaps must be fixed in the draft phase before this passes.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the contract template against the locked criteria. Step 1: read contract.md. Step 2: confirm FIRST that a prominent non-legal-advice disclaimer is present — if missing, FAIL immediately and loop back. Step 3: check EACH remaining criterion: parties + roles defined via placeholders, every variable is a clearly marked fill-in field, standard protective clauses for this type are present, termination + governing-law clauses included, clauses are numbered and unambiguous, and a signature block exists. Step 4: confirm lawyer-judgment items carry a [LAWYER REVIEW] flag rather than false certainty, folding in notes/review.md. Write PASS/FAIL per criterion with the offending clause on any FAIL.",
       "loopBackTo": "draft",
-      "deliverable": { "path": "contract.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "contract.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -418,7 +617,13 @@
     "role": "general",
     "name": "Newsletter Issue",
     "description": "Produce a single polished, email-client-safe newsletter issue — intro, a few curated stories with links, a featured section, and a CTA — that renders correctly across email clients. Outlines the issue's theme and section lineup FIRST, writes scannable, personable copy with working links, then builds the email-safe HTML using inline styles and table layout so it survives Gmail/Outlook. Use for recurring email newsletters, product updates, and curated digests sent to subscribers.",
-    "tags": ["newsletter", "email", "issue", "content", "html"],
+    "tags": [
+      "newsletter",
+      "email",
+      "issue",
+      "content",
+      "html"
+    ],
     "triggers": [
       "newsletter issue",
       "write a newsletter",
@@ -434,7 +639,10 @@
         "role": "planner",
         "summary": "theme, section lineup, story picks, and the one CTA",
         "prompt": "Plan the issue before writing. Step 1: name this issue's theme/hook and the audience. Step 2: lay out the section lineup in order — subject line + preheader, a short personal intro, 3-5 curated stories (each: title, link, 1-2 line take), a featured/deep-dive block, and a single clear CTA. Step 3: pick the actual stories/links to include and note the angle for each; cut anything off-theme. Step 4: decide the one primary action you want readers to take. Step 5: write an acceptance-criteria checklist ('has a subject line + preheader', 'intro is short and personable', '3-5 stories each with a working link and a one-line take', 'exactly one primary CTA', 'scannable in under two minutes'). Write the lineup + checklist via write_task_note AND to notes/outline.md. No copy or HTML yet.",
-        "produces": { "path": "notes/outline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/outline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -442,7 +650,10 @@
         "role": "copywriter",
         "summary": "scannable, personable copy with links and one CTA",
         "prompt": "Write the newsletter copy from the outline in a warm, scannable voice. Step 1: write a subject line (under ~50 chars, curiosity or value) and a preheader that complements it. Step 2: write a short, personable intro (2-4 sentences) tied to the theme. Step 3: for each curated story write a punchy title and a 1-2 line take that gives the reader a reason to click, with the link. Step 4: write the featured/deep-dive block — a few sentences with a clear payoff. Step 5: write the one CTA with action-oriented button copy. Keep paragraphs short, use the second person, and make it skimmable. Do not invent links — use the ones from the outline. Write the section-by-section copy via write_task_note AND to notes/write.md.",
-        "produces": { "path": "notes/write.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/write.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -450,13 +661,23 @@
         "role": "developer",
         "summary": "render index.html email-safe: inline styles, table layout, ~600px",
         "prompt": "Build the issue as a single self-contained index.html that renders in real email clients. Step 1: use a table-based layout centered at ~600px with all CSS INLINE on elements (email clients strip <style> and ignore fl/grid) — no external stylesheets, no web fonts, web-safe font stacks only. Step 2: lay out the sections per the outline order (preheader text first, hidden but present; intro; story list; featured block; CTA button) with the approved copy verbatim. Step 3: render the CTA as a bulletproof button (a padded, background-colored anchor styled as a table cell) and make every story link a real working <a href>. Step 4: keep images optional and provide alt text; ensure it degrades gracefully with images off. Step 5: include a footer with an (illustrative) unsubscribe link. On a loop-back, fix ONLY the named gaps. Write the path via write_task_note.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the newsletter against the locked criteria. Step 1: open/render index.html. Step 2: confirm email-safety: table layout, inline styles only (no reliance on <style>/flex/grid), centered ~600px, web-safe fonts. Step 3: check EACH acceptance criterion: subject line + preheader present, short personable intro, 3-5 stories each with a working <a href> link and a one-line take, exactly one primary CTA rendered as a tappable button, footer with unsubscribe. Step 4: confirm it is scannable in under two minutes and links are real (from the outline, not invented). Write PASS/FAIL per criterion with the offending section on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -464,7 +685,13 @@
     "role": "general",
     "name": "Ebook Compile",
     "description": "Compile a collection of notes, articles, or chapter drafts into a coherent, readable ebook — with a title page, table of contents, consistently formatted chapters, and front/back matter — output as a single navigable HTML book. Outlines the chapter structure and through-line FIRST (so disparate notes become a real book, not a pile), writes/edits each chapter to a consistent voice and adds connective tissue, then builds the compiled HTML with a linked TOC and chapter navigation. Use for turning a blog backlog, course notes, or drafts into a downloadable ebook.",
-    "tags": ["ebook", "book", "compile", "long-form", "html"],
+    "tags": [
+      "ebook",
+      "book",
+      "compile",
+      "long-form",
+      "html"
+    ],
     "triggers": [
       "compile an ebook",
       "make an ebook",
@@ -480,7 +707,10 @@
         "role": "planner",
         "summary": "chapter order, through-line, and front/back matter",
         "prompt": "Turn the raw material into a book structure. Step 1: survey the source notes/articles and identify the central through-line or argument that will make them cohere. Step 2: group and order the material into chapters/parts that build logically; cut or merge redundant pieces. Step 3: plan the front matter (title page, optional preface/intro, table of contents) and back matter (conclusion, about, resources). Step 4: for each chapter note its title, the source pieces it draws from, and the transition that links it to the next. Step 5: write an acceptance-criteria checklist ('has a title page + linked table of contents', 'chapters are ordered to a clear through-line', 'each chapter opens and closes cleanly with transitions', 'consistent heading levels throughout', 'front and back matter present'). Write the chapter map + checklist via write_task_note AND to notes/outline.md. No chapter prose or HTML yet.",
-        "produces": { "path": "notes/outline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/outline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -488,7 +718,10 @@
         "role": "copywriter",
         "summary": "edit each chapter to one voice + add connective transitions",
         "prompt": "Write/edit the chapters so the book reads as one work. Step 1: for each chapter in order, shape the source material into clean prose with a consistent voice, tense, and terminology (disparate notes often clash — unify them). Step 2: give each chapter a clear opening that orients the reader and a close that lands the point and transitions to the next chapter. Step 3: write the preface/intro that sets up the through-line and the conclusion that ties it together. Step 4: standardize formatting decisions — heading levels, how lists/quotes/code appear — so they are uniform across chapters. Step 5: keep the reader's journey in mind: no chapter should feel like an orphaned blog post. Write the per-chapter edited text + front/back matter via write_task_note AND to notes/write.md.",
-        "produces": { "path": "notes/write.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/write.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -496,13 +729,23 @@
         "role": "developer",
         "summary": "compile index.html: title page, linked TOC, chapter nav",
         "prompt": "Compile the book as a single self-contained index.html (inline CSS, no external assets). Step 1: build a title page (title, subtitle, author) as the opening screen. Step 2: build a Table of Contents with in-page anchor links to every chapter. Step 3: render each chapter in order with a stable id, consistent heading hierarchy, comfortable reading width and line-height, and the unified formatting from the edit phase. Step 4: add chapter navigation — previous/next links and a back-to-TOC link at each chapter boundary — and use page-break-before per chapter so it also prints/exports as a clean book. Step 5: include the front matter (preface) and back matter (conclusion, about/resources). Drop in the edited prose verbatim; do not re-edit the voice here. On a loop-back, fix ONLY the named gaps. Write the path + chapter count via write_task_note.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the ebook against the locked criteria. Step 1: open/render index.html and click through the TOC links and chapter navigation. Step 2: check EACH acceptance criterion: title page present, a linked table of contents whose links all resolve to the right chapters, chapters ordered to the through-line, each chapter opens/closes with transitions, heading levels and formatting are consistent across chapters, and front + back matter are present. Step 3: read two non-adjacent chapters and confirm the voice is unified (not obviously stitched from clashing sources). Step 4: confirm chapter page-breaks work for print/export. Write PASS/FAIL per criterion with the offending chapter on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -510,7 +753,13 @@
     "role": "general",
     "name": "Team Handbook Section",
     "description": "Write a clear, reference-grade section of a team/company handbook — a policy, process, or how-we-work doc that a new hire can read once and act on correctly. Scopes the policy's intent, audience, and edge cases FIRST, writes unambiguous prose with concrete examples, a quick-reference summary, and FAQ, then has a reviewer check it for ambiguity and contradictions with how things actually work. Use for onboarding docs, policy pages, process documentation, and internal wikis.",
-    "tags": ["handbook", "policy", "process", "documentation", "wiki"],
+    "tags": [
+      "handbook",
+      "policy",
+      "process",
+      "documentation",
+      "wiki"
+    ],
     "triggers": [
       "handbook section",
       "write a policy",
@@ -526,7 +775,10 @@
         "role": "planner",
         "summary": "intent, audience, what's in/out, and the tricky edge cases",
         "prompt": "Define the policy/process before writing it. Step 1: state the section's intent — what behavior or knowledge it is trying to produce — and who reads it. Step 2: define what this section covers and what it explicitly does not (link-outs for the rest). Step 3: enumerate the edge cases and 'what if' questions people actually hit, because unhandled edge cases are where handbooks fail. Step 4: decide whether the topic is a POLICY (rules + rationale) or a PROCESS (ordered steps + owners) and structure accordingly. Step 5: write an acceptance-criteria checklist ('states intent up front', 'covers the enumerated edge cases', 'includes at least one concrete example', 'has a quick-reference summary (TL;DR)', 'unambiguous — no \"usually/it depends\" without resolution', 'owner/contact named for questions'). Write the scope + edge-case list + checklist via write_task_note AND to notes/scope.md. No prose yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -534,7 +786,10 @@
         "role": "copywriter",
         "summary": "unambiguous prose with examples, TL;DR, and FAQ",
         "prompt": "Write the handbook section as handbook.md so a new hire reads it once and acts correctly. Step 1: open with a one-line TL;DR / quick-reference summary capturing the rule or the steps at a glance. Step 2: state the intent/why briefly (people follow policy better when they understand it). Step 3: write the body — for a POLICY, the rules with rationale; for a PROCESS, NUMBERED steps with the owner/role for each — in plain, direct language. Step 4: include at least one concrete worked example showing the policy/process applied. Step 5: write a short FAQ resolving every enumerated edge case with a definite answer (no 'it depends' left dangling). Step 6: name the owner/contact for questions and the last-reviewed date. Avoid hedging where a decision is needed. On a loop-back, fix ONLY the named gaps. Write the path via write_task_note.",
-        "produces": { "path": "handbook.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "handbook.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -542,13 +797,23 @@
         "role": "reviewer",
         "summary": "hunt for ambiguity, contradictions, and unanswered edge cases",
         "prompt": "Review the section for the failure modes that make handbooks useless. Step 1: read it as a new hire and flag any sentence that leaves you unsure what to actually do. Step 2: check every enumerated edge case is answered definitively in the FAQ or body. Step 3: hunt for internal contradictions and for hedging ('usually', 'generally') where a firm answer is required. Step 4: confirm the TL;DR matches the detailed body and the example is correct. Step 5: list concrete gaps with the location and the fix, recorded as PASS/FAIL against the scope checklist. Write the findings via write_task_note AND to notes/review.md. Gaps must be fixed in the write phase before this passes.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the handbook section against the locked criteria. Step 1: read handbook.md as a brand-new hire. Step 2: check EACH acceptance criterion: a TL;DR/quick-reference is present and matches the body, the intent is stated up front, the body is unambiguous (no unresolved 'it depends'), every enumerated edge case is answered, at least one concrete example is present and correct, and an owner/contact is named. Step 3: confirm there are no internal contradictions, folding in notes/review.md findings. Write PASS/FAIL per criterion with the offending location on any FAIL.",
       "loopBackTo": "write",
-      "deliverable": { "path": "handbook.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "handbook.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -556,7 +821,13 @@
     "role": "general",
     "name": "Invoice Generator",
     "description": "Generate a clean, professional, print-ready invoice from billing details — sender/recipient, line items with quantity and rate, subtotal, tax, total, invoice number, dates, and payment instructions. Scopes the required fields and the tax/total math FIRST (a wrong total is the one unforgivable invoice bug), then builds a polished single-file HTML invoice with an itemized table and correctly computed totals. Use for freelancer/contractor billing, one-off invoices, and invoice templates.",
-    "tags": ["invoice", "billing", "finance", "document", "html"],
+    "tags": [
+      "invoice",
+      "billing",
+      "finance",
+      "document",
+      "html"
+    ],
     "triggers": [
       "generate an invoice",
       "make an invoice",
@@ -572,7 +843,10 @@
         "role": "planner",
         "summary": "required fields, line items, and the tax/total math rules",
         "prompt": "Nail down the data and the math before formatting. Step 1: list the required fields — sender (name, address, contact), recipient (bill-to), invoice number, issue date, due date, and payment terms. Step 2: enumerate the line items, each with description, quantity, unit rate, and line amount (quantity x rate). Step 3: define the money math EXACTLY: subtotal = sum of line amounts; tax = subtotal x tax rate (or none); discount if any; total = subtotal - discount + tax. State the currency and rounding (2 decimals). Step 4: capture payment instructions (bank/transfer/links) and any notes. Step 5: write an acceptance-criteria checklist ('all required header fields present', 'every line item has qty, rate, and qty x rate amount', 'subtotal equals the sum of line amounts', 'tax computed from the stated rate', 'total = subtotal - discount + tax and is arithmetically correct', 'currency + dates + invoice number shown', 'payment instructions present'). Write the field list + math rules + checklist via write_task_note AND to notes/scope.md. No HTML yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -580,13 +854,23 @@
         "role": "developer",
         "summary": "render invoice.html with an itemized table and correct totals",
         "prompt": "Build the invoice as a single self-contained invoice.html (inline CSS with print @page rules). Step 1: render a header with the sender block, a bill-to block, and an invoice-meta block (invoice number, issue date, due date, terms). Step 2: render the line items as a bordered table with columns Description | Qty | Rate | Amount, computing each Amount as qty x rate. Step 3: render a totals block beneath the table: Subtotal (sum of amounts), Discount (if any), Tax (subtotal x rate, with the rate shown), and a visually emphasized Total = subtotal - discount + tax. COMPUTE the arithmetic correctly and format all money to 2 decimals in the stated currency. Step 4: add a payment-instructions section and any notes, plus a clean, professional visual style that prints to one page. Step 5: double-check the totals add up before finishing. On a loop-back, fix ONLY the named gaps (most commonly an arithmetic error). Write the path + the computed total via write_task_note.",
-        "produces": { "path": "invoice.html", "kind": "html-page" }
+        "produces": {
+          "path": "invoice.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the invoice against the locked criteria — and RE-DO THE MATH yourself. Step 1: open/render invoice.html. Step 2: independently recompute each line Amount (qty x rate), the Subtotal (sum of amounts), the Tax (subtotal x stated rate), and the Total (subtotal - discount + tax); compare to what the invoice shows — any mismatch is an automatic FAIL. Step 3: check EACH remaining criterion: all header fields present (sender, bill-to, invoice number, issue + due dates, terms), itemized table with qty/rate/amount columns, currency and 2-decimal formatting, payment instructions present, prints cleanly to one page. Step 4: write PASS/FAIL per criterion; on any arithmetic mismatch, state the correct figure and loop back to fix.",
       "loopBackTo": "build",
-      "deliverable": { "path": "invoice.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "invoice.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -594,7 +878,13 @@
     "role": "general",
     "name": "Customer Case Study",
     "description": "Write a persuasive customer/case-study writeup that turns a customer's results into a credible marketing asset — challenge, solution, and quantified results in the classic before/after arc, with a pull-quote and a clear CTA. Scopes the customer story and the hard metrics FIRST (results without numbers are not a case study), writes the narrative copy in the proven challenge-solution-results structure, then builds a clean, branded single-page HTML asset with a results-highlight band and quote callout. Use for marketing case studies, customer success stories, and sales proof assets.",
-    "tags": ["case-study", "marketing", "customer-story", "document", "html"],
+    "tags": [
+      "case-study",
+      "marketing",
+      "customer-story",
+      "document",
+      "html"
+    ],
     "triggers": [
       "write a case study",
       "customer success story",
@@ -610,7 +900,10 @@
         "role": "planner",
         "summary": "the challenge, the solution, and the quantified results + quote",
         "prompt": "Find the story and the proof before writing. Step 1: identify the customer (and their industry/size) and the single headline result that makes this worth publishing. Step 2: map the classic arc: the CHALLENGE (the pain before, ideally with a baseline number), the SOLUTION (what they adopted and how), and the RESULTS (the after, with HARD METRICS — %, time, revenue, scale). Step 3: gather a real customer quote (or note that one is needed) for the pull-quote. Step 4: define the one CTA the asset should drive (demo, contact, signup). Step 5: write an acceptance-criteria checklist ('names the customer + context', 'challenge has a concrete before-state', 'solution is specific', 'results include at least two quantified metrics', 'has a customer pull-quote', 'ends with one clear CTA'). Write the story map + metrics + checklist via write_task_note AND to notes/scope.md. Do not invent metrics — if a number is unknown, mark it as a placeholder to fill, not a fabricated stat. No copy or HTML yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -618,7 +911,10 @@
         "role": "copywriter",
         "summary": "challenge -> solution -> results copy with the pull-quote",
         "prompt": "Write the case-study copy in the proven structure. Step 1: write a results-led headline and a one-line dek summarizing customer + outcome. Step 2: write a short 'at a glance' summary (industry, the 2-3 key metrics) for skimmers. Step 3: write the Challenge section — set the before-state and stakes concretely. Step 4: write the Solution section — what they did, specifically, and why it fit. Step 5: write the Results section leading with the quantified metrics and what they meant for the business; place the customer pull-quote where it lands hardest. Step 6: write the CTA copy. Keep it credible and specific, not hype; let the numbers do the bragging. Use only the metrics from the scope (no invented stats). Write the section-by-section copy via write_task_note AND to notes/write.md.",
-        "produces": { "path": "notes/write.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/write.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -626,13 +922,23 @@
         "role": "developer",
         "summary": "render index.html: results band, quote callout, branded styling",
         "prompt": "Build the case study as a single self-contained index.html (inline CSS, real branded styling). Step 1: build a header with the results-led headline and dek. Step 2: render an 'at a glance' results band that makes the 2-3 key metrics visually dominant (big numbers, accent color). Step 3: lay out the Challenge -> Solution -> Results sections in order with comfortable reading width and clear section headings. Step 4: render the customer pull-quote as a styled blockquote callout with attribution (name, title, company). Step 5: end with a prominent CTA button. Apply a coherent palette (exact hex) and type scale so it reads as a polished marketing asset, and make it responsive. Drop in the approved copy verbatim; do not invent metrics. On a loop-back, fix ONLY the named gaps. Write the path via write_task_note.",
-        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-marketing-site"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the case study against the locked criteria. Step 1: open/render index.html. Step 2: check EACH acceptance criterion: customer + context named, a results band makes at least two quantified metrics visually dominant, the Challenge has a concrete before-state, the Solution is specific, the Results lead with the metrics, a customer pull-quote with attribution is present, and one clear CTA button closes it. Step 3: confirm the visual styling is real and branded (palette + type applied, not unstyled) and responsive. Step 4: confirm no metrics were invented beyond the scope. Write PASS/FAIL per criterion with the offending section on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-marketing-site"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -640,7 +946,13 @@
     "role": "general",
     "name": "Board Meeting Deck",
     "description": "Build a board-meeting deck that briefs directors efficiently — an executive summary up top, KPI dashboard, financials, progress against goals, key risks/asks, and an appendix — structured so a director gets the state of the business in minutes. Locks the standard board narrative and the metrics that matter FIRST (boards want a consistent dashboard, not a redesign every quarter), designs a dense data-forward slide system, then builds a navigable HTML deck where every slide leads with its number and the asks are unmistakable. Use for quarterly board meetings, board updates, and investor board reports.",
-    "tags": ["deck", "board", "executive", "kpi", "slides"],
+    "tags": [
+      "deck",
+      "board",
+      "executive",
+      "kpi",
+      "slides"
+    ],
     "triggers": [
       "board deck",
       "board meeting slides",
@@ -656,7 +968,10 @@
         "role": "planner",
         "summary": "lock the standard board slide order + the KPIs + the asks",
         "prompt": "Structure the board story before any design — boards expect a consistent shape. Step 1: gather inputs: the period's headline, the KPIs that matter (with current vs target vs prior), financial summary (revenue, burn, runway), progress against the goals set last meeting, key risks, and the specific ASKS/decisions you need from the board. Step 2: lay out the canonical order: (1) title + period, (2) executive summary / TL;DR, (3) KPI dashboard, (4) financials + runway, (5) progress against last quarter's goals, (6) key risks + mitigations, (7) asks/decisions needed, (8) appendix. Step 3: for each KPI decide current value, comparison, and status (on/off track). Step 4: write the explicit asks as decisions the board must make. Step 5: write an acceptance-criteria checklist ('opens with an executive summary slide', 'KPI dashboard shows current vs target/prior with status', 'financials include runway', 'progress slide references last quarter's goals', 'a dedicated asks/decisions slide states what is needed', 'one topic per slide'). Write the slide-by-slide outline + metrics + checklist via write_task_note AND to notes/narrative.md. No design or HTML yet.",
-        "produces": { "path": "notes/narrative.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/narrative.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -664,7 +979,10 @@
         "role": "designer",
         "summary": "dense, data-forward slide system with status colors",
         "prompt": "Design a data-forward slide system suited to dense board content. Step 1: pick a restrained, serious palette with exact hex plus a clear status scale (on-track / at-risk / off-track colors used consistently). Step 2: define the grid: title + period in a header, a footer with slide number and confidentiality label, and a content zone that can hold a KPI grid or a metrics table without feeling cramped. Step 3: define slide archetypes: an executive-summary slide, a KPI dashboard (a grid of metric cards: label, big value, comparison, status dot), a financials slide (table + runway callout), a progress slide (goal -> status rows), a risks slide, and an asks slide that visually stands out. Step 4: ensure big numbers and statuses are scannable at a glance. Step 5: write a visual-criteria checklist ('consistent status colors throughout', 'KPI values are visually dominant', 'every slide has header period + footer slide number', 'asks slide visually distinct'). Write the slide-system spec + checklist via write_task_note AND to notes/design.md. No content yet.",
-        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/design.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -672,13 +990,23 @@
         "role": "developer",
         "summary": "implement index.html dashboard deck to the locked order + system",
         "prompt": "Implement the board deck as a single self-contained index.html (inline CSS + minimal JS, no external assets). Step 1: create one full-viewport section per slide in the locked board order. Step 2: apply the design system exactly — palette hex, the status color scale used consistently, header with period and footer with slide number + confidentiality label on every slide. Step 3: render the KPI dashboard as a grid of metric cards (label, dominant value, vs target/prior, status dot) and the financials slide with a table + a runway callout. Step 4: render the progress slide as goal -> status rows and make the asks/decisions slide visually distinct so directors cannot miss what is needed. Step 5: wire arrow-key navigation and visible slide numbers. Drop the approved numbers/content in verbatim; do not invent metrics. On a loop-back, fix ONLY the named gaps. Write the deck path + slide count via write_task_note.",
-        "produces": { "path": "index.html", "kind": "slide-deck" }
+        "produces": {
+          "path": "index.html",
+          "kind": "slide-deck"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the board deck against the locked criteria. Step 1: open/render index.html and step through every slide with the arrow keys. Step 2: verify the board order (title -> exec summary -> KPI dashboard -> financials -> progress -> risks -> asks -> appendix). Step 3: check EACH acceptance criterion: opens with an executive summary, the KPI dashboard shows current vs target/prior with a consistent status color scale and dominant values, financials include runway, the progress slide references last quarter's goals, a dedicated asks/decisions slide clearly states what the board must decide and is visually distinct, every slide has the period header + slide-number footer, and there is one topic per slide. Step 4: confirm no metrics were invented beyond the outline. Write PASS/FAIL per criterion with the offending slide on any FAIL.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "slide-deck" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "slide-deck"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -686,7 +1014,13 @@
     "role": "general",
     "name": "Meeting Minutes & Actions",
     "description": "Turn a meeting transcript, recording notes, or rough scratch into clean, distributable meeting minutes — attendees, agenda topics discussed, decisions made, and (most importantly) action items with owners and due dates. Scopes the minutes structure and what counts as a decision vs an action FIRST, then writes accurate, neutral minutes where every decision is recorded and every action has an owner and a date — the action table is the part people actually use. Use for board/team meeting minutes, project status meetings, and decision logs.",
-    "tags": ["minutes", "meeting", "actions", "notes", "document"],
+    "tags": [
+      "minutes",
+      "meeting",
+      "actions",
+      "notes",
+      "document"
+    ],
     "triggers": [
       "meeting minutes",
       "write up meeting notes",
@@ -702,7 +1036,10 @@
         "role": "planner",
         "summary": "structure, what counts as a decision vs action, owner/date rule",
         "prompt": "Decide the structure and the rules before writing. Step 1: capture the meeting metadata to record — title, date/time, attendees (present + absent), and the agenda/topics. Step 2: define the crucial distinction the minutes must enforce: a DECISION is a settled outcome (record what was decided and by whom), whereas an ACTION is a future task that MUST have an owner and a due date. Step 3: decide the section order: header/metadata, agenda, discussion-by-topic, decisions log, and an action-items table (Action | Owner | Due | Status). Step 4: set the neutrality rule — minutes record what happened factually, not opinion or editorializing. Step 5: write an acceptance-criteria checklist ('header with date + attendees', 'each agenda topic summarized neutrally', 'a decisions section listing every decision', 'an action table where EVERY action has an owner and a due date', 'no editorializing'). Write the structure + rules + checklist via write_task_note AND to notes/scope.md. No minutes prose yet.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -710,13 +1047,23 @@
         "role": "copywriter",
         "summary": "neutral minutes with a decisions log and an owner/date action table",
         "prompt": "Write the minutes as minutes.md from the source material. Step 1: open with the header block — meeting title, date/time, attendees present and absent. Step 2: list the agenda, then write a neutral, concise summary per topic discussed (what was raised and the gist of the discussion) without editorializing or attributing motives. Step 3: write a Decisions section that records every decision reached, each as a clear statement of what was decided. Step 4: write the Action Items as a markdown TABLE with columns Action | Owner | Due Date | Status, and ensure EVERY action row has a named owner and a concrete due date — flag any item missing an owner/date as [OWNER?]/[DATE?] rather than leaving it blank. Step 5: note the next meeting / follow-up if mentioned. Pull only from the source; do not invent decisions or actions that were not discussed. On a loop-back, fix ONLY the named gaps. Write the path + counts of decisions and actions via write_task_note.",
-        "produces": { "path": "minutes.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "minutes.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "QA the minutes against the locked criteria. Step 1: read minutes.md alongside the source. Step 2: check EACH acceptance criterion: header includes date + attendees, each agenda topic has a neutral summary, a decisions section captures every decision from the source, and an action-items TABLE exists where EVERY row has a named owner and a concrete due date (any [OWNER?]/[DATE?] placeholder or blank is a FAIL on that criterion). Step 3: confirm the tone is factual with no editorializing and that no decision or action was invented beyond the source. Write PASS/FAIL per criterion; on a missing owner/date, name the offending action row and loop back.",
       "loopBackTo": "write",
-      "deliverable": { "path": "minutes.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "minutes.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

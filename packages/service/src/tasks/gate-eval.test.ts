@@ -667,6 +667,24 @@ describe('evaluateGate — hardened kinds', () => {
     expect(result.failures.join('\n')).toContain('2 H1 slide headings');
   });
 
+  it('markdownHeadingsMatch can compare workspace Markdown with an artifact outline', async () => {
+    const result = await evaluateGate(
+      [
+        {
+          kind: 'markdownHeadingsMatch',
+          file: 'deck.md',
+          outlineFile: 'notes/outline.md',
+          outlineArtifact: true,
+        },
+      ],
+      splitReader(
+        { 'deck.md': '# Opening\n# Next step' },
+        { 'notes/outline.md': '## Slide 1 — Opening\n## Slide 2 — Next step' },
+      ),
+    );
+    expect(result.pass).toBe(true);
+  });
+
   it('valueGrounding: rejects decoy values and quotes the offending pattern', async () => {
     const facts = [{ id: 'q3-revenue', required: ['\\$4\\.2M'], forbidden: ['\\$7\\.9M'] }];
     const decoyed = await evaluateGate(

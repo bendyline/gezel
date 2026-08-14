@@ -231,6 +231,13 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
     return [...this.capturedCalls];
   }
 
+  getRegisteredToolNames(): string[] {
+    const bridgeNames = this.deps.bridges.isEmpty()
+      ? []
+      : this.deps.bridges.getOpenAITools().map((tool) => tool.name);
+    return [...new Set([...bridgeNames, ...this.externalToolNames])];
+  }
+
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
   }

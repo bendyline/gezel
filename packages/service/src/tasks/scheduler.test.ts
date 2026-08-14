@@ -365,8 +365,35 @@ describe('TaskScheduler — ambient project nudges', () => {
       };
       workingDir?: string;
       managedWorkspaceWritePolicy?: 'auto' | 'allow' | 'deny';
+      withActiveTask?: boolean;
     } = {},
   ): Promise<void> {
+    // Ambient-nudge tests exercise cadence for work that already exists.
+    // Seed that prerequisite by default; tests for a truly fresh project
+    // opt out explicitly.
+    if (opts.withActiveTask !== false && (await tasks.list({ projectId: 'cron' })).length === 0) {
+      const seededAt = '2020-01-01T00:00:00Z';
+      await store.writeTask({
+        projectId: 'cron',
+        num: 900,
+        ref: 'cron/900',
+        title: 'Existing project work',
+        status: 'active',
+        assignee: { kind: 'user' },
+        craftbook: {
+          id: 'ambient-fixture',
+          name: 'Ambient fixture',
+          steps: [{ id: 'main', name: 'Main', createdAt: seededAt }],
+          entryStepId: 'main',
+          createdAt: seededAt,
+          updatedAt: seededAt,
+        },
+        activeStepId: 'main',
+        createdAt: seededAt,
+        updatedAt: seededAt,
+        createdBy: { kind: 'user' },
+      });
+    }
     // Overwrite project.json directly so we can set updatedAt to a
     // precise moment in the past.
     const record = await store.getProject('cron');
@@ -507,6 +534,28 @@ describe('TaskScheduler — ambient project nudges', () => {
     expect(chat.delivered[0]!.lane).toBe('background');
     const record = await store.getProject('cron');
     expect(record!.nudgeState?.consecutiveRapidNudges).toBe(1);
+  });
+
+  it('does not invent ambient work for a fresh project with no tasks', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setupProject({
+      voormanGezelId: 'leo',
+      meesterGezelId: 'meester-1',
+      updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+      withActiveTask: false,
+    });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+    });
+
+    await scheduler.tick();
+
+    expect(chat.delivered).toHaveLength(0);
+    expect((await store.getProject('cron'))?.nudgeState).toBeUndefined();
   });
 
   it('treats tracker-stamped activity as recent even when project.updatedAt is stale', async () => {
@@ -1181,6 +1230,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       voormanGezelId: 'leo',
       meesterGezelId: 'meester-1',
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+      withActiveTask: false,
     });
     // Close the only task (which auto-stabilizes), then force the status
     // back to `active` to simulate the stuck state — a stabilization

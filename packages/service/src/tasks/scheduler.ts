@@ -708,6 +708,16 @@ export class TaskScheduler {
     }
     const activeTasks = projectTasks.filter((t) => t.status === 'active');
 
+    // A freshly-created project has a voorman but no job yet. Ambient
+    // check-ins are meant to resume owned work, not turn an empty project
+    // (or a casual greeting in its first chat) into a fabricated brief.
+    // The user's next message can create the first task; until then there is
+    // nothing deterministic for the scheduler to advance.
+    if (projectTasks.length === 0) {
+      trace('skip — project has no tasks to advance');
+      return;
+    }
+
     // Self-heal: the project has tasks but none active, yet its status is
     // still `active` (the status gate above already let it through).
     // `maybeStabilizeProject` normally fires when a task closes, but a

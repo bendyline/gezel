@@ -4,7 +4,13 @@
     "role": "general",
     "name": "Release Notes",
     "description": "Turn a raw set of merged commits, pull requests, and ticket IDs into polished, human-readable release notes for a versioned release — grouped by theme (Features, Improvements, Bug Fixes, Breaking Changes), written for users rather than engineers, with upgrade/migration callouts surfaced first. The ordering is deliberate: a developer gathers and de-noises the change inventory before any prose is written, a copywriter turns that inventory into benefit-led notes in a consistent voice, and a reviewer verifies every shipped change is represented and nothing internal-only or unreleased leaked in. Use this for GitHub Releases, product announcement posts, or the user-facing notes that ship alongside a tagged version.",
-    "tags": ["release", "release-notes", "changelog", "announcement", "versioning"],
+    "tags": [
+      "release",
+      "release-notes",
+      "changelog",
+      "announcement",
+      "versioning"
+    ],
     "triggers": [
       "write release notes",
       "release notes for v2",
@@ -19,7 +25,10 @@
         "role": "developer",
         "summary": "collect and de-noise every shipped change since the last tag",
         "prompt": "1. Determine the version range: the last released tag (or last release date) up to HEAD/the release candidate. 2. Collect the raw inventory — merged PRs, commit subjects, and linked issue IDs (use git log, gh pr list --state merged, or the changelog source available to you). 3. Filter OUT noise that should never reach users: merge commits, dependency-bump-only commits, CI/build-config tweaks, lint/format-only commits, and anything not yet actually released. 4. Classify each remaining change into exactly one bucket: Features, Improvements, Bug Fixes, Breaking Changes. 5. Flag every Breaking Change and anything requiring a user action (config change, migration, new env var) — these get top billing later. 6. Good looks like: a deduplicated, categorized list where each item has a PR/issue reference and a one-line plain description, and every category is either populated or explicitly marked 'none'. Write an acceptance-criteria checklist (e.g. 'every shipped user-facing change appears exactly once', 'breaking changes are flagged with the required user action', 'no merge/dependency/CI-only noise', 'each item cites a PR or issue') plus the version range and the classified inventory to the notes file via write_task_note AND to notes/gather.md.",
-        "produces": { "path": "notes/gather.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/gather.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -27,7 +36,10 @@
         "role": "copywriter",
         "summary": "turn the inventory into benefit-led, user-facing notes",
         "prompt": "1. Open notes/gather.md and write the release notes for HUMANS, not for the commit log — lead each item with the user-visible benefit, not the implementation. 2. Order the document: a one-paragraph highlights summary, then Breaking Changes / Upgrade Notes (with the exact action the user must take), then Features, Improvements, Bug Fixes. 3. Keep each line tight and parallel in voice; use the imperative or present tense consistently ('Adds…', 'Fixes…'). 4. Preserve the PR/issue references as links or trailing (#123) so readers can dig in. 5. Open with the version number and release date as an H1/H2. 6. Good looks like: a reader who has never seen the codebase understands what changed and what they must do, breaking changes are impossible to miss, and every inventory item from gather.md is represented. Write the notes to release-notes.md.",
-        "produces": { "path": "release-notes.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "release-notes.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -35,13 +47,23 @@
         "role": "reviewer",
         "summary": "verify coverage, accuracy, and that nothing internal leaked",
         "prompt": "1. Cross-check release-notes.md against notes/gather.md: every classified item must appear, and nothing must appear that was filtered as noise or is unreleased. 2. Verify Breaking Changes are at the top with a concrete user action, not buried. 3. Check the voice is consistent and benefit-led, version + date are present, and references resolve. 4. Confirm no internal-only details (private ticket chatter, internal service names, secrets, profanity) leaked into a public document. 5. Write a PASS/FAIL against each acceptance criterion from gather.md, listing any specific gap. 6. If anything fails, the fix happens back in the write phase. Write your findings to notes/review.md.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open release-notes.md and verify it against the acceptance criteria locked in notes/gather.md, checking EACH one and writing PASS/FAIL with the evidence. Confirm: (a) every user-facing change from the gathered inventory is represented exactly once; (b) breaking changes and required user actions appear at the top, each with a concrete action; (c) no merge/dependency/CI-only noise and nothing unreleased leaked in; (d) every item cites a PR or issue; (e) the version number and release date appear as a heading; (f) the voice is consistent and written for users, not the commit log. Any FAIL routes back to the write phase to fix exactly that gap.",
       "loopBackTo": "write",
-      "deliverable": { "path": "release-notes.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "release-notes.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -49,7 +71,13 @@
     "role": "general",
     "name": "Changelog Cut",
     "description": "Cut a new versioned section into a Keep a Changelog / CHANGELOG.md style file for a release — moving entries out of the Unreleased section into a dated, semver-stamped version block under the standard Added / Changed / Deprecated / Removed / Fixed / Security headings, with a fresh empty Unreleased section left behind. A developer gathers the unreleased entries and reconciles them against actual merged changes before a copywriter normalizes them into terse, consistent changelog lines and stamps the version block. Use this whenever you 'cut a release', 'update the changelog', or roll the Unreleased section into a tagged version while keeping the file append-only and machine-comparable.",
-    "tags": ["changelog", "release", "semver", "keep-a-changelog", "versioning"],
+    "tags": [
+      "changelog",
+      "release",
+      "semver",
+      "keep-a-changelog",
+      "versioning"
+    ],
     "triggers": [
       "cut a changelog",
       "update CHANGELOG.md",
@@ -64,7 +92,10 @@
         "role": "developer",
         "summary": "reconcile the Unreleased section against actual merged changes",
         "prompt": "1. Locate the changelog file (CHANGELOG.md or similar) and read its existing format — Keep a Changelog headings (Added, Changed, Deprecated, Removed, Fixed, Security) are the default; match whatever the file already uses. 2. Read the current Unreleased section and reconcile it against the real merged changes since the last version block (git log / merged PRs) — add anything user-facing that is missing, and remove or merge duplicates. 3. Determine the new version number per semver: bump MAJOR for breaking changes, MINOR for new backward-compatible features, PATCH for fixes only; note the reasoning. 4. Map each entry to the correct heading (Removed and Security are not Changed). 5. Good looks like: a reconciled, categorized list of every unreleased user-facing change, the chosen version number with a one-line semver justification, and the release date. Write an acceptance-criteria checklist ('version follows semver given the change set', 'every entry sits under the correct standard heading', 'Unreleased reconciles with merged changes', 'existing version blocks untouched') plus the inventory to the notes file via write_task_note AND to notes/gather.md.",
-        "produces": { "path": "notes/gather.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/gather.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -72,13 +103,23 @@
         "role": "copywriter",
         "summary": "normalize entries and stamp the dated version section",
         "prompt": "1. Open notes/gather.md and rewrite the changelog so the reconciled entries form a new version block headed '## [VERSION] - YYYY-MM-DD' inserted directly above the previous version block. 2. Under that block, emit only the non-empty standard headings, each with terse, parallel one-line bullets in the imperative ('Add…', 'Fix…') — one change per bullet, no implementation chatter. 3. Leave a fresh, empty '## [Unreleased]' section at the top with the standard heading placeholders. 4. Do NOT alter any pre-existing version block, the file header, or the comparison-link footer except to add the new version's link if the file uses them. 5. Preserve issue/PR references if the file's convention includes them. 6. Good looks like: a clean, append-only CHANGELOG.md where the new dated version block is correct semver, Unreleased is empty, and the file still parses as Keep a Changelog. Write the updated changelog to CHANGELOG.md.",
-        "produces": { "path": "CHANGELOG.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "CHANGELOG.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open CHANGELOG.md and check it against the acceptance criteria in notes/gather.md, PASS/FAIL each. Confirm: (a) a new '## [VERSION] - DATE' block exists with a valid date and a semver-correct version for the change set; (b) every gathered entry appears once under the correct standard heading and empty headings are omitted; (c) a fresh empty Unreleased section sits at the top; (d) all previous version blocks and the file header/footer are unchanged; (e) bullets are terse and parallel with one change each; (f) the file still reads as a valid Keep a Changelog document. Any FAIL routes back to the write phase.",
       "loopBackTo": "write",
-      "deliverable": { "path": "CHANGELOG.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "CHANGELOG.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -86,7 +127,14 @@
     "role": "general",
     "name": "Deploy Checklist",
     "description": "Author and then actually execute a pre-deploy verification checklist for shipping a release to production — the concrete gates that must be green before the deploy button is pressed: tests passing, build clean, migrations reviewed, config/secrets present, feature flags set, rollback path confirmed, and observability/alerts ready. A planner scopes the checklist tailored to this service and risk level, a developer runs each item and records real evidence (command output, links, screenshots) for pass or fail, and a reviewer signs off go/no-go. Use this before a production deploy, a release cut-over, or any 'are we ready to ship?' gate where skipping a step causes outages.",
-    "tags": ["deploy", "release", "checklist", "pre-flight", "production", "verification"],
+    "tags": [
+      "deploy",
+      "release",
+      "checklist",
+      "pre-flight",
+      "production",
+      "verification"
+    ],
     "triggers": [
       "pre-deploy checklist",
       "are we ready to deploy",
@@ -101,7 +149,10 @@
         "role": "planner",
         "summary": "define the go/no-go gates for THIS service and release",
         "prompt": "1. Identify what is being deployed (service, version, target environment) and its blast radius / risk level. 2. Build the checklist of pre-deploy gates tailored to this service — at minimum: CI green (tests + lint + build), schema/data migrations reviewed and reversible, required config and secrets present in the target env, feature flags in their intended state, dependencies/external services healthy, a confirmed rollback path, and observability (dashboards, alerts, on-call) ready. 3. Drop any gate that genuinely does not apply and note why; add service-specific gates (cache warmups, queue drains, third-party rate limits) that do. 4. For each gate, write the EXACT verification step (the command to run, the URL to check, the artifact to inspect) and the explicit pass condition. 5. Good looks like: an ordered, unambiguous checklist where any engineer could execute each item and objectively decide pass/fail, and where each item has a defined pass condition. Write this as an acceptance-criteria checklist (each gate IS a criterion) plus the deploy context to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -109,7 +160,10 @@
         "role": "developer",
         "summary": "execute every checklist item and record real evidence",
         "prompt": "1. Open notes/scope.md and work through every gate IN ORDER, actually running the verification step (run the command, hit the endpoint, inspect the artifact) — do not assume, do not skip. 2. For each gate record: the step taken, the real evidence (command output, status, link), and a PASS or FAIL with the pass condition met or not. 3. If a gate FAILS, mark it FAIL with the specific reason — do not silently soften it; a failed gate is a no-go signal. 4. Render the result as a markdown checklist where every item is checked [x] only when its evidence genuinely supports PASS. 5. Conclude with an overall GO (all gates PASS) or NO-GO (any gate FAIL) recommendation and the single biggest risk. 6. Good looks like: a completed checklist where every gate from scope.md has attached evidence and an honest verdict, with a clear top-line go/no-go. Write the executed checklist to deploy-checklist.md.",
-        "produces": { "path": "deploy-checklist.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "deploy-checklist.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "report",
@@ -117,13 +171,23 @@
         "role": "reviewer",
         "summary": "audit the evidence and confirm the go/no-go decision",
         "prompt": "1. Open deploy-checklist.md and audit each gate's EVIDENCE, not just its checkbox — a checked box with weak or missing evidence is a FAIL. 2. Confirm every gate from notes/scope.md is present and that no gate was dropped without a recorded reason. 3. Re-derive the overall verdict: if any gate is FAIL, the deploy is NO-GO regardless of the recorded recommendation. 4. Note any gate whose evidence is ambiguous and must be re-verified. 5. Write a PASS/FAIL per gate and a final, defensible GO or NO-GO with the deciding factors. 6. Any insufficient evidence routes back to the verify phase to re-run that gate. Write your sign-off to notes/report.md.",
-        "produces": { "path": "notes/report.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/report.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open deploy-checklist.md and verify it against the gates locked in notes/scope.md, PASS/FAIL each gate. Confirm: (a) every gate from scope.md appears with a recorded verification step; (b) each gate has REAL evidence (command output, link, or artifact), not just a checked box; (c) no gate was dropped without a stated reason; (d) the pass condition for each gate is genuinely met where marked PASS; (e) the document ends with a clear GO/NO-GO that is consistent with the gates (any FAIL ⇒ NO-GO). Any gate lacking evidence or wrongly marked routes back to the verify phase to re-run it.",
       "loopBackTo": "verify",
-      "deliverable": { "path": "deploy-checklist.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "deploy-checklist.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -131,7 +195,14 @@
     "role": "general",
     "name": "Rollback Plan",
     "description": "Author a concrete, tested rollback plan for a release so that when a deploy goes wrong the team can revert FAST and safely without improvising under pressure — covering the trigger conditions that mean 'roll back', the exact reversal steps (redeploy previous artifact, down-migrations, flag flips, cache/CDN invalidation), data-safety and forward/backward-compatibility considerations, the recovery-time estimate, and a post-rollback verification. A planner scopes the failure modes and triggers, a developer writes the precise step-by-step runbook with real commands, and a reviewer dry-runs it for correctness and irreversible-data hazards. Use this alongside any risky deploy, migration, or feature launch where 'how do we undo this' must be answered before, not during, an incident.",
-    "tags": ["rollback", "release", "runbook", "recovery", "deploy", "incident"],
+    "tags": [
+      "rollback",
+      "release",
+      "runbook",
+      "recovery",
+      "deploy",
+      "incident"
+    ],
     "triggers": [
       "write a rollback plan",
       "how do we roll back this release",
@@ -146,7 +217,10 @@
         "role": "planner",
         "summary": "define what 'roll back' means and when to pull the trigger",
         "prompt": "1. Identify the change being deployed (service, version, what it touches) and enumerate the realistic failure modes: error-rate spike, latency regression, broken migration, data corruption, dependency outage, bad feature flag. 2. For each failure mode define the TRIGGER — the objective signal and threshold that means 'roll back now' (e.g. '5xx > 2% for 5 min', 'p99 latency doubles', 'data-integrity check fails'). 3. Decide the rollback STRATEGY per failure mode: redeploy previous artifact, flip a feature flag, run a down-migration, restore from backup — and flag which changes are NOT cleanly reversible (irreversible migrations, deleted data, externally-visible side effects). 4. Identify who decides and who executes, and the target recovery-time objective. 5. Good looks like: a list of failure modes each with a measurable trigger and a chosen reversal strategy, with irreversible hazards called out explicitly. Write this as an acceptance-criteria checklist ('every failure mode has a measurable trigger', 'every reversible change has a reversal step', 'irreversible hazards are flagged with mitigation', 'RTO and decision owner stated') plus the analysis to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -154,7 +228,10 @@
         "role": "developer",
         "summary": "produce precise, ordered reversal steps with real commands",
         "prompt": "1. Open notes/scope.md and write the rollback runbook as a numbered, copy-pasteable procedure an on-call engineer can follow at 3am under stress. 2. Structure it: Trigger conditions (from scope) → Pre-rollback safety checks (snapshot/backup, announce, freeze) → Reversal steps in exact order with the real command or action for each → Data-handling steps (down-migrations, and explicit handling for any irreversible change) → Post-rollback verification (the checks that confirm the system is healthy again) → Communication/escalation. 3. For each reversal step give the concrete command/UI action and the expected result, so there is zero improvisation. 4. Call out every irreversible step with its mitigation (e.g. 'this migration drops a column — take a backup first; restoring requires X'). 5. State the expected recovery time. 6. Good looks like: a self-contained runbook where every reversible change from scope.md has an ordered step with a real command, every irreversible hazard has a mitigation, and a verification step confirms recovery. Write the runbook to rollback-plan.md.",
-        "produces": { "path": "rollback-plan.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "rollback-plan.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -162,13 +239,23 @@
         "role": "reviewer",
         "summary": "trace the steps for correctness and data hazards",
         "prompt": "1. Open rollback-plan.md and mentally (or actually, in a safe environment) dry-run each reversal step in order — does it run, is it in the right sequence, does it actually undo the change? 2. Confirm every failure mode and trigger from notes/scope.md is covered and that each reversible change has a working reversal step. 3. Scrutinize the irreversible/data-loss steps hardest: is the hazard flagged, is the mitigation real and ordered BEFORE the destructive action? 4. Verify the post-rollback verification genuinely proves health, not just that a command exited 0. 5. Write a PASS/FAIL per acceptance criterion and list any gap, wrong ordering, or unguarded destructive step. 6. Any failure routes back to the write phase. Write findings to notes/review.md.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open rollback-plan.md and verify it against notes/scope.md, PASS/FAIL each criterion. Confirm: (a) every failure mode has a measurable trigger condition; (b) every reversible change has an ordered, concrete reversal step with a real command; (c) every irreversible/data-loss hazard is flagged with a mitigation that happens BEFORE the destructive action; (d) pre-rollback safety checks and a post-rollback verification that proves health are present; (e) an RTO and a decision owner/escalation path are stated; (f) the steps read as a runbook executable under pressure with no improvisation. Any FAIL routes back to the write phase.",
       "loopBackTo": "write",
-      "deliverable": { "path": "rollback-plan.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "rollback-plan.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -176,7 +263,14 @@
     "role": "maintenance-review",
     "name": "Hotfix Flow",
     "description": "Drive an expedited production hotfix from red to green: reproduce the live defect with a failing test, apply the smallest safe fix that makes it pass without scope-creeping into a refactor, and verify the fix plus a clean regression check before it ships out-of-band. The ordering is the whole discipline — reproduce FIRST (a failing test that captures the bug is the contract the fix must satisfy), then fix minimally, then verify the new test passes and nothing else broke. Use this for urgent production bugs, expedited patch releases, and out-of-band fixes where speed matters but a regression would be worse than the original bug.",
-    "tags": ["hotfix", "bug-fix", "tdd", "release", "patch", "regression"],
+    "tags": [
+      "hotfix",
+      "bug-fix",
+      "tdd",
+      "release",
+      "patch",
+      "regression"
+    ],
     "triggers": [
       "hotfix this bug",
       "urgent production fix",
@@ -191,7 +285,10 @@
         "role": "developer",
         "summary": "capture the live defect as a failing, deterministic test",
         "prompt": "1. Read the bug report / incident and state the exact observed behavior vs the expected behavior in one line each. 2. Identify the smallest input or scenario that triggers the defect. 3. Write a NEW automated test that exercises that scenario and asserts the EXPECTED (correct) behavior — so it fails RED against current code for the right reason (it reproduces THIS bug, not some unrelated assertion). 4. Run the test and confirm it fails, capturing the failure output as proof of reproduction. 5. Do NOT fix anything yet and do NOT alter unrelated code. 6. Good looks like: one focused, deterministic failing test that pins the defect, plus the captured red output. Write an acceptance-criteria checklist ('a new test reproduces the bug and fails red', 'the test asserts correct behavior not the buggy behavior', 'the test is deterministic and minimal', 'the fix will be the smallest change that turns it green', 'full suite must stay green after the fix') plus the observed/expected behavior and the test location to the notes file via write_task_note AND to notes/reproduce.md.",
-        "produces": { "path": "notes/reproduce.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/reproduce.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "fix",
@@ -199,7 +296,10 @@
         "role": "developer",
         "summary": "smallest safe change that turns the failing test green",
         "prompt": "1. Open notes/reproduce.md and make the SMALLEST change that turns the reproducing test green — fix the root cause, not the symptom, but resist refactoring, renaming, or unrelated cleanup (this is a hotfix, not a rewrite). 2. Keep the diff tight and reviewable; touch only what the fix requires. 3. Run the reproducing test and confirm it now passes GREEN; capture the output. 4. If the fix needs a follow-up (a deeper refactor, tech-debt), note it as a separate item rather than doing it now. 5. Implement the fix and the reproducing test together in the deliverable file so the change is self-verifying. 6. Good looks like: a minimal diff that makes the new test pass for the right reason, with no scope creep. Write the fix plus the reproducing test (the source/test module that now passes) to hotfix.ts.",
-        "produces": { "path": "hotfix.ts", "kind": "code-with-tests" }
+        "produces": {
+          "path": "hotfix.ts",
+          "kind": "code-with-tests"
+        }
       },
       {
         "id": "verify",
@@ -207,13 +307,23 @@
         "role": "reviewer",
         "summary": "confirm green plus no regressions before shipping",
         "prompt": "1. Run the reproducing test and confirm it now passes GREEN. 2. Run the FULL relevant test suite and confirm nothing else broke — a hotfix that fixes one bug and regresses another is a failure. 3. Review the diff for scope creep: confirm the change is minimal and addresses the root cause described in notes/reproduce.md, not a symptom patch. 4. Sanity-check edge cases adjacent to the fix that a single test might miss. 5. Write a PASS/FAIL per acceptance criterion from reproduce.md, with the test output as evidence and any regression or over-reach called out. 6. Any failure routes back to the fix phase. Write findings to notes/verify.md.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open hotfix.ts and verify it against the criteria in notes/reproduce.md, PASS/FAIL each. Confirm: (a) it contains a test that reproduces the reported bug by asserting the correct behavior; (b) that test passes GREEN against the fix; (c) the fix is minimal and targets the root cause with no unrelated refactor/scope-creep; (d) the change does not regress adjacent behavior (the broader suite stays green); (e) the test is deterministic. Run/trace the test to gather evidence. Any FAIL routes back to the fix phase.",
       "loopBackTo": "fix",
-      "deliverable": { "path": "hotfix.ts", "kind": "code-with-tests" }
+      "deliverable": {
+        "path": "hotfix.ts",
+        "kind": "code-with-tests"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -221,7 +331,14 @@
     "role": "general",
     "name": "Version Bump",
     "description": "Perform a coordinated, semver-correct version bump across a project — deciding MAJOR/MINOR/PATCH from the actual change set, then updating every place the version is stamped in lockstep (package manifest(s), version constant, lockfile, badges, docs) plus the changelog header, so nothing drifts out of sync. A planner determines the correct semver level and enumerates every file that carries the version, a developer applies the bump everywhere consistently, and a reviewer verifies no location was missed and the new version is internally consistent. Use this when 'bumping the version', preparing a tag, or releasing a new package version where a half-applied bump (manifest says 2.0.0 but the constant says 1.9.0) is a classic ship bug.",
-    "tags": ["version", "semver", "release", "bump", "versioning", "tagging"],
+    "tags": [
+      "version",
+      "semver",
+      "release",
+      "bump",
+      "versioning",
+      "tagging"
+    ],
     "triggers": [
       "bump the version",
       "release a new version",
@@ -236,7 +353,10 @@
         "role": "planner",
         "summary": "pick the semver level and enumerate every version-bearing file",
         "prompt": "1. Read the change set since the last release (changelog Unreleased, merged PRs, git log) and decide the semver level: MAJOR for any breaking/incompatible change, MINOR for new backward-compatible functionality, PATCH for backward-compatible fixes only — state the deciding change. 2. Compute the exact new version string from the current one (find the current version first; respect any pre-release/build suffix convention). 3. Enumerate EVERY location that stamps the version: package manifest(s) (and workspace members if a monorepo), any VERSION constant in source, the lockfile, README/docs badges, and the changelog header. 4. Note any inter-package version constraints that must move together. 5. Good looks like: the chosen new version with a one-line semver justification and a complete, file-by-file list of every place that must change with its current and target value. Write this as an acceptance-criteria checklist ('semver level matches the change set', 'every version-bearing file is listed with old→new', 'monorepo/peer constraints accounted for', 'changelog header updated to the new version') plus the analysis to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "bump",
@@ -244,7 +364,10 @@
         "role": "developer",
         "summary": "update every version location in lockstep",
         "prompt": "1. Open notes/scope.md and update the version string in EVERY enumerated location to the exact target value — do not eyeball one and miss another. 2. Update package manifest(s) and any workspace members, the source VERSION constant, the lockfile (regenerate if the tooling requires it), docs/badges, and the changelog header. 3. Keep any pre-release/build suffix convention intact. 4. Do not change anything unrelated to the version stamp. 5. After editing, grep the repo for the OLD version string to confirm no stray occurrence remains (except historical changelog entries, which are correct to leave). 6. Produce a manifest of what changed: for each file, the path and the old→new version, plus the result of the stale-version grep. 7. Good looks like: every location from scope.md now reads the new version, the old version survives only in historical changelog entries, and the manifest records each edit. Write the change manifest (JSON with one entry per file) to version-bump.json.",
-        "produces": { "path": "version-bump.json", "kind": "json" }
+        "produces": {
+          "path": "version-bump.json",
+          "kind": "json"
+        }
       },
       {
         "id": "verify",
@@ -252,13 +375,23 @@
         "role": "reviewer",
         "summary": "confirm no location drifted and the bump is consistent",
         "prompt": "1. Open version-bump.json and confirm every file from notes/scope.md was bumped to the SAME target version — no drift between manifest, constant, lockfile, and docs. 2. Independently grep the repo for both the old and the new version strings: the new version should appear in every expected place; the old version should remain only in historical changelog entries. 3. Verify the semver level still matches the change set described in scope.md. 4. Confirm the changelog header was updated and nothing unrelated changed. 5. Write a PASS/FAIL per acceptance criterion with the grep evidence, and list any missed or inconsistent location. 6. Any failure routes back to the bump phase. Write findings to notes/verify.md.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open version-bump.json and verify it against notes/scope.md, PASS/FAIL each criterion. Confirm: (a) it is valid JSON listing every version-bearing file from scope.md with an old→new entry; (b) every listed location carries the SAME new version (no drift between manifest, source constant, lockfile, docs); (c) the new version is semver-correct for the change set; (d) the changelog header reflects the new version; (e) the old version string survives only in historical changelog entries (verify with a grep). Any missed or inconsistent location routes back to the bump phase.",
       "loopBackTo": "bump",
-      "deliverable": { "path": "version-bump.json", "kind": "json" }
+      "deliverable": {
+        "path": "version-bump.json",
+        "kind": "json"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -266,7 +399,14 @@
     "role": "maintenance-review",
     "name": "Incident Postmortem",
     "description": "Write a blameless incident postmortem after a production outage or degradation — a structured, factual document covering the impact, a precise timeline (detection → diagnosis → mitigation → resolution), the root cause and contributing factors via a five-whys analysis, what went well and what went poorly, and concrete, owned, dated action items that prevent recurrence. A researcher assembles the verified timeline and evidence from logs/alerts/chat, a copywriter writes the blameless narrative and root-cause analysis, and a reviewer checks the timeline is accurate, the analysis reaches a true root cause, and every action item is specific and owned. Use this for outage retrospectives, severity-incident reviews, and any 'what happened and how do we prevent it' writeup.",
-    "tags": ["postmortem", "incident", "outage", "retrospective", "root-cause", "blameless"],
+    "tags": [
+      "postmortem",
+      "incident",
+      "outage",
+      "retrospective",
+      "root-cause",
+      "blameless"
+    ],
     "triggers": [
       "write a postmortem",
       "incident retrospective",
@@ -281,7 +421,10 @@
         "role": "researcher",
         "summary": "build a verified, timestamped factual timeline",
         "prompt": "1. Gather the raw record of the incident from every available source: alerts, monitoring graphs, deploy log, incident chat, error logs, and any commands run. 2. Reconstruct a precise, timestamped timeline of key moments: first impact, detection/alert, acknowledgement, diagnosis milestones, the mitigation action, full resolution, and the all-clear. 3. Quantify the impact factually: duration, who/what was affected, magnitude (error rate, users, revenue if known). 4. Note the detection method (alert vs customer report) and time-to-detect / time-to-mitigate. 5. Keep this BLAMELESS and factual — what happened and when, not who is at fault. 6. Good looks like: a chronological, timestamped timeline whose every entry is backed by evidence, plus a quantified impact statement. Write an acceptance-criteria checklist ('timeline is timestamped and chronological', 'impact is quantified with duration and scope', 'detection and mitigation times are stated', 'analysis must reach a true root cause via five-whys', 'every action item must be specific, owned, and dated', 'tone stays blameless') plus the timeline and impact to the notes file via write_task_note AND to notes/timeline.md.",
-        "produces": { "path": "notes/timeline.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/timeline.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -289,7 +432,10 @@
         "role": "copywriter",
         "summary": "blameless narrative, root-cause, and owned action items",
         "prompt": "1. Open notes/timeline.md and write the postmortem with standard sections: Summary, Impact, Timeline, Root Cause, Contributing Factors, What Went Well, What Went Poorly, and Action Items. 2. In Root Cause, run a five-whys (or equivalent) from the symptom down to the systemic cause — not 'human made a mistake' but the system that allowed the mistake to cause an outage. 3. Keep the entire document BLAMELESS: describe systems and decisions, never blame individuals. 4. Make each Action Item concrete, with an explicit owner and a due date, and tied to a contributing factor — preventing recurrence, not vague 'be more careful'. 5. Lead with a tight executive Summary (what happened, impact, status) readable in 30 seconds. 6. Good looks like: a factual, blameless document where the root cause is systemic, the timeline matches notes/timeline.md, and every action item is specific/owned/dated. Write the postmortem to postmortem.md.",
-        "produces": { "path": "postmortem.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "postmortem.md",
+          "kind": "markdown-report"
+        }
       },
       {
         "id": "review",
@@ -297,13 +443,23 @@
         "role": "reviewer",
         "summary": "check root cause, timeline fidelity, and action quality",
         "prompt": "1. Open postmortem.md and cross-check its Timeline against notes/timeline.md — every entry must be accurate and evidence-backed, nothing invented or reordered. 2. Pressure-test the Root Cause: does the five-whys actually reach a SYSTEMIC cause, or does it stop at 'someone erred'? If it stops short, it fails. 3. Verify the document is genuinely blameless — flag any individual-blaming language. 4. Audit each Action Item: is it specific, does it have an owner and a due date, and would it actually reduce recurrence of THIS class of incident? 5. Confirm Impact is quantified and the Summary is tight and accurate. 6. Write a PASS/FAIL per acceptance criterion with specifics; any failure routes back to the write phase. Write findings to notes/review.md.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open postmortem.md and verify it against the criteria in notes/timeline.md, PASS/FAIL each. Confirm: (a) it has Summary, Impact, Timeline, Root Cause, Contributing Factors, What Went Well/Poorly, and Action Items sections; (b) the timeline is chronological, timestamped, and matches the assembled evidence; (c) impact is quantified (duration + scope); (d) the root-cause analysis reaches a systemic cause via five-whys, not individual blame; (e) the document is blameless throughout; (f) every action item is specific, owned, and dated, and addresses a contributing factor. Any FAIL routes back to the write phase.",
       "loopBackTo": "write",
-      "deliverable": { "path": "postmortem.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "postmortem.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -311,7 +467,14 @@
     "role": "maintenance-review",
     "name": "Release Pipeline (CI/CD)",
     "description": "Author a CI/CD release workflow as a YAML pipeline (GitHub Actions style) that takes a tagged commit and turns it into a published release — running tests and build as gates, then on a version tag building the artifact, generating release notes, publishing the package/image, and creating the GitHub Release, with the dangerous publish steps gated behind the green test/build stages and the tag trigger. A planner scopes the trigger, stages, secrets, and the publish target, a developer writes the valid pipeline YAML wiring the stages in the safe order, and a reviewer validates the syntax and that publishing cannot run before tests pass. Use this to set up automated releases, a publish-on-tag workflow, or a deploy pipeline from scratch.",
-    "tags": ["ci", "cd", "release", "pipeline", "github-actions", "yaml"],
+    "tags": [
+      "ci",
+      "cd",
+      "release",
+      "pipeline",
+      "github-actions",
+      "yaml"
+    ],
     "triggers": [
       "set up a release pipeline",
       "ci/cd for releases",
@@ -326,7 +489,10 @@
         "role": "planner",
         "summary": "define trigger, stages, secrets, and publish target",
         "prompt": "1. Decide the trigger: typically push of a semver tag (e.g. v*.*.*) for the release path, plus PR/push for the test gate. 2. Define the ordered stages: test → build → (on tag) package/publish → create release — and which stages gate which (publish must depend on test+build passing). 3. Identify the platform (GitHub Actions assumed unless told otherwise), the runner/language toolchain, and the cache strategy. 4. Enumerate the secrets/permissions the publish step needs (registry token, GITHUB_TOKEN scopes) WITHOUT inventing real values — reference them by name. 5. Specify the publish target (npm, container registry, GitHub Release) and the artifact. 6. Good looks like: an unambiguous stage graph with explicit dependencies, the trigger condition, the named secrets, and the publish target. Write this as an acceptance-criteria checklist ('publish only runs on a version tag', 'publish depends on a green test+build', 'secrets referenced by name not value', 'stages run in the safe order', 'creates the release/artifact on the named target') plus the design to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -334,7 +500,10 @@
         "role": "developer",
         "summary": "implement the gated release workflow YAML",
         "prompt": "1. Open notes/scope.md and write the pipeline as a single valid workflow YAML file (GitHub Actions schema unless another platform was specified). 2. Wire the jobs in the safe order: a test job and a build job triggered broadly, and a publish/release job that runs ONLY on the version-tag trigger and DECLARES a needs:/dependency on test (and build) so it cannot start until they pass. 3. Reference secrets via the platform's secrets context by name (e.g. ${{ secrets.NPM_TOKEN }}) — never hardcode credentials. 4. Include checkout, toolchain setup, dependency cache, the test command, the build command, the publish command, and the create-release step against the named target. 5. Use correct YAML indentation and real action references/versions so the file would actually parse and run. 6. Good looks like: a valid, well-indented workflow where publish is gated on green tests and the tag trigger, secrets are name-referenced, and every scoped stage is present. Write the pipeline to release.yml.",
-        "produces": { "path": "release.yml", "kind": "yaml-spec" }
+        "produces": {
+          "path": "release.yml",
+          "kind": "yaml-spec"
+        }
       },
       {
         "id": "verify",
@@ -342,13 +511,23 @@
         "role": "reviewer",
         "summary": "check syntax and that publish cannot run before tests pass",
         "prompt": "1. Open release.yml and confirm it is syntactically valid YAML with the platform's required top-level keys (name, on/trigger, jobs). 2. Verify the TRIGGER gating: the publish/release job must run only on a version tag, and must declare a dependency (needs:) on the test/build jobs so it cannot execute before they pass — a publish that can run on a red build is a critical FAIL. 3. Confirm secrets are referenced by name with no hardcoded credentials. 4. Check every stage from notes/scope.md is present (test, build, publish, create-release) with real commands and pinned action versions. 5. Write a PASS/FAIL per acceptance criterion, calling out any ungated publish, syntax error, or missing stage. 6. Any failure routes back to the build phase. Write findings to notes/verify.md.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open release.yml and verify it against notes/scope.md, PASS/FAIL each criterion. Confirm: (a) it is valid YAML with the platform's required keys; (b) the publish/release job runs only on a version-tag trigger AND declares a needs:/dependency on the test (and build) job so it cannot run on a red build; (c) secrets are referenced by name with no hardcoded credentials; (d) every scoped stage (test, build, publish, create-release) is present with real commands and pinned action versions; (e) the publish target matches the scope. Any ungated publish, syntax error, or missing stage routes back to the build phase.",
       "loopBackTo": "build",
-      "deliverable": { "path": "release.yml", "kind": "yaml-spec" }
+      "deliverable": {
+        "path": "release.yml",
+        "kind": "yaml-spec"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -356,7 +535,14 @@
     "role": "general",
     "name": "Release Announcement",
     "description": "Write a public-facing release announcement that turns a shipped version into a compelling story for users — a blog-post / email-style piece that leads with the headline value, shows the marquee features with concrete before/after benefits, links to the full release notes and upgrade path, and ends with a clear call to action. A planner picks the 2-4 things actually worth announcing and the audience/channel, a copywriter writes the benefit-led announcement in the brand voice, and a reviewer checks it is accurate, on-message, and that every claim traces to a real shipped change. Use this for product launch posts, 'what's new' announcements, version launch emails, and changelog-to-marketing translations.",
-    "tags": ["announcement", "release", "marketing", "launch", "copywriting", "whats-new"],
+    "tags": [
+      "announcement",
+      "release",
+      "marketing",
+      "launch",
+      "copywriting",
+      "whats-new"
+    ],
     "triggers": [
       "announce the release",
       "what's new post",
@@ -371,7 +557,10 @@
         "role": "planner",
         "summary": "pick the marquee items, audience, and channel",
         "prompt": "1. Review the release contents (changelog/release notes) and pick the 2-4 changes genuinely worth announcing — the ones users will care about, not an exhaustive list. 2. Identify the audience and channel (blog, email, in-app) and the single headline benefit of the release. 3. For each marquee item, capture the concrete user benefit and a before/after framing ('used to take X, now Y'). 4. Decide the call to action (upgrade, try it, read the docs) and the link to the full release notes. 5. Set the tone to the brand voice and a target length appropriate to the channel. 6. Good looks like: a short brief listing the headline, the 2-4 marquee items each with a user benefit, the audience/channel, the CTA, and the release-notes link. Write this as an acceptance-criteria checklist ('leads with the headline benefit', 'each marquee item states a user benefit not a feature spec', 'every claim traces to a real shipped change', 'has a clear CTA and a link to full notes', 'matches the brand voice and channel length') plus the brief to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -379,7 +568,10 @@
         "role": "copywriter",
         "summary": "benefit-led launch story in the brand voice",
         "prompt": "1. Open notes/scope.md and write the announcement leading with the headline benefit in the title and opening line — hook first, not 'We are pleased to announce version X'. 2. Give each marquee item its own short section with a benefit-led subhead and the before/after framing, written for users not engineers. 3. Keep the voice consistent with the brand and the length appropriate to the channel; scannable subheads and short paragraphs. 4. Include the call to action prominently and link out to the full release notes / upgrade guide. 5. Do not over-claim or mention anything not actually shipped. 6. Good looks like: a tight, benefit-led announcement a non-technical reader enjoys, every marquee item from scope.md covered with its benefit, a clear CTA, and a notes link. Write the announcement to announcement.md.",
-        "produces": { "path": "announcement.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "announcement.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -387,13 +579,23 @@
         "role": "reviewer",
         "summary": "verify claims trace to shipped changes and tone is on-brand",
         "prompt": "1. Open announcement.md and cross-check every feature/benefit claim against notes/scope.md and the actual release — flag anything over-claimed, vague, or not actually shipped. 2. Confirm it leads with the headline benefit and that each marquee item is framed as a user benefit, not a raw feature spec. 3. Verify the CTA is present and the link to full release notes resolves. 4. Check the voice is on-brand and the length fits the channel; flag engineer-speak that leaked into a user-facing piece. 5. Write a PASS/FAIL per acceptance criterion with specifics; any failure routes back to the write phase. Write findings to notes/review.md.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open announcement.md and verify it against notes/scope.md, PASS/FAIL each criterion. Confirm: (a) the title and opening lead with the headline benefit; (b) each marquee item from scope.md has a benefit-led section, not a raw feature spec; (c) every claim traces to a real shipped change with no over-claiming; (d) a clear CTA and a link to the full release notes are present; (e) the voice matches the brand and the length fits the channel. Any FAIL routes back to the write phase.",
       "loopBackTo": "write",
-      "deliverable": { "path": "announcement.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "announcement.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -401,7 +603,14 @@
     "role": "general",
     "name": "Release Readiness Review",
     "description": "Run a go/no-go release readiness review (a release sign-off / 'launch readiness' gate) that audits a release candidate across every dimension before it ships — functional QA status, performance, security, docs, support readiness, rollback plan, monitoring, and stakeholder sign-offs — and produces a single defensible GO or NO-GO with the open risks and their owners. A planner defines the readiness dimensions and bar for this release, a reviewer audits each dimension and records evidence and status, and a second reviewer adjudicates the final decision with conditions. Use this for launch sign-off meetings, release gate reviews, and any high-stakes ship where multiple areas must all be green.",
-    "tags": ["release", "readiness", "go-no-go", "sign-off", "launch", "gate"],
+    "tags": [
+      "release",
+      "readiness",
+      "go-no-go",
+      "sign-off",
+      "launch",
+      "gate"
+    ],
     "triggers": [
       "release readiness review",
       "go/no-go review",
@@ -416,7 +625,10 @@
         "role": "planner",
         "summary": "define the dimensions and the bar for a GO",
         "prompt": "1. Identify the release candidate (what, version, target date) and its risk tier. 2. Enumerate the readiness DIMENSIONS to audit: functional QA / acceptance tests, performance & load, security/privacy review, documentation & release notes, support/CS readiness, rollback plan in place, monitoring & alerting ready, and required stakeholder sign-offs. 3. Drop any dimension that genuinely does not apply (note why) and add release-specific ones. 4. For each dimension define the explicit BAR for GO (what 'green' means) and how it is evidenced. 5. Decide the decision rule (e.g. any critical dimension red ⇒ NO-GO; a conditional GO with named follow-ups is allowed). 6. Good looks like: a list of dimensions each with a concrete GO bar and an evidence source, plus the decision rule. Write this as an acceptance-criteria checklist (each dimension's bar IS a criterion) plus the decision rule and release context to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -424,7 +636,10 @@
         "role": "reviewer",
         "summary": "assess every dimension and record evidence and status",
         "prompt": "1. Open notes/scope.md and assess each readiness dimension in turn against its GO bar, gathering real evidence (test results, perf numbers, the rollback-plan link, sign-off confirmations) — do not rubber-stamp. 2. For each dimension record: the bar, the evidence, and a status of GREEN / YELLOW (risk, has mitigation) / RED (blocker). 3. For every YELLOW/RED, capture the specific risk, its owner, and the mitigation or follow-up. 4. Render this as a readiness matrix (dimension → status → evidence → owner). 5. Produce a provisional GO / CONDITIONAL-GO / NO-GO per the decision rule. 6. Good looks like: a completed matrix where every dimension from scope.md has a status backed by evidence and every non-green item has an owner, plus a provisional verdict. Write the readiness review to readiness-review.md.",
-        "produces": { "path": "readiness-review.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "readiness-review.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "decide",
@@ -432,13 +647,23 @@
         "role": "reviewer",
         "summary": "make the final defensible decision with conditions",
         "prompt": "1. Open readiness-review.md and audit each dimension's EVIDENCE against its bar in notes/scope.md — a GREEN with thin evidence is not green. 2. Apply the decision rule strictly: any unresolved RED in a critical dimension forces NO-GO; a CONDITIONAL-GO must list the exact conditions and owners that make it safe. 3. Confirm every YELLOW/RED has a named owner and a mitigation. 4. Write the final, defensible GO / CONDITIONAL-GO / NO-GO with the deciding factors and the top residual risk. 5. Write a PASS/FAIL per dimension; any dimension with insufficient evidence routes back to the audit phase to re-assess. Write your decision to notes/decide.md.",
-        "produces": { "path": "notes/decide.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/decide.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open readiness-review.md and verify it against the dimensions in notes/scope.md, PASS/FAIL each dimension. Confirm: (a) every readiness dimension from scope.md is assessed with a GREEN/YELLOW/RED status; (b) each status is backed by real evidence, not a rubber stamp; (c) every YELLOW/RED has a named owner and a mitigation/follow-up; (d) the document ends with a GO/CONDITIONAL-GO/NO-GO that is consistent with the decision rule (any critical RED ⇒ NO-GO); (e) a conditional GO lists exact conditions and owners. Any dimension lacking evidence or wrongly statused routes back to the audit phase.",
       "loopBackTo": "audit",
-      "deliverable": { "path": "readiness-review.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "readiness-review.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -446,7 +671,14 @@
     "role": "general",
     "name": "Feature Flag Release Plan",
     "description": "Plan and document a progressive feature-flag rollout for shipping a change behind a flag — defining the flag and its default-off state, the staged ramp (internal → 1% → 10% → 50% → 100%) with the success and guardrail metrics that gate each step, the automatic rollback/kill-switch criteria, and the cleanup that removes the flag once fully rolled out. A planner scopes the flag, ramp stages, and metrics, a developer writes the rollout runbook with the exact flag changes and the kill-switch procedure, and a reviewer verifies each ramp step has a measurable gate and a safe abort. Use this for gradual rollouts, canary releases, dark launches, percentage-based ramps, and de-risking a risky change behind a toggle.",
-    "tags": ["feature-flag", "rollout", "canary", "release", "progressive-delivery", "kill-switch"],
+    "tags": [
+      "feature-flag",
+      "rollout",
+      "canary",
+      "release",
+      "progressive-delivery",
+      "kill-switch"
+    ],
     "triggers": [
       "feature flag rollout plan",
       "gradual rollout",
@@ -461,7 +693,10 @@
         "role": "planner",
         "summary": "define the flag, ramp stages, and gating metrics",
         "prompt": "1. Define the feature flag: name, what it controls, and its initial state (default OFF in production). 2. Design the ramp stages — typically internal/dogfood → 1% → 10% → 50% → 100% — and the dwell time (or sample size) at each stage before advancing. 3. For each stage define the SUCCESS metric that must improve/hold and the GUARDRAIL metrics that must NOT regress (error rate, latency, conversion) — these gate the advance. 4. Define the kill-switch / automatic rollback criteria: the thresholds that mean 'flip the flag off immediately'. 5. Identify the targeting dimension (user %, account, region) and any segments to exclude. 6. Good looks like: a staged ramp where each step has an entry condition, success + guardrail metrics, and an abort threshold, plus the flag definition and cleanup intent. Write this as an acceptance-criteria checklist ('flag defaults OFF', 'each ramp stage has success + guardrail metrics gating the advance', 'kill-switch thresholds are defined and measurable', 'targeting and exclusions specified', 'flag-cleanup step exists') plus the plan to the notes file via write_task_note AND to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -469,7 +704,10 @@
         "role": "developer",
         "summary": "exact flag changes, gates, and kill-switch procedure",
         "prompt": "1. Open notes/scope.md and write the rollout as a numbered runbook an operator can execute stage by stage. 2. For each stage give the EXACT flag change (set flag X to Y% for segment Z), the metrics to watch and where (dashboard/query), the dwell time, and the explicit GO/HOLD/ABORT decision against the success+guardrail thresholds. 3. Document the kill-switch procedure prominently: the exact action to flip the flag fully OFF and the thresholds that trigger it automatically or manually. 4. Include the verification at each step (confirm the flag actually took effect for the intended cohort). 5. End with the cleanup step: after 100% and a soak period, remove the flag and the dead code path, and delete the flag config. 6. Good looks like: a stage-by-stage runbook where every ramp step has a concrete flag change, a measurable gate, and an abort path, plus a kill-switch and a cleanup step. Write the runbook to rollout-plan.md.",
-        "produces": { "path": "rollout-plan.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "rollout-plan.md",
+          "kind": "markdown-doc"
+        }
       },
       {
         "id": "review",
@@ -477,13 +715,23 @@
         "role": "reviewer",
         "summary": "verify each stage has a measurable gate and safe abort",
         "prompt": "1. Open rollout-plan.md and confirm the flag defaults OFF and that every ramp stage from notes/scope.md is present with a concrete flag change. 2. Verify each stage's advance is gated on MEASURABLE success + guardrail metrics with thresholds — a stage that advances on vibes is a FAIL. 3. Scrutinize the kill-switch: is the abort action exact, and are the trigger thresholds defined and reachable mid-rollout? 4. Confirm targeting/exclusions are specified and the cleanup step removes the flag and dead code. 5. Write a PASS/FAIL per acceptance criterion, flagging any ungated advance or missing abort. 6. Any failure routes back to the write phase. Write findings to notes/review.md.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open rollout-plan.md and verify it against notes/scope.md, PASS/FAIL each criterion. Confirm: (a) the flag is defined and defaults OFF in production; (b) every ramp stage has a concrete flag change AND a measurable success+guardrail metric gate that controls the advance; (c) a kill-switch with exact abort action and defined trigger thresholds is present and prominent; (d) targeting and exclusions are specified; (e) a cleanup step removes the flag and dead code after full rollout. Any ungated advance or missing abort path routes back to the write phase.",
       "loopBackTo": "write",
-      "deliverable": { "path": "rollout-plan.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "rollout-plan.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]
