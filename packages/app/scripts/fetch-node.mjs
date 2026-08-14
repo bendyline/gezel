@@ -27,10 +27,22 @@ import { createHash } from 'node:crypto';
  *                                to system node").
  */
 import { createWriteStream } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { extract } from 'tar';
 
@@ -46,6 +58,8 @@ setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(here, '..');
+const DOWNLOAD_ATTEMPTS = 3;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
 
 async function importPinned() {
   // Read the pins directly so we don't need a compile step first.
@@ -112,17 +126,39 @@ async function sha256File(path) {
 }
 
 async function downloadTo(url, dest) {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
   await mkdir(dirname(dest), { recursive: true });
-  const file = createWriteStream(dest);
-  const reader = res.body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!file.write(value)) await new Promise((r) => file.once('drain', r));
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    const partial = `${dest}.partial-${process.pid}-${attempt}`;
+    try {
+      const res = await fetch(url, { redirect: 'follow' });
+      if (!res.ok) {
+        const error = new Error(`HTTP ${res.status} from ${url}`);
+        error.httpStatus = res.status;
+        throw error;
+      }
+      if (!res.body) throw new Error(`empty response body from ${url}`);
+
+      await pipeline(Readable.fromWeb(res.body), createWriteStream(partial));
+      await rm(dest, { force: true });
+      await rename(partial, dest);
+      if (attempt > 1) {
+        console.log(`[fetch-node] download recovered on attempt ${attempt}/${DOWNLOAD_ATTEMPTS}`);
+      }
+      return;
+    } catch (error) {
+      await rm(partial, { force: true }).catch(() => {});
+      const status = error?.httpStatus;
+      const retryable =
+        status === undefined || RETRYABLE_HTTP_STATUSES.has(status) || status >= 500;
+      if (!retryable || attempt === DOWNLOAD_ATTEMPTS) throw error;
+
+      const delayMs = 500 * 2 ** (attempt - 1);
+      console.warn(
+        `[fetch-node] download attempt ${attempt}/${DOWNLOAD_ATTEMPTS} failed for ${url}: ${error instanceof Error ? error.message : String(error)}; retrying in ${delayMs}ms`,
+      );
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+    }
   }
-  await new Promise((r) => file.end(r));
 }
 
 async function main() {
