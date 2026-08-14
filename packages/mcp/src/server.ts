@@ -11169,7 +11169,7 @@ server.tool(
 
 server.tool(
   'github_pr_file',
-  'Fetch one changed path and its bounded patch. Use this after github_pr_files identifies a file; if the patch is truncated, continue with github_pr_diff({ path, offset: nextOffset }).',
+  'Fetch one changed path and its bounded patch. Use this after github_pr_files identifies a file; if the patch is truncated, continue with github_pr_diff({ number, path, offset: nextOffset }).',
   {
     project: z.string().optional(),
     number: z.number().int().positive(),
