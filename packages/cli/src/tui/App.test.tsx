@@ -259,14 +259,16 @@ describe('App interactions', () => {
 
     await submit(harness, '/model');
     await vi.waitFor(() => {
-      expect(harness.text()).toContain('Choose engine + model');
+      expect(harness.text()).toContain(
+        'Choose engine + model - models are downloaded from Hugging Face (huggingface.co)',
+      );
       expect(harness.text()).toContain('Download a new model…');
     });
     await pressKey(harness, '\u001B[B');
     await pressKey(harness, '\r');
     await vi.waitFor(() => {
       expect(harness.text()).toContain('Download and use an on-device model');
-      expect(harness.text()).toContain('Fresh Gemma');
+      expect(harness.text()).toContain('Fresh Gemma (test)');
     });
     await pressKey(harness, '\r');
 
@@ -296,7 +298,7 @@ describe('App interactions', () => {
 
     await vi.waitFor(() => {
       expect(harness.text()).toContain('Download and use an on-device model');
-      expect(harness.text()).toContain('Fresh Gemma');
+      expect(harness.text()).toContain('Fresh Gemma (test)');
     });
   });
 

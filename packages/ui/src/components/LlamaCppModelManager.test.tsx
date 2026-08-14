@@ -25,6 +25,10 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
       version: '1.0.0',
       description: 'test model',
       tags: [],
+      maintainer: {
+        name: 'Google',
+        url: 'https://huggingface.co/google/gemma-4-31B-it',
+      },
       category,
       license: 'MIT',
       licenseClass: 'open',
@@ -33,11 +37,14 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
       supportsTools: true,
       contextWindow: 32_768,
       llamaCpp: {
-        huggingfaceRepo: `test/${id}`,
+        huggingfaceRepo: `unsloth/${id}`,
         filename: `${id}.gguf`,
         sha256: 'a'.repeat(64),
         approxSizeBytes: 4 * GiB,
         quantization: 'Q4_K_M',
+      },
+      mlx: {
+        huggingfaceRepo: `mlx-community/${id}`,
       },
     },
   };
@@ -349,5 +356,19 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'General' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Coding' })).not.toBeInTheDocument();
+  });
+
+  it('places maker and customization credit directly below the model title', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [catalogModel('gemma4-31b-q4', 'Gemma 4 (31B)', 'general')],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    const title = await screen.findByText('Gemma 4 (31B)');
+    const attribution = title.parentElement?.querySelector('.catalog-item-attribution');
+    expect(attribution?.children).toHaveLength(2);
+    expect(attribution?.children[0]).toHaveTextContent('Made by Google');
+    expect(attribution?.children[1]).toHaveTextContent('Customized by unsloth, mlx-community');
   });
 });

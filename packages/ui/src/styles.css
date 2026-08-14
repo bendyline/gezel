@@ -18294,6 +18294,18 @@ button.timeline-session-divider-continuing::before {
   font-weight: 500;
 }
 
+.catalog-item-attribution {
+  margin-top: 0.1rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.25;
+}
+
+.catalog-item-attribution strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .catalog-item-meta {
   display: flex;
   gap: 0.5rem;

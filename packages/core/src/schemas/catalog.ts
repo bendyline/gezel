@@ -1523,6 +1523,17 @@ export type ChatModelMlxSource = z.infer<typeof ChatModelMlxSourceSchema>;
 
 export const ChatModelIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('chat-model'),
+  /**
+   * Organization that created the core model weights when it differs from
+   * the catalog maintainer (for example, a quant maintained by its converter).
+   * Omit when `maintainer` already names the maker.
+   */
+  maker: z
+    .object({
+      name: z.string().min(1),
+      url: z.string().url().optional(),
+    })
+    .optional(),
   parameterSize: z.string(),
   supportsTools: z.boolean(),
   contextWindow: z.number().int().positive().optional(),
@@ -1642,6 +1653,13 @@ export const ChatModelManifestSchema = z.object({
     name: z.string(),
     url: z.string().url().optional(),
   }),
+  /** Core-model maker; present when it differs from `maintainer`. */
+  maker: z
+    .object({
+      name: z.string().min(1),
+      url: z.string().url().optional(),
+    })
+    .optional(),
   logo: z.string().optional(),
   license: z.string().optional(),
   ...LicenseMetaShape,
