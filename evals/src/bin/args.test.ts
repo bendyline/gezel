@@ -22,6 +22,17 @@ function capture(run: () => void): { errors: string[]; exited: number | null } {
   return { errors, exited };
 }
 
+describe('parseArgs', () => {
+  it('treats a bare -- as a separator, not a flag', () => {
+    // pnpm inserts `--` when forwarding through a wrapper script; parsing
+    // it as a flag named "" made strict validation reject every leased
+    // `pnpm eval:all` invocation with "Unknown flag --".
+    const args = parseArgs(['--', '--suite', 'smoke', '--count', '1']);
+    expect(args.flags).toEqual({ suite: 'smoke', count: '1' });
+    expect(Object.keys(args.flags)).not.toContain('');
+  });
+});
+
 describe('assertKnownFlags', () => {
   it("accepts a bin's own flags and the shared resolver flags", () => {
     const { exited } = capture(() => {

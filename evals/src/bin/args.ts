@@ -17,6 +17,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     if (!tok) continue;
+    // A bare `--` is the conventional end-of-flags separator, and pnpm
+    // inserts one when forwarding through a wrapper script (`pnpm run x --
+    // --suite core`). Parsing it as a flag named "" made strict validation
+    // reject every leased invocation with "Unknown flag --".
+    if (tok === '--') continue;
     if (tok.startsWith('--')) {
       const eq = tok.indexOf('=');
       if (eq !== -1) {
