@@ -312,7 +312,7 @@ export interface TrialOptions {
   imageModelId?: string;
   /**
    * Execution density for the trial daemon (`--render-mode`). `flat` routes
-   * the meester to a solo ambachtsman (collapsed craftbook) instead of a
+   * the meester to a solo Builder (collapsed craftbook) instead of a
    * crew; `scaffold` is the full team; `auto` picks by provider. Threaded
    * into the daemon's `config.executionDensity`. Omitted ⇒ daemon default
    * (`scaffold`). The A/B lever for frontier-adaptive execution.

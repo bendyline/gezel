@@ -20,7 +20,22 @@ vi.mock('./OllamaSettings.js', () => ({ OllamaSettings: stub('ollama-settings') 
 
 vi.mock('../components/CacheControlsPanel.js', () => ({ CacheControlsPanel: () => null }));
 vi.mock('../components/CatalogBrowser.js', () => ({ CatalogBrowser: () => null }));
-vi.mock('../components/ConfirmDialog.js', () => ({ ConfirmDialog: () => null }));
+vi.mock('../components/ConfirmDialog.js', () => ({
+  ConfirmDialog: ({
+    open,
+    confirmLabel = 'Confirm',
+    onConfirm,
+  }: {
+    open: boolean;
+    confirmLabel?: string;
+    onConfirm: () => void | Promise<void>;
+  }) =>
+    open ? (
+      <button type="button" onClick={() => void onConfirm()}>
+        {confirmLabel}
+      </button>
+    ) : null,
+}));
 vi.mock('../components/CopilotLoginCommand.js', () => ({ CopilotLoginCommand: () => null }));
 vi.mock('../components/DeviceSummary.js', () => ({ DeviceSummary: () => null }));
 vi.mock('../components/GezelIcon.js', () => ({ GezelIcon: () => null }));
@@ -175,18 +190,34 @@ describe('SettingsView', () => {
     expect(await screen.findByRole('button', { name: 'Uninstall Gezel…' })).toBeInTheDocument();
   });
 
-  it('About shows the live local engine with its granted context window', async () => {
+  it('About labels the live local engine processes and their granted context windows', async () => {
     const base = await api.getSystemDiagnostics();
     vi.mocked(api.getSystemDiagnostics).mockResolvedValue({
       ...base,
       localEngines: [
         {
           provider: 'llama-cpp',
-          model: 'gemma4-e4b-q8',
+          model: 'qwen3.6-27b-q4',
           pid: 4242,
           contextPerSlot: 65_536,
           slots: 1,
           kvCacheType: 'q8_0',
+          backend: 'metal',
+        },
+        {
+          provider: 'ds4',
+          model: 'deepseek-v4-q4',
+          pid: 4343,
+          contextPerSlot: 32_768,
+          slots: 1,
+          backend: 'cuda',
+        },
+        {
+          provider: 'mlx',
+          model: 'gemma4-e4b-q8',
+          pid: 4444,
+          contextPerSlot: 16_384,
+          slots: 1,
           backend: 'metal',
         },
       ],
@@ -194,10 +225,49 @@ describe('SettingsView', () => {
 
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-about'));
-    const dd = await screen.findByText(/gemma4-e4b-q8/);
-    expect(dd.textContent).toContain('65,536-token context window');
-    expect(dd.textContent).toContain('q8_0 KV');
-    expect(dd.textContent).toContain('pid 4242');
+    expect(await screen.findByText('Local engine processes')).toBeInTheDocument();
+    const llama = screen.getByText('gezel-llama-server:').parentElement;
+    expect(llama).not.toBeNull();
+    expect(llama?.textContent).toContain('qwen3.6-27b-q4');
+    expect(llama?.textContent).toContain('65,536-token context window');
+    expect(llama?.textContent).toContain('q8_0 KV');
+    expect(llama?.textContent).toContain('pid 4242');
+    expect(screen.getByText('gezel-ds4-server:').parentElement?.textContent).toContain(
+      'deepseek-v4-q4',
+    );
+    expect(screen.getByText('gezel_mlx_server.py:').parentElement?.textContent).toContain(
+      'gemma4-e4b-q8',
+    );
+    expect(screen.getByRole('button', { name: 'Hard Stop' })).toBeInTheDocument();
+  });
+
+  it('About hard-stops chats, unloads the engine status, and reports the result', async () => {
+    const base = await api.getSystemDiagnostics();
+    vi.mocked(api.getSystemDiagnostics).mockResolvedValue({
+      ...base,
+      localEngines: [{ provider: 'llama-cpp', model: 'qwen3.6-27b-q4', pid: 4242 }],
+    });
+    vi.mocked(api.emergencyStopChats).mockResolvedValue({
+      ok: true,
+      engagementMode: 'reactive',
+      persisted: true,
+      cancelledTurns: 2,
+      clearedQueuedMessages: 1,
+      clearedDeferredActions: 0,
+    });
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-about'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hard Stop' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hard stop' }));
+
+    await waitFor(() => expect(api.emergencyStopChats).toHaveBeenCalledOnce());
+    expect(
+      await screen.findByText(
+        'Stopped 2 chats and discarded 1 queued message. Local engines unloaded. Gezel is Reactive.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Local engine processes')).not.toBeInTheDocument();
   });
 
   // About is the only full home for install-health notices — the rail just

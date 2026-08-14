@@ -121,6 +121,44 @@ describe('App interactions', () => {
     expect(client.runTerminalCommand).toHaveBeenCalledTimes(1);
   });
 
+  it('opens project folders and recent files surfaced by chat', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/open workspace');
+    await vi.waitFor(() => {
+      expect(client.revealProject).toHaveBeenCalledWith('studio', 'workspace');
+    });
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'tool',
+        name: 'read_file',
+        durationMs: 3,
+        success: true,
+        path: 'security/review-scope.md',
+      },
+    });
+    await harness.waitUntilRenderFlush();
+
+    harness.write('/open review');
+    await harness.waitUntilRenderFlush();
+    expect(harness.text()).toContain('/open security/review-scope.md');
+    harness.write('\r');
+
+    await vi.waitFor(() => {
+      expect(client.revealProjectReference).toHaveBeenCalledWith('studio', {
+        kind: 'workspace',
+        path: 'security/review-scope.md',
+      });
+    });
+    expect(harness.text()).toContain('revealed security/review-scope.md');
+  });
+
   it('queues input as a nudge and shows it as pending while the focused turn is busy', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -583,6 +621,13 @@ function createClient(opts?: {
       tools: [{ name: 'read_file' }, { name: 'write_file' }],
     }),
     invokeSessionTool: vi.fn().mockResolvedValue({ text: 'contents of README.md' }),
+    revealProject: vi.fn(async (_id: string, which: 'artifacts' | 'workspace') => ({
+      ok: true as const,
+      path: `C:/projects/studio/${which}`,
+    })),
+    revealProjectReference: vi.fn(async (_id: string, request: { path: string }) => ({
+      path: `C:/projects/studio/${request.path}`,
+    })),
     listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
     getCopilotStatus: vi.fn().mockResolvedValue({ available: false }),
     getMemoryProfile: vi.fn().mockResolvedValue({

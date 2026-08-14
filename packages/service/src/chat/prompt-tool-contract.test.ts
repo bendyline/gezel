@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capabilitySafeCorrectivePrompt,
   filterPromptToolDirectives,
   lintPromptToolContract,
   promptMandatedTools,
@@ -187,6 +188,26 @@ describe('lintPromptToolContract', () => {
 
     expect(filterPromptToolDirectives({ prompt, availableTools: ['read_file'] })).toBe(
       'Call `read_file` before editing.\nDo not call `delete_path` for this task.',
+    );
+  });
+
+  it('never preserves a corrective mandate for a tool absent from the live roster', () => {
+    const prompt = capabilitySafeCorrectivePrompt({
+      prompt: 'Call `start_project` now and only report success after it returns.',
+      availableTools: ['invoke_craftbook'],
+    });
+
+    expect(prompt).not.toContain('start_project');
+    expect(lintPromptToolContract({ prompt, availableTools: ['invoke_craftbook'] })).toEqual({
+      errors: [],
+      warnings: [],
+    });
+  });
+
+  it('keeps a corrective directive when its tool is live', () => {
+    const prompt = 'Call `invoke_craftbook` now and only report success after it returns.';
+    expect(capabilitySafeCorrectivePrompt({ prompt, availableTools: ['invoke_craftbook'] })).toBe(
+      prompt,
     );
   });
 });

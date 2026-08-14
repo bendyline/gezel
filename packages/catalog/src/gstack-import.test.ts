@@ -444,14 +444,60 @@ describe('applyOverlay', () => {
         expect.objectContaining({ kind: 'contains', artifact: true }),
       ]),
     );
-    expect(evaluate.prompt).toContain('Open every review target with `read_artifact`');
+    expect(evaluate.prompt).toContain('with `read_artifact`');
+    expect(evaluate.consumes).toEqual([{ file: 'reports/findings.md', artifact: true }]);
     expect(
       normalizeStepGate(evaluate.gate!).checks.every(
         (check) => (check as { artifact?: boolean }).artifact === true,
       ),
     ).toBe(true);
-    expect(repair.prompt).toContain('actual artifact files with `write_artifact`');
+    expect(repair.prompt).toContain('`write_artifact` for artifact inputs');
     expect(repair.advanceWhen).toMatchObject({ artifact: true, requireChange: true });
+  });
+
+  it('defaults accessory working files to artifacts while keeping product files in workspace', () => {
+    const out = applyOverlay(base, {
+      workflow: {
+        plan: 'Plan, then ship project source.',
+        phases: [
+          {
+            id: 'scope',
+            name: 'Scope',
+            description: 'Write the internal scope.',
+            suggestedRole: 'planner',
+            prompt: 'Record the scope.',
+            output: { path: 'notes/scope.md', minBytes: 100 },
+          },
+          {
+            id: 'build',
+            name: 'Build',
+            description: 'Write the product file.',
+            suggestedRole: 'developer',
+            prompt: 'Build `src/index.ts` from `notes/scope.md`.',
+            output: { path: 'src/index.ts', minBytes: 100 },
+          },
+        ],
+        review: {
+          artifactPath: 'src/index.ts',
+          relatedPaths: ['notes/scope.md'],
+          reviewPath: 'reviews/build-review.md',
+          criteria: ['The source follows the scope.'],
+        },
+      },
+    });
+    const byId = new Map(out.steps.map((step) => [step.id, step]));
+
+    expect(byId.get('scope')?.advanceWhen).toMatchObject({ artifact: true });
+    expect(byId.get('build')?.advanceWhen).not.toHaveProperty('artifact');
+    expect(byId.get('build')?.consumes).toEqual([{ file: 'notes/scope.md', artifact: true }]);
+    expect(byId.get('evaluate')?.consumes).toEqual([
+      { file: 'src/index.ts' },
+      { file: 'notes/scope.md', artifact: true },
+    ]);
+    expect(normalizeStepGate(byId.get('evaluate')!.gate!).checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ artifact: true })]),
+    );
+    expect(byId.get('repair')?.advanceWhen).not.toHaveProperty('artifact');
   });
 
   it('version generation preserves catalog-owned identity metadata', () => {

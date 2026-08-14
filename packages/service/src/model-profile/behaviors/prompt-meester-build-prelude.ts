@@ -105,6 +105,23 @@ export function looksLikeNewBuildRequest(text: string): boolean {
   return BUILD_REQUEST_RE.test(text);
 }
 
+/**
+ * In an already-scoped project, a generic build request means "work here".
+ * Starting another project requires explicit project/workspace language;
+ * `new game` is deliberately insufficient because `new` describes the
+ * deliverable, not a request to leave the current project.
+ */
+export function explicitlyRequestsSeparateProject(text: string): boolean {
+  return (
+    /\b(?:new|fresh|separate|another|dedicated)\s+(?:(?:standalone|independent)\s+)?(?:project|workspace)\b/i.test(
+      text,
+    ) ||
+    /\b(?:as|in|into|under|for)\s+(?:a|an)\s+(?:new|fresh|separate|another|dedicated)\s+(?:project|workspace)\b/i.test(
+      text,
+    )
+  );
+}
+
 const MEESTER_BUILD_PRELUDE =
   '(System note for this turn: the user is asking for a new substantive build. Make ONE tool call:\n' +
   ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the effective execution mode, creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every "build me a website / game / app / dashboard" request, from a single-file prototype through multimodal work. `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`).\n' +
@@ -117,7 +134,13 @@ export const PromptMeesterBuildPrelude: Behavior = {
 
   userPromptPrelude(ctx) {
     if (!ctx.isMeester) return null;
+    if (ctx.messageOrigin !== 'direct-user') return null;
+    if (/^\s*\[Answer to:/i.test(ctx.userText)) return null;
     if (!looksLikeNewBuildRequest(ctx.userText)) return null;
+    if (ctx.projectId !== 'default' && !explicitlyRequestsSeparateProject(ctx.userText)) {
+      return null;
+    }
+    if (!ctx.availableToolNames.includes('start_project')) return null;
     return MEESTER_BUILD_PRELUDE;
   },
 };

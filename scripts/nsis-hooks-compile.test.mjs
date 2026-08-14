@@ -104,10 +104,19 @@ function isMissingRosettaSpawnError(error) {
  */
 async function makensisRunsOnThisHost(makensis) {
   return await new Promise((resolve) => {
-    const child = spawn(makensis.path, ['-VERSION'], {
-      env: { ...process.env, ...(makensis.env ?? {}) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child;
+    try {
+      child = spawn(makensis.path, ['-VERSION'], {
+        env: { ...process.env, ...(makensis.env ?? {}) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
     const out = [];
     child.stdout.on('data', (chunk) => out.push(chunk));
     child.stderr.on('data', (chunk) => out.push(chunk));

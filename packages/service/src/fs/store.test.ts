@@ -342,10 +342,11 @@ describe('projects', () => {
     expect(detail!.packages).toEqual([]);
   });
 
-  it('stores and reads workingDir', async () => {
+  it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {
     await store.createProject({ name: 'External', workingDir: '/tmp/ext' });
     const detail = await store.getProject('external');
     expect(detail!.workingDir).toBe('/tmp/ext');
+    expect(detail!.nudgeConfig).toEqual({ enabled: false });
   });
 
   it('updates working directory', async () => {

@@ -142,6 +142,7 @@ describe('AnthropicSession — external tools', () => {
     expect(text).toBe('');
     expect(captured.value?.tools).toBeTruthy();
     expect(captured.value?.tools?.map((t) => t.name)).toContain('get_weather');
+    expect(session.getRegisteredToolNames()).toContain('get_weather');
 
     const calls = session.capturedToolCalls();
     expect(calls).toHaveLength(1);

@@ -104,18 +104,16 @@ export function GildeUpdatesCard() {
     }
   }, [pollUntilIdle]);
 
-  const checkDisabled =
-    !enabled || status?.mode === 'overridden' || status?.updateInProgress === true;
+  const checkDisabled = status?.mode === 'overridden' || status?.updateInProgress === true;
 
   return (
     <section style={{ marginBottom: '2rem' }}>
       <h3>Catalog content</h3>
       <p className="muted" style={{ marginTop: 0 }}>
         Craftbooks, model recommendations, and role templates ship with the app and can also update
-        between releases. When on, Gezel checks the public npm registry about once a day for newer
-        content, verifies it, and applies it only when everything already in use keeps working.
-        Nothing about you or this install is sent. Turning it off returns to the content that
-        shipped with the app.
+        between releases. When on, Gezel checks about once a day for newer content, verifies it, and
+        applies it. Nothing about you or this install is sent. Turning it off returns to the content
+        that shipped with the app.
       </p>
       <label className="debug-toggle">
         <input
@@ -127,7 +125,12 @@ export function GildeUpdatesCard() {
       </label>
       <div
         className="new-row"
-        style={{ marginTop: '0.75rem', alignItems: 'center', gap: '0.5rem' }}
+        style={{
+          marginTop: '0.75rem',
+          alignItems: 'flex-start',
+          flexDirection: 'column',
+          gap: '0.5rem',
+        }}
       >
         <span className="muted small">
           {status ? contentSourceLabel(status) : 'loading…'}
@@ -137,14 +140,11 @@ export function GildeUpdatesCard() {
               ? ` · ${lastCheckLabel(status.lastCheck)}`
               : ''}
         </span>
-        <button
-          type="button"
-          onClick={() => void checkNow()}
-          disabled={checkDisabled}
-          style={{ marginLeft: 'auto' }}
-        >
-          Check now
-        </button>
+        {enabled && (
+          <button type="button" onClick={() => void checkNow()} disabled={checkDisabled}>
+            Check now
+          </button>
+        )}
       </div>
       {saveError && <p className="error small">{saveError}</p>}
     </section>

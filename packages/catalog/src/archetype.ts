@@ -12,6 +12,7 @@ import {
   completionGate,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
+import { isAccessoryArtifactPath } from './artifact-surface.js';
 
 // `DeliverableKind`, the gate-class helpers, and `deliverableStep` now live in
 // core (`@bendyline/gezel`) so the MCP server and the plan craftbook reuse the
@@ -182,9 +183,10 @@ const DRAWER_DEFAULT_KINDS: ReadonlySet<DeliverableKind> = new Set([
   'security-report',
 ]);
 
-function withArtifactDefault<T extends { kind: DeliverableKind; artifact?: boolean }>(
+function withArtifactDefault<T extends { path: string; kind: DeliverableKind; artifact?: boolean }>(
   produces: T,
 ): T {
+  if (isAccessoryArtifactPath(produces.path)) return { ...produces, artifact: true };
   if (produces.artifact !== undefined) return produces;
   if (!DRAWER_DEFAULT_KINDS.has(produces.kind)) return produces;
   return { ...produces, artifact: true };
@@ -212,6 +214,28 @@ function normalizeArchetypeSpec(spec: ArchetypeSpec): ArchetypeSpec {
  */
 function drawerPromptNote(path: string): string {
   return `The deliverable \`${path}\` lands in the project's artifacts drawer — write it with \`write_artifact\` and read it back with \`read_artifact\`; the shipped workspace stays untouched.`;
+}
+
+function artifactInputPromptNote(paths: string[]): string {
+  const list = paths.map((path) => `\`${path}\``).join(', ');
+  return `Before working, open the artifact input${paths.length === 1 ? '' : 's'} ${list} with \`read_artifact\`; do not look for ${paths.length === 1 ? 'it' : 'them'} in the workspace.`;
+}
+
+function referencedPhaseInputs(
+  phases: ArchetypePhase[],
+  prompt: string,
+): NonNullable<CraftbookStep['consumes']> {
+  const seen = new Set<string>();
+  const inputs: NonNullable<CraftbookStep['consumes']> = [];
+  for (const phase of phases) {
+    const output = phase.produces;
+    if (!output || !prompt.includes(output.path)) continue;
+    const key = `${output.artifact === true ? 'artifact' : 'workspace'}:${output.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    inputs.push({ file: output.path, ...(output.artifact ? { artifact: true } : {}) });
+  }
+  return inputs;
 }
 
 export interface ArchetypeCraftbook {
@@ -265,10 +289,15 @@ export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook
     // gate on their own artifact; the last phase gates on the FINAL
     // deliverable (which defaults to its own `produces`).
     const gated = isLast ? deliverable : p.produces;
-    const prompt =
-      gated?.artifact && !p.prompt.includes('write_artifact')
-        ? `${p.prompt.trim()}\n\n${drawerPromptNote(gated.path)}`
-        : p.prompt;
+    const inputs = referencedPhaseInputs(spec.phases.slice(0, i), p.prompt);
+    const artifactInputs = inputs.filter((input) => input.artifact).map((input) => input.file);
+    let prompt = p.prompt.trim();
+    if (artifactInputs.length > 0 && !prompt.includes('read_artifact')) {
+      prompt = `${prompt}\n\n${artifactInputPromptNote(artifactInputs)}`;
+    }
+    if (p.produces?.artifact && !prompt.includes('write_artifact')) {
+      prompt = `${prompt}\n\n${drawerPromptNote(p.produces.path)}`;
+    }
 
     steps.push({
       id: p.id,
@@ -276,6 +305,7 @@ export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook
       description: p.summary,
       suggestedRole: p.role,
       prompt,
+      ...(inputs.length > 0 ? { consumes: inputs } : {}),
       // Observable progress: the phase auto-advances the moment its
       // artifact lands (no `advance_task_step` call needed) — and the
       // completion gate judges that advance like any other.
@@ -313,6 +343,16 @@ export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook
         ? deliverable.path
         : null,
     )}`,
+    ...(deliverable
+      ? {
+          consumes: [
+            {
+              file: deliverable.path,
+              ...(deliverable.artifact ? { artifact: true } : {}),
+            },
+          ],
+        }
+      : {}),
     // Default forward edge loops back to the build phase — the safe failure
     // mode is "keep improving", never "ship half-done".
     next: loopBackTo,

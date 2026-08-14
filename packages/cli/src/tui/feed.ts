@@ -221,16 +221,28 @@ export function sessionToFeedRows(
 }
 
 /**
- * Per-session "turn in progress" status, keyed by sessionId. Drives the
- * working indicator + status label between a send and the first token —
- * the window where a local engine is queued or loading its model and the
- * feed would otherwise look frozen.
+ * Per-session "turn in progress" status, keyed by sessionId. Besides the
+ * display label, retain the streamed output volume so the CLI can show the
+ * same best-effort live token count as the desktop engine pill. Visible
+ * text, private reasoning, and structured tool arguments all count toward
+ * the model's eventual completion-token total.
  */
-export type TurnMap = Map<string, string>;
+export interface TurnStatus {
+  label: string;
+  outputChars: number;
+  activeToolName: string | null;
+}
+
+export type TurnMap = Map<string, TurnStatus>;
 
 export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
   const { sessionId, event } = env;
-  const set = (label: string): TurnMap => new Map(turns).set(sessionId, label);
+  const prior = turns.get(sessionId);
+  const set = (
+    label: string,
+    outputChars = prior?.outputChars ?? 0,
+    activeToolName: string | null = prior?.activeToolName ?? null,
+  ): TurnMap => new Map(turns).set(sessionId, { label, outputChars, activeToolName });
   const clear = (): TurnMap => {
     if (!turns.has(sessionId)) return turns;
     const m = new Map(turns);
@@ -239,19 +251,31 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
   };
   switch (event.type) {
     case 'user_message':
-      return set('thinking…');
+      return set('thinking…', 0, null);
     case 'queued':
       return set(event.aheadOf > 0 ? `queued · ${event.aheadOf} ahead` : 'queued');
     case 'intent':
-      return set(event.label);
+      return set(event.label, undefined, null);
     case 'engine_phase':
-      return set(phaseLabel(event));
+      return set(phaseLabel(event, prior?.outputChars ?? 0), undefined, null);
     case 'delta':
-      return set('generating');
-    case 'tool':
-      return set('running tool');
+    case 'reasoning_delta': {
+      const outputChars = (prior?.outputChars ?? 0) + event.content.length;
+      return set(generationLabel(outputChars), outputChars, null);
+    }
+    case 'tool_args_delta': {
+      const outputChars = (prior?.outputChars ?? 0) + event.content.length;
+      const name = event.name.trim() || prior?.activeToolName || null;
+      return set(runningToolLabel(name), outputChars, name);
+    }
+    case 'tool': {
+      const name = event.name.trim() || prior?.activeToolName || null;
+      return set(runningToolLabel(name), undefined, name);
+    }
+    case 'heartbeat':
+      return event.label ? set(heartbeatLabel(event.label), undefined, null) : turns;
     case 'awaiting_gezel':
-      return set('awaiting gezel');
+      return set('awaiting gezel', undefined, null);
     case 'error':
     case 'done':
       return clear();
@@ -260,7 +284,10 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
   }
 }
 
-function phaseLabel(event: Extract<ChatEventEnvelope['event'], { type: 'engine_phase' }>): string {
+function phaseLabel(
+  event: Extract<ChatEventEnvelope['event'], { type: 'engine_phase' }>,
+  outputChars: number,
+): string {
   const pct = event.progress !== undefined ? ` ${Math.round(event.progress * 100)}%` : '';
   switch (event.phase) {
     case 'starting':
@@ -270,10 +297,42 @@ function phaseLabel(event: Extract<ChatEventEnvelope['event'], { type: 'engine_p
     case 'prefill':
       return `reading prompt${pct}`;
     case 'generating':
-      return 'generating';
+      return generationLabel(outputChars);
     default:
       return 'ready';
   }
+}
+
+/**
+ * Mid-stream providers do not expose tokenizer boundaries consistently, so
+ * use the same 4 chars/token estimate as the desktop engine pill and mark it
+ * explicitly as approximate. Exact usage still lands in `turn_stats` at the
+ * end of the turn; this label is intentionally about live progress.
+ */
+function generationLabel(outputChars: number): string {
+  if (!Number.isFinite(outputChars) || outputChars <= 0) return 'generating';
+  const tokens = Math.max(1, Math.round(outputChars / 4));
+  return `generating · ~${tokens.toLocaleString('en-US')} ${tokens === 1 ? 'token' : 'tokens'}`;
+}
+
+function runningToolLabel(name: string | null): string {
+  return name ? `running tool · ${name}` : 'running tool';
+}
+
+/**
+ * CLI-backed providers publish tool starts as a heartbeat whose label is the
+ * humanized tool name. Preserve ordinary lifecycle labels, but make a bare
+ * tool name read as activity instead of an unexplained noun in the pill.
+ */
+function heartbeatLabel(label: string): string {
+  const trimmed = label.trim();
+  if (
+    /^(thinking|reasoning|streaming|preparing|working)(?:\b|$)/i.test(trimmed) ||
+    /^(running|updating|searching|awaiting|using)(?:\b|$)/i.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return runningToolLabel(trimmed || null);
 }
 
 /** Append a local system/tool/error note (not tied to a chat session). */

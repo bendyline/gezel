@@ -309,10 +309,13 @@ export function NewProjectDialog({
     };
   }, [open, githubIdentity]);
 
-  const isSolo = mode === 'solo';
+  // Attaching a folder is an action-oriented workbench: start it with one
+  // Builder instead of a coordination-only Voorman, regardless of which
+  // create button opened the dialog.
+  const isSolo = mode === 'solo' || kind === 'folder';
   const titleText = isSolo ? 'New Job' : 'New Project';
   const aboutPlaceholder = isSolo
-    ? "Describe the job. What do you want done? What's in scope, what's out? The ambachtsman lands on this with no other context."
+    ? "Describe the job. What do you want done? What's in scope, what's out? The Builder lands on this with no other context."
     : "Who's this project for, what's in scope, what's out. The first thing any gezel joining the project reads.";
   const missionPlaceholder = isSolo
     ? 'Concrete success criteria. What does the finished job look like?'
@@ -679,15 +682,10 @@ export function NewProjectDialog({
           about: a,
           missionObjectives: m,
           ...(isSolo ? { mode: 'solo' as const } : {}),
+          ...(kind === 'folder' ? { workingDir: folderPath.trim() } : {}),
           ...(wantsGitHub && repo ? { github: { url: toGitHubUrl(repo) } } : {}),
         });
-        let finalProject = created;
-        if (kind === 'folder' && folderPath.trim()) {
-          finalProject = await api
-            .setProjectWorkingDir(created.id, folderPath.trim())
-            .catch(() => created);
-        }
-        await onCreated(finalProject);
+        await onCreated(created);
         onClose();
       } catch (err) {
         setError((err as Error).message);
@@ -735,7 +733,7 @@ export function NewProjectDialog({
                 </Dialog.Title>
                 <p className="gz-npd-header-sub">
                   {isSolo
-                    ? 'A job is a solo project — the Meester picks one specialist (the ambachtsman) who handles everything themselves.'
+                    ? 'A job is a solo project — one Builder handles the work end to end.'
                     : 'Pick a starting point — blank, connected, or purpose-built.'}
                 </p>
               </div>

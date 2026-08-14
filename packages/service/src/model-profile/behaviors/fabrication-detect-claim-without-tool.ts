@@ -32,22 +32,20 @@ interface ClaimRule {
   nudge: string;
 }
 
-// Past-tense verbs that all imply "the project / task / gezel now
-// exists because I just made it." Wild-caught models pick whichever
-// synonym they felt like that turn — Cosima/Gemma 26B emitted
-// "initialized" in one bundle, "created" in another. Treat them as
-// equivalent so the claim catalog isn't a vocabulary game.
+// Unambiguous creation verbs: these claim a project container now exists.
+// "started" / "initiated" / "kicked off" are intentionally separate —
+// in a scoped project they usually mean work began in the current project,
+// and a successful invoke_craftbook/create_task is valid evidence for that.
 const PROJECT_CREATION_VERBS = [
   'created',
-  'initiated',
   'initialized',
   'set\\s+up',
   'spun\\s+up',
-  'started',
   'made',
   'bootstrapped',
-  'kicked\\s+off',
 ].join('|');
+
+const PROJECT_WORK_START_VERBS = ['initiated', 'started', 'kicked\\s+off'].join('|');
 
 const TASK_CREATION_VERBS = ['created', 'added', 'queued', 'set\\s+up'].join('|');
 
@@ -122,6 +120,22 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
       'or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
   },
   {
+    // Ambiguous kickoff verbs only become a container-creation claim when
+    // the prose explicitly says this is a new/separate project. Otherwise
+    // the next rule treats them as starting work in the current project.
+    pattern: new RegExp(
+      String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
+        PROJECT_WORK_START_VERBS +
+        String.raw`)\s+(?:the|a|an)\s+(?:new|fresh|separate|another|dedicated)\s+project\b`,
+      'i',
+    ),
+    requiredTools: ['start_project'],
+    claim: 'created a project',
+    nudge:
+      'You told the user you started a new project, but you did not call `start_project` this turn. ' +
+      'Call it now with the user-intended name and project brief, or correct the claim.',
+  },
+  {
     pattern: new RegExp(
       String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
         PROJECT_CREATION_VERBS +
@@ -153,6 +167,20 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     nudge:
       'You told the user you created the project, but you did not call `start_project` this turn. ' +
       'Call it now with the user-intended name and a real `about` + `missionObjectives` derived from their request.',
+  },
+  {
+    pattern: new RegExp(
+      String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
+        PROJECT_WORK_START_VERBS +
+        String.raw`)\s+(?:(?:work|the\s+work)\s+(?:on|for)\s+)?(?:the|this|that|our|your|a|an)\s+project\b`,
+      'i',
+    ),
+    requiredTools: ['invoke_craftbook', 'create_task', 'start_project'],
+    claim: 'started work in the current project',
+    nudge:
+      'You told the user project work started, but no project-local action succeeded this turn. ' +
+      'Use `invoke_craftbook` for a selected procedure, `create_task` for an ad-hoc task, or `start_project` only when the user explicitly requested a separate project. ' +
+      'Do not repeat the kickoff claim until the action returns successfully.',
   },
   {
     pattern: new RegExp(

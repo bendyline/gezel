@@ -46,6 +46,11 @@ import {
   parseNativeVariant,
 } from '../native-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
+import {
+  craftbookStartRequest,
+  findCraftbook,
+  normalizeCraftbooks,
+} from '../tui/craftbook-start.js';
 
 const program = new Command();
 program
@@ -478,6 +483,32 @@ program
     }
   });
 
+program
+  .command('do <craftbook...>')
+  .description("Start a craftbook as a task in the current directory's project")
+  .action(async (craftbookParts: string[]) => {
+    const craftbookRef = craftbookParts.join(' ').trim();
+    const client = await connectOwned(cliGlobals());
+    const projectId = await resolveRunProject(client, cliGlobals());
+    const [config, result] = await Promise.all([
+      client.getConfig(),
+      client.listProjectCraftbooks(projectId),
+    ]);
+    const craftbooks = normalizeCraftbooks(
+      result.items,
+      config.showWorkInProgressFeatures === true,
+    );
+    const book = findCraftbook(craftbooks, craftbookRef);
+    if (!book) {
+      throw new CliError(`craftbook not found: ${craftbookRef} (run gezel and type /do to browse)`);
+    }
+    const created = await client.createTask(projectId, {
+      ...craftbookStartRequest(book),
+      roleBasedNameOnlyMode: true,
+    });
+    console.log(`started ${created.ref} — ${created.title}`);
+  });
+
 const agent = program.command('agent').description('Manage agents');
 
 agent
@@ -724,6 +755,7 @@ task
         description,
         assignee: opts.assignee ? { kind: 'gezel', gezelId: opts.assignee } : { kind: 'user' },
         steps: [{ name: opts.phase }],
+        roleBasedNameOnlyMode: true,
       });
       console.log(`created ${created.ref}`);
     },

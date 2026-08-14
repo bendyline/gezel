@@ -65,8 +65,9 @@ export async function markdownHeadingsMatch(
   ws: WorkspaceLike,
   file: string,
   outlineFile: string,
+  outlineWs: WorkspaceLike = ws,
 ): Promise<MarkdownHeadingsMatchResult> {
-  const [document, outline] = await Promise.all([ws.read(file), ws.read(outlineFile)]);
+  const [document, outline] = await Promise.all([ws.read(file), outlineWs.read(outlineFile)]);
   if (document === null) {
     return {
       ok: false,

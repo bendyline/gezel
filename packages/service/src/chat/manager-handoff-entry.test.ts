@@ -170,7 +170,11 @@ describe('single-channel kickoff (D1)', () => {
 });
 
 describe('handoff seed wording', () => {
-  async function seedFor(args: { fromGezelName?: string; fromGezelId?: string }) {
+  async function seedFor(args: {
+    fromGezelName?: string;
+    fromGezelId?: string;
+    roleBasedNameOnlyMode?: boolean;
+  }) {
     mock.script('ok');
     const { sessionId } = await manager.startHandoffSession({
       gezelId: 'worker',
@@ -187,6 +191,32 @@ describe('handoff seed wording', () => {
   it('names the sender when the previous step belonged to another gezel', async () => {
     const seed = await seedFor({ fromGezelName: 'Koray', fromGezelId: 'koray' });
     expect(seed).toContain('Koray has handed step `report`');
+  });
+
+  it('uses the sender role and pins the worker session in boring mode', async () => {
+    const reviewer = await store.createGezel({ name: 'Nare', role: 'Reviewer' });
+    const seed = await seedFor({
+      fromGezelName: 'Nare',
+      fromGezelId: reviewer.id,
+      roleBasedNameOnlyMode: true,
+    });
+    expect(seed).toContain('reviewer has handed step `report`');
+    expect(seed).not.toContain('Nare');
+
+    const sessions = await store.listSessions({ gezelId: 'worker' });
+    const workerSession = sessions.find((session) => session.taskRef === 'p1/1');
+    const full = workerSession ? await store.getSession('worker', workerSession.id) : null;
+    expect(full?.roleBasedNameOnlyMode).toBe(true);
+  });
+
+  it('keeps an unresolved sender anonymous in boring mode', async () => {
+    const seed = await seedFor({
+      fromGezelName: 'Bennet',
+      fromGezelId: 'deleted-gezel',
+      roleBasedNameOnlyMode: true,
+    });
+    expect(seed).toContain('The previous step has been completed and handed step `report`');
+    expect(seed).not.toContain('Bennet');
   });
 
   it('reads as a step advance when the same gezel owned the previous step', async () => {

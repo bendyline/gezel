@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { embedModelId, queryInstruction } from './embed-core.js';
+import {
+  PipelineLoadError,
+  embedModelId,
+  isRetryablePipelineLoadFailure,
+  queryInstruction,
+} from './embed-core.js';
 import { embed, embeddingsDisabledReason } from './embeddings.js';
 
 const prior = process.env.GEZEL_EMBED_MODEL;
@@ -48,5 +53,25 @@ describe('embedding kill switch', () => {
     await expect(embed('offline fixture text')).rejects.toMatchObject({
       code: 'EMBEDDINGS_DISABLED',
     });
+  });
+});
+
+describe('embedding model-load failure classification', () => {
+  it('retries transport and registry-capacity failures', () => {
+    expect(isRetryablePipelineLoadFailure(new Error('fetch failed'))).toBe(true);
+    expect(isRetryablePipelineLoadFailure(new Error('HTTP 503 while downloading model.onnx'))).toBe(
+      true,
+    );
+    expect(
+      isRetryablePipelineLoadFailure(
+        Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps configuration and runtime failures non-retryable', () => {
+    expect(isRetryablePipelineLoadFailure(new Error('Unknown model id'))).toBe(false);
+    expect(isRetryablePipelineLoadFailure(new Error('ERR_DLOPEN_FAILED'))).toBe(false);
+    expect(new PipelineLoadError('invalid model').retryable).toBe(false);
   });
 });

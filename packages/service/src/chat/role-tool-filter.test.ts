@@ -1769,24 +1769,27 @@ describe('computeToolAllowlist', () => {
     ).toBe(false);
   });
 
-  it('strips team-management tools when projectMode is "solo" (developer ambachtsman)', () => {
-    // A developer running a solo project should keep workspace + code +
-    // tasks + artifacts, but lose nothing (developer never had team-
+  it('strips team-management tools when projectMode is "solo" (Builder)', () => {
+    // A Builder running a solo project should keep workspace + code +
+    // tasks + artifacts, but lose nothing (Builder never had team-
     // management to begin with). Same shape as crew mode.
     const crew = computeToolAllowlist({
-      role: 'developer',
+      role: 'Builder',
       mode: 'always',
       provider: 'openai',
       projectMode: 'crew',
     });
     const solo = computeToolAllowlist({
-      role: 'developer',
+      role: 'Builder',
       mode: 'always',
       provider: 'openai',
       projectMode: 'solo',
     });
     expect(solo).toEqual(crew);
     expect(solo!.has('read_file')).toBe(true);
+    expect(solo!.has('read_files')).toBe(true);
+    expect(solo!.has('write_file')).toBe(true);
+    expect(solo!.has('run_nodejs_script')).toBe(true);
     expect(solo!.has('list_gezels')).toBe(false);
   });
 

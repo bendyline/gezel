@@ -9,7 +9,7 @@ export const PROJECT_MACRO_FAILURE_CAP = 2;
 /** Derive a concise user-facing closing from a successful kickoff result. */
 export function deriveProjectMacroClosing(firstResult: string): string {
   const projectMatch = firstResult.match(/Started (?:project|job) "([^"]+)"/);
-  const leadMatch = firstResult.match(/Recruited (\S+) as (voorman|ambachtsman|lead)/);
+  const leadMatch = firstResult.match(/Recruited (\S+) as (voorman|builder|lead)/i);
   const projectName = projectMatch?.[1];
   const leadName = leadMatch?.[1];
   const leadRole = leadMatch?.[2];

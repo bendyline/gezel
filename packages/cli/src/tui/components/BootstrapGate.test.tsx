@@ -114,18 +114,29 @@ describe('BootstrapGate interactions', () => {
   });
 
   it('installs the selected llama.cpp model and persists it before entering the TUI', async () => {
+    let finishInstall: (() => void) | undefined;
     const client = createClient({
       listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
       listCatalogItems: vi.fn(async (kind: string) =>
         kind === 'chat-model' ? { items: [chatModel()] } : { items: [] },
       ),
       installLlamaCppModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'progress', bytesWritten: 1, totalBytes: 2 });
+        await new Promise<void>((resolve) => {
+          finishInstall = resolve;
+        });
         onEvent({ type: 'done', model: { id: 'chat-model' } });
       }),
     });
     const harness = mountGate(client);
 
     await chooseFirst(harness, 'Recommended workshop set');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain(
+        'Downloading local models from Hugging Face (huggingface.co)',
+      );
+    });
+    finishInstall?.();
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).toHaveBeenCalledWith('chat-model', expect.any(Function));

@@ -66,6 +66,13 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
     return this.claudeSessionIdCache ? { claudeCliSessionId: this.claudeSessionIdCache } : {};
   }
 
+  getRegisteredToolNames(): string[] {
+    const context = this.deps.context;
+    return [
+      ...new Set([...(context.allowedBuiltinTools ?? []), ...(context.allowedMcpTools ?? [])]),
+    ];
+  }
+
   async disconnect(): Promise<void> {
     this.aborted = true;
     // Evict THIS session's worker only — never call pool.shutdown() from

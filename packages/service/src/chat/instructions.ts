@@ -635,7 +635,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     }
     // Mission objectives are voorman-only context. They describe the
     // strategic direction the project is moving toward — what the
-    // voorman (or solo-mode ambachtsman) reasons against on watchdog
+    // voorman (or solo-mode Builder) reasons against on watchdog
     // wake-ups and handoff decisions ("am I moving the ball toward
     // mission?"). A Designer fixing a button or a Developer wiring up
     // an API doesn't reason at that altitude; injecting the mission

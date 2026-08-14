@@ -376,6 +376,15 @@ export const TaskSchema = z.object({
       }),
       z.object({
         /**
+         * An invoke_craftbook call keyed to one persisted root chat turn.
+         * The HTTP task boundary uses this opaque digest to return the first
+         * still-active task when a provider continuation repeats the call.
+         */
+        kind: z.literal('craftbook-invocation'),
+        key: z.string().regex(/^craftbook-root-v1:[a-f0-9]{64}$/),
+      }),
+      z.object({
+        /**
          * A host materialized from a gezel template's `suggestedCraftbooks`
          * entry via the suggested-work layer. `suggestionKey` is the
          * entry's key within the template (`<craftbookId>` or
@@ -406,6 +415,13 @@ export const TaskSchema = z.object({
       at: z.string(),
     })
     .optional(),
+  /**
+   * Naming presentation inherited from the session that launched this
+   * workflow. Task handoffs create fresh sessions (and may be rehydrated
+   * after restart), so they cannot rely on the launcher's session record
+   * still being available when the next step starts.
+   */
+  roleBasedNameOnlyMode: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   createdBy: TaskAssigneeSchema,
@@ -481,6 +497,8 @@ export const CreateTaskRequestSchema = z
       .optional(),
     fanout: NewTaskFanoutSchema.optional(),
     createdBy: TaskAssigneeSchema.optional(),
+    /** Preserve the launcher's naming presentation across task handoffs. */
+    roleBasedNameOnlyMode: z.boolean().optional(),
     /**
      * Enqueue the entry-step handoff immediately after create — the
      * single-channel kickoff (there is no "tell a gezel about work"
@@ -491,6 +509,15 @@ export const CreateTaskRequestSchema = z
      * activation hooks — flag-dispatching the host would double-engage).
      */
     dispatchEntry: z.boolean().optional(),
+    /**
+     * Internal invoke_craftbook idempotency digest. The task route converts
+     * it into service-owned Task.origin provenance; ordinary create_task
+     * callers omit it.
+     */
+    craftbookInvocationKey: z
+      .string()
+      .regex(/^craftbook-root-v1:[a-f0-9]{64}$/)
+      .optional(),
   })
   .refine((v) => !!v.craftbookId !== !!(v.steps && v.steps.length > 0), {
     message: 'exactly one of craftbookId or steps must be provided for the main craftbook',

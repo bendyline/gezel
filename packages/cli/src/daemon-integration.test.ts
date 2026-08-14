@@ -237,4 +237,18 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
       stderr: expect.stringContaining('usage: gezel run'),
     });
   });
+
+  it('starts a craftbook from the do subcommand', async () => {
+    const result = await runCli('do', 'security-architecture-review');
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toMatch(/^started .+\/\d+ — Security Architecture Review/m);
+
+    const { projects } = await client.listProjects();
+    const project = projects.find(
+      (candidate) => candidate.workingDir?.toLowerCase() === process.cwd().toLowerCase(),
+    );
+    expect(project).toBeDefined();
+    const { tasks } = await client.listProjectTasks(project!.id);
+    expect(tasks.some((task) => task.craftbook.id === 'security-architecture-review')).toBe(true);
+  });
 });

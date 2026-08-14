@@ -12,6 +12,7 @@ import { lintPromptToolContract } from '../../chat/prompt-tool-contract.js';
 import type { TurnCtx } from '../types.js';
 import {
   PromptMeesterBuildPrelude,
+  explicitlyRequestsSeparateProject,
   looksLikeNewBuildRequest,
 } from './prompt-meester-build-prelude.js';
 
@@ -24,6 +25,9 @@ function turnCtx(overrides: Partial<TurnCtx>): TurnCtx {
     providerName: 'mlx' satisfies ProviderName,
     sessionId: 'sess-1',
     isMeester: true,
+    projectId: 'default',
+    messageOrigin: 'direct-user',
+    availableToolNames: ['start_project'],
     userText: '',
     drained: [] as ChatMessageToolCall[],
     assistantContent: '',
@@ -85,6 +89,76 @@ describe('PromptMeesterBuildPrelude', () => {
       undefined,
     );
     expect(out).toBeNull();
+  });
+
+  it('does not fire for a structured question answer', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({
+        messageOrigin: 'question-answer',
+        userText: '[Answer to: What should we make?]\nCreate a space war game.',
+      }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('recognizes an Answer envelope even if a caller omits provenance', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({ userText: '[Answer to: What should we make?]\nCreate a space war game.' }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
+
+  it.each(['cross-gezel', 'background-nudge', 'system'] as const)(
+    'does not fire for %s messages',
+    (messageOrigin) => {
+      const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+        turnCtx({ messageOrigin, userText: 'Create a space war game.' }),
+        undefined,
+      );
+      expect(out).toBeNull();
+    },
+  );
+
+  it('keeps an ordinary build request inside the current project', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({ projectId: 'cli', userText: 'Create a space war game.' }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('allows an explicit separate-project request from a scoped project', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({
+        projectId: 'cli',
+        userText: 'Create a separate project for a space war game.',
+      }),
+      undefined,
+    );
+    expect(out).toContain('start_project');
+  });
+
+  it('does not emit a start_project prelude when that tool is absent', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({
+        userText: 'Create a space war game.',
+        availableToolNames: ['list_projects'],
+      }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
+});
+
+describe('explicitlyRequestsSeparateProject', () => {
+  it('requires project/workspace language rather than a new deliverable', () => {
+    expect(explicitlyRequestsSeparateProject('Create a new space war game.')).toBe(false);
+    expect(explicitlyRequestsSeparateProject('Create a new project for a space war game.')).toBe(
+      true,
+    );
+    expect(explicitlyRequestsSeparateProject('Build it in a separate workspace.')).toBe(true);
   });
 });
 

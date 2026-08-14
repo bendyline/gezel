@@ -13,8 +13,9 @@ import type {
   QuotaBucket,
   UsageResponse,
 } from '@bendyline/gezel-client';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
@@ -3382,7 +3383,7 @@ export function SettingsView() {
                 Something not working right?{' '}
                 <ReportErrorLink
                   className="home-link"
-                  label="Report a problem on GitHub…"
+                  label="Report a problem on GitHub"
                   report={{ surface: 'settings-about', message: '' }}
                 />
               </p>
@@ -3418,7 +3419,7 @@ export function SettingsView() {
                 />
                 <span>Show advanced features</span>
               </label>
-              <label className="debug-toggle">
+              <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
                 <input
                   type="checkbox"
                   checked={config?.showWorkInProgressFeatures === true}
@@ -3754,46 +3755,147 @@ function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
  */
 function LocalEngineStatus() {
   const [engines, setEngines] = useState<NonNullable<SystemDiagnostics['localEngines']>>([]);
+  const [hardStopOpen, setHardStopOpen] = useState(false);
+  const [hardStopping, setHardStopping] = useState(false);
+  const [hardStopError, setHardStopError] = useState<string | null>(null);
+  const [hardStopNotice, setHardStopNotice] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
     void api.getSystemDiagnostics().then(
       (diagnostics) => {
-        if (!cancelled) setEngines(diagnostics.localEngines ?? []);
+        if (mountedRef.current) setEngines(diagnostics.localEngines ?? []);
       },
       () => {
-        if (!cancelled) setEngines([]);
+        if (mountedRef.current) setEngines([]);
       },
     );
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
   }, []);
-  if (engines.length === 0) return null;
+
+  const hardStop = async () => {
+    if (hardStopping) return;
+    setHardStopping(true);
+    setHardStopError(null);
+    setHardStopNotice(null);
+    try {
+      const result = await api.emergencyStopChats();
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', {
+          detail: { aiEngagementMode: 'reactive' },
+        }),
+      );
+      if (!mountedRef.current) return;
+      setEngines([]);
+      setHardStopNotice(
+        `Stopped ${result.cancelledTurns} ${result.cancelledTurns === 1 ? 'chat' : 'chats'}${
+          result.clearedQueuedMessages > 0
+            ? ` and discarded ${result.clearedQueuedMessages} queued ${result.clearedQueuedMessages === 1 ? 'message' : 'messages'}`
+            : ''
+        }. Local engines unloaded. Gezel is Reactive.`,
+      );
+      setHardStopOpen(false);
+    } catch (error) {
+      if (mountedRef.current) {
+        setHardStopError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (mountedRef.current) setHardStopping(false);
+    }
+  };
+
+  if (engines.length === 0 && !hardStopNotice) return null;
   return (
-    <dl>
-      {engines.map((engine, idx) => {
-        const parts: string[] = [];
-        if (engine.contextPerSlot !== undefined) {
-          parts.push(`${engine.contextPerSlot.toLocaleString()}-token context window`);
+    <>
+      {engines.length > 0 && (
+        <dl>
+          <dt>Local engine processes</dt>
+          <dd>
+            {engines.map((engine, idx) => {
+              const parts: string[] = [];
+              if (engine.contextPerSlot !== undefined) {
+                parts.push(`${engine.contextPerSlot.toLocaleString()}-token context window`);
+              }
+              if (engine.slots !== undefined && engine.slots > 1) {
+                parts.push(`${engine.slots} slots`);
+              }
+              if (engine.kvCacheType) parts.push(`${engine.kvCacheType} KV`);
+              if (engine.backend) parts.push(engine.backend);
+              return (
+                <div key={`${engine.provider}-${engine.pid ?? idx}`}>
+                  <strong>{localEngineProcessName(engine.provider)}:</strong>{' '}
+                  {engine.model ?? engine.provider}
+                  {parts.length > 0 ? ` — ${parts.join(', ')}` : ''}
+                  {engine.pid !== undefined ? (
+                    <span className="muted small">{` · pid ${engine.pid}`}</span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </dd>
+        </dl>
+      )}
+      <div className="engine-pill-emergency-stop">
+        <div className="engine-pill-emergency-copy">
+          <strong>Need everything to pause?</strong>
+          <span>Stop every chat, unload local engines, and switch Gezel to Reactive.</span>
+        </div>
+        <button
+          type="button"
+          className="danger engine-pill-emergency-button"
+          disabled={hardStopping}
+          onClick={() => {
+            setHardStopError(null);
+            setHardStopOpen(true);
+          }}
+        >
+          {hardStopping ? 'Stopping…' : 'Hard Stop'}
+        </button>
+        {hardStopNotice && (
+          <output className="engine-pill-emergency-notice">{hardStopNotice}</output>
+        )}
+      </div>
+      <ConfirmDialog
+        open={hardStopOpen}
+        title="Hard stop all chats?"
+        message={
+          <>
+            Every chat in progress will stop, queued chat messages will be discarded, local engines
+            will be unloaded, and Gezel will switch to Reactive. It will only respond when you
+            initiate a chat.
+            {hardStopError && (
+              <span className="engine-pill-emergency-error" role="alert">
+                {hardStopError}
+              </span>
+            )}
+          </>
         }
-        if (engine.slots !== undefined && engine.slots > 1) parts.push(`${engine.slots} slots`);
-        if (engine.kvCacheType) parts.push(`${engine.kvCacheType} KV`);
-        if (engine.backend) parts.push(engine.backend);
-        return (
-          <Fragment key={`${engine.provider}-${engine.pid ?? idx}`}>
-            <dt>Local engine</dt>
-            <dd>
-              {engine.model ?? engine.provider}
-              {parts.length > 0 ? ` — ${parts.join(', ')}` : ''}
-              {engine.pid !== undefined ? (
-                <span className="muted small">{` · pid ${engine.pid}`}</span>
-              ) : null}
-            </dd>
-          </Fragment>
-        );
-      })}
-    </dl>
+        confirmLabel="Hard stop"
+        danger
+        onConfirm={hardStop}
+        onCancel={() => {
+          if (!hardStopping) setHardStopOpen(false);
+        }}
+      />
+    </>
   );
+}
+
+/** Canonical process labels shown by the OS; platform suffixes are omitted. */
+function localEngineProcessName(
+  provider: NonNullable<SystemDiagnostics['localEngines']>[number]['provider'],
+): string {
+  switch (provider) {
+    case 'llama-cpp':
+      return 'gezel-llama-server';
+    case 'mlx':
+      return 'gezel_mlx_server.py';
+    case 'ds4':
+      return 'gezel-ds4-server';
+  }
 }
 
 function BackgroundServiceStatus() {

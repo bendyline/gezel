@@ -139,6 +139,7 @@ Run `gezel --help` for the full list. The most-used ones:
 |---|---|
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
+| `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id or display name |
 | `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |

@@ -48,6 +48,22 @@ describe('opaqueServerErrors', () => {
     expect(await response.json()).toMatchObject({ error: 'internal_error' });
   });
 
+  it('adds the request-id header to an already-sanitized internal error', async () => {
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: () => {} }));
+    app.get('/already-opaque', (c) =>
+      c.json({ error: 'internal_error', requestId: 'req-already-opaque' }, 500),
+    );
+
+    const response = await app.request('/already-opaque');
+
+    expect(response.headers.get('x-request-id')).toBe('req-already-opaque');
+    expect(await response.json()).toEqual({
+      error: 'internal_error',
+      requestId: 'req-already-opaque',
+    });
+  });
+
   it('preserves the fixed machine-engine outage code without leaking details', async () => {
     const app = new Hono();
     app.use('*', opaqueServerErrors({ error: () => {} }));

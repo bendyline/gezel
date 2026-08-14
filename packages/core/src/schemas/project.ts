@@ -174,7 +174,7 @@ export const ProjectSchema = z.object({
   /** Optional gezel that acts as the project's voorman (foreman). Surfaces in
    *  the project detail pane, flows into the system prompt when a session is
    *  scoped here. For solo projects (`mode === 'solo'`) this same field
-   *  holds the project's ambachtsman — the data is unchanged, only the
+   *  holds the project's Builder — the data is unchanged, only the
    *  label flips. */
   voormanGezelId: z.string().optional(),
   /**
@@ -224,7 +224,7 @@ export const ProjectSchema = z.object({
   /**
    * Project shape. `crew` (the default) is the original behavior — the
    * voorman recruits and coordinates a team of specialists. `solo` is a
-   * "job" — a single specialist (the ambachtsman, stored in
+   * "job" — a single Builder (stored in
    * `voormanGezelId`) handles the whole project themselves; team-
    * management MCP tools are stripped from their session, and the
    * Meester is instructed not to nominate other gezels. Missing → `crew`
@@ -234,7 +234,7 @@ export const ProjectSchema = z.object({
   mode: z.enum(['crew', 'solo']).optional(),
   /**
    * Optional custom label for this project's lead gezel, overriding the
-   * mode-based default ("Voorman" / "Ambachtsman") everywhere the UI
+   * mode-based default ("Voorman" / "Builder") everywhere the UI
    * renders it. Set by a project type at adoption (e.g. checkers →
    * "Opponent"); absent → the mode default. The data field stays
    * `voormanGezelId` — only the label changes.

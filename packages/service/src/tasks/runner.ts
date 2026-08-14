@@ -129,6 +129,8 @@ export interface TaskRunnerDispatcher {
     fromGezelName?: string;
     fromGezelId?: string;
     kind?: 'handoff' | 'entry';
+    /** Naming presentation pinned by the task that owns this handoff. */
+    roleBasedNameOnlyMode?: boolean;
     /**
      * Queue lane for the dispatched turn. Task handoffs travel
      * `'background'` so a typed chat always drains first; Night Shift also
@@ -591,6 +593,9 @@ export class TaskRunner {
           ...(handoff.fromGezelName ? { fromGezelName: handoff.fromGezelName } : {}),
           ...(handoff.fromGezelId ? { fromGezelId: handoff.fromGezelId } : {}),
           ...(handoff.kind ? { kind: handoff.kind } : {}),
+          ...(task.roleBasedNameOnlyMode !== undefined
+            ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
+            : {}),
           lane,
           ...(isNight ? { ambient: true } : {}),
           ...(isNight ? { nightShift: true } : {}),

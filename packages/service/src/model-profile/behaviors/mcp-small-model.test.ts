@@ -100,7 +100,7 @@ const STOCK_TOOLS: OpenAIFunctionTool[] = [
   {
     type: 'function',
     name: 'start_job',
-    description: 'Macro: create solo job + ambachtsman + task + kickoff message',
+    description: 'Macro: create solo job + Builder + task + kickoff message',
     parameters: {
       type: 'object',
       required: ['name', 'about', 'missionObjectives', 'taskDescription', 'specialistRole'],

@@ -268,6 +268,13 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
     }
   }
 
+  getRegisteredToolNames(): string[] {
+    const bridgeNames = this.deps.bridges.isEmpty()
+      ? []
+      : this.deps.bridges.getAnthropicTools().map((tool) => tool.name);
+    return [...new Set([...bridgeNames, ...this.externalToolNames])];
+  }
+
   capturedToolCalls(): ExternalToolCall[] {
     return [...this.capturedCalls];
   }

@@ -18,7 +18,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
     id: 'html-arcade-game',
     name: 'HTML Arcade Game',
     role: 'project-starter',
-    release: { version: '1.2.0', releasedAt: '2026-08-10T00:00:00Z' },
+    release: { version: '1.2.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Build a playable single-file HTML/canvas arcade game (shooter, runner, dodger, etc.). Splits design into game-mechanics and visual look, builds, then evaluates against a playability bar and loops until it is actually fun and bug-free.',
     tags: ['game', 'html', 'canvas', 'interactive'],
@@ -128,7 +128,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
     id: 'branding-website',
     name: 'Branding Website',
     role: 'project-starter',
-    release: { version: '1.1.0', releasedAt: '2026-08-09T00:00:00Z' },
+    release: { version: '1.1.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Build a small brand/marketing website where the visual identity leads. Locks a visual language and mockups FIRST, then writes the copy, then builds the HTML to the locked design — the ordering that makes brand sites feel designed rather than templated.',
     tags: ['website', 'branding', 'marketing', 'design', 'html'],
@@ -231,7 +231,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
   {
     id: 'image-set-index',
     name: 'Index & Describe an Image Set',
-    release: { version: '1.2.0', releasedAt: '2026-08-10T00:00:00Z' },
+    release: { version: '1.2.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Given a folder of images, produce a structured index that describes each one (caption, tags, notable content) in a consistent schema, then validates coverage and consistency. For cataloguing, search, or alt-text generation over an image collection.',
     tags: ['images', 'index', 'catalog', 'data', 'vision'],
@@ -321,7 +321,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
   {
     id: 'content-deck',
     name: 'Slide Deck from Content',
-    release: { version: '1.2.0', releasedAt: '2026-08-10T00:00:00Z' },
+    release: { version: '1.2.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Turn a body of source content into a presentation deck. Outlines the narrative first, designs a consistent slide look, then builds the deck (HTML slides), evaluating for narrative flow and visual consistency.',
     tags: ['deck', 'slides', 'presentation', 'content', 'html'],
@@ -418,7 +418,7 @@ export const SEED_ARCHETYPES: ArchetypeSpec[] = [
   {
     id: 'corpus-email-digest',
     name: 'Daily Email Digest from a Corpus',
-    release: { version: '1.2.0', releasedAt: '2026-08-10T00:00:00Z' },
+    release: { version: '1.2.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Produce an email-ready digest that summarizes a corpus of content (docs, feeds, notes) for a recurring send. Scopes what matters and the format first, drafts the digest in a consistent voice, then builds the email-ready output and evaluates for accuracy and scannability.',
     tags: ['summary', 'email', 'digest', 'content', 'reporting'],

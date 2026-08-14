@@ -1444,7 +1444,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     // ── Declarative per-item fanout ─────────────────────────────────────
     // A step marked `spawnFanout` on a spawn-host task (one carrying a
     // `spawnsCraftbook`) fans out one child task per item in the parent
-    // craftbook's `spawn.overFile` workspace JSON array — the runtime does
+    // craftbook's `spawn.overFile` JSON array on its declared surface — the runtime does
     // the spawning, with NO model tool call. Each child inherits the item's
     // fields as `variation.context` (string-substituted into its step
     // prompt + gate paths) and dispatches through its own entry-step binding
@@ -1468,9 +1468,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       try {
         const existing = await tasks.listChildren(task.ref).catch(() => []);
         if (existing.length === 0) {
-          const raw = await store
-            .readProjectWorkspaceFile(projectId, spawn.overFile)
-            .catch(() => null);
+          const raw = await (spawn.overArtifact
+            ? store.readProjectArtifact(projectId, spawn.overFile)
+            : store.readProjectWorkspaceFile(projectId, spawn.overFile)
+          ).catch(() => null);
           const items = raw ? extractSpawnItems(raw, spawn.itemsPath) : [];
           if (items.length === 0) {
             log.warn(
@@ -1507,9 +1508,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           const manifest = `# Fanned out ${kids.length} draft(s)\n\n${kids
             .map((k) => `- ${k.ref}: ${k.title}`)
             .join('\n')}\n`;
-          await store
-            .writeProjectWorkspaceFile(projectId, advanceFile, manifest)
-            .catch((err) => log.warn(`[fanout] ${task.ref}: could not write ${advanceFile}:`, err));
+          await (newStep.advanceWhen?.artifact
+            ? store.writeProjectArtifact(projectId, advanceFile, manifest)
+            : store.writeProjectWorkspaceFile(projectId, advanceFile, manifest)
+          ).catch((err) => log.warn(`[fanout] ${task.ref}: could not write ${advanceFile}:`, err));
         }
         const nextStep = newStep.advanceWhen?.goto ?? newStep.next;
         if (nextStep) {

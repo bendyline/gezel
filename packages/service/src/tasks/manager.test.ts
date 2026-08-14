@@ -819,10 +819,13 @@ describe('TaskManager spawn craftbooks & children', () => {
       steps: [{ name: 'Wait' }],
       spawnsSteps: [{ name: 'Draft', suggestedGezelId: 'ada' }],
       fanout: { count: 3 },
+      roleBasedNameOnlyMode: true,
     });
     expect(parent.fanout?.materializedAt).toBeDefined();
+    expect(parent.roleBasedNameOnlyMode).toBe(true);
     const children = await tasks.listChildren(parent.ref);
     expect(children).toHaveLength(3);
+    expect(children.every((child) => child.roleBasedNameOnlyMode === true)).toBe(true);
 
     // Calling materializeFanout again is idempotent.
     const again = await tasks.materializeFanout('website', parent.num);

@@ -501,7 +501,7 @@ describe('McpBridge', () => {
       });
 
       expect(create).toContain('Started project "Flat Project Kickoff"');
-      expect(create).toContain('as lead (template: developer)');
+      expect(create).toContain('as lead (template: builder)');
       expect(create).not.toContain('Started job');
       const projectId = create.match(/\(([a-z0-9-]+)\)/)?.[1];
       expect(projectId).toBeTruthy();
@@ -634,7 +634,7 @@ describe('McpBridge', () => {
       new RegExp(`You've been assigned task ${task!.ref}`),
     );
     expect(entryText).toBeTruthy();
-    expect(create).toContain('template: developer');
+    expect(create).toContain('template: builder');
   });
 
   it('start_job normalizes image_generator to the image-generator template', async () => {

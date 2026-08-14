@@ -15,6 +15,7 @@ export const MAINTENANCE_REVIEW_ARCHETYPES: ArchetypeSpec[] = [
     id: 'codebase-refactoring-review',
     name: 'Codebase Refactoring Review',
     role: 'maintenance-review',
+    release: { version: '1.0.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Review an entire codebase for the least cogent, highest-leverage refactoring opportunities without changing source. Uses the repository map and per-file AI health index to rank weak areas, then verifies each lead in the real code and leaves a file-and-line-cited morning report with sequenced refactor plans, risk, effort, and tests that must protect behavior. Use for a weekly code-health sweep, refactoring review, technical-debt triage, finding code smells, or deciding which files should be refactored first.',
     tags: [
@@ -86,6 +87,7 @@ export const MAINTENANCE_REVIEW_ARCHETYPES: ArchetypeSpec[] = [
     id: 'codebase-ux-review',
     name: 'Codebase UX Review',
     role: 'maintenance-review',
+    release: { version: '1.0.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Review the user experience implemented across a codebase and, when runnable, exercise the key flows in a real browser. Starts from the indexed UI surface rather than one screenshot, traces primary journeys and state transitions, then leaves a prioritized morning report covering information architecture, comprehension, feedback, recovery, consistency, responsive behavior, and user impact with source or runtime evidence. Use for a weekly UX sweep, product usability review, interaction review, or finding the highest-impact friction in an application.',
     tags: [
@@ -156,6 +158,7 @@ export const MAINTENANCE_REVIEW_ARCHETYPES: ArchetypeSpec[] = [
     id: 'artifact-integrity-review',
     name: 'Artifact Integrity & Ship Review',
     role: 'maintenance-review',
+    release: { version: '1.0.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Perform an isolated ship-readiness review of the actual built artifacts of a project—sites, npm packages, archives, CLIs, binaries, installers, checksums, signatures, and release bundles—rather than trusting source or CI status. Inventories expected versus present assets, stages immutable copies, inspects archive contents and metadata, runs safe sandboxed smoke checks where possible, and leaves per-artifact GO/NO-GO verdicts plus a release-wide decision. Can review locally staged assets or public-release evidence supplied to the project. Use before shipping a release or as a recurring artifact-integrity night-shift audit.',
     tags: [
@@ -240,6 +243,7 @@ export const MAINTENANCE_REVIEW_ARCHETYPES: ArchetypeSpec[] = [
     id: 'reliability-review',
     name: 'Reliability & Resilience Review',
     role: 'maintenance-review',
+    release: { version: '1.0.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Review a codebase for production reliability and resilience risks across asynchronous work, external dependencies, state transitions, resource lifecycles, and recovery paths. Uses the repository and per-file indexes to map failure domains, verifies likely issues in source and tests, and leaves a prioritized morning report covering timeouts, retries, idempotency, cancellation, concurrency, backpressure, cleanup, graceful shutdown, observability, and disaster recovery. Use for a weekly reliability sweep, resilience review, failure-mode audit, or pre-production hardening review.',
     tags: [
@@ -310,6 +314,7 @@ export const MAINTENANCE_REVIEW_ARCHETYPES: ArchetypeSpec[] = [
     id: 'documentation-drift-review',
     name: 'Documentation Drift Review',
     role: 'maintenance-review',
+    release: { version: '1.0.1', releasedAt: '2026-08-14T00:00:00Z' },
     description:
       'Review project documentation against the code, configuration, commands, API surface, and shipped behavior to find stale or misleading guidance. Uses the indexed docs and source map to verify examples and references instead of proofreading in isolation, then leaves a prioritized morning report with exact doc locations, source-of-truth evidence, corrected text, owners, and a prevention plan. Use for a weekly docs-health sweep, documentation accuracy review, stale README audit, or finding runbook and API-documentation drift.',
     tags: ['maintenance-review', 'night-shift', 'documentation', 'drift', 'accuracy', 'codebase'],

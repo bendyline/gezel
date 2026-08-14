@@ -19,7 +19,10 @@
         "role": "letter-writer",
         "summary": "owed list from the roster, voice guide, coverage rules",
         "prompt": "Define the batch before drafting a word. Step 1: read correspondents.json from the workspace — who is owed thanks, for what gift or kindness, and how long each has been owed. Step 2: read the household's voice notes if they exist (notes/voice.md or a voice field on the roster) — the phrases this family actually uses, how they open and sign off, and what they would never say. Step 3: confirm with the owner anyone to add or defer, and how the notes go out (card, email, hand-delivered) since that shapes length. Step 4: write an acceptance-criteria checklist ('every owed person gets a note or an explicit deferral with a reason', 'every note names the actual gift or kindness — a generic thanks is a miss', 'the voice guide is respected and no two notes are interchangeable', 'every drafted note is logged against the roster'). Call write_task_note with the owed count + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -27,7 +30,11 @@
         "role": "copywriter",
         "summary": "one personal note per owed person, in the household voice",
         "prompt": "Draft the whole batch against the locked rules. Step 1: write one section per person in letters/thank-you.md — a heading with their name, then the note. Step 2: open each note with the specific gift or kindness from the roster in the first two sentences — the detail IS the thanks; 'thank you for the lovely gift' is a rejection. Step 3: vary the shape — if two notes could swap recipients without anyone noticing, rewrite one of them. Step 4: keep the household's voice throughout — warm, theirs, sized for how each note will be sent. Step 5: call write_task_note with the note count and anyone you had to defer.",
-        "produces": { "path": "letters/thank-you.md", "kind": "markdown-doc", "minBytes": 1200 }
+        "produces": {
+          "path": "letters/thank-you.md",
+          "kind": "markdown-doc",
+          "minBytes": 1200
+        }
       },
       {
         "id": "log",
@@ -35,12 +42,20 @@
         "role": "archivist",
         "summary": "record each note in the roster, write the run summary",
         "prompt": "Close the batch. Step 1: for each drafted note, record it against the person's entry through the project's correspondence capabilities (or note the exact roster update) so the owed-thanks tracking clears. Step 2: write the run summary — who got a note and what it names, who was deferred and why, and what still has to physically happen (addresses to find, stamps to buy). Step 3: keep it short and factual — this is a household ritual, not paperwork. Write report.md and call write_task_note with the drafted and deferred counts.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 600
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open letters/thank-you.md and report.md and verify every criterion from notes/scope.md: every owed person in correspondents.json has a note or an explicit deferral with a reason, every note names the actual gift or kindness from the roster — spot-check each against the record, a note that thanks someone for the wrong thing is worse than none — no two notes are interchangeable, the voice matches the household's guide, and every drafted note is logged. Write PASS/FAIL per criterion; on any failure, name the person and the gap and loop back to draft.",
       "loopBackTo": "draft"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -63,7 +78,10 @@
         "role": "letter-writer",
         "summary": "who's in, stale or missing addresses, message criteria",
         "prompt": "Sweep the list before designing anything. Step 1: read correspondents.json from the workspace — who gets a card this run, and check every address: present, missing, or suspect (a move noted, an old date, a gap). Step 2: confirm the list with the owner — who is in, who is out this year, and anyone new. Step 3: settle the message criteria — the greeting's warmth and register, anything it must say or avoid, and that one message has to work for every household on the list. Step 4: write an acceptance-criteria checklist ('every household is in or out on purpose', 'stale and missing addresses are flagged by name', 'the card message is settled and fits everyone it goes to', 'card and address sheet are print-ready — proper page setup, nothing screen-only'). Call write_task_note with the list count + flagged addresses + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "card",
@@ -75,7 +93,11 @@
           "path": "cards/card.html",
           "kind": "html-page",
           "extraChecks": [
-            { "kind": "cssMinBytes", "bytes": 650, "file": "cards/card.html" },
+            {
+              "kind": "cssMinBytes",
+              "bytes": 650,
+              "file": "cards/card.html"
+            },
             {
               "kind": "contains",
               "file": "cards/card.html",
@@ -112,12 +134,20 @@
         "role": "letter-writer",
         "summary": "what went to print, gaps that need a human",
         "prompt": "Write the run summary. Step 1: state what is ready — the card, the address sheet, and how many households the run covers. Step 2: list the stale and missing addresses by name with the concrete next step for each (who to ask, where to look). Step 3: note anything the owner still does by hand — signing, stamps, the mail date that makes the season. Step 4: keep it under a page. Write report.md and call write_task_note with the covered and outstanding counts.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 600
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open cards/card.html, cards/addresses.html, and report.md and verify every criterion from notes/scope.md: the card is complete, print-styled, and carries the settled message; the address sheet covers every in-list household or marks the gap plainly — cross-check the names against correspondents.json, a household the sheet quietly dropped is the classic failure; the run count claim matches the sheet; and the report names every stale or missing address with a next step. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to card.",
       "loopBackTo": "card"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -140,7 +170,10 @@
         "role": "ceremoniemeester",
         "summary": "fact checklist from the event record, look brief",
         "prompt": "Lock the facts before any design. Step 1: read event.json from the workspace — the occasion, date, time, venue, host, and RSVP instructions — and guests.json for who the invitation must speak to. Step 2: confirm the look brief with the owner — the mood of the day, colors or motifs that matter, and anything the honoree would hate. Step 3: write the fact checklist: date, time, venue, and RSVP line exactly as the event record has them, character for character — the invitation may be creative about everything except these. Step 4: write an acceptance-criteria checklist ('every fact matches event.json exactly', 'the RSVP instruction is present and actionable — who to tell, how, by when', 'the file is print-ready — @page setup, honest margins, one sheet', 'the look fits the brief'). Call write_task_note with the occasion + the fact list + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -152,7 +185,11 @@
           "path": "invitations/invitation.html",
           "kind": "html-page",
           "extraChecks": [
-            { "kind": "cssMinBytes", "bytes": 650, "file": "invitations/invitation.html" },
+            {
+              "kind": "cssMinBytes",
+              "bytes": 650,
+              "file": "invitations/invitation.html"
+            },
             {
               "kind": "contains",
               "file": "invitations/invitation.html",
@@ -174,6 +211,10 @@
     "evaluate": {
       "prompt": "Open invitations/invitation.html and event.json side by side and verify every criterion from notes/scope.md: the date, the time, the venue, and the RSVP instruction each match the event record exactly — read them character by character, this is the check the whole book exists for — the RSVP line is actionable, the file is print-ready with proper page setup on one sheet, and the look honors the brief. Write PASS/FAIL per fact and per criterion; on any mismatch, quote both versions and loop back to design.",
       "loopBackTo": "design"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -196,7 +237,10 @@
         "role": "ceremoniemeester",
         "summary": "gift and helper roster, coverage rule, tracking rule",
         "prompt": "Define the sweep before drafting. Step 1: read gifts.json from the workspace — who gave what — and guests.json for the people who helped without a gift attached: setup, kitchen, driving, cleanup. Step 2: lock the coverage rule with the owner: every giver AND every helper gets a note, one personal detail each — the actual gift for givers, the actual deed for helpers — and helpers never get a gift-shaped form note. Step 3: settle how notes go out and what 'tracked to sent' means in the event's books. Step 4: write an acceptance-criteria checklist ('every giver and every helper covered or explicitly deferred with a reason', 'each note names the specific gift or deed from the record', 'no two notes interchangeable', 'every note recorded drafted and tracked to sent'). Call write_task_note with the giver + helper counts and the checklist, and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -204,7 +248,11 @@
         "role": "copywriter",
         "summary": "one personal note per giver and helper",
         "prompt": "Draft the whole batch against the locked coverage rule. Step 1: one section per person in letters/thank-you.md — a heading with their name, then the note. Step 2: givers get the gift named in the first two sentences and a line about how it will be used or where it now lives. Step 3: helpers get the actual deed named — the grill run all afternoon, the chairs stacked at midnight — never a generic 'thanks for your help'. Step 4: vary the shape so no two notes could swap recipients. Step 5: call write_task_note with the note count split by givers and helpers.",
-        "produces": { "path": "letters/thank-you.md", "kind": "markdown-doc", "minBytes": 1200 }
+        "produces": {
+          "path": "letters/thank-you.md",
+          "kind": "markdown-doc",
+          "minBytes": 1200
+        }
       },
       {
         "id": "record",
@@ -212,12 +260,20 @@
         "role": "archivist",
         "summary": "track each note in the books, write the coverage summary",
         "prompt": "Close the sweep. Step 1: record each note against the person's entry through the project's event books so every one is tracked drafted and then sent. Step 2: write the run summary — the coverage count stated plainly ('X of Y covered'), who was deferred and why, and what still has to physically happen for the notes to actually go out. Step 3: keep it short and honest. Write report.md and call write_task_note with the coverage count.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 600
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open letters/thank-you.md and report.md and verify every criterion from notes/scope.md: every giver in gifts.json and every helper in guests.json is covered or explicitly deferred with a reason — count them, the forgotten setup crew is the classic failure — each note names the specific gift or deed from the record (spot-check each against the stores), no two notes are interchangeable, and the report states the coverage count with each note tracked. Write PASS/FAIL per criterion; on any failure, name the person and the gap and loop back to draft.",
       "loopBackTo": "draft"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -240,7 +296,10 @@
         "role": "puzzle-maker",
         "summary": "theme and word list from the personal material, construction rules",
         "prompt": "Set the build before placing a letter. Step 1: gather the personal material — the task's params (theme, names, size) and any notes in the workspace about the solvers: names, places, pets, running jokes. Step 2: draft the word list — the personal entries first, filler words only where the grid needs them to interlock, everything spellable in plain uppercase letters. Step 3: lock the construction rules — grid size from the size param (small about 9x9, medium about 13x13, large about 15x15), every entry placed in the grid and crossing at least one other entry, no entry without a clue, clue difficulty tuned to the solvers. Step 4: write an acceptance-criteria checklist ('every entry reads out of the grid at its stated coordinates', 'every crossing agrees letter for letter', 'every entry has a clue at the target difficulty', 'the personal words made it into the grid', 'the rendered page prints cleanly with the solution out of casual sight'). Call write_task_note with the theme + word count + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "construct",
@@ -248,7 +307,11 @@
         "role": "developer",
         "summary": "verified puzzle data — grid, entries, clues",
         "prompt": "Construct the puzzle as data at puzzle.json. Step 1: build the grid — uppercase letters in filled cells, '.' for blocks — placing every word from the locked list so the entries interlock. Step 2: write it as JSON with this exact shape: { \"title\": ..., \"size\": { \"rows\": N, \"cols\": N }, \"grid\": [ one string per row ], \"entries\": [ { \"number\", \"answer\", \"row\", \"col\", \"direction\": \"across\" or \"down\", \"clue\" } ] } — rows and columns zero-indexed from the top-left. Step 3: verify your own work cell by cell before completing — every answer must read out of the grid exactly at its coordinates and every crossing letter must agree; the gate re-checks this mechanically and names any entry that lies. Step 4: write the clues into the entries — personal entries clued with the in-jokes, fillers clued honestly at the target difficulty. Call write_task_note with the grid size and the entry count.",
-        "produces": { "path": "puzzle.json", "kind": "json", "minBytes": 400 }
+        "produces": {
+          "path": "puzzle.json",
+          "kind": "json",
+          "minBytes": 400
+        }
       },
       {
         "id": "render",
@@ -260,7 +323,11 @@
           "path": "puzzle.html",
           "kind": "html-page",
           "extraChecks": [
-            { "kind": "cssMinBytes", "bytes": 650, "file": "puzzle.html" },
+            {
+              "kind": "cssMinBytes",
+              "bytes": 650,
+              "file": "puzzle.html"
+            },
             {
               "kind": "contains",
               "file": "puzzle.html",
@@ -268,7 +335,10 @@
               "flags": "i",
               "label": "print CSS"
             },
-            { "kind": "jsParses", "file": "puzzle.html" }
+            {
+              "kind": "jsParses",
+              "file": "puzzle.html"
+            }
           ]
         }
       }
@@ -276,6 +346,10 @@
     "evaluate": {
       "prompt": "Open puzzle.json and puzzle.html and verify every criterion from notes/scope.md: read three entries out of the grid by their coordinates and confirm each matches its answer, check one crossing square agrees in both directions, confirm every entry has a clue and the personal words from the scope made it in, and check the rendered page — the grid matches the data, the clue numbers line up, and the solution stays out of sight on screen and in print. Write PASS/FAIL per criterion; on any failure, name the entry or cell and loop back to construct.",
       "loopBackTo": "construct"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -298,7 +372,10 @@
         "role": "puzzle-maker",
         "summary": "which puzzles are in, pack order, page rules",
         "prompt": "Inventory before laying anything out. Step 1: read the puzzles/ shelf from the workspace — every puzzle's data and rendered page, its title, and when it was made. Step 2: confirm with the owner which puzzles belong in this pack and the order they should appear. Step 3: lock the page rules — a cover with the pack's title and contents, one puzzle per page with a page break between, solutions gathered as their own section at the back and never beside their puzzle, print styles throughout. Step 4: write an acceptance-criteria checklist ('every chosen shelf puzzle appears in the pack under its own title', 'one puzzle per page with clean breaks', 'all solutions in the back section, none interleaved', 'the cover lists the contents', 'the pack prints cleanly'). Call write_task_note with the puzzle count + order + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "layout",
@@ -311,7 +388,11 @@
           "kind": "html-page",
           "minBytes": 3000,
           "extraChecks": [
-            { "kind": "cssMinBytes", "bytes": 650, "file": "pack/pack.html" },
+            {
+              "kind": "cssMinBytes",
+              "bytes": 650,
+              "file": "pack/pack.html"
+            },
             {
               "kind": "contains",
               "file": "pack/pack.html",
@@ -326,6 +407,10 @@
     "evaluate": {
       "prompt": "Open pack/pack.html against the puzzles/ shelf and verify every criterion from notes/scope.md: every chosen puzzle appears in the pack under its own title — check the shelf listing, a missing puzzle is the classic failure — each puzzle gets its own page with a clean break, every solution sits in the back section and none beside its puzzle, the cover lists the contents, and the page-break styling would print cleanly. Write PASS/FAIL per criterion; on any failure, name the puzzle and the gap and loop back to layout.",
       "loopBackTo": "layout"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -348,7 +433,10 @@
         "role": "kitchen-master",
         "summary": "inclusion rule from the shelf, chapter order, page rules",
         "prompt": "Read the shelf before laying out a page. Step 1: read recipes.json from the workspace and the recipe files under recipes/ — which recipes are tested and which still pending. Step 2: lock the inclusion rule: tested recipes go in; untested ones go on a short 'still to test' page at the back — listed, never silently dropped. Step 3: settle the chapter order with the owner — by course, by season, or by the family line each recipe came down — and the page rules: one recipe per page, the provenance line under every title, a short chapter intro in the family's voice, print styles throughout. Step 4: write an acceptance-criteria checklist ('every tested recipe appears in its chapter with its provenance line', 'untested recipes listed at the back, not dropped', 'the family's phrasings preserved, not rewritten into recipe-site prose', 'chapters ordered as agreed', 'the book prints cleanly, one recipe per page'). Call write_task_note with the tested/untested counts + chapter order + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "layout",
@@ -361,7 +449,11 @@
           "kind": "html-page",
           "minBytes": 8000,
           "extraChecks": [
-            { "kind": "cssMinBytes", "bytes": 650, "file": "book/cookbook.html" },
+            {
+              "kind": "cssMinBytes",
+              "bytes": 650,
+              "file": "book/cookbook.html"
+            },
             {
               "kind": "contains",
               "file": "book/cookbook.html",
@@ -376,6 +468,10 @@
     "evaluate": {
       "prompt": "Open book/cookbook.html against recipes.json and the recipes/ files and verify every criterion from notes/scope.md: every tested recipe appears in its chapter with its provenance line — spot-check three against the shelf, a recipe that lost its story has lost the point — untested recipes are listed at the back and none silently dropped, the family's phrasings survive in the methods, chapters run in the agreed order, and the page styling would print one recipe per page. Write PASS/FAIL per criterion; on any failure, name the recipe and the gap and loop back to layout.",
       "loopBackTo": "layout"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

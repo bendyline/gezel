@@ -1,7 +1,7 @@
 /**
  * Execution density — the single switch that scales how much orchestration
  * scaffolding wraps a task, from the full crew + granular craftbook
- * ("scaffold") down to a single generalist ambachtsman running a collapsed
+ * ("scaffold") down to a single generalist Builder running a collapsed
  * craftbook ("flat"). See `GezelConfig.executionDensity` and
  * `docs/frontier-adaptive-execution.md`.
  *

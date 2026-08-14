@@ -13,6 +13,7 @@
  *   GEZEL_PROJECT_ID — the project context
  *   GEZEL_SESSION_ID — the chat session this subprocess serves
  *   GEZEL_HOME       — path to ~/.gezel (for direct memory access)
+ *   GEZEL_ROLE_BASED_NAME_ONLY_MODE — 1/0 naming presentation inherited by new tasks
  *   GEZEL_CRAFTBOOK_ID — explicit craftbook-editor context (loads step surgery)
  *   GEZEL_MCP_LEGACY_TOOLS=1 — expose compatibility aliases during migration
  */
@@ -69,6 +70,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { commandResultIsError } from './command-result.js';
+import {
+  RootTurnInvocationCache,
+  rootTurnIdFromMessages,
+  rootTurnInvocationKey,
+} from './craftbook-invocation-idempotency.js';
 import {
   type BinaryDocumentCraftbookRequest,
   CraftbookInvocationParamsArgSchema,
@@ -149,6 +155,16 @@ const gezelId = process.env.GEZEL_AGENT_ID ?? '';
 const projectId = process.env.GEZEL_PROJECT_ID ?? 'default';
 const sessionId = process.env.GEZEL_SESSION_ID ?? '';
 const sessionStepId = process.env.GEZEL_STEP_ID ?? '';
+const sessionRoleBasedNameOnlyMode =
+  process.env.GEZEL_ROLE_BASED_NAME_ONLY_MODE === '1'
+    ? true
+    : process.env.GEZEL_ROLE_BASED_NAME_ONLY_MODE === '0'
+      ? false
+      : undefined;
+const sessionTaskNamingMode =
+  sessionRoleBasedNameOnlyMode === undefined
+    ? {}
+    : { roleBasedNameOnlyMode: sessionRoleBasedNameOnlyMode };
 // The task this session is scoped to (`record.taskRef`), if any. Lets
 // the task tools default to / recover toward the current task when the
 // model omits or mangles the ref. Empty for lobby sessions.
@@ -390,11 +406,16 @@ server.tool(
       }
       const data = (await res.json()) as {
         results: Array<{ text: string; score: number; day: string; scope: string }>;
+        mode?: 'semantic' | 'hybrid' | 'lexical';
+        degraded?: { code?: string; message?: string };
       };
       const results = data.results ?? [];
-      const summary = results.length
+      const resultSummary = results.length
         ? `Found ${results.length} relevant ${results.length === 1 ? 'memory' : 'memories'}.`
         : 'No relevant memories found.';
+      const summary = data.degraded?.message
+        ? `${data.degraded.message} ${resultSummary}`
+        : resultSummary;
       const formatted = results
         .map((r) => `[${r.scope}/${r.day} score=${r.score.toFixed(2)}] ${r.text}`)
         .join('\n\n');
@@ -406,6 +427,8 @@ server.tool(
           matches: results,
           count: results.length,
           truncated: false,
+          ...(data.mode ? { mode: data.degraded ? `${data.mode}-fallback` : data.mode } : {}),
+          engine: data.mode === 'semantic' || data.mode === 'hybrid' ? 'sqlite-vec' : 'markdown',
         },
         { text: formatted ? `${summary}\n${formatted}` : summary },
       );
@@ -450,13 +473,31 @@ server.tool(
       if (!res.ok) {
         return errorResult(`save_memory failed: ${await responseErrorMessage(res)}`);
       }
-      const data = (await res.json().catch(() => ({}))) as { status?: unknown };
+      const data = (await res.json().catch(() => ({}))) as {
+        status?: unknown;
+        indexed?: unknown;
+        degraded?: { message?: unknown };
+      };
       const status = data.status === 'duplicate' ? 'duplicate' : 'saved';
-      const summary =
+      const savedSummary =
         status === 'duplicate'
           ? `Memory already existed (${scope}); no duplicate was added.`
           : `Memory saved (${scope}).`;
-      return okResult(MemorySaveToolOutputSchema, { summary, status, scope }, { text: summary });
+      const degradedMessage =
+        data.degraded && typeof data.degraded.message === 'string'
+          ? data.degraded.message
+          : undefined;
+      const summary = degradedMessage ? `${savedSummary} ${degradedMessage}` : savedSummary;
+      return okResult(
+        MemorySaveToolOutputSchema,
+        {
+          summary,
+          status,
+          scope,
+          ...(typeof data.indexed === 'boolean' ? { indexed: data.indexed } : {}),
+        },
+        { text: summary },
+      );
     } catch (err) {
       return errorResult(`save_memory failed: ${unwrapApiError(err)}`);
     }
@@ -2769,9 +2810,21 @@ async function responseErrorMessage(res: Response): Promise<string> {
   const body = await res.text().catch(() => '');
   if (body) {
     try {
-      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
-      if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
-      if (typeof parsed.message === 'string' && parsed.message) return parsed.message;
+      const parsed = JSON.parse(body) as {
+        error?: unknown;
+        message?: unknown;
+        requestId?: unknown;
+      };
+      const requestSuffix =
+        typeof parsed.requestId === 'string' && parsed.requestId
+          ? ` (request id: ${parsed.requestId})`
+          : '';
+      if (typeof parsed.error === 'string' && parsed.error) {
+        return `${parsed.error}${requestSuffix}`;
+      }
+      if (typeof parsed.message === 'string' && parsed.message) {
+        return `${parsed.message}${requestSuffix}`;
+      }
     } catch {
       // Plain-text errors are already useful to a model; clamp noisy bodies.
     }
@@ -4453,6 +4506,20 @@ type CraftbookLaunchResult =
   | { kind: 'existing'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
   | { kind: 'setup-required'; missing: CraftbookToolsetNeed[]; installed: string[] };
 
+const invokeCraftbookRootTurnCache = new RootTurnInvocationCache<CraftbookLaunchResult>();
+
+async function currentRootTurnId(): Promise<string | null> {
+  if (!sessionId) return null;
+  try {
+    const session = await api.getChatSession(sessionId);
+    return rootTurnIdFromMessages(sessionId, session.messages);
+  } catch {
+    // Fail open: inability to read the transcript must not block a legitimate
+    // invocation. The ordinary task API remains the final mutation boundary.
+    return null;
+  }
+}
+
 async function launchCraftbookTask(args: {
   craftbookId: string;
   project: string;
@@ -4461,6 +4528,8 @@ async function launchCraftbookTask(args: {
   version?: string;
   assignee?: z.infer<ReturnType<typeof assigneeArg>>;
   params?: Record<string, string>;
+  /** Durable continuation dedupe key for the explicit invoke_craftbook tool. */
+  craftbookInvocationKey?: string;
   /** Ad-hoc binary handoffs join the active capability workflow. */
   dedupeActiveCraftbook?: boolean;
 }): Promise<CraftbookLaunchResult> {
@@ -4504,12 +4573,14 @@ async function launchCraftbookTask(args: {
     projectCraftbooks.items.find((item) => item.manifest.id === args.craftbookId)?.manifest.name ??
     args.craftbookId;
   const task = await api.createTask(args.project, {
+    ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
     description: normalizedCraftbookTaskDescription(args.description, args.craftbookId),
     craftbookId: args.craftbookId,
     ...(args.version ? { craftbookVersion: args.version } : {}),
     ...(args.params && Object.keys(args.params).length > 0 ? { craftbookParams: args.params } : {}),
     ...(args.assignee ? { assignee: assigneeFromArg(args.assignee) } : {}),
+    ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
     dispatchEntry: true,
   });
@@ -4775,7 +4846,7 @@ server.tool(
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
       const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
-      const launch = await launchCraftbookTask({
+      const invocation = {
         craftbookId,
         project: resolvedProject,
         title,
@@ -4783,7 +4854,23 @@ server.tool(
         version,
         assignee,
         params: invocationParams,
-      });
+      };
+      const rootTurnId = await currentRootTurnId();
+      const launchInvocation = rootTurnId
+        ? {
+            ...invocation,
+            craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation),
+          }
+        : invocation;
+      const launched = rootTurnId
+        ? await invokeCraftbookRootTurnCache.run({
+            rootTurnId,
+            invocation,
+            execute: () => launchCraftbookTask(launchInvocation),
+            cacheResult: (result) => result.kind !== 'setup-required',
+          })
+        : { value: await launchCraftbookTask(launchInvocation), reused: false };
+      const launch = launched.value;
       if (launch.kind === 'setup-required') {
         return {
           content: [
@@ -4801,11 +4888,14 @@ server.tool(
         launch.installed.length > 0
           ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
           : '';
+      const idempotentText = launched.reused
+        ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
+        : '';
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}`,
+            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
           },
         ],
       };
@@ -6563,7 +6653,7 @@ function normalizeSpecialistRole(value: string | undefined): string {
   }
   const resolved = resolveRoleId(lower) ?? resolveRoleId(normalized);
   if (resolved && resolved !== 'meester' && resolved !== 'voorman') return resolved;
-  return 'developer';
+  return 'builder';
 }
 
 function repoFetchRedirectForMacro(input: {
@@ -7035,6 +7125,7 @@ async function runPromotedStartJobAsProject(input: {
     // notification. All kickoff steering lives in the task/step text above.
     const task = crewLoop
       ? await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
           title: input.taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
@@ -7043,6 +7134,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         })
       : await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
           title: input.taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
@@ -7175,6 +7267,7 @@ server.tool(
       // in-prompt from turn 1) — there is no separate chat notification.
       const task = crewLoop
         ? await api.createTask(project.id, {
+            ...sessionTaskNamingMode,
             title: taskTitle ?? `Build ${brief.name}`,
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
@@ -7183,6 +7276,7 @@ server.tool(
             dispatchEntry: true,
           })
         : await api.createTask(project.id, {
+            ...sessionTaskNamingMode,
             title: taskTitle ?? `Build ${brief.name}`,
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
@@ -7307,11 +7401,11 @@ async function runFlatProject(
       mode: 'solo',
     });
     const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
-    const ambachtsman = await api.createGezelFromTemplate(effectiveSpecialistRole, {
+    const builder = await api.createGezelFromTemplate(effectiveSpecialistRole, {
       name: gezelName,
       gender: gezelGender,
     });
-    await api.updateProject(project.id, { voormanGezelId: ambachtsman.id });
+    await api.updateProject(project.id, { voormanGezelId: builder.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
       ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
@@ -7328,28 +7422,30 @@ async function runFlatProject(
     const craftbookPick = await pickCraftbookForBrief(project.id, brief);
     const soloLoop = craftbookPick
       ? await buildSoloLoopSteps(
-          ambachtsman.id,
+          builder.id,
           sourceDeliverablePath ?? 'index.html',
           `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
         )
       : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to the
-    // ambachtsman as a task-scoped handoff — no separate chat notify. The
+    // Builder as a task-scoped handoff — no separate chat notify. The
     // old notify's advisory expectedDeliverable becomes an ENFORCED step
     // gate on the ad-hoc fallback (the pinned loop already gates it).
     const task = soloLoop
       ? await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
           title: taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
-          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          assignee: { kind: 'gezel', gezelId: builder.id },
           steps: soloLoop.steps,
           entryStepId: soloLoop.entryStepId,
           dispatchEntry: true,
         })
       : await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
           title: taskTitle ?? `Build ${brief.name}`,
           description: effectiveTaskDescription,
-          assignee: { kind: 'gezel', gezelId: ambachtsman.id },
+          assignee: { kind: 'gezel', gezelId: builder.id },
           steps: [
             {
               name: 'Plan and execute',
@@ -7359,7 +7455,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${ambachtsman.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${ambachtsman.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${ambachtsman.name} is on it and they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project.`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [
@@ -7986,6 +8082,7 @@ server.tool(
     try {
       const projectId = await resolveProjectId(project);
       const created = await api.createTask(projectId, {
+        ...sessionTaskNamingMode,
         title,
         description,
         ...(plan ? { plan } : {}),
@@ -8071,6 +8168,7 @@ server.tool(
       // The draft IS the plan. Seed a ≥40-char placeholder "about" so the
       // create floor passes; the planner overwrites it during framing.
       const draft = await api.createTask(resolvedProject, {
+        ...sessionTaskNamingMode,
         title: title ?? `Plan: ${goal.slice(0, 60)}`,
         description: `DRAFT PLAN (being authored). User goal: ${goal}`.padEnd(40, ' '),
         status: 'draft',
@@ -8085,6 +8183,7 @@ server.tool(
       // The authoring task runs the gated plan craftbook and points at the
       // draft via craftbookParams.draftRef (the gate scripts read it).
       const authoring = await api.createTask(resolvedProject, {
+        ...sessionTaskNamingMode,
         title: `Author plan for ${draft.ref}`,
         description: `Run the plan craftbook to author task ${draft.ref}. User goal: ${goal}`,
         craftbookId: 'plan',

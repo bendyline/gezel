@@ -19,7 +19,10 @@
         "role": "planner",
         "summary": "decompose the question into sub-questions + lock scope",
         "prompt": "1. Restate the research question in one precise sentence; if it is vague, narrow it to something answerable (define the entity, timeframe, geography, and metric). 2. Decompose it into 3-6 sub-questions that, answered together, fully answer the main question. 3. Decide the report structure: executive summary, one section per sub-question, a limitations section, and a references list. 4. Decide source standards: how many independent sources minimum (aim 5+), what counts as authoritative for this topic, and the recency window. 5. Write an acceptance-criteria checklist (e.g. 'every sub-question has a dedicated section', 'every factual claim has an inline citation [n]', 'at least 5 distinct sources in references', 'an explicit limitations/uncertainty section exists', 'executive summary is <=150 words and states the bottom line'). Good looks like a checklist a grader could mechanically apply. 6. Record key decisions (the narrowed question, the sub-questions, the recency window). Call write_task_note with the sub-questions + checklist + decisions, and also write the same content to notes/question-scope.md.",
-        "produces": { "path": "notes/question-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/question-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -27,7 +30,10 @@
         "role": "researcher",
         "summary": "gather sources, log each with a citation key + key facts",
         "prompt": "1. For each sub-question from the scope, find authoritative sources (prefer primary sources, official data, and reputable secondary sources within the recency window). 2. For every source, append an entry to notes/sources.md with: a citation key [n], title, author/publisher, date, URL or locator, and 1-3 bullet facts you extracted with the exact figure or quote. 3. Cross-check any surprising or load-bearing fact against a second independent source and note the agreement or conflict. 4. Flag every claim you could NOT verify as UNVERIFIED so the writer does not state it as fact. 5. Aim to exceed the minimum source count and cover every sub-question; do not pad with low-quality sources. Good looks like a source log dense enough that the writer never needs to invent a fact. Keep notes/sources.md as the single source of truth; do not write prose yet.",
-        "produces": { "path": "notes/sources.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/sources.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -35,13 +41,23 @@
         "role": "copywriter",
         "summary": "write the cited markdown report to the locked structure",
         "prompt": "1. Write report.md following the locked structure exactly: title, an executive summary <=150 words that states the bottom-line answer, one section per sub-question, a limitations section, and a numbered References list. 2. Every factual claim gets an inline citation [n] keyed to the references; do NOT state any UNVERIFIED claim as fact (hedge it or drop it). 3. Build the References list directly from notes/sources.md so every [n] resolves and no citation is invented. 4. Lead each section with the answer, then the evidence; keep prose tight and skimmable with subheadings. 5. On a loop-back, fix only the gaps the reviewer named and do not regress sections that already passed. 6. Call write_task_note with the report path and which criteria now pass.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and check EACH acceptance criterion, writing PASS/FAIL per criterion: (1) every sub-question from notes/question-scope.md has a dedicated section; (2) every factual claim carries an inline citation [n] and every [n] resolves to a References entry; (3) there are at least the minimum distinct sources and they meet the authority/recency bar; (4) an explicit limitations/uncertainty section exists; (5) the executive summary is <=150 words and states the bottom line; (6) spot-check 3 citations against notes/sources.md to confirm the claim matches the logged fact and nothing was fabricated. A report that reads well but invents or mismatches a citation FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -64,7 +80,10 @@
         "role": "planner",
         "summary": "topic boundaries, inclusion criteria, organizing themes",
         "prompt": "1. State the review topic and its boundaries in one sentence (what is in and out of scope). 2. Define inclusion criteria: source types accepted (peer-reviewed, official reports, etc.), recency window, and a minimum source count (aim 6+). 3. Decide 3-5 organizing themes or dimensions the review will be structured around (NOT source-by-source) plus a source-characterization matrix schema (columns like source, year, method, key finding, quality/limitation). 4. Write an acceptance-criteria checklist (e.g. 'review is organized by theme not by source', 'each source appears in the matrix with all columns filled', 'consensus vs disagreement is explicitly called out', 'a gaps/future-work section exists', 'minimum source count met'). 5. Record decisions. Call write_task_note with the themes, matrix schema, and checklist, and write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "gather",
@@ -72,7 +91,10 @@
         "role": "researcher",
         "summary": "build the source matrix: method, finding, quality per source",
         "prompt": "1. Find sources meeting the inclusion criteria, prioritizing seminal and recent work. 2. For each source, add a row to the matrix in notes/sources.md with every scoped column filled: citation key [n], title/author/year, method or evidence type, key finding (with the figure or claim), and a one-line quality note or limitation. 3. As you go, tag which organizing theme(s) each source speaks to so the writer can group them. 4. Note where sources agree and where they conflict on the same question. 5. Flag anything you could not verify as UNVERIFIED. Good looks like a matrix where the comparative structure of the field is already visible. Do not write the prose review yet.",
-        "produces": { "path": "notes/sources.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/sources.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "synthesize",
@@ -80,13 +102,23 @@
         "role": "copywriter",
         "summary": "write a thematic synthesis with consensus, conflict, gaps",
         "prompt": "1. Write review.md organized by the locked themes (one section per theme), NOT one section per source. 2. In each theme, synthesize across sources: state what is established, cite the supporting sources [n], then explicitly note where sources disagree and why. 3. Open with an introduction framing the topic and scope, and close with a 'Gaps & future directions' section. 4. Add a numbered References list built from notes/sources.md so every [n] resolves. 5. Keep it comparative and analytical, not a chain of one-paragraph summaries. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the review path and which criteria now pass.",
-        "produces": { "path": "review.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "review.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open review.md and check EACH criterion PASS/FAIL: (1) the review is organized by theme, not source-by-source; (2) every source in notes/sources.md is cited and every matrix column was actually used to inform the prose; (3) consensus AND disagreement are explicitly surfaced for at least the main themes; (4) a gaps/future-work section exists; (5) the minimum source count is met and inclusion criteria respected; (6) every inline [n] resolves to the References list. A pile of per-source summaries with no synthesis FAILS even if every source is present.",
       "loopBackTo": "synthesize",
-      "deliverable": { "path": "review.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "review.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -109,7 +141,10 @@
         "role": "planner",
         "summary": "lock the competitor set + comparison dimensions",
         "prompt": "1. Identify the subject (us/the product) and pick 3-6 named competitors that are genuinely comparable; justify each inclusion in one line. 2. Choose 5-8 comparison dimensions that decide the market (e.g. core features, pricing model, target segment, differentiator, weaknesses, traction signals) and define what each dimension means so cells are comparable. 3. Decide the matrix schema (rows = competitors incl. us, columns = dimensions) and where the final analysis lands. 4. Write an acceptance-criteria checklist (e.g. 'every competitor x every dimension cell is filled with evidence, not blank or guessed', 'our own offering is included as a row', 'each cell cites or names a source', 'the analysis ends with a recommendation and the top competitive gaps'). 5. Record decisions. Call write_task_note with the competitor set, dimensions, schema, and checklist; write the same to notes/dimension-scope.md.",
-        "produces": { "path": "notes/dimension-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/dimension-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -117,7 +152,10 @@
         "role": "researcher",
         "summary": "evidence-backed cell for every competitor x dimension",
         "prompt": "1. For each competitor, research every locked dimension and fill the corresponding cell in notes/matrix.md with a specific, evidence-backed value (a feature fact, a real price, a named segment) — never 'maybe' or a guess. 2. Cite or name the source for each cell (product page, pricing page, review, filing) in a [n] reference list. 3. Use consistent wording per dimension across competitors so cells are directly comparable. 4. Where a value is genuinely unknown, mark the cell UNKNOWN and say why, rather than fabricating. 5. Note any standout strength or weakness you observe per competitor for the writer to use. Good looks like a fully-populated, cited matrix. Do not write the narrative analysis yet.",
-        "produces": { "path": "notes/matrix.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/matrix.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -125,13 +163,23 @@
         "role": "copywriter",
         "summary": "narrative analysis + recommendation from the matrix",
         "prompt": "1. Write analysis.md: start with the rendered comparison matrix (a markdown table of competitors x dimensions), then a per-dimension or per-competitor narrative interpreting the matrix. 2. Explicitly call out where each competitor leads, where they are weak, and where the market has a gap. 3. End with a clear, defensible recommendation (where to compete, what to build/avoid) tied to specific cells in the matrix. 4. Keep every claim traceable to a matrix cell and its source; carry the [n] references through. 5. On a loop-back, fix only the named gaps. 6. Call write_task_note with the analysis path and which criteria now pass.",
-        "produces": { "path": "analysis.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "analysis.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open analysis.md and check EACH criterion PASS/FAIL: (1) the matrix table covers every competitor x every dimension from the scope with no unexplained blanks; (2) our own offering is included; (3) cells are evidence-backed and consistently worded, with sources named (spot-check 3 against notes/matrix.md); (4) the narrative actually interprets the matrix rather than restating it; (5) there is a clear recommendation tied to specific evidence; (6) competitive gaps are explicitly identified. A pretty write-up over a half-empty or guessed matrix FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "analysis.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "analysis.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -154,7 +202,10 @@
         "role": "planner",
         "summary": "define the market boundary + analysis lenses",
         "prompt": "1. Define the market boundary precisely: what product/service category, geography, and timeframe — and state explicitly what adjacent markets are excluded. 2. Lock the lenses the scan will cover (e.g. market size & growth, key segments, major players/share, demand drivers, trends, risks/headwinds) and what each must contain. 3. Decide the report structure and where sized figures come from (state that figures must cite a source and a date). 4. Write an acceptance-criteria checklist (e.g. 'market boundary is stated and exclusions named', 'each lens has its own section', 'every sized figure cites a source + date', 'at least N notable players are mapped', 'a trends section with 3+ named trends exists'). 5. Record decisions. Call write_task_note with the boundary, lenses, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -162,7 +213,10 @@
         "role": "researcher",
         "summary": "sized figures, players, and trends with sources",
         "prompt": "1. For each locked lens, gather concrete facts into notes/findings.md: market size/growth figures (with the figure, the year, and the source [n]), the key segments, the notable players with what each is known for, the demand drivers, and 3+ named trends with evidence. 2. Cite every sized figure to a dated source; prefer recent, reputable data and reconcile conflicting numbers by noting the range and which source you trust. 3. Map at least the required number of players, each with a one-line positioning. 4. Flag estimates vs hard figures, and mark anything unverifiable as UNVERIFIED. Good looks like a findings file where each lens already has its evidence. Do not write the narrative yet.",
-        "produces": { "path": "notes/findings.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/findings.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -170,13 +224,23 @@
         "role": "copywriter",
         "summary": "structured landscape report from the findings",
         "prompt": "1. Write scan.md with a section per locked lens: an opening that states the market boundary and exclusions, then size & growth, segments, players (a short table or list), drivers, trends, and risks. 2. Every sized figure carries its citation [n] and year; never state a number without a source. 3. Lead with the headline read of the market, then the supporting detail. 4. Close with a short 'so what' takeaway. 5. Add a References list from notes/findings.md so every [n] resolves. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the scan path and which criteria now pass.",
-        "produces": { "path": "scan.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "scan.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open scan.md and check EACH criterion PASS/FAIL: (1) the market boundary and exclusions are stated; (2) every locked lens has its own section; (3) every sized figure carries a source and year (spot-check 3 against notes/findings.md); (4) at least the required number of players are mapped with positioning; (5) a trends section names 3+ trends with evidence; (6) a 'so what' takeaway exists. A scan that mixes adjacent markets or states unsourced figures FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "scan.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "scan.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -199,7 +263,10 @@
         "role": "planner",
         "summary": "itemize every checkable claim + lock the rating scale",
         "prompt": "1. Read the source material and extract EVERY discrete, checkable factual claim into notes/claim-scope.md, each as one atomic statement with an id (C1, C2, ...) — split compound sentences into separate claims and quote the original wording. 2. Mark each claim's type (statistic, attribution, event, causal, definitional) since that drives how it is verified. 3. Lock the rating scale exactly (e.g. True / Mostly True / Mixed / Mostly False / False / Unverifiable) and define each rating. 4. Write an acceptance-criteria checklist (e.g. 'every claim from the source is itemized with an id', 'each claim gets exactly one rating from the locked scale', 'each rating cites at least one independent source', 'false/mixed claims include a correction'). 5. Record decisions. Call write_task_note with the claim list + scale + checklist; write the same to notes/claim-scope.md.",
-        "produces": { "path": "notes/claim-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/claim-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -207,7 +274,10 @@
         "role": "researcher",
         "summary": "independently check each claim against primary sources",
         "prompt": "1. For each claim id, independently verify it against authoritative, primary sources — do NOT trust the source being checked. 2. Log to notes/evidence.md per claim: the id, the source(s) [n] you checked, the exact figure/quote/fact found, whether it confirms, contradicts, or partially supports the claim, and a proposed rating from the locked scale. 3. For numeric or attribution claims, find the original record (the dataset, the filing, the transcript), not a secondary report. 4. If a claim cannot be verified after a genuine search, rate it Unverifiable and say what evidence would settle it. 5. Where a claim is false or mixed, capture the correct fact so the report can state the correction. Good looks like an evidence log where each claim's rating is already justified. Do not write the final report yet.",
-        "produces": { "path": "notes/evidence.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/evidence.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -215,13 +285,23 @@
         "role": "reviewer",
         "summary": "per-claim ratings, evidence, and corrections",
         "prompt": "1. Write factcheck.md with a short summary (counts per rating) then one entry per claim id, in order: the quoted claim, its rating from the locked scale, a one-to-three-sentence justification, the supporting source(s) [n], and — for any False/Mixed claim — the correct statement. 2. Use ONLY ratings from the locked scale and base each strictly on notes/evidence.md; do not introduce new claims or change wordings. 3. Add a References list so every [n] resolves to a real, independent source. 4. Keep verdicts dispassionate and evidence-first. 5. On a loop-back, fix only the named gaps. 6. Call write_task_note with the report path and which criteria now pass.",
-        "produces": { "path": "factcheck.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "factcheck.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open factcheck.md and check EACH criterion PASS/FAIL: (1) every claim id from notes/claim-scope.md has an entry — none dropped; (2) each entry has exactly one rating drawn from the locked scale; (3) each rating cites at least one independent source that is NOT the material being checked; (4) every False/Mixed claim includes a correction; (5) spot-check 3 verdicts against notes/evidence.md to confirm the rating matches the logged evidence; (6) the summary counts match the entries. A report that rates a claim against the source it came from, or skips a claim, FAILS.",
       "loopBackTo": "report",
-      "deliverable": { "path": "factcheck.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "factcheck.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -245,7 +325,10 @@
         "role": "planner",
         "summary": "synthesis question + per-document extraction schema",
         "prompt": "1. List the corpus (every document/file in scope) and state the synthesis question in one sentence — what unified understanding the output must deliver. 2. Define a per-document extraction schema: for each doc capture source id, key claims/findings, relevant data points, and any stance or contradiction. 3. Decide the output structure: organize by theme/idea (3-6 themes), not by document, plus an open-questions/contradictions section. 4. Write an acceptance-criteria checklist (e.g. 'every document in the corpus is read and extracted', 'output is organized by theme not by file', 'each synthesized point cites the document(s) it came from', 'contradictions across documents are surfaced', 'nothing is asserted that is not in the corpus'). 5. Record decisions. Call write_task_note with the corpus list, schema, themes, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "read",
@@ -253,7 +336,10 @@
         "role": "researcher",
         "summary": "structured extract per document, keyed to the source",
         "prompt": "1. Open and read EVERY document in the corpus — do not skip or sample. 2. For each, append an extract block to notes/extracts.md following the schema: source id [n], its key claims/findings, supporting data points (with the figure), and any stance or point where it conflicts with another document. 3. Tag each extract with which output theme(s) it speaks to. 4. As you read, note explicit cross-document agreements and contradictions. 5. Stay faithful to the source — capture what the document says, not your opinion, and quote load-bearing passages. Good looks like an extract file complete enough that the writer never reopens the originals. Do not write the synthesis yet.",
-        "produces": { "path": "notes/extracts.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/extracts.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "synthesize",
@@ -261,13 +347,23 @@
         "role": "copywriter",
         "summary": "unified narrative organized by idea, citing sources",
         "prompt": "1. Write synthesis.md organized by the locked themes (one section each), weaving together what the documents collectively say. 2. Each synthesized point cites the document(s) [n] it draws from so a reader can trace it. 3. Open with a 1-paragraph answer to the synthesis question, then the thematic body, then an 'Open questions & contradictions' section that surfaces where the corpus disagrees or leaves gaps. 4. Synthesize across documents — do NOT produce a per-file summary list. 5. Assert only what the corpus supports (from notes/extracts.md). 6. Add a source key so every [n] maps to a document. 7. On a loop-back, fix only the named gaps. 8. Call write_task_note with the synthesis path and which criteria now pass.",
-        "produces": { "path": "synthesis.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "synthesis.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open synthesis.md and check EACH criterion PASS/FAIL: (1) every document in notes/scope.md appears in notes/extracts.md (full coverage) and is cited somewhere in the synthesis; (2) the output is organized by theme, not file-by-file; (3) each synthesized point cites its source document(s); (4) an open-questions/contradictions section surfaces real cross-document disagreement; (5) spot-check 3 points against notes/extracts.md to confirm nothing was asserted beyond the corpus. A per-file summary list, or a synthesis missing documents, FAILS.",
       "loopBackTo": "synthesize",
-      "deliverable": { "path": "synthesis.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "synthesis.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -290,7 +386,10 @@
         "role": "planner",
         "summary": "lock options, weighted criteria, and the scoring rule",
         "prompt": "1. List the options to compare (3-8 named candidates) and confirm they are genuinely comparable for the stated goal. 2. Choose 5-9 decision criteria, define each precisely, and assign each a weight (e.g. percentages summing to 100, or 1-5 importance) BEFORE looking at any data — justify each weight in one line. 3. Decide how each cell is scored (a 1-5 rating, a raw value, or yes/no) and the rule that turns ratings x weights into a total score. 4. Decide the page features: a comparison table (options x criteria), per-option total score, and a highlighted recommendation. 5. Write an acceptance-criteria checklist (e.g. 'every option x criterion cell is filled with evidence', 'weights are fixed before research and sum correctly', 'the page computes and shows a weighted total per option', 'the table is sortable or filterable', 'the recommended option is highlighted and justified'). 6. Record decisions. Call write_task_note with options, weighted criteria, scoring rule, and checklist; write the same to notes/criteria-scope.md.",
-        "produces": { "path": "notes/criteria-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/criteria-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -298,7 +397,10 @@
         "role": "researcher",
         "summary": "evidence-backed value + rating for every option x criterion",
         "prompt": "1. For each option, research every locked criterion and record in notes/data.md: the raw value/fact, the rating per the scoring rule, the source [n], and a one-line note. 2. Rate consistently across options so scores are comparable; do not let a known favorite get generous ratings. 3. Cite each value to a real source; mark genuinely unknown cells UNKNOWN with a conservative rating and a note, never a fabricated value. 4. Pre-compute each option's weighted total using the locked rule and show your arithmetic so the developer can reproduce it. 5. Note any decisive strength or dealbreaker per option. Good looks like a complete, cited data file the build can render verbatim. Do not write HTML yet.",
-        "produces": { "path": "notes/data.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/data.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -310,7 +412,13 @@
           "path": "index.html",
           "kind": "html-page",
           "minBytes": 1800,
-          "extraChecks": [{ "kind": "cssMinBytes", "file": "index.html", "bytes": 400 }]
+          "extraChecks": [
+            {
+              "kind": "cssMinBytes",
+              "file": "index.html",
+              "bytes": 400
+            }
+          ]
         }
       }
     ],
@@ -321,8 +429,18 @@
         "path": "index.html",
         "kind": "html-page",
         "minBytes": 1800,
-        "extraChecks": [{ "kind": "cssMinBytes", "file": "index.html", "bytes": 400 }]
+        "extraChecks": [
+          {
+            "kind": "cssMinBytes",
+            "file": "index.html",
+            "bytes": 400
+          }
+        ]
       }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -345,7 +463,10 @@
         "role": "planner",
         "summary": "lock diligence dimensions + red-flag criteria",
         "prompt": "1. Name the entity and the decision the brief informs (invest, partner, buy, hire) in one sentence. 2. Lock the diligence dimensions to cover (e.g. business model & traction, financials/funding, leadership, legal/regulatory, reputation/litigation, security/compliance as relevant) and what each must establish. 3. Define the red-flag rubric: what observations count as a red, amber, or green signal in each dimension. 4. Write an acceptance-criteria checklist (e.g. 'every dimension has a findings section', 'each material fact cites a source', 'risks are rated red/amber/green per the rubric', 'an overall recommendation/read is stated', 'unknowns and information gaps are listed'). 5. Record decisions. Call write_task_note with the dimensions, red-flag rubric, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -353,7 +474,10 @@
         "role": "researcher",
         "summary": "verifiable facts + risk signals per dimension, sourced",
         "prompt": "1. For each locked dimension, gather verifiable facts into notes/findings.md: the fact, its source [n] (official filing, registry, reputable reporting), and the date. 2. Apply the red-flag rubric as you go: tag each notable signal red/amber/green with the reason. 3. Prefer primary records (registrations, filings, official statements) over rumor; corroborate any serious negative with a second independent source before flagging it red. 4. Explicitly list what you could NOT find — open questions and information gaps are a diligence output, not a failure. 5. Do not assert unverified rumors as fact; mark them UNVERIFIED. Good looks like a per-dimension findings file with rated signals. Do not write the brief yet.",
-        "produces": { "path": "notes/findings.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/findings.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -361,13 +485,23 @@
         "role": "copywriter",
         "summary": "decision-oriented brief with findings, risks, and a read",
         "prompt": "1. Write brief.md: a 1-paragraph bottom-line read up top (overall recommendation + the single biggest risk), then a section per diligence dimension with its findings and rated signals, then a consolidated 'Risks (red/amber/green)' section, then 'Open questions & information gaps'. 2. Every material fact carries its citation [n] and date; never state a serious negative without a corroborating source. 3. Keep it decision-oriented and scannable — a busy reader should get the verdict and risks in 60 seconds. 4. Add a References list from notes/findings.md so every [n] resolves. 5. On a loop-back, fix only the named gaps. 6. Call write_task_note with the brief path and which criteria now pass.",
-        "produces": { "path": "brief.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "brief.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open brief.md and check EACH criterion PASS/FAIL: (1) every locked dimension has a findings section; (2) each material fact cites a dated source (spot-check 3 against notes/findings.md); (3) risks are rated red/amber/green per the rubric and serious negatives are corroborated by a second source; (4) an explicit bottom-line read/recommendation is stated up top; (5) an open-questions/information-gaps section lists what could not be confirmed; (6) no UNVERIFIED rumor is presented as fact. A brief that buries the risks, omits a dimension, or states an uncorroborated negative as fact FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "brief.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "brief.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -390,7 +524,10 @@
         "role": "planner",
         "summary": "audience, assumed knowledge, and concept dependency order",
         "prompt": "1. Pin the target audience and their assumed prior knowledge in one sentence (e.g. 'curious non-technical adult, no math'), and the target length. 2. List the concepts that MUST be understood, then order them by dependency (what must be taught before what) — this is the explainer's spine. 3. Decide the structure: a one-line 'what it is', then fundamentals, then the mechanism, then implications/examples, then a recap; flag where an analogy or a worked example is needed. 4. Write an acceptance-criteria checklist (e.g. 'no concept is used before it is introduced', 'jargon is defined on first use', 'at least 2 concrete examples or analogies', 'a reader at the assumed level could follow it', 'every factual claim is accurate and cited where non-obvious'). 5. Record decisions. Call write_task_note with the audience, concept order, structure, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -398,7 +535,10 @@
         "role": "researcher",
         "summary": "accurate facts, examples, and analogies with sources",
         "prompt": "1. For each concept in the dependency order, gather accurate facts into notes/facts.md with sources [n] for any non-obvious or quantitative claim, prioritizing authoritative explanations. 2. Find or craft at least two concrete examples and one strong analogy per hard concept, and sanity-check that each analogy does not mislead (note where it breaks down). 3. Note common misconceptions about the topic so the explainer can pre-empt them. 4. Verify any figure or mechanism against a reliable source; mark uncertain points UNVERIFIED. Good looks like a fact file where every concept has accurate grounding plus a teaching device. Do not write the explainer yet.",
-        "produces": { "path": "notes/facts.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/facts.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -406,13 +546,23 @@
         "role": "copywriter",
         "summary": "progressive explainer from fundamentals to full picture",
         "prompt": "1. Write explainer.md following the locked concept order: a crisp one-line 'what it is', then build up concept by concept so nothing is referenced before it is introduced. 2. Define every term on first use, and use the gathered examples/analogies to make hard concepts concrete (note where an analogy breaks down). 3. Pre-empt the common misconceptions. 4. Match the assumed-knowledge level exactly — neither condescend nor assume away prerequisites. 5. Cite non-obvious facts [n] and end with a short recap of the key takeaways. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the explainer path and which criteria now pass.",
-        "produces": { "path": "explainer.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "explainer.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open explainer.md and check EACH criterion PASS/FAIL: (1) no concept is used before it is introduced (trace the dependency order from notes/scope.md); (2) every jargon term is defined on first use; (3) at least two concrete examples or analogies appear and any analogy notes where it breaks down; (4) it matches the assumed-knowledge level — readable by the target audience without condescension; (5) non-obvious facts are cited and accurate (spot-check 2 against notes/facts.md); (6) a recap of takeaways closes it. An explainer that drops a prerequisite, leaves jargon undefined, or misstates a fact FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "explainer.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "explainer.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -436,7 +586,10 @@
         "role": "reviewer",
         "summary": "pair each cited claim to its citation + lock the rubric",
         "prompt": "1. Read the target document and build a pairing table in notes/scope.md: for every inline citation, record a pair id (P1, P2, ...), the exact claim sentence it supports, and the citation/reference it points to. 2. Also flag every factual claim that has NO citation as a candidate (these are audit findings too). 3. Lock the verdict rubric: Supported (source clearly backs the claim), Partially-Supported (source backs part / overstates), Not-Supported (source does not back it), Source-Missing/Dead (citation cannot be located), Uncited-Claim. 4. Write an acceptance-criteria checklist (e.g. 'every inline citation is paired and audited', 'uncited factual claims are listed', 'each pair gets exactly one verdict from the rubric', 'each Not-Supported/Partial verdict quotes the source to justify it', 'a fix is proposed per problem'). 5. Record decisions. Call write_task_note with the pairing table + rubric + checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "verify",
@@ -444,7 +597,10 @@
         "role": "researcher",
         "summary": "open each source, confirm it backs the paired claim",
         "prompt": "1. For each pair id, locate and open the cited source and read the relevant part. 2. Log to notes/verify.md: the pair id, whether the source was reachable, the exact passage/figure the claim relies on (quote it), and a proposed verdict from the locked rubric with a one-line reason. 3. Be strict: a source on the right topic that does not actually state the specific claim is Not-Supported, not Supported. 4. For dead or unfindable citations, record Source-Missing/Dead and what you searched. 5. For each problem, draft a concrete fix (correct the claim, swap the source, or add a citation). Good looks like a verify log where every pair's verdict is justified by a quote. Do not write the final report yet.",
-        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/verify.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -452,13 +608,23 @@
         "role": "reviewer",
         "summary": "per-citation verdicts, justifying quotes, and fixes",
         "prompt": "1. Write audit.md with a summary (counts per verdict, and the count of uncited claims) then one entry per pair id: the claim, the citation, the verdict from the rubric, the justifying quote from the source, and the proposed fix for any non-Supported verdict. 2. Add a dedicated 'Uncited claims' section listing factual statements that lack a citation. 3. Use ONLY rubric verdicts and base each strictly on notes/verify.md. 4. Make it actionable — an editor should be able to apply every fix directly. 5. On a loop-back, fix only the named gaps. 6. Call write_task_note with the report path and which criteria now pass.",
-        "produces": { "path": "audit.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "audit.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open audit.md and check EACH criterion PASS/FAIL: (1) every citation paired in notes/scope.md has an audited entry — none skipped; (2) an uncited-claims section lists statements lacking citations; (3) each entry has exactly one rubric verdict; (4) every Not-Supported/Partially-Supported/Dead verdict is justified by a quoted source passage (spot-check 3 against notes/verify.md); (5) each problem has a concrete, applicable fix; (6) the summary counts match the entries. A report that marks a topically-related-but-non-supporting source as Supported, or skips a citation, FAILS.",
       "loopBackTo": "report",
-      "deliverable": { "path": "audit.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "audit.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -481,7 +647,10 @@
         "role": "planner",
         "summary": "domain, term-selection criteria, and entry template",
         "prompt": "1. Define the domain and audience in one sentence (who reads this and at what level). 2. Set term-selection criteria (what makes a term in-scope) and produce the candidate term list (aim for the genuinely core terms, not every word). 3. Lock the entry template every term will follow: term, short definition (1-2 sentences), expanded explanation if needed, example/usage, related terms (cross-references), and source. 4. Decide ordering (alphabetical) and any grouping. 5. Write an acceptance-criteria checklist (e.g. 'every candidate term has an entry following the template', 'definitions are accurate and audience-appropriate', 'cross-referenced related terms exist as their own entries', 'entries are alphabetized', 'acronyms are expanded on first definition'). 6. Record decisions. Call write_task_note with the term list, entry template, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "gather",
@@ -489,7 +658,10 @@
         "role": "researcher",
         "summary": "canonical definition + usage per term, with sources",
         "prompt": "1. For each candidate term, gather the canonical definition into notes/terms.md following the entry template: term, accurate short definition, expanded note if the term is subtle, a real usage example, candidate related terms, and a source [n]. 2. Use authoritative sources (standards, official docs, reputable references) and reconcile conflicting definitions by noting the dominant usage in this domain. 3. Ensure every term named as a 'related term' is itself in the term list — add it if it is missing so cross-references resolve. 4. Expand every acronym and note common synonyms. 5. Flag any term whose meaning is contested or uncertain. Good looks like a complete, sourced entry per term with resolvable cross-references. Do not write the final glossary yet.",
-        "produces": { "path": "notes/terms.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/terms.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -497,13 +669,23 @@
         "role": "copywriter",
         "summary": "alphabetized, cross-referenced glossary to the template",
         "prompt": "1. Write glossary.md as an alphabetized list of entries, each following the locked template exactly (term as a heading, definition, optional expansion, example, related terms, source). 2. Make cross-references real: every 'related term' links to or names an entry that exists in the glossary. 3. Keep voice and depth uniform across entries — same level of detail and the same audience pitch throughout. 4. Expand acronyms on their defining entry. 5. Carry source references so definitions are traceable. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the glossary path and term count.",
-        "produces": { "path": "glossary.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "glossary.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open glossary.md and check EACH criterion PASS/FAIL: (1) every candidate term from notes/scope.md has an entry following the template; (2) entries are alphabetized; (3) every related-term cross-reference resolves to an actual entry (check 3 at random); (4) definitions are accurate and at the right audience level (spot-check 3 against notes/terms.md); (5) acronyms are expanded on first definition; (6) entry depth and voice are uniform. A glossary with missing terms, dangling cross-references, or inconsistent entry depth FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "glossary.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "glossary.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -526,7 +708,10 @@
         "role": "planner",
         "summary": "reader, goal, and selection + ordering criteria",
         "prompt": "1. Pin the reader and their goal in one sentence (e.g. 'a working dev who wants a practical intro to distributed systems') and their current level. 2. Set selection criteria: what makes a resource worth including for THIS reader (authority, level fit, recency, format mix) and how many items (aim 6-12). 3. Decide the ordering principle — a reading ORDER (foundational -> advanced, or a sequenced path), not just an unordered set — and any grouping (e.g. start here / go deeper / reference). 4. Lock the per-item annotation template: title, author, type/length, why it is on the list, what it covers, level, and where it fits in the order. 5. Write an acceptance-criteria checklist (e.g. 'each item has a full annotation', 'items are sequenced into a sensible reading order', 'a mix of levels/formats appropriate to the reader', 'each pick is justified for this reader specifically', 'links/locators are included'). 6. Record decisions. Call write_task_note with the reader, criteria, ordering, template, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "curate",
@@ -534,13 +719,23 @@
         "role": "researcher",
         "summary": "selected, ordered, annotated picks for the reader",
         "prompt": "1. Find resources that meet the selection criteria for the specified reader, preferring authoritative and well-regarded materials at the right level. 2. Write reading-list.md grouped/ordered per the locked ordering principle, with each item fully annotated to the template: title, author, type & rough length, why it earns a spot for THIS reader, what it covers, its level, and a working link or locator. 3. Sequence the items into an explicit reading order (number them or use 'start here / next / deeper / reference' groupings) so the reader knows what to read first. 4. Justify each pick against the reader's goal — drop anything you cannot justify rather than padding the list. 5. Include a deliberate mix of levels and formats as scoped, and verify each link/locator is real. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the list path and item count.",
-        "produces": { "path": "reading-list.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "reading-list.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open reading-list.md and check EACH criterion PASS/FAIL: (1) every item has a full annotation following the template from notes/scope.md; (2) items are sequenced into an explicit, sensible reading order (not an unordered dump); (3) each pick is justified for the specified reader and goal, not generic; (4) the mix of levels/formats matches the scope and suits the reader; (5) every item has a working link or locator (spot-check 3); (6) the list is the scoped length with no padding. A random link dump, or items with no annotation or no justification for this reader, FAILS.",
       "loopBackTo": "curate",
-      "deliverable": { "path": "reading-list.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "reading-list.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -563,7 +758,10 @@
         "role": "planner",
         "summary": "topic, citation style, and annotation rubric",
         "prompt": "1. State the research question/topic and the inclusion criteria (source types, recency, minimum count — aim 6+). 2. Lock the citation style exactly (APA, MLA, Chicago, or a stated custom format) with a one-line example of a correctly-formatted entry. 3. Lock the annotation rubric: each annotation must have (a) a 2-4 sentence summary of the source, (b) a critical evaluation of its credibility/method/bias, and (c) a relevance note tying it to the research question. 4. Decide ordering (alphabetical by author, or thematic). 5. Write an acceptance-criteria checklist (e.g. 'every entry is formatted in the locked citation style', 'every annotation has all three rubric parts', 'sources meet the inclusion criteria', 'entries are ordered as specified', 'minimum source count met'). 6. Record decisions. Call write_task_note with the style example, rubric, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -571,7 +769,10 @@
         "role": "researcher",
         "summary": "find each source, draft its three-part annotation",
         "prompt": "1. Find sources meeting the inclusion criteria, prioritizing primary and authoritative works on the topic. 2. For each, record in notes/sources.md: the full bibliographic data needed for the locked citation style, plus a draft three-part annotation (summary, critical evaluation, relevance) per the rubric. 3. In the evaluation part, judge the source honestly — author authority, method or evidence quality, recency, and any bias or limitation — not just praise. 4. Verify each source actually exists and the bibliographic details are correct; flag any you cannot confirm. 5. Ensure you exceed the minimum count and cover the topic without padding with weak sources. Good looks like a sources file where each entry already has correct citation data and a complete three-part annotation. Do not format the final document yet.",
-        "produces": { "path": "notes/sources.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/sources.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -579,13 +780,23 @@
         "role": "copywriter",
         "summary": "formatted, ordered, uniformly-annotated bibliography",
         "prompt": "1. Write bibliography.md as an ordered list of entries: each a citation formatted exactly in the locked style, followed by its annotation containing all three rubric parts (summary, evaluation, relevance). 2. Apply the citation style precisely and consistently — punctuation, author order, italics/markers as the style requires. 3. Keep annotation length and depth uniform across entries. 4. Order entries as specified (alphabetical/thematic). 5. Draw everything from notes/sources.md; do not invent or alter citation data. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the bibliography path and entry count.",
-        "produces": { "path": "bibliography.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "bibliography.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open bibliography.md and check EACH criterion PASS/FAIL: (1) every entry is formatted in the locked citation style and is consistent (check 3 against the style example in notes/scope.md); (2) every annotation contains all three rubric parts — summary, critical evaluation, and relevance; (3) the evaluation part genuinely assesses credibility/method/bias rather than only summarizing; (4) sources meet the inclusion criteria and the minimum count is met; (5) entries are ordered as specified; (6) citation data matches notes/sources.md with nothing fabricated. An entry missing a rubric part, or with a malformed/invented citation, FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "bibliography.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "bibliography.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -608,7 +819,10 @@
         "role": "planner",
         "summary": "decision question, options, evidence + confidence rubric",
         "prompt": "1. State the exact decision question and the discrete options on the table (including 'do nothing' if relevant) in a few lines. 2. Lock the criteria that good evidence must meet for this decision (relevance, source quality, recency) and a confidence scale: High / Medium / Low, with a one-line definition of each (e.g. High = multiple independent strong sources agree). 3. Decide how evidence maps to a recommendation (e.g. weigh strength-rated evidence for/against each option). 4. Write an acceptance-criteria checklist (e.g. 'evidence is gathered for AND against each option', 'each piece of evidence is rated for strength and cited', 'the recommendation states an explicit confidence level', 'key uncertainties and what would change the recommendation are listed', 'no recommendation exceeds the confidence its evidence supports'). 5. Record decisions. Call write_task_note with the question, options, confidence scale, and checklist; write the same to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "research",
@@ -616,7 +830,10 @@
         "role": "researcher",
         "summary": "evidence for/against each option, strength-rated + cited",
         "prompt": "1. For each option, gather evidence both FOR and AGAINST into notes/evidence.md: the finding, its source [n], the date, and a strength rating per the locked confidence scale with a reason (sample size, source quality, corroboration). 2. Actively seek disconfirming evidence for the option you suspect is best — steelman the alternatives so the brief is not a foregone conclusion. 3. Corroborate strong claims across independent sources before rating them High. 4. Explicitly record what is unknown and what evidence would resolve it. 5. Mark anything you cannot verify UNVERIFIED. Good looks like a balanced, strength-rated evidence file per option. Do not write the recommendation yet.",
-        "produces": { "path": "notes/evidence.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/evidence.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -624,13 +841,23 @@
         "role": "copywriter",
         "summary": "recommendation with confidence + key uncertainties",
         "prompt": "1. Write brief.md: a bottom-line recommendation up top stating which option and at what confidence level (High/Medium/Low), then a section per option laying out evidence for and against with each piece's strength rating and citation [n], then a 'Key uncertainties & what would change this' section. 2. Calibrate the stated confidence to the evidence — do not claim High confidence on Low/Medium evidence; if the evidence is thin, say so plainly. 3. Present the alternatives fairly, including the strongest case against your recommendation. 4. Add a References list from notes/evidence.md so every [n] resolves. 5. Keep it decision-ready and scannable. 6. On a loop-back, fix only the named gaps. 7. Call write_task_note with the brief path and which criteria now pass.",
-        "produces": { "path": "brief.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "brief.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open brief.md and check EACH criterion PASS/FAIL: (1) evidence is presented for AND against each option (not one-sided); (2) each piece of evidence is strength-rated and cited (spot-check 3 against notes/evidence.md); (3) the recommendation states an explicit confidence level; (4) the stated confidence is calibrated to the evidence — a High-confidence call must rest on multiple strong corroborated sources; (5) a 'key uncertainties / what would change this' section exists; (6) the strongest counter-case is acknowledged. A one-sided brief, or one claiming more confidence than its evidence supports, FAILS.",
       "loopBackTo": "write",
-      "deliverable": { "path": "brief.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "brief.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

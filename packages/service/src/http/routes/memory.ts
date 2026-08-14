@@ -15,13 +15,13 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
       query: string;
       topK?: number;
     };
-    const results = await ctx.memory.searchAll(
+    const outcome = await ctx.memory.searchAllDetailed(
       body.gezelId,
       body.projectId,
       body.query,
       body.topK ?? 10,
     );
-    return c.json({ results });
+    return c.json(outcome);
   });
 
   app.post('/save', async (c) => {
@@ -33,7 +33,7 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     };
     const kind = isMemoryKind(body.kind) ? body.kind : 'fact';
     const outcome = await ctx.memory.save(body.scope, body.id, body.text, kind);
-    return c.json({ ok: true, status: outcome?.status ?? 'saved' });
+    return c.json({ ok: true, ...outcome });
   });
 
   app.get('/recent', async (c) => {

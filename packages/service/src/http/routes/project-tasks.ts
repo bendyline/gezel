@@ -84,6 +84,7 @@ async function resolveActor(
 
 export function projectTaskRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  const inflightCraftbookInvocations = new Map<string, Promise<Task>>();
 
   // Nested under /api/projects/:id/tasks — see http/server.ts
   app.get('/:projectId/tasks', async (c) => {
@@ -102,10 +103,38 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:projectId/tasks', async (c) => {
     const projectId = c.req.param('projectId');
-    const { dispatchEntry, ...body } = CreateTaskRequestSchema.parse(await c.req.json());
+    const { dispatchEntry, craftbookInvocationKey, ...body } = CreateTaskRequestSchema.parse(
+      await c.req.json(),
+    );
     let task: Task;
     try {
-      task = await ctx.tasks.create(projectId, body);
+      if (craftbookInvocationKey) {
+        const existing = (await ctx.tasks.list({ projectId })).find(
+          (candidate) =>
+            candidate.origin?.kind === 'craftbook-invocation' &&
+            candidate.origin.key === craftbookInvocationKey &&
+            (candidate.status === 'draft' ||
+              candidate.status === 'active' ||
+              candidate.status === 'paused'),
+        );
+        if (existing) return c.json(existing);
+
+        const inflightKey = `${projectId}:${craftbookInvocationKey}`;
+        const pending = inflightCraftbookInvocations.get(inflightKey);
+        if (pending) return c.json(await pending);
+
+        const create = ctx.tasks.create(projectId, body, {
+          origin: { kind: 'craftbook-invocation', key: craftbookInvocationKey },
+        });
+        inflightCraftbookInvocations.set(inflightKey, create);
+        try {
+          task = await create;
+        } finally {
+          inflightCraftbookInvocations.delete(inflightKey);
+        }
+      } else {
+        task = await ctx.tasks.create(projectId, body);
+      }
     } catch (err) {
       if (err instanceof CraftbookSetupRequiredError) {
         return c.json(

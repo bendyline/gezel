@@ -19,7 +19,10 @@
         "role": "data-analyst",
         "summary": "measure the data's shape, types, and defects before touching it",
         "prompt": "Load the raw dataset and PROFILE it before deciding any fix. Step 1: report row count, column count, and the delimiter/encoding. Step 2: for EACH column report inferred type, % null/blank, # distinct values, and 3 sample values. Step 3: count exact-duplicate rows and flag candidate key columns. Step 4: list concrete defects you observe — mixed types in a column, inconsistent casing ('USA' vs 'usa'), stray whitespace, mojibake/encoding issues, impossible values (negative ages, dates in the future), and outliers (values > 3 stdev). Step 5: turn each defect into a planned, deterministic fix and write an acceptance-criteria checklist (e.g. 'no exact-duplicate rows', 'date column parses as ISO-8601', 'no nulls in key columns', 'cleaned row count >= 95% of raw unless dupes explain the drop'). Call write_task_note with the profile table + defects + fixes + checklist, and also write the same content to notes/profile.md. No cleaning code yet.",
-        "produces": { "path": "notes/profile.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/profile.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "clean",
@@ -27,13 +30,23 @@
         "role": "developer",
         "summary": "apply the planned deterministic transforms and emit the cleaned file",
         "prompt": "Apply EXACTLY the fixes the profile planned — no new undocumented transforms. Step 1: read the raw file with the correct encoding/delimiter. Step 2: in order, drop exact duplicates, coerce each column to its target type, normalize whitespace and casing, standardize known value variants to a canonical form, and handle nulls per the plan (impute, drop, or leave with a reason). Step 3: keep a running tally of rows-in vs rows-out and WHY any row was dropped. Step 4: write the cleaned dataset to data/clean.csv with a header row and consistent quoting. Step 5: call write_task_note with the path, the rows-in/rows-out delta, and which checklist items the output now satisfies. Do not lose columns the profile expected to keep.",
-        "produces": { "path": "data/clean.csv", "kind": "data-file" }
+        "produces": {
+          "path": "data/clean.csv",
+          "kind": "data-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Validate that data/clean.csv is genuinely analysis-ready by re-profiling it. Step 1: confirm it parses as CSV, has a header row, and zero exact-duplicate rows. Step 2: confirm the key column(s) have no nulls and every column holds its declared type. Step 3: reconcile the row count — raw rows minus documented duplicates must equal the cleaned row count, and no column was dropped. Step 4: re-measure at least two of these numbers yourself rather than trusting the build note. Step 5: spot-check 5 rows against the raw source to confirm values were transformed, not corrupted. Write PASS/FAIL per acceptance criterion from the profile note; any FAIL loops back to clean.",
       "loopBackTo": "clean",
-      "deliverable": { "path": "data/clean.csv", "kind": "data-file" }
+      "deliverable": {
+        "path": "data/clean.csv",
+        "kind": "data-file"
+      }
+    },
+    "release": {
+      "version": "1.2.2",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -56,7 +69,10 @@
         "role": "data-analyst",
         "summary": "extract the real findings with supporting numbers",
         "prompt": "Interrogate the dataset to find what actually matters — do not write prose yet. Step 1: state the 3-5 questions the report should answer (totals, trends over time, top/bottom segments, notable correlations or anomalies). Step 2: compute the answer to each with concrete numbers (counts, means, %, deltas, top-N) and record the exact figure plus how you derived it. Step 3: identify the single most important takeaway and 2-3 supporting findings, each tied to a number. Step 4: note data caveats (sample size, missing periods, definitions). Step 5: write an acceptance-criteria checklist for the report ('leads with the headline finding', 'every claim cites a number', 'includes a summary table', 'states limitations'). Call write_task_note and write the findings + figures + checklist to notes/analyze.md. No narrative prose yet.",
-        "produces": { "path": "notes/analyze.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/analyze.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -64,7 +80,10 @@
         "role": "copywriter",
         "summary": "draft a takeaway-led narrative grounded in the figures",
         "prompt": "Write the report narrative using ONLY the figures from the analysis note — invent no numbers. Step 1: open with a 2-3 sentence executive summary that states the headline finding and its 'so what'. Step 2: write one short section per supporting finding; each paragraph states the insight, then the number that proves it, then the implication. Step 3: keep it scannable — short paragraphs, plain language, no jargon a manager wouldn't use. Step 4: end with a clearly labeled 'Limitations' paragraph from the caveats. Call write_task_note with the draft keyed by section so the build phase drops it straight in.",
-        "produces": { "path": "notes/write.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/write.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -72,13 +91,23 @@
         "role": "developer",
         "summary": "assemble the polished report.md with sections and a summary table",
         "prompt": "Assemble the final report as report.md. Step 1: add a title, a date, and an Executive Summary section from the approved narrative. Step 2: add one ## section per finding with the prose and inline figures. Step 3: include a Markdown summary table of the key metrics (metric, value, change). Step 4: add a Methodology / Data notes section and a Limitations section. Step 5: ensure every numeric claim in the prose matches the analysis note. On a loop-back, fix only the named gaps. Call write_task_note with the report path and section list.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read report.md as a stakeholder would. Verify: it opens with a takeaway-led executive summary; every numeric claim matches a figure in the analysis note (re-check at least three); it contains a summary table of key metrics; section headers organize it; and a Limitations section is present and honest. Confirm no fabricated numbers and no claim without a supporting figure. Write PASS/FAIL per acceptance criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -101,7 +130,10 @@
         "role": "planner",
         "summary": "lock the questions and the chart type that answers each",
         "prompt": "Decide WHAT the chart pack must answer before any analysis. Step 1: list 4-8 specific questions a reader has about this data (e.g. 'how did revenue trend by month?', 'which 5 categories are largest?', 'how are values distributed?'). Step 2: for EACH question pick the chart type that answers it best and say why (trend over time -> line; part-to-whole -> bar/stacked, not pie unless <=5 slices; distribution -> histogram; comparison -> grouped bar; relationship -> scatter). Step 3: name the exact columns and aggregation each chart needs. Step 4: write an acceptance-criteria checklist ('one chart per question', 'every chart has a title + axis labels', 'every chart has a one-line takeaway caption', 'chart type matches the question'). Call write_task_note and write the question->chart mapping + checklist to notes/question-scope.md.",
-        "produces": { "path": "notes/question-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/question-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -109,7 +141,10 @@
         "role": "data-analyst",
         "summary": "aggregate the data into the exact series each chart needs",
         "prompt": "Transform the raw data into the precise series each scoped chart needs. Step 1: for each chart, group/aggregate the columns named in the scope (sum, count, average, bucketed histogram) and produce ordered (label, value) arrays. Step 2: sort sensibly (time ascending, categories by magnitude) and cap to a readable count (top-N + 'other' if needed). Step 3: write the computed takeaway caption for each chart from the numbers ('March was the peak at 4.2k, up 38% from Feb'). Step 4: emit the series as data/series.json keyed by chart id so the build phase reads it directly. Call write_task_note with the series summary and the captions.",
-        "produces": { "path": "data/series.json", "kind": "json" }
+        "produces": {
+          "path": "data/series.json",
+          "kind": "json"
+        }
       },
       {
         "id": "build",
@@ -117,13 +152,23 @@
         "role": "developer",
         "summary": "render every chart in one self-contained index.html",
         "prompt": "Build a single self-contained index.html that renders every scoped chart from data/series.json. Step 1: use inline <canvas>/SVG drawing or a single inlined chart library — no external network asset that could fail offline; if you embed the series, keep it in sync with the JSON. Step 2: render each chart with its title, labeled axes, readable ticks, and a legend where needed. Step 3: place the one-line takeaway caption under each chart. Step 4: lay the charts out responsively in a grid that reads top-to-bottom in the scoped order. Step 5: ensure no console errors and that charts have real data, not placeholders. On a loop-back, fix only the named gaps. Call write_task_note with the path and chart count.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open index.html (render it if a browser capability exists, else trace the source). Verify: there is one chart per scoped question; each chart has a title, labeled axes, and a takeaway caption; the chart type matches the question from the scope; charts render real values from the series, not placeholders; and there are no console errors. Spot-check two charts' values against data/series.json. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -146,7 +191,10 @@
         "role": "planner",
         "summary": "lock the purpose, drivers, assumptions, and outputs",
         "prompt": "Define the model's contract before building. Step 1: state the question the model answers and the single primary output (e.g. 'monthly net profit', '12-month cash runway'). Step 2: list the input drivers (assumptions a user changes) with a default value and unit for each. Step 3: list the calculated rows and the formula logic in words ('revenue = units * price'; 'gross margin = revenue - COGS'). Step 4: define the time axis or scenario columns if any. Step 5: write an acceptance-criteria checklist ('inputs, calcs, and outputs are visually separated', 'every assumption is a labeled editable cell', 'totals reconcile', 'changing an input flows through to the output', 'a documented sanity scenario produces the expected value'). Call write_task_note and write the driver list + formula logic + checklist to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -154,13 +202,23 @@
         "role": "developer",
         "summary": "implement the model with live formulas and labeled cells",
         "prompt": "Build the model as a single interactive index.html that behaves like a spreadsheet. Step 1: lay out three clearly labeled zones — Assumptions (editable inputs), Calculations, and Outputs. Step 2: implement every calculated row with a live formula derived from the inputs (changing an input recomputes downstream values in the page). Step 3: label each cell with its name and unit; format currency/percent appropriately. Step 4: add the time/scenario columns from the scope and ensure totals sum correctly. Step 5: seed the default assumptions and show the primary output prominently. On a loop-back, fix only the named gaps. Call write_task_note with the path and the computed default output.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open index.html and exercise it as a spreadsheet, verifying the math, not just the layout. Step 1: confirm inputs, calculations, and outputs are visually separated and every assumption is a labeled, editable cell with a unit. Step 2: independently compute the primary output by hand from the default assumptions and confirm the model agrees. Step 3: change one driver to a round number, re-derive the expected output by hand, and confirm the model recomputes to it live (the flow-through works). Step 4: run the documented sanity scenario and check it hits the expected value. Step 5: confirm totals reconcile (subtotals sum to totals) and no calculated value is hardcoded where it should reference an input. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -183,7 +241,10 @@
         "role": "planner",
         "summary": "lock the question, tables, grain, and filters",
         "prompt": "Pin down exactly what the query must compute before writing SQL. Step 1: restate the business question as a precise metric ('count of distinct paying users who signed up in Q1', not 'how many users'). Step 2: identify the tables and the columns involved, and the join keys between them. Step 3: state the GRAIN of the answer (one row per user? per day? a single scalar?) and any filters (date range, status, dedup rule). Step 4: define edge cases (nulls, soft-deletes, duplicates, timezone). Step 5: write an acceptance-criteria checklist ('answers the exact restated question', 'joins on the correct keys', 'filters match the stated scope', 'handles nulls/dupes correctly', 'result is at the stated grain'). Call write_task_note and write the restated question + schema map + grain + checklist to notes/question-scope.md.",
-        "produces": { "path": "notes/question-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/question-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "query",
@@ -191,13 +252,23 @@
         "role": "data-analyst",
         "summary": "author a correct, readable query and capture the result",
         "prompt": "Write the SQL that answers the scoped question and run it if a database capability is available. Step 1: write a readable query — CTEs over deep nesting, explicit column lists, clear aliases, and a comment stating what it returns. Step 2: apply the scoped filters, joins, and dedup rule; pick the correct aggregate (COUNT(DISTINCT ...) vs COUNT(*)) for the grain. Step 3: run it (or, if no DB is reachable, dry-run against the schema and reason about the result), and capture the returned rows/value. Step 4: write the query to query.sql and record the result. Call write_task_note with the query, the result, and the assumptions baked in. On a loop-back, fix only the named correctness gaps.",
-        "produces": { "path": "query.sql", "kind": "code-module" }
+        "produces": {
+          "path": "query.sql",
+          "kind": "code-module"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read query.sql and verify it is correct, not just runnable. Step 1: confirm it answers the exact restated question, the joins use the correct keys, the aggregate matches the stated grain (e.g. COUNT(DISTINCT) where dedup is required), and the filters match scope. Step 2: re-reason about the classic SQL traps yourself — fan-out from a one-to-many join inflating counts, NULLs silently dropping rows in filters, and a missing DISTINCT. Step 3: sanity-check the captured result's magnitude against a back-of-envelope expectation and flag if it's implausible (e.g. more paying users than total users). Step 4: state in one sentence what the number means in business terms. Write PASS/FAIL per criterion; any FAIL loops back to query.",
       "loopBackTo": "query",
-      "deliverable": { "path": "query.sql", "kind": "code-module" }
+      "deliverable": {
+        "path": "query.sql",
+        "kind": "code-module"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -220,7 +291,10 @@
         "role": "data-analyst",
         "summary": "lock the hypothesis, primary metric, and decision rule before looking",
         "prompt": "Define the experiment's contract BEFORE computing anything, to prevent metric-shopping. Step 1: state the hypothesis ('variant B increases checkout conversion vs control'). Step 2: name the ONE primary metric the decision rests on and how it's defined (conversions / exposures). Step 3: list guardrail metrics that must not regress. Step 4: state the decision rule up front (e.g. 'ship if lift is positive and significant at 95% and no guardrail drops > 2%'). Step 5: write an acceptance-criteria checklist ('reports lift with a confidence interval', 'reports a significance test for the primary metric', 'checks sample size / power', 'gives a clear ship/no-ship tied to the decision rule', 'flags any guardrail regression'). Call write_task_note and write the hypothesis + metric + decision rule + checklist to notes/hypothesis-scope.md.",
-        "produces": { "path": "notes/hypothesis-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/hypothesis-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -228,7 +302,10 @@
         "role": "data-analyst",
         "summary": "compute lift, significance, and confidence intervals",
         "prompt": "Compute the statistics for the primary metric and guardrails. Step 1: for control and variant, report exposures, conversions, and the rate. Step 2: compute absolute and relative lift. Step 3: run the appropriate significance test (two-proportion z-test for a rate; report the p-value) and a confidence interval on the lift. Step 4: assess whether the sample size is adequate (was the experiment powered, or is it underpowered/peeking?). Step 5: compute the guardrail metrics and flag any regression. Step 6: apply the decision rule to reach a tentative verdict. Write the computed numbers to data/stats.json (rates, lift, p-value, CI, guardrails) and call write_task_note with the figures and the tentative call.",
-        "produces": { "path": "data/stats.json", "kind": "json" }
+        "produces": {
+          "path": "data/stats.json",
+          "kind": "json"
+        }
       },
       {
         "id": "write",
@@ -236,13 +313,23 @@
         "role": "copywriter",
         "summary": "produce a plain-language ship/no-ship recommendation",
         "prompt": "Write a decision-ready readout from the computed stats — no new numbers. Step 1: lead with the recommendation (Ship / Don't ship / Inconclusive) in the first sentence, tied to the decision rule. Step 2: state the lift with its confidence interval and whether it cleared significance, in plain language ('+8% conversion, 95% CI [3%, 13%], significant at p=0.01'). Step 3: note the guardrail check result. Step 4: caveat honestly — underpowered, short runtime, novelty effect, or a result too good to be true. Step 5: end with the concrete next action. Write the readout to readout.md and call write_task_note with the recommendation. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "readout.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "readout.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read readout.md and check it against the scope. Verify: it leads with a clear ship/no-ship recommendation tied to the stated decision rule; it reports lift WITH a confidence interval; it reports a significance test for the primary metric; it addresses sample size / power; and it flags any guardrail regression. Re-check the headline lift and significance call against data/stats.json. Confirm the verdict actually follows from the decision rule (not metric-shopped). Write PASS/FAIL per criterion; any FAIL loops back to write.",
       "loopBackTo": "write",
-      "deliverable": { "path": "readout.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "readout.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -265,7 +352,10 @@
         "role": "planner",
         "summary": "lock the input schema, target schema, and field-by-field mapping",
         "prompt": "Define the transform contract before writing any code. Step 1: document the INPUT schema (columns, types, format/delimiter) from a sample of the source. Step 2: document the TARGET schema (columns, types, order, output format). Step 3: write the field-by-field mapping table: each target column = which source column(s) and the transform (rename, cast, split on delimiter, concatenate, derive via formula, constant). Step 4: define row-level rules — filters to apply, dedup, how to handle missing source values, and pivot/unpivot if the shape changes. Step 5: write an acceptance-criteria checklist ('output has exactly the target columns in order', 'output parses in the target format', 'row count matches the filter rule', 'a sampled row maps correctly end-to-end', 'no data type errors'). Call write_task_note and write the mapping table + rules + checklist to notes/schema-scope.md.",
-        "produces": { "path": "notes/schema-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/schema-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -273,13 +363,23 @@
         "role": "developer",
         "summary": "apply the mapping and emit the target file",
         "prompt": "Implement the transform exactly to the mapping table. Step 1: read the input with the correct delimiter/encoding. Step 2: apply each target column's rule in order (rename, cast, split/join, derive, constant); reshape (pivot/unpivot) if specified. Step 3: apply row filters and dedup; track rows-in vs rows-out and the reason for any drop. Step 4: write the output to data/output.csv (or the requested format/extension) with the target columns in the exact specified order and a header row. Step 5: ensure the output parses (valid CSV/JSON) and types are clean (no '1.0' where an int is expected). On a loop-back, fix only the named gaps. Call write_task_note with the path and rows-in/rows-out.",
-        "produces": { "path": "data/output.csv", "kind": "data-file" }
+        "produces": {
+          "path": "data/output.csv",
+          "kind": "data-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open data/output.csv and verify it matches the schema-scope contract. Step 1: confirm it parses in the target format and has EXACTLY the target columns in the specified order. Step 2: re-count the rows and reconcile against input — the count must equal input rows after the documented filter/dedup, with the delta explained. Step 3: pick 3 source rows and trace them through the mapping by hand to confirm each target field is correct end-to-end. Step 4: scan for type errors (e.g. '1.0' where an int is expected) and stray nulls the mapping didn't intend. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "data/output.csv", "kind": "data-file" }
+      "deliverable": {
+        "path": "data/output.csv",
+        "kind": "data-file"
+      }
+    },
+    "release": {
+      "version": "1.2.2",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -302,7 +402,10 @@
         "role": "data-analyst",
         "summary": "derive each column's real type, domain, and relationships from values",
         "prompt": "Profile the dataset to learn each column's TRUE characteristics from the data itself. Step 1: list every column. Step 2: for each, derive the data type, the value domain (range for numerics, the enumerated set for low-cardinality categoricals, format/pattern for strings like dates or IDs), the null/blank rate, the unit of measure, and an example value. Step 3: infer the likely meaning of each column and flag any whose name is ambiguous. Step 4: identify keys (unique columns), likely foreign keys, and any computed/derived columns. Step 5: write an acceptance-criteria checklist ('one entry per column', 'each entry has type + description + example', 'enumerated columns list their allowed values', 'keys and relationships are documented', 'units are stated where relevant'). Call write_task_note and write the per-column profile + checklist to notes/inspect.md.",
-        "produces": { "path": "notes/inspect.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/inspect.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "write",
@@ -310,13 +413,23 @@
         "role": "copywriter",
         "summary": "produce a readable per-column dictionary with dataset context",
         "prompt": "Write the data dictionary from the inspection profile — only describe what the data actually shows. Step 1: open with a dataset overview: what it is, the grain (one row = ?), the source, and the row/column counts. Step 2: produce a Markdown table with one row per column: Column, Type, Description, Allowed values / range, Nullable, Unit, Example. Step 3: write plain-English descriptions a newcomer understands; expand ambiguous names. Step 4: add a short 'Keys & relationships' section and a 'Notes / caveats' section (quirks, deprecated columns, derived fields). Step 5: ensure every column from the inspection appears. Write the dictionary to data-dictionary.md and call write_task_note with the path and column count. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "data-dictionary.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "data-dictionary.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read data-dictionary.md and cross-check it against notes/inspect.md and the dataset. Verify: there is exactly one entry per column (count them against the data); each entry has a type, a plain description, and an example; enumerated columns list their allowed values; nullability and units are stated where relevant; and keys/relationships are documented. Spot-check 3 columns' types and value domains against the actual data. Write PASS/FAIL per criterion; any FAIL loops back to write.",
       "loopBackTo": "write",
-      "deliverable": { "path": "data-dictionary.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "data-dictionary.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -339,7 +452,10 @@
         "role": "data-analyst",
         "summary": "lock what counts as anomalous and the thresholds",
         "prompt": "Define exactly what 'anomalous' means before scanning, so results are reproducible. Step 1: choose which columns/metrics to scan and the expected normal behavior of each. Step 2: pick detection methods per column — statistical (z-score > 3, IQR fence at 1.5x, percentile cutoffs) for numerics; rule-based (impossible/contradictory values, future dates, out-of-domain categories, broken referential integrity) where rules apply. Step 3: set concrete thresholds and a severity scale (e.g. high = impossible value or z > 4; medium = z 3-4). Step 4: decide how to rank flagged records. Step 5: write an acceptance-criteria checklist ('every method has a stated threshold', 'each flag records the rule it tripped and a severity', 'findings are ranked', 'false-positive rate is considered'). Call write_task_note and write the methods + thresholds + checklist to notes/criteria.md. No scanning yet.",
-        "produces": { "path": "notes/criteria.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/criteria.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "scan",
@@ -347,7 +463,10 @@
         "role": "developer",
         "summary": "apply the criteria and emit ranked flagged records",
         "prompt": "Apply the detection criteria to the full dataset deterministically. Step 1: compute the per-column statistics the thresholds need (mean/stdev, quartiles, value-domain sets). Step 2: evaluate every record against each method and collect the flags it trips, with the measured value and the threshold it breached. Step 3: assign each flagged record a severity and a reason string. Step 4: rank flagged records by severity then magnitude. Step 5: emit data/anomalies.json — a ranked list of { record id/row, column, value, rule, threshold, severity } plus a summary count by severity. Do not flag records that don't breach a stated threshold. Call write_task_note with the counts by severity and the top findings.",
-        "produces": { "path": "data/anomalies.json", "kind": "json" }
+        "produces": {
+          "path": "data/anomalies.json",
+          "kind": "json"
+        }
       },
       {
         "id": "report",
@@ -355,13 +474,23 @@
         "role": "copywriter",
         "summary": "write a prioritized, triage-ready anomaly report",
         "prompt": "Turn the flagged records into a report a human can triage — use only what the scan found. Step 1: open with a summary: how many records scanned, how many flagged, and the breakdown by severity. Step 2: list the top findings highest-severity first, each with the record, the value, what's wrong, and why it tripped (the rule + threshold). Step 3: group repeated patterns ('14 rows have a negative price') rather than listing each identically. Step 4: separate likely-real anomalies from probable noise/false-positives and say which deserve action. Step 5: end with recommended next steps. Write the report to report.md and call write_task_note with the path. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read report.md and cross-check it against notes/criteria.md and data/anomalies.json. Verify: every detection method named a concrete threshold; each reported flag records the rule it tripped, the value, and a severity; findings are ranked highest-severity first; repeated patterns are grouped, not duplicated; and likely false-positives are separated from real anomalies. Re-derive two flagged records from the criteria to confirm they genuinely breach a threshold (no spurious flags). Write PASS/FAIL per criterion; any FAIL loops back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -384,7 +513,10 @@
         "role": "data-analyst",
         "summary": "lock the series, horizon, method, and assumptions",
         "prompt": "Frame the forecast before computing it. Step 1: identify the metric, its time grain (daily/weekly/monthly), and how much history you have. Step 2: inspect the history for trend, seasonality, and level shifts, and note them. Step 3: pick a method appropriate to the data and JUSTIFY it (linear/exponential trend, simple moving average, naive-seasonal, simple exponential smoothing) — prefer the simplest method the data supports; avoid overfitting short series. Step 4: state the forecast horizon and the key assumptions (no regime change, seasonality repeats). Step 5: write an acceptance-criteria checklist ('method is justified by the observed pattern', 'forecast covers the stated horizon', 'output includes a confidence/uncertainty band', 'assumptions are stated', 'projection is continuous with recent history'). Call write_task_note and write the method choice + assumptions + checklist to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -392,13 +524,23 @@
         "role": "developer",
         "summary": "compute the projection with a baseline and an uncertainty band",
         "prompt": "Compute the forecast with the scoped method. Step 1: fit the chosen method to the history (e.g. fit a trend line, compute smoothing, or seasonal-naive). Step 2: project the metric over the full horizon and produce point forecasts per period. Step 3: compute an uncertainty band (e.g. +/- from the residual standard error, or a simple high/low scenario) so the output is a range, not just a line. Step 4: emit data/forecast.json with history, point forecast per period, and the band; if helpful, also render a small inline line chart of history + forecast in index.html. Step 5: ensure the forecast joins smoothly to the last actual value (no implausible jump). On a loop-back, fix only the named gaps. Call write_task_note with the projected values and the band.",
-        "produces": { "path": "data/forecast.json", "kind": "json" }
+        "produces": {
+          "path": "data/forecast.json",
+          "kind": "json"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open data/forecast.json and review it for plausibility and rigor against notes/scope.md. Step 1: confirm the chosen method is justified by the observed pattern, the forecast covers the full stated horizon, and the assumptions are stated. Step 2: confirm the projection is continuous with recent actuals (no implausible jump) and the trend direction matches the history. Step 3: confirm the output includes an uncertainty band (not just a point line) that widens with the horizon or is at least present and reasonable. Step 4: re-compute one forecast period by hand from the method and confirm the model agrees. Step 5: watch for overfit or absurd extrapolation — a short, noisy series projected into a steep unbounded curve. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "data/forecast.json", "kind": "json" }
+      "deliverable": {
+        "path": "data/forecast.json",
+        "kind": "json"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -421,7 +563,10 @@
         "role": "data-analyst",
         "summary": "lock the questions, response types, and segments to cut by",
         "prompt": "Map the survey before analyzing it. Step 1: list every question, its type (single-choice, multi-select, Likert/rating, open text, NPS), and the response count / completion rate. Step 2: identify the segmentation dimensions worth cutting by (role, plan, region) and confirm the data supports them. Step 3: for rating questions decide the summary stat (mean, top-2-box %, NPS formula); for open-text plan a thematic coding pass. Step 4: flag data hygiene issues (straightliners, blank responses, low-N segments to suppress). Step 5: write an acceptance-criteria checklist ('every question summarized', 'closed questions show distribution + a headline stat', 'open-text is themed with counts and example quotes', 'segment cuts suppress low-N', 'response/completion counts stated'). Call write_task_note and write the question map + segments + checklist to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -429,7 +574,10 @@
         "role": "data-analyst",
         "summary": "tally closed questions and theme open-text comments",
         "prompt": "Compute the survey results from the responses. Step 1: for each closed question, compute the full distribution and the chosen headline stat (mean, top-2-box %, or NPS), and the same per segment where N is adequate. Step 2: for each open-text question, read the comments, induce 4-8 recurring themes, code each comment to a theme, and count theme frequencies; pull 1-2 verbatim quotes per major theme. Step 3: identify the most striking segment differences and surprises with the numbers. Step 4: suppress or caveat low-N segments. Step 5: emit data/results.json (per-question distributions, headline stats, theme counts, quotes) and call write_task_note with the headline findings.",
-        "produces": { "path": "data/results.json", "kind": "json" }
+        "produces": {
+          "path": "data/results.json",
+          "kind": "json"
+        }
       },
       {
         "id": "write",
@@ -437,13 +585,23 @@
         "role": "copywriter",
         "summary": "produce a findings summary with headlines, segments, and quotes",
         "prompt": "Write the survey readout from the computed results — no invented numbers or quotes. Step 1: open with response counts and the 3 biggest takeaways. Step 2: one short section per key question: the headline stat, the distribution in words, and the notable segment difference. Step 3: a themes section for open-text: each theme with its frequency and a representative verbatim quote (quoted exactly). Step 4: a 'surprises / watch-outs' section. Step 5: caveat sample size and any suppressed segments. Write the summary to summary.md and call write_task_note with the path. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "summary.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "summary.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read summary.md and cross-check against notes/scope.md and data/results.json. Verify: every survey question is summarized; closed questions show a distribution plus a headline stat; open-text is themed with frequency counts and exact verbatim quotes; segment cuts suppress low-N; and response/completion counts are stated. Re-check two headline stats (e.g. an NPS or top-2-box) against the results data, and confirm quotes are verbatim, not paraphrased. Write PASS/FAIL per criterion; any FAIL loops back to write.",
       "loopBackTo": "write",
-      "deliverable": { "path": "summary.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "summary.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -466,7 +624,10 @@
         "role": "planner",
         "summary": "lock the audience, decisions, and questions the dashboard answers",
         "prompt": "Establish why the dashboard exists before designing widgets. Step 1: name the primary audience and the recurring decisions they make. Step 2: list the 5-10 specific questions the dashboard must answer for those decisions, ordered by importance. Step 3: for each question, name the metric(s) that answer it and define each metric precisely (numerator/denominator, time window). Step 4: identify the filters/segments users need (date range, team, region) and the refresh cadence. Step 5: write an acceptance-criteria checklist ('every widget traces to a listed question', 'each metric has a precise definition', 'top question is most prominent', 'required filters are listed', 'no orphan chart that answers no question'). Call write_task_note and write the audience + questions + metric definitions + checklist to notes/question-scope.md.",
-        "produces": { "path": "notes/question-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/question-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "design",
@@ -474,13 +635,23 @@
         "role": "designer",
         "summary": "produce a build-ready layout: widgets, metrics, filters, hierarchy",
         "prompt": "Design the dashboard as a build-ready specification (a spec, not the live dashboard). Step 1: choose the widget per question — KPI tile for a single headline number, line for trend, bar for comparison, table for detail — and justify each choice. Step 2: lay out the screen in priority order: a top KPI strip for the headline numbers, then trend and breakdown sections; describe the grid/wireframe in markdown. Step 3: for each widget specify title, chart type, the exact metric + its definition, dimensions/filters it responds to, and the data source/field. Step 4: specify global filters, default date range, and refresh cadence. Step 5: confirm every widget maps to a scoped question and there are no orphans. Write the full spec to dashboard-spec.md and call write_task_note with the widget count. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "dashboard-spec.md", "kind": "markdown-doc" }
+        "produces": {
+          "path": "dashboard-spec.md",
+          "kind": "markdown-doc"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read dashboard-spec.md and check it against notes/question-scope.md. Verify: every widget traces explicitly to a listed question (and no orphan widget answers nothing); each widget names a chart type with a justification; each metric has a precise definition (numerator/denominator/window); the layout puts the top question most prominently; and required global filters, default date range, and refresh cadence are specified. Confirm a developer could build it without re-asking what a metric means. Write PASS/FAIL per criterion; any FAIL loops back to design.",
       "loopBackTo": "design",
-      "deliverable": { "path": "dashboard-spec.md", "kind": "markdown-doc" }
+      "deliverable": {
+        "path": "dashboard-spec.md",
+        "kind": "markdown-doc"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -504,7 +675,10 @@
         "role": "data-analyst",
         "summary": "lock the cohort key, activity event, and retention window",
         "prompt": "Define retention unambiguously before computing anything. Step 1: choose the cohort key — usually signup/first-activity period (weekly or monthly), and state the period. Step 2: define the ACTIVITY that counts as 'retained' (logged in, made a purchase, used core feature) and the unit (a user, an account). Step 3: define the retention window and periods (W0..W8, or M0..M6) and whether it's classic (active in period N) or rolling/unbounded. Step 4: state filters (exclude test accounts, a minimum-tenure cutoff so incomplete recent cohorts are flagged). Step 5: write an acceptance-criteria checklist ('cohort key and activity are precisely defined', 'retention table has cohorts as rows and periods as columns', 'period 0 is 100% by construction', 'incomplete recent cohorts are flagged', 'a trend across cohorts is reported'). Call write_task_note and write the definitions + checklist to notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "analyze",
@@ -512,7 +686,10 @@
         "role": "data-analyst",
         "summary": "compute the retention matrix and curves",
         "prompt": "Compute the cohort retention matrix from the defined rules. Step 1: assign each user/account to its cohort by the cohort key. Step 2: for each cohort and each retention period, compute the share of the cohort that performed the activity in that period; period 0 is 100% by construction. Step 3: build the triangular retention matrix (cohorts x periods), the cohort sizes, and the average retention curve across cohorts. Step 4: compute the trend — are later cohorts retaining better at the same period age than earlier ones? Step 5: flag cohorts too recent to have full data. Emit data/cohorts.json (matrix, sizes, average curve, trend) and call write_task_note with the headline retention numbers and the trend.",
-        "produces": { "path": "data/cohorts.json", "kind": "json" }
+        "produces": {
+          "path": "data/cohorts.json",
+          "kind": "json"
+        }
       },
       {
         "id": "write",
@@ -520,13 +697,23 @@
         "role": "copywriter",
         "summary": "explain what the cohorts reveal about retention",
         "prompt": "Write the retention readout from the computed matrix — no invented figures. Step 1: lead with the headline: the typical W1/M1 retention and where the curve flattens (the 'sticky' floor). Step 2: present the retention table (cohorts as rows, periods as columns) and read it for the reader. Step 3: state the cross-cohort trend in plain language ('M1 retention improved from 22% to 31% over the last 6 cohorts'). Step 4: call out the best and worst cohorts and any inflection. Step 5: caveat the incomplete recent cohorts and suggest one next action. Write the readout to readout.md and call write_task_note with the path. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "readout.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "readout.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read readout.md and cross-check against notes/scope.md and data/cohorts.json. Verify: the cohort key and activity are precisely defined and used; the retention table has cohorts as rows and periods as columns with period 0 = 100%; incomplete recent cohorts are flagged; and a cross-cohort trend is reported with numbers. Re-check the headline W1/M1 retention and the trend against the cohort data. Confirm no cohort's retention exceeds 100% or rises impossibly. Write PASS/FAIL per criterion; any FAIL loops back to write.",
       "loopBackTo": "write",
-      "deliverable": { "path": "readout.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "readout.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -549,7 +736,10 @@
         "role": "data-analyst",
         "summary": "lock the dimensions, rules, and thresholds for 'good'",
         "prompt": "Make data quality measurable before auditing. Step 1: choose the quality dimensions in scope — completeness (no missing required fields), validity (values match type/format/domain), consistency (cross-field logic, e.g. end_date >= start_date), uniqueness (no dupes on the key), timeliness (recency), and accuracy/referential integrity where checkable. Step 2: write concrete, testable rules per dimension naming the exact columns ('email matches an email regex', 'status in {active,churned,trial}', 'no duplicate customer_id'). Step 3: set a pass-rate threshold per rule (e.g. >= 99% non-null) and a weighting for the overall score. Step 4: write an acceptance-criteria checklist ('every dimension has at least one testable rule', 'each rule names its columns and threshold', 'audit reports a pass rate + failing examples per rule', 'an overall weighted score is produced'). Call write_task_note and write the rules + thresholds + weights + checklist to notes/rules.md. No auditing yet.",
-        "produces": { "path": "notes/rules.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/rules.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "audit",
@@ -557,7 +747,10 @@
         "role": "developer",
         "summary": "measure every rule and emit pass rates with failing examples",
         "prompt": "Run every quality rule against the full dataset deterministically. Step 1: for each rule, evaluate all rows and compute the pass rate (rows passing / total) and the count of failures. Step 2: capture up to 5 concrete failing examples per rule (the row id + the offending value) so the report can show evidence. Step 3: compare each pass rate to its threshold and mark the rule pass/fail. Step 4: compute the overall weighted quality score from the rule results and the weights. Step 5: emit data/audit.json — per-rule { dimension, rule, pass_rate, threshold, status, failing_examples } plus the overall score and a per-dimension rollup. Call write_task_note with the overall score and the worst rules.",
-        "produces": { "path": "data/audit.json", "kind": "json" }
+        "produces": {
+          "path": "data/audit.json",
+          "kind": "json"
+        }
       },
       {
         "id": "report",
@@ -565,13 +758,23 @@
         "role": "copywriter",
         "summary": "write a prioritized scorecard with remediation steps",
         "prompt": "Write the data-quality report from the audit results — use only measured numbers. Step 1: open with the overall score and a one-line verdict on trustworthiness. Step 2: show a scorecard table: dimension, rule, pass rate, threshold, pass/fail. Step 3: detail the failing rules worst-first, each with its pass rate and 1-2 failing examples as evidence. Step 4: give a prioritized remediation list (fix the highest-impact, lowest-effort failures first) with a concrete action per failing rule. Step 5: note any rule that couldn't be evaluated and why. Write the report to report.md and call write_task_note with the path and overall score. On a loop-back, fix only the named gaps.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Read report.md and cross-check against notes/rules.md and data/audit.json. Verify: every quality dimension has at least one testable rule; each rule reports a pass rate against its threshold with a pass/fail; failing rules show concrete failing examples as evidence; an overall weighted score is reported; and remediation steps are prioritized and concrete. Re-compute one rule's pass rate against the audit data to confirm. Confirm no rule is marked passing while its examples show failures. Write PASS/FAIL per criterion; any FAIL loops back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -594,7 +797,10 @@
         "role": "planner",
         "summary": "lock each KPI's formula, target, and comparison period",
         "prompt": "Define each KPI precisely before computing anything. Step 1: list the 4-8 KPIs the scorecard shows, ordered by importance. Step 2: for each, write the exact formula (numerator / denominator), the unit and format (count, %, currency), and the time window. Step 3: define the comparison — period-over-period (this month vs last) or vs a target — and the target value where one exists. Step 4: define 'good' direction (up is good vs down is good) so deltas can be colored. Step 5: write an acceptance-criteria checklist ('every KPI has a precise formula and unit', 'each tile shows current value + delta vs comparison', 'targets shown where defined', 'good/bad direction is correct', 'a small trend is shown per KPI'). Call write_task_note and write the KPI definitions + targets + checklist to notes/kpi-scope.md.",
-        "produces": { "path": "notes/kpi-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/kpi-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "compute",
@@ -602,7 +808,10 @@
         "role": "data-analyst",
         "summary": "compute each KPI's value, delta, and trend series",
         "prompt": "Compute every scoped KPI from the data. Step 1: for each KPI apply its exact formula over the current window and record the value. Step 2: compute the same for the comparison window and derive the absolute and % delta and whether it's an improvement given the good-direction. Step 3: build a short trend series (e.g. last 6-12 periods) per KPI for the sparkline. Step 4: attach the target and the gap to target where defined. Step 5: emit data/kpis.json — per KPI { name, value, unit, delta, delta_pct, improved, target, trend[] }. Double-check a denominator isn't zero and a % isn't mis-scaled. Call write_task_note with the headline KPI values and deltas.",
-        "produces": { "path": "data/kpis.json", "kind": "json" }
+        "produces": {
+          "path": "data/kpis.json",
+          "kind": "json"
+        }
       },
       {
         "id": "build",
@@ -610,13 +819,23 @@
         "role": "developer",
         "summary": "render a self-contained KPI scorecard page",
         "prompt": "Build a single self-contained index.html scorecard from data/kpis.json. Step 1: render one KPI tile per metric in priority order, each showing the formatted current value, the metric name, and the delta vs comparison with an up/down arrow colored by improvement (green good, red bad per the good-direction). Step 2: show the target and gap where defined. Step 3: draw a tiny inline sparkline (canvas/SVG) of the trend series in each tile — no external chart CDN that could fail offline. Step 4: lay the tiles out in a responsive grid, headline KPIs largest. Step 5: ensure values are real (from the JSON), formatting is correct, and there are no console errors. On a loop-back, fix only the named gaps. Call write_task_note with the path and KPI count.",
-        "produces": { "path": "index.html", "kind": "html-page" }
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open index.html (render it if possible, else trace the source) and check against notes/kpi-scope.md and data/kpis.json. Verify: every scoped KPI appears as a tile with its formatted current value; each tile shows a delta vs the comparison with the correct good/bad color direction; targets and gaps are shown where defined; a trend sparkline renders per KPI from real data; and there are no console errors. Re-derive one KPI's value and delta from the data. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "index.html", "kind": "html-page" }
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -639,7 +858,10 @@
         "role": "planner",
         "summary": "lock the join key, join type, and conflict rules",
         "prompt": "Define the merge contract before joining. Step 1: profile BOTH sources — row counts, the candidate key column(s) in each, and the key's cardinality (is it unique, or one-to-many?). Step 2: assess key compatibility — same type/format? trailing whitespace or case differences? leading-zero or string-vs-number mismatches that must be normalized first? Step 3: choose the join type and justify it (inner = only matches; left = keep all of source A, enrich where matched; full = keep everything). Step 4: define conflict rules for columns present in both (which source wins, or keep both with suffixes) and the expected output column set. Step 5: write an acceptance-criteria checklist ('join key normalized in both', 'join type matches intent', 'output row count is explained by the join type and key cardinality', 'no unintended fan-out duplication', 'unmatched rows handled per the join type', 'expected columns present'). Call write_task_note and write the key analysis + join type + conflict rules + checklist to notes/key-scope.md.",
-        "produces": { "path": "notes/key-scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/key-scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "build",
@@ -647,13 +869,23 @@
         "role": "developer",
         "summary": "normalize keys, join, and emit the reconciled table",
         "prompt": "Execute the join exactly to the contract. Step 1: load both sources and normalize the join key in each (trim, case-fold, cast, zero-pad) per the scope. Step 2: perform the scoped join type on the normalized key. Step 3: apply conflict rules for overlapping columns (source-wins or suffixed _a/_b) and select the expected output columns. Step 4: track the numbers — rows in A, rows in B, matched rows, unmatched rows kept/dropped, and final row count — and confirm the final count is explained by the join type and key cardinality (not an accidental fan-out). Step 5: write the merged table to data/merged.csv with a header. On a loop-back, fix only the named gaps. Call write_task_note with the path and the match-rate / row-count reconciliation.",
-        "produces": { "path": "data/merged.csv", "kind": "data-file" }
+        "produces": {
+          "path": "data/merged.csv",
+          "kind": "data-file"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open data/merged.csv and verify the merge is correct and lossless-by-intent against notes/key-scope.md. Step 1: confirm it parses and has the expected columns, and that the join key was normalized consistently in both sources. Step 2: reconcile the row count yourself — final must equal matched rows (plus any unmatched-kept for left/full) and must NOT be inflated by duplicate keys creating a cartesian fan-out; compute the match rate and sanity-check it. Step 3: pick 3 keys — one matched, one present only in A, one only in B — and confirm each was handled per the chosen join type. Step 4: confirm overlapping columns followed the conflict rule and no key-normalization error caused false misses. Write PASS/FAIL per criterion; any FAIL loops back to build.",
       "loopBackTo": "build",
-      "deliverable": { "path": "data/merged.csv", "kind": "data-file" }
+      "deliverable": {
+        "path": "data/merged.csv",
+        "kind": "data-file"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

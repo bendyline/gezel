@@ -106,6 +106,17 @@ export interface PromptCtx extends ModelCtx {
 export interface TurnCtx extends ModelCtx {
   sessionId: string;
   isMeester: boolean;
+  /** Project receiving this turn. `default` is the unscoped front-door context. */
+  projectId: string;
+  /**
+   * Provenance of the user-role message. Provider schemas use `user` for
+   * human composer turns, question answers, gezel handoffs, and service
+   * nudges alike; behaviors need this stronger signal before applying
+   * user-intent routing such as the Meester new-project prelude.
+   */
+  messageOrigin: 'direct-user' | 'question-answer' | 'cross-gezel' | 'background-nudge' | 'system';
+  /** Canonical/unqualified plus provider-advertised live tool names. */
+  availableToolNames: ReadonlyArray<string>;
   /** Verbatim user-message text for this turn. */
   userText: string;
   /** Tool calls that drained from the per-turn accumulator. */

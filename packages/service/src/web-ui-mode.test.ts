@@ -3,7 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gezelPaths } from '@bendyline/gezel/paths';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { UnexpectedHttpErrorEvent } from './http/server.js';
 import { type RunningService, startService } from './service.js';
 
@@ -128,11 +128,12 @@ describe('web-UI token', () => {
   });
 
   it('reports thrown route errors to the host observer', async () => {
-    const priorDisabled = process.env.GEZEL_DISABLE_EMBEDDINGS;
     const start = unexpectedHttpErrors.length;
+    const saveSpy = vi
+      .spyOn(svc.context.memory, 'save')
+      .mockRejectedValueOnce(new Error('observer sentinel'));
     let res: Response;
     try {
-      process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
       res = await fetch(`${baseUrl}/api/memory/save`, {
         method: 'POST',
         headers: {
@@ -146,8 +147,7 @@ describe('web-UI token', () => {
         }),
       });
     } finally {
-      if (priorDisabled === undefined) delete process.env.GEZEL_DISABLE_EMBEDDINGS;
-      else process.env.GEZEL_DISABLE_EMBEDDINGS = priorDisabled;
+      saveSpy.mockRestore();
     }
 
     expect(res.status).toBe(500);
@@ -157,7 +157,7 @@ describe('web-UI token', () => {
         method: 'POST',
         path: '/api/memory/save',
         status: 500,
-        detail: expect.stringContaining('EmbeddingsDisabledError'),
+        detail: expect.stringContaining('observer sentinel'),
       }),
     ]);
   });

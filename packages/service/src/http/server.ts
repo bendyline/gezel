@@ -173,7 +173,12 @@ export function opaqueServerErrors(
       .catch(() => '');
     try {
       const parsed = JSON.parse(raw) as { error?: unknown; requestId?: unknown };
-      if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') return;
+      if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') {
+        // Keep the correlation id in both the opaque body and the conventional
+        // response header so clients can retain it without parsing JSON.
+        c.header('x-request-id', parsed.requestId);
+        return;
+      }
       // Broker outages and capacity denials are expected, actionable degraded
       // states rather than route exceptions. Preserve only their fixed codes;
       // the bridge logs the underlying detail and never puts it in this body.

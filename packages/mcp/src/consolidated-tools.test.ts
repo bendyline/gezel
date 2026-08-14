@@ -139,6 +139,61 @@ describe('consolidated MCP tools', () => {
     expect(JSON.stringify(search.content)).toContain('memory scope denied');
   });
 
+  it('reports lexical memory fallback as a successful degraded search', async () => {
+    handler = (url) => {
+      expect(url.pathname).toBe('/api/memory/search');
+      return {
+        results: [
+          {
+            text: 'The launch checklist requires a rollback plan.',
+            score: 1,
+            day: '2026-08-14',
+            scope: 'project',
+          },
+        ],
+        mode: 'lexical',
+        degraded: {
+          code: 'semantic_search_unavailable',
+          message:
+            'Semantic memory search is temporarily unavailable; searched saved memory text directly instead.',
+        },
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'search_memory',
+      arguments: { query: 'rollback plan' },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      count: 1,
+      mode: 'lexical-fallback',
+      engine: 'markdown',
+    });
+    expect(JSON.stringify(result.content)).toContain('temporarily unavailable');
+    expect(JSON.stringify(result.content)).toContain('rollback plan');
+  });
+
+  it('preserves an opaque server error request id for support correlation', async () => {
+    handler = (url) => {
+      expect(url.pathname).toBe('/api/memory/search');
+      return {
+        __status: 500,
+        body: { error: 'internal_error', requestId: 'req-memory-123' },
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'search_memory',
+      arguments: { query: 'anything' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('internal_error');
+    expect(JSON.stringify(result.content)).toContain('req-memory-123');
+  });
+
   it('keeps duplicate memory saves as a structured successful outcome', async () => {
     handler = (url) => {
       expect(url.pathname).toBe('/api/memory/save');
@@ -155,6 +210,36 @@ describe('consolidated MCP tools', () => {
       status: 'duplicate',
       scope: 'project',
     });
+  });
+
+  it('reports a durable save as successful when semantic indexing is deferred', async () => {
+    handler = (url) => {
+      expect(url.pathname).toBe('/api/memory/save');
+      return {
+        ok: true,
+        status: 'saved',
+        indexed: false,
+        degraded: {
+          code: 'semantic_index_unavailable',
+          message: 'Memory was saved, but semantic indexing is temporarily unavailable.',
+        },
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'save_memory',
+      arguments: { text: 'Remember this', scope: 'project' },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      status: 'saved',
+      scope: 'project',
+      indexed: false,
+    });
+    expect(JSON.stringify(result.content)).toContain(
+      'semantic indexing is temporarily unavailable',
+    );
   });
 
   it('marks mail and connector draft rejections as MCP execution errors', async () => {

@@ -19,7 +19,10 @@
         "role": "planner",
         "summary": "backlog picture, episode goal, plan rules",
         "prompt": "Define the episode before anything gets produced. Step 1: read episodes.json from the workspace — the idea backlog, the publishing cadence, the last few shipped episodes and any loose threads or listener notes they left behind. Step 2: confirm with the owner which idea leads the next episode and what the episode is FOR — the one thing a listener should take away. Step 3: set the plan rules — target length, the segment shape the show uses, guests or clips that need lead time, and the record date that keeps the cadence. Step 4: write an acceptance-criteria checklist ('every segment has a minute mark and a purpose', 'segment minutes add up to the target length', 'every prep item has an owner and a by-date', 'the record date beats the publish date', 'loose threads from last episode are picked up or consciously dropped'). Call write_task_note with the chosen idea + record date + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "rundown",
@@ -27,7 +30,10 @@
         "role": "producer",
         "summary": "timed segments, per-segment needs, open questions",
         "prompt": "Build the rundown against the locked goal. Step 1: draft the segment list — cold open to outro — with a minute mark and a one-line purpose per segment. Step 2: for each segment, note what it needs: a guest, a clip, research, an ad read, or nothing but the host. Step 3: check the math — segment minutes must add up to the target length, with the big segment where the energy belongs. Step 4: list the open questions the owner must answer before record day. Step 5: write the full rundown to notes/rundown.md and call write_task_note with the segment count and the total minutes.",
-        "produces": { "path": "notes/rundown.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/rundown.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -35,13 +41,23 @@
         "role": "copywriter",
         "summary": "title options, final rundown, prep list with owners, record date",
         "prompt": "Write the episode brief from the rundown. Step 1: open with the episode goal and two or three title options that would make the target listener stop scrolling. Step 2: lay out the final rundown — every segment with its minute mark and purpose. Step 3: write the prep list — each item with an owner and a by-date, ordered by lead time, longest first. Step 4: state the record date and the publish date it protects. Step 5: keep it one page, warm and specific — this is the sheet the host glances at before hitting record. Write report.md and call write_task_note with the report path and the record date.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/rundown.md and verify every criterion from notes/scope.md: every segment carries a minute mark and a purpose, the minutes add up to the target length, every prep item names an owner and a by-date, the record date is set and beats the publish date, and last episode's loose threads are picked up or consciously dropped. Cross-check the brief against episodes.json — the chosen idea must come from the backlog or the owner, never from thin air. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -64,7 +80,10 @@
         "role": "planner",
         "summary": "locate the recording or transcript, lock the shownotes checklist",
         "prompt": "Define the job before touching the audio. Step 1: find the episode's recording or transcript — check the recordings folder and episodes.json for which episode is being shipped and what already exists on file. Step 2: confirm with the owner anything the transcript alone won't give you — guest name spellings, links they promised listeners, and where the shownotes get published. Step 3: write an acceptance-criteria checklist ('a clean, complete transcript is on file under transcripts/', 'every chapter has a timestamp that exists in the transcript', 'every link mentioned in the episode is captured', 'names spelled right throughout', 'the summary reads like the episode, not a form'). Call write_task_note with the episode + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "transcript",
@@ -96,7 +115,14 @@
     "evaluate": {
       "prompt": "Open report.md and the transcript under transcripts/ and verify every criterion from notes/scope.md: the transcript on file is complete and speaker-labeled, every chapter timestamp appears in the transcript (spot-check each one — a chapter that points at nothing is fabrication), every link mentioned in the episode is captured, names are spelled the way the owner confirmed, and the pull quotes are verbatim. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to shownotes.",
       "loopBackTo": "shownotes",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -119,7 +145,10 @@
         "role": "planner",
         "summary": "theme from the timeline's gaps, question set, capture rules",
         "prompt": "Choose the session's aim before pressing record — or before opening the transcript. Step 1: read sessions.json and timeline.md from the workspace — what has been captured already, and which years and themes the timeline is hungriest for. Step 2: pick the session theme with the owner and draft the question set — open questions that follow feeling, not chronology ('what did the kitchen smell like' beats 'what year was that'). Step 3: write an acceptance-criteria checklist ('the session file preserves the teller's own words and phrasings', 'the session is recorded in the store with its date and theme', 'the report names the moments worth a chapter, each with the teller's words', 'at least three follow-up threads, each with the question to open it'). Call write_task_note with the theme + question set + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "capture",
@@ -134,13 +163,25 @@
         "role": "archivist",
         "summary": "store record updated, chapter-worthy moments, follow-up threads",
         "prompt": "File the session and set up the next one. Step 1: record the session in the store through the project's memoir capabilities — date, teller, theme, and the session file's path — so sessions.json stays the index of everything banked. Step 2: write report.md: what was captured this session in a few warm lines, the moments worth a chapter (quote the teller's words for each), and at least three follow-up threads — each one a specific question for next time, aimed at a gap the session opened. Step 3: note anything the teller said to come back to, or asked to keep private — that instruction outranks everything. Call write_task_note with the chapter-worthy count and the top follow-up question.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1000
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and the new session file under sessions/ and verify every criterion from notes/scope.md: the session file preserves the teller's own words (spot-check the report's quotes against the session file — they must be verbatim), the session is recorded in the store with date and theme, the chapter-worthy moments are named with the teller's words, and there are at least three follow-up threads each carrying a real question. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to file.",
       "loopBackTo": "file",
-      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report",
+        "minBytes": 1000
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -163,7 +204,10 @@
         "role": "editor",
         "summary": "chapter arc from the sessions, no-invention rules, target file",
         "prompt": "Choose the chapter before writing a line. Step 1: read every session file under sessions/ (and sessions.json for the index) — what themes recur, which sessions overlap, and where the material is thick enough to hold a chapter. Step 2: pick the chapter's arc with the owner — the span of time or the thread of feeling it covers, and where it opens and closes. Step 3: lock the weaving rules: no invented events — every scene traces to something actually said; the teller's phrasings survive the prose; where sessions contradict each other, the contradiction is surfaced, not silently resolved; where the record has a hole, the gap is marked inline for a future session, never papered over. Step 4: write the acceptance-criteria checklist from those rules, name the chapter file under chapters/ (the path the owner asks for, or chapters/<slug>.md named for the arc), and call write_task_note with the arc + checklist. Write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -176,6 +220,10 @@
     "evaluate": {
       "prompt": "Open the chapter under chapters/ beside every session file it draws on, and verify every criterion from notes/scope.md: pick five concrete events or details in the chapter and find each one in a session file — any detail with no source is invented and fails the whole pass; the teller's phrasings survive (spot-check three passages); contradictions between sessions are surfaced in the text, not resolved silently; gaps are marked inline, not smoothed over. Write PASS/FAIL per criterion; on any failure, name the invented detail or missed criterion and loop back to draft.",
       "loopBackTo": "draft"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -198,7 +246,10 @@
         "role": "coach",
         "summary": "honest picture of today: pieces, minutes, tempos, trouble spots",
         "prompt": "Get the honest picture of today's session before logging a minute of it. Step 1: read practice.json and repertoire.json from the workspace — the streak, the pieces in rotation, and where each one stands. Step 2: confirm with the owner what actually happened today: which pieces, honest minutes (the ones at the instrument, not the ones planned), tempo marks reached, and the spots that fought back. Step 3: write an acceptance-criteria checklist ('today's session is logged with date, minutes, and piece', 'trouble spots recorded by bar or passage, not vibes', 'piece states in the repertoire updated where today changed them', 'tomorrow's plan targets the trouble spots with concrete tempo marks'). Call write_task_note with the minutes + pieces + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "log",
@@ -213,13 +264,25 @@
         "role": "coach",
         "summary": "today in two lines, streak state, tomorrow's targeted plan",
         "prompt": "Close the day and open tomorrow. Step 1: write today in two honest lines — what got the minutes and how it went. Step 2: state the streak — how many days running, and what today did to it. Step 3: write tomorrow's plan: the specific passages to hit (by bar number), the metronome mark to start at and the mark to reach for, and one thing to leave alone because it is already working. Step 4: keep it encouraging and true — a coach's note, not a report card. Write report.md and call write_task_note with tomorrow's top target.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1000
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and practice.json and verify every criterion from notes/scope.md: today's entry is in the log with date, minutes, and piece matching what the owner reported; trouble spots are recorded by bar or passage; repertoire states moved where today moved them; and tomorrow's plan names specific passages with metronome marks. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report",
+        "minBytes": 1000
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -242,7 +305,10 @@
         "role": "coach",
         "summary": "recording inventory, comparison baseline, review rules",
         "prompt": "Frame the review before listening back. Step 1: read recordings/index.json from the workspace — the month's recordings with their dates and pieces — and the previous month's review from the reviews folder if one exists. Step 2: confirm the comparison baseline with the owner: last month's marks per piece, and what last month's single focus was. Step 3: lock the review rules — every recording in the index gets assessed; every assessment names concrete observations (tempo held, voicing, rushing at a named spot — things a teacher would point at); each piece gets a delta versus last month; and the review ends with exactly ONE next-month focus. Step 4: write the acceptance-criteria checklist from those rules, call write_task_note with the recording count + baseline, and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "review",
@@ -250,7 +316,10 @@
         "role": "reviewer",
         "summary": "per-recording assessment with concrete observations",
         "prompt": "Assess each recording the way a teacher would. Step 1: for every recording in the index, work through its notes and the piece's history — what is concretely better, steadier, or cleaner than last month, and what regressed or plateaued. Step 2: name the evidence per observation — the passage, the tempo, the habit — never a bare 'sounds better'. Step 3: check last month's focus: did the month's work actually move it? Say so plainly. Step 4: write the per-recording assessments to notes/review.md and call write_task_note with the biggest improvement and the biggest concern.",
-        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/review.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "report",
@@ -258,13 +327,23 @@
         "role": "copywriter",
         "summary": "deltas per piece, verdict on last month's focus, one next focus",
         "prompt": "Write the month's review from the assessments. Step 1: open with what the month proved — the progress the owner's own ears stopped noticing, with the recording that shows it. Step 2: per piece, the delta versus last month in a line or two, honest in both directions. Step 3: the verdict on last month's focus — moved, stalled, or abandoned. Step 4: close with exactly one next-month focus, chosen from the evidence, with why this one and not the runner-up. Step 5: warm, specific, and honest — proof over impression. Write report.md and call write_task_note with the focus chosen.",
-        "produces": { "path": "report.md", "kind": "markdown-report" }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report"
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md and notes/review.md and verify every criterion from notes/scope.md: every recording in recordings/index.json is assessed (count them), every assessment carries concrete observations with evidence, every piece has a last-month delta, last month's focus gets an explicit verdict, and exactly one next-month focus is named — not two, not zero. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
       "loopBackTo": "report",
-      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report"
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -287,7 +366,10 @@
         "role": "genealogist",
         "summary": "target branch, extraction rules, fact-sourcing checklist",
         "prompt": "Aim the interview at the tree before extracting a single fact. Step 1: read tree.json from the workspace — the people, the branches, the facts already recorded and the ones marked uncertain. Step 2: identify the relative who was interviewed and which branch facts this interview can confirm, correct, or newly supply. Step 3: lock the extraction rules — every fact carries the teller's quote or the transcript line behind it; a fact that conflicts with the tree is surfaced as a conflict, never silently overwritten; uncertain stays uncertain ('she thought it was 1954' is recorded as thought, not fact). Step 4: write the acceptance-criteria checklist from those rules, plus 'the transcript is filed under interviews/' and 'follow-up questions written for the gaps the interview opened'. Call write_task_note with the relative + target branch + checklist and write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "file",
@@ -302,13 +384,25 @@
         "role": "genealogist",
         "summary": "facts with quotes into the tree, conflicts surfaced, follow-ups",
         "prompt": "Pull the facts into the record with their sources. Step 1: walk the transcript and list every person, place, date, and event it attests — each with the quote behind it. Step 2: compare against tree.json: which facts confirm the tree, which are new, and which conflict with what is recorded — update the tree through the project's family-record capabilities for confirmations and additions, and surface every conflict for the owner instead of picking a winner. Step 3: write report.md: the facts captured (each with its quote), the conflicts with the existing tree stated plainly, and the follow-up questions to ask while asking is still possible. Step 4: call write_task_note with the fact count, the conflict count, and the top follow-up question.",
-        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1200 }
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1200
+        }
       }
     ],
     "evaluate": {
       "prompt": "Open report.md beside the interview transcript and tree.json and verify every criterion from notes/scope.md: every fact in the report carries a quote that actually appears in the transcript (spot-check five — a quote that isn't there is fabrication), every date and name in the report exists in the transcript or the tree, conflicts with the tree are surfaced as conflicts rather than silently resolved, uncertain memories are recorded as uncertain, and the follow-up questions are real questions aimed at real gaps. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to extract.",
       "loopBackTo": "extract",
-      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 1200 }
+      "deliverable": {
+        "path": "report.md",
+        "kind": "markdown-report",
+        "minBytes": 1200
+      }
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   },
   {
@@ -331,7 +425,10 @@
         "role": "editor",
         "summary": "arc from the interviews and tree, sourcing rules, target file",
         "prompt": "Choose the chapter's arc from the record you actually have. Step 1: read tree.json and every file under interviews/ (plus any photo caption notes) — where is the material thick enough to carry a chapter, and what does the owner want told first. Step 2: fix the arc — the years, the people, and the journey it covers, and where it opens and closes. Step 3: lock the writing rules: every concrete event traces to an interview or a tree fact; quotes from the tellers stay verbatim; speculation is allowed only when dressed as speculation ('family legend has it', 'she may have') and never load-bearing; where the record is silent, the silence is acknowledged. Step 4: write the acceptance-criteria checklist from those rules, name the chapter file under chapters/ (the path the owner asks for, or chapters/<slug>.md named for the arc), and call write_task_note with the arc. Write notes/scope.md.",
-        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+        "produces": {
+          "path": "notes/scope.md",
+          "kind": "markdown-notes"
+        }
       },
       {
         "id": "draft",
@@ -344,6 +441,10 @@
     "evaluate": {
       "prompt": "Open the chapter beside the interviews and tree.json and verify every criterion from notes/scope.md: pick five concrete events or dates in the chapter and trace each to an interview or the tree — anything untraceable is invented and fails the whole pass; quotes are verbatim (check two); every speculative line is explicitly dressed as speculation; holes in the record are acknowledged rather than filled. Write PASS/FAIL per criterion; on any failure, name the invented detail or missed criterion and loop back to draft.",
       "loopBackTo": "draft"
+    },
+    "release": {
+      "version": "1.0.1",
+      "releasedAt": "2026-08-14T00:00:00Z"
     }
   }
 ]

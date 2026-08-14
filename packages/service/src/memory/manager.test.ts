@@ -131,11 +131,14 @@ describe('MemoryManager.save dedup', () => {
     expect(entries[0]?.kind).toBe('pref');
   });
 
-  it('embeddings disabled: appends markdown + throws; identical re-save dedups via exact without throwing', async () => {
+  it('embeddings disabled: saves Markdown with deferred indexing; identical re-save dedups', async () => {
     embeddingsMock.__setDisabled(true);
-    await expect(memory.save('gezel', 'deduper', 'Degraded-mode fact.')).rejects.toThrow(
-      'mock-disabled',
-    );
+    const first = await memory.save('gezel', 'deduper', 'Degraded-mode fact.');
+    expect(first).toMatchObject({
+      status: 'saved',
+      indexed: false,
+      degraded: { code: 'semantic_index_unavailable' },
+    });
     const content = await store.readMemoryDay('gezel', 'deduper', today());
     expect(parseMemoryDay(content)).toHaveLength(1);
 
@@ -164,5 +167,43 @@ describe('MemoryManager.save dedup', () => {
     );
     expect(outcome.status).toBe('saved');
     expect(await countIndexed(store.memoryIndexDir('gezel', 'deduper'))).toBe(2);
+  });
+});
+
+describe('MemoryManager search degradation', () => {
+  it('does not initialize the embedder when neither scope has an index', async () => {
+    const callsBefore = embeddingsMock.__embedCalls();
+
+    const outcome = await memory.searchAllDetailed('deduper', 'default', 'anything at all');
+
+    expect(outcome).toEqual({ results: [], mode: 'lexical' });
+    expect(embeddingsMock.__embedCalls()).toBe(callsBefore);
+  });
+
+  it('falls back to source Markdown when semantic search is unavailable', async () => {
+    await memory.save('gezel', 'deduper', 'The launch checklist requires a rollback plan.');
+    embeddingsMock.__setDisabled(true);
+
+    const outcome = await memory.searchAllDetailed('deduper', 'default', 'rollback plan');
+
+    expect(outcome.mode).toBe('lexical');
+    expect(outcome.degraded?.code).toBe('semantic_search_unavailable');
+    expect(outcome.results).toEqual([
+      expect.objectContaining({
+        text: 'The launch checklist requires a rollback plan.',
+        scope: 'gezel',
+      }),
+    ]);
+  });
+
+  it('embeds once and reuses the query vector across both indexed scopes', async () => {
+    await memory.save('gezel', 'deduper', 'The release uses a blue-green deployment.');
+    await memory.save('project', 'default', 'The project rollback window is fifteen minutes.');
+    const callsBefore = embeddingsMock.__embedCalls();
+
+    const outcome = await memory.searchAllDetailed('deduper', 'default', 'release rollback');
+
+    expect(outcome.mode).toBe('semantic');
+    expect(embeddingsMock.__embedCalls()).toBe(callsBefore + 1);
   });
 });

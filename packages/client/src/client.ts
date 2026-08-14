@@ -4912,6 +4912,18 @@ export class GezelClient {
     );
   }
 
+  /** Reveal a validated project-chat file in the daemon host's file manager. */
+  revealProjectReference(
+    projectId: string,
+    request: ReferenceFileLocationRequest,
+  ): Promise<ReferenceFileLocationResponse> {
+    const params = new URLSearchParams({ kind: request.kind, path: request.path });
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/reveal-reference?${params.toString()}`,
+    );
+  }
+
   /**
    * Classify a References-pane file and prepare any document markdown
    * companion. Binary bytes are never returned through this JSON endpoint.

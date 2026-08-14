@@ -93,14 +93,14 @@ export function roleHasTeamScope(role: string | undefined, projectMode?: 'crew' 
 
 /**
  * Strip `team-management` from a list of group ids. Used for solo
- * projects ("jobs") where one ambachtsman handles everything and must
+ * projects ("jobs") where one Builder handles everything and must
  * not reach for `ensure_gezel`, `message_gezel`, `create_gezel*`,
  * `create_project`, etc. — the Meester already chose one specialist
  * for the job, and team-building tools at this layer would just
  * tempt the model to fan out unnecessarily.
  *
  * Applied regardless of role. A "voorman"-roled gezel running a solo
- * project still loses team-management — they are an ambachtsman in
+ * project still loses team-management — they are a Builder in
  * that context, not a voorman.
  */
 function stripTeamManagement(groups: readonly string[]): readonly string[] {
@@ -586,7 +586,7 @@ export function computeToolAllowlist(opts: {
   /**
    * Mode of the project this session is scoped to. `solo` strips the
    * `team-management` group regardless of role (the project's
-   * ambachtsman shouldn't recruit other gezels). Missing / `'crew'`
+   * Builder shouldn't recruit other gezels). Missing / `'crew'`
    * leaves the resolved groups untouched.
    */
   projectMode?: 'crew' | 'solo';

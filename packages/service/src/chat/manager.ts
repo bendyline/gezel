@@ -247,7 +247,11 @@ import {
   modelRoutingDisabled,
   rankModelForFloor,
 } from './model-routing.js';
-import { formatPromptToolContractFinding, lintPromptToolContract } from './prompt-tool-contract.js';
+import {
+  capabilitySafeCorrectivePrompt,
+  formatPromptToolContractFinding,
+  lintPromptToolContract,
+} from './prompt-tool-contract.js';
 import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { spliceIntoText } from './recognition-splice.js';
 import { type TurnImageLimits, resolveTurnImages } from './resolve-turn-images.js';
@@ -394,6 +398,41 @@ function sameFromBucket(
   if (!a && !b) return true;
   if (!a || !b) return false;
   return a.gezelId === b.gezelId;
+}
+
+export type TurnMessageOrigin =
+  | 'direct-user'
+  | 'question-answer'
+  | 'cross-gezel'
+  | 'background-nudge'
+  | 'system';
+
+function resolveTurnMessageOrigin(
+  opts:
+    | {
+        messageOrigin?: TurnMessageOrigin;
+        from?: { gezelId: string; gezelName: string };
+        lane?: Lane;
+        ambient?: boolean;
+        nudge?: boolean;
+      }
+    | undefined,
+): TurnMessageOrigin {
+  if (opts?.messageOrigin) return opts.messageOrigin;
+  if (opts?.from) return 'cross-gezel';
+  if (opts?.ambient || opts?.nudge || opts?.lane === 'background') return 'background-nudge';
+  return 'direct-user';
+}
+
+/** Include provider-qualified and unqualified spellings in capability checks. */
+function liveTurnToolNames(session: LLMSession | null | undefined): string[] {
+  const names = new Set<string>();
+  for (const name of session?.getRegisteredToolNames?.() ?? []) {
+    names.add(name);
+    const qualified = name.match(/^mcp__.+?__(.+)$/)?.[1];
+    if (qualified && qualified !== '*') names.add(qualified);
+  }
+  return [...names];
 }
 
 /**
@@ -694,6 +733,8 @@ interface PendingSendEntry {
   lane: Lane | undefined;
   /** Ambient housekeeping turn — see `EnqueueRequest.ambient`. */
   ambient: boolean;
+  /** Strong provenance for behavior hooks; user-role alone is ambiguous. */
+  messageOrigin: TurnMessageOrigin;
   /** See send() opts — forwarded to the provider request. */
   continuationMaxTokens: number | undefined;
   /** Persist + deliver to the model but never render a transcript bubble. */
@@ -2603,6 +2644,7 @@ export class ChatManager {
         coalescable: false,
         lane: undefined,
         ambient: false,
+        messageOrigin: 'direct-user',
         continuationMaxTokens: undefined,
         hidden: false,
         nudge: false,
@@ -3094,11 +3136,18 @@ export class ChatManager {
       const full = await this.store.getSession(args.gezelId, active.id);
       if (full) return full;
     }
+    const parsedTaskRef = parseTaskRef(args.taskRef);
+    const task = parsedTaskRef
+      ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
+      : null;
     return this.createSession({
       gezelId: args.gezelId,
       projectId: args.projectId,
       taskRef: args.taskRef,
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(task?.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
+        : {}),
     });
   }
 
@@ -3260,6 +3309,8 @@ export class ChatManager {
      * advanced, carry on" instead of naming the recipient as the sender.
      */
     fromGezelId?: string;
+    /** Naming presentation inherited from the task's launching session. */
+    roleBasedNameOnlyMode?: boolean;
     /**
      * `'entry'` is a fresh launch (e.g. the command launcher created the
      * task and is starting its entry step) — there is no prior step, so
@@ -3289,6 +3340,8 @@ export class ChatManager {
     bookCatalogId?: string;
   }): Promise<{ sessionId: string }> {
     const dispatchConfig = await this.store.readConfig();
+    const roleBasedNameOnlyMode =
+      args.roleBasedNameOnlyMode ?? dispatchConfig.roleBasedNameOnlyMode ?? false;
     const dispatchGezel = await this.store.getGezel(args.gezelId);
     const dispatchProviderName = await this.resolveProviderName(
       args.gezelId,
@@ -3356,6 +3409,7 @@ export class ChatManager {
       projectId: args.projectId,
       taskRef: args.taskRef,
       stepId: dispatchStepId,
+      roleBasedNameOnlyMode,
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
@@ -3437,14 +3491,29 @@ export class ChatManager {
     // Naming them as their own sender — "Koray has handed step `report` to
     // you" — reads as a bug to the user and as a second party to the model.
     const selfHandoff = args.fromGezelId !== undefined && args.fromGezelId === args.gezelId;
+    const previousGezel =
+      !selfHandoff && args.fromGezelId
+        ? await this.store.getGezel(args.fromGezelId).catch(() => null)
+        : null;
+    // In boring mode an unresolved sender must stay anonymous. Falling
+    // back to the caller-provided friendly name would reintroduce exactly
+    // the leak this mode is meant to prevent for deleted/legacy gezels.
+    const fromGezelDisplayName = previousGezel
+      ? displayName(
+          { name: previousGezel.name, roleBasedName: previousGezel.roleBasedName },
+          roleBasedNameOnlyMode,
+        )
+      : roleBasedNameOnlyMode
+        ? undefined
+        : args.fromGezelName;
     const seed =
       args.kind === 'entry'
         ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
         : selfHandoff
           ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
           : `${
-              args.fromGezelName
-                ? `${args.fromGezelName} has`
+              fromGezelDisplayName
+                ? `${fromGezelDisplayName} has`
                 : 'The previous step has been completed and'
             } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
@@ -3454,6 +3523,7 @@ export class ChatManager {
     // in flight" so the handoff lands even if the next gezel was mid-turn.
     this.trackBackground(
       this.sendWithBusyRetry(session.id, seed, {
+        messageOrigin: 'system',
         ...(args.lane ? { lane: args.lane } : {}),
         ...(args.ambient ? { ambient: true } : {}),
       }).catch((err) => {
@@ -4696,11 +4766,10 @@ export class ChatManager {
       `[questions] delivering answer to session ${args.sessionId.slice(0, 8)} ` +
         `(gezel ${session.gezelId}, project ${session.projectId})`,
     );
-    await this.sendWithBusyRetry(
-      args.sessionId,
-      args.seed,
-      args.coalescable ? { coalescable: true } : undefined,
-    );
+    await this.sendWithBusyRetry(args.sessionId, args.seed, {
+      messageOrigin: 'question-answer',
+      ...(args.coalescable ? { coalescable: true } : {}),
+    });
   }
 
   /**
@@ -4741,6 +4810,7 @@ export class ChatManager {
       this.send(session.id, args.seed, {
         coalescable: true,
         lane: 'background',
+        messageOrigin: 'system',
         ...(leanReactionCap ? { continuationMaxTokens: leanReactionCap } : {}),
         ...(args.hidden ? { hidden: true } : {}),
       }).catch((err) => {
@@ -4772,6 +4842,7 @@ export class ChatManager {
       coalescable?: boolean;
       lane?: Lane;
       ambient?: boolean;
+      messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
     return this.send(sessionId, userText, opts);
@@ -5406,6 +5477,8 @@ export class ChatManager {
        * the message never queued, so it renders as a normal send.
        */
       nudge?: boolean;
+      /** Strong provenance used by per-turn behavior hooks. */
+      messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -5415,6 +5488,7 @@ export class ChatManager {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
     const existingQueue = this.pendingSends.get(sessionId);
+    const messageOrigin = resolveTurnMessageOrigin(opts);
     const shouldQueue =
       this.inflight.has(sessionId) || (existingQueue !== undefined && existingQueue.length > 0);
 
@@ -5430,6 +5504,7 @@ export class ChatManager {
           opts?.nudge !== true &&
           tail?.coalescable === true &&
           tail.nudge !== true &&
+          tail.messageOrigin === messageOrigin &&
           sameFromBucket(tail.from, opts.from);
 
         if (canMerge && tail) {
@@ -5467,6 +5542,7 @@ export class ChatManager {
           coalescable: opts?.coalescable === true,
           lane: opts?.lane,
           ambient: opts?.ambient === true,
+          messageOrigin,
           continuationMaxTokens: opts?.continuationMaxTokens,
           hidden: opts?.hidden === true,
           nudge: opts?.nudge === true,
@@ -5488,7 +5564,7 @@ export class ChatManager {
     return this.runSendAndDrain(
       sessionId,
       userText,
-      opts?.nudge ? { ...opts, nudge: false } : opts,
+      opts?.nudge ? { ...opts, nudge: false, messageOrigin } : { ...opts, messageOrigin },
     );
   }
 
@@ -5519,6 +5595,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
@@ -5618,7 +5695,12 @@ export class ChatManager {
     if (next.nudge) {
       while (q.length > 0) {
         const peek = q[0]!;
-        if (!peek.nudge || peek.hidden !== next.hidden || !sameFromBucket(peek.from, next.from)) {
+        if (
+          !peek.nudge ||
+          peek.hidden !== next.hidden ||
+          peek.messageOrigin !== next.messageOrigin ||
+          !sameFromBucket(peek.from, next.from)
+        ) {
           break;
         }
         q.shift();
@@ -5643,6 +5725,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      messageOrigin?: TurnMessageOrigin;
     } = {};
     if (next.from) runOpts.from = next.from;
     if (next.lane) runOpts.lane = next.lane;
@@ -5650,6 +5733,7 @@ export class ChatManager {
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
     if (next.hidden) runOpts.hidden = true;
     if (next.nudge) runOpts.nudge = true;
+    runOpts.messageOrigin = next.messageOrigin;
     void this.runSendAndDrain(sessionId, next.userText, runOpts)
       .then((msg) => {
         // Every caller that coalesced into this entry gets the
@@ -5691,6 +5775,7 @@ export class ChatManager {
       continuationMaxTokens?: number;
       hidden?: boolean;
       nudge?: boolean;
+      messageOrigin?: TurnMessageOrigin;
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -6202,6 +6287,18 @@ export class ChatManager {
       // depend on. Spliced identically here and in the history rebuild so a
       // restart doesn't invalidate the cached prefix.
       let promptForTurn = spliceIntoText(userText, pendingDigests);
+      const correctivePromptForLiveRoster = (prompt: string, source: string): string => {
+        const safe = capabilitySafeCorrectivePrompt({
+          prompt,
+          availableTools: liveTurnToolNames(liveSession),
+        });
+        if (safe !== prompt.trim()) {
+          log.warn(
+            `session ${sessionId}: filtered ${source} corrective against the live tool roster`,
+          );
+        }
+        return safe;
+      };
       const freshGameState = await this.refreshLeanGameState(state.record, userText);
       if (freshGameState) {
         promptForTurn = `${freshGameState}\n\n${promptForTurn}`;
@@ -6222,7 +6319,8 @@ export class ChatManager {
       // only consumer is `prompt.meester-build-prelude` (Meester +
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
-      const preludeForTurn = await this.resolveUserPromptPrelude(state, userText);
+      const messageOrigin = resolveTurnMessageOrigin(opts);
+      const preludeForTurn = await this.resolveUserPromptPrelude(state, userText, messageOrigin);
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -6253,13 +6351,18 @@ export class ChatManager {
       // user-initiated send, so this only fires on autonomous continuations.
       if (state.record.taskRef && this.pendingBudgetNudge.has(state.record.taskRef)) {
         this.pendingBudgetNudge.delete(state.record.taskRef);
-        promptForTurn = `${TASK_BUDGET_NUDGE}\n\n${promptForTurn}`;
+        promptForTurn = `${correctivePromptForLiveRoster(TASK_BUDGET_NUDGE, 'task-budget')}\n\n${promptForTurn}`;
         log.info(
           `session ${sessionId}: task-budget soft nudge prepended for ${state.record.taskRef}`,
         );
       }
       let continuations = 0;
       const maxContinuations = resolveContinuationBudget(state);
+      // Voorman-idle recovery is a project-level suggestion, not a broken
+      // model turn that benefits from the profile's full continuation
+      // budget. One reminder is enough; preserve the next prose answer and
+      // release the turn instead of asking the same question four times.
+      let voormanIdleNudged = false;
       // Keep a send-wide view for detectors. Individual assistant
       // iterations still own their own `toolCalls` arrays, but a
       // continuation must not forget that an earlier iteration in this
@@ -6755,6 +6858,7 @@ export class ChatManager {
         const detectorVerdict = runPostTurnDetectors(state, {
           sessionId,
           isMeester: cfgForDetector?.meesterGezelId === state.record.gezelId,
+          messageOrigin,
           userText,
           drained: toolsAcrossContinuations,
           assistantContent: assistantMessage.content,
@@ -6768,7 +6872,10 @@ export class ChatManager {
           this.events.publish(scope, { type: 'warning', message: warningMessage });
         }
         if (detectorVerdict?.promptForNextTurn) {
-          detectorReprompt = detectorVerdict.promptForNextTurn;
+          detectorReprompt = correctivePromptForLiveRoster(
+            detectorVerdict.promptForNextTurn,
+            'post-turn detector',
+          );
         }
         // Observable-progress auto-advance: if this gezel just produced the
         // deliverable a craftbook step is waiting on, advance the workflow
@@ -7068,7 +7175,10 @@ export class ChatManager {
               log.info(
                 `session ${sessionId}: keurmeester intervention applied (case ${consult.caseId}) — granting one recovery continuation`,
               );
-              promptForTurn = consult.correctivePrompt;
+              promptForTurn = correctivePromptForLiveRoster(
+                consult.correctivePrompt,
+                'keurmeester',
+              );
               continue;
             }
           }
@@ -7104,7 +7214,10 @@ export class ChatManager {
             log.info(
               `session ${sessionId}: ${detectorVerdict?.reason ?? 'detector'} — re-prompting`,
             );
-            promptForTurn = detectorReprompt;
+            promptForTurn = correctivePromptForLiveRoster(
+              detectorReprompt,
+              detectorVerdict ? 'post-turn detector' : 'deliverable salvage',
+            );
             continue;
           }
           // The step's completion GATE rejected the deliverable: it
@@ -7130,10 +7243,12 @@ export class ChatManager {
               `session ${sessionId}: ${advanceOutcome.gateRejected.taskRef} step ` +
                 `"${advanceOutcome.gateRejected.stepId}" gate rejected — re-prompting with the verdict${stage > 0 ? ` (escalation stage ${stage})` : ''}`,
             );
-            promptForTurn =
+            promptForTurn = correctivePromptForLiveRoster(
               stage >= 1
                 ? advanceOutcome.gateRejected.message
-                : buildGateRejectionNudge(advanceOutcome.gateRejected.message);
+                : buildGateRejectionNudge(advanceOutcome.gateRejected.message),
+              'task-gate',
+            );
             continue;
           }
           // Ad-hoc deliverable plateau exhausted (stage 3): stop the
@@ -7208,7 +7323,10 @@ export class ChatManager {
                 log.info(
                   `session ${sessionId}: keurmeester intervention applied on deliverable plateau (case ${consult.caseId}) — granting one recovery continuation`,
                 );
-                promptForTurn = consult.correctivePrompt;
+                promptForTurn = correctivePromptForLiveRoster(
+                  consult.correctivePrompt,
+                  'keurmeester deliverable-plateau',
+                );
                 continue;
               }
             }
@@ -7250,8 +7368,10 @@ export class ChatManager {
               ...(dRej.filePath ? { filePath: dRej.filePath } : {}),
               failingVerdict: dRej.message,
             });
-            promptForTurn =
-              clampNudge ?? (dStage >= 1 ? dRej.message : buildGateRejectionNudge(dRej.message));
+            promptForTurn = correctivePromptForLiveRoster(
+              clampNudge ?? (dStage >= 1 ? dRej.message : buildGateRejectionNudge(dRej.message)),
+              'deliverable-gate',
+            );
             continue;
           }
           // False-"done" on an edit gate: a requireChange step is waiting on
@@ -7273,7 +7393,10 @@ export class ChatManager {
               `session ${sessionId}: ${advanceOutcome.unmetEditGate.taskRef} edit gate unmet ` +
                 `(${advanceOutcome.unmetEditGate.file} not written) but reply claims progress — nudging to edit`,
             );
-            promptForTurn = buildDeliverableEditNudge(advanceOutcome.unmetEditGate.file);
+            promptForTurn = correctivePromptForLiveRoster(
+              buildDeliverableEditNudge(advanceOutcome.unmetEditGate.file),
+              'deliverable-edit',
+            );
             continue;
           }
           const unresolvedToolFailures = unresolvedFailedToolCalls(drained);
@@ -7349,7 +7472,8 @@ export class ChatManager {
             // Also requires `proactive` — voorman idle nudges advance
             // project work past what the user asked for.
             isProactiveAllowed(nudgeConfig) &&
-            state.record.providerName !== 'copilot'
+            state.record.providerName !== 'copilot' &&
+            !voormanIdleNudged
           ) {
             voormanIdleVerdict = await this.didVoormanIdleStall(state.record, drained, sessionId);
             if (voormanIdleVerdict !== null) {
@@ -7381,13 +7505,14 @@ export class ChatManager {
               );
               break;
             }
+            if (stallReason === 'voorman-idle') voormanIdleNudged = true;
             continuations++;
             // Stable marker — ab-prompt-conduct greps daemon logs for
             // "response looks stalled (" to count nudge firings per arm.
             log.info(
-              `session ${sessionId}: response looks stalled (${stallReason}) — nudging the model to actually execute`,
+              `session ${sessionId}: response looks stalled (${stallReason}) — requesting one recovery pass`,
             );
-            promptForTurn =
+            promptForTurn = correctivePromptForLiveRoster(
               stallReason === 'voorman-idle'
                 ? buildContinuationNudge(
                     finalContent,
@@ -7402,7 +7527,9 @@ export class ChatManager {
                     ? READ_ONLY_PROGRESS_NUDGE
                     : stallReason === 'tool-failed'
                       ? buildFailedToolRecoveryNudge(unresolvedToolFailures)
-                      : buildContinuationNudge(finalContent, state.record.messages);
+                      : buildContinuationNudge(finalContent, state.record.messages),
+              `stall-${stallReason}`,
+            );
             continue;
           }
         }
@@ -8253,20 +8380,16 @@ export class ChatManager {
     if (snap && snap.running + snap.queuedInteractive + snap.queuedBackground > 0) {
       return null;
     }
-    // Project work is wrapped up — every task is terminal (complete /
-    // canceled / paused; none `active`, which is the only status the
-    // scheduler ticks). With no active step there is nothing for the
-    // voorman to ADVANCE, so a prose "the project is done" is the
-    // correct terminal, NOT an idle stall. Nudging her to "pick a tool"
-    // here is precisely what sent qwen3.6 into a 12 KB "tool or no
-    // tool?" spiral (wild-caught, "Space Shooter Arcade"):
-    // the project was closed-and-verified, yet every check-in re-fired
-    // the menu and she relitigated all five options for thousands of
-    // chars. Let the prose stand. Only suppress when tasks EXIST — a
-    // project with zero tasks still wants the "wire up an assignee"
-    // nudge, since there the voorman really does have work to start.
+    // No task means there is no runtime-owned work to resume. This is the
+    // normal state of a fresh CLI project before the user has supplied a
+    // brief, and turning a greeting into "pick a proactive tool" invents
+    // urgency the user never asked for. Ordinary stalled-intent and
+    // fabrication guards still catch a model that explicitly promises work
+    // without doing it; the voorman-idle arm is reserved for active work.
+    // Likewise, when every task is terminal there is no active step to
+    // advance, so the voorman's prose is already a valid terminal response.
     const tasks = await this.store.listProjectTasks(record.projectId).catch(() => [] as Task[]);
-    if (tasks.length > 0 && !tasks.some((t) => t.status === 'active')) {
+    if (tasks.length === 0 || !tasks.some((t) => t.status === 'active')) {
       return null;
     }
     // Live work remains. Distinguish whether anything has actually been
@@ -12025,6 +12148,7 @@ export class ChatManager {
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
+    messageOrigin: TurnMessageOrigin,
   ): Promise<{ behaviorId: string; text: string } | null> {
     const profile = state.profile;
     if (!profile) return null;
@@ -12034,6 +12158,9 @@ export class ChatManager {
       ...modelCtxFromProfile(profile, state),
       sessionId: state.record.id,
       isMeester,
+      projectId: state.record.projectId,
+      messageOrigin,
+      availableToolNames: liveTurnToolNames(state.session),
       userText,
       drained: [],
       assistantContent: '',
@@ -14121,6 +14248,8 @@ export class ChatManager {
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
         GEZEL_EXECUTION_DENSITY: executionDensity,
+        GEZEL_ROLE_BASED_NAME_ONLY_MODE:
+          (record.roleBasedNameOnlyMode ?? globalConfig.roleBasedNameOnlyMode ?? false) ? '1' : '0',
         ...(record.expectedDeliverable
           ? { GEZEL_EXPECTED_DELIVERABLE: JSON.stringify(record.expectedDeliverable) }
           : {}),
@@ -14877,6 +15006,7 @@ function runPostTurnDetectors(
   args: {
     sessionId: string;
     isMeester: boolean;
+    messageOrigin: TurnMessageOrigin;
     userText: string;
     drained: ChatMessageToolCall[];
     assistantContent: string;
@@ -14889,6 +15019,9 @@ function runPostTurnDetectors(
     ...modelCtxFromProfile(profile, state),
     sessionId: args.sessionId,
     isMeester: args.isMeester,
+    projectId: state.record.projectId,
+    messageOrigin: args.messageOrigin,
+    availableToolNames: liveTurnToolNames(state.session),
     userText: args.userText,
     drained: args.drained,
     assistantContent: args.assistantContent,
@@ -16183,40 +16316,38 @@ Earlier conversation:
 `;
 
 const VOORMAN_IDLE_NUDGE =
-  "You're the project voorman and this turn ended with no handoff or proactive tool. " +
-  'If there is live work to move, pick one now: ' +
-  '`advance_task_step` (next step), ' +
-  '`message_gezel` (ping the next gezel), ' +
-  '`assign_task` / `ensure_gezel` (wire up an assignee), or ' +
-  '`ask_user_question` (surface a real blocker). ' +
-  // The escape hatch is co-equal, not an afterthought, and it
-  // explicitly resolves the conflict that paralyzes weak local models:
-  // a prose-only "it's done" reads as forbidden against "Act, don't
-  // narrate" + the anti-fabrication rules + the ramble nudge's "MUST
-  // start with a tool call", so the model loops on "tool or no tool?".
-  // Spelling out that a one-sentence "done" IS a complete, legitimate
-  // turn (not an idle failure, not a fabrication) lets it commit.
-  'But if the project is finished, or stable, or waiting on the user, that is already a COMPLETE turn — ' +
-  'reply with ONE short sentence saying so (e.g. "From my perspective the project is done / in a stable state.") and stop. ' +
-  'A plain "it\'s done" with no tool call is the correct answer there: it is not an idle failure and not a fabrication. ' +
-  'Do not re-verify, do not relitigate the options, do not promise future action.';
+  'Before you finish, make one quick project check: is there concrete work already in flight that this turn should move? ' +
+  'If yes, take the natural next action with the most relevant available tool — advance a ready step, message or assign the right gezel, or surface a real blocker. ' +
+  // The no-action outcome is deliberately co-equal with the tool path.
+  // Do not provide a canned example sentence: Gemma copied the old example
+  // verbatim on every continuation, which made a framework loop look like
+  // model degeneration.
+  'If no — because the project is complete, stable, or waiting on the user — say that once in one short sentence and end the turn. ' +
+  'Do not invent work or call a tool merely to satisfy this check. Do not re-verify or promise future action.';
 
 /**
- * Workspace files the project scaffolder seeds on every fresh project.
- * A workspace holding ONLY these has produced nothing yet — used by
+ * Setup and dependency metadata that does not count as a deliverable. The
+ * project scaffolder seeds the package/TypeScript files; package managers
+ * may add a lockfile before the user has built anything. A workspace holding
+ * ONLY these has produced nothing yet — used by
  * {@link ChatManager.didVoormanIdleStall} to decide whether the
  * "it's done / stable" escape hatch is even plausible. Mirrors the set
  * in `http/routes/projects.ts`.
  */
 const BOOTSTRAP_WORKSPACE_FILES: ReadonlySet<string> = new Set([
   'package.json',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
   'tsconfig.json',
   '.gitignore',
 ]);
 
 /**
  * Voorman-idle nudge for the "nothing built yet" case: there's live
- * work (an active task, or a project with no assignee wired up) AND the
+ * work (an active task) AND the
  * workspace still holds only its bootstrap files, so the project
  * demonstrably is NOT done. Unlike {@link VOORMAN_IDLE_NUDGE} this
  * withholds the "say it's done / stable and stop" escape hatch — a weak
@@ -16224,18 +16355,13 @@ const BOOTSTRAP_WORKSPACE_FILES: ReadonlySet<string> = new Set([
  * handoff (wild-caught, "Space War Arcade": gemma4-e4b
  * replied "My project is in a stable state" to every check-in over an
  * empty workspace). The `ask_user_question` escalation stays, so a
- * genuinely blocked voorman can still surface it. Shares the opening
- * sentence with {@link VOORMAN_IDLE_NUDGE} so the stall-detection tests
- * match either variant.
+ * genuinely blocked voorman can still surface it.
  */
 const VOORMAN_NOT_DONE_NUDGE =
-  "You're the project voorman and this turn ended with no handoff or proactive tool. " +
-  'The workspace still holds only its bootstrap files — nothing has been built yet, so the project is NOT done, complete, or stable. Do NOT reply that it is. ' +
-  'Move the work this turn: ' +
-  '`message_gezel` the Builder/Developer who owns this task (or `ensure_gezel` for one first if none exists), with the exact deliverable path and acceptance criteria, and ask them to write the file and reply with the path; ' +
-  'or `advance_task_step` if a step is genuinely ready; ' +
-  'or, if you are truly blocked on a decision, `ask_user_question` to surface it. ' +
-  'Pick one tool — a prose "it\'s stable / done" over an empty workspace is a false claim, not a complete turn.';
+  'One project-state check before you finish: an active task remains, but the workspace still contains only setup files, so no deliverable has been built yet. ' +
+  'If the user only asked for status or conversation, answer accurately and stop; a tool is not required. ' +
+  'If this turn is supposed to move the active work, take one natural next action: message or assign the specialist who owns the deliverable, advance a genuinely ready step, or surface a real blocker with `ask_user_question`. ' +
+  'Do not invent work or call a tool merely to appear busy, and do not describe an active empty project as done or stable.';
 
 /**
  * MCP tools that only read state. A voorman turn that fires only these

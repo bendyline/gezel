@@ -3,15 +3,7 @@
   "version": "1.0.3",
   "description": "The Gezel daemon: HTTP API, task runner, sandbox, agent runtime.",
   "license": "MIT",
-  "keywords": [
-    "gezel",
-    "ai",
-    "agents",
-    "local-first",
-    "daemon",
-    "server",
-    "llm"
-  ],
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"
@@ -80,8 +72,8 @@
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/squisq": "2.7.1",
-    "@bendyline/squisq-cli": "2.5.4",
-    "@bendyline/squisq-formats": "2.4.3",
+    "@bendyline/squisq-cli": "2.5.5",
+    "@bendyline/squisq-formats": "2.4.4",
     "@hono/node-server": "2.0.11",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.3.0",

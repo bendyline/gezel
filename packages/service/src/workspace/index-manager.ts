@@ -23,7 +23,7 @@ import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { PROJECT_TYPE_MIN_SCORE, detectProjectType } from '../project-type/detect.js';
 import {
-  type EnsureVoormanResult,
+  type EnsureProjectLeadResult,
   type ImportSyncDeps,
   ensureProjectVoorman,
   syncProjectImports,
@@ -515,7 +515,7 @@ export class WorkspaceIndexManager {
     // cheap no-op once one is set.
     const ensured = await ensureProjectVoorman(importDeps, projectId).catch((err) => {
       log.warn(`[index] ensure-voorman failed for ${projectId}: ${describe(err)}`);
-      return {} as EnsureVoormanResult;
+      return {} as EnsureProjectLeadResult;
     });
     if (ensured.createdGezel) {
       this.events?.publishGlobalEvent({
