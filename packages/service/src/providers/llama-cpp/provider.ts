@@ -5322,6 +5322,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           const normalized = normalizeMalformedStructuredToolCalls(
             toolCalls,
             collectKnownToolNames(),
+            // A malformed write at the output ceiling is not repairable: the
+            // missing JSON tail may also be missing file bytes. Executing the
+            // loose prefix can silently replace a complete file with a
+            // truncated one. Valid, fully parseable calls remain eligible.
+            finishReason !== 'length',
           );
           toolCalls = normalized.toolCalls;
           malformedStructuredCallIds = new Set(normalized.sanitizedIds);
@@ -6703,6 +6708,7 @@ export class ToolCallAccumulator {
 export function normalizeMalformedStructuredToolCalls(
   toolCalls: StructuredToolCall[],
   knownToolNames: ReadonlySet<string>,
+  allowMalformedWriteRepair = true,
 ): {
   toolCalls: StructuredToolCall[];
   repaired: Array<{ name: string; path: string; bytes: number }>;
@@ -6720,11 +6726,9 @@ export function normalizeMalformedStructuredToolCalls(
     } catch {
       // Try the write-shaped repair below.
     }
-    const repairedArgs = tryRepairMalformedWriteToolArguments(
-      call.function.name,
-      raw,
-      knownToolNames,
-    );
+    const repairedArgs = allowMalformedWriteRepair
+      ? tryRepairMalformedWriteToolArguments(call.function.name, raw, knownToolNames)
+      : null;
     if (repairedArgs) {
       repaired.push({
         name: call.function.name,

@@ -98,6 +98,42 @@ describe('buildPreflightChecks', () => {
     expect(checks.reasoningBudget.detail).toContain('budget=512');
   });
 
+  it('reads a bounded budget from llama-server launch diagnostics', () => {
+    const { checks } = buildPreflightChecks(
+      evidence({
+        daemonLog:
+          'tuning gezel=probe profile=thinking-general kind=thinking thinking=yes\n' +
+          '[llama-server] launch {"model":"qwen3.8-27b-q4","reasoningBudgetTokens":8192}',
+      }),
+    );
+    expect(checks.reasoningBudget.ok).toBe(true);
+    expect(checks.reasoningBudget.detail).toContain('budget=8192');
+  });
+
+  it('rejects an explicitly unbounded llama-server launch for a thinking profile', () => {
+    const { checks, admitted } = buildPreflightChecks(
+      evidence({
+        daemonLog:
+          'tuning gezel=probe profile=thinking-general kind=thinking thinking=yes\n' +
+          '[llama-server] launch {"model":"qwen3.8-27b-q4","reasoningBudgetTokens":"unbounded"}',
+      }),
+    );
+    expect(admitted).toBe(false);
+    expect(checks.reasoningBudget.ok).toBe(false);
+    expect(checks.reasoningBudget.detail).toContain('unbounded');
+  });
+
+  it('does not describe observed thinking as disabled when its budget is not observable', () => {
+    const { checks } = buildPreflightChecks(
+      evidence({
+        daemonLog: 'tuning gezel=probe profile=thinking-general kind=thinking temp=1 thinking=yes',
+      }),
+    );
+    expect(checks.reasoningBudget.ok).toBe(true);
+    expect(checks.reasoningBudget.detail).toContain('thinking enabled');
+    expect(checks.reasoningBudget.detail).toContain('not verifiable');
+  });
+
   it('throughput below the floor fails (the mistral-medium class)', () => {
     const { checks, admitted } = buildPreflightChecks(evidence({ genTokensPerSec: 1.2 }));
     expect(admitted).toBe(false);
@@ -163,5 +199,21 @@ describe('preflight admission cache policy', () => {
     expect(preflightPolicyFingerprint({ ...base, llamaBin: '/tmp/gezel-llama-b' })).not.toBe(
       preflightPolicyFingerprint(base),
     );
+  });
+
+  it('does not reuse a control-arm preflight for reasoning preservation', () => {
+    const base = {
+      modelId: 'qwen3.8-27b-q4',
+      engine: 'llama-cpp' as const,
+      minGenTokensPerSec: 3,
+    };
+    const previous = process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    delete process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    const control = preflightPolicyFingerprint(base);
+    process.env.GEZEL_LLAMA_REASONING_PRESERVE = '1';
+    const treatment = preflightPolicyFingerprint(base);
+    if (previous === undefined) delete process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    else process.env.GEZEL_LLAMA_REASONING_PRESERVE = previous;
+    expect(treatment).not.toBe(control);
   });
 });

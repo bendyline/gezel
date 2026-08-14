@@ -284,6 +284,36 @@ ${FROZEN_NAMED_OWNER_ACTIONS.replaceAll('Phil Okeke', 'TBD')}`;
     );
   });
 
+  it('reports hard and advisory success signals without an apparent 8-versus-9 mismatch', async () => {
+    const workspace = new Map<string, string>([
+      ...intactIncidentEvidence(),
+      ['postmortem.md', GROUNDED_REFERENCE],
+    ]);
+    const client = {
+      listProjects: vi.fn(async () => ({
+        projects: [{ id: 'checkout-incident-postmortem', name: 'Checkout Incident Postmortem' }],
+      })),
+      fetchProjectWorkspaceBlob: vi.fn(async (_projectId: string, path: string) => {
+        const content = workspace.get(path);
+        if (content === undefined) throw new Error(`not found: ${path}`);
+        return new Blob([content]);
+      }),
+    };
+
+    const result = await incidentPostmortemScenario.successCheck({
+      client,
+      meesterId: 'soren',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+      recordSniff: vi.fn(),
+    } as never);
+
+    expect(result).toMatchObject({ done: true, success: true });
+    if (!result.done) throw new Error('expected terminal success');
+    expect(result.reason).toContain('8/8');
+    expect(result.reason).toContain('advisory no-blame-language=pass');
+  });
+
   it('credits the frozen 14:54 recovery wording that ends in below 1%', () => {
     const frozenRecoveryVariant = GROUNDED_REFERENCE.replace(
       'The v4.18.1 hotfix reverted the change and service recovered by 14:54.',

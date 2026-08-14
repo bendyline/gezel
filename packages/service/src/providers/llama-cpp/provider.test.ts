@@ -2734,6 +2734,56 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(args.content).not.toContain('<|channel>');
   });
 
+  it('does not repair and execute a malformed write_file prefix at the output limit', async () => {
+    globalThis.fetch = (async () => {
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_truncated_write',
+                    type: 'function',
+                    function: {
+                      name: 'write_file',
+                      arguments:
+                        '{"path":"postmortem.md","content":"# Postmortem\\n\\n| Action | Owner |\\n| Add alert |',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [{ index: 0, finish_reason: 'length' }],
+          usage: { prompt_tokens: 10, completion_tokens: 4096 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen3.8-27b-q4',
+      externalTools: [
+        {
+          name: 'write_file',
+          description: 'Write a file.',
+          parameters: { type: 'object', additionalProperties: true },
+        },
+      ],
+    });
+
+    await session.sendAndWait('write it');
+    const call = session.capturedToolCalls?.()[0];
+    expect(call).toMatchObject({ name: 'write_file', arguments: '{}' });
+  });
+
   it('recognizes saved invalid first drafts as recoverable immediate writes', () => {
     expect(
       isRecoverableImmediateFileWriteError(
@@ -8609,6 +8659,28 @@ describe('malformed structured tool-call argument repair', () => {
     expect(out.repaired).toEqual([]);
     expect(out.sanitized).toEqual(['get_weather']);
     expect(out.sanitizedIds).toEqual(['call_weather']);
+    expect(out.toolCalls[0]?.function.arguments).toBe('{}');
+  });
+
+  it('sanitizes a repairable write prefix when generation ended at the output ceiling', () => {
+    const out = normalizeMalformedStructuredToolCalls(
+      [
+        {
+          id: 'call_write',
+          type: 'function',
+          function: {
+            name: 'write_file',
+            arguments:
+              '{"path":"postmortem.md","content":"# Postmortem\\n\\n| Action | Owner |\\n| Add alert |',
+          },
+        },
+      ],
+      knownWriteTools,
+      false,
+    );
+    expect(out.repaired).toEqual([]);
+    expect(out.sanitized).toEqual(['write_file']);
+    expect(out.sanitizedIds).toEqual(['call_write']);
     expect(out.toolCalls[0]?.function.arguments).toBe('{}');
   });
 });

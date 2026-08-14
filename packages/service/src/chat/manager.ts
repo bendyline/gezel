@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
@@ -1052,10 +1052,12 @@ export class ChatManager {
    */
   private readonly afterSessionIdle = new Map<string, Array<() => void>>();
   /**
-   * One live async file handoff per sender/target/project/path. Models can
+   * One live async file handoff per sender/target/project/path/intent. Models can
    * emit the same `message_gezel` call several times while the sender turn
    * is still active; joining that work prevents a parked-send burst from
-   * replaying the same assignment into the recipient session.
+   * replaying the same assignment into the recipient session. A later
+   * validator repair for a file that was originally missing is distinct work
+   * and must never join the older create request.
    */
   private readonly inflightFileHandoffs = new Map<
     string,
@@ -3559,6 +3561,8 @@ export class ChatManager {
     toGezelIdOrName: string;
     projectId?: string;
     text: string;
+    /** One-way feedback that must not wake the sender with the recipient's reply. */
+    suppressReply?: boolean;
     /** Internal task context for scheduler re-drives. */
     taskRef?: string;
     /** Exact step paired with taskRef when re-driving task work. */
@@ -3665,6 +3669,7 @@ export class ChatManager {
           target.id,
           projectId,
           normalizeExpectedDeliverablePath(requestedFilePath),
+          fileHandoffIntentKey(args.text),
         ].join('\u0000')
       : null;
     const pendingHandoff = fileHandoffKey
@@ -3747,7 +3752,7 @@ export class ChatManager {
         : await this.ensureOrCreateSession({ gezelId: args.fromGezelId, projectId })
             .then((s) => s.id)
             .catch(() => null));
-    if (resolvedFromSessionId && resolvedFromSessionId !== session.id) {
+    if (!args.suppressReply && resolvedFromSessionId && resolvedFromSessionId !== session.id) {
       this.attachReplyListener({
         targetSessionId: session.id,
         fromSessionId: resolvedFromSessionId,
@@ -15620,6 +15625,23 @@ export function messageExpressesModifyIntent(text: string): boolean {
       text,
     )
   );
+}
+
+/**
+ * Preserve create-request deduplication while keeping concrete repairs from
+ * being swallowed by an older in-flight create for the same path. Distinct
+ * repair verdicts get distinct keys; byte-identical/reformatted retries still
+ * join one live handoff.
+ */
+export function fileHandoffIntentKey(text: string): string {
+  const repair =
+    messageExpressesModifyIntent(text) ||
+    /\[scenario check\]|\b(?:specific failure|signals? that (?:didn't|did not) fire|success criteria (?:aren't|are not) met|repeat miss|gate_full_rewrite|rejected)\b/i.test(
+      text,
+    );
+  if (!repair) return 'create';
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  return `repair:${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
 }
 
 export function isSubstantiveExistingWorkspaceFile(filePath: string, content: string): boolean {

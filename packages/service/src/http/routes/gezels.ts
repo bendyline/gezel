@@ -364,6 +364,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
         toGezelIdOrName: toId,
         projectId: body.projectId,
         text: body.text,
+        ...(body.suppressReply ? { suppressReply: true } : {}),
         ...(body.expectedDeliverable ? { expectedDeliverable: body.expectedDeliverable } : {}),
       });
       return c.json({

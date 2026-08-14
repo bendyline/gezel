@@ -3026,6 +3026,11 @@ export const MessageGezelRequestSchema = z.object({
   projectId: z.string().optional(),
   text: z.string().min(1),
   /**
+   * One-way system/harness feedback. The recipient still runs normally, but
+   * its completion is not injected back into and auto-processed by the sender.
+   */
+  suppressReply: z.boolean().optional(),
+  /**
    * Shape-of-deliverable hint persisted on the target's session so
    * their consultation-mode addendum knows whether to default to
    * chat reply or file deliverable. See `ExpectedDeliverableSchema`.

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
+import { repoRoot } from './native-bin.ts';
+import { resolveEvalRunsDir } from './run-paths.ts';
 import {
   PoisonedSessionRecoveryTracker,
   attachableDeliverable,
@@ -31,6 +33,7 @@ import {
   retryLoopSniffKey,
   runawaySessionFailure,
   selectSilentRecoveries,
+  shouldDeferHardWatchdogForReEngage,
   shouldDeferRetryLoopForInflight,
   shouldDeferRetryLoopForRecentEscalation,
   shouldDeferSoftWatchdog,
@@ -51,6 +54,19 @@ function terminalHandoffTestClient(): GezelClient {
     listSessionTelemetry: vi.fn().mockResolvedValue({ sessions: [] }),
   } as unknown as GezelClient;
 }
+
+describe('eval run directory resolution', () => {
+  it('anchors relative paths to the repository instead of the eval package cwd', () => {
+    expect(resolveEvalRunsDir('evals/runs/treatment')).toBe(
+      join(repoRoot(), 'evals/runs/treatment'),
+    );
+  });
+
+  it('leaves absolute paths unchanged', () => {
+    const absolute = join(tmpdir(), 'gezel-eval-treatment');
+    expect(resolveEvalRunsDir(absolute)).toBe(absolute);
+  });
+});
 
 describe('completed repair-action snapshots', () => {
   it('counts committed successful file-mutation turns, not calls, failures, or reads', () => {
@@ -1065,6 +1081,43 @@ describe('poisoned-session recovery', () => {
 });
 
 describe('re-engage nudge state', () => {
+  it('gives the harness-dispatched target one bounded hard-watchdog completion window', () => {
+    const deliveredAt = 1_000;
+    const inflight = [
+      {
+        sessionId: 'repair-session',
+        gezelId: 'jordan',
+        projectId: 'checkout',
+        elapsedMs: 9 * 60_000,
+      },
+    ];
+
+    expect(
+      shouldDeferHardWatchdogForReEngage({
+        deliveredAt,
+        targetGezelId: 'jordan',
+        inflightTurns: inflight,
+        now: deliveredAt + 9 * 60_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferHardWatchdogForReEngage({
+        deliveredAt,
+        targetGezelId: 'someone-else',
+        inflightTurns: inflight,
+        now: deliveredAt + 9 * 60_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferHardWatchdogForReEngage({
+        deliveredAt,
+        targetGezelId: 'jordan',
+        inflightTurns: inflight,
+        now: deliveredAt + 15 * 60_000,
+      }),
+    ).toBe(false);
+  });
+
   it('requests a targeted repair when a checked file already exists', () => {
     const nudge = buildReEngageNudge({
       downstream: true,

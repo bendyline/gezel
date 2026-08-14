@@ -442,3 +442,15 @@ describe('buildLlamaCppEngineArgs — reasoning format', () => {
     expect(args[last + 1]).toBe('auto');
   });
 });
+
+describe('buildLlamaCppEngineArgs — reasoning preservation', () => {
+  it('is off by default', () => {
+    expect(has(buildLlamaCppEngineArgs({ config: {} }), '--reasoning-preserve')).toBe(false);
+  });
+
+  it('passes the opt-in bare flag', () => {
+    const args = buildLlamaCppEngineArgs({ config: {}, reasoningPreserve: true });
+    expect(has(args, '--reasoning-preserve')).toBe(true);
+    expect(args.filter((arg) => arg === '--reasoning-preserve')).toHaveLength(1);
+  });
+});

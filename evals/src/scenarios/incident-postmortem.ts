@@ -1188,7 +1188,7 @@ export const incidentPostmortemScenario: EvalScenario = {
 
     const bytes = postmortem.length;
     const verdict = evaluateIncidentPostmortem(postmortem, persistedEvidence);
-    const { signals, score, failReason, failures } = verdict;
+    const { signals, hardSignals, score, failReason, failures } = verdict;
     logChanged(
       'sniff',
       `[scenario] incident-postmortem bytes=${bytes} score=${score}/9 signals=${signals.join(',') || 'none'}${failReason ? ` failReason="${failReason}"` : ''}`,
@@ -1217,14 +1217,14 @@ export const incidentPostmortemScenario: EvalScenario = {
       };
     }
 
-    // Pass when all 8 hard signals fire. `no-blame-language` is
-    // soft (we just record it). The judge layer (when --llm-judge ran)
-    // contributes its own advisory axes via the report.
+    // Pass when all 8 hard signals fire. `no-blame-language` is soft (we
+    // just record it), so report hard and advisory results separately instead
+    // of saying "8" beside a list that may contain 9 signals.
     if (verdict.success) {
       return {
         done: true,
         success: true,
-        reason: `all 8 hard signals firing (signals: ${signals.join(', ')})`,
+        reason: `all hard signals firing (${hardSignals.length}/8; advisory no-blame-language=${signals.includes('no-blame-language') ? 'pass' : 'miss'}; signals: ${signals.join(', ')})`,
       };
     }
 

@@ -1709,9 +1709,14 @@ describe('postMissingDeliverableFeedback', () => {
       minPolls: 1,
       projectId: 'launch-board',
     });
+    await postMissingDeliverableFeedback(ctx, 'index.html', {
+      minPolls: 1,
+      projectId: 'launch-board',
+    });
 
     expect(client.messageGezel).not.toHaveBeenCalled();
     expect(logs.join('\n')).toContain('missing-deliverable nudge for index.html deferred');
+    expect(logs.filter((line) => line.includes('missing-deliverable nudge')).length).toBe(1);
   });
 
   it('allows missing-deliverable feedback after a long-running target turn', async () => {

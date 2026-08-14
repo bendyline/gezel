@@ -110,6 +110,12 @@ export interface EngineFlagInput {
    */
   reasoningFormat?: string | undefined;
   /**
+   * Preserve assistant reasoning across tool-loop/history turns. This is an
+   * explicit experiment because it changes the rendered prompt and only works
+   * when the client also replays `reasoning_content`.
+   */
+  reasoningPreserve?: boolean | undefined;
+  /**
    * The model's GGUF `general.architecture`, for the Gemma-family auto
    * defaults (sliding-window full cache). Undefined disables the arch
    * heuristic; an explicit config/manifest `swaFull` still applies.
@@ -168,6 +174,7 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     ggufHasMtp,
     installedDraftModelPath,
     reasoningFormat,
+    reasoningPreserve,
     architecture,
     modelId,
     swaFullAutoFits,
@@ -265,6 +272,9 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
 
   // ── Server-side output parsing (`--reasoning-format`) ─────────────
   if (reasoningFormat) args.push('--reasoning-format', reasoningFormat);
+
+  // ── Cross-turn reasoning history (`--reasoning-preserve`) ─────────
+  if (reasoningPreserve) args.push('--reasoning-preserve');
 
   // ── Escape hatch (`llamaCppExtraArgs`) — applied last, wins ────────
   if (config.llamaCppExtraArgs) {

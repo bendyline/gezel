@@ -2155,7 +2155,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(mayaDisk!.messages[1]?.content).toBe('I will take it from here.');
   });
 
-  it('joins a duplicate pending file handoff instead of parking it twice', async () => {
+  it('joins duplicate pending create handoffs for the same file instead of parking twice', async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     mock.script('I wrote the outline.');
@@ -2197,6 +2197,39 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     });
     const mayaDisk = await store.getSession('maya', first.sessionId);
     expect(mayaDisk!.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  it('does not swallow a validator repair behind an in-flight create for the same file', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+      afterSessionIdle: Map<string, Array<() => void>>;
+    };
+    internals.inflight.set(adaSession.id, { userText: 'delegate', startedAt: Date.now() });
+
+    const first = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'Write the outline.',
+      expectedDeliverable: { kind: 'file', filePath: 'notes/outline.md' },
+    });
+    const repair = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: '[scenario check] I looked at `notes/outline.md` and the success criteria are not met. Specific failure: Owner is empty. Use `replace_in_file` to patch it.',
+      expectedDeliverable: { kind: 'file', filePath: 'notes/outline.md' },
+    });
+
+    expect(repair).toMatchObject({
+      sessionId: first.sessionId,
+      toGezelId: first.toGezelId,
+    });
+    expect(repair.deduplicated).toBeUndefined();
+    expect(internals.afterSessionIdle.get(adaSession.id)).toHaveLength(2);
   });
 
   it('flushes deferred target sends before draining queued sender messages', async () => {
@@ -2303,6 +2336,29 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     // No preface-glued user message with the old "[While you were away]" text.
     const anyPreface = messages.some((m) => m.content.includes('While you were away'));
     expect(anyPreface).toBe(false);
+  });
+
+  it('keeps one-way harness feedback from waking the sender with a reply turn', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('Patched the checked file.', 'NONE');
+
+    const result = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: '[scenario check] Patch the failing file.',
+      suppressReply: true,
+    });
+
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', result.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const adaDisk = await store.getSession('ada', adaSession.id);
+    expect(adaDisk?.messages ?? []).toHaveLength(0);
   });
 
   it('keeps the async reply listener alive while a slow target is still making progress', async () => {

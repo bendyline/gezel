@@ -153,6 +153,7 @@ export async function postRuntimeFeedback(
     await ctx.client.messageGezel(target.gezelId, {
       fromGezelId: ctx.meesterId,
       text,
+      suppressReply: true,
       ...(expectedDeliverable ? { expectedDeliverable } : {}),
       ...(target.projectId ? { projectId: target.projectId } : {}),
     });
