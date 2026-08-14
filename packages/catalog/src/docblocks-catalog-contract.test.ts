@@ -96,10 +96,10 @@ describe('DocBlocks catalog contract', () => {
   it('routes PDF, DOCX, PPTX, MP4, and GIF craftbooks through Markdown and DocBlocks', async () => {
     const entries = await loadIndex('craftbook-templates');
     const expected = new Map([
-      ['report-pdf', { version: '1.1.0', artifacts: ['report.pdf'] }],
-      ['research-to-document', { version: '1.2.0', artifacts: ['report.docx'] }],
-      ['powerpoint-deck', { version: '1.6.0', artifacts: [], workspace: ['{{outputPath}}'] }],
-      ['narrated-slideshow', { version: '1.1.0', artifacts: ['slideshow.gif', 'slideshow.mp4'] }],
+      ['report-pdf', { version: '1.1.1', artifacts: ['report.pdf'] }],
+      ['research-to-document', { version: '1.2.1', artifacts: ['report.docx'] }],
+      ['powerpoint-deck', { version: '1.7.1', artifacts: [], workspace: ['{{outputPath}}'] }],
+      ['narrated-slideshow', { version: '1.1.1', artifacts: ['slideshow.gif', 'slideshow.mp4'] }],
     ]);
 
     for (const [id, contract] of expected) {
