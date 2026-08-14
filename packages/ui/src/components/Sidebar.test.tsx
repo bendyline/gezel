@@ -632,6 +632,20 @@ describe('Sidebar', () => {
       g.__GEZEL__ = { ...g.__GEZEL__, ...fields };
     }
 
+    function updateBridge(initial: unknown) {
+      let listener: ((state: unknown) => void) | null = null;
+      return {
+        state: vi.fn().mockResolvedValue(initial),
+        install: vi.fn().mockResolvedValue({ ok: true }),
+        onStateChanged: vi.fn((callback: (state: unknown) => void) => {
+          listener = callback;
+        }),
+        emit(state: unknown) {
+          listener?.(state);
+        },
+      };
+    }
+
     beforeEach(() => {
       setShell({ fallbackReason: null, fallbackCode: null, update: undefined });
       resetUpdateStateForTests();
@@ -652,6 +666,26 @@ describe('Sidebar', () => {
       const notice = screen.getByTestId('sidebar-notice-service-unavailable');
       expect(notice).toHaveTextContent('Background work is off');
       expect(notice.getAttribute('title')).toMatch(/will not start again by itself/);
+    });
+
+    it('shows live download progress and the install-on-quit handoff in the rail', async () => {
+      const update = updateBridge({
+        kind: 'downloading',
+        version: '1.26224.48',
+        percent: 37,
+      });
+      setShell({ platform: 'win32', update });
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      const progress = await screen.findByTestId('sidebar-notice-update-downloading');
+      expect(progress).toHaveTextContent('Downloading update · 37%');
+      expect(progress).toHaveAttribute('data-tone', 'progress');
+
+      update.emit({ kind: 'ready', version: '1.26224.48' });
+      const ready = await screen.findByTestId('sidebar-notice-update-ready');
+      expect(ready).toHaveTextContent('Update ready — quit to install');
+      expect(ready.getAttribute('title')).toMatch(/system tray/i);
+      expect(ready).toHaveAttribute('data-tone', 'success');
     });
 
     it('opens Settings → About when clicked', () => {

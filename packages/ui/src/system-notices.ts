@@ -4,13 +4,13 @@ import { RELEASES_URL, releaseUrl } from './github-urls.js';
 export { releaseUrl };
 
 /**
- * Install-health notices: the background service, and the app updater.
+ * Install-health notices plus the whole-app updater lifecycle.
  *
  * These used to be full-width banners across the top of Home. Neither is
  * urgent and neither is fixable in the moment — a failed update *check* is
  * the ordinary offline case, and a background service that did not start
- * needs the installer. Both now sit as one quiet line in the navigation rail
- * under Settings, and explain themselves fully in Settings → About.
+ * needs the installer. The same quiet navigation-rail locus also carries live
+ * check/download/ready progress so a large background update never disappears.
  *
  * A notice with `railLabel: null` never reaches the rail at all; it is
  * findable in Settings and nowhere else.
@@ -23,6 +23,11 @@ export type SystemNoticeId =
   | 'legacy-machine-data'
   | 'service-version-mismatch'
   | 'service-unavailable'
+  | 'update-checking'
+  | 'update-up-to-date'
+  | 'update-downloading'
+  | 'update-ready'
+  | 'update-download-failed'
   | 'update-install-failed'
   | 'update-check-failed'
   | 'engine-backend-quarantined'
@@ -37,6 +42,8 @@ export interface SystemNotice {
   /** Raw diagnostic text, kept behind a disclosure. */
   technical?: string;
   link?: { href: string; label: string };
+  /** Visual temperature of the rail dot; failures default to warning. */
+  tone?: 'progress' | 'success' | 'warning';
   /**
    * Whether this condition is worth a bug report. A failed update *check* is
    * what being offline looks like — nothing is wrong with the install — so
@@ -150,13 +157,88 @@ export function serviceNotice(input: {
   };
 }
 
-/**
- * Update failures. A failed check is quiet by design — it is what an offline
- * launch looks like, and what a build with no published release yet looks
- * like, so it never reaches the rail.
- */
-export function updateNotice(state: UpdateState | null): SystemNotice | null {
-  if (!state || state.kind !== 'error') return null;
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = units[0]!;
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index]!;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
+function downloadDetail(state: Extract<UpdateState, { kind: 'downloading' }>): string {
+  const parts: string[] = [];
+  if (state.transferred !== undefined && state.total !== undefined) {
+    parts.push(`${formatBytes(state.transferred)} of ${formatBytes(state.total)}`);
+  }
+  if (state.bytesPerSecond !== undefined) {
+    parts.push(`${formatBytes(state.bytesPerSecond)}/s`);
+  }
+  return parts.length > 0 ? ` (${parts.join(' · ')})` : '';
+}
+
+/** One source of truth for update copy in the rail and Settings → About. */
+export function updateNotice(state: UpdateState | null, platform?: string): SystemNotice | null {
+  if (!state) return null;
+
+  if (state.kind === 'checking') {
+    return {
+      id: 'update-checking',
+      railLabel: 'Checking for updates…',
+      title: 'Gezel is checking for updates.',
+      body: 'This usually takes only a moment.',
+      tone: 'progress',
+    };
+  }
+
+  if (state.kind === 'up-to-date') {
+    return {
+      id: 'update-up-to-date',
+      railLabel: 'Gezel is up to date',
+      title: `Gezel ${state.version} is up to date.`,
+      body: 'No newer public desktop release is available.',
+      tone: 'success',
+    };
+  }
+
+  if (state.kind === 'downloading') {
+    const percent = state.percent === undefined ? '' : ` · ${state.percent}%`;
+    return {
+      id: 'update-downloading',
+      railLabel: `Downloading update${percent}`,
+      title: `Downloading Gezel ${state.version}.`,
+      body: `You can keep working while the update downloads${downloadDetail(state)}.`,
+      tone: 'progress',
+    };
+  }
+
+  if (state.kind === 'ready') {
+    const automatic = platform !== 'darwin';
+    return {
+      id: 'update-ready',
+      railLabel: automatic ? 'Update ready — quit to install' : 'Update ready to install',
+      title: `Gezel ${state.version} is ready to install.`,
+      body: automatic
+        ? 'It will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'
+        : 'Choose Open installer in Settings or on Home to launch the verified macOS installer.',
+      tone: 'success',
+    };
+  }
+
+  if (state.stage === 'download') {
+    return {
+      id: 'update-download-failed',
+      railLabel: 'Update download needs attention',
+      title: 'Gezel could not download the update.',
+      body: 'You can keep working. Gezel will try again next time it starts, or you can download the installer yourself.',
+      technical: state.message,
+      link: { href: releaseUrl(state.version), label: 'Get the latest release' },
+      tone: 'warning',
+    };
+  }
 
   if (state.stage === 'install') {
     return {
@@ -167,6 +249,7 @@ export function updateNotice(state: UpdateState | null): SystemNotice | null {
       technical: state.message,
       reportable: true,
       link: { href: releaseUrl(state.version), label: 'Get the latest release' },
+      tone: 'warning',
     };
   }
 
@@ -180,6 +263,7 @@ export function updateNotice(state: UpdateState | null): SystemNotice | null {
       'release has been published yet. Gezel will try again the next time it starts.',
     technical: state.message,
     link: { href: RELEASES_URL, label: 'Check releases yourself' },
+    tone: 'warning',
   };
 }
 
@@ -287,6 +371,6 @@ export function railSystemNotices(input: {
       ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),
       ...(input.runningBackend ? { running: input.runningBackend } : {}),
     }),
-    updateNotice(input.update),
+    updateNotice(input.update, input.platform),
   ].filter((n): n is SystemNotice => n !== null && n.railLabel !== null);
 }

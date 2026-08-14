@@ -3842,7 +3842,10 @@ function BackgroundServiceStatus() {
 /** Where the last update attempt got to. Silent unless there is news. */
 function UpdateStatus() {
   const state = useUpdateState();
-  const notice = updateNotice(state);
+  const platform = window.__GEZEL__?.platform;
+  const notice = state?.kind === 'error' ? updateNotice(state, platform) : null;
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   if (notice) {
     return (
@@ -3852,24 +3855,112 @@ function UpdateStatus() {
     );
   }
 
+  if (state?.kind === 'checking') {
+    return (
+      <output className="update-status" data-testid="update-status-checking">
+        Checking for updates…
+      </output>
+    );
+  }
+
+  if (state?.kind === 'up-to-date') {
+    return (
+      <output className="update-status update-status-success" data-testid="update-status-current">
+        Gezel {state.version} is up to date.
+      </output>
+    );
+  }
+
   if (state?.kind === 'downloading') {
     return (
-      <p className="muted small" style={{ marginTop: '0.75rem' }}>
-        Downloading version {state.version}…
-      </p>
+      <output className="update-status" data-testid="update-status-downloading">
+        <span className="update-status-head">
+          <span>Downloading Gezel {state.version}…</span>
+          {state.percent !== undefined && <strong>{state.percent}%</strong>}
+        </span>
+        {state.percent !== undefined && (
+          <progress
+            className="update-status-progress"
+            max={100}
+            value={state.percent}
+            aria-label={`Update download ${state.percent}% complete`}
+          />
+        )}
+        {state.transferred !== undefined && state.total !== undefined && (
+          <span className="muted small">
+            {formatUpdateBytes(state.transferred)} of {formatUpdateBytes(state.total)}
+            {state.bytesPerSecond !== undefined
+              ? ` · ${formatUpdateBytes(state.bytesPerSecond)}/s`
+              : ''}
+          </span>
+        )}
+      </output>
     );
   }
 
   if (state?.kind === 'ready') {
     return (
-      <p className="muted small" style={{ marginTop: '0.75rem' }}>
-        Version {state.version} is downloaded and ready to install — the prompt is on the Home
-        screen.
-      </p>
+      <output className="update-status update-status-ready" data-testid="update-status-ready">
+        <strong>Gezel {state.version} is ready to install.</strong>
+        <span className="muted small">
+          {platform === 'darwin'
+            ? 'Open the verified installer when you are ready.'
+            : 'It will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'}
+        </span>
+        <span>
+          <button
+            type="button"
+            className="primary"
+            disabled={installing}
+            onClick={() => {
+              setInstalling(true);
+              setInstallError(null);
+              const install = window.__GEZEL__?.update?.install;
+              if (!install) {
+                setInstallError('Installing updates needs the Gezel desktop app.');
+                setInstalling(false);
+                return;
+              }
+              void install()
+                .then((result) => {
+                  if (!result.ok) {
+                    setInstallError(result.error);
+                    setInstalling(false);
+                  }
+                })
+                .catch((err: unknown) => {
+                  setInstallError(err instanceof Error ? err.message : String(err));
+                  setInstalling(false);
+                });
+            }}
+          >
+            {installing
+              ? platform === 'darwin'
+                ? 'Opening installer…'
+                : 'Restarting…'
+              : platform === 'darwin'
+                ? 'Open installer'
+                : 'Install and restart'}
+          </button>
+        </span>
+        {installError && <span className="error small">{installError}</span>}
+      </output>
     );
   }
 
   return null;
+}
+
+function formatUpdateBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = units[0]!;
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index]!;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
 }
 
 /**

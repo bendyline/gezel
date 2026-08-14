@@ -24,7 +24,7 @@ cd "$(dirname "$0")/.."
 
 corepack enable
 corepack prepare pnpm@11.15.1 --activate
-pnpm deps:install -- --frozen-lockfile=false
+pnpm deps:install
 pnpm setup:native
 pnpm build
 pnpm typecheck

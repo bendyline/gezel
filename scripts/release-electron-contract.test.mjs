@@ -199,17 +199,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'prerelease alone is editable at publish time; make_latest is the flag the API consults',
   );
 
-  // A native release in the stable channel makes the updater find no release at
-  // all, which is silent from the release side. Both halves must fail closed.
+  // Native archives remain prereleases for honest public classification, while
+  // app discovery no longer depends on GitHub's repository-wide latest pointer.
   assert.match(
     workflow,
     /Native release \$\{NATIVE_TAG\} is not marked as a prerelease/,
-    'preflight must reject a native release that could take /releases/latest',
+    'preflight must reject a native archive mislabeled as a stable release',
   );
-  assert.match(
+  assert.doesNotMatch(
     workflow,
     /releases\/latest currently resolves to/,
-    'preflight must reject a repository whose /releases/latest is not an app tag',
+    'release preflight must not depend on the repository-wide latest pointer',
   );
   assert.match(
     workflow,

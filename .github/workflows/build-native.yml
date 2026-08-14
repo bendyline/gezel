@@ -1694,22 +1694,17 @@ jobs:
           name: Native binaries v${{ steps.pack.outputs.version }}
           draft: true
           # Native archives are implementation inputs, not end-user app
-          # releases. Keeping them in GitHub's prerelease channel prevents a
-          # published native-v* tag from replacing the Electron app at
-          # /releases/latest.
+          # releases. Keeping them in GitHub's prerelease channel makes that
+          # public classification explicit; the desktop updater independently
+          # filters to its exact stable v<semver> namespace.
           #
           # Both flags, deliberately. `prerelease` is the semantic claim, but it
           # is only as strong as whoever publishes the draft: GitHub's UI shows
           # "Set as a pre-release" as an editable checkbox, and clearing it hands
           # the stable namespace to a native tag. `make_latest: false` is the
-          # independent belt — it survives that, and it is what the API actually
-          # consults when deciding the repository's latest release.
-          #
-          # This is not hypothetical. native-v0.1.29 held /releases/latest for
-          # two days in Aug 2026 (it was cut before `prerelease: true` landed),
-          # and discoverLatestAppRelease correctly refused it — so the shipped
-          # app found no update at all rather than the wrong one. The Electron
-          # release preflight now fails closed on the same condition.
+          # independent belt — it survives that and keeps the repository-wide
+          # latest pointer useful to people browsing releases, even though the
+          # updater no longer trusts that pointer for app discovery.
           prerelease: true
           make_latest: false
           generate_release_notes: true

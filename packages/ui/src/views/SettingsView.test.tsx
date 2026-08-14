@@ -266,6 +266,52 @@ describe('SettingsView', () => {
       expect(notice).not.toHaveTextContent('could not install');
       expect(notice).toHaveTextContent('net::ERR_INTERNET_DISCONNECTED');
     });
+
+    it('shows byte progress and offers the Windows install handoff when ready', async () => {
+      window.__GEZEL__ = {
+        ...window.__GEZEL__,
+        platform: 'win32',
+        update: {
+          state: vi.fn().mockResolvedValue({
+            kind: 'downloading',
+            version: '1.26224.48',
+            percent: 64,
+            transferred: 64 * 1024 * 1024,
+            total: 100 * 1024 * 1024,
+            bytesPerSecond: 8 * 1024 * 1024,
+          }),
+          install: vi.fn(),
+          onStateChanged: vi.fn(),
+        },
+      } as never;
+
+      const downloading = render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+      const progress = await screen.findByTestId('update-status-downloading');
+      expect(progress).toHaveTextContent('64%');
+      expect(progress).toHaveTextContent('64 MB of 100 MB · 8.0 MB/s');
+      expect(screen.getByRole('progressbar')).toHaveAttribute('value', '64');
+      downloading.unmount();
+
+      resetUpdateStateForTests();
+      const install = vi.fn().mockResolvedValue({ ok: true });
+      window.__GEZEL__ = {
+        token: 'test-token',
+        platform: 'win32',
+        update: {
+          state: vi.fn().mockResolvedValue({ kind: 'ready', version: '1.26224.48' }),
+          install,
+          onStateChanged: vi.fn(),
+        },
+      } as never;
+
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+      const ready = await screen.findByTestId('update-status-ready');
+      expect(ready).toHaveTextContent('install automatically after you quit Gezel completely');
+      fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
+      await waitFor(() => expect(install).toHaveBeenCalledOnce());
+    });
   });
 
   it('uses llama as the user-facing engine name on Mac', async () => {

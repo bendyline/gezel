@@ -525,7 +525,7 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
       <span>
         {platform === 'darwin'
           ? 'Installing replaces Gezel and its background service together, so macOS will ask for an administrator password.'
-          : 'Gezel will restart to finish installing.'}
+          : 'The update will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'}
       </span>
       <div className="app-fallback-banner-actions">
         <button
@@ -543,7 +543,13 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
             });
           }}
         >
-          {installing ? 'Opening installer…' : 'Install now'}
+          {installing
+            ? platform === 'darwin'
+              ? 'Opening installer…'
+              : 'Restarting…'
+            : platform === 'darwin'
+              ? 'Open installer'
+              : 'Install and restart'}
         </button>
       </div>
       {installError && (

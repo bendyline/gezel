@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { withDependencyReadLease } from './dependency-lease.mjs';
 import { execPnpm } from './pnpm-cli.mjs';
-import { withPnpmInstallLock } from './pnpm-install.mjs';
 
 export function localReleaseLinks(workspaceSource) {
   return workspaceSource.split(/\r?\n/).flatMap((line) => {
@@ -50,7 +50,7 @@ export async function runIsolatedPnpmDeploy(options) {
   });
   console.log(`[${options.label}] pnpm ${args.join(' ')}`);
 
-  return withPnpmInstallLock(
+  return withDependencyReadLease(
     options.repoRoot,
     async () => {
       const result = await execPnpmFn(args, {

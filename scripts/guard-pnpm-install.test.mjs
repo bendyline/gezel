@@ -18,6 +18,7 @@ test('rejects a bare local pnpm install with the safe replacement', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Refusing a bare pnpm install/);
   assert.match(result.stderr, /pnpm deps:install/);
+  assert.match(result.stderr, /pnpm deps:repair/);
 });
 
 test('admits installs launched by the checkout lock wrapper', () => {

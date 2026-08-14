@@ -379,7 +379,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 
 ## Development
 
-- `pnpm deps:install` — checkout-locked dependency bootstrap. Bare `pnpm install` is rejected locally because concurrent installs can corrupt the shared `node_modules` tree.
+- A pnpm stale-dependency warning is informational and never authorizes dependency mutation. Use existing binaries for ordinary checks; do not install or repair merely to remove a warning.
+- `pnpm deps:status` — read-only diagnosis. `pnpm deps:install` installs only genuinely missing dependencies. `pnpm deps:repair` is the explicit, confirmed reconciliation path. Bare `pnpm install` is rejected because concurrent installs can corrupt the shared `node_modules` tree.
 - `pnpm build` — full workspace build; required before `pnpm test:e2e` or `pnpm app`.
 - `pnpm build:bundle` — build the relocatable service bundle via `pnpm deploy --prod`. Output at `packages/app/dist/service-bundle/`. Needed before packaging a distributable.
 - `pnpm build:packaged` — shortcut: `build` + `build:bundle`.

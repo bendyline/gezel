@@ -1,19 +1,14 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
+
 /**
- * Assert that GitHub's /releases/latest belongs to the Electron app namespace.
+ * Assert that the Electron app namespace contains a discoverable stable release.
  *
- * The desktop updater discovers releases by resolving that endpoint and
- * accepting the target only when its tag is exactly `v<semver>` — see
- * packages/app/src/updater/app-release.ts. The repository also hosts
- * `native-v*` engine releases, and GitHub picks "latest" by publish time
- * across every non-draft, non-prerelease release regardless of tag shape.
- *
- * So a published native release with the prerelease flag cleared does not make
- * clients download the wrong thing: discovery refuses the tag and returns null,
- * and the app reports "no published application release exists yet". Auto-update
- * stops, silently, for everyone already installed. That happened in Aug 2026 —
- * native-v0.1.29 was cut before build-native.yml carried `prerelease: true` and
- * held the stable channel until it was re-flagged by hand.
+ * The repository also hosts `native-v*` engine and npm-package releases. The
+ * desktop updater therefore lists releases and selects the greatest stable tag
+ * exactly matching `v<semver>`; GitHub's repository-wide "latest" pointer is
+ * deliberately irrelevant. Keep this script aligned with
+ * packages/app/src/updater/app-release.ts.
  *
  * Run this after publishing a draft app release, and any time the release list
  * has been edited in the GitHub UI.
@@ -31,25 +26,33 @@ function arg(name) {
   return process.argv[index + 1];
 }
 
-export function classifyLatestTag(tag, expectedVersion) {
-  if (typeof tag !== 'string' || tag.length === 0) {
-    return { ok: false, reason: 'GitHub reported no latest release for this repository.' };
+function compareTags(left, right) {
+  const a = APP_TAG.exec(left)?.slice(1).map(Number);
+  const b = APP_TAG.exec(right)?.slice(1).map(Number);
+  if (!a || !b) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index];
   }
-  if (!APP_TAG.test(tag)) {
-    return {
-      ok: false,
-      reason: [
-        `/releases/latest resolves to '${tag}', which is not an app release tag.`,
-        'The desktop updater accepts only a bare v<semver> tag, so it will find no',
-        'update at all and installed clients stay pinned to their current version.',
-        `Fix with:  gh release edit ${tag} --prerelease`,
-      ].join('\n'),
-    };
+  return 0;
+}
+
+export function selectLatestAppTag(releases, expectedVersion) {
+  if (!Array.isArray(releases)) {
+    return { ok: false, reason: 'GitHub returned an invalid release listing.' };
+  }
+  const tags = releases
+    .filter((release) => release?.draft !== true && release?.prerelease !== true)
+    .map((release) => release?.tag_name)
+    .filter((tag) => typeof tag === 'string' && APP_TAG.test(tag))
+    .sort(compareTags);
+  const tag = tags.at(-1);
+  if (!tag) {
+    return { ok: false, reason: 'GitHub reported no published stable app release.' };
   }
   if (expectedVersion && tag !== `v${expectedVersion}`) {
     return {
       ok: false,
-      reason: `/releases/latest resolves to '${tag}', expected 'v${expectedVersion}'.`,
+      reason: `The app namespace resolves to '${tag}', expected 'v${expectedVersion}'.`,
     };
   }
   return { ok: true, tag };
@@ -65,7 +68,9 @@ async function main() {
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers });
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`, {
+    headers,
+  });
   if (!response.ok) {
     console.error(
       `check-latest-release-namespace: GitHub returned HTTP ${response.status} for ${repo}`,
@@ -73,16 +78,15 @@ async function main() {
     process.exit(1);
   }
 
-  const { tag_name: tag } = await response.json();
-  const verdict = classifyLatestTag(tag, expected);
+  const verdict = selectLatestAppTag(await response.json(), expected);
   if (!verdict.ok) {
     console.error(`✗ ${verdict.reason}`);
     process.exit(1);
   }
 
-  console.log(`✓ ${repo} /releases/latest resolves to ${verdict.tag} — update discovery is live.`);
+  console.log(`✓ ${repo} app update namespace resolves to ${verdict.tag} — discovery is live.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }

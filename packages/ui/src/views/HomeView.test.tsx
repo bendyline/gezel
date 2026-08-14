@@ -180,7 +180,9 @@ describe('HomeView', () => {
       stubUpdateBridge(null);
       render(<HomeView />);
       await screen.findByTestId('home-workshop');
-      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /install|open installer/i }),
+      ).not.toBeInTheDocument();
     });
 
     // A download in flight is not actionable, so it stays out of the way.
@@ -188,7 +190,9 @@ describe('HomeView', () => {
       stubUpdateBridge({ kind: 'downloading', version: '1.26212.4' });
       render(<HomeView />);
       await screen.findByTestId('home-workshop');
-      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /install|open installer/i }),
+      ).not.toBeInTheDocument();
     });
 
     // Assert on the banner's whole text rather than per-string queries: the
@@ -203,13 +207,15 @@ describe('HomeView', () => {
       expect(banner).toHaveTextContent('ask for an administrator password');
     });
 
-    it('tells Windows and Linux users the app restarts instead', async () => {
+    it('tells Windows and Linux users that a complete quit applies the update', async () => {
       stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
       render(<HomeView platform="win32" />);
 
       const banner = await screen.findByTestId('update-banner');
-      expect(banner).toHaveTextContent('Gezel will restart to finish installing.');
+      expect(banner).toHaveTextContent('install automatically after you quit Gezel completely');
+      expect(banner).toHaveTextContent('system tray');
       expect(banner).not.toHaveTextContent('administrator password');
+      expect(screen.getByRole('button', { name: /install and restart/i })).toBeInTheDocument();
     });
 
     it('hands the install to the shell when asked', async () => {
@@ -217,7 +223,7 @@ describe('HomeView', () => {
       stubUpdateBridge({ kind: 'ready', version: '1.26212.4' }, install);
       render(<HomeView platform="darwin" />);
 
-      fireEvent.click(await screen.findByRole('button', { name: /install now/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /open installer/i }));
       await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
     });
 

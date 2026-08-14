@@ -2,8 +2,9 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { withDependencyReadLease } from './dependency-lease.mjs';
 import { spawnPnpm } from './pnpm-cli.mjs';
-import { runPnpmInstallChild, withPnpmInstallLock } from './pnpm-install.mjs';
+import { runPreparedFrozenInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptsDir, '..');
@@ -49,17 +50,19 @@ export async function runWorkspaceValidation(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const install = options.install ?? false;
   const inheritedEnv = options.env ?? process.env;
-  const runInstallFn = options.runInstallFn ?? runPnpmInstallChild;
+  const runInstallFn = options.runInstallFn ?? runPreparedFrozenInstall;
   const runValidationFn = options.runValidationFn ?? runValidationChild;
 
-  return withPnpmInstallLock(
+  const withLease = install ? withPnpmInstallLock : withDependencyReadLease;
+  return withLease(
     repoRoot,
-    async ({ setChildPid, lockEnv }) => {
-      const env = { ...inheritedEnv, ...lockEnv };
+    async ({ setChildPid, leaseEnv }) => {
+      const env = { ...inheritedEnv, ...leaseEnv };
       if (install) {
         const installCode = await runInstallFn({
           repoRoot,
-          args: ['--frozen-lockfile'],
+          args: [],
+          allowPurge: false,
           env,
           setChildPid,
         });
@@ -68,7 +71,7 @@ export async function runWorkspaceValidation(options = {}) {
       return runValidationFn({ repoRoot, env, setChildPid });
     },
     {
-      command: install ? 'pnpm all' : 'pnpm validate',
+      command: install ? 'pnpm deps:validate' : 'pnpm validate',
       env: inheritedEnv,
     },
   );
