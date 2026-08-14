@@ -38,8 +38,8 @@ async function waitForProjectSessionText(projectId: string, pattern: RegExp): Pr
   // The kickoff macros return once the entry step is ENQUEUED on the task
   // runner; the handoff session and its seed message only exist after a
   // runner tick dispatches it and the fire-and-forget send lands. Drive
-  // both ends rather than racing a wall clock: `tick()` is public for
-  // exactly this, and `drainBackground()` awaits the detached send.
+  // both ends rather than racing a wall clock: `wake()` shares the live
+  // ticker's overlap guard, and `drainBackground()` awaits the detached send.
   // A timed poll passed here for months and then failed on CI, where the
   // 5s ticker and a per-session MCP child spawn on a loaded 4-vCPU runner
   // outran the window — a slow machine must not change the outcome.
@@ -48,7 +48,7 @@ async function waitForProjectSessionText(projectId: string, pattern: RegExp): Pr
     // Drain first so slots and writes from earlier tests' unawaited
     // kickoffs settle before this pass measures anything.
     await svc.context.chat.drainBackground();
-    await svc.context.taskRunner.tick();
+    await svc.context.taskRunner.wake();
     await svc.context.chat.drainBackground();
     const sessions = await svc.context.store.listSessions({ projectId });
     for (const summary of sessions) {

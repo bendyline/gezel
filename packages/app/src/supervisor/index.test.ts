@@ -251,6 +251,7 @@ const { startService } = await import('@bendyline/gezel-service');
 const ENV_KEYS = [
   'GEZEL_PNPM_PATH',
   'GEZEL_NODE_PATH',
+  'GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL',
   'GEZEL_DS4_SERVER_BIN',
   'GEZEL_SD_SERVER_BIN',
   'GEZEL_LLAMA_SERVER_BIN',
@@ -357,7 +358,45 @@ function baseOpts(overrides: Partial<Parameters<typeof connectOrStart>[0]> = {})
   };
 }
 
-describe('packaged runtime prelude', () => {
+describe('bundled runtime prelude', () => {
+  it('lets development E2Es bypass repeated bundled runtime installs', async () => {
+    process.env.GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL = '1';
+    process.env.GEZEL_NODE_PATH = '/development/node';
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+    const logger = baseOpts().logger;
+
+    const svc = await connectOrStart(baseOpts({ logger }));
+
+    expect(installNodeIfNeeded).not.toHaveBeenCalled();
+    expect(installPnpmIfNeeded).not.toHaveBeenCalled();
+    expect(process.env.GEZEL_NODE_PATH).toBe('/development/node');
+    expect(logger.info).toHaveBeenCalledWith(
+      '[supervisor] skipping bundled runtime install in development',
+    );
+    await svc.shutdown();
+  });
+
+  it('never lets the development bypass disable packaged provisioning', async () => {
+    process.env.GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL = '1';
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'remote',
+      baseUrl: 'https://remote.example.test',
+      token: 'remote-tok',
+      cert: null,
+    });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(installNodeIfNeeded).toHaveBeenCalledOnce();
+    expect(installPnpmIfNeeded).toHaveBeenCalledOnce();
+    await svc.shutdown();
+  });
+
   it('clears inherited runtime overrides when the bundles are not verified', async () => {
     process.env.GEZEL_NODE_PATH = '/untrusted/global/node';
     process.env.GEZEL_PNPM_PATH = '/untrusted/global/pnpm';

@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GEZEL_VERSION } from '@bendyline/gezel';
+import { GEZEL_VERSION, resolveShowWorkInProgressFeatures } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from './service.js';
@@ -662,7 +662,7 @@ describe('config API', () => {
   it('materializes the build default for work-in-progress features and persists explicit choices', async () => {
     const initialRes = await api('GET', '/api/config');
     expect(await initialRes.json()).toMatchObject({
-      showWorkInProgressFeatures: GEZEL_VERSION === '0.0.0',
+      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(undefined, GEZEL_VERSION),
     });
 
     const disabledRes = await api('PUT', '/api/config', { showWorkInProgressFeatures: false });

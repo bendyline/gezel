@@ -309,6 +309,27 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
+test('PR artifact checks compile the same release-stamped source shape as Electron release', async () => {
+  const quality = await readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8');
+  const packagedStart = quality.indexOf('  packaged-bundle:');
+  const packagedEnd = quality.indexOf('\n  supply-chain:', packagedStart);
+
+  assert.notEqual(packagedStart, -1, 'quality must retain a packaged-artifact job');
+  assert.notEqual(packagedEnd, -1, 'the packaged-artifact job must remain a distinct job');
+
+  const packaged = quality.slice(packagedStart, packagedEnd);
+  const stampIndex = packaged.indexOf('node scripts/stamp-version.mjs --inc 0');
+  const buildIndex = packaged.indexOf('run: pnpm build', stampIndex);
+  const typecheckIndex = packaged.indexOf('run: pnpm typecheck', buildIndex);
+
+  assert.ok(stampIndex >= 0, 'PR artifact checks must stamp a representative release version');
+  assert.ok(buildIndex > stampIndex, 'the release-stamped tree must be built after stamping');
+  assert.ok(
+    typecheckIndex > buildIndex,
+    'the release-stamped tree must be typechecked after build',
+  );
+});
+
 test('macOS release installs the finished PKG and exercises recovery', async () => {
   const workflow = await readFile(
     join(root, '.github', 'workflows', 'release-electron.yml'),
