@@ -181,7 +181,7 @@ jobs:
         run: pnpm test:stability
 
   packaged-bundle:
-    name: Packaged and published-artifact contracts
+    name: Release-stamped packaged and published-artifact contracts
     needs: workflow-policy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -191,7 +191,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
-      - run: pnpm build
+      # Release workflows mutate both package manifests and the exported
+      # version constants before compiling. Keep one PR job on that exact
+      # source shape; ordinary build/typecheck above intentionally exercises
+      # the unstamped 0.0.0 development tree.
+      - name: Stamp representative Electron release version
+        run: node scripts/stamp-version.mjs --inc 0
+      - name: Build release-stamped workspace
+        run: pnpm build
+      - name: Typecheck release-stamped workspace
+        run: pnpm typecheck
       - name: Build and import the packaged service bundle
         run: pnpm build:bundle
       - name: Verify publishable package shapes and subpaths
