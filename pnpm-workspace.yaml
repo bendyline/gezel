@@ -80,6 +80,10 @@ ignoredOptionalDependencies:
   - "@napi-rs/canvas"
 
 overrides:
+  # Keep direct declarations exact when they are covered by an exact override.
+  # pnpm's pre-script dependency check compares the original manifest specifier
+  # with the override-normalized lockfile importer and otherwise warns even
+  # though a frozen install validates successfully.
   "@hono/node-server": "2.0.11"
   "adm-zip": "0.6.0"
   "axios": "1.18.1"
