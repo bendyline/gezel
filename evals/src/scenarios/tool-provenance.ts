@@ -2,6 +2,7 @@ export interface ProvenanceToolCall {
   name: string;
   success: boolean;
   path?: string;
+  paths?: string[];
   argsFull?: string;
   argsSummary?: string;
 }
@@ -90,6 +91,7 @@ function shellOverwriteIndex(call: ProvenanceToolCall, path: string): number {
 export function provenanceToolReadsPath(call: ProvenanceToolCall, path: string): boolean {
   if (call.success !== true) return false;
   if (call.name === 'read_file') return call.path === path;
+  if (call.name === 'read_files') return call.paths?.includes(path) === true;
   return shellReadIndex(call, path) >= 0;
 }
 

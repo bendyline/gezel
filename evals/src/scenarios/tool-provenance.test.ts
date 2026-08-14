@@ -7,6 +7,32 @@ import {
 } from './tool-provenance.ts';
 
 describe('CLI shell tool provenance', () => {
+  it('recognizes every path in a successful batch read', () => {
+    const read = {
+      name: 'read_files',
+      success: true,
+      path: 'state/config.json',
+      paths: ['state/config.json', 'state/backup.json'],
+    };
+
+    expect(provenanceToolReadsPath(read, 'state/config.json')).toBe(true);
+    expect(provenanceToolReadsPath(read, 'state/backup.json')).toBe(true);
+    expect(provenanceToolReadsPath(read, 'runbook.md')).toBe(false);
+  });
+
+  it('does not credit paths from a failed batch read', () => {
+    expect(
+      provenanceToolReadsPath(
+        {
+          name: 'read_files',
+          success: false,
+          paths: ['state/config.json', 'state/backup.json'],
+        },
+        'state/backup.json',
+      ),
+    ).toBe(false);
+  });
+
   it('recognizes successful shell reads and heredoc writes', () => {
     const read = {
       name: 'shell',
