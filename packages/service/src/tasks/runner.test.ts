@@ -43,7 +43,10 @@ class FakeDispatcher {
   readonly activeSessionIds = new Set<string>();
   readonly cancelledSessionIds: string[] = [];
 
-  constructor(private readonly gezelProvider: Map<string, ProviderName>) {}
+  constructor(
+    private readonly gezelProvider: Map<string, ProviderName>,
+    private readonly beforeDispatch?: () => Promise<void>,
+  ) {}
 
   async startHandoffSession(args: {
     gezelId: string;
@@ -58,6 +61,7 @@ class FakeDispatcher {
     capabilityFloor?: string;
     bookCatalogId?: string;
   }): Promise<{ sessionId: string }> {
+    await this.beforeDispatch?.();
     this.dispatches.push({
       gezelId: args.gezelId,
       projectId: args.projectId,
@@ -130,6 +134,65 @@ afterEach(async () => {
 });
 
 describe('TaskRunner — dispatch + FIFO', () => {
+  it('preserves a handoff enqueued while a serialized tick is in flight', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    for (const num of [1, 2]) {
+      await store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `t${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook([
+          {
+            id: 'plan',
+            name: 'plan',
+            assignee: { kind: 'gezel', gezelId: 'bea' },
+            createdAt: now,
+          },
+        ]),
+        activeStepId: 'plan',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+
+    let markDispatchStarted!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => {
+      markDispatchStarted = resolve;
+    });
+    let releaseDispatch!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]), async () => {
+      markDispatchStarted();
+      await dispatchGate;
+    });
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    const tick = runner.wake();
+    await dispatchStarted;
+
+    // This mirrors an entry handoff arriving just after the interval tick's
+    // snapshot. It must survive that pass and retain FIFO position.
+    runner.enqueueHandoff({ taskRef: 'p1/2', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    releaseDispatch();
+    await tick;
+
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual(['p1/1']);
+    expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/2']);
+
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual(['p1/1', 'p1/2']);
+  });
+
   it('deduplicates the same task activation before and after dispatch', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

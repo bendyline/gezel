@@ -385,10 +385,18 @@ export class TaskRunner {
   /** Run one serialized dispatch pass now, sharing the interval's overlap guard. */
   async wake(): Promise<void> {
     if (this.tickInFlight) return this.tickInFlight;
-    this.tickInFlight = this.tick().finally(() => {
+    this.tickInFlight = this.tickOnce().finally(() => {
       this.tickInFlight = null;
     });
     return this.tickInFlight;
+  }
+
+  /**
+   * Public test/operator entry point. Keep it serialized with the interval:
+   * callers may drive a real, already-started service whose ticker is active.
+   */
+  async tick(): Promise<void> {
+    return this.wake();
   }
 
   /**
@@ -450,9 +458,9 @@ export class TaskRunner {
   /**
    * One dispatch pass. Walks pending in FIFO order; dispatches any
    * whose target provider has a free slot; skips items for tasks
-   * that are no longer active. Public for test-driven ticks.
+   * that are no longer active.
    */
-  async tick(): Promise<void> {
+  private async tickOnce(): Promise<void> {
     await this.pruneActiveDispatches();
     if (this.pending.length === 0) {
       this.holdReason = undefined;
@@ -477,6 +485,7 @@ export class TaskRunner {
     // Work on a snapshot: mutating `pending` mid-loop from async
     // dispatches would thrash the iteration.
     const snapshot = this.pending.slice();
+    const snapshotIds = new Set(snapshot.map((handoff) => handoff.id));
     const keep: PendingHandoff[] = [];
     // Dispatches within this tick haven't acquired queue slots yet
     // (startHandoffSession spawns a session; sendAndWait-via-queue
@@ -628,10 +637,13 @@ export class TaskRunner {
       }
     }
 
-    // Replace `pending` with the non-dispatched leftovers, preserving
-    // the original order for anything we kept.
+    // Replace only the snapshot portion with its non-dispatched leftovers.
+    // Handoffs enqueued while this async pass was running were not examined
+    // and must remain behind the older FIFO work. Replacing the whole array
+    // here used to erase those mid-tick enqueues.
+    const enqueuedDuringTick = this.pending.filter((handoff) => !snapshotIds.has(handoff.id));
     this.pending.length = 0;
-    this.pending.push(...keep);
+    this.pending.push(...keep, ...enqueuedDuringTick);
     this.holdReason = keep.some((handoff) => handoff.heldFor === 'provider-busy')
       ? 'provider-busy'
       : undefined;

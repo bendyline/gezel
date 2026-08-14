@@ -60,6 +60,10 @@ test.beforeAll(async () => {
       GEZEL_HOME: gezelHome,
       GEZEL_MOCK_PROVIDER: '1',
       GEZEL_SPAWN: '1',
+      // buildLaunchEnv skips runtime installation for ordinary fresh-home
+      // specs. This is the one dev E2E that deliberately proves the bundled
+      // Node/pnpm provisioning path before spawning gezeld.
+      GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL: '0',
       // Crucially NOT setting GEZEL_EMBEDDED — we want the real spawn path.
       // Same reason as app.spec.ts: skip the on-device model download and the
       // system-toolset bootstrap. This spec is about supervisor spawn, and

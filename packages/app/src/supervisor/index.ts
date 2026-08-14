@@ -789,52 +789,65 @@ export type Connection = SupervisedService;
  * silent drift into embedded mode.
  */
 export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedService> {
-  // Install Node first: the bundled pnpm package is a JavaScript CLI and
-  // every packaged platform launches it with this runtime. The sandbox
-  // runner also prefers `GEZEL_NODE_PATH` over `node` on PATH so
-  // `run_nodejs_script` works on machines without a global Node
-  // install. Packaged mode fails closed when the release manifest is absent
-  // or invalid; only development may use an unauthenticated/PATH runtime.
-  if (opts.packaged) delete process.env.GEZEL_NODE_PATH;
-  try {
-    const nodeBundleDir = defaultNodeBundleDir(import.meta.url);
-    const node = await installNodeIfNeeded({
-      home: opts.home,
-      bundleDir: nodeBundleDir,
-      logger: opts.logger,
-    });
-    if (node.binaryPath && (node.verified || !opts.packaged)) {
-      process.env.GEZEL_NODE_PATH = node.binaryPath;
-    } else if (opts.packaged) {
-      opts.logger?.warn?.(
-        '[supervisor] verified bundled node is unavailable; packaged autostart and Node-backed tools remain disabled',
-      );
-    }
-  } catch (err) {
-    opts.logger?.warn?.(
-      `[supervisor] node install step failed: ${(err as Error).message}; continuing without a trusted bundled node`,
-    );
-  }
+  // Most Electron E2Es use a fresh home and the system Node/pnpm already
+  // running the checkout. Reinstalling and repeatedly hashing the ~110 MB
+  // bundled runtimes for every spec only tests cold provisioning over and
+  // over. Development tests may bypass that prelude; packaged launches never
+  // honor the escape hatch, and supervisor-spawn.spec explicitly opts back in
+  // to retain one end-to-end provisioning check.
+  const skipBundledRuntimeInstall =
+    !opts.packaged && process.env.GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL === '1';
 
-  // Lay down the ordinary pnpm package at
-  // `~/.gezel/bin/pnpm-runtime/` and point the service at its JS
-  // entrypoint. Invocation resolution combines this with
-  // `GEZEL_NODE_PATH`; dev mode still falls back to pnpm on PATH.
-  if (opts.packaged) delete process.env.GEZEL_PNPM_PATH;
-  try {
-    const bundleDir = defaultPnpmBundleDir(import.meta.url);
-    const pnpm = await installPnpmIfNeeded({ home: opts.home, bundleDir, logger: opts.logger });
-    if (pnpm.entryPath && (pnpm.verified || !opts.packaged)) {
-      process.env.GEZEL_PNPM_PATH = pnpm.entryPath;
-    } else if (opts.packaged) {
+  if (skipBundledRuntimeInstall) {
+    opts.logger?.info?.('[supervisor] skipping bundled runtime install in development');
+  } else {
+    // Install Node first: the bundled pnpm package is a JavaScript CLI and
+    // every packaged platform launches it with this runtime. The sandbox
+    // runner also prefers `GEZEL_NODE_PATH` over `node` on PATH so
+    // `run_nodejs_script` works on machines without a global Node
+    // install. Packaged mode fails closed when the release manifest is absent
+    // or invalid; only development may use an unauthenticated/PATH runtime.
+    if (opts.packaged) delete process.env.GEZEL_NODE_PATH;
+    try {
+      const nodeBundleDir = defaultNodeBundleDir(import.meta.url);
+      const node = await installNodeIfNeeded({
+        home: opts.home,
+        bundleDir: nodeBundleDir,
+        logger: opts.logger,
+      });
+      if (node.binaryPath && (node.verified || !opts.packaged)) {
+        process.env.GEZEL_NODE_PATH = node.binaryPath;
+      } else if (opts.packaged) {
+        opts.logger?.warn?.(
+          '[supervisor] verified bundled node is unavailable; packaged autostart and Node-backed tools remain disabled',
+        );
+      }
+    } catch (err) {
       opts.logger?.warn?.(
-        '[supervisor] verified bundled pnpm is unavailable; packaged package workflows and autostart remain disabled',
+        `[supervisor] node install step failed: ${(err as Error).message}; continuing without a trusted bundled node`,
       );
     }
-  } catch (err) {
-    opts.logger?.warn?.(
-      `[supervisor] pnpm install step failed: ${(err as Error).message}; continuing without bundled pnpm`,
-    );
+
+    // Lay down the ordinary pnpm package at
+    // `~/.gezel/bin/pnpm-runtime/` and point the service at its JS
+    // entrypoint. Invocation resolution combines this with
+    // `GEZEL_NODE_PATH`; dev mode still falls back to pnpm on PATH.
+    if (opts.packaged) delete process.env.GEZEL_PNPM_PATH;
+    try {
+      const bundleDir = defaultPnpmBundleDir(import.meta.url);
+      const pnpm = await installPnpmIfNeeded({ home: opts.home, bundleDir, logger: opts.logger });
+      if (pnpm.entryPath && (pnpm.verified || !opts.packaged)) {
+        process.env.GEZEL_PNPM_PATH = pnpm.entryPath;
+      } else if (opts.packaged) {
+        opts.logger?.warn?.(
+          '[supervisor] verified bundled pnpm is unavailable; packaged package workflows and autostart remain disabled',
+        );
+      }
+    } catch (err) {
+      opts.logger?.warn?.(
+        `[supervisor] pnpm install step failed: ${(err as Error).message}; continuing without bundled pnpm`,
+      );
+    }
   }
 
   // Expose the per-platform bundled sd-server (and, later, other native

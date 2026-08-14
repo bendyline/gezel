@@ -33,7 +33,19 @@ export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEn
   // GEZEL_E2E=1 flips the macOS Electron app into `accessory` activation
   // policy (see main.ts) — windows render and Playwright can drive
   // them, but the app doesn't grab the dock or steal focus while you
-  // work in another app. Universal across every spec; individual
-  // tests can still override via `extras`.
-  return { ...base, GEZEL_E2E: '1', ...extras };
+  // work in another app. Ordinary specs also use the checkout's Node/pnpm
+  // instead of reinstalling the bundled runtimes into every fresh test home.
+  // Packaged launches ignore this development-only bypass, and the dedicated
+  // supervisor-spawn spec overrides it to retain cold-provisioning coverage.
+  return {
+    ...base,
+    GEZEL_E2E: '1',
+    GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL: '1',
+    // The embedded service shares Electron's process, whose execPath points
+    // at electron.exe rather than Node. Script-backed project pages still
+    // need a real development Node binary after provisioning is skipped.
+    // Packaged connectOrStart clears this and installs the verified bundle.
+    GEZEL_NODE_PATH: process.execPath,
+    ...extras,
+  };
 }
