@@ -1,35 +1,35 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { workspaceDependenciesReady } from './pnpm-install.mjs';
+import { dependencyStatus, reportDependencyStatus } from './pnpm-install.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, '..');
 
-if (workspaceDependenciesReady(repoRoot)) process.exit(0);
+export function runBootstrap(options = {}) {
+  const root = options.repoRoot ?? repoRoot;
+  const warn = options.warn ?? console.warn;
+  const error = options.error ?? console.error;
+  const status = (options.statusFn ?? dependencyStatus)(root);
+  if (status.usable) {
+    const metadataIssues = [
+      status.installedLockfileIssue,
+      status.workspaceStructureIssue,
+      status.lockfileValidationIssue,
+    ].filter(Boolean);
+    for (const issue of metadataIssues) warn(`[bootstrap] dependency metadata warning: ${issue}`);
+    if (metadataIssues.length > 0) {
+      warn('[bootstrap] continuing with existing tools; no install or repair was started');
+    }
+    return 0;
+  }
 
-const probe = spawnSync('pnpm', ['--version'], {
-  stdio: 'ignore',
-  shell: process.platform === 'win32',
-});
-if (probe.status !== 0) {
-  console.error('[bootstrap] pnpm was not found on your PATH.');
-  console.error('');
-  console.error('Node ≥22 ships with Corepack, which can provision the exact pnpm version');
-  console.error('this repo pins in package.json. Run these once, then retry:');
-  console.error('');
-  console.error('  corepack enable');
-  console.error('  corepack prepare pnpm@11.15.1 --activate');
-  console.error('');
-  console.error('See the README "Getting started" section for details.');
-  process.exit(1);
+  (options.reportFn ?? reportDependencyStatus)(root, { write: error });
+  error('[bootstrap] dependencies are incomplete; no install was started');
+  error('[bootstrap] run `pnpm deps:install` only if dependency installation is intended');
+  return 1;
 }
 
-console.log('[bootstrap] dependencies missing or incomplete — waiting for the shared install lock');
-const result = spawnSync(process.execPath, [join(scriptsDir, 'pnpm-install.mjs'), '--if-missing'], {
-  stdio: 'inherit',
-  cwd: repoRoot,
-});
-process.exit(result.status ?? 1);
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isMain) process.exitCode = runBootstrap();

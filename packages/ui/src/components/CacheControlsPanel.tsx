@@ -15,7 +15,7 @@
  *      systems). Leaving the slider on the suggestion keeps the budget
  *      "Auto" (no stored override, so it re-derives if RAM changes).
  *   2. **Clear all caches.** Emergency button — immediately drops
- *      every warm session for this engine. Used when caches feel
+ *      every chat and shared-prefix entry for this engine. Used when caches feel
  *      stuck or the engine misbehaves.
  *
  * Live stats pull from `/api/cache/stats` once on mount + every 5s
@@ -27,6 +27,7 @@
 import type { ProviderCacheStatsResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { summarizeCacheEntries } from './cacheDisplay.js';
 
 const POLL_MS = 5_000;
 const MB = 1024 * 1024;
@@ -127,6 +128,7 @@ export function CacheControlsPanel({
 
   const totalMb = stats ? Math.round(stats.totalBytes / MB) : 0;
   const budgetMb = stats ? Math.round(stats.budgetBytes / MB) : 0;
+  const entrySummary = summarizeCacheEntries(stats?.sessions, stats?.warmSessionCount ?? 0);
 
   // The RAM-aware suggestion (override-independent) and the physical-RAM
   // ceiling, both reported by /api/cache/stats. Fall back to the live
@@ -154,18 +156,20 @@ export function CacheControlsPanel({
     <div className="cache-controls-panel">
       <h4>Memory budget</h4>
       <p className="muted small">
-        The most memory {label} keeps for warm threads before older ones are released.
+        The most memory {label} keeps for chat and shared-prefix context before older entries are
+        released.
       </p>
-      {stats && stats.warmSessionCount > 0 ? (
+      {stats && entrySummary.totalCount > 0 ? (
         <p className="muted small">
-          {stats.warmSessionCount} warm {stats.warmSessionCount === 1 ? 'thread' : 'threads'} ·{' '}
-          {fmtMemory(totalMb)} used of {fmtMemory(budgetMb)}
+          {entrySummary.label} · {fmtMemory(totalMb)} used of {fmtMemory(budgetMb)}
           {stats.recentHitRate > 0 && (
             <> · {Math.round(stats.recentHitRate * 100)}% hit rate (last 50 turns)</>
           )}
         </p>
       ) : (
-        <p className="muted small">No warm threads yet — cache populates after the first turn.</p>
+        <p className="muted small">
+          No warm cache entries yet — they populate after the first turn.
+        </p>
       )}
 
       <div className="gz-budget-slider">
@@ -228,7 +232,7 @@ export function CacheControlsPanel({
         <button
           type="button"
           onClick={() => void onClear()}
-          disabled={clearing || !stats || stats.warmSessionCount === 0}
+          disabled={clearing || !stats || entrySummary.totalCount === 0}
         >
           {clearing ? 'Clearing…' : 'Clear all caches'}
         </button>

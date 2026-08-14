@@ -60,6 +60,12 @@ import {
   appReleaseFeedConfiguration,
   discoverLatestAppRelease,
 } from './updater/app-release.js';
+import {
+  type UpdateState,
+  downloadingUpdateState,
+  shouldPublishDownloadState,
+  updateErrorStage,
+} from './updater/update-state.js';
 
 /**
  * Electron's OS-integration boundary. Product state and model execution stay
@@ -148,21 +154,7 @@ let macUninstallDialogRequested = false;
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
 /** The exact app-tagged release selected for the current update check. */
 let appUpdateRelease: PublishedAppRelease | null = null;
-/**
- * What the renderer shows about updates. Previously every update outcome —
- * including outright failure — went only to the console, so a user whose
- * update could not be applied had no way to find out.
- *
- * `stage` separates the two failures the renderer used to conflate. A failed
- * *check* is the ordinary offline/no-release-published case and says nothing
- * about the install; the renderer showed it as "Gezel could not install an
- * update", which was both alarming and untrue. Only a failed *install* means
- * a verified update is sitting there unable to land.
- */
-type UpdateState =
-  | { kind: 'downloading'; version: string }
-  | { kind: 'ready'; version: string }
-  | { kind: 'error'; stage: 'check' | 'install'; version?: string; message: string };
+/** Latest updater lifecycle snapshot pushed to every renderer over IPC. */
 let updateState: UpdateState | null = null;
 /** Verified installer staged by the macOS update flow, awaiting the user. */
 let macUpdatePkgPath: string | null = null;
@@ -1021,11 +1013,39 @@ ipcMain.handle('gezel:update:install', async () => {
   if (process.platform !== 'darwin') {
     // Windows and Linux keep electron-updater's own installer handoff, which
     // already elevates via elevate.exe / pkexec.
-    autoUpdaterRef?.quitAndInstall();
-    return { ok: true as const };
+    if (!autoUpdaterRef || updateState?.kind !== 'ready') {
+      return { ok: false as const, error: 'No downloaded update is ready to install.' };
+    }
+    try {
+      // quitAndInstall starts closing windows before Electron's ordinary quit
+      // sequence on some updater/platform combinations. Let close-to-tray know
+      // this is a real quit so it cannot hide the last window mid-handoff.
+      isQuitting = true;
+      // Match the automatic NSIS-on-quit path (`/S`) while opting back into a
+      // restart because this action was explicitly chosen by the user.
+      autoUpdaterRef.quitAndInstall(true, true);
+      return { ok: true as const };
+    } catch (err) {
+      isQuitting = false;
+      const message = err instanceof Error ? err.message : String(err);
+      setUpdateState({
+        kind: 'error',
+        stage: 'install',
+        version: updateState.version,
+        message,
+      });
+      return { ok: false as const, error: message };
+    }
   }
   const result = await installStagedMacUpdate();
-  return result.ok ? { ok: true as const } : { ok: false as const, error: result.error };
+  if (result.ok) return { ok: true as const };
+  setUpdateState({
+    kind: 'error',
+    stage: 'install',
+    version: updateState?.kind === 'ready' ? updateState.version : appUpdateRelease?.version,
+    message: result.error ?? 'The verified installer could not be opened.',
+  });
+  return { ok: false as const, error: result.error };
 });
 
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
@@ -1892,12 +1912,15 @@ async function triggerAuthorizedUpdateCheck(): Promise<void> {
 async function checkAppReleaseForUpdates(
   updater: import('electron-updater').AppUpdater,
 ): Promise<void> {
+  appUpdateRelease = null;
+  setUpdateState({ kind: 'checking' });
   try {
     const release = await discoverLatestAppRelease({
       fetch: globalThis.fetch,
     });
     if (!release) {
       console.info('[updater] no published application release exists yet');
+      setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
       return;
     }
     appUpdateRelease = release;
@@ -1906,6 +1929,11 @@ async function checkAppReleaseForUpdates(
     await updater.checkForUpdates();
   } catch (err) {
     console.warn('[updater] check failed:', err);
+    setUpdateState({
+      kind: 'error',
+      stage: 'check',
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -1914,6 +1942,13 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   try {
     const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
     autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error } as never;
+    autoUpdater.on('checking-for-update', () => {
+      setUpdateState({ kind: 'checking' });
+    });
+    autoUpdater.on('update-not-available', () => {
+      setUpdateState({ kind: 'up-to-date', version: app.getVersion() });
+      tray?.setTooltip('Gezel');
+    });
     if (process.platform === 'darwin') {
       // Take the download away from MacUpdater. Its ZIP path cannot deliver a
       // complete macOS update for a machine-service install and cannot elevate
@@ -1925,31 +1960,63 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
         void handleMacUpdateAvailable(info.version);
       });
     } else {
+      // Make the Windows NSIS/AppImage contract explicit rather than relying
+      // on electron-updater's defaults: download in the background, then use
+      // its silent install hook after a complete process quit.
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
       autoUpdater.on('update-available', (info) => {
+        setUpdateState(downloadingUpdateState(info.version));
         notify({ title: 'Gezel update available', body: `Downloading version ${info.version}…` });
         tray?.setTooltip('Gezel — downloading update…');
       });
+      autoUpdater.on('download-progress', (progress) => {
+        const version =
+          updateState?.kind === 'downloading'
+            ? updateState.version
+            : (appUpdateRelease?.version ?? app.getVersion());
+        const next = downloadingUpdateState(version, progress);
+        if (shouldPublishDownloadState(updateState, next)) setUpdateState(next);
+      });
       autoUpdater.on('update-downloaded', (info) => {
+        setUpdateState({ kind: 'ready', version: info.version });
+        tray?.setTooltip('Gezel — update ready; quit to install');
         notify({
           title: 'Gezel update ready',
-          body: `Version ${info.version} installs when you quit Gezel.`,
+          body: `Version ${info.version} will install after you quit Gezel completely.`,
+          view: 'home',
         });
+      });
+      autoUpdater.on('update-cancelled', (info) => {
+        setUpdateState({
+          kind: 'error',
+          stage: 'download',
+          version: info.version,
+          message: 'The update download was cancelled before it finished.',
+        });
+        tray?.setTooltip('Gezel');
       });
     }
     autoUpdater.on('error', (err) => {
-      // Was a bare console.warn, which made every update failure invisible.
       console.warn('[updater] error:', err);
+      const previous = updateState;
       setUpdateState({
         kind: 'error',
-        stage: 'check',
+        stage: updateErrorStage(previous),
         version: appUpdateRelease?.version,
         message: err instanceof Error ? err.message : String(err),
       });
+      tray?.setTooltip('Gezel');
     });
     autoUpdaterRef = autoUpdater;
     return autoUpdater;
   } catch (err) {
     console.warn('[updater] not available:', err);
+    setUpdateState({
+      kind: 'error',
+      stage: 'check',
+      message: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -1995,7 +2062,7 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[updater] macOS package staging failed:', message);
     macUpdatePkgPath = null;
-    setUpdateState({ kind: 'error', stage: 'install', version, message });
+    setUpdateState({ kind: 'error', stage: 'download', version, message });
     tray?.setTooltip('Gezel');
   }
 }

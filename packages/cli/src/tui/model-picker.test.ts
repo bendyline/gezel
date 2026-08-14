@@ -102,40 +102,32 @@ describe('loadModelChoices', () => {
     ]);
     expect(calls).toEqual(['llama-cpp', 'ds4', 'ollama', 'codex-cli']);
   });
+
+  it('adds catalog maker and customizer credit to installed local model rows', async () => {
+    const item = attributedCatalogModel('gemma');
+    const client = {
+      getCopilotStatus: async () => ({ available: false }),
+      getMemoryProfile: async () => ({ totalRamBytes: 32 * 1024 ** 3 }),
+      listCatalogItems: async () => ({ items: [item] }),
+      listProviderModels: async (provider: ProviderName) => ({
+        models: provider === 'llama-cpp' ? [{ id: 'gemma', name: 'Gemma 4 (31B)' }] : [],
+      }),
+    };
+
+    await expect(loadModelChoices(client, config(), 'win32', 'x64')).resolves.toMatchObject([
+      {
+        value: 'llama-cpp:gemma',
+        label: 'llama.cpp · Gemma 4 (31B) (Google, customized by unsloth, mlx-community)',
+      },
+    ]);
+  });
 });
 
 describe('loadModelDownloadChoices', () => {
   it('ranks compatible catalog models and excludes user or shared installed models', async () => {
     const bytes = 2 * 1024 ** 3;
     const catalogModel = (id: string, score: number): CatalogItemSummary =>
-      ({
-        sourceId: 'test',
-        kind: 'chat-model',
-        manifest: {
-          schemaVersion: 1,
-          kind: 'chat-model',
-          id,
-          name: id,
-          description: '',
-          tags: [],
-          maintainer: { name: 'test' },
-          licenseClass: 'open',
-          recoScore: score,
-          version: '1.0.0',
-          releasedAt: '2026-01-01',
-          parameterSize: '2B',
-          approxSizeBytes: bytes,
-          supportsTools: true,
-          llamaCpp: {
-            huggingfaceRepo: 'test/model',
-            filename: 'model.gguf',
-            sha256: '0'.repeat(64),
-            approxSizeBytes: bytes,
-            residentBytes: bytes,
-          },
-          availableVersions: [],
-        },
-      }) as CatalogItemSummary;
+      attributedCatalogModel(id, score, bytes);
     const client = {
       getMemoryProfile: async () => ({
         platform: 'win32',
@@ -156,13 +148,54 @@ describe('loadModelDownloadChoices', () => {
         {
           provider: 'llama-cpp',
           value: 'llama-cpp:new-model',
-          label: 'new-model',
+          label: 'new-model (Google, customized by unsloth, mlx-community)',
           hint: expect.stringContaining('2.1 GB'),
         },
       ],
     );
   });
 });
+
+function attributedCatalogModel(id: string, score = 80, bytes = 2 * 1024 ** 3): CatalogItemSummary {
+  return {
+    sourceId: 'test',
+    kind: 'chat-model',
+    manifest: {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id,
+      name: id,
+      description: '',
+      tags: [],
+      maintainer: {
+        name: 'Google',
+        url: 'https://huggingface.co/google/gemma-4-31B-it',
+      },
+      licenseClass: 'open',
+      recoScore: score,
+      version: '1.0.0',
+      releasedAt: '2026-01-01',
+      parameterSize: '2B',
+      approxSizeBytes: bytes,
+      supportsTools: true,
+      upstream: 'https://huggingface.co/google/gemma-4-31B-it',
+      llamaCpp: {
+        huggingfaceRepo: 'unsloth/model',
+        filename: 'model.gguf',
+        sha256: '0'.repeat(64),
+        approxSizeBytes: bytes,
+        residentBytes: bytes,
+      },
+      mlx: {
+        huggingfaceRepo: 'mlx-community/model',
+        files: [{ name: 'weights', sha256: '0'.repeat(64), sizeBytes: bytes }],
+        approxSizeBytes: bytes,
+        residentBytes: bytes,
+      },
+      availableVersions: [],
+    },
+  } as CatalogItemSummary;
+}
 
 describe('modelProviderLabel', () => {
   it('keeps local engines distinguishable', () => {

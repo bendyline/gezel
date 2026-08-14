@@ -13,7 +13,11 @@
  * knows nothing about connectors.
  */
 
-import type { CraftbookConnectorNeed, ProjectDetail } from '@bendyline/gezel';
+import type {
+  CraftbookConnectorNeed,
+  ProjectConnectorBinding,
+  ProjectDetail,
+} from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import type { BindingSyncResult } from './manager.js';
 
@@ -26,7 +30,10 @@ export interface ConnectorTaskPrepContext {
   /** Params supplied at launch, merged over the craftbook's defaults. */
   params: Record<string, string>;
   /** Targeted sync — narrows the pass to the scopes the task needs now. */
-  sync(bindingId: string, opts?: { scopes?: readonly string[] }): Promise<BindingSyncResult>;
+  sync(
+    bindingId: string,
+    opts?: { scopes?: readonly string[]; backfillLimit?: number },
+  ): Promise<BindingSyncResult>;
 }
 
 export interface ConnectorTaskPrepResult {
@@ -86,10 +93,19 @@ export interface RunConnectorTaskPrepDeps {
   sync(
     project: ProjectDetail,
     bindingId: string,
-    opts?: { scopes?: readonly string[] },
+    opts?: { scopes?: readonly string[]; backfillLimit?: number },
   ): Promise<BindingSyncResult>;
   /** Security posture — a task-initiated sync respects it like any other. */
   allowExternalServices(project: ProjectDetail): Promise<boolean>;
+  /**
+   * Optional native zero-config binding provisioner. It must refuse any type
+   * that needs new credentials or user choices; required unhandled types stay
+   * setup-blocked.
+   */
+  ensureBinding?: (
+    project: ProjectDetail,
+    need: CraftbookConnectorNeed,
+  ) => Promise<ProjectConnectorBinding | null>;
 }
 
 /**
@@ -115,19 +131,24 @@ export async function runConnectorTaskPrep(
   const summaries: string[] = [];
 
   for (const need of input.connectors) {
-    const binding = (project.connectors ?? []).find((b) => b.type === need.typeId && !b.disabled);
-    if (!binding) {
-      // Required-but-unbound already failed the launch upstream; an
-      // optional need simply has nothing to do.
-      if (!need.optional) {
-        throw new Error(`no enabled ${need.typeId} connector is bound to this project`);
-      }
-      continue;
-    }
     if (!(await deps.allowExternalServices(project))) {
       throw new Error(
         `Craftbook "${input.craftbookId}" reads the ${need.typeId} connector, but this install's security policy blocks external services. Enable them in Settings → Security, then run it again.`,
       );
+    }
+    let binding = (project.connectors ?? []).find((b) => b.type === need.typeId && !b.disabled);
+    if (!binding && !need.optional && deps.ensureBinding) {
+      binding = (await deps.ensureBinding(project, need)) ?? undefined;
+    }
+    if (!binding) {
+      // Optional needs simply have nothing to do. Required connectors that
+      // cannot be safely auto-provisioned should normally have failed in
+      // TaskManager with ConnectorSetupRequiredError; keep this fail-closed
+      // backstop for direct callers.
+      if (!need.optional) {
+        throw new Error(`no enabled ${need.typeId} connector is bound to this project`);
+      }
+      continue;
     }
 
     const prep = PREPS.get(need.typeId);

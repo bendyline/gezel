@@ -1351,7 +1351,7 @@ export function App(props: {
       ) : null}
       {overlay === 'model' ? (
         <Picker
-          title="Choose engine + model"
+          title="Choose engine + model - models are downloaded from Hugging Face (huggingface.co)"
           items={[
             {
               label: 'Use default',

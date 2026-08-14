@@ -1,47 +1,48 @@
 import { describe, expect, it, vi } from 'vitest';
-import { appReleaseFeedConfiguration, discoverLatestAppRelease } from './app-release.js';
+import {
+  appReleaseFeedConfiguration,
+  discoverLatestAppRelease,
+  latestPublishedAppRelease,
+} from './app-release.js';
 
-function redirect(location?: string, status = 302): Response {
-  return new Response(null, {
-    status,
-    headers: location ? { location } : undefined,
-  });
+function releases(body: unknown, status = 200): Response {
+  return Response.json(body, { status });
 }
 
 describe('app release discovery', () => {
-  it('resolves an exact v-prefixed application release', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(redirect('https://github.com/bendyline/gezel/releases/tag/v1.26211.27'));
+  it('finds the greatest stable app release among newer package and native releases', async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      releases([
+        { tag_name: '@bendyline/gezel-service@1.0.2', draft: false, prerelease: false },
+        { tag_name: 'native-v0.1.36', draft: false, prerelease: true },
+        { tag_name: 'v1.26224.48', draft: false, prerelease: false },
+        { tag_name: 'v1.26219.46', draft: false, prerelease: false },
+      ]),
+    );
 
     await expect(discoverLatestAppRelease({ fetch })).resolves.toEqual({
-      version: '1.26211.27',
-      tagName: 'v1.26211.27',
-      downloadBaseUrl: 'https://github.com/bendyline/gezel/releases/download/v1.26211.27/',
+      version: '1.26224.48',
+      tagName: 'v1.26224.48',
+      downloadBaseUrl: 'https://github.com/bendyline/gezel/releases/download/v1.26224.48/',
     });
     expect(fetch).toHaveBeenCalledWith(
-      'https://github.com/bendyline/gezel/releases/latest',
-      expect.objectContaining({ redirect: 'manual' }),
+      'https://api.github.com/repos/bendyline/gezel/releases?per_page=100',
+      expect.objectContaining({ headers: expect.objectContaining({ Accept: expect.any(String) }) }),
     );
   });
 
-  it('excludes a native release even when GitHub calls it latest', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        redirect('https://github.com/bendyline/gezel/releases/tag/native-v99.0.0'),
-      );
-
-    await expect(discoverLatestAppRelease({ fetch })).resolves.toBeNull();
-  });
-
-  it('excludes prerelease and lookalike tags from the stable app channel', async () => {
-    for (const tag of ['v2.0.0-beta.1', 'app-v2.0.0', 'v02.0.0', 'v2.0']) {
-      const fetch = vi
-        .fn()
-        .mockResolvedValue(redirect(`https://github.com/bendyline/gezel/releases/tag/${tag}`));
-      await expect(discoverLatestAppRelease({ fetch })).resolves.toBeNull();
-    }
+  it('excludes drafts, prereleases, and lookalike tags from the app channel', () => {
+    expect(
+      latestPublishedAppRelease([
+        { tag_name: 'v9.0.0', draft: true, prerelease: false },
+        { tag_name: 'v8.0.0', draft: false, prerelease: true },
+        ...['v2.0.0-beta.1', 'app-v2.0.0', 'v02.0.0', 'v2.0'].map((tag_name) => ({
+          tag_name,
+          draft: false,
+          prerelease: false,
+        })),
+      ]),
+    ).toBeNull();
   });
 
   it('returns null when the repository has no published release yet', async () => {
@@ -50,24 +51,16 @@ describe('app release discovery', () => {
     await expect(discoverLatestAppRelease({ fetch })).resolves.toBeNull();
   });
 
-  it('fails closed for missing, cross-origin, or malformed redirects', async () => {
+  it('fails closed for an API failure or malformed body', async () => {
     await expect(
-      discoverLatestAppRelease({ fetch: vi.fn().mockResolvedValue(redirect()) }),
-    ).rejects.toThrow('no redirect target');
+      discoverLatestAppRelease({ fetch: vi.fn().mockResolvedValue(releases({}, 403)) }),
+    ).rejects.toThrow('HTTP 403');
 
     await expect(
       discoverLatestAppRelease({
-        fetch: vi
-          .fn()
-          .mockResolvedValue(redirect('https://example.com/bendyline/gezel/releases/tag/v1.2.3')),
+        fetch: vi.fn().mockResolvedValue(releases({ releases: [] })),
       }),
-    ).rejects.toThrow('unexpected target');
-
-    await expect(
-      discoverLatestAppRelease({
-        fetch: vi.fn().mockResolvedValue(new Response('unexpected', { status: 200 })),
-      }),
-    ).rejects.toThrow('HTTP 200');
+    ).rejects.toThrow('invalid response body');
   });
 });
 

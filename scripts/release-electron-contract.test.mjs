@@ -199,17 +199,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'prerelease alone is editable at publish time; make_latest is the flag the API consults',
   );
 
-  // A native release in the stable channel makes the updater find no release at
-  // all, which is silent from the release side. Both halves must fail closed.
+  // Native archives remain prereleases for honest public classification, while
+  // app discovery no longer depends on GitHub's repository-wide latest pointer.
   assert.match(
     workflow,
     /Native release \$\{NATIVE_TAG\} is not marked as a prerelease/,
-    'preflight must reject a native release that could take /releases/latest',
+    'preflight must reject a native archive mislabeled as a stable release',
   );
-  assert.match(
+  assert.doesNotMatch(
     workflow,
     /releases\/latest currently resolves to/,
-    'preflight must reject a repository whose /releases/latest is not an app tag',
+    'release preflight must not depend on the repository-wide latest pointer',
   );
   assert.match(
     workflow,
@@ -271,6 +271,42 @@ test('dependency security floors fix B3 while CI blocks only on critical advisor
     /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.0|4\.3\.0)|mermaid@11\.16\.0):/,
     'the lockfile must not reintroduce a B3-vulnerable resolution',
   );
+});
+
+test('PR and release gates share serialized unit and CLI TUI stability contracts', async () => {
+  const [rootPackageSource, quality, publish] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+  ]);
+  const scripts = JSON.parse(rootPackageSource).scripts;
+  const validateSteps = scripts['validate:unlocked'].split(' && ');
+
+  assert.ok(validateSteps.includes('pnpm test:ci'), 'validate must use the serialized CI suite');
+  assert.ok(
+    !validateSteps.includes('pnpm test'),
+    'validate must not restore release-only parallel package contention',
+  );
+  assert.equal(
+    scripts['test:stability'],
+    'node scripts/run-with-dependency-lease.mjs test:stability:unleased',
+  );
+  assert.equal(
+    scripts['test:stability:tui'],
+    'node scripts/run-with-dependency-lease.mjs test:stability:tui:unleased',
+  );
+  assert.equal(
+    scripts['test:stability:tui:unleased'],
+    'pnpm --filter @bendyline/gezel-cli exec vitest run src/tui/App.test.tsx',
+  );
+  assert.equal(
+    scripts['test:stability:unleased'].match(/pnpm test:stability:tui/g)?.length,
+    2,
+    'stability passes 2 and 3 must both exercise the CLI interaction suite',
+  );
+  assert.match(quality, /run: pnpm test:ci/);
+  assert.match(quality, /run: pnpm test:stability/);
+  assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
 test('macOS release installs the finished PKG and exercises recovery', async () => {

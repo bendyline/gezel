@@ -110,27 +110,15 @@ jobs:
             exit 1
           fi
 
-          # The app updater discovers releases through /releases/latest and
-          # accepts only a bare `v<semver>` tag (see updater/app-release.ts). A
-          # native-v* release sitting in the stable channel therefore does not
-          # ship the wrong update — it silently ships *no* update, because
-          # discovery returns null and the app reports "no published application
-          # release exists yet". That is invisible from the release side, so
-          # assert both halves here rather than trusting the publish checkbox.
+          # Native archives are implementation inputs, not end-user releases.
+          # The desktop updater now selects its own exact v<semver> namespace,
+          # so a mislabeled native release cannot mask app discovery, but keep
+          # the prerelease contract because it is still the truthful public
+          # classification and keeps the release page intelligible.
           if [ "$(jq -r '.prerelease' <<<"$release")" != 'true' ]; then
             echo "::error::Native release ${NATIVE_TAG} is not marked as a prerelease."
-            echo "::error::Publishing it can move /releases/latest off the app namespace and"
-            echo "::error::break update discovery for every installed client. Fix with:"
+            echo "::error::Native engine archives must stay outside the stable app channel. Fix with:"
             echo "::error::  gh release edit ${NATIVE_TAG} --prerelease"
-            exit 1
-          fi
-
-          latest_tag="$(gh api "repos/${GH_REPO}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
-          if [ -n "$latest_tag" ] && ! [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::/releases/latest currently resolves to '${latest_tag}', which is not an"
-            echo "::error::app release tag. Update discovery is broken for shipped clients right now."
-            echo "::error::Mark the offending release as a prerelease before releasing:"
-            echo "::error::  gh release edit ${latest_tag} --prerelease"
             exit 1
           fi
 
@@ -1278,21 +1266,19 @@ jobs:
           files: release-assets/*
 
       # Publishing is a manual step in the GitHub UI, so no workflow can gate
-      # what happens after it. Leave the operator the one command that proves
-      # update discovery survived the publish — a native-v* release holding
-      # /releases/latest makes the updater find nothing at all, and that is
-      # invisible from the release page.
+      # what happens after it. Leave the operator the same namespace check the
+      # desktop updater performs: enumerate public releases, ignore native/npm
+      # tags, and require this app version to be the greatest stable v<semver>.
       - name: Record the post-publish update-discovery check
         run: |
           {
             echo '## After publishing this draft'
             echo
-            echo 'Confirm the app namespace still owns `/releases/latest`:'
+            echo 'Confirm the app update namespace resolves to this release:'
             echo
             echo '```'
             echo "node scripts/check-latest-release-namespace.mjs --expect ${{ needs.release-preflight.outputs.version }}"
             echo '```'
             echo
-            echo 'If it fails, a `native-v*` release has taken the stable channel.'
-            echo 'Re-flag it with `gh release edit <tag> --prerelease`.'
+            echo 'This ignores interleaved native-engine and npm-package releases.'
           } >> "$GITHUB_STEP_SUMMARY"

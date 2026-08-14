@@ -128,9 +128,12 @@ export type AdvanceWhen = z.infer<typeof AdvanceWhenSchema>;
  */
 export const CraftbookStepInputSchema = z.object({
   /** Path relative to the selected drawer's root. */
-  file: z.string().min(1),
+  file: z.string().min(1).describe('Path relative to the selected drawer root.'),
   /** Read from the artifacts drawer instead of the project workspace. */
-  artifact: z.boolean().optional(),
+  artifact: z
+    .boolean()
+    .optional()
+    .describe('True for the artifacts drawer; false/omitted for the project workspace.'),
 });
 export type CraftbookStepInput = z.infer<typeof CraftbookStepInputSchema>;
 
@@ -180,7 +183,13 @@ export const CraftbookStepSchema = z.object({
    */
   onExit: ScriptRefListSchema.optional(),
   /** Required file inputs for this step, in the order they should be opened. */
-  consumes: z.array(CraftbookStepInputSchema).min(1).optional(),
+  consumes: z
+    .array(CraftbookStepInputSchema)
+    .min(1)
+    .optional()
+    .describe(
+      'Files this step must open before working. Artifact inputs also require an explicit `read_artifact` call in the step prompt.',
+    ),
   /** See {@link AdvanceWhenSchema}. */
   advanceWhen: AdvanceWhenSchema.optional(),
   /** The end-of-step decision. See {@link StepGateSchema} (current) / {@link GateSpecSchema} (legacy). */
@@ -206,7 +215,8 @@ export type CraftbookStep = z.infer<typeof CraftbookStepSchema>;
  * extracts the item array (the file IS the array, or the array at the
  * dotted `itemsPath`), and spawns one child task per item from `steps`
  * (each item's fields become the child's `variation.context`, string-
- * substituted into the child step prompts and gate/advanceWhen paths).
+ * substituted into the child step prompts, declared inputs, and
+ * gate/advanceWhen paths).
  * The runtime fans out; no model tool call is involved.
  */
 export const CraftbookSpawnSchema = z.object({
@@ -741,7 +751,13 @@ export const NewCraftbookStepSchema = z.object({
   assignee: TaskAssigneeSchema.optional(),
   onEnter: ScriptRefListSchema.optional(),
   onExit: ScriptRefListSchema.optional(),
-  consumes: z.array(CraftbookStepInputSchema).min(1).optional(),
+  consumes: z
+    .array(CraftbookStepInputSchema)
+    .min(1)
+    .optional()
+    .describe(
+      'Files this step must open before working. Artifact inputs also require an explicit `read_artifact` call in the step prompt.',
+    ),
   advanceWhen: AdvanceWhenSchema.optional(),
   gate: StepGateUnionSchema.optional(),
   /** See {@link StepDeliverableSchema} — one field attaches the enforced gate. */

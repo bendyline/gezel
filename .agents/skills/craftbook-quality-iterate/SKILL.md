@@ -10,7 +10,7 @@ description: Improve craftbook template quality from audit findings and local-mo
 > that checkout) and must not relink the workspace dependency tree. Run
 > `pnpm link:gilde` only when a daemon or end-to-end eval must resolve the local
 > checkout as the installed `@bendyline/gilde` package. Before linking, run
-> `pnpm deps:install --if-missing`; allow the relink/install to finish without a
+> `pnpm deps:install`; allow the relink/install to finish without a
 > short command timeout, and stop the quality loop immediately if it fails.
 > Refresh generated indexes with `pnpm --filter @bendyline/gezel-catalog
 > build-index`. When the loop lands: run `pnpm unlink:gilde`, confirm

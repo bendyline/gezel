@@ -5,7 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runPnpmInstallChild, withPnpmInstallLock } from './pnpm-install.mjs';
+import { runLockfileRefreshAndInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
 const mode = process.argv[2];
 if (mode !== 'link' && mode !== 'unlink') {
@@ -110,7 +110,7 @@ const installStatus = await withPnpmInstallLock(
       );
     }
 
-    return runPnpmInstallChild({ repoRoot, setChildPid });
+    return runLockfileRefreshAndInstall({ repoRoot, setChildPid });
   },
   { command: `pnpm ${mode}:squisq` },
 );

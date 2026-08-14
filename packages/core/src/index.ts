@@ -20,6 +20,7 @@ export * from './process-errors.js';
 export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';
+export * from './model-attribution.js';
 export * from './fitness-badge.js';
 export * from './recommendation.js';
 export * from './tool-names.js';

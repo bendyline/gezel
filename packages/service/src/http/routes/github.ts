@@ -53,8 +53,20 @@ export function githubRoutes(ctx: ServiceContext): Hono {
     const num = Number.parseInt(c.req.param('num'), 10);
     if (!Number.isFinite(num)) return c.json({ error: 'invalid PR number' }, 400);
     try {
-      const files = await ctx.gitHubPrs.listFiles(project, num);
-      return c.json({ files });
+      const offset = optionalNonnegativeInt(c.req.query('offset'));
+      const limit = optionalPositiveInt(c.req.query('limit'));
+      const includePatch = c.req.query('includePatch') !== 'false';
+      const paths = (c.req.queries('path') ?? [])
+        .flatMap((value) => value.split(','))
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const page = await ctx.gitHubPrs.listFilesPage(project, num, {
+        ...(offset !== undefined ? { offset } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(paths.length > 0 ? { paths } : {}),
+        includePatch,
+      });
+      return c.json(page);
     } catch (err) {
       return gitError(c, err);
     }
@@ -81,8 +93,15 @@ export function githubRoutes(ctx: ServiceContext): Hono {
     const num = Number.parseInt(c.req.param('num'), 10);
     if (!Number.isFinite(num)) return c.json({ error: 'invalid PR number' }, 400);
     try {
-      const diff = await ctx.gitHubPrs.getPullRequestDiff(project, num);
-      const body: GitHubPullDiffResponse = { number: num, diff };
+      const offset = optionalNonnegativeInt(c.req.query('offset'));
+      const limit = optionalPositiveInt(c.req.query('limit'));
+      const path = c.req.query('path')?.trim();
+      const page = await ctx.gitHubPrs.getPullRequestDiffPage(project, num, {
+        ...(offset !== undefined ? { offset } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(path ? { path } : {}),
+      });
+      const body: GitHubPullDiffResponse = { number: num, ...page };
       return c.json(body);
     } catch (err) {
       return gitError(c, err);
@@ -158,4 +177,15 @@ export function githubRoutes(ctx: ServiceContext): Hono {
   });
 
   return app;
+}
+
+function optionalNonnegativeInt(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function optionalPositiveInt(raw: string | undefined): number | undefined {
+  const value = optionalNonnegativeInt(raw);
+  return value !== undefined && value > 0 ? value : undefined;
 }

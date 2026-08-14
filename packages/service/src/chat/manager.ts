@@ -12884,22 +12884,25 @@ export class ChatManager {
           const step =
             (record.stepId && task.craftbook.steps.find((s) => s.id === record.stepId)) ||
             task.craftbook.steps.find((s) => s.id === task.activeStepId);
-          // Bake task-level notes + (if scoped to a step) step-level
-          // notes into the prompt so the gezel lands with the shared
-          // scratchpad already in hand — skips the obligatory
-          // `read_task_notes` round-trip on the very first turn when
-          // the user is already pointing at this task. Snapshot at
-          // session creation like `aboutSnapshot`; later edits don't
-          // retro-update live sessions, and the gezel can still pull
-          // fresh notes mid-session via the MCP tool.
+          // Bake notes from earlier/other steps + (if scoped to a step)
+          // notes for this step into the prompt so the gezel lands with
+          // the full handoff scratchpad already in hand. Keeping only
+          // unscoped + current-step notes hid the predecessor's handoff
+          // from successor sessions (for example, a PR number selected in
+          // `scope` disappeared from `report`). Snapshot at session creation
+          // like `aboutSnapshot`; later edits don't retro-update live
+          // sessions, and the gezel can still pull the whole fresh feed via
+          // `read_task_notes`.
           const allNotes = await this.store
             .listTaskNotes(parsed.projectId, parsed.num)
             .catch(() => [] as TaskNote[]);
-          const notes = formatTaskNotesDigest(allNotes.filter((n) => !n.stepId));
-          const stepNotes =
-            record.stepId && step
-              ? formatTaskNotesDigest(allNotes.filter((n) => n.stepId === record.stepId))
-              : '';
+          const scopedStepId = record.stepId && step?.id === record.stepId ? record.stepId : null;
+          const notes = formatTaskNotesDigest(
+            scopedStepId ? allNotes.filter((n) => n.stepId !== scopedStepId) : allNotes,
+          );
+          const stepNotes = scopedStepId
+            ? formatTaskNotesDigest(allNotes.filter((n) => n.stepId === scopedStepId))
+            : '';
           taskContext = {
             task,
             ...(step ? { step } : {}),

@@ -1297,6 +1297,28 @@ describe('connector-backed craftbooks', () => {
     expect(await tasks.list({ projectId: 'website' })).toEqual([]);
   });
 
+  it('lets launch prep provision a declared zero-config connector', async () => {
+    resolveConnectorBook();
+    let called = false;
+    tasks.setConnectorPrepHook(
+      async () => {
+        called = true;
+        return {
+          params: { number: '52', corpusScope: 'artifacts/data/github-pulls/pr-52' },
+        };
+      },
+      { autoPreparedTypes: ['github-pulls'] },
+    );
+
+    const task = await tasks.create('website', {
+      title: 'Review',
+      craftbookId: 'pull-request-review',
+      assignee: { kind: 'user' },
+    });
+    expect(called).toBe(true);
+    expect(task.craftbook.steps[0]?.prompt).toContain('artifacts/data/github-pulls/pr-52');
+  });
+
   it('interpolates the prep params into step prompts and gate paths', async () => {
     // The whole reason prep runs at launch: interpolation happens exactly
     // once, so the corpus paths must be concrete before it.

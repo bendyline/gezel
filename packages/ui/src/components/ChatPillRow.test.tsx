@@ -355,6 +355,24 @@ describe('ChatPillRow', () => {
     expect(onFocusTask).toHaveBeenCalledWith(expect.objectContaining({ ref: 'p1/4' }));
   });
 
+  it('keeps active tasks before recent threads in the horizontal strip', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [task('p1/9', 'New work')] });
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [session('recent-thread', 'g1')],
+    });
+    renderRow();
+
+    const taskPill = await screen.findByRole('button', {
+      name: /^Task p1\/9: New work\./,
+    });
+    const threadPill = screen.getByRole('button', {
+      name: /^Esra: Thread recent-thread\./,
+    });
+    expect(
+      taskPill.compareDocumentPosition(threadPill) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it('unifies an active task with its latest chat instead of rendering a second pill', async () => {
     vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [task('p1/4', 'Ship the game')] });
     vi.mocked(api.listChatSessions).mockResolvedValue({

@@ -1,8 +1,15 @@
-import type { CatalogItemSummary, ModelInfo, ProviderName } from '@bendyline/gezel';
+import {
+  type CatalogItemSummary,
+  type ChatModelManifest,
+  type ModelInfo,
+  type ProviderName,
+  formatModelAttribution,
+} from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client/node';
 import {
   type BootstrapChatModel,
   type BootstrapChatProvider,
+  bootstrapChatModelLabel,
   formatDownloadSize,
   rankChatModels,
 } from './bootstrap.js';
@@ -28,6 +35,7 @@ interface ModelInventoryClient {
   getCopilotStatus(): Promise<{ available: boolean }>;
   getMemoryProfile(): Promise<{ totalRamBytes: number }>;
   listProviderModels(provider: ProviderName): Promise<{ models: ModelInfo[] }>;
+  listCatalogItems?(kind: 'chat-model'): Promise<{ items: CatalogItemSummary[] }>;
 }
 
 interface ModelDownloadClient {
@@ -128,9 +136,12 @@ export async function loadModelChoices(
   platform: NodeJS.Platform = process.platform,
   arch: NodeJS.Architecture = process.arch,
 ): Promise<ModelChoice[]> {
-  const [copilot, memory] = await Promise.all([
+  const [copilot, memory, catalog] = await Promise.all([
     client.getCopilotStatus().catch(() => null),
     client.getMemoryProfile().catch(() => null),
+    client.listCatalogItems
+      ? client.listCatalogItems('chat-model').catch(() => null)
+      : Promise.resolve(null),
   ]);
   const providers = configuredModelProviders(config, {
     platform,
@@ -150,12 +161,16 @@ export async function loadModelChoices(
   );
 
   return inventories.flatMap(({ provider, models }) =>
-    models.map((model) => ({
-      provider,
-      model,
-      value: `${provider}:${model.id}`,
-      label: `${modelProviderLabel(provider)} · ${model.name}`,
-    })),
+    models.map((model) => {
+      const manifest = catalogManifestForModel(catalog?.items ?? [], provider, model.id);
+      const attribution = manifest ? ` (${formatModelAttribution(manifest)})` : '';
+      return {
+        provider,
+        model,
+        value: `${provider}:${model.id}`,
+        label: `${modelProviderLabel(provider)} · ${model.name}${attribution}`,
+      };
+    }),
   );
 }
 
@@ -203,7 +218,7 @@ export async function loadModelDownloadChoices(
       provider,
       model,
       value: `${provider}:${model.id}`,
-      label: model.name,
+      label: bootstrapChatModelLabel(model),
       hint: [
         index === 0 ? 'recommended' : null,
         formatDownloadSize(model.approxSizeBytes),
@@ -212,6 +227,20 @@ export async function loadModelDownloadChoices(
         .filter(Boolean)
         .join(' · '),
     }));
+}
+
+function catalogManifestForModel(
+  items: readonly CatalogItemSummary[],
+  provider: ProviderName,
+  modelId: string,
+): ChatModelManifest | null {
+  for (const item of items) {
+    if (item.manifest.kind !== 'chat-model') continue;
+    const manifest = item.manifest;
+    if (manifest.id === modelId) return manifest;
+    if (provider === 'ollama' && manifest.ollama?.tag === modelId) return manifest;
+  }
+  return null;
 }
 
 function modelFitLabel(fit: BootstrapChatModel['fit']): string {

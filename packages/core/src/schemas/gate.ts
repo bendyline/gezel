@@ -277,6 +277,20 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minSuccessful: z.number().int().positive().optional(),
   }),
   /**
+   * A PR-review coverage ledger must name every changed path materialized in
+   * a connector corpus. The ledger is workspace JSON (`reviewedFiles` by
+   * default); the source records live in the read-only artifacts drawer and
+   * carry their authoritative path in frontmatter. This prevents a polished
+   * report from passing after only the first context-sized prefix was read.
+   */
+  z.object({
+    kind: z.literal('corpusCoverage'),
+    file: z.string().min(1),
+    corpusDir: z.string().min(1),
+    reviewedField: z.string().min(1).optional(),
+    recordField: z.string().min(1).optional(),
+  }),
+  /**
    * The H1 slide titles in `file` must match the numbered slide headings in
    * `outlineFile`, one-for-one and in order. This makes a locked Markdown
    * outline mechanically binding instead of relying on a reviewer to notice

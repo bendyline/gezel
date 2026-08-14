@@ -92,6 +92,14 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | n
       case 'researchEvidence':
         for (const tool of RESEARCH_STEP_TOOLS) out.add(tool);
         break;
+      case 'corpusCoverage':
+        out.add('list_artifacts');
+        out.add('read_artifact');
+        out.add('grep_artifact');
+        out.add('grep_files');
+        out.add('find_symbol');
+        out.add('search_code');
+        break;
       case 'csvShape':
       case 'recordSchema':
       case 'tableShape':

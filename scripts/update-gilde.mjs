@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runPnpmInstallChild, withPnpmInstallLock } from './pnpm-install.mjs';
+import { runLockfileRefreshAndInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
 const GILDE_PACKAGE = '@bendyline/gilde';
 const CATALOG_PACKAGE = '@bendyline/gezel-catalog';
@@ -165,7 +165,7 @@ async function main() {
       );
       console.log(`[gilde:update] updating ${lockedCurrent} -> ${latest}`);
 
-      const installStatus = await runPnpmInstallChild({
+      const installStatus = await runLockfileRefreshAndInstall({
         repoRoot,
         args: ['--filter', CATALOG_PACKAGE],
         setChildPid,

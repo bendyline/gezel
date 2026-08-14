@@ -203,6 +203,17 @@ export function docFromCraftbook(book: Craftbook): CraftbookDoc {
  * — the validator's strings are load-bearing for existing consumers.)
  */
 function augmentGraphProblem(problem: string, stepIds: string[]): CraftbookDocError {
+  const artifactInput =
+    /^step "([^"]+)" consumes artifact "([^"]+)" but its prompt does not explicitly call `read_artifact`$/.exec(
+      problem,
+    );
+  if (artifactInput) {
+    return {
+      where: `steps (id "${artifactInput[1]}") → prompt`,
+      message: `${problem}.`,
+      fix: `start the procedure with \`read_artifact({ path: ${JSON.stringify(artifactInput[2])} })\`; artifact paths are not workspace paths`,
+    };
+  }
   const missing = /"([^"]+)" missing from steps/.exec(problem);
   if (missing) {
     const near = nearestMatch(missing[1]!, stepIds);

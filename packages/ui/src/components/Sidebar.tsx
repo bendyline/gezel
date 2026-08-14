@@ -258,10 +258,20 @@ export function Sidebar({
     () => AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures),
     [showAdvancedFeatures],
   );
-  // Install-health notices (background service, updater). They live here
-  // rather than across the top of Home: neither is urgent, and neither is
-  // fixable without the installer. See system-notices.ts.
+  // Installation and updater notices live beneath Settings, which is the
+  // lower corner of the rail in the default right-sidebar layout. Routine
+  // "up to date" feedback clears after a moment; download and ready states
+  // remain visible for the full lifecycle.
   const updateState = useUpdateState();
+  const [showUpToDate, setShowUpToDate] = useState(true);
+  useEffect(() => {
+    setShowUpToDate(true);
+    if (updateState?.kind !== 'up-to-date') return;
+    const timer = window.setTimeout(() => setShowUpToDate(false), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [updateState]);
+  const visibleUpdateState =
+    updateState?.kind === 'up-to-date' && !showUpToDate ? null : updateState;
   // Engine-backend health rides along here because a quarantined GPU
   // backend is otherwise completely invisible: the app works, just
   // slower. One fetch, same pattern as HealthStrip — the rail is the
@@ -277,7 +287,7 @@ export function Sidebar({
     reason: window.__GEZEL__?.fallbackReason ?? null,
     code: window.__GEZEL__?.fallbackCode ?? null,
     ...(window.__GEZEL__?.platform ? { platform: window.__GEZEL__.platform } : {}),
-    update: updateState,
+    update: visibleUpdateState,
     ...(engineHealth?.llamaCppQuarantinedBackends
       ? { quarantinedBackends: engineHealth.llamaCppQuarantinedBackends }
       : {}),
@@ -958,29 +968,32 @@ export function Sidebar({
           })}
           {/* Settings is last in AREA_LINKS, so install-health notices land
               directly beneath it — the screen that explains them. */}
-          {systemNotices.map((notice) => (
-            <button
-              key={notice.id}
-              type="button"
-              className="app-sidebar-notice"
-              data-testid={`sidebar-notice-${notice.id}`}
-              onClick={() => {
-                // Stash for the not-yet-mounted case, open the area, then fire
-                // the event for the already-open-on-another-section case.
-                requestSettingsSection('about');
-                onOpenArea('settings');
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: 'about' },
-                  }),
-                );
-              }}
-              title={`${notice.title} ${notice.body}`}
-            >
-              <span className="app-sidebar-notice-dot" aria-hidden="true" />
-              <span className="app-sidebar-notice-label">{notice.railLabel}</span>
-            </button>
-          ))}
+          <div className="app-sidebar-notices" aria-live="polite" aria-atomic="false">
+            {systemNotices.map((notice) => (
+              <button
+                key={notice.id}
+                type="button"
+                className="app-sidebar-notice"
+                data-tone={notice.tone ?? 'warning'}
+                data-testid={`sidebar-notice-${notice.id}`}
+                onClick={() => {
+                  // Stash for the not-yet-mounted case, open the area, then fire
+                  // the event for the already-open-on-another-section case.
+                  requestSettingsSection('about');
+                  onOpenArea('settings');
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:navigate', {
+                      detail: { view: 'settings', section: 'about' },
+                    }),
+                  );
+                }}
+                title={`${notice.title} ${notice.body}`}
+              >
+                <span className="app-sidebar-notice-dot" aria-hidden="true" />
+                <span className="app-sidebar-notice-label">{notice.railLabel}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </nav>
 

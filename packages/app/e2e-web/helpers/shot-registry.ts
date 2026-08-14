@@ -22,7 +22,8 @@ export type ShotArea =
   | 'history'
   | 'settings'
   | 'dialogs'
-  | 'handboek';
+  | 'handboek'
+  | 'updates';
 
 export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
   shell: [
@@ -75,6 +76,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
   ],
   dialogs: ['create-gezel', 'create-project'],
   handboek: ['home'],
+  updates: ['downloading', 'ready-home', 'ready-settings'],
 };
 
 /** Zero-padded 1-based index of `name` within its area; throws if unregistered. */

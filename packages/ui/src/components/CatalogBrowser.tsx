@@ -1,4 +1,10 @@
-import type { CatalogItemSummary, CatalogKind, ToolsetCategory } from '@bendyline/gezel';
+import {
+  type CatalogItemSummary,
+  type CatalogKind,
+  type ModelAttribution,
+  type ToolsetCategory,
+  modelAttribution,
+} from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
@@ -57,6 +63,14 @@ function CatalogItemLogo({ item }: { item: CatalogItemSummary }) {
       }
     />
   );
+}
+
+function catalogModelAttribution(item: CatalogItemSummary): ModelAttribution | null {
+  if (item.manifest.kind === 'chat-model') return modelAttribution(item.manifest);
+  if (item.manifest.kind === 'image-model' || item.manifest.kind === 'video-model') {
+    return { maker: item.manifest.maintainer.name, customizers: [] };
+  }
+  return null;
 }
 
 export function CatalogBrowser({
@@ -163,13 +177,17 @@ export function CatalogBrowser({
     }
     if (query.trim()) {
       const q = query.toLowerCase();
-      out = out.filter(
-        (i) =>
+      out = out.filter((i) => {
+        const attribution = catalogModelAttribution(i);
+        return (
           i.manifest.name.toLowerCase().includes(q) ||
           i.manifest.description.toLowerCase().includes(q) ||
           i.manifest.tags.some((t) => t.toLowerCase().includes(q)) ||
-          i.manifest.id.toLowerCase().includes(q),
-      );
+          i.manifest.id.toLowerCase().includes(q) ||
+          attribution?.maker.toLowerCase().includes(q) ||
+          attribution?.customizers.some((name) => name.toLowerCase().includes(q))
+        );
+      });
     }
     if (filter) out = out.filter(filter);
     return out;
@@ -217,40 +235,55 @@ export function CatalogBrowser({
         <p className="muted small">{emptyMessage ?? 'Nothing in the catalog for this kind yet.'}</p>
       )}
       <ul className="catalog-grid">
-        {visible.map((item) => (
-          <li key={`${item.sourceId}:${item.manifest.id}`} className="catalog-item">
-            <div className="catalog-item-header">
-              <CatalogItemLogo item={item} />
-              <div className="catalog-item-head">
-                <div className="catalog-item-name">{item.manifest.name}</div>
-                {item.manifest.tags.length > 0 && (
-                  <div className="catalog-item-tags">
-                    {item.manifest.tags.map((t) => {
-                      const tip = tagTooltips?.[t.toLowerCase()];
-                      const pill = (
-                        <span
-                          key={t}
-                          className="catalog-item-tag"
-                          style={tip ? { cursor: 'help' } : undefined}
-                        >
-                          {t}
-                        </span>
-                      );
-                      if (!tip) return pill;
-                      return (
-                        <Tooltip.Hint key={t} text={tip}>
-                          {pill}
-                        </Tooltip.Hint>
-                      );
-                    })}
-                  </div>
-                )}
+        {visible.map((item) => {
+          const attribution = catalogModelAttribution(item);
+          return (
+            <li key={`${item.sourceId}:${item.manifest.id}`} className="catalog-item">
+              <div className="catalog-item-header">
+                <CatalogItemLogo item={item} />
+                <div className="catalog-item-head">
+                  <div className="catalog-item-name">{item.manifest.name}</div>
+                  {attribution && (
+                    <div className="catalog-item-attribution">
+                      <div>
+                        Made by <strong>{attribution.maker}</strong>
+                      </div>
+                      {attribution.customizers.length > 0 && (
+                        <div>
+                          Customized by <strong>{attribution.customizers.join(', ')}</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {item.manifest.tags.length > 0 && (
+                    <div className="catalog-item-tags">
+                      {item.manifest.tags.map((t) => {
+                        const tip = tagTooltips?.[t.toLowerCase()];
+                        const pill = (
+                          <span
+                            key={t}
+                            className="catalog-item-tag"
+                            style={tip ? { cursor: 'help' } : undefined}
+                          >
+                            {t}
+                          </span>
+                        );
+                        if (!tip) return pill;
+                        return (
+                          <Tooltip.Hint key={t} text={tip}>
+                            {pill}
+                          </Tooltip.Hint>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-            <p className="catalog-item-description">{item.manifest.description}</p>
-            <div className="catalog-item-action">{action(item)}</div>
-          </li>
-        ))}
+              <p className="catalog-item-description">{item.manifest.description}</p>
+              <div className="catalog-item-action">{action(item)}</div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

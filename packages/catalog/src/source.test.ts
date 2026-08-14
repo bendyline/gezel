@@ -377,6 +377,7 @@ describe('BundledSource — versioned layout', () => {
       description: 'fixture',
       tags: [],
       maintainer: { name: 'Test' },
+      maker: { name: 'Core Model Co', url: 'https://example.com/core-model' },
       yankedVersions: [],
       parameterSize: '1B',
       supportsTools: false,
@@ -397,6 +398,10 @@ describe('BundledSource — versioned layout', () => {
     const found = await src.get('chat-model', 'ds4-only');
     expect(found?.manifest.kind).toBe('chat-model');
     if (found?.manifest.kind !== 'chat-model') throw new Error('expected chat-model fixture');
+    expect(found.manifest.maker).toEqual({
+      name: 'Core Model Co',
+      url: 'https://example.com/core-model',
+    });
     expect(found.manifest.ds4?.filename).toBe('model.gguf');
   });
 });

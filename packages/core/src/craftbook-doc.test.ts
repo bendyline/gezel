@@ -258,6 +258,31 @@ describe('craftbookFromDoc', () => {
     if (!res.ok) expect(formatCraftbookDocErrors(res.errors)).toContain('"nope"');
   });
 
+  it('gives an exact repair when an artifact input lacks read_artifact', () => {
+    const res = craftbookFromDoc(
+      {
+        name: 'Artifact handoff',
+        steps: [
+          {
+            id: 'audit',
+            name: 'Audit',
+            prompt: 'Use security/review-scope.md and write the findings.',
+            consumes: [{ file: 'security/review-scope.md', artifact: true }],
+            terminal: true,
+          },
+        ],
+      },
+      { now: '2026-08-13T00:00:00.000Z' },
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const message = formatCraftbookDocErrors(res.errors);
+      expect(message).toContain('steps (id "audit") → prompt');
+      expect(message).toContain('read_artifact({ path: "security/review-scope.md" })');
+      expect(message).toContain('artifact paths are not workspace paths');
+    }
+  });
+
   it('docFromCraftbook(book) is accepted back unchanged (read→write loop)', () => {
     const first = craftbookFromDoc(FULL_DOC, { now: '2026-01-01T00:00:00.000Z' });
     expect(first.ok).toBe(true);

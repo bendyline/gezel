@@ -302,6 +302,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'github_pr_list',
       'github_pr_view',
       'github_pr_files',
+      'github_pr_file',
       'github_pr_diff',
       'github_pr_comments',
       'github_pr_comment',

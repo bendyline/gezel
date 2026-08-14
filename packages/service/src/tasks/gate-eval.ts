@@ -29,6 +29,7 @@ import {
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
 import { runStepSniff } from '../chat/step-sniff.js';
+import { parseFrontmatter } from '../index-store/frontmatter.js';
 
 /**
  * Read-only workspace view a static gate evaluates against. Backed by the
@@ -238,6 +239,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `citationsResolve ${c.file}`;
     case 'researchEvidence':
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
+    case 'corpusCoverage':
+      return `corpusCoverage ${c.file} ${c.corpusDir}`;
     case 'markdownHeadingsMatch':
       return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
     case 'valueGrounding':
@@ -608,6 +611,167 @@ async function evalCheckInner(
         ok: true,
         detail: `Research evidence: ${result.matches.length} successful source-acquisition call(s) observed`,
         evidence,
+      };
+    }
+    case 'corpusCoverage': {
+      const ledger = await ws.read(c.file);
+      if (ledger === null) {
+        return {
+          ok: false,
+          detail: `${c.file} not found — write the PR coverage ledger before advancing.`,
+        };
+      }
+      if (!ws.listArtifacts || !ws.readArtifact) {
+        return {
+          ok: false,
+          detail: `${c.file}: connector-corpus coverage cannot be verified because artifact reads are unavailable (fail-closed).`,
+        };
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(ledger);
+      } catch (error) {
+        return {
+          ok: false,
+          detail: `${c.file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      const field = c.reviewedField ?? 'reviewedFiles';
+      const reviewedRaw =
+        parsed && typeof parsed === 'object'
+          ? (parsed as Record<string, unknown>)[field]
+          : undefined;
+      if (!Array.isArray(reviewedRaw) || reviewedRaw.some((value) => typeof value !== 'string')) {
+        return {
+          ok: false,
+          detail: `${c.file}: ${field} must be an array of exact changed-path strings.`,
+        };
+      }
+      const recordField = c.recordField ?? 'reviewedRecords';
+      const reviewedRecordsRaw =
+        parsed && typeof parsed === 'object'
+          ? (parsed as Record<string, unknown>)[recordField]
+          : undefined;
+      if (
+        !Array.isArray(reviewedRecordsRaw) ||
+        reviewedRecordsRaw.some((value) => typeof value !== 'string')
+      ) {
+        return {
+          ok: false,
+          detail: `${c.file}: ${recordField} must be an array of exact artifact-record paths.`,
+        };
+      }
+
+      const corpusDir = c.corpusDir
+        .replace(/\\/g, '/')
+        .replace(/^\.?\/+/, '')
+        .replace(/^artifacts\/+/, '')
+        .replace(/\/+$/, '');
+      const filePrefix = `${corpusDir}/files/`;
+      const records = (await ws.listArtifacts()).filter(
+        (path) =>
+          path.replace(/\\/g, '/').startsWith(filePrefix) &&
+          path.endsWith('.md') &&
+          !path.split('/').pop()?.startsWith('_'),
+      );
+      if (records.length === 0) {
+        return {
+          ok: false,
+          detail: `${c.file}: no changed-file records were found under artifacts/${filePrefix} — the PR corpus is missing or incomplete.`,
+        };
+      }
+      const expected = new Set<string>();
+      for (const record of records) {
+        const content = await ws.readArtifact(record);
+        if (content === null) {
+          return {
+            ok: false,
+            detail: `${c.file}: could not read connector record artifacts/${record} (fail-closed).`,
+          };
+        }
+        const path = parseFrontmatter(content).data.path?.trim();
+        if (!path) {
+          return {
+            ok: false,
+            detail: `${c.file}: connector record artifacts/${record} has no authoritative path frontmatter.`,
+          };
+        }
+        expected.add(path);
+      }
+
+      const reviewed = new Set(
+        (reviewedRaw as string[]).map((path) => path.trim()).filter(Boolean),
+      );
+      const normalizeRecordPath = (path: string) =>
+        path
+          .replace(/\\/g, '/')
+          .replace(/^\.?\/+/, '')
+          .replace(/^artifacts\/+/, '');
+      const expectedRecords = new Set(records.map(normalizeRecordPath));
+      const reviewedRecords = new Set(
+        (reviewedRecordsRaw as string[])
+          .map((path) => normalizeRecordPath(path.trim()))
+          .filter(Boolean),
+      );
+      const missing = [...expected].filter((path) => !reviewed.has(path)).sort();
+      const unknown = [...reviewed].filter((path) => !expected.has(path)).sort();
+      const missingRecords = [...expectedRecords]
+        .filter((path) => !reviewedRecords.has(path))
+        .sort();
+      const unknownRecords = [...reviewedRecords]
+        .filter((path) => !expectedRecords.has(path))
+        .sort();
+      if (
+        missing.length > 0 ||
+        unknown.length > 0 ||
+        missingRecords.length > 0 ||
+        unknownRecords.length > 0
+      ) {
+        const parts = [
+          `${c.file}: reviewed ${reviewed.size} path(s), but the connector corpus contains ${expected.size}.`,
+        ];
+        if (missing.length > 0) {
+          parts.push(
+            `Missing: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ` (+${missing.length - 10} more)` : ''}.`,
+          );
+        }
+        if (unknown.length > 0) {
+          parts.push(
+            `Not in PR: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`,
+          );
+        }
+        if (missingRecords.length > 0) {
+          parts.push(
+            `Unread records: ${missingRecords.slice(0, 10).join(', ')}${missingRecords.length > 10 ? ` (+${missingRecords.length - 10} more)` : ''}.`,
+          );
+        }
+        if (unknownRecords.length > 0) {
+          parts.push(
+            `Unknown records: ${unknownRecords.slice(0, 10).join(', ')}${unknownRecords.length > 10 ? ` (+${unknownRecords.length - 10} more)` : ''}.`,
+          );
+        }
+        return {
+          ok: false,
+          detail: parts.join(' '),
+          evidence: {
+            expected: expected.size,
+            reviewed: reviewed.size,
+            missing: capList(missing),
+            unknown: capList(unknown),
+            missingRecords: capList(missingRecords),
+            unknownRecords: capList(unknownRecords),
+          },
+        };
+      }
+      return {
+        ok: true,
+        detail: `${c.file}: coverage complete for all ${expected.size} changed path(s) and ${expectedRecords.size} per-file record(s) in artifacts/${filePrefix}.`,
+        evidence: {
+          expected: expected.size,
+          reviewed: reviewed.size,
+          expectedRecords: expectedRecords.size,
+          reviewedRecords: reviewedRecords.size,
+        },
       };
     }
     case 'markdownHeadingsMatch': {

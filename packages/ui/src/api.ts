@@ -6,16 +6,29 @@ import { GezelClient } from '@bendyline/gezel-client';
  * pushes over `gezel:update-state`.
  */
 export type UpdateState =
-  | { kind: 'downloading'; version: string }
+  | { kind: 'checking' }
+  | { kind: 'up-to-date'; version: string }
+  | {
+      kind: 'downloading';
+      version: string;
+      percent?: number;
+      transferred?: number;
+      total?: number;
+      bytesPerSecond?: number;
+    }
   | { kind: 'ready'; version: string }
   /**
-   * `stage` tells a failed version *check* (offline, or no release published
-   * yet — nothing is wrong with the install) apart from a failed *install* (a
-   * verified update could not be applied). Optional because an older Electron
-   * shell may still be driving this renderer; absent is read as 'check', the
-   * quieter of the two.
+   * `stage` tells a failed version *check* (often just offline), download, and
+   * installer handoff apart. Optional because an older Electron shell may
+   * still be driving this renderer; absent is read as 'check', the quieter
+   * outcome.
    */
-  | { kind: 'error'; stage?: 'check' | 'install'; version?: string; message: string };
+  | {
+      kind: 'error';
+      stage?: 'check' | 'download' | 'install';
+      version?: string;
+      message: string;
+    };
 
 /**
  * Build a client against the daemon that served this HTML. When the Electron

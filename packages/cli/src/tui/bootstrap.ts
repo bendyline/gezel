@@ -6,6 +6,7 @@ import type {
 } from '@bendyline/gezel';
 import {
   computeModelFit,
+  formatModelAttribution,
   isMoEFromTags,
   isRecommendedModel,
   mediaModelFits,
@@ -22,6 +23,7 @@ export interface BootstrapChatModel {
   residentBytes: number;
   recoScore: number;
   fit: 'fits' | 'fits-offload' | 'tight' | 'too-big';
+  attribution: string;
 }
 
 export type AccessoryKind = 'image' | 'recognition' | 'stt' | 'tts' | 'video';
@@ -110,6 +112,7 @@ export function rankChatModels(
       // no tool support) sorts as unscored rather than leading the list.
       recoScore: isRecommendedModel(manifest) ? (manifest.recoScore ?? 0) : 0,
       fit,
+      attribution: formatModelAttribution(manifest),
     });
   }
   if (candidates.length === 0) return [];
@@ -154,6 +157,11 @@ export function rankChatModels(
     if (best) pool.unshift(best);
   }
   return pool;
+}
+
+/** Model name plus the people behind the original and downloadable builds. */
+export function bootstrapChatModelLabel(model: BootstrapChatModel): string {
+  return `${model.name} (${model.attribution})`;
 }
 
 /** Recommended accessory models that fit, excluding anything already installed. */

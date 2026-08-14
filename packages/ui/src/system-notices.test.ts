@@ -98,10 +98,34 @@ describe('serviceNotice', () => {
 });
 
 describe('updateNotice', () => {
-  it('says nothing about a healthy or in-flight update', () => {
+  it('maps checking, current, and download progress into calm rail status', () => {
     expect(updateNotice(null)).toBeNull();
-    expect(updateNotice({ kind: 'downloading', version: '1.2.3' })).toBeNull();
-    expect(updateNotice({ kind: 'ready', version: '1.2.3' })).toBeNull();
+    expect(updateNotice({ kind: 'checking' })?.railLabel).toBe('Checking for updates…');
+    expect(updateNotice({ kind: 'up-to-date', version: '1.2.3' })?.tone).toBe('success');
+    const downloading = updateNotice({
+      kind: 'downloading',
+      version: '1.2.3',
+      percent: 42,
+      transferred: 12 * 1024 * 1024,
+      total: 30 * 1024 * 1024,
+    });
+    expect(downloading?.railLabel).toBe('Downloading update · 42%');
+    expect(downloading?.body).toContain('12 MB of 30 MB');
+  });
+
+  it('tells Windows users that a ready update installs on a complete quit', () => {
+    const notice = updateNotice({ kind: 'ready', version: '1.2.3' }, 'win32');
+    expect(notice?.id).toBe('update-ready');
+    expect(notice?.railLabel).toBe('Update ready — quit to install');
+    expect(notice?.body).toMatch(/quit Gezel completely/i);
+    expect(notice?.body).toMatch(/system tray/i);
+  });
+
+  it('keeps the macOS installer handoff distinct from install-on-quit', () => {
+    const notice = updateNotice({ kind: 'ready', version: '1.2.3' }, 'darwin');
+    expect(notice?.railLabel).toBe('Update ready to install');
+    expect(notice?.body).toMatch(/choose Open installer/i);
+    expect(notice?.body).not.toMatch(/automatically after you quit/i);
   });
 
   // The reported bug: a failed *check* — what an offline launch and a repo
@@ -135,6 +159,18 @@ describe('updateNotice', () => {
     expect(notice?.id).toBe('update-install-failed');
     expect(notice?.railLabel).toBe('Update needs attention');
     expect(notice?.link?.href).toBe('https://github.com/bendyline/gezel/releases/tag/v1.26212.4');
+  });
+
+  it('surfaces a failed download separately from check and install failures', () => {
+    const notice = updateNotice({
+      kind: 'error',
+      stage: 'download',
+      version: '1.26212.4',
+      message: 'disk full',
+    });
+    expect(notice?.id).toBe('update-download-failed');
+    expect(notice?.railLabel).toMatch(/download needs attention/i);
+    expect(notice?.technical).toBe('disk full');
   });
 
   it('falls back to the releases list, never repository latest, with no known version', () => {

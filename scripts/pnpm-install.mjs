@@ -1,172 +1,23 @@
 #!/usr/bin/env node
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { dependencyLeasePath, withDependencyMutationLease } from './dependency-lease.mjs';
 import { spawnPnpm } from './pnpm-cli.mjs';
 import { inspectWindowsDependencyLocks } from './windows-dependency-locks.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptsDir, '..');
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
-const OWNER_GRACE_MS = 30 * 1000;
 const SERIALIZED_INSTALL_ENV = 'GEZEL_SERIALIZED_PNPM_INSTALL';
-const INSTALL_LOCK_PATH_ENV = 'GEZEL_PNPM_INSTALL_LOCK_PATH';
-const INSTALL_LOCK_TOKEN_ENV = 'GEZEL_PNPM_INSTALL_LOCK_TOKEN';
 
-function delay(ms) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
+export const pnpmInstallLockPath = dependencyLeasePath;
 
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code !== 'ESRCH' && error?.code !== 'EINVAL';
-  }
-}
-
-export async function pnpmInstallLockPath(repoRoot) {
-  let canonical;
-  try {
-    canonical = await realpath(repoRoot);
-  } catch {
-    canonical = resolve(repoRoot);
-  }
-  if (process.platform === 'win32') canonical = canonical.toLowerCase();
-  const key = createHash('sha256').update(canonical).digest('hex').slice(0, 20);
-  return join(tmpdir(), `gezel-pnpm-install-${key}.lock`);
-}
-
-async function lockSnapshot(lockDir) {
-  try {
-    const [ownerRaw, lockStat] = await Promise.all([
-      readFile(join(lockDir, 'owner.json'), 'utf8').catch(() => null),
-      stat(lockDir),
-    ]);
-    let owner = null;
-    try {
-      owner = ownerRaw ? JSON.parse(ownerRaw) : null;
-    } catch {}
-    return { owner, mtimeMs: lockStat.mtimeMs };
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-function snapshotIsStale(snapshot, now = Date.now()) {
-  if (!snapshot) return false;
-  if (!snapshot.owner) return now - snapshot.mtimeMs > OWNER_GRACE_MS;
-  const pids = [snapshot.owner.pid, snapshot.owner.childPid].filter(Number.isInteger);
-  return pids.length === 0 || pids.every((pid) => !processIsAlive(pid));
-}
-
-async function quarantineStaleLock(lockDir, token) {
-  const quarantine = `${lockDir}.stale-${token}`;
-  try {
-    await rename(lockDir, quarantine);
-  } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'EACCES' || error?.code === 'EPERM') {
-      return false;
-    }
-    throw error;
-  }
-  await rm(quarantine, { recursive: true, force: true });
-  return true;
-}
-
-/** Serialize every operation that can rewrite this checkout's dependency tree. */
-export async function withPnpmInstallLock(repoRoot, fn, options = {}) {
-  const lockDir = await pnpmInstallLockPath(repoRoot);
-  const inheritedEnv = options.env ?? process.env;
-  const inheritedToken = inheritedEnv[INSTALL_LOCK_TOKEN_ENV];
-  const inheritedPath = inheritedEnv[INSTALL_LOCK_PATH_ENV];
-
-  // A checkout-wide workflow such as `pnpm validate` keeps this lock while it
-  // launches child pnpm commands. Some of those children perform an isolated
-  // deploy and use this helper themselves. Admit only descendants carrying the
-  // live owner's unguessable token; unrelated processes still have to wait.
-  if (inheritedToken && inheritedPath && resolve(inheritedPath) === resolve(lockDir)) {
-    const snapshot = await lockSnapshot(lockDir);
-    const ownerPids = [snapshot?.owner?.pid, snapshot?.owner?.childPid].filter(Number.isInteger);
-    if (
-      snapshot?.owner?.token === inheritedToken &&
-      resolve(snapshot.owner.repoRoot ?? '') === resolve(repoRoot) &&
-      ownerPids.some(processIsAlive)
-    ) {
-      return fn({
-        setChildPid: async () => {},
-        lockEnv: {
-          [INSTALL_LOCK_PATH_ENV]: lockDir,
-          [INSTALL_LOCK_TOKEN_ENV]: inheritedToken,
-        },
-      });
-    }
-  }
-
-  const token = randomUUID();
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const startedAt = Date.now();
-  let announcedWait = false;
-
-  while (true) {
-    try {
-      await mkdir(lockDir);
-      break;
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-    }
-
-    const snapshot = await lockSnapshot(lockDir);
-    if (snapshotIsStale(snapshot) && (await quarantineStaleLock(lockDir, token))) continue;
-    if (Date.now() - startedAt >= timeoutMs) {
-      const owner = snapshot?.owner;
-      const detail = owner?.command ? ` (held by ${owner.command}, pid ${owner.pid})` : '';
-      throw new Error(`Timed out waiting for the shared pnpm install lock${detail}`);
-    }
-    if (!announcedWait) {
-      const owner = snapshot?.owner;
-      const detail = owner?.command ? `: ${owner.command} (pid ${owner.pid})` : '';
-      console.log(`[pnpm-install] waiting for another dependency mutation${detail}`);
-      announcedWait = true;
-    }
-    await delay(options.pollMs ?? 250);
-  }
-
-  const ownerPath = join(lockDir, 'owner.json');
-  const owner = {
-    token,
-    pid: process.pid,
-    childPid: null,
-    command: options.command ?? 'pnpm install',
-    repoRoot: resolve(repoRoot),
-    startedAt: new Date().toISOString(),
-  };
-  const writeOwner = () => writeFile(ownerPath, `${JSON.stringify(owner, null, 2)}\n`, 'utf8');
-  await writeOwner();
-
-  try {
-    return await fn({
-      setChildPid: async (childPid) => {
-        owner.childPid = childPid ?? null;
-        await writeOwner();
-      },
-      lockEnv: {
-        [INSTALL_LOCK_PATH_ENV]: lockDir,
-        [INSTALL_LOCK_TOKEN_ENV]: token,
-      },
-    });
-  } finally {
-    const current = await lockSnapshot(lockDir);
-    if (current?.owner?.token === token) await rm(lockDir, { recursive: true, force: true });
-  }
-}
+/** Backward-compatible name for the checkout's exclusive dependency mutation lease. */
+export const withPnpmInstallLock = withDependencyMutationLease;
 
 function waitForChild(child) {
   return new Promise((resolveChild, rejectChild) => {
@@ -189,6 +40,79 @@ function workspacePackageDirs(repoRoot) {
     }
   }
   return packageDirs;
+}
+
+function normalizedPath(path) {
+  const normalized = resolve(path);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+export function workspaceStructureIssue(repoRoot) {
+  const statePath = join(repoRoot, 'node_modules', '.pnpm-workspace-state-v1.json');
+  if (!existsSync(statePath)) return 'pnpm workspace-state metadata is missing';
+  let state;
+  try {
+    state = JSON.parse(readFileSync(statePath, 'utf8'));
+  } catch {
+    return 'pnpm workspace-state metadata is invalid';
+  }
+
+  const currentProjects = new Map(
+    workspacePackageDirs(repoRoot).map((packageDir) => {
+      const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+      return [
+        normalizedPath(packageDir),
+        { name: manifest.name, version: manifest.version ?? '0.0.0' },
+      ];
+    }),
+  );
+  const installedProjects = new Map(
+    Object.entries(state.projects ?? {}).map(([packageDir, project]) => [
+      normalizedPath(packageDir),
+      { name: project.name, version: project.version ?? '0.0.0' },
+    ]),
+  );
+  if (currentProjects.size !== installedProjects.size) {
+    return `workspace project count changed (${installedProjects.size} installed, ${currentProjects.size} current)`;
+  }
+  for (const [packageDir, current] of currentProjects) {
+    const installed = installedProjects.get(packageDir);
+    if (!installed)
+      return `workspace package was added or moved: ${relative(repoRoot, packageDir)}`;
+    if (installed.name !== current.name || installed.version !== current.version) {
+      return `workspace package identity changed: ${relative(repoRoot, packageDir)}`;
+    }
+  }
+  return null;
+}
+
+export function lockfileValidationIssue(repoRoot) {
+  const statePath = join(repoRoot, 'node_modules', '.pnpm-workspace-state-v1.json');
+  const lockfilePath = join(repoRoot, 'pnpm-lock.yaml');
+  if (!existsSync(statePath) || !existsSync(lockfilePath)) return null;
+  try {
+    const state = JSON.parse(readFileSync(statePath, 'utf8'));
+    const validatedAt = Number(state.lastValidatedTimestamp);
+    if (Number.isFinite(validatedAt) && statSync(lockfilePath).mtimeMs > validatedAt) {
+      return 'lockfile timestamp is newer than pnpm workspace-state metadata';
+    }
+  } catch {}
+  return null;
+}
+
+export function installedLockfileIssue(repoRoot) {
+  const wantedPath = join(repoRoot, 'pnpm-lock.yaml');
+  const installedPath = join(repoRoot, 'node_modules', '.pnpm', 'lock.yaml');
+  if (!existsSync(wantedPath)) return 'pnpm-lock.yaml is missing';
+  if (!existsSync(installedPath)) return 'installed dependency lock is missing';
+  try {
+    if (!readFileSync(wantedPath).equals(readFileSync(installedPath))) {
+      return 'installed dependency lock differs from pnpm-lock.yaml';
+    }
+  } catch {
+    return 'installed dependency lock could not be compared with pnpm-lock.yaml';
+  }
+  return null;
 }
 
 function dependencyLinkPath(packageDir, dependency) {
@@ -236,7 +160,70 @@ export function workspaceDependenciesReady(repoRoot) {
   );
 }
 
-function repairInstallArgs(repoRoot, args) {
+export function dependencyStatus(repoRoot) {
+  const markersReady = workspaceDependencyMarkersReady(repoRoot);
+  const missingLinks = missingWorkspaceDependencyLinks(repoRoot);
+  const installedIssue = installedLockfileIssue(repoRoot);
+  const workspaceIssue = workspaceStructureIssue(repoRoot);
+  const usable = markersReady && missingLinks.length === 0;
+  return {
+    usable,
+    synchronized: usable && !installedIssue && !workspaceIssue,
+    markersReady,
+    missingLinks,
+    installedLockfileIssue: installedIssue,
+    lockfileValidationIssue: lockfileValidationIssue(repoRoot),
+    workspaceStructureIssue: workspaceIssue,
+  };
+}
+
+export function reportDependencyStatus(repoRoot, options = {}) {
+  const status = dependencyStatus(repoRoot);
+  const write = options.write ?? console.log;
+  write(`[deps:status] generated dependencies: ${status.usable ? 'usable' : 'incomplete'}`);
+  if (!status.markersReady)
+    write('[deps:status] required workspace markers or binaries are missing');
+  for (const missing of status.missingLinks) {
+    write(`[deps:status] missing ${missing.dependency} for ${missing.packageName}`);
+  }
+  if (status.installedLockfileIssue) {
+    write(`[deps:status] synchronization required: ${status.installedLockfileIssue}`);
+  }
+  if (status.workspaceStructureIssue) {
+    write(`[deps:status] metadata warning: ${status.workspaceStructureIssue}`);
+  }
+  if (status.lockfileValidationIssue) {
+    write(`[deps:status] metadata warning: ${status.lockfileValidationIssue}`);
+  }
+  if (status.usable && (status.workspaceStructureIssue || status.lockfileValidationIssue))
+    write('[deps:status] existing tools remain usable; this warning does not authorize a repair');
+  write(
+    status.synchronized
+      ? '[deps:status] no dependency mutation is required for ordinary build/test/lint commands'
+      : status.usable
+        ? '[deps:status] existing tools are usable; `pnpm deps:install` will safely synchronize them'
+        : '[deps:status] run `pnpm deps:install` only when dependency installation is intended',
+  );
+  return status;
+}
+
+export async function dependencyInputsFingerprint(repoRoot) {
+  const paths = [
+    join(repoRoot, 'pnpm-lock.yaml'),
+    join(repoRoot, 'pnpm-workspace.yaml'),
+    ...workspacePackageDirs(repoRoot).map((packageDir) => join(packageDir, 'package.json')),
+  ];
+  const hash = createHash('sha256');
+  for (const path of [...new Set(paths)].sort()) {
+    hash.update(relative(repoRoot, path).replaceAll('\\', '/'));
+    hash.update('\0');
+    hash.update(await readFile(path).catch(() => Buffer.from('<missing>')));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function missingInstallArgs(repoRoot, args) {
   const repairedArgs = [...args];
   if (!repairedArgs.includes('--config.optimistic-repeat-install=false')) {
     repairedArgs.push('--config.optimistic-repeat-install=false');
@@ -266,7 +253,7 @@ function reportDependencyLockOwners(owners) {
     );
   }
   console.error('');
-  console.error('Close the listed app or workspace, then rerun `pnpm deps:install`.');
+  console.error('Close the listed app or workspace, then rerun the intended dependency command.');
   console.error('The install was stopped before pnpm could rewrite node_modules.');
 }
 
@@ -308,20 +295,126 @@ export async function runPnpmInstallChild(options = {}) {
   }
 }
 
+export async function runPnpmFetchChild(options = {}) {
+  const repoRoot = options.repoRoot ?? defaultRepoRoot;
+  const args = options.args ?? ['--frozen-lockfile'];
+  const stagingRoot = await mkdtemp(join(options.stagingParent ?? tmpdir(), 'gezel-pnpm-fetch-'));
+  const stagingModules = join(stagingRoot, 'node_modules');
+  const stagingVirtualStore = join(stagingModules, '.pnpm');
+  console.log(`[pnpm-install] pnpm fetch ${args.join(' ')} (isolated staging directory)`);
+  try {
+    // pnpm 11's fetch command intentionally writes a virtual-store-only
+    // modules layout with empty hoist patterns. Pointing it at an existing
+    // workspace makes pnpm treat that live node_modules as incompatible and
+    // offer to purge it. Both paths are explicit here so fetch can populate
+    // the shared content-addressable store without ever opening the live
+    // modules manifest or virtual store.
+    const child = (options.spawnPnpmFn ?? spawnPnpm)(
+      [
+        'fetch',
+        ...args,
+        '--modules-dir',
+        stagingModules,
+        '--virtual-store-dir',
+        stagingVirtualStore,
+      ],
+      {
+        cwd: repoRoot,
+        env: options.env ?? process.env,
+        stdio: 'inherit',
+      },
+    );
+    const completion = waitForChild(child);
+    await options.setChildPid?.(child.pid);
+    const { code, signal } = await completion;
+    if (signal) {
+      console.error(`[pnpm-install] pnpm fetch exited on ${signal}`);
+      return 1;
+    }
+    return code ?? 1;
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+function safeFrozenInstallArgs(args, allowPurge) {
+  if (args.some((arg) => arg === '--frozen-lockfile=false' || arg === '--no-frozen-lockfile')) {
+    throw new Error('Safe dependency installation requires the committed frozen lockfile');
+  }
+  if (args.includes('--lockfile-only')) {
+    throw new Error('A node_modules install cannot also be lockfile-only');
+  }
+  const result = args.filter(
+    (arg) =>
+      arg !== '--offline' &&
+      arg !== '--frozen-lockfile' &&
+      !arg.startsWith('--config.confirm-modules-purge='),
+  );
+  result.push('--offline', '--frozen-lockfile');
+  if (allowPurge) result.push('--config.confirm-modules-purge=false');
+  return result;
+}
+
+/** Fetch every locked package in isolation before pnpm may touch the live node_modules. */
+export async function runPreparedFrozenInstall(options = {}) {
+  const repoRoot = options.repoRoot ?? defaultRepoRoot;
+  const fingerprintBefore = await dependencyInputsFingerprint(repoRoot);
+  const fetchCode = await (options.runFetchFn ?? runPnpmFetchChild)({
+    repoRoot,
+    args: ['--frozen-lockfile'],
+    env: options.env,
+    spawnPnpmFn: options.spawnPnpmFn,
+    setChildPid: options.setChildPid,
+  });
+  if (fetchCode !== 0) {
+    console.error('[pnpm-install] fetch failed; node_modules was left untouched');
+    return fetchCode;
+  }
+  const fingerprintAfter = await dependencyInputsFingerprint(repoRoot);
+  if (fingerprintAfter !== fingerprintBefore) {
+    console.error(
+      '[pnpm-install] dependency inputs changed during fetch; node_modules was left untouched',
+    );
+    return 1;
+  }
+  return (options.runInstallFn ?? runPnpmInstallChild)({
+    repoRoot,
+    args: safeFrozenInstallArgs(options.args ?? [], options.allowPurge ?? false),
+    env: options.env,
+    spawnPnpmFn: options.spawnPnpmFn,
+    setChildPid: options.setChildPid,
+  });
+}
+
+/** Refresh a lockfile without touching node_modules, then perform a prepared offline install. */
+export async function runLockfileRefreshAndInstall(options = {}) {
+  const args = options.args ?? [];
+  const lockfileCode = await runPnpmInstallChild({
+    ...options,
+    args: [...args, '--lockfile-only'],
+  });
+  if (lockfileCode !== 0) {
+    console.error('[pnpm-install] lockfile refresh failed; node_modules was left untouched');
+    return lockfileCode;
+  }
+  return runPreparedFrozenInstall({ ...options, args, allowPurge: false });
+}
+
 export async function runSerializedPnpmInstall(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const args = options.args ?? [];
-  const command = `pnpm install${args.length > 0 ? ` ${args.join(' ')}` : ''}`;
+  const repair = options.repair ?? false;
+  const command = repair ? 'pnpm deps:repair' : 'pnpm deps:install';
 
   return withPnpmInstallLock(
     repoRoot,
-    async ({ setChildPid }) => {
-      if (options.ifMissing && workspaceDependenciesReady(repoRoot)) {
+    async ({ setChildPid, leaseEnv }) => {
+      if (!repair && dependencyStatus(repoRoot).synchronized) {
         console.log('[pnpm-install] dependencies already present');
         return 0;
       }
 
-      const installArgs = options.ifMissing ? repairInstallArgs(repoRoot, args) : args;
+      const installArgs = repair ? args : missingInstallArgs(repoRoot, args);
 
       const lockOwners = (options.dependencyLockProbeFn ?? inspectWindowsDependencyLocks)(repoRoot);
       if (lockOwners.length > 0) {
@@ -329,10 +422,13 @@ export async function runSerializedPnpmInstall(options = {}) {
         return 1;
       }
 
-      return runPnpmInstallChild({
+      return runPreparedFrozenInstall({
         repoRoot,
         args: installArgs,
-        env: options.env,
+        allowPurge: repair,
+        env: { ...(options.env ?? process.env), ...leaseEnv },
+        runFetchFn: options.runFetchFn,
+        runInstallFn: options.runInstallFn,
         spawnPnpmFn: options.spawnPnpmFn,
         setChildPid,
       });
@@ -347,17 +443,53 @@ export async function runSerializedPnpmInstall(options = {}) {
 
 export function parsePnpmInstallArgs(argv) {
   const args = [...argv];
+  const repairIndex = args.indexOf('--repair');
+  const repair = repairIndex !== -1;
+  if (repair) args.splice(repairIndex, 1);
+  const confirmIndex = args.indexOf('--confirm-repair');
+  const confirmRepair = confirmIndex !== -1;
+  if (confirmRepair) args.splice(confirmIndex, 1);
+  const statusIndex = args.indexOf('--status');
+  const status = statusIndex !== -1;
+  if (status) args.splice(statusIndex, 1);
   const ifMissingIndex = args.indexOf('--if-missing');
-  const ifMissing = ifMissingIndex !== -1;
-  if (ifMissing) args.splice(ifMissingIndex, 1);
+  if (ifMissingIndex !== -1) args.splice(ifMissingIndex, 1);
   if (args[0] === '--') args.shift();
-  return { args, ifMissing };
+  return { args, confirmRepair, repair, status };
+}
+
+async function confirmRepairInTerminal() {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  const { createInterface } = await import('node:readline/promises');
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question(
+      'Dependency repair may rebuild node_modules after a successful fetch. Continue? [y/N] ',
+    );
+    return /^y(?:es)?$/i.test(answer.trim());
+  } finally {
+    prompt.close();
+  }
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) {
-  const { args, ifMissing } = parsePnpmInstallArgs(process.argv.slice(2));
-  runSerializedPnpmInstall({ args, ifMissing }).then(
+  const parsed = parsePnpmInstallArgs(process.argv.slice(2));
+  const run = async () => {
+    if (parsed.status) {
+      reportDependencyStatus(defaultRepoRoot);
+      return 0;
+    }
+    if (parsed.repair && !parsed.confirmRepair && !(await confirmRepairInTerminal())) {
+      console.error('[pnpm-install] dependency repair was not authorized');
+      console.error(
+        '[pnpm-install] non-interactive callers need explicit user approval and --confirm-repair',
+      );
+      return 1;
+    }
+    return runSerializedPnpmInstall({ args: parsed.args, repair: parsed.repair });
+  };
+  run().then(
     (code) => {
       process.exitCode = code;
     },

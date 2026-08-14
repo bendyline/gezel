@@ -119,12 +119,12 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
       try {
         const [d, f, c] = await Promise.all([
           api.getProjectGitHubPull(projectId, num),
-          api.listProjectGitHubPullFiles(projectId, num),
+          listAllPullFiles(projectId, num),
           api.listProjectGitHubPullComments(projectId, num),
         ]);
         if (cancelled) return;
         setDetail(d);
-        setFiles(f.files);
+        setFiles(f);
         setComments(c.comments);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -240,4 +240,22 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
       )}
     </div>
   );
+}
+
+async function listAllPullFiles(
+  projectId: string,
+  num: number,
+): Promise<Awaited<ReturnType<typeof api.listProjectGitHubPullFiles>>['files']> {
+  const files: Awaited<ReturnType<typeof api.listProjectGitHubPullFiles>>['files'] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await api.listProjectGitHubPullFiles(projectId, num, {
+      offset,
+      limit: 200,
+      includePatch: true,
+    });
+    files.push(...page.files);
+    if (!page.hasMore || page.nextOffset === undefined) return files;
+    offset = page.nextOffset;
+  }
 }

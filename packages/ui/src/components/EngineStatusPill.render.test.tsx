@@ -127,6 +127,50 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
   });
 
+  it('distinguishes chat caches from shared prefixes in engine telemetry', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    const cacheEntry = (sessionId: string) => ({
+      sessionId,
+      tokenCount: 1_000,
+      bytes: GiB,
+      lastUsedAt: Date.now(),
+      evictionPriority: 'normal' as const,
+    });
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        ds4: queueState(0),
+        'llama-cpp': queueState(1),
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [
+        {
+          providerName: 'llama-cpp',
+          totalBytes: 14 * GiB,
+          budgetBytes: 16 * GiB,
+          warmSessionCount: 4,
+          hits: 4,
+          misses: 1,
+          recentHitRate: 0.8,
+          sessions: [
+            cacheEntry('chat-a'),
+            cacheEntry('prefix-model-a'),
+            cacheEntry('chat-b'),
+            cacheEntry('prefix-gezel-project-a'),
+          ],
+        },
+      ],
+      at: '',
+    } as QueueStatusResponse);
+
+    render(<EngineStatusPill />);
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    expect(await screen.findByText(/2 chat caches \+ 2 shared prefixes/)).toBeInTheDocument();
+    expect(screen.queryByText(/4 threads/)).not.toBeInTheDocument();
+  });
+
   it('shows elapsed work as a minute-and-second clock', async () => {
     const now = Date.now();
     const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);

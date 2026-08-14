@@ -8700,14 +8700,14 @@ server.tool(
 
 server.tool(
   'read_task_notes',
-  'Read the chronological feed of timestamped notes for a task (or a specific step). Each entry has an author (a gezel or the user) and was appended at a known time — newest first.',
+  'Read the chronological feed of timestamped notes for a task (or a specific step). Omit stepId to read the whole task feed across every step. Each entry has an author (a gezel or the user) and was appended at a known time — newest first.',
   {
     ref: z.string(),
     stepId: z.string().optional(),
   },
   async ({ ref, stepId }) => {
     const parsed = parseRef(ref);
-    const effectiveStep = stepId ?? (sessionStepId || undefined);
+    const effectiveStep = stepId?.trim() || undefined;
     const { notes } = await api.listTaskNotes(parsed.projectId, parsed.num, effectiveStep);
     const summary = `Loaded ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} for ${ref}${effectiveStep ? `/${effectiveStep}` : ''}.`;
     return okResult(
@@ -11094,23 +11094,69 @@ server.tool(
 
 server.tool(
   'github_pr_files',
-  'List the files changed in a PR with per-file additions, deletions, and a truncated patch hunk. Use this when you want a structured per-file view; for the full unified diff use github_pr_diff.',
+  'List a bounded page of files changed in a PR. Defaults to compact metadata only so filenames later in a large PR are never hidden behind early patch bodies. Follow `nextOffset` until `hasMore: false`; set includePatch only for a small page, or use github_pr_file for one path.',
   {
     project: z.string().optional(),
     number: z.number().int().positive(),
+    offset: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe('Zero-based file offset (default 0).'),
+    limit: z.number().int().min(1).max(200).optional().describe('Files per page (default 100).'),
+    paths: z
+      .array(z.string().min(1))
+      .max(50)
+      .optional()
+      .describe('Optional exact changed paths to select.'),
+    includePatch: z
+      .boolean()
+      .optional()
+      .describe('Include bounded patches for this page. Defaults false.'),
   },
-  async ({ project, number }) => {
+  async ({ project, number, offset, limit, paths, includePatch }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGitHubPullFiles(resolved, number);
+      const res = await api.listProjectGitHubPullFiles(resolved, number, {
+        ...(offset !== undefined ? { offset } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(paths ? { paths } : {}),
+        includePatch: includePatch === true,
+      });
       if (!res.files.length) {
-        return { content: [{ type: 'text' as const, text: 'No file changes in this PR.' }] };
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: paths?.length
+                ? `No changed files matched: ${paths.join(', ')}`
+                : 'No file changes in this PR.',
+            },
+          ],
+        };
       }
       const blocks = res.files.map((f) => {
         const header = `${f.filename} — ${f.status} (+${f.additions} −${f.deletions})`;
-        return f.patch ? `${header}\n\`\`\`diff\n${f.patch}\n\`\`\`` : header;
+        if (!f.patch) return header;
+        const truncation = f.patchTruncated
+          ? `\n[patch truncated: returned ${f.patch.length} of ${f.patchChars ?? '?'} chars; call github_pr_diff with path="${f.filename}" and nextOffset until complete]`
+          : '';
+        return `${header}\n\`\`\`diff\n${f.patch}\n\`\`\`${truncation}`;
       });
-      return { content: [{ type: 'text' as const, text: blocks.join('\n\n') }] };
+      const start = res.offset ?? offset ?? 0;
+      const total = res.totalFiles ?? res.files.length;
+      const end = start + res.files.length;
+      const coverage = [
+        `Coverage: files ${start + 1}-${end} of ${total}${res.allFiles !== undefined && res.allFiles !== total ? ` selected from ${res.allFiles} PR files` : ''}.`,
+        `Patches: ${res.includesPatch ? 'included where available' : 'omitted (metadata-only)'}.`,
+        res.hasMore
+          ? `hasMore: true; nextOffset: ${res.nextOffset ?? end}. Call github_pr_files again with that offset.`
+          : 'hasMore: false; this selection is complete.',
+      ].join('\n');
+      return {
+        content: [{ type: 'text' as const, text: `${coverage}\n\n${blocks.join('\n\n')}` }],
+      };
     } catch (err) {
       const msg = unwrapApiError(err);
       return {
@@ -11122,17 +11168,83 @@ server.tool(
 );
 
 server.tool(
-  'github_pr_diff',
-  'Fetch the full unified diff for a PR (truncated at ~64KB). Use this to feed the diff body to the model when you want it to reason about changes holistically; for per-file iteration use github_pr_files.',
+  'github_pr_file',
+  'Fetch one changed path and its bounded patch. Use this after github_pr_files identifies a file; if the patch is truncated, continue with github_pr_diff({ number, path, offset: nextOffset }).',
   {
     project: z.string().optional(),
     number: z.number().int().positive(),
+    path: z.string().min(1).describe('Exact changed path from github_pr_files.'),
   },
-  async ({ project, number }) => {
+  async ({ project, number, path }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.getProjectGitHubPullDiff(resolved, number);
-      return { content: [{ type: 'text' as const, text: res.diff || '(empty diff)' }] };
+      const res = await api.listProjectGitHubPullFiles(resolved, number, {
+        paths: [path],
+        limit: 1,
+        includePatch: true,
+      });
+      const file = res.files[0];
+      if (!file) {
+        return {
+          content: [{ type: 'text' as const, text: `Changed path not found: ${path}` }],
+          isError: true,
+        };
+      }
+      const header = `${file.filename} — ${file.status} (+${file.additions} −${file.deletions})`;
+      const patch = file.patch
+        ? `\n\n\`\`\`diff\n${file.patch}\n\`\`\``
+        : '\n\n(No patch returned.)';
+      const truncation = file.patchTruncated
+        ? `\n\nPatch truncated: returned ${file.patch?.length ?? 0} of ${file.patchChars ?? '?'} chars. Call github_pr_diff({ number: ${number}, path: ${JSON.stringify(file.filename)} }) and follow nextOffset.`
+        : '';
+      return { content: [{ type: 'text' as const, text: `${header}${patch}${truncation}` }] };
+    } catch (err) {
+      const msg = unwrapApiError(err);
+      return {
+        content: [{ type: 'text' as const, text: `github_pr_file failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'github_pr_diff',
+  'Fetch one explicit character page of a PR diff, optionally scoped to an exact changed path. The result always reports totalChars, truncated, and nextOffset; continue until truncated is false. For large PR discovery, page github_pr_files first instead of assuming one diff call is complete.',
+  {
+    project: z.string().optional(),
+    number: z.number().int().positive(),
+    path: z.string().min(1).optional().describe('Optional exact changed path.'),
+    offset: z.number().int().nonnegative().optional().describe('Character offset (default 0).'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(60_000)
+      .optional()
+      .describe('Characters to return (default 48,000; max 60,000).'),
+  },
+  async ({ project, number, path, offset, limit }) => {
+    const resolved = project ? await resolveProjectId(project) : projectId;
+    try {
+      const res = await api.getProjectGitHubPullDiff(resolved, number, {
+        ...(path ? { path } : {}),
+        ...(offset !== undefined ? { offset } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      const scope = res.path ? ` for ${res.path}` : '';
+      const start = res.offset ?? offset ?? 0;
+      const returned = res.returnedChars ?? res.diff.length;
+      const total = res.totalChars ?? res.diff.length;
+      const meta = [
+        `Diff page${scope}: chars ${start}-${start + returned} of ${total}.`,
+        res.truncated
+          ? `truncated: true; nextOffset: ${res.nextOffset ?? start + returned}. Continue with the same path and that offset.`
+          : 'truncated: false; this diff selection is complete.',
+      ].join('\n');
+      return {
+        content: [{ type: 'text' as const, text: `${meta}\n\n${res.diff || '(empty diff)'}` }],
+      };
     } catch (err) {
       const msg = unwrapApiError(err);
       return {

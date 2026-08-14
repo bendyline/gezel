@@ -237,6 +237,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'github_pr_list',
   'github_pr_view',
   'github_pr_files',
+  'github_pr_file',
   'github_pr_diff',
   'github_pr_comments',
   'github_pr_comment',

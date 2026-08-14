@@ -23,8 +23,9 @@ beforeEach(() => {
 
 afterEach(async () => {
   for (const harness of mounted.splice(0)) {
+    const exit = harness.waitUntilExit();
     harness.unmount();
-    await harness.waitUntilExit();
+    await exit;
   }
 });
 
@@ -258,28 +259,34 @@ describe('App interactions', () => {
 
     await submit(harness, '/model');
     await vi.waitFor(() => {
-      expect(harness.text()).toContain('Choose engine + model');
+      expect(harness.text()).toContain(
+        'Choose engine + model - models are downloaded from Hugging Face (huggingface.co)',
+      );
       expect(harness.text()).toContain('Download a new model…');
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    harness.write('\u001B[B');
-    await harness.waitUntilRenderFlush();
-    harness.write('\r');
+    await pressKey(harness, '\u001B[B');
+    await pressKey(harness, '\r');
     await vi.waitFor(() => {
       expect(harness.text()).toContain('Download and use an on-device model');
-      expect(harness.text()).toContain('Fresh Gemma');
+      expect(harness.text()).toContain('Fresh Gemma (test)');
     });
-    harness.write('\r');
+    await pressKey(harness, '\r');
 
-    await vi.waitFor(() => {
-      expect(client.installLlamaCppModel).toHaveBeenCalledWith('fresh-gemma', expect.any(Function));
-      expect(client.updateGezelSettings).toHaveBeenCalledWith('foreman', {
-        provider: 'llama-cpp',
-        model: 'fresh-gemma',
-        reasoningEffort: null,
-      });
-    });
-    expect(harness.text()).toContain('model → llama.cpp · Fresh Gemma');
+    await vi.waitFor(
+      () => {
+        expect(client.installLlamaCppModel).toHaveBeenCalledWith(
+          'fresh-gemma',
+          expect.any(Function),
+        );
+        expect(client.updateGezelSettings).toHaveBeenCalledWith('foreman', {
+          provider: 'llama-cpp',
+          model: 'fresh-gemma',
+          reasoningEffort: null,
+        });
+        expect(harness.text()).toContain('model → llama.cpp · Fresh Gemma');
+      },
+      { timeout: 5_000 },
+    );
   });
 
   it('opens the same download picker directly with /model download', async () => {
@@ -291,7 +298,7 @@ describe('App interactions', () => {
 
     await vi.waitFor(() => {
       expect(harness.text()).toContain('Download and use an on-device model');
-      expect(harness.text()).toContain('Fresh Gemma');
+      expect(harness.text()).toContain('Fresh Gemma (test)');
     });
   });
 
@@ -461,6 +468,13 @@ async function submit(harness: InkHarness, value: string): Promise<void> {
   harness.write(value);
   await harness.waitUntilRenderFlush();
   harness.write('\r');
+  await harness.waitUntilRenderFlush();
+}
+
+/** Let Ink install the active overlay's input effect before sending a synthetic key. */
+async function pressKey(harness: InkHarness, key: string): Promise<void> {
+  await harness.waitUntilRenderFlush();
+  harness.write(key);
   await harness.waitUntilRenderFlush();
 }
 

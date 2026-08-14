@@ -829,7 +829,7 @@ export class ConnectorManager {
   async syncBinding(
     project: ProjectDetail,
     bindingId: string,
-    opts?: { scopes?: readonly string[] },
+    opts?: { scopes?: readonly string[]; backfillLimit?: number },
   ): Promise<BindingSyncResult> {
     return this.withLock(project.id, async () => {
       const current = await this.reread(project);
@@ -889,7 +889,7 @@ export class ConnectorManager {
   private async syncBindingInner(
     project: ProjectDetail,
     binding: ProjectConnectorBinding,
-    opts?: { scopes?: readonly string[] },
+    opts?: { scopes?: readonly string[]; backfillLimit?: number },
   ): Promise<BindingSyncResult> {
     try {
       // Legacy bindings predate provenance pins and could otherwise be
@@ -918,7 +918,7 @@ export class ConnectorManager {
         quarantineWorkspaceDir,
         corpusDir,
         allowPrune: resolved.manifest.completeness === 'mirror',
-        backfillLimit: DEFAULT_BACKFILL_LIMIT,
+        backfillLimit: Math.max(1, Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000)),
         cursor: binding.cursor,
         ...(opts?.scopes ? { scopes: opts.scopes } : {}),
       });

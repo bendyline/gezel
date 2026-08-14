@@ -112,6 +112,74 @@ describe('evaluateGate', () => {
     expect(res.pass).toBe(false);
   });
 
+  it('corpusCoverage requires every connector-materialized PR path', async () => {
+    const artifactRecord = (path: string) =>
+      `---\npath: ${path}\nstatus: modified\n---\n\n# ${path}\n\n\`\`\`diff\n+changed\n\`\`\``;
+    const artifacts = {
+      'data/github-pulls/pr-52/files/001--early--aaaa1111.md': artifactRecord('src/early.ts'),
+      'data/github-pulls/pr-52/files/002--late--bbbb2222.md': artifactRecord(
+        'packages/client/src/client.ts',
+      ),
+      'data/github-pulls/pr-52/001--overview--cccc3333.md': '# overview',
+    };
+    const earlyRecord = 'data/github-pulls/pr-52/files/001--early--aaaa1111.md';
+    const lateRecord = 'data/github-pulls/pr-52/files/002--late--bbbb2222.md';
+    const check = {
+      kind: 'corpusCoverage' as const,
+      file: 'pr-review-coverage.json',
+      corpusDir: 'artifacts/data/github-pulls/pr-52',
+    };
+
+    const partial = await evaluateGate(
+      [check],
+      splitReader(
+        {
+          'pr-review-coverage.json': JSON.stringify({
+            reviewedFiles: ['src/early.ts'],
+            reviewedRecords: [earlyRecord],
+          }),
+        },
+        artifacts,
+      ),
+    );
+    expect(partial.pass).toBe(false);
+    expect(partial.failures[0]).toContain('packages/client/src/client.ts');
+
+    const invented = await evaluateGate(
+      [check],
+      splitReader(
+        {
+          'pr-review-coverage.json': JSON.stringify({
+            reviewedFiles: [
+              'src/early.ts',
+              'packages/client/src/client.ts',
+              'packages/client/src/node/client.ts',
+            ],
+            reviewedRecords: [earlyRecord, lateRecord],
+          }),
+        },
+        artifacts,
+      ),
+    );
+    expect(invented.pass).toBe(false);
+    expect(invented.failures[0]).toContain('Not in PR');
+
+    const complete = await evaluateGate(
+      [check],
+      splitReader(
+        {
+          'pr-review-coverage.json': JSON.stringify({
+            reviewedFiles: ['src/early.ts', 'packages/client/src/client.ts'],
+            reviewedRecords: [`artifacts/${earlyRecord}`, lateRecord],
+          }),
+        },
+        artifacts,
+      ),
+    );
+    expect(complete.pass).toBe(true);
+    expect(complete.checks[0]?.detail).toContain('all 2 changed path');
+  });
+
   it('notContains rejects forbidden content with a repairable gap', async () => {
     const res = await evaluateGate(
       [{ kind: 'notContains', file: 'CHANGELOG.md', pattern: 'Internal|CI', flags: 'i' }],

@@ -5,6 +5,7 @@ import type {
   NativeEngineStatusResponse,
   RecoDevice,
 } from '@bendyline/gezel';
+import { formatModelAttribution } from '@bendyline/gezel';
 import type {
   ConfigResponse,
   GezelClient,
@@ -19,6 +20,7 @@ import {
   type BootstrapChatModel,
   type BootstrapChatProvider,
   NATIVE_TOOLKIT,
+  bootstrapChatModelLabel,
   formatDownloadSize,
   pickAccessoryModels,
   rankChatModels,
@@ -51,6 +53,7 @@ interface ModelPlan {
     id: string;
     name?: string;
     approxSizeBytes?: number;
+    attribution?: string;
   }>;
   /** Hardware winner before availability is considered. */
   recommendedChatModel?: BootstrapChatModel;
@@ -156,6 +159,13 @@ export function BootstrapGate(props: {
       );
       const recommendedChatModel = rankedChatModels[0];
       const chatModels = rankedChatModels.filter((model) => !installedIds.has(model.id));
+      const catalogAttributions = new Map(
+        context.chatCatalog.flatMap((item) =>
+          item.manifest.kind === 'chat-model'
+            ? [[item.manifest.id, formatModelAttribution(item.manifest)] as const]
+            : [],
+        ),
+      );
       if (chatModels.length === 0 && installedChat.models.length === 0) {
         setScreen({
           kind: 'error',
@@ -185,7 +195,10 @@ export function BootstrapGate(props: {
         kind: 'model-choice',
         plan: {
           context,
-          installedChatModels: installedChat.models,
+          installedChatModels: installedChat.models.map((model) => {
+            const attribution = catalogAttributions.get(model.id);
+            return { ...model, ...(attribution ? { attribution } : {}) };
+          }),
           ...(recommendedChatModel ? { recommendedChatModel } : {}),
           chatModels,
           accessories,
@@ -434,7 +447,7 @@ export function BootstrapGate(props: {
       ...(best
         ? [
             {
-              label: `Recommended workshop set — ${best.name} + ${screen.plan.accessories.length} helpers`,
+              label: `Recommended workshop set — ${bootstrapChatModelLabel(best)} + ${screen.plan.accessories.length} helpers`,
               hint: `${bestInstalled ? 'chat model already available · ' : ''}${
                 workshopDownloadBytes > 0
                   ? formatDownloadSize(workshopDownloadBytes)
@@ -443,7 +456,7 @@ export function BootstrapGate(props: {
               value: 'bundle',
             },
             {
-              label: `${bestInstalled ? 'Use' : 'Download'} ${best.name} only`,
+              label: `${bestInstalled ? 'Use' : 'Download'} ${bootstrapChatModelLabel(best)} only`,
               hint: `recommended for this device · ${
                 bestInstalled ? 'already available' : formatDownloadSize(best.approxSizeBytes)
               }`,
@@ -454,7 +467,7 @@ export function BootstrapGate(props: {
       ...screen.plan.installedChatModels
         .filter((model) => model.id !== best?.id)
         .map((model) => ({
-          label: `Use ${model.name ?? model.id}`,
+          label: `Use ${model.name ?? model.id}${model.attribution ? ` (${model.attribution})` : ''}`,
           hint: `already available on this machine${
             model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
           }`,
@@ -464,7 +477,7 @@ export function BootstrapGate(props: {
         .filter((model) => model.id !== best?.id)
         .slice(0, MAX_ALTERNATIVE_MODELS)
         .map((model) => ({
-          label: `Download ${model.name} only`,
+          label: `Download ${bootstrapChatModelLabel(model)} only`,
           hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
           value: `chat:${model.id}`,
         })),
