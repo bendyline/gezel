@@ -8,8 +8,8 @@ import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
-import { NightShiftManager } from './night-shift-manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
+import { NightShiftManager } from './night-shift-manager.js';
 
 let home: string;
 let store: Store;

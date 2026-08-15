@@ -6,11 +6,7 @@ import type {
   RecentTabArea,
   SecurityPolicy,
 } from '@bendyline/gezel';
-import type {
-  NightShiftStatusResponse,
-  QuotaBucket,
-  UsageResponse,
-} from '@bendyline/gezel-client';
+import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';

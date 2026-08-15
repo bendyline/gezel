@@ -48,10 +48,7 @@ export interface NightShiftManagerOptions {
    * closure the runner's dispatcher uses, so classification here and
    * admission there cannot disagree. Absent = the gate never applies.
    */
-  resolveProviderName?: (
-    gezelId: string,
-    opts?: { nightShift?: boolean },
-  ) => Promise<ProviderName>;
+  resolveProviderName?: (gezelId: string, opts?: { nightShift?: boolean }) => Promise<ProviderName>;
 }
 
 /** Why pending night work is parked, summarized for status surfaces. */

@@ -186,8 +186,12 @@ describe('NightShiftQuotaGate', () => {
   function makeGate(opts: {
     config?: GezelConfig;
     usage?: UsageTracker;
-    claude?: NonNullable<NonNullable<ConstructorParameters<typeof NightShiftQuotaGate>[0]['probes']>['claude']>;
-    codex?: NonNullable<NonNullable<ConstructorParameters<typeof NightShiftQuotaGate>[0]['probes']>['codex']>;
+    claude?: NonNullable<
+      NonNullable<ConstructorParameters<typeof NightShiftQuotaGate>[0]['probes']>['claude']
+    >;
+    codex?: NonNullable<
+      NonNullable<ConstructorParameters<typeof NightShiftQuotaGate>[0]['probes']>['codex']
+    >;
   }) {
     const usage = opts.usage ?? new UsageTracker();
     const gate = new NightShiftQuotaGate({
