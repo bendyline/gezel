@@ -5492,6 +5492,33 @@ export const WorkspaceIndexStatusSchema = z.object({
 export type WorkspaceIndexStatus = z.infer<typeof WorkspaceIndexStatusSchema>;
 
 /**
+ * One workspace file as recorded by the static index scan (`files.json`).
+ * Mirrors the service-internal `WorkspaceFile` shape — core deliberately
+ * re-declares the three fields rather than importing service types.
+ */
+export const WorkspaceIndexFileSchema = z.object({
+  path: z.string(),
+  size: z.number(),
+  mtimeMs: z.number(),
+});
+export type WorkspaceIndexFile = z.infer<typeof WorkspaceIndexFileSchema>;
+
+/**
+ * Response for `GET /api/projects/:id/index/files?detail=1` — the complete
+ * flat file list from the static index (up to the indexer's file cap), used
+ * by the UI's flat "by last modified" workspace view. Empty when the project
+ * has never been indexed or indexing is disabled; callers read
+ * `/index/status` to tell those states apart.
+ */
+export const WorkspaceIndexFilesDetailResponseSchema = z.object({
+  files: z.array(WorkspaceIndexFileSchema),
+  total: z.number().int().nonnegative(),
+});
+export type WorkspaceIndexFilesDetailResponse = z.infer<
+  typeof WorkspaceIndexFilesDetailResponseSchema
+>;
+
+/**
  * On-demand enrichment drive ("study now"). Two shapes:
  *   - legacy (no `intensity`): one bounded synchronous pass per request — the
  *     caller loops until `drained`.

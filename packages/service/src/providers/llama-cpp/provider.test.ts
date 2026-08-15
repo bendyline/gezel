@@ -24,6 +24,7 @@ import {
   isLlamaCppGrammarParseError,
   isRecoverableImmediateFileWriteError,
   isScenarioFileRepairTurn,
+  llamaCppReasoningRequestDiagnostic,
   mergeSystemMessagesIntoFirst,
   normalizeJsonSchemaForLlamaCpp,
   normalizeMalformedStructuredToolCalls,
@@ -39,6 +40,22 @@ import {
   tryParseToolCallParseError,
   tryRepairMalformedWriteToolArguments,
 } from './provider.js';
+
+describe('llama.cpp reasoning request diagnostics', () => {
+  it('reports only effective chat-template reasoning controls', () => {
+    expect(
+      llamaCppReasoningRequestDiagnostic({
+        messages: [{ role: 'user', content: 'secret' }],
+        chat_template_kwargs: {
+          enable_thinking: true,
+          reasoning_effort: 'xhigh',
+          unrelated: 'ignored',
+        },
+      }),
+    ).toEqual({ enableThinking: true, reasoningEffort: 'xhigh' });
+    expect(llamaCppReasoningRequestDiagnostic({ messages: [] })).toBeNull();
+  });
+});
 
 describe('llama.cpp JSON Schema compatibility', () => {
   it('normalizes RegExp.source slash escapes in nested URI patterns without mutating the source', () => {

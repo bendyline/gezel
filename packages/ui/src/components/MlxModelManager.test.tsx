@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -14,6 +14,26 @@ const { MlxModelManager } = await import('./MlxModelManager.js');
 const { api } = await import('../api.js');
 
 const GiB = 1024 ** 3;
+
+// Radix Popper measures tooltip content with ResizeObserver. jsdom does not
+// provide it, so give the size-tooltip tests the inert browser shape.
+vi.stubGlobal(
+  'ResizeObserver',
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
+/** Open the Radix size tooltip (focus opens it without the hover delay). */
+async function readSizeTooltip(memory: HTMLElement): Promise<string> {
+  const trigger = memory.closest('.model-size-cell');
+  expect(trigger).not.toBeNull();
+  fireEvent.focus(trigger as HTMLElement);
+  const tooltips = await screen.findAllByRole('tooltip');
+  return tooltips[0]?.textContent ?? '';
+}
 
 const INSTALLED = {
   models: [
@@ -124,7 +144,7 @@ describe('MlxModelManager fitness column', () => {
 
     const memory = await screen.findByText(/~16\.8 GB in memory/);
     expect(screen.queryByText(/27\.9 GB in memory/)).not.toBeInTheDocument();
-    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    const title = await readSizeTooltip(memory);
     expect(title).toMatch(/about 16\.8 GB of memory to serve one chat/);
     expect(title).toMatch(/Serving 2 chats at once reserves about 27\.9 GB/);
   });

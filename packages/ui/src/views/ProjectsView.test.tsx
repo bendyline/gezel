@@ -125,6 +125,9 @@ vi.mock('../components/CatalogBrowser.js', () => ({
 }));
 vi.mock('../components/ConfirmDialog.js', () => ({ ConfirmDialog: () => null }));
 vi.mock('../components/FileTree.js', () => ({
+  // FileFlatList (rendered unmocked) pulls its default icon from this
+  // module; keep the export present so flat views render in these tests.
+  defaultIconFor: () => null,
   FileTree: ({
     entries,
     onSelect,
@@ -187,6 +190,8 @@ describe('ProjectsView', () => {
     window.localStorage.removeItem('gezel.projectsSidebarCollapsed');
     window.localStorage.removeItem('gezel:project-output-fraction');
     window.localStorage.removeItem('gezel:project-output-fraction:v2');
+    window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:workspace');
+    window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:artifacts');
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
@@ -1079,6 +1084,140 @@ describe('ProjectsView', () => {
       });
     });
     expect(await screen.findByTestId('project-chat')).toBeInTheDocument();
+  });
+
+  it('offers five workspace view modes, persists the choice, and loads the flat index list', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [
+        { name: 'old.md', path: 'docs/old.md', isDirectory: false, mtimeMs: 100 },
+        { name: 'docs', path: 'docs', isDirectory: true },
+      ],
+      truncated: false,
+    } as never);
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'stale' } as never);
+    vi.mocked(api.listProjectIndexFilesDetail).mockResolvedValue({
+      files: [
+        { path: 'docs/old.md', size: 10, mtimeMs: 100 },
+        { path: 'fresh.md', size: 10, mtimeMs: 900 },
+      ],
+      total: 2,
+    } as never);
+    vi.mocked(api.refreshProjectIndex).mockResolvedValue({
+      ok: true,
+      status: { state: 'indexing' },
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    await waitFor(() => {
+      expect(api.listProjectWorkspace).toHaveBeenCalledWith('pj-alpha', '', true, { stats: true });
+    });
+
+    const tray = await screen.findByRole('radiogroup', { name: 'File list view' });
+    expect(within(tray).getAllByRole('radio')).toHaveLength(5);
+    expect(within(tray).getByRole('radio', { name: 'Folders, A to Z' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    fireEvent.click(within(tray).getByRole('radio', { name: 'All files by last modified' }));
+    expect(window.localStorage.getItem('gezel.projectFilesView:pj-alpha:workspace')).toBe(
+      'flat-modified',
+    );
+    await waitFor(() => {
+      expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha');
+    });
+    // Newest first, from the index-backed list (fresh.md is not in the walk).
+    const flatButtons = await screen.findByRole('button', { name: /fresh\.md/ });
+    expect(flatButtons).toBeInTheDocument();
+
+    // Stale index surfaces the notice with an Index now action.
+    expect(screen.getByText('Index is out of date.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Index now' }));
+    await waitFor(() => {
+      expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-alpha');
+    });
+  });
+
+  it('ranks the issue triage views by count and weighted criticality', async () => {
+    const issueAt = (path: string, severity: 'major' | 'minor', ref: string) => ({
+      ...trackedWorkspaceIssue,
+      id: ref,
+      ref,
+      fingerprint: ref,
+      path,
+      severity,
+    });
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+    vi.mocked(api.toolListFileIssues).mockResolvedValue({
+      issues: [
+        issueAt('many.md', 'minor', 'BW-1'),
+        issueAt('many.md', 'minor', 'BW-2'),
+        issueAt('grave.md', 'major', 'BW-3'),
+      ],
+      counts: { total: 3, bySeverity: { minor: 2, major: 1 }, byCategory: { clarity: 3 } },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 2,
+      eligibleFiles: 4,
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    const tray = await screen.findByRole('radiogroup', { name: 'File list view' });
+    fireEvent.click(within(tray).getByRole('radio', { name: 'Files by issues' }));
+
+    expect(await screen.findByText('2 of 4 eligible files reviewed')).toBeInTheDocument();
+    const issueRows = screen
+      .getAllByRole('button')
+      .filter((b) => /many\.md|grave\.md/.test(b.textContent ?? ''));
+    expect(issueRows.map((b) => b.textContent?.trim().split(/\s/)[0])).toEqual([
+      'many.md',
+      'grave.md',
+    ]);
+
+    fireEvent.click(within(tray).getByRole('radio', { name: 'Files by criticality' }));
+    const scoredRows = screen
+      .getAllByRole('button')
+      .filter((b) => /many\.md|grave\.md/.test(b.textContent ?? ''));
+    expect(scoredRows.map((b) => b.textContent?.trim().split(/\s/)[0])).toEqual([
+      'grave.md',
+      'many.md',
+    ]);
+  });
+
+  it('shows only the three shared view modes on the artifacts tab', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+
+    const tray = await screen.findByRole('radiogroup', { name: 'File list view' });
+    const keys = within(tray).getAllByRole('radio');
+    expect(keys).toHaveLength(3);
+    expect(within(tray).queryByRole('radio', { name: 'Files by issues' })).toBeNull();
+    expect(within(tray).queryByRole('radio', { name: 'Files by criticality' })).toBeNull();
   });
 
   it('offers a Boekwachter fix when Codex Edit can write past the scoped workspace gate', async () => {

@@ -13,6 +13,7 @@ import type {
   ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
+  WorkspaceIndexFile,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import {
@@ -34,7 +35,9 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
+import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
+import { FileViewModeKeys } from '../components/FileViewModeKeys.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
@@ -71,6 +74,18 @@ import {
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
 import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
+import {
+  ARTIFACT_VIEW_MODES,
+  type FileViewMode,
+  WORKSPACE_VIEW_MODES,
+  aggregateIssuesByFile,
+  coerceFileViewMode,
+  compareFilesByMtimeDesc,
+  describeSeverities,
+  fileEntryFromPath,
+  fileViewStorageKey,
+  sortAggregates,
+} from '../components/file-view-modes.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
@@ -551,6 +566,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [artifactFiles, setArtifactFiles] = useState<FileEntry[]>([]);
   const [workspaceTruncated, setWorkspaceTruncated] = useState(false);
   const [artifactsTruncated, setArtifactsTruncated] = useState(false);
+  // Per-tab file-panel view mode (tree/flat, sort axis), persisted per
+  // project + tab in localStorage. See file-view-modes.ts.
+  const [fileViewModes, setFileViewModes] = useState<Record<FileTab, FileViewMode>>({
+    workspace: 'tree-alpha',
+    artifacts: 'tree-alpha',
+  });
+  // Flat index-backed workspace file list ({path, size, mtimeMs}); fetched
+  // lazily when the flat "by modified" view is active. Null = not loaded.
+  const [workspaceIndexFiles, setWorkspaceIndexFiles] = useState<WorkspaceIndexFile[] | null>(null);
   const [openFile, setOpenFile] = useState<{
     path: string;
     content: string;
@@ -823,9 +847,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const refreshFiles = useCallback(async (id: string) => {
+    // Always ask for stats: one fetch powers the alpha tree, the
+    // modified-sorted tree, and the artifacts flat view. Cost is bounded by
+    // the walker's 500-entry cap.
     const [ws, art] = await Promise.all([
-      api.listProjectWorkspace(id, '', true),
-      api.listProjectArtifacts(id, '', true),
+      api.listProjectWorkspace(id, '', true, { stats: true }),
+      api.listProjectArtifacts(id, '', true, { stats: true }),
     ]);
     setWorkspaceFiles(ws.files);
     setArtifactFiles(art.files);
@@ -891,6 +918,65 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       window.clearInterval(timer);
     };
   }, [fileTab, selectedProjectId]);
+
+  // Restore each tab's persisted view mode when the project changes.
+  useEffect(() => {
+    setWorkspaceIndexFiles(null);
+    if (!selectedProjectId) {
+      setFileViewModes({ workspace: 'tree-alpha', artifacts: 'tree-alpha' });
+      return;
+    }
+    let workspaceMode: FileViewMode = 'tree-alpha';
+    let artifactsMode: FileViewMode = 'tree-alpha';
+    try {
+      workspaceMode = coerceFileViewMode(
+        window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'workspace')),
+        'workspace',
+      );
+      artifactsMode = coerceFileViewMode(
+        window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'artifacts')),
+        'artifacts',
+      );
+    } catch {}
+    setFileViewModes({ workspace: workspaceMode, artifacts: artifactsMode });
+  }, [selectedProjectId]);
+
+  const setFileViewMode = useCallback(
+    (tabKey: FileTab, mode: FileViewMode) => {
+      setFileViewModes((current) => ({ ...current, [tabKey]: mode }));
+      if (selectedProjectId) {
+        try {
+          window.localStorage.setItem(fileViewStorageKey(selectedProjectId, tabKey), mode);
+        } catch {}
+      }
+    },
+    [selectedProjectId],
+  );
+
+  // Fetch the complete index-backed file list while the flat "by modified"
+  // workspace view is active. Keyed on `scannedAt` so a finished re-scan
+  // (e.g. after "Index now") refreshes the list through the existing 30s
+  // status poll — no extra polling loop.
+  const workspaceViewMode = fileViewModes.workspace;
+  const indexScannedAt = workspaceIndexStatus?.meta?.scannedAt;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `indexScannedAt` is a deliberate extra dependency — a finished re-scan must refresh the list.
+  useEffect(() => {
+    if (fileTab !== 'workspace' || workspaceViewMode !== 'flat-modified' || !selectedProjectId) {
+      return;
+    }
+    let cancelled = false;
+    api
+      .listProjectIndexFilesDetail(selectedProjectId)
+      .then((res) => {
+        if (!cancelled) setWorkspaceIndexFiles(res.files);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceIndexFiles(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt]);
 
   const workspaceReviewPath =
     fileTab === 'workspace' && openFile?.source === 'workspace' ? openFile.path : null;
@@ -1667,9 +1753,44 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const activeEntries = fileTab === 'workspace' ? workspaceFiles : artifactFiles;
-  const visibleActiveEntries = activeEntries.filter(
-    (entry) => !isOutsideInInternalPath(entry.path),
+  const visibleActiveEntries = useMemo(
+    () => activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
+    [activeEntries],
   );
+  const activeViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
+  // Flat "by modified": prefer the complete index-backed list for the
+  // workspace (not capped by the walker); artifacts — and workspaces with
+  // indexing disabled or not yet scanned — fall back to the walked entries,
+  // which now carry mtimes.
+  const flatModifiedEntries = useMemo(() => {
+    if (activeViewMode !== 'flat-modified') return [];
+    if (fileTab === 'workspace' && workspaceIndexFiles && workspaceIndexFiles.length > 0) {
+      return workspaceIndexFiles
+        .filter((file) => !isOutsideInInternalPath(file.path))
+        .map((file) => fileEntryFromPath(file.path, file.mtimeMs))
+        .sort(compareFilesByMtimeDesc);
+    }
+    return visibleActiveEntries
+      .filter((entry) => !entry.isDirectory)
+      .slice()
+      .sort(compareFilesByMtimeDesc);
+  }, [activeViewMode, fileTab, workspaceIndexFiles, visibleActiveEntries]);
+  // Triage views: aggregate the already-polled live issues by file.
+  const issueAggregates = useMemo(
+    () => aggregateIssuesByFile(workspaceIssues?.issues ?? []),
+    [workspaceIssues],
+  );
+  const issueAggByPath = useMemo(
+    () => new Map(issueAggregates.map((agg) => [agg.path, agg])),
+    [issueAggregates],
+  );
+  const flatIssueEntries = useMemo(() => {
+    if (activeViewMode !== 'flat-issues' && activeViewMode !== 'flat-criticality') return [];
+    return sortAggregates(
+      issueAggregates,
+      activeViewMode === 'flat-issues' ? 'count' : 'score',
+    ).map((agg) => fileEntryFromPath(agg.path));
+  }, [activeViewMode, issueAggregates]);
   const isReadOnly = openFile?.outsideIn
     ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
     : fileTab === 'workspace';
@@ -2863,6 +2984,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               )}
                             </div>
                           )}
+                          <FileViewModeKeys
+                            value={activeViewMode}
+                            modes={
+                              fileTab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES
+                            }
+                            onChange={(mode) => setFileViewMode(fileTab, mode)}
+                          />
                         </div>
                         {fileTab === 'artifacts' && (
                           <div style={{ padding: '0.35rem 0.5rem' }}>
@@ -2884,63 +3012,194 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </div>
                           </div>
                         )}
-                        <div className="file-tree">
-                          {visibleActiveEntries.length === 0 && (
-                            <p className="muted" style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
-                              {fileTab === 'workspace'
-                                ? selected.workingDir
-                                  ? 'Workspace directory is empty.'
-                                  : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                                : 'No artifacts yet. Your gezellen will store reports and outputs here.'}
-                            </p>
+                        {fileTab === 'workspace' &&
+                          activeViewMode === 'flat-modified' &&
+                          workspaceIndexStatus &&
+                          workspaceIndexStatus.state !== 'fresh' && (
+                            <div className="file-flat-notice">
+                              <span>
+                                {workspaceIndexStatus.state === 'indexing'
+                                  ? 'Indexing…'
+                                  : workspaceIndexStatus.state === 'stale'
+                                    ? 'Index is out of date.'
+                                    : workspaceIndexStatus.state === 'never'
+                                      ? 'Not indexed yet — showing files from the folder walk.'
+                                      : 'Indexing is disabled — showing files from the folder walk.'}
+                              </span>
+                              {(workspaceIndexStatus.state === 'stale' ||
+                                workspaceIndexStatus.state === 'never') && (
+                                <button
+                                  type="button"
+                                  className="file-flat-notice-action"
+                                  onClick={() =>
+                                    void api
+                                      .refreshProjectIndex(selected.id)
+                                      .then((res) => setWorkspaceIndexStatus(res.status))
+                                      .catch(() => {})
+                                  }
+                                >
+                                  Index now
+                                </button>
+                              )}
+                            </div>
                           )}
-                          <FileTree
-                            entries={visibleActiveEntries}
-                            selectedPath={openFile?.path}
-                            onSelect={(e) => void openFileEntry(e, fileTab)}
-                            onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
-                            trailingForEntry={
-                              fileTab === 'workspace'
-                                ? (entry) => {
-                                    const count = indexedIssueCountForEntry(entry, workspaceIssues);
-                                    return count > 0 ? (
+                        {fileTab === 'workspace' &&
+                          (activeViewMode === 'flat-issues' ||
+                            activeViewMode === 'flat-criticality') && (
+                            <div className="file-flat-notice">
+                              <span>
+                                {workspaceIssues
+                                  ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed${workspaceIssues.truncated ? ' — showing the first 1000 issues' : ''}`
+                                  : 'Loading review coverage…'}
+                              </span>
+                              {(workspaceIndexStatus?.state === 'stale' ||
+                                workspaceIndexStatus?.state === 'never') && (
+                                <button
+                                  type="button"
+                                  className="file-flat-notice-action"
+                                  onClick={() =>
+                                    void api
+                                      .refreshProjectIndex(selected.id)
+                                      .then((res) => setWorkspaceIndexStatus(res.status))
+                                      .catch(() => {})
+                                  }
+                                >
+                                  Index now
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        <div className="file-tree">
+                          {activeViewMode === 'tree-alpha' || activeViewMode === 'tree-modified' ? (
+                            <>
+                              {visibleActiveEntries.length === 0 && (
+                                <p
+                                  className="muted"
+                                  style={{ padding: '0.5rem', fontSize: '0.85rem' }}
+                                >
+                                  {fileTab === 'workspace'
+                                    ? selected.workingDir
+                                      ? 'Workspace directory is empty.'
+                                      : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
+                                    : 'No artifacts yet. Your gezellen will store reports and outputs here.'}
+                                </p>
+                              )}
+                              <FileTree
+                                entries={visibleActiveEntries}
+                                selectedPath={openFile?.path}
+                                sortMode={activeViewMode === 'tree-modified' ? 'modified' : 'alpha'}
+                                onSelect={(e) => void openFileEntry(e, fileTab)}
+                                onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
+                                trailingForEntry={
+                                  fileTab === 'workspace'
+                                    ? (entry) => {
+                                        const count = indexedIssueCountForEntry(
+                                          entry,
+                                          workspaceIssues,
+                                        );
+                                        return count > 0 ? (
+                                          <span
+                                            className="workspace-tree-issue-count"
+                                            title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
+                                            aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
+                                          >
+                                            {count}
+                                          </span>
+                                        ) : null;
+                                      }
+                                    : undefined
+                                }
+                                actionsForEntry={(entry) => {
+                                  if (
+                                    entry.isDirectory ||
+                                    !resolveOutsideInLayout(entry.path) ||
+                                    (openFile?.path === entry.path &&
+                                      openFile.source === fileTab &&
+                                      openFile.outsideIn?.editingEnabled)
+                                  ) {
+                                    return [];
+                                  }
+                                  return [
+                                    {
+                                      label: 'Allow editing via markdown',
+                                      disabled: !canWriteProjectFiles(fileTab),
+                                      onSelect: () => allowOutsideInMarkdownEditing(entry, fileTab),
+                                    },
+                                  ];
+                                }}
+                              />
+                            </>
+                          ) : activeViewMode === 'flat-modified' ? (
+                            <FileFlatList
+                              entries={flatModifiedEntries}
+                              selectedPath={openFile?.path}
+                              onSelect={(e) => void openFileEntry(e, fileTab)}
+                              trailingForEntry={(entry) =>
+                                entry.mtimeMs !== undefined ? (
+                                  <span className="file-flat-time">
+                                    {formatRelativeTime(new Date(entry.mtimeMs).toISOString())}
+                                  </span>
+                                ) : null
+                              }
+                              emptyMessage={
+                                fileTab === 'workspace'
+                                  ? 'No files yet.'
+                                  : 'No artifacts yet. Your gezellen will store reports and outputs here.'
+                              }
+                            />
+                          ) : (
+                            <FileFlatList
+                              entries={flatIssueEntries}
+                              selectedPath={openFile?.path}
+                              onSelect={(e) => {
+                                void openFileEntry(e, fileTab);
+                                setWorkspaceIndexPaneOpen(true);
+                              }}
+                              trailingForEntry={(entry) => {
+                                const agg = issueAggByPath.get(entry.path);
+                                if (!agg) return null;
+                                return (
+                                  <>
+                                    {activeViewMode === 'flat-criticality' ? (
+                                      <span
+                                        className="file-flat-score"
+                                        title={`Criticality score ${agg.score}`}
+                                      >
+                                        {agg.score}
+                                      </span>
+                                    ) : (
                                       <span
                                         className="workspace-tree-issue-count"
-                                        title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
-                                        aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
+                                        title={`${agg.total} Boekwachter issue${agg.total === 1 ? '' : 's'} in this file`}
                                       >
-                                        {count}
+                                        {agg.total}
                                       </span>
-                                    ) : null;
-                                  }
-                                : undefined
-                            }
-                            actionsForEntry={(entry) => {
-                              if (
-                                entry.isDirectory ||
-                                !resolveOutsideInLayout(entry.path) ||
-                                (openFile?.path === entry.path &&
-                                  openFile.source === fileTab &&
-                                  openFile.outsideIn?.editingEnabled)
-                              ) {
-                                return [];
-                              }
-                              return [
-                                {
-                                  label: 'Allow editing via markdown',
-                                  disabled: !canWriteProjectFiles(fileTab),
-                                  onSelect: () => allowOutsideInMarkdownEditing(entry, fileTab),
-                                },
-                              ];
-                            }}
-                          />
-                          {(fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) && (
-                            <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
-                              This folder has more files than can be shown — the listing is
-                              incomplete. Use "Open" above to browse everything in your file
-                              manager.
-                            </p>
+                                    )}
+                                    <span className="file-flat-severities">
+                                      {describeSeverities(agg.bySeverity)}
+                                    </span>
+                                  </>
+                                );
+                              }}
+                              emptyMessage="No open review issues."
+                            />
                           )}
+                          {(activeViewMode === 'tree-alpha' ||
+                            activeViewMode === 'tree-modified' ||
+                            (activeViewMode === 'flat-modified' &&
+                              (fileTab === 'artifacts' ||
+                                !workspaceIndexFiles ||
+                                workspaceIndexFiles.length === 0))) &&
+                            (fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) && (
+                              <p
+                                className="muted"
+                                style={{ padding: '0.5rem', fontSize: '0.8rem' }}
+                              >
+                                This folder has more files than can be shown — the listing is
+                                incomplete. Use "Open" above to browse everything in your file
+                                manager.
+                              </p>
+                            )}
                         </div>
                       </div>
 

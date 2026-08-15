@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -13,6 +13,26 @@ const { LlamaCppModelManager } = await import('./LlamaCppModelManager.js');
 const { api } = await import('../api.js');
 
 const GiB = 1024 ** 3;
+
+// Radix Popper measures tooltip content with ResizeObserver. jsdom does not
+// provide it, so give the size-tooltip tests the inert browser shape.
+vi.stubGlobal(
+  'ResizeObserver',
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
+/** Open the Radix size tooltip (focus opens it without the hover delay). */
+async function readSizeTooltip(memory: HTMLElement): Promise<string> {
+  const trigger = memory.closest('.model-size-cell');
+  expect(trigger).not.toBeNull();
+  fireEvent.focus(trigger as HTMLElement);
+  const tooltips = await screen.findAllByRole('tooltip');
+  return tooltips[0]?.textContent ?? '';
+}
 
 function catalogModel(id: string, name: string, category: 'general' | 'coding') {
   return {
@@ -161,10 +181,7 @@ describe('LlamaCppModelManager local model list', () => {
     render(<LlamaCppModelManager />);
 
     const memory = await screen.findByText(/~6\.5 GB in memory/);
-    expect(memory.closest('td')).toHaveAttribute(
-      'title',
-      expect.stringMatching(/weights plus the KV cache/),
-    );
+    expect(await readSizeTooltip(memory)).toMatch(/weights plus the KV cache/);
     expect(memory.closest('td')?.textContent).toContain('2.4 GB');
   });
 
@@ -195,7 +212,7 @@ describe('LlamaCppModelManager local model list', () => {
 
     const memory = await screen.findByText(/~28\.0 GB in memory/);
     expect(screen.queryByText(/45\.9 GB in memory/)).not.toBeInTheDocument();
-    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    const title = await readSizeTooltip(memory);
     expect(title).toMatch(/about 28\.0 GB of memory to serve one chat/);
     expect(title).toMatch(/Serving 3 chats at once reserves about 45\.9 GB/);
   });
@@ -223,7 +240,7 @@ describe('LlamaCppModelManager local model list', () => {
     render(<LlamaCppModelManager />);
 
     const memory = await screen.findByText(/~8\.4 GB in memory/);
-    const title = memory.closest('td')?.getAttribute('title') ?? '';
+    const title = await readSizeTooltip(memory);
     expect(title).toMatch(/serve one chat/);
     expect(title).not.toMatch(/at once reserves/);
   });

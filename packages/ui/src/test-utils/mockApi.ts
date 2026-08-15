@@ -32,6 +32,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listProjects: { projects: [] },
   listProjectWorkspaceHtmlPages: { files: [] },
   getProjectIndexStatus: { state: 'never' },
+  listProjectIndexFilesDetail: { files: [], total: 0 },
   toolListFileIssues: {
     issues: [],
     counts: { total: 0, bySeverity: {}, byCategory: {} },

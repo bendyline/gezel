@@ -144,6 +144,14 @@ Rules:
   its state is already understood by: play, pause, check, circle-slash. This
   holds only for states the app colors elsewhere; a preference group with no
   meaningful ends stays on the accent.
+- **Icon-only keys are sanctioned for tight panel headers and toolbars**
+  where 2–5 modes must fit beside a title — use `gz-key gz-key--icon`
+  (near-square padding, no label gap) inside the usual `role="radiogroup"`
+  tray, and give every key both `title` and `aria-label` since there is no
+  visible text. The file-panel view switch (`FileViewModeKeys`) is the
+  reference implementation. This is still a keys case, not Tabs: the same
+  content is being re-presented (sorted, flattened), not swapped for a
+  different panel.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to

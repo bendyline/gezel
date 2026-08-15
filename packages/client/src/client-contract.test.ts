@@ -297,6 +297,24 @@ const cases: ContractCase[] = [
     body: { description: 'Updated' },
     invoke: (c) => c.updateProject('project/one', { description: 'Updated' }),
   },
+  {
+    name: 'workspace recursive listing with stats',
+    method: 'GET',
+    path: '/api/projects/p1/workspace?recursive=1&stats=1',
+    invoke: (c) => c.listProjectWorkspace('p1', '', true, { stats: true }),
+  },
+  {
+    name: 'artifacts recursive listing with stats',
+    method: 'GET',
+    path: '/api/projects/p1/artifacts?recursive=1&stats=1',
+    invoke: (c) => c.listProjectArtifacts('p1', '', true, { stats: true }),
+  },
+  {
+    name: 'index files detail',
+    method: 'GET',
+    path: '/api/projects/p1/index/files?detail=1',
+    invoke: (c) => c.listProjectIndexFilesDetail('p1'),
+  },
   { name: 'remote list', method: 'GET', path: '/api/remotes', invoke: (c) => c.listRemotes() },
   {
     name: 'remote inspect',

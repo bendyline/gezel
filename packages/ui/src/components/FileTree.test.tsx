@@ -78,6 +78,51 @@ describe('FileTree folder expansion', () => {
   });
 });
 
+describe('FileTree sortMode', () => {
+  const UNORDERED = [
+    { path: 'zeta.md', name: 'zeta.md', isDirectory: false, mtimeMs: 100 },
+    { path: 'docs', name: 'docs', isDirectory: true },
+    { path: 'docs/inner.md', name: 'inner.md', isDirectory: false, mtimeMs: 50 },
+    { path: 'alpha.md', name: 'alpha.md', isDirectory: false, mtimeMs: 900 },
+  ];
+
+  function rowLabels(): string[] {
+    return screen
+      .getAllByRole('button')
+      .filter((b) => b.classList.contains('tree-label'))
+      .map((b) => b.textContent?.trim() ?? '');
+  }
+
+  it('defaults to preserving the input order', () => {
+    render(<FileTree entries={UNORDERED} onSelect={vi.fn()} />);
+    expect(rowLabels()).toEqual(['zeta.md', 'docs', 'inner.md', 'alpha.md']);
+  });
+
+  it('alpha mode sorts folders first then files alphabetically', () => {
+    render(<FileTree entries={UNORDERED} onSelect={vi.fn()} sortMode="alpha" />);
+    expect(rowLabels()).toEqual(['docs', 'inner.md', 'alpha.md', 'zeta.md']);
+  });
+
+  it('modified mode sorts files newest-first under alpha folders', () => {
+    render(<FileTree entries={UNORDERED} onSelect={vi.fn()} sortMode="modified" />);
+    expect(rowLabels()).toEqual(['docs', 'inner.md', 'alpha.md', 'zeta.md']);
+  });
+
+  it('modified mode orders sibling files by recency', () => {
+    render(
+      <FileTree
+        entries={[
+          { path: 'old.md', name: 'old.md', isDirectory: false, mtimeMs: 1 },
+          { path: 'new.md', name: 'new.md', isDirectory: false, mtimeMs: 9 },
+        ]}
+        onSelect={vi.fn()}
+        sortMode="modified"
+      />,
+    );
+    expect(rowLabels()).toEqual(['new.md', 'old.md']);
+  });
+});
+
 describe('FileTree row status', () => {
   it('renders a host-provided read-only trailing status', () => {
     render(

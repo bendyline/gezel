@@ -341,6 +341,7 @@ import type {
   WikipediaSearchRequest,
   WorkspaceCommandIndex,
   WorkspaceEditResponse,
+  WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
 } from '@bendyline/gezel';
@@ -4994,14 +4995,16 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
+    opts?: { stats?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/artifacts${qs}`);
   }
@@ -5209,14 +5212,16 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
+    opts?: { stats?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/workspace${qs}`);
   }
@@ -5952,6 +5957,16 @@ export class GezelClient {
   /** Lightweight status (state + meta). Cheap to poll. */
   getProjectIndexStatus(id: string): Promise<WorkspaceIndexStatus> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/status`);
+  }
+
+  /**
+   * Complete flat workspace file list from the last static index scan
+   * (`{path, size, mtimeMs}` per file, up to the indexer's cap). Empty for
+   * never-indexed or indexing-disabled projects — read `/index/status` to
+   * tell those states apart.
+   */
+  listProjectIndexFilesDetail(id: string): Promise<WorkspaceIndexFilesDetailResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/files?detail=1`);
   }
 
   /** Force a re-scan. Returns immediately; poll status for completion. */

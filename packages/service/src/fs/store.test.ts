@@ -750,6 +750,25 @@ describe('project workspace', () => {
     expect(dir).toBe('/tmp');
   });
 
+  it('listProjectWorkspaceRecursiveDetailed forwards withStats to the walker', async () => {
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    await store.createProject({ name: 'Stats' });
+    const dir = await store.projectWorkspaceDir('stats');
+    await mkdir(join(dir, 'sub'), { recursive: true });
+    await writeFile(join(dir, 'sub', 'file.txt'), 'x');
+
+    const plain = await store.listProjectWorkspaceRecursiveDetailed('stats');
+    expect(plain.entries.every((e) => e.mtimeMs === undefined)).toBe(true);
+
+    const detailed = await store.listProjectWorkspaceRecursiveDetailed('stats', {
+      withStats: true,
+    });
+    const file = detailed.entries.find((e) => e.path === 'sub/file.txt');
+    const folder = detailed.entries.find((e) => e.path === 'sub');
+    expect(file?.mtimeMs).toBeTypeOf('number');
+    expect(folder?.mtimeMs).toBeUndefined();
+  });
+
   it('points at github.checkoutDir when github-linked and clone has landed', async () => {
     // Simulate a github-linked project whose clone has populated.
     await store.createProject({ name: 'Cloned', github: { url: 'https://github.com/foo/bar' } });

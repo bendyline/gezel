@@ -27,11 +27,12 @@ import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
+import { ModelSizeCell } from './ModelSizeCell.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
-import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
+import { formatBytes } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -781,14 +782,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               </div>
                             </div>
                           </td>
-                          <td title={modelSizeTitle(m)}>
-                            {formatBytes(m.approxSizeBytes)}
-                            {modelMemoryHeadline(m) ? (
-                              <span className="muted small model-memory-headline">
-                                {modelMemoryHeadline(m)}
-                              </span>
-                            ) : null}
-                          </td>
+                          <ModelSizeCell model={m} />
                           <td title={quantizationTitle(m.quantization)}>
                             {approximateQuantizationLabel(m.quantization)}
                           </td>

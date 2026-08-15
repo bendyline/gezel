@@ -302,6 +302,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     defaultLlamaEvalLaunch,
     llamaCppReasoningEvalLaunchOverrides(opts, engine),
   );
+  const reasoningEffortConfig = llamaCppReasoningEffortEvalConfig(opts, engine);
   const trialId = makeTrialId(scenario.id, engine, opts.modelId);
   const runsDir = resolveEvalRunsDir(opts.runsDir);
   const runDir = join(runsDir, trialId);
@@ -816,6 +817,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     await client.updateConfig({
       ...buildProviderConfig(engine, opts.modelId),
       ...(llamaEvalLaunch?.config ? llamaEvalLaunch.config : {}),
+      ...(reasoningEffortConfig ? reasoningEffortConfig : {}),
       ...(evalLlamaSpecType ? { llamaCppSpecType: evalLlamaSpecType } : {}),
       ...(evalLlamaKvCache ? { llamaCppKvCacheType: evalLlamaKvCache } : {}),
       ...localEvalDeviceSafetyConfig(engine),
@@ -1331,6 +1333,28 @@ export function llamaCppReasoningEvalLaunchOverrides(
       ...(budget !== undefined ? { GEZEL_LLAMA_REASONING_BUDGET_TOKENS: String(budget) } : {}),
     },
     summary: `reasoning experiment: preserve=${preserve ?? 'catalog/default'} budget=${budget ?? 'catalog'}`,
+  };
+}
+
+export function llamaCppReasoningEffortEvalConfig(
+  opts: Pick<TrialOptions, 'modelId' | 'llamaCppReasoningEffort'>,
+  engine: ChatProvider,
+): Partial<GezelConfig> | undefined {
+  const raw = opts.llamaCppReasoningEffort;
+  if (raw === undefined) return undefined;
+  if (engine !== 'llama-cpp') {
+    throw new Error('llama.cpp reasoning effort override requires engine=llama-cpp');
+  }
+  const effort = raw.trim();
+  if (!/^[a-z][a-z0-9_-]*$/i.test(effort)) {
+    throw new Error('llamaCppReasoningEffort must be a non-empty template token');
+  }
+  return {
+    modelTuning: {
+      [opts.modelId]: {
+        reasoning: { templateKwargs: { reasoning_effort: effort } },
+      },
+    },
   };
 }
 

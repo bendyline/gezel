@@ -4105,15 +4105,21 @@ export class Store {
     return listDirEntries(base, intoWorkspaceRelative(base, subpath));
   }
 
-  async listProjectWorkspaceRecursive(id: string): Promise<ProjectFileEntry[]> {
-    return (await this.listProjectWorkspaceRecursiveDetailed(id)).entries;
+  async listProjectWorkspaceRecursive(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    return (await this.listProjectWorkspaceRecursiveDetailed(id, opts)).entries;
   }
 
   /** Recursive listing plus the truncation flag, for surfaces that must
    *  tell the user/model when the walker's entry cap dropped files. */
-  async listProjectWorkspaceRecursiveDetailed(id: string): Promise<WalkDirResult> {
+  async listProjectWorkspaceRecursiveDetailed(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<WalkDirResult> {
     const base = await this.projectWorkspaceDir(id);
-    return walkDirDetailed(base);
+    return walkDirDetailed(base, opts);
   }
 
   async listProjectWorkspaceHtmlPages(id: string): Promise<ProjectFileEntry[]> {

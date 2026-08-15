@@ -5533,6 +5533,64 @@ button.danger {
   white-space: nowrap;
 }
 
+/* ── Flat file list (view modes beyond the tree) ── */
+
+/* The view-mode tray sits on its own full-width header row, like the
+   index summary above — the 2-column header grid stays intact. */
+.file-view-tray {
+  grid-column: 1 / -1;
+}
+
+.file-flat-parent {
+  margin-left: 0.4rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-flat-empty {
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.file-flat-time {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.file-flat-severities {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+.file-flat-score {
+  font-weight: 600;
+  font-size: var(--text-2xs);
+  color: color-mix(in srgb, var(--warning) 78%, var(--text));
+  white-space: nowrap;
+}
+
+/* Slim status strip for flat views: index staleness + coverage notes. */
+.file-flat-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.3;
+}
+
+.file-flat-notice-action {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 /* ── Persistent "workspace writes enabled" banner ── */
 
 /* ── Recent workspace-changes log (Settings tab) ── */
@@ -6097,6 +6155,7 @@ button.danger {
 .tree-row-trailing {
   display: inline-flex;
   align-items: center;
+  gap: 0.35rem;
   flex: 0 0 auto;
 }
 
@@ -17848,6 +17907,13 @@ button.timeline-session-divider-continuing::before {
   white-space: nowrap;
 }
 
+/* Tooltip trigger wrapping the on-disk size + memory headline; block so
+   the hover target covers both lines of the cell. */
+.model-size-cell {
+  display: inline-block;
+  cursor: help;
+}
+
 .model-memory-headline {
   display: block;
   margin-top: 0.2rem;
@@ -26625,6 +26691,14 @@ button.boekwachter-pill:focus-visible {
   align-items: flex-start;
   gap: 0.1rem;
   text-align: left;
+}
+
+/* Icon-only keys for tight panel headers and toolbars: near-square padding,
+   no label gap. No visible text, so every key MUST carry both `title` and
+   `aria-label` (docs/ux.md → "Controls: keys in trays"). */
+.gz-key--icon {
+  padding: 0.3rem 0.45rem;
+  gap: 0;
 }
 
 .gz-key:where(:hover:not(:disabled)),

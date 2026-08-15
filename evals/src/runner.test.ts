@@ -21,6 +21,7 @@ import {
   hardStallShape,
   inflightDeferMsForEngine,
   llamaCppEvalLaunchOverridesForModel,
+  llamaCppReasoningEffortEvalConfig,
   llamaCppReasoningEvalLaunchOverrides,
   localEvalDeviceSafetyConfig,
   makeTrialId,
@@ -1210,6 +1211,38 @@ describe('llama.cpp reasoning experiment launch overrides', () => {
     ).toThrow(/positive safe integer/);
     expect(() =>
       llamaCppReasoningEvalLaunchOverrides({ llamaCppReasoningPreserve: true }, 'mlx'),
+    ).toThrow(/engine=llama-cpp/);
+  });
+});
+
+describe('llama.cpp reasoning effort experiment override', () => {
+  it('authors only the per-model reasoning template kwarg', () => {
+    expect(
+      llamaCppReasoningEffortEvalConfig(
+        { modelId: 'qwen3.8-27b-q4', llamaCppReasoningEffort: 'medium' },
+        'llama-cpp',
+      ),
+    ).toEqual({
+      modelTuning: {
+        'qwen3.8-27b-q4': {
+          reasoning: { templateKwargs: { reasoning_effort: 'medium' } },
+        },
+      },
+    });
+  });
+
+  it('refuses malformed values and non-llama engines', () => {
+    expect(() =>
+      llamaCppReasoningEffortEvalConfig(
+        { modelId: 'qwen', llamaCppReasoningEffort: 'xhigh please' },
+        'llama-cpp',
+      ),
+    ).toThrow(/non-empty template token/);
+    expect(() =>
+      llamaCppReasoningEffortEvalConfig(
+        { modelId: 'qwen', llamaCppReasoningEffort: 'medium' },
+        'mlx',
+      ),
     ).toThrow(/engine=llama-cpp/);
   });
 });

@@ -1,16 +1,20 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
+import { sortTreeNodes } from './file-view-modes.js';
 
 export interface FileEntry {
   name: string;
   path: string;
   isDirectory: boolean;
+  /** File mtime (ms epoch). Present only when the listing opted into stats. */
+  mtimeMs?: number;
 }
 
 export interface TreeNode {
   name: string;
   path: string;
   isDirectory: boolean;
+  mtimeMs?: number;
   children: TreeNode[];
 }
 
@@ -50,6 +54,14 @@ export interface FileTreeProps {
    * label toggles expansion (the sidebar/navigation behavior).
    */
   selectableFolders?: boolean;
+  /**
+   * Ordering applied to the built tree. `'none'` (the default) preserves the
+   * server's walk order byte-for-byte — existing hosts rely on it. `'alpha'`
+   * sorts folders-first alphabetically; `'modified'` keeps folders
+   * alphabetical but orders files newest-first by `mtimeMs` (entries without
+   * a stamp sink to the end).
+   */
+  sortMode?: 'none' | 'alpha' | 'modified';
 }
 
 /** Convert a flat list of file entries (with slash-separated `path`) into a tree. */
@@ -61,6 +73,7 @@ export function buildTree(flat: FileEntry[]): TreeNode[] {
       name: f.name,
       path: f.path,
       isDirectory: f.isDirectory,
+      ...(f.mtimeMs !== undefined ? { mtimeMs: f.mtimeMs } : {}),
       children: [],
     });
   }
@@ -75,7 +88,7 @@ export function buildTree(flat: FileEntry[]): TreeNode[] {
   return roots;
 }
 
-function defaultIconFor(entry: FileEntry): ReactNode {
+export function defaultIconFor(entry: FileEntry): ReactNode {
   // FontAwesome Free icons. The webfont + `.fa-*` utility classes are
   // loaded app-wide via `@bendyline/squisq-editor-react/styles` (which
   // bundles `@fortawesome/fontawesome-free`), so no extra import is needed.
@@ -113,8 +126,12 @@ export function FileTree({
   iconFor = defaultIconFor,
   labelFor = defaultLabelFor,
   selectableFolders = false,
+  sortMode = 'none',
 }: FileTreeProps) {
-  const tree = buildTree(entries);
+  const tree = useMemo(
+    () => (sortMode === 'none' ? buildTree(entries) : sortTreeNodes(buildTree(entries), sortMode)),
+    [entries, sortMode],
+  );
   return (
     <>
       {tree.map((node) => (
@@ -172,6 +189,7 @@ function TreeItem({
     name: node.name,
     path: node.path,
     isDirectory: node.isDirectory,
+    ...(node.mtimeMs !== undefined ? { mtimeMs: node.mtimeMs } : {}),
   };
   const label = labelFor(entry);
   const customActions = actionsForEntry?.(entry) ?? [];

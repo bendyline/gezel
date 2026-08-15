@@ -86,6 +86,8 @@
     "eval:all:unleased": "pnpm --filter @bendyline/gezel-evals run all",
     "eval:ab-reasoning": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-reasoning-factorial.ts",
     "eval:ab-reasoning:unleased": "pnpm --filter @bendyline/gezel-evals run ab-reasoning-factorial",
+    "eval:ab-effort": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-reasoning-effort.ts",
+    "eval:ab-effort:unleased": "pnpm --filter @bendyline/gezel-evals run ab-reasoning-effort",
     "eval:scorecard": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/scorecard.ts",
     "eval:scorecard:unleased": "pnpm --filter @bendyline/gezel-evals run scorecard",
     "eval:judge-sweep": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/judge-sweep.ts",

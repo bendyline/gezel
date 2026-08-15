@@ -267,7 +267,7 @@ export class WorkspaceIndexManager {
    * autocomplete. The index stores files only, so directories are derived:
    * each match collapses to its next path segment after the prefix — a
    * directory (trailing `/`, so the user can descend) or the full file path.
-   * Reads the cached file list (capped at ~500 by the indexer).
+   * Reads the cached file list (capped at 20,000 files by the indexer).
    * Case-insensitive prefix; deduped; capped.
    */
   async searchWorkspaceFiles(projectId: string, prefix: string, limit = 50): Promise<string[]> {

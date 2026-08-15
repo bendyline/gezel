@@ -1517,6 +1517,45 @@ type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
  */
 const REASONING_DEPTH_TEMPLATE_KWARGS = new Set(['reasoning_effort', 'reasoning_strength']);
 
+export interface LlamaCppReasoningRequestDiagnostic {
+  enableThinking?: boolean;
+  reasoningEffort?: string | number | boolean;
+  reasoningStrength?: string | number | boolean;
+}
+
+/**
+ * Extract only the non-sensitive reasoning controls that will reach the chat
+ * template. Keeping this at the final request-body boundary lets evals prove
+ * an effort arm did not collapse after profile resolution or constrained-turn
+ * rewriting, without logging prompts, messages, or tool arguments.
+ */
+export function llamaCppReasoningRequestDiagnostic(
+  body: Record<string, unknown>,
+): LlamaCppReasoningRequestDiagnostic | null {
+  const raw = body.chat_template_kwargs;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const kwargs = raw as Record<string, unknown>;
+  const diagnostic: LlamaCppReasoningRequestDiagnostic = {};
+  if (typeof kwargs.enable_thinking === 'boolean') {
+    diagnostic.enableThinking = kwargs.enable_thinking;
+  }
+  if (
+    typeof kwargs.reasoning_effort === 'string' ||
+    typeof kwargs.reasoning_effort === 'number' ||
+    typeof kwargs.reasoning_effort === 'boolean'
+  ) {
+    diagnostic.reasoningEffort = kwargs.reasoning_effort;
+  }
+  if (
+    typeof kwargs.reasoning_strength === 'string' ||
+    typeof kwargs.reasoning_strength === 'number' ||
+    typeof kwargs.reasoning_strength === 'boolean'
+  ) {
+    diagnostic.reasoningStrength = kwargs.reasoning_strength;
+  }
+  return Object.keys(diagnostic).length > 0 ? diagnostic : null;
+}
+
 function disableThinkingForConstrainedTurn(
   body: Record<string, unknown>,
   shape: DisableThinkingRequestShape,
@@ -4480,6 +4519,16 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         let res: Response;
         const requestStartedAt = Date.now();
         try {
+          const reasoningDiagnostic = llamaCppReasoningRequestDiagnostic(body);
+          if (reasoningDiagnostic) {
+            log.debug(
+              `[llama-cpp] request-reasoning ${JSON.stringify({
+                model: this.deps.model,
+                iteration: turn,
+                ...reasoningDiagnostic,
+              })}`,
+            );
+          }
           res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

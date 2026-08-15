@@ -650,9 +650,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   // Workspace file/dir paths matching a prefix — backs the terminal's
-  // file-path autocomplete.
+  // file-path autocomplete. With `detail=1`, returns the complete flat file
+  // list from the last static scan (`{path, size, mtimeMs}` per file) —
+  // backs the UI's flat "by last modified" workspace view. Empty for
+  // never-indexed/disabled projects; callers read `/index/status` to tell
+  // those states apart.
   app.get('/:id/index/files', async (c) => {
     const id = c.req.param('id');
+    if (c.req.query('detail') === '1') {
+      const files = await ctx.workspaceIndex.readFiles(id);
+      return c.json({ files, total: files.length });
+    }
     const prefix = c.req.query('prefix') ?? '';
     const paths = await ctx.workspaceIndex.searchWorkspaceFiles(id, prefix);
     return c.json({ paths });
@@ -927,8 +935,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
+    // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
+    // (the shallow listing has no stats path).
+    const withStats = c.req.query('stats') === '1';
     if (recursive) {
-      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id);
+      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(
+        id,
+        withStats ? { withStats: true } : undefined,
+      );
       return c.json({ files: detailed.entries, truncated: detailed.truncated });
     }
     return c.json({ files: await ctx.store.listProjectArtifacts(id, subpath) });
@@ -1316,9 +1330,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
+    // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
+    // (the shallow listing has no stats path).
+    const withStats = c.req.query('stats') === '1';
     try {
       if (recursive) {
-        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id);
+        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(
+          id,
+          withStats ? { withStats: true } : undefined,
+        );
         return c.json({ files: detailed.entries, truncated: detailed.truncated });
       }
       return c.json({ files: await ctx.store.listProjectWorkspace(id, subpath) });
