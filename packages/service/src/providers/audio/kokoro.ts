@@ -129,6 +129,25 @@ const KOKORO_APPROX_BYTES_BY_ID: Readonly<Record<string, number>> = {
   [KOKORO_DEFAULT_MODEL_ID]: 95_000_000,
 };
 
+type ModuleResolver = (specifier: string) => string;
+
+/**
+ * Whether this service installation can actually load the optional Kokoro
+ * runtime. Keep this as a resolution-only check: importing either package
+ * starts the sizeable ONNX/phonemizer stack, which catalog reads must not do.
+ */
+export function isKokoroRuntimeAvailable(
+  resolveModule: ModuleResolver = (specifier) => import.meta.resolve(specifier),
+): boolean {
+  try {
+    resolveModule('kokoro-js');
+    resolveModule('@huggingface/transformers');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Curated subset of Kokoro's 54 voices to surface in the picker.
  * `kokoro-js` exposes the full set via `instance.voices`; the UI uses

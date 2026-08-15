@@ -217,7 +217,9 @@ real tarballs into a non-pnpm project rather than trusting the workspace.
 
 The local-ML packages are therefore optional peers of the published service.
 The default npm install is the cloud/headless/runtime surface and carries no
-Transformers, Sharp, or ONNX tree. Consumers that opt into in-process memory
+Transformers, Sharp, or ONNX tree. The CLI's first-run workshop consumes the
+service's capability-filtered audio catalog, so it does not offer or download
+Kokoro when those peers are absent. Consumers that opt into in-process memory
 embeddings or Kokoro TTS must use the safe root overrides documented in the
 service README. Complete Electron and relocatable Node artifacts merge the
 private `packages/ml-runtime` deployment, where workspace overrides do apply.

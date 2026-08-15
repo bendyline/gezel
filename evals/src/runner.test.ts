@@ -21,6 +21,7 @@ import {
   hardStallShape,
   inflightDeferMsForEngine,
   llamaCppEvalLaunchOverridesForModel,
+  llamaCppReasoningEvalLaunchOverrides,
   localEvalDeviceSafetyConfig,
   makeTrialId,
   pickPoisonedSessionsForRecovery,
@@ -1181,6 +1182,35 @@ describe('llamaCppEvalLaunchOverridesForModel', () => {
     expect(actual?.summary).toContain('numCtx=65536');
     expect(actual?.summary).toContain('hardProgressTimeout=45m');
     expect(actual?.summary).toContain('minTrialTimeout=60m');
+  });
+});
+
+describe('llama.cpp reasoning experiment launch overrides', () => {
+  it('authors both factorial levers explicitly in the daemon env', () => {
+    expect(
+      llamaCppReasoningEvalLaunchOverrides(
+        {
+          llamaCppReasoningPreserve: false,
+          llamaCppReasoningBudgetTokens: 4096,
+        },
+        'llama-cpp',
+      ),
+    ).toMatchObject({
+      extraEnv: {
+        GEZEL_LLAMA_REASONING_PRESERVE: '0',
+        GEZEL_LLAMA_REASONING_BUDGET_TOKENS: '4096',
+      },
+      summary: expect.stringContaining('preserve=false budget=4096'),
+    });
+  });
+
+  it('refuses invalid budgets and non-llama engines', () => {
+    expect(() =>
+      llamaCppReasoningEvalLaunchOverrides({ llamaCppReasoningBudgetTokens: 0 }, 'llama-cpp'),
+    ).toThrow(/positive safe integer/);
+    expect(() =>
+      llamaCppReasoningEvalLaunchOverrides({ llamaCppReasoningPreserve: true }, 'mlx'),
+    ).toThrow(/engine=llama-cpp/);
   });
 });
 

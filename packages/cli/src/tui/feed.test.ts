@@ -207,6 +207,71 @@ describe('reduceFeed queued messages', () => {
   });
 });
 
+describe('reduceFeed cold-start messages', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('shows the submitted text while chat starts, then replaces it with the durable message', () => {
+    let rows = reduceFeed(
+      [],
+      envelope({ type: 'user_message_pending', preview: 'hello from the terminal' }),
+    );
+    let turns = reduceTurns(
+      new Map(),
+      envelope({ type: 'user_message_pending', preview: 'hello from the terminal' }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        key: 'startup-s1',
+        kind: 'pending',
+        text: 'hello from the terminal',
+      }),
+    ]);
+    expect(turns.get('s1')?.label).toBe('preparing chat');
+
+    rows = reduceFeed(
+      rows,
+      envelope({
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'hello from the terminal',
+          at: '2026-08-14T12:00:00.000Z',
+        },
+      }),
+    );
+    turns = reduceTurns(
+      turns,
+      envelope({
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'hello from the terminal',
+          at: '2026-08-14T12:00:00.000Z',
+        },
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'hello from the terminal' }),
+    ]);
+    expect(turns.get('s1')?.label).toBe('thinking…');
+  });
+
+  it('removes the pending text when provider startup fails', () => {
+    const pending = reduceFeed([], envelope({ type: 'user_message_pending', preview: 'hello' }));
+
+    expect(
+      reduceFeed(pending, envelope({ type: 'error', error: 'local model could not start' })),
+    ).toEqual([expect.objectContaining({ kind: 'error', text: 'local model could not start' })]);
+  });
+});
+
 describe('reduceFeed tool events', () => {
   const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
     sessionId: 's1',

@@ -5798,25 +5798,50 @@ export class ChatManager {
       }
     }
 
-    // All terminal paths below must publish a terminal event + `done` to
-    // the session's SSE bus. Intentional cancellation is distinct from an
-    // error so the UI can stop spinning without poisoning the session.
-    // Before the record is loaded we don't know the gezel/project, so we
-    // publish on the session bus only.
+    // A cold provider session can spend a noticeable amount of time loading
+    // before the durable user message is appended below. Keep project/global
+    // timelines honest during that gap: show the submitted text as pending
+    // and mark the turn as active instead of leaving it on "idle". Once
+    // ensureState succeeds the pending row is replaced by the ordinary
+    // user_message event.
+    const preflightScope: PublishScope | undefined = ffRecord
+      ? {
+          sessionId,
+          gezelId: ffRecord.gezelId,
+          projectId: ffRecord.projectId,
+        }
+      : undefined;
+    const coldStartPending = preflightScope && !this.states.get(sessionId)?.session;
+    if (preflightScope && coldStartPending) {
+      this.events.publish(preflightScope, {
+        type: 'user_message_pending',
+        preview: userText.length > 160 ? `${userText.slice(0, 157)}…` : userText,
+      });
+    }
+
+    // All terminal paths below must publish a terminal event + `done`.
+    // Intentional cancellation is distinct from an error so the UI can stop
+    // spinning without poisoning the session. A valid on-disk record gives
+    // us enough scope to reach project/global clients even when ensureState
+    // fails; only a genuinely missing record falls back to session-only.
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('error:', message);
+      const publish = (event: ChatEvent): void => {
+        if (preflightScope) this.events.publish(preflightScope, event);
+        else this.events.publishSessionOnly(sessionId, event);
+      };
       if (inflightTurn.cancelled) {
-        this.events.publishSessionOnly(sessionId, { type: 'cancelled' });
+        publish({ type: 'cancelled' });
       } else {
         const detail = describeTurnError(err);
-        this.events.publishSessionOnly(sessionId, {
+        publish({
           type: 'error',
           error: redactCredentials(message),
           ...(detail ? { errorDetail: detail } : {}),
         });
       }
-      this.events.publishSessionOnly(sessionId, { type: 'done' });
+      publish({ type: 'done' });
       throw err;
     };
 

@@ -273,6 +273,9 @@ describe('ChatEventSchema', () => {
     );
     expect(ChatEventSchema.parse({ type: 'done' }).type).toBe('done');
     expect(ChatEventSchema.parse({ type: 'error', error: 'oops' }).type).toBe('error');
+    expect(ChatEventSchema.parse({ type: 'user_message_pending', preview: 'hello' }).type).toBe(
+      'user_message_pending',
+    );
     expect(ChatEventSchema.parse({ type: 'cancelled' }).type).toBe('cancelled');
     expect(
       ChatEventSchema.parse({ type: 'gezel_created', gezelId: 'sipho', name: 'Sipho' }).type,

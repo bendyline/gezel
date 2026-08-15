@@ -201,19 +201,26 @@ describe('preflight admission cache policy', () => {
     );
   });
 
-  it('does not reuse a control-arm preflight for reasoning preservation', () => {
+  it('does not reuse a preflight across reasoning launch arms', () => {
     const base = {
       modelId: 'qwen3.8-27b-q4',
       engine: 'llama-cpp' as const,
       minGenTokensPerSec: 3,
     };
-    const previous = process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    const previousPreserve = process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    const previousBudget = process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS;
     delete process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    delete process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS;
     const control = preflightPolicyFingerprint(base);
     process.env.GEZEL_LLAMA_REASONING_PRESERVE = '1';
-    const treatment = preflightPolicyFingerprint(base);
-    if (previous === undefined) delete process.env.GEZEL_LLAMA_REASONING_PRESERVE;
-    else process.env.GEZEL_LLAMA_REASONING_PRESERVE = previous;
-    expect(treatment).not.toBe(control);
+    const preserve = preflightPolicyFingerprint(base);
+    process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS = '4096';
+    const budget = preflightPolicyFingerprint(base);
+    if (previousPreserve === undefined) delete process.env.GEZEL_LLAMA_REASONING_PRESERVE;
+    else process.env.GEZEL_LLAMA_REASONING_PRESERVE = previousPreserve;
+    if (previousBudget === undefined) delete process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS;
+    else process.env.GEZEL_LLAMA_REASONING_BUDGET_TOKENS = previousBudget;
+    expect(preserve).not.toBe(control);
+    expect(budget).not.toBe(preserve);
   });
 });

@@ -33,6 +33,7 @@ let svc: RunningService;
 let bridge: McpBridge;
 let mcpPath: string;
 let bridgeEnv: Record<string, string>;
+let serviceHome: string | undefined;
 
 async function waitForProjectSessionText(projectId: string, pattern: RegExp): Promise<string> {
   // The kickoff macros return once the entry step is ENQUEUED on the task
@@ -77,8 +78,8 @@ beforeAll(async () => {
   // starved the kickoff poll below. Skip the embedder; the same 53 assertions
   // hold and the file drops from ~50 s to ~14 s.
   process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
-  const home = await mkdtemp(join(tmpdir(), 'gezel-mcp-bridge-'));
-  svc = await startService({ home });
+  serviceHome = await mkdtemp(join(tmpdir(), 'gezel-mcp-bridge-'));
+  svc = await startService({ home: serviceHome });
 
   const scheme = svc.cert ? 'https' : 'http';
   const baseUrl = `${scheme}://127.0.0.1:${svc.port}`;
@@ -122,7 +123,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await bridge?.stop();
   await svc?.stop();
-  await rm(svc.context.home, { recursive: true, force: true }).catch(() => {});
+  if (serviceHome) {
+    await rm(serviceHome, { recursive: true, force: true }).catch(() => {});
+  }
   delete process.env.GEZEL_MOCK_PROVIDER;
 });
 

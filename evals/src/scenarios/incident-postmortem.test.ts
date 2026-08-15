@@ -362,6 +362,23 @@ ${FROZEN_NAMED_OWNER_ACTIONS.replaceAll('Phil Okeke', 'TBD')}`;
     expect(verdict.success).toBe(true);
   });
 
+  it('credits grounded people paired with the specific checkout on-call rotation', () => {
+    const rotationOwners = `## Action items
+
+| Action | Owner | Due | Evidence |
+|---|---|---|---|
+| Add saturation paging | Bertha Vargas / checkout on-call rotation | 2026-03-21 | metrics.csv |
+| Add steady-state load coverage | Phil Okeke / checkout on-call rotation | 2026-03-28 | hotfix.diff |
+| Add a rollout soak gate | Platform/CD team | 2026-04-04 | deploy.log |
+`;
+    const verdict = evaluateIncidentPostmortem(
+      replaceActionItems(GROUNDED_REFERENCE, rotationOwners),
+    );
+
+    expect(verdict.signals).toContain('action-items-formatted');
+    expect(verdict.success).toBe(true);
+  });
+
   it('rejects the frozen invented Jordan/Sarah owners while retaining the specific team', () => {
     const verdict = evaluateIncidentPostmortem(
       replaceActionItems(GROUNDED_REFERENCE, FROZEN_INVENTED_OWNER_ACTIONS),
@@ -457,6 +474,23 @@ ${FROZEN_NAMED_OWNER_ACTIONS.replaceAll('Phil Okeke', 'TBD')}`;
     expect(verdict.failReason).toContain('no-unsupported-certainty');
     expect(verdict.failReason).toContain('no data loss');
     expect(verdict.success).toBe(false);
+  });
+
+  it.each([
+    'This postmortem makes no assertion that data loss occurred or that no data loss occurred; both outcomes remain unknown.',
+    'No data loss or security/privacy impact is established either way by the supplied evidence; treat both as unknown.',
+  ])('allows explicit uncertainty even when it quotes a forbidden conclusion: %s', (wording) => {
+    const explicitUncertainty = GROUNDED_REFERENCE.replace(
+      'The supplied evidence does not establish whether data loss or any security/privacy impact occurred.',
+      wording,
+    );
+    const verdict = evaluateIncidentPostmortem(explicitUncertainty);
+
+    expect(verdict.signals).toContain('no-unsupported-certainty');
+    expect(
+      verdict.failures.find((failure) => failure.startsWith('no-unsupported-certainty')),
+    ).toBeUndefined();
+    expect(verdict.success).toBe(true);
   });
 
   it('allows supported metric separation, partial-impact wording, and configuration audits', () => {

@@ -50,6 +50,7 @@ import {
   planMoeOffload,
 } from './offload-planner.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from './provider.js';
+import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
 import { resolveSpecDraft } from './spec-draft.js';
 
 const log = createLogger('chat');
@@ -146,10 +147,8 @@ export async function buildLlamaCppProvider(opts: {
   // llama-server with `--reasoning-preserve` AND replay the captured
   // `reasoning_content` on subsequent requests. Keep it opt-in until diverse
   // agent-loop trials show that the extra history improves convergence.
-  const reasoningPreserve = (() => {
-    const raw = process.env.GEZEL_LLAMA_REASONING_PRESERVE?.trim().toLowerCase();
-    return raw === '1' || raw === 'true';
-  })();
+  const reasoningLaunchOverrides = reasoningLaunchOverridesFromEnv();
+  const reasoningPreserve = reasoningLaunchOverrides.preserve;
 
   const defaultModelId = opts.modelOverride?.modelId ?? config.defaultModel?.['llama-cpp'];
   // Slot count (`--parallel N`) is the single source of truth — drives the
@@ -578,12 +577,20 @@ export async function buildLlamaCppProvider(opts: {
   // budget at the manifest's recommended value is the difference
   // between "Builder produces code" and "Builder hangs the trial."
   // See `resolveCatalogReasoningBudget` for the lookup rationale.
-  const reasoningBudgetTokens = opts.catalog
+  const catalogReasoningBudgetTokens = opts.catalog
     ? await resolveCatalogReasoningBudget(
         opts.catalog,
         opts.modelOverride?.modelId ?? defaultModelId,
       )
     : undefined;
+  const reasoningBudgetTokens =
+    reasoningLaunchOverrides.budgetTokens ?? catalogReasoningBudgetTokens;
+  const reasoningBudgetSource =
+    reasoningLaunchOverrides.budgetTokens !== undefined
+      ? 'env'
+      : catalogReasoningBudgetTokens !== undefined
+        ? 'catalog'
+        : 'unbounded';
 
   // Speculative-decoding draft resolution — a manifest names its draft by
   // catalog id; resolve it to the installed GGUF path (or disable) before the
@@ -1310,6 +1317,7 @@ export async function buildLlamaCppProvider(opts: {
           ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
           flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
           reasoningBudgetTokens: reasoningBudgetTokens ?? 'unbounded',
+          reasoningBudgetSource,
           reasoningPreserve,
           cudaGraphs: process.env.GGML_CUDA_DISABLE_GRAPHS ? 'disabled-by-env' : 'default',
         },

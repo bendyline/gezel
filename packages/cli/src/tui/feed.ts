@@ -76,9 +76,26 @@ export function reduceFeed(
     next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
 
   switch (event.type) {
+    case 'user_message_pending': {
+      const key = `startup-${sessionId}`;
+      const pending: FeedRow = {
+        key,
+        sessionId,
+        gezelId,
+        kind: 'pending',
+        text: capFeedText(event.preview),
+        open: false,
+      };
+      const idx = rows.findIndex((row) => row.key === key);
+      if (idx === -1) return cap([...rows, pending]);
+      const next = rows.slice();
+      next[idx] = pending;
+      return next;
+    }
+
     case 'user_message':
       return cap([
-        ...rows,
+        ...withoutStartupPending(rows, sessionId),
         {
           key: nextKey(),
           sessionId,
@@ -228,7 +245,10 @@ export function reduceFeed(
       ]);
 
     case 'error': {
-      const settled = closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId);
+      const settled = withoutStartupPending(
+        closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId),
+        sessionId,
+      );
       return cap([
         ...settled,
         {
@@ -243,7 +263,7 @@ export function reduceFeed(
     }
 
     case 'done': {
-      const settled = closeWriteRows(rows, sessionId);
+      const settled = withoutStartupPending(closeWriteRows(rows, sessionId), sessionId);
       return settled.map((r) => (r.sessionId === sessionId && r.open ? { ...r, open: false } : r));
     }
 
@@ -344,6 +364,8 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     return m;
   };
   switch (event.type) {
+    case 'user_message_pending':
+      return set('preparing chat', 0, null);
     case 'user_message':
       return set('thinking…', 0, null);
     case 'queued':
@@ -376,6 +398,11 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     default:
       return turns;
   }
+}
+
+function withoutStartupPending(rows: FeedRow[], sessionId: string): FeedRow[] {
+  const key = `startup-${sessionId}`;
+  return rows.some((row) => row.key === key) ? rows.filter((row) => row.key !== key) : rows;
 }
 
 function phaseLabel(

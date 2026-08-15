@@ -114,7 +114,8 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
    * without abandoning the download. Idempotent: a second `POST` for a
    * running id attaches to the in-flight install rather than starting (or
    * erroring on) a parallel one. Cancel is the explicit `DELETE` below.
-   * The companion image-reader pull rides the same background job.
+   * Unless explicitly suppressed by a caller with its own bundle plan, the
+   * companion image-reader pull rides the same background job.
    */
   app.post('/models/:catalogId/install', async (c) => {
     const catalogId = c.req.param('catalogId');
@@ -125,12 +126,25 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     const skipShaRaw = c.req.query('skipSha');
     const skipSha =
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
+    // Callers with their own explicit bundle plan (the CLI first-run setup)
+    // suppress the implicit image reader here, then install only the helpers
+    // the user selected with first-class progress of their own.
+    const skipCompanionRaw = c.req.query('skipCompanion');
+    const skipCompanion =
+      skipCompanionRaw != null &&
+      skipCompanionRaw !== '' &&
+      skipCompanionRaw !== '0' &&
+      skipCompanionRaw !== 'false';
     // Only fetch the vision projector when the user has opted this model into
     // native image support. Re-running the install after flipping the toggle
     // picks up just the missing file — completed files are skipped.
     const config = await ctx.store.readConfig().catch(() => null);
     const includeMmproj = config?.nativeVision?.[catalogId] === true;
-    ctx.chatInstalls.llamaCpp.start(catalogId, { skipSha, includeMmproj });
+    ctx.chatInstalls.llamaCpp.start(catalogId, {
+      skipSha,
+      includeMmproj,
+      installCompanion: !skipCompanion,
+    });
     return streamSSE(c, (stream) =>
       subscribeToInstallSse(ctx.chatInstalls.llamaCpp, catalogId, stream),
     );

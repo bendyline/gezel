@@ -292,12 +292,16 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   // Local-engine eval launch overrides (env + config + timeouts). Shared shape
   // across llama-cpp and ds4 (both supervised GGUF engines), so it flows
   // through the same `evalDaemonEnvForTrial` + `updateConfig` path below.
-  const llamaEvalLaunch =
+  const defaultLlamaEvalLaunch =
     engine === 'llama-cpp'
       ? llamaCppEvalLaunchOverridesForModel(opts.modelId)
       : engine === 'ds4'
         ? ds4EvalLaunchOverridesForModel(opts.modelId)
         : undefined;
+  const llamaEvalLaunch = mergeLlamaCppEvalLaunchOverrides(
+    defaultLlamaEvalLaunch,
+    llamaCppReasoningEvalLaunchOverrides(opts, engine),
+  );
   const trialId = makeTrialId(scenario.id, engine, opts.modelId);
   const runsDir = resolveEvalRunsDir(opts.runsDir);
   const runDir = join(runsDir, trialId);
@@ -1306,6 +1310,48 @@ export interface LlamaCppEvalLaunchOverrides {
   minTrialTimeoutMs?: number;
   hardProgressTimeoutMs?: number;
   summary?: string;
+}
+
+export function llamaCppReasoningEvalLaunchOverrides(
+  opts: Pick<TrialOptions, 'llamaCppReasoningPreserve' | 'llamaCppReasoningBudgetTokens'>,
+  engine: ChatProvider,
+): LlamaCppEvalLaunchOverrides | undefined {
+  const preserve = opts.llamaCppReasoningPreserve;
+  const budget = opts.llamaCppReasoningBudgetTokens;
+  if (preserve === undefined && budget === undefined) return undefined;
+  if (engine !== 'llama-cpp') {
+    throw new Error('llama.cpp reasoning launch overrides require engine=llama-cpp');
+  }
+  if (budget !== undefined && (!Number.isSafeInteger(budget) || budget <= 0)) {
+    throw new Error('llamaCppReasoningBudgetTokens must be a positive safe integer');
+  }
+  return {
+    extraEnv: {
+      ...(preserve !== undefined ? { GEZEL_LLAMA_REASONING_PRESERVE: preserve ? '1' : '0' } : {}),
+      ...(budget !== undefined ? { GEZEL_LLAMA_REASONING_BUDGET_TOKENS: String(budget) } : {}),
+    },
+    summary: `reasoning experiment: preserve=${preserve ?? 'catalog/default'} budget=${budget ?? 'catalog'}`,
+  };
+}
+
+export function mergeLlamaCppEvalLaunchOverrides(
+  base: LlamaCppEvalLaunchOverrides | undefined,
+  experiment: LlamaCppEvalLaunchOverrides | undefined,
+): LlamaCppEvalLaunchOverrides | undefined {
+  if (!base) return experiment;
+  if (!experiment) return base;
+  return {
+    ...base,
+    ...experiment,
+    extraEnv: { ...base.extraEnv, ...experiment.extraEnv },
+    config: { ...base.config, ...experiment.config },
+    minTrialTimeoutMs: Math.max(base.minTrialTimeoutMs ?? 0, experiment.minTrialTimeoutMs ?? 0),
+    hardProgressTimeoutMs: Math.max(
+      base.hardProgressTimeoutMs ?? 0,
+      experiment.hardProgressTimeoutMs ?? 0,
+    ),
+    summary: [base.summary, experiment.summary].filter(Boolean).join('; '),
+  };
 }
 
 export function llamaCppEvalLaunchOverridesForModel(

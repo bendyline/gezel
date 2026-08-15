@@ -165,7 +165,11 @@ export function ds4Routes(ctx: ServiceContext): Hono {
     const skipShaRaw = c.req.query('skipSha');
     const skipSha =
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
-    ctx.chatInstalls.ds4.start(catalogId, { skipSha, includeMmproj: false });
+    ctx.chatInstalls.ds4.start(catalogId, {
+      skipSha,
+      includeMmproj: false,
+      installCompanion: false,
+    });
     return streamSSE(c, (stream) => subscribeToInstallSse(ctx.chatInstalls.ds4, catalogId, stream));
   });
 

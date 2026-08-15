@@ -746,6 +746,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reasoning_delta'), content: z.string() }),
   z.object({ type: z.literal('complete'), message: ChatMessageSchema }),
   /**
+   * The user submitted a message, but a cold provider session is still being
+   * created. Project timelines render this as a temporary pending row until
+   * the durable `user_message` or a terminal `error` arrives.
+   */
+  z.object({ type: z.literal('user_message_pending'), preview: z.string() }),
+  /**
    * Emitted right after the user's message is appended to the session
    * record. The legacy session-scoped UI inserted user messages locally
    * before POSTing, so it didn't need this — but the project + global

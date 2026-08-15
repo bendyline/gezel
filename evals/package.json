@@ -14,6 +14,7 @@
     "ab-tool-naming": "tsx src/bin/ab-tool-naming.ts",
     "ab-craftbook-format": "tsx src/bin/ab-craftbook-format.ts",
     "ab-prompt-conduct": "tsx src/bin/ab-prompt-conduct.ts",
+    "ab-reasoning-factorial": "tsx src/bin/ab-reasoning-factorial.ts",
     "ab-index": "tsx src/bin/ab-index.ts",
     "index-bench": "tsx src/bin/index-bench.ts",
     "preflight": "tsx src/bin/preflight.ts",

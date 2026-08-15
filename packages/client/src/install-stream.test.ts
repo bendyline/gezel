@@ -14,8 +14,9 @@ import {
  * "interrupted install" case the install methods must turn into an
  * error instead of a silent success.
  */
-function streamingFetch(frames: object[]): typeof fetch {
-  return (async () => {
+function streamingFetch(frames: object[], onRequest?: (url: string) => void): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    onRequest?.(String(input));
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -117,6 +118,24 @@ describe('installLlamaCppModel companion handling', () => {
       client.installLlamaCppModel('qwen3.5-2b-q4', (event) => events.push(event)),
     ).resolves.toBeUndefined();
     expect(events.map((event) => event.type)).toEqual(['extracting-metadata', 'companion', 'done']);
+  });
+
+  it('can suppress the implicit image reader for callers with an explicit bundle plan', async () => {
+    let requestedUrl = '';
+    const client = makeClient(
+      streamingFetch([{ type: 'done', id: 'qwen3.5-2b-q4' }], (url) => {
+        requestedUrl = url;
+      }),
+    );
+
+    await client.installLlamaCppModel('qwen3.5-2b-q4', () => {}, undefined, {
+      skipSha: true,
+      skipCompanion: true,
+    });
+
+    expect(requestedUrl).toBe(
+      'http://test/api/llama-cpp/models/qwen3.5-2b-q4/install?skipSha=1&skipCompanion=1',
+    );
   });
 });
 

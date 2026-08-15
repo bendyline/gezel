@@ -413,6 +413,49 @@ describe('ChatManager — session lifecycle', () => {
 });
 
 describe('ChatManager — send + persistence', () => {
+  it('shows a submitted first message as pending while the provider session starts', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: Array<{ type: string; preview?: string }> = [];
+    events.subscribeProject('default', (envelope) => {
+      if (envelope.sessionId === session.id) received.push(envelope.event);
+    });
+    const gate = mock.gateNextCreateSession();
+    mock.script('Ready');
+
+    const sending = manager.send(session.id, 'hello from the terminal');
+    await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'create')).toBe(true));
+
+    expect(received).toContainEqual(
+      expect.objectContaining({
+        type: 'user_message_pending',
+        preview: 'hello from the terminal',
+      }),
+    );
+    expect(received.some((event) => event.type === 'user_message')).toBe(false);
+
+    gate.release();
+    await sending;
+
+    expect(received.some((event) => event.type === 'user_message')).toBe(true);
+  });
+
+  it('publishes cold-start failures to project clients instead of failing silently', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: Array<{ type: string; error?: string }> = [];
+    events.subscribeProject('default', (envelope) => {
+      if (envelope.sessionId === session.id) received.push(envelope.event);
+    });
+    mock.createSession = vi.fn().mockRejectedValue(new Error('local model could not start'));
+
+    await expect(manager.send(session.id, 'hello')).rejects.toThrow('local model could not start');
+
+    expect(received).toContainEqual(expect.objectContaining({ type: 'user_message_pending' }));
+    expect(received).toContainEqual(
+      expect.objectContaining({ type: 'error', error: 'local model could not start' }),
+    );
+    expect(received.at(-1)).toEqual(expect.objectContaining({ type: 'done' }));
+  });
+
   it('threads the session project into interactive provider queue metadata', async () => {
     const project = await store.createProject({ name: 'Spanish lessons' });
     const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
