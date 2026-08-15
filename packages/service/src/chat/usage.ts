@@ -137,6 +137,11 @@ export class UsageTracker {
     state.quotaUpdatedAt = at;
   }
 
+  /** Latest quota buckets recorded for `provider`; empty when never reported. */
+  quotaBucketsFor(provider: ProviderName): QuotaBucket[] {
+    return this.byProvider.get(provider)?.latestQuotaBuckets ?? [];
+  }
+
   summary(): UsageSummary {
     const today = new Date().toISOString().slice(0, 10);
     const providers: UsageSummary['providers'] = {};

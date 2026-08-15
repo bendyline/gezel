@@ -81,6 +81,8 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     tasksCompleted: [],
     reports: [],
   },
+  getNightShiftStatus: { active: false, source: null },
+  getNightShiftTasks: { background: [], active: [], upcoming: [] },
   listProjectCodeReviews: { reviews: [] },
   listQuestions: { questions: [] },
   listScripts: { scripts: [] },

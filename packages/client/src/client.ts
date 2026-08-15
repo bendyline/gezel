@@ -450,6 +450,29 @@ export interface UsageResponse {
   lastUpdated: string | null;
 }
 
+/** One provider-level reason night work is being held by the quota reserve. */
+export interface NightShiftQuotaHoldReason {
+  provider: ProviderName;
+  /** Provider bucket id that tripped the reserve (e.g. "premium_interactions"). */
+  bucket: string;
+  /** Derived remaining, 0-100. */
+  remainingPercent: number;
+  /** Effective floor that triggered the hold, 0-100. */
+  floorPercent: number;
+  rule: 'overall' | 'per-day';
+  resetDate?: string;
+}
+
+export interface NightShiftStatusResponse {
+  active: boolean;
+  source: 'scheduled' | 'manual' | null;
+  /** Present while >=1 pending night task is held by the quota reserve. */
+  quotaHold?: {
+    heldTaskCount: number;
+    reasons: NightShiftQuotaHoldReason[];
+  };
+}
+
 /**
  * Per-provider queue state — lets the UI render a "3 waiting on
  * Copilot" indicator and (on click) a breakdown of what's running
@@ -555,6 +578,8 @@ export interface TaskRunnerState {
     active: boolean;
     /** ISO time the next window opens; null when Night Shift is off. */
     opensAt: string | null;
+    /** True while night work is held by the cloud quota reserve. */
+    quotaHold?: boolean;
   };
 }
 
@@ -1163,6 +1188,15 @@ export interface ConfigResponse {
       enabled?: boolean;
       provider?: ProviderName;
       model?: string;
+    };
+    /**
+     * Cloud-subscription quota reserve. See `GezelConfig.nightShift`
+     * in core schemas: `overall` is ON by default (absent = enabled,
+     * percent 20); `perDay` is opt-in (percent 10 when enabled).
+     */
+    quotaReserve?: {
+      overall?: { enabled?: boolean; percent?: number };
+      perDay?: { enabled?: boolean; percent?: number };
     };
   };
   /**
@@ -2190,13 +2224,11 @@ export class GezelClient {
 
   // ---------- night shift ----------
 
-  getNightShiftStatus(): Promise<{ active: boolean; source: 'scheduled' | 'manual' | null }> {
+  getNightShiftStatus(): Promise<NightShiftStatusResponse> {
     return this.request('GET', '/api/night-shift/status');
   }
 
-  setNightShiftManual(
-    action: 'start' | 'stop',
-  ): Promise<{ active: boolean; source: 'scheduled' | 'manual' | null }> {
+  setNightShiftManual(action: 'start' | 'stop'): Promise<NightShiftStatusResponse> {
     return this.request('POST', '/api/night-shift/manual', { action });
   }
 

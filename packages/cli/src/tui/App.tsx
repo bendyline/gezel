@@ -1,13 +1,14 @@
-import type {
-  ChatSessionSummary,
-  ClaudePermissionMode,
-  CodexPermissionMode,
-  GezelSummary,
-  NightShiftTasksResponse,
-  Project,
-  Question,
-  Task,
-  TaskStatus,
+import {
+  type ChatSessionSummary,
+  type ClaudePermissionMode,
+  type CodexPermissionMode,
+  type GezelSummary,
+  type NightShiftTasksResponse,
+  type Project,
+  type Question,
+  type Task,
+  type TaskStatus,
+  pickRandomNameWithGender,
 } from '@bendyline/gezel';
 import type {
   ConfigResponse,
@@ -59,6 +60,13 @@ import {
   reduceTurns,
   sessionToFeedRows,
 } from './feed.js';
+import {
+  GEZEL_VALUE_PREFIX,
+  type GezelTemplateChoice,
+  TEMPLATE_VALUE_PREFIX,
+  buildGezelPickerItems,
+  resolveGezelArg,
+} from './gezel-picker.js';
 import type { TuiRuntimeDiagnostics } from './memory-diagnostics.js';
 import {
   type ModelChoice,
@@ -142,7 +150,8 @@ interface ModelDownloadProgress {
 }
 
 const HELP = [
-  '/project — switch project   /gezel — switch gezel   /model — switch engine + model',
+  '/project — switch project   /model — switch engine + model',
+  '/gezel — switch gezel or bring on a role   /gezel <role or name> — go straight there',
   '/model download — choose and download a new on-device model',
   '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
   '/allow codexedits|claudeedits — allow provider-native project edits',
@@ -200,6 +209,10 @@ export function App(props: {
   const [modelDownloadReturn, setModelDownloadReturn] = useState<'model' | null>(null);
   const [modelChoicesLoading, setModelChoicesLoading] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
+  const [gezelPickerItems, setGezelPickerItems] = useState<PickerItem[]>([]);
+  // Cached because `/gezel <arg>` resolves against the same catalog the picker
+  // renders, and the two entry points must agree on what "voorman" means.
+  const [roleTemplates, setRoleTemplates] = useState<GezelTemplateChoice[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<Question[]>([]);
 
   const [projectId, setProjectId] = useState(props.initialProjectId);
@@ -242,13 +255,18 @@ export function App(props: {
     ? Math.min(QUESTION_OPTION_WINDOW_SIZE, Math.max(1, questionOptionCount(pendingQuestion))) + 4
     : 0;
   const modelPickerWindowSize = Math.max(4, Math.min(10, termRows - 12));
+  // Tighter than the model picker: the gezel list draws section headers, and
+  // those rows are decoration the window size does not account for.
+  const gezelPickerWindowSize = Math.max(4, Math.min(10, termRows - 17));
   const inventoryPickerRows =
     overlay === 'model' ||
     overlay === 'model-download' ||
     overlay === 'start-category' ||
     overlay === 'start-craftbook'
       ? modelPickerWindowSize + 5
-      : 0;
+      : overlay === 'gezel'
+        ? gezelPickerWindowSize + 10
+        : 0;
   const visibleRows = Math.max(
     4,
     termRows - 7 - wordwheelRows - questionRows - inventoryPickerRows,
@@ -486,6 +504,147 @@ export function App(props: {
       }
     },
     [client, ensureSession, note, projectId, projects, setRows, setTurns],
+  );
+
+  /**
+   * The gilde's role catalog, loaded once per session. `/gezel` needs it for
+   * two things a bare roster can't give: an English explanation of every role
+   * (the Dutch-named ones read as nothing otherwise), and the set of roles this
+   * project could still bring on.
+   */
+  const loadRoleTemplates = useCallback(async (): Promise<GezelTemplateChoice[]> => {
+    if (roleTemplates.length > 0) return roleTemplates;
+    try {
+      const { items } = await client.listCatalogItems('gezel-template');
+      const byId = new Map<string, GezelTemplateChoice>();
+      for (const item of items) {
+        const manifest = item.manifest;
+        if (manifest.kind !== 'gezel-template' || byId.has(manifest.id)) continue;
+        byId.set(manifest.id, {
+          id: manifest.id,
+          name: manifest.name,
+          role: manifest.role,
+          description: manifest.description,
+        });
+      }
+      const loaded = [...byId.values()];
+      setRoleTemplates(loaded);
+      return loaded;
+    } catch (err) {
+      // A picker of just the current roster still works; say so once and move on.
+      note(`could not load the role catalog: ${errMsg(err)}`, 'error');
+      return [];
+    }
+  }, [client, note, roleTemplates]);
+
+  /**
+   * A folder project starts as a solo "job", which strips team-management
+   * tools from every session scoped to it. The moment the user brings a second
+   * gezel on, that stripping is working against them — a Voorman recruited
+   * into a solo job cannot delegate or recruit, which is the entire role. Flip
+   * the project to a crew and say so, rather than handing back a lead with no
+   * levers.
+   */
+  const promoteSoloProject = useCallback(
+    async (joinedGezelId: string) => {
+      try {
+        const project = await client.getProject(projectId);
+        if (project.mode !== 'solo') return;
+        if (project.voormanGezelId === joinedGezelId) return;
+        await client.updateProject(projectId, { mode: 'crew' });
+        note('this job is now a crew project — gezels here can delegate and recruit.');
+      } catch (err) {
+        note(`could not switch this job to a crew project: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, projectId],
+  );
+
+  /** Switch to a gezel, pulling it onto the project roster first if needed. */
+  const useGezel = useCallback(
+    async (gezelId: string) => {
+      if (gezelId === activeGezelId) return;
+      try {
+        const { added } = await client.addGezelToProject(projectId, gezelId);
+        if (added) await promoteSoloProject(gezelId);
+      } catch (err) {
+        // Roster membership is idempotent and advisory; a failure here should
+        // not block the user from talking to the gezel.
+        note(`could not add to the project roster: ${errMsg(err)}`, 'error');
+      }
+      setActiveGezelId(gezelId);
+      setThreads([]);
+      setActiveThreadTitle(null);
+      await ensureSession(gezelId, projectId);
+    },
+    [activeGezelId, client, ensureSession, note, projectId, promoteSoloProject],
+  );
+
+  /** Recruit a role from the gilde into this project, then switch to it. */
+  const recruitGezel = useCallback(
+    async (templateId: string) => {
+      note(`recruiting ${templateId}…`);
+      try {
+        const { name, gender } = pickRandomNameWithGender();
+        const gezel = await client.createGezelFromTemplate(templateId, { name, gender });
+        await refreshGezels();
+        note(`${gezel.name} joined the project as ${gezel.role ?? templateId}.`);
+        await useGezel(gezel.id);
+      } catch (err) {
+        note(`could not recruit ${templateId}: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, refreshGezels, useGezel],
+  );
+
+  const openGezelPicker = useCallback(async () => {
+    const templates = await loadRoleTemplates();
+    let project: Project | null = null;
+    try {
+      project = await client.getProject(projectId);
+    } catch {
+      // Without the project record we lose roster membership and the detected
+      // type, so the list degrades to "every gezel, every role" — still usable.
+    }
+    setGezelPickerItems(
+      buildGezelPickerItems({
+        gezels,
+        templates,
+        memberIds: [
+          // Without the project record we only know the gezel we are talking
+          // to. Claiming the whole roster is "in this project" would be a
+          // guess the header presents as fact.
+          ...(project?.gezelIds ?? (activeGezelId ? [activeGezelId] : [])),
+          ...(project?.voormanGezelId ? [project.voormanGezelId] : []),
+        ],
+        ...(project ? { project } : {}),
+        roleBasedNameOnly: boring,
+        hintWidth: Math.max(24, shellColumns - 34),
+      }),
+    );
+    setOverlay('gezel');
+  }, [activeGezelId, boring, client, gezels, loadRoleTemplates, projectId, shellColumns]);
+
+  /** `/gezel <role or name>` — switch to a matching gezel, or recruit the role. */
+  const ensureGezelByName = useCallback(
+    async (arg: string) => {
+      const templates = await loadRoleTemplates();
+      const resolved = resolveGezelArg(arg, { gezels, templates });
+      switch (resolved.kind) {
+        case 'gezel':
+          return useGezel(resolved.gezelId);
+        case 'template':
+          return recruitGezel(resolved.templateId);
+        case 'ambiguous':
+          return note(
+            `"${arg}" matches ${resolved.labels.join(', ')} — be more specific.`,
+            'error',
+          );
+        default:
+          return note(`no gezel or role matches "${arg}". Type /gezel to browse.`, 'error');
+      }
+    },
+    [gezels, loadRoleTemplates, note, recruitGezel, useGezel],
   );
 
   const openModelPicker = useCallback(async () => {
@@ -1071,8 +1230,11 @@ export function App(props: {
           return;
         case 'project':
           return setOverlay('project');
-        case 'gezel':
-          return setOverlay('gezel');
+        case 'gezel': {
+          const target = rest.trim();
+          if (target) return ensureGezelByName(target);
+          return openGezelPicker();
+        }
         case 'allow':
           await applyProjectPermission(rest, true);
           return;
@@ -1256,8 +1418,10 @@ export function App(props: {
       applyChatDetailVisibility,
       client,
       craftbooks,
+      ensureGezelByName,
       note,
       exit,
+      openGezelPicker,
       openModelDownloadPicker,
       openModelPicker,
       openThreadPicker,
@@ -1475,20 +1639,17 @@ export function App(props: {
       ) : null}
       {overlay === 'gezel' ? (
         <Picker
-          title="Switch gezel"
-          items={gezels.map((g) => ({
-            label: boring ? (g.roleBasedName ?? g.role ?? g.id) : g.name,
-            value: g.id,
-            hint: g.role,
-          }))}
+          title="Switch gezel, or bring on a role"
+          items={gezelPickerItems}
+          windowSize={gezelPickerWindowSize}
           onCancel={() => setOverlay(null)}
-          onSelect={(id) => {
+          onSelect={(value) => {
             setOverlay(null);
-            if (id === activeGezelId) return;
-            setActiveGezelId(id);
-            setThreads([]);
-            setActiveThreadTitle(null);
-            void ensureSession(id, projectId);
+            if (value.startsWith(TEMPLATE_VALUE_PREFIX)) {
+              void recruitGezel(value.slice(TEMPLATE_VALUE_PREFIX.length));
+              return;
+            }
+            void useGezel(value.slice(GEZEL_VALUE_PREFIX.length));
           }}
         />
       ) : null}

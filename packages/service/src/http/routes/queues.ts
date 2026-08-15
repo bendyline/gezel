@@ -95,10 +95,12 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     ]);
     // Night Shift context travels with the queue snapshot rather than as a
     // second poll: the QueueMeter needs it on every refresh to say when the
-    // scheduled bucket picks up ("waiting for Night Shift · starts 22:00").
+    // scheduled bucket picks up ("waiting for Night Shift · starts 22:00"),
+    // or that the cloud quota reserve is holding it instead.
     const nightShift = {
       active: ctx.nightShift.isActive(),
       opensAt: ctx.nightShift.nextStartIso(),
+      ...(ctx.nightShift.quotaHoldStatus() ? { quotaHold: true } : {}),
     };
     let deviceHealth = localDeviceHealth;
 

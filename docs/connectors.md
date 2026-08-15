@@ -454,11 +454,25 @@ Connectors extend the existing `SecurityPolicy` ladder ([schemas/api.ts](../pack
 they do not add a parallel one:
 
 - Autonomous sync is gated by `allowExternalServices`; lockdown postures stop the loop.
+- **User-initiated data movement is gated by `allowConnectorData` (derived from
+  `allowAppNetwork`), not by `allowExternalServices`.** That flag governs *agency* — what the
+  model may reach for on its own — and a connector is the opposite arrangement: the runtime
+  holds the credential and does the fetch, and no model-callable fetch tool exists. Binding
+  and manual sync were already exempt for this reason; a **task launch** joins them, because
+  the human picked the craftbook and pressed the button. The ladder therefore reads:
+  `super-lockdown` moves no data (nothing leaves the machine, so a craftbook that *requires* a
+  corpus is hidden from the launcher entirely); `lockdown` moves data when the user asks;
+  `free` also syncs autonomously. An `optional` connector never blocks or hides — the launch
+  degrades without it.
 - The corpus is `trust: untrusted-external` and injection-scanned; quarantine keeps hostile
   raw content out of the artifact tree while leaving a safe stub. This is the single largest
   new attack surface — all inbound.
 - Write actions are deny-by-default and daemon-enforced; the model cannot widen its own
-  allowlist.
+  allowlist. Note the consent is **channel-level, not per-write**: once a recipient domain is
+  allowlisted or `allowPublish` is on, `send_email` / `publish_post` transmit without a further
+  human click. That is real outbound agency, so those tools stay in `EXTERNAL_SERVICE_TOOLS`
+  and remain stripped below `free` — connectors being permitted at `lockdown` does not put
+  them back.
 - **Autonomous third-party execution.** An `mcp` / `script` connector means gezel runs
   third-party code **on a schedule, unattended** — a larger surface than a tool the user
   invokes through an agent. The project-type sharing rules apply harder: catalog-referenced

@@ -452,6 +452,64 @@ describe('SettingsView', () => {
     ).toBeInTheDocument();
   });
 
+  it('defaults the quota reserve to overall-on at 20% with per-day opt-in', async () => {
+    render(<SettingsView />);
+    const overallToggle = await screen.findByRole('checkbox', {
+      name: 'Stop night work near my overall quota',
+    });
+    // Absent config = the protective default is already on.
+    expect(overallToggle).toBeChecked();
+    const overallPercent = screen.getByRole('spinbutton', { name: 'Overall quota floor percent' });
+    expect(overallPercent).toHaveValue(20);
+    expect(overallPercent).toBeEnabled();
+
+    const perDayToggle = screen.getByRole('checkbox', {
+      name: 'Reserve a share of my quota per day until reset',
+    });
+    expect(perDayToggle).not.toBeChecked();
+    expect(screen.getByRole('spinbutton', { name: 'Daily quota reserve percent' })).toBeDisabled();
+  });
+
+  it('saves quota-reserve edits with the sibling rule intact', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      nightShift: {
+        quotaReserve: { perDay: { enabled: true, percent: 15 } },
+      },
+    } as never);
+    render(<SettingsView />);
+
+    const overallToggle = await screen.findByRole('checkbox', {
+      name: 'Stop night work near my overall quota',
+    });
+    fireEvent.click(overallToggle); // on-by-default → unchecking writes enabled: false
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        nightShift: {
+          quotaReserve: {
+            perDay: { enabled: true, percent: 15 },
+            overall: { enabled: false },
+          },
+        },
+      }),
+    );
+  });
+
+  it('clamps a quota percent typed past 100', async () => {
+    render(<SettingsView />);
+    const overallPercent = await screen.findByRole('spinbutton', {
+      name: 'Overall quota floor percent',
+    });
+    fireEvent.change(overallPercent, { target: { value: '150' } });
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        nightShift: { quotaReserve: { overall: { percent: 100 } } },
+      }),
+    );
+  });
+
   it('inherits the default AI model until the Night Shift override is enabled', async () => {
     const inheritedConfig = {
       provider: 'openai',

@@ -30,9 +30,10 @@ import {
 import type { CraftbookDocError, CraftbookDocFormat } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { ConnectorPrepError } from '../../connectors/task-prep.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
-import { CraftbookSetupRequiredError } from '../../tasks/manager.js';
+import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from '../../tasks/manager.js';
 import type { ServiceContext } from '../context.js';
 
 const taskDocLog = createLogger('craftbooks');
@@ -136,6 +137,9 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         task = await ctx.tasks.create(projectId, body);
       }
     } catch (err) {
+      // A launch that fails its own preconditions is a 409 the caller
+      // renders, never a 500 — the catch-all handler scrubs the body, and
+      // these messages ARE the fix instructions.
       if (err instanceof CraftbookSetupRequiredError) {
         return c.json(
           {
@@ -143,6 +147,29 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
             code: err.code,
             craftbookId: err.craftbookId,
             missingToolsets: err.missingToolsets,
+          },
+          409,
+        );
+      }
+      if (err instanceof ConnectorSetupRequiredError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            craftbookId: err.craftbookId,
+            missingConnectors: err.missingConnectors,
+          },
+          409,
+        );
+      }
+      if (err instanceof ConnectorPrepError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            craftbookId: err.craftbookId,
+            connectorTypeId: err.typeId,
+            reason: err.reason,
           },
           409,
         );

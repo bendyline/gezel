@@ -10,6 +10,7 @@ import {
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
@@ -471,7 +472,7 @@ export function NewTaskDialog({
           await onCreated(created);
           onClose();
         } catch (err) {
-          setError((err as Error).message);
+          setError(apiErrorMessage(err));
         } finally {
           setBusy(false);
         }
@@ -526,7 +527,7 @@ export function NewTaskDialog({
         await onCreated(created);
         onClose();
       } catch (err) {
-        setError((err as Error).message);
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(false);
       }

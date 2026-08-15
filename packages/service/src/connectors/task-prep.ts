@@ -46,6 +46,46 @@ export interface ConnectorTaskPrepResult {
 export type ConnectorTaskPrep = (ctx: ConnectorTaskPrepContext) => Promise<ConnectorTaskPrepResult>;
 
 /**
+ * A connector's launch prep failed in a way only the user can clear: the
+ * security posture blocks external services, nothing is bound, the source
+ * is unreachable, or the craftbook's target could not be resolved.
+ *
+ * The type is what carries the message out. An untyped throw here lands in
+ * the catch-all `app.onError`, which scrubs the body to
+ * `{ error: 'internal_error' }` — so the launcher rendered a bare
+ * "Gezel API error 500" and the one sentence naming the fix ("enable
+ * external services in Settings → Security") only ever reached the log.
+ */
+export class ConnectorPrepError extends Error {
+  readonly code = 'CONNECTOR_PREP_FAILED';
+
+  constructor(
+    readonly craftbookId: string,
+    readonly typeId: string,
+    readonly reason: 'policy' | 'unbound' | 'prep',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ConnectorPrepError';
+  }
+}
+
+function asConnectorPrepError(
+  err: unknown,
+  craftbookId: string,
+  typeId: string,
+): ConnectorPrepError {
+  if (err instanceof ConnectorPrepError) return err;
+  const detail = err instanceof Error ? err.message : String(err);
+  return new ConnectorPrepError(
+    craftbookId,
+    typeId,
+    'prep',
+    `Craftbook "${craftbookId}" could not prepare its ${typeId} data: ${detail}`,
+  );
+}
+
+/**
  * A task must never start against a corpus that only partially arrived.
  * Connector syncs reserve `error` for whole-pass failures; individual
  * fetch/write failures are reported only through `errors`, and rate limiting
@@ -95,8 +135,15 @@ export interface RunConnectorTaskPrepDeps {
     bindingId: string,
     opts?: { scopes?: readonly string[]; backfillLimit?: number },
   ): Promise<BindingSyncResult>;
-  /** Security posture — a task-initiated sync respects it like any other. */
-  allowExternalServices(project: ProjectDetail): Promise<boolean>;
+  /**
+   * Security posture. A launch is user-initiated — the human picked the
+   * craftbook and pressed the button — so it rides `allowConnectorData`
+   * (the machine may fetch on the user's behalf) rather than the agency
+   * gate that governs what a model reaches for on its own. Only
+   * `super-lockdown`, whose promise is that nothing leaves the machine,
+   * refuses.
+   */
+  allowConnectorData(project: ProjectDetail): Promise<boolean>;
   /**
    * Optional native zero-config binding provisioner. It must refuse any type
    * that needs new credentials or user choices; required unhandled types stay
@@ -131,9 +178,16 @@ export async function runConnectorTaskPrep(
   const summaries: string[] = [];
 
   for (const need of input.connectors) {
-    if (!(await deps.allowExternalServices(project))) {
-      throw new Error(
-        `Craftbook "${input.craftbookId}" reads the ${need.typeId} connector, but this install's security policy blocks external services. Enable them in Settings → Security, then run it again.`,
+    if (!(await deps.allowConnectorData(project))) {
+      // An optional corpus is a bonus, never a blocker — under a posture
+      // that forbids the fetch it degrades exactly as it does when nothing
+      // is bound, rather than failing the whole launch.
+      if (need.optional) continue;
+      throw new ConnectorPrepError(
+        input.craftbookId,
+        need.typeId,
+        'policy',
+        `Craftbook "${input.craftbookId}" reads the ${need.typeId} connector, but this install's security level keeps all data on the machine. Choose a level below Super Lockdown in Settings → Security, then run it again.`,
       );
     }
     let binding = (project.connectors ?? []).find((b) => b.type === need.typeId && !b.disabled);
@@ -146,29 +200,41 @@ export async function runConnectorTaskPrep(
       // TaskManager with ConnectorSetupRequiredError; keep this fail-closed
       // backstop for direct callers.
       if (!need.optional) {
-        throw new Error(`no enabled ${need.typeId} connector is bound to this project`);
+        throw new ConnectorPrepError(
+          input.craftbookId,
+          need.typeId,
+          'unbound',
+          `no enabled ${need.typeId} connector is bound to this project`,
+        );
       }
       continue;
     }
 
     const prep = PREPS.get(need.typeId);
-    if (!prep) {
-      // No type-specific prep: an ordinary full sync still makes the
-      // corpus current, which is all a non-parameterized connector needs.
-      const result = await deps.sync(project, binding.id);
-      assertConnectorTaskSync(result, `${need.typeId} connector data`);
-      log.info(`[connectors] task prep synced ${need.typeId} for ${input.craftbookId}`);
-      continue;
-    }
+    try {
+      if (!prep) {
+        // No type-specific prep: an ordinary full sync still makes the
+        // corpus current, which is all a non-parameterized connector needs.
+        const result = await deps.sync(project, binding.id);
+        assertConnectorTaskSync(result, `${need.typeId} connector data`);
+        log.info(`[connectors] task prep synced ${need.typeId} for ${input.craftbookId}`);
+        continue;
+      }
 
-    const result = await prep({
-      project,
-      binding,
-      params: { ...input.params, ...params },
-      sync: (bindingId, opts) => deps.sync(project, bindingId, opts),
-    });
-    Object.assign(params, result.params ?? {});
-    if (result.summary) summaries.push(result.summary);
+      const result = await prep({
+        project,
+        binding,
+        params: { ...input.params, ...params },
+        sync: (bindingId, opts) => deps.sync(project, bindingId, opts),
+      });
+      Object.assign(params, result.params ?? {});
+      if (result.summary) summaries.push(result.summary);
+    } catch (err) {
+      // Every way a prep fails — auth, rate limit, an unresolvable target
+      // like "no open PR for this branch" — is something the user acts on,
+      // so it leaves here typed rather than as a scrubbed 500.
+      throw asConnectorPrepError(err, input.craftbookId, need.typeId);
+    }
   }
 
   return {

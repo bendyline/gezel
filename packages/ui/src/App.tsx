@@ -6,7 +6,11 @@ import type {
   RecentTabArea,
   SecurityPolicy,
 } from '@bendyline/gezel';
-import type { QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
+import type {
+  NightShiftStatusResponse,
+  QuotaBucket,
+  UsageResponse,
+} from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
@@ -954,6 +958,7 @@ function NightShiftMenu({
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
+  const [status, setStatus] = useState<NightShiftStatusResponse | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -995,6 +1000,7 @@ function NightShiftMenu({
   useEffect(() => {
     if (!open) {
       setTasks(null);
+      setStatus(null);
       return;
     }
     let cancelled = false;
@@ -1006,6 +1012,16 @@ function NightShiftMenu({
         })
         .catch(() => {
           /* swallow — the menu still shows the status + action */
+        });
+      // The quota-hold detail rides the same poll: it explains why queued
+      // work isn't moving, so it should track the same refresh cadence.
+      api
+        .getNightShiftStatus()
+        .then((s) => {
+          if (!cancelled) setStatus(s);
+        })
+        .catch(() => {
+          /* swallow — the pill's SSE state remains the on/off truth */
         });
     };
     load();
@@ -1073,6 +1089,9 @@ function NightShiftMenu({
             {state.active
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
+            {status?.quotaHold && (
+              <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
+            )}
           </div>
           {hasWork && tasks && (
             <div className="app-nightshift-tasks">
@@ -1198,8 +1217,27 @@ function NightShiftTaskRow({
   task: NightShiftTasksResponse['active'][number];
   active?: boolean;
 }) {
-  const meta = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  const base = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  const meta = task.quotaHeld ? `${base} · waiting for quota` : base;
   return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+}
+
+/**
+ * One sentence for the status strip while the quota reserve is holding
+ * night work. All percentages come from the server's verdict — the UI
+ * never recomputes quota math (the buckets' scales have bitten before).
+ */
+function quotaHoldLine(hold: NonNullable<NightShiftStatusResponse['quotaHold']>): string {
+  const n = hold.heldTaskCount;
+  const head = `Holding ${n} task${n === 1 ? '' : 's'} to protect your quota`;
+  const reason = hold.reasons[0];
+  if (!reason) return `${head}.`;
+  const label = QUOTA_PROVIDERS.find((p) => p.key === reason.provider)?.label ?? reason.provider;
+  const bucket = humanizeBucketName(reason.bucket).toLowerCase();
+  const detail = `${label} ${bucket} at ${reason.remainingPercent}% (reserve ${reason.floorPercent}%)`;
+  const more = hold.reasons.length > 1 ? ` and ${hold.reasons.length - 1} more` : '';
+  const resume = reason.resetDate ? ` · resumes after ${formatResetDate(reason.resetDate)}` : '';
+  return `${head} — ${detail}${more}${resume}`;
 }
 
 function NightShiftWorkRow({

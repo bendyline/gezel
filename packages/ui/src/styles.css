@@ -20485,6 +20485,15 @@ a.license-button:hover {
   margin-bottom: 0.25rem;
 }
 
+/* Second line of the status strip while the cloud quota reserve is holding
+   queued night work — explains why "queued" isn't moving. */
+.app-nightshift-quota-hold {
+  display: block;
+  margin-top: 0.2rem;
+  max-width: 18rem;
+  color: var(--text-muted);
+}
+
 /* "What the shift is doing" panel: working-on + up-next task lists, shown
    between the status line and the start/stop action while a shift runs. */
 .app-nightshift-tasks {

@@ -115,6 +115,13 @@ function clampHour(value: string, fallback: number): number {
   return Math.min(23, Math.max(0, n));
 }
 
+/** Parse a percent input, clamping to 0–100 and falling back on garbage. */
+function clampPercent(value: string, fallback: number): number {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(0, n));
+}
+
 function buildSections(platform: string | undefined): SettingsSection[] {
   return [
     { id: 'general', label: 'General' },
@@ -618,6 +625,10 @@ export function SettingsView() {
         provider?: ProviderName;
         model?: string;
       };
+      quotaReserve?: {
+        overall?: { enabled?: boolean; percent?: number };
+        perDay?: { enabled?: boolean; percent?: number };
+      };
     }) => {
       setStatus('saving…');
       try {
@@ -647,6 +658,18 @@ export function SettingsView() {
       });
     },
     [config?.nightShift?.modelOverride, config?.provider, saveNightShift],
+  );
+
+  const saveNightShiftQuotaReserve = useCallback(
+    async (rule: 'overall' | 'perDay', patch: { enabled?: boolean; percent?: number }) => {
+      // Spread every level: the store merges config shallowly, so the whole
+      // nested object must round-trip with the sibling rule intact.
+      const current = config?.nightShift?.quotaReserve ?? {};
+      await saveNightShift({
+        quotaReserve: { ...current, [rule]: { ...(current[rule] ?? {}), ...patch } },
+      });
+    },
+    [config?.nightShift?.quotaReserve, saveNightShift],
   );
 
   const saveRoleBasedNameOnlyMode = useCallback(async (roleBasedNameOnlyMode: boolean) => {
@@ -1522,6 +1545,85 @@ export function SettingsView() {
                   <span>Wake this machine when the window opens</span>
                 </label>
               )}
+              <div
+                style={{
+                  marginTop: '1.5rem',
+                  paddingTop: '1.25rem',
+                  borderTop: '1px solid var(--border)',
+                }}
+              >
+                <h4 style={{ margin: '0 0 0.35rem' }}>Cloud quota reserve</h4>
+                <p className="muted" style={{ margin: '0 0 0.75rem' }}>
+                  For Claude, Codex, and Copilot subscriptions, run the night shift only until:
+                </p>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
+                    }
+                    aria-label="Stop night work near my overall quota"
+                  />
+                  <span>I’m within</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('overall', {
+                        percent: clampPercent(e.target.value, 20),
+                      })
+                    }
+                    style={{ width: '4rem' }}
+                    disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
+                    aria-label="Overall quota floor percent"
+                  />
+                  <span>% of my overall quota</span>
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    flexWrap: 'wrap',
+                    marginTop: '0.4rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
+                    }
+                    aria-label="Reserve a share of my quota per day until reset"
+                  />
+                  <span>It would dip into a reserve of</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('perDay', {
+                        percent: clampPercent(e.target.value, 10),
+                      })
+                    }
+                    style={{ width: '4rem' }}
+                    disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
+                    aria-label="Daily quota reserve percent"
+                  />
+                  <span>% of my quota per day until it resets</span>
+                </label>
+                <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
+                  The daily reserve scales with the time left: 10% a day with 4 days until reset
+                  keeps the last 40% for you. Work already running finishes; held work resumes when
+                  your quota frees up. Gezels on local models are never held.
+                </p>
+              </div>
             </section>
             <section style={{ marginTop: '2rem' }}>
               <h3>Gezel templates</h3>

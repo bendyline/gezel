@@ -166,6 +166,15 @@ export const ProjectTypeProvenanceSchema = z.object({
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 
+/**
+ * Project shape. `crew` (the default) is the original behavior — the voorman
+ * recruits and coordinates a team of specialists. `solo` is a "job": a single
+ * Builder handles the whole project themselves and team-management MCP tools
+ * are stripped from every session scoped here.
+ */
+export const ProjectModeSchema = z.enum(['crew', 'solo']);
+export type ProjectMode = z.infer<typeof ProjectModeSchema>;
+
 export const ProjectSchema = z.object({
   id: EntityIdSchema,
   name: z.string(),
@@ -231,7 +240,7 @@ export const ProjectSchema = z.object({
    * for back-compat with every project on disk before this field
    * existed.
    */
-  mode: z.enum(['crew', 'solo']).optional(),
+  mode: ProjectModeSchema.optional(),
   /**
    * Optional custom label for this project's lead gezel, overriding the
    * mode-based default ("Voorman" / "Builder") everywhere the UI

@@ -147,6 +147,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
+import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { TaskRunner } from './tasks/runner.js';
@@ -920,10 +921,21 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     tasks.collapseCraftbookForTier(projectId, num, opts),
   );
 
+  // Quota reserve for cloud-subscription night work — one verdict source
+  // shared by the runner's per-handoff admission gate and the manager's
+  // activeness/status classification, so the two can never disagree.
+  const nightQuotaGate = new NightShiftQuotaGate({ store, usage: chat.usageTracker, home });
+
   // NightShiftManager owns the Night Shift ON/OFF state (nightly window +
   // manual shifts). Its `isActive` read gates deferred night-shift work in
   // the scheduler, runner, and enrichment loop below.
-  const nightShift = new NightShiftManager({ store, manager: tasks, events: chatEvents });
+  const nightShift = new NightShiftManager({
+    store,
+    manager: tasks,
+    events: chatEvents,
+    quotaGate: nightQuotaGate,
+    resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
+  });
 
   // Per-project last-activity stamps, fed by the history + chat buses.
   // The nudge scheduler and the meester status generator both read it
@@ -964,6 +976,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),
     isIndexCatchUpActive: () => indexEnrichmentRef?.isCatchUpActive() ?? false,
+    nightQuotaHold: (provider) => nightQuotaGate.holdFor(provider),
     ...(config.taskRunner?.tickIntervalMs
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
@@ -1956,8 +1969,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         {
           getProject: (id) => store.getProject(id),
           sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
-          allowExternalServices: async () =>
-            resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
+          allowConnectorData: async () =>
+            resolveSecurityPolicy(await store.readConfig()).allowConnectorData,
           ensureBinding: async (project, need) => {
             if (need.typeId !== 'github-pulls') return null;
             if (!project.github?.url) return null;

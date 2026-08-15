@@ -120,6 +120,7 @@ import {
   ProjectDetailSchema,
   ProjectGitHubSchema,
   ProjectManagedWorkspaceWritePolicySchema,
+  ProjectModeSchema,
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
@@ -2211,6 +2212,17 @@ export const GezelConfigSchema = z.object({
    *     Disabled or absent inherits the ordinary install defaults. Per-gezel
    *     provider/model pins still win because this remains a default, not a
    *     forced routing rule.
+   *   - `quotaReserve` — cloud-subscription quota reserve. Night-shift
+   *     handoffs to a quota-reporting provider (Copilot, Claude CLI,
+   *     Codex CLI) are held while any of that provider's non-unlimited
+   *     buckets sits at or below the effective floor; running turns are
+   *     never interrupted, and providers without quota data are allowed.
+   *     `overall` holds while a bucket's remaining% <= percent — ON by
+   *     default (absent = enabled, percent 20). `perDay` reserves
+   *     percent x fractional-days-until-reset — opt-in (absent =
+   *     disabled, percent 10 when enabled); buckets without a future
+   *     resetDate skip it. The strictest applicable floor wins per
+   *     bucket, clamped to 0-100. Read by `NightShiftQuotaGate`.
    *
    * Read by `NightShiftManager` (window/enable), the task/chat and index
    * enrichment paths (model defaults), and the Electron main process
@@ -2232,6 +2244,22 @@ export const GezelConfigSchema = z.object({
           enabled: z.boolean().optional(),
           provider: ProviderNameSchema.optional(),
           model: z.string().optional(),
+        })
+        .optional(),
+      quotaReserve: z
+        .object({
+          overall: z
+            .object({
+              enabled: z.boolean().optional(),
+              percent: z.number().min(0).max(100).optional(),
+            })
+            .optional(),
+          perDay: z
+            .object({
+              enabled: z.boolean().optional(),
+              percent: z.number().min(0).max(100).optional(),
+            })
+            .optional(),
         })
         .optional(),
     })
@@ -3813,6 +3841,14 @@ export const UpdateProjectRequestSchema = z.object({
    * not mentioned are untouched.
    */
   properties: z.record(z.string(), z.string()).optional(),
+  /**
+   * Project shape — `solo` (one gezel handles the whole job) vs `crew`. The
+   * Store has always accepted this; it reaches the wire so a solo job can be
+   * promoted when the user brings a second role onto it. Without the
+   * promotion a recruited Voorman keeps the solo tool surface, which strips
+   * exactly the team-management tools they were recruited for.
+   */
+  mode: ProjectModeSchema.optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequestSchema>;
 
@@ -5515,6 +5551,8 @@ export const NightShiftTaskBriefSchema = z.object({
   projectName: z.string(),
   /** Name of the task's current (active) step, when it has one. */
   stepName: z.string().optional(),
+  /** True when this task's next handoff is held by the cloud quota reserve. */
+  quotaHeld: z.boolean().optional(),
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 

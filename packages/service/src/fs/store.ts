@@ -6248,6 +6248,7 @@ export class Store {
       basedOn?: unknown;
       triggers?: unknown;
       toolsets?: unknown;
+      connectors?: unknown;
       hooks?: unknown;
       paramSchema?: unknown;
       command?: unknown;
@@ -6280,6 +6281,9 @@ export class Store {
       entryStepId: v.entryStepId,
       ...(Array.isArray(v.triggers) ? { triggers: v.triggers as string[] } : {}),
       ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
+      ...(Array.isArray(v.connectors)
+        ? { connectors: v.connectors as Craftbook['connectors'] }
+        : {}),
       ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
       ...(v.paramSchema && typeof v.paramSchema === 'object'
         ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] }
@@ -6343,6 +6347,12 @@ export class Store {
       ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
       ...(book.triggers ? { triggers: book.triggers } : {}),
       ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+      // connectors decide whether the launch runs connector prep at all —
+      // the same drop that once disabled the feature for every catalog
+      // craftbook (see runtimeCraftbookFromTemplate). Without them a
+      // project-local book launches with no corpus and `{{corpusScope}}`
+      // survives interpolation straight into the step prompts and gates.
+      ...(book.connectors ? { connectors: book.connectors } : {}),
       ...(book.hooks ? { hooks: book.hooks } : {}),
       ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
       ...(book.command ? { command: book.command } : {}),

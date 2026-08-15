@@ -39,6 +39,7 @@ describe('night-shift task status', () => {
           task('p1/2', 'Queued'),
           task('p1/3', 'Eligible but stranded'),
         ],
+        quotaHeldTaskRefs: () => new Set<string>(),
       },
       chat: { activeTaskRefs: () => new Set(['p1/1']) },
       taskRunner: {
@@ -94,6 +95,7 @@ describe('night-shift task status', () => {
       nightShift: {
         isActive: () => false,
         listPendingTasks: async () => [task('p1/2', 'Queued for tonight')],
+        quotaHeldTaskRefs: () => new Set<string>(),
       },
       chat: { activeTaskRefs: () => new Set<string>() },
       taskRunner: {
@@ -120,5 +122,69 @@ describe('night-shift task status', () => {
         },
       ],
     });
+  });
+
+  it('marks upcoming rows the quota reserve is holding', async () => {
+    const ctx = {
+      nightShift: {
+        isActive: () => false,
+        listPendingTasks: async () => [task('p1/2', 'Waiting on quota')],
+        quotaHeldTaskRefs: () => new Set(['p1/2']),
+      },
+      chat: { activeTaskRefs: () => new Set<string>() },
+      taskRunner: {
+        workSnapshot: () => ({ queuedTaskRefs: ['p1/2'], dispatchedTaskRefs: [] }),
+      },
+      indexEnrichment: {
+        getActivity: () => null,
+      },
+      store: { getProject: async () => ({ id: 'p1', name: 'Project One' }) },
+    } as unknown as ServiceContext;
+
+    const response = await nightShiftRoutes(ctx).request('/tasks');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { upcoming: Array<{ quotaHeld?: boolean }> };
+    expect(body.upcoming[0]?.quotaHeld).toBe(true);
+  });
+});
+
+describe('night-shift status', () => {
+  const HOLD_STATUS = {
+    heldTaskCount: 2,
+    reasons: [
+      {
+        provider: 'copilot',
+        bucket: 'premium_interactions',
+        remainingPercent: 12,
+        floorPercent: 20,
+        rule: 'overall',
+      },
+    ],
+  };
+
+  function statusCtx(quotaHold: typeof HOLD_STATUS | null): ServiceContext {
+    return {
+      nightShift: {
+        isActive: () => false,
+        source: () => null,
+        quotaHoldStatus: () => quotaHold,
+      },
+    } as unknown as ServiceContext;
+  }
+
+  it('embeds the quota-hold summary while work is parked by the reserve', async () => {
+    const response = await nightShiftRoutes(statusCtx(HOLD_STATUS)).request('/status');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      active: false,
+      source: null,
+      quotaHold: HOLD_STATUS,
+    });
+  });
+
+  it('omits quotaHold entirely when nothing is held', async () => {
+    const response = await nightShiftRoutes(statusCtx(null)).request('/status');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ active: false, source: null });
   });
 });

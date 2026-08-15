@@ -561,6 +561,29 @@ describe('QueueMeter — night-shift handoffs', () => {
     expect(within(panel).getByText(/Nothing to do\./)).toBeInTheDocument();
   });
 
+  it('names the quota reserve instead of the window clock while it holds work', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...SCHEDULED_ONLY,
+      taskRunner: {
+        ...SCHEDULED_ONLY.taskRunner,
+        pendingCount: 5,
+        dispatchable: { count: 1, byGezel: { 'gez-1': 1 } },
+        nightShift: { active: true, opensAt: '2026-08-02T22:00:00.000Z', quotaHold: true },
+      },
+    });
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+    await userEvent.click(button);
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(
+      within(panel).getByText('Holding to protect your subscription quota.'),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/Starts/)).not.toBeInTheDocument();
+  });
+
   it('names the sticky reason when AI engagement is switched off', async () => {
     vi.mocked(api.getQueueStatus).mockResolvedValue({
       ...SCHEDULED_ONLY,

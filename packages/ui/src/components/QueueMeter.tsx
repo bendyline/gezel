@@ -130,6 +130,9 @@ function formatClock(iso: string): string | undefined {
  */
 function scheduledHandoffNote(nightShift: TaskRunnerState['nightShift']): string {
   if (!nightShift) return 'Held for the next Night Shift.';
+  // The reserve outranks the clock: "starts 22:00" would be a lie while
+  // the hold is what's actually parking the work.
+  if (nightShift.quotaHold) return 'Holding to protect your subscription quota.';
   if (!nightShift.opensAt) return 'Night Shift is off — turn it on to run these.';
   if (nightShift.active) return 'Held for the next window.';
   const opensAt = formatClock(nightShift.opensAt);

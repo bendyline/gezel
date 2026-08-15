@@ -47,6 +47,21 @@ language, for instance, is a **project property** — set once in project
 Settings (or the first time you enable the translation run) and reused by
 every run after that.
 
+## Keeping your subscription quota safe
+
+Night work on a Claude, Codex, or Copilot subscription spends the same
+quota you use during the day, so the Night Shift keeps a **quota
+reserve**: by default it stops sending work to a subscription once you're
+within 20% of a quota, leaving the rest for you. You can adjust that
+floor in Settings → Night Shift, or add a daily reserve that scales with
+the time left — 10% a day with four days until your quota resets keeps
+the last 40% for you.
+
+Work that's already running always finishes; only new work is held. Held
+work resumes on its own when a quota window resets (if the machine is
+awake) or the next night, and the moon menu says what's being protected
+and why. Gezels on local models spend nothing and are never held.
+
 ## The morning review
 
 When the window closes, gezel gathers what the shift accomplished and

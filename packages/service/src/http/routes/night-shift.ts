@@ -21,6 +21,17 @@ const log = createLogger('http');
 export function nightShiftRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
+  // One shape for /status and the /manual response: on/off, plus the
+  // quota-reserve hold summary while pending night work is parked by it.
+  const statusJson = () => {
+    const quotaHold = ctx.nightShift.quotaHoldStatus();
+    return {
+      active: ctx.nightShift.isActive(),
+      source: ctx.nightShift.source(),
+      ...(quotaHold ? { quotaHold } : {}),
+    };
+  };
+
   app.post('/manual', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { action?: string };
     if (body.action === 'start') {
@@ -31,12 +42,10 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: "action must be 'start' or 'stop'" }, 400);
     }
     log.info(`[night-shift] manual ${body.action} → active=${ctx.nightShift.isActive()}`);
-    return c.json({ active: ctx.nightShift.isActive(), source: ctx.nightShift.source() });
+    return c.json(statusJson());
   });
 
-  app.get('/status', (c) =>
-    c.json({ active: ctx.nightShift.isActive(), source: ctx.nightShift.source() }),
-  );
+  app.get('/status', (c) => c.json(statusJson()));
 
   // What the shift is working on: pending night-shift tasks split into
   // those with a turn in flight (`active`) and the rest (`upcoming`).
@@ -50,6 +59,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
     const running = ctx.chat.activeTaskRefs();
     const runner = ctx.taskRunner.workSnapshot();
     const queued = new Set([...runner.queuedTaskRefs, ...runner.dispatchedTaskRefs]);
+    const quotaHeld = ctx.nightShift.quotaHeldTaskRefs();
     const tasks = await ctx.nightShift.listPendingTasks();
     const projectNames = new Map<string, string>();
     const active: NightShiftTaskBrief[] = [];
@@ -67,6 +77,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
         title: t.title,
         projectName,
         ...(stepName ? { stepName } : {}),
+        ...(quotaHeld.has(t.ref) ? { quotaHeld: true } : {}),
       };
       if (running.has(t.ref)) active.push(brief);
       else if (queued.has(t.ref)) upcoming.push(brief);

@@ -62,6 +62,7 @@ import {
 } from '../../packages/toolset-import-hook.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
+import { detectAndPersistProjectType } from '../../project-type/detect.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
@@ -150,8 +151,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         name: ensured.createdGezel.name,
       });
     }
-    // Re-read so the response carries the freshly-set voormanGezelId; the
-    // UI selects the project from this payload and opens Chat on the lead.
+    // Classify a folder-backed project up front, off a bounded static scan of
+    // the directory. The index tick would get here eventually, but not for the
+    // first session: opening a folder and immediately asking "what should I
+    // build?" is exactly when the craftbook shortlist and the gezel-role
+    // suggestions need to know whether this is code, prose, data, or assets.
+    if (body.workingDir) {
+      await detectAndPersistProjectType({ store: ctx.store }, created.id);
+    }
+    // Re-read so the response carries the freshly-set voormanGezelId and
+    // detected type; the UI selects the project from this payload and opens
+    // Chat on the lead.
     const project = (await ctx.store.getProject(created.id)) ?? created;
     // Announce the new project on the project + global SSE streams so
     // always-mounted surfaces (the left sidebar PROJECTS list) fold it

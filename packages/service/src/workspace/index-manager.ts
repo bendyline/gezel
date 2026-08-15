@@ -21,7 +21,7 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
-import { PROJECT_TYPE_MIN_SCORE, detectProjectType } from '../project-type/detect.js';
+import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,
   type ImportSyncDeps,
@@ -486,26 +486,18 @@ export class WorkspaceIndexManager {
       } catch (err) {
         log.warn(`[index] content-index refresh failed for ${projectId}: ${describe(err)}`);
       }
-
-      // Classify the project's output type from the freshly-indexed file mix
-      // + about/mission text, and persist the top result. Drives the curated
-      // craftbook shortlist in the rail. Never overwrites the user's explicit
-      // `projectTypeId` override; best-effort, never breaks the scan.
-      try {
-        const ranked = await detectProjectType(
-          { store: this.store, contentIndex: this.contentIndex },
-          projectId,
-        );
-        const top = ranked[0];
-        if (top && top.score >= PROJECT_TYPE_MIN_SCORE) {
-          await this.store.updateProject(projectId, {
-            detectedProjectType: { id: top.id, score: top.score, scannedAt: nowIso() },
-          });
-        }
-      } catch (err) {
-        log.warn(`[index] project-type detect failed for ${projectId}: ${describe(err)}`);
-      }
     }
+
+    // Classify the project's output type from its file mix + about/mission
+    // text, and persist the top result. Drives the curated craftbook shortlist
+    // in the rail and the gezel-role affinity lists. Never overwrites the
+    // user's explicit `projectTypeId` override; best-effort, never breaks the
+    // scan. Runs outside the `contentIndex` gate above because detection falls
+    // back to a bounded folder scan when no index profile exists.
+    await detectAndPersistProjectType(
+      { store: this.store, contentIndex: this.contentIndex },
+      projectId,
+    );
 
     // Make sure the project has a voorman — promote a project-member gezel,
     // reuse an existing voorman, or recruit a real one from the `voorman`

@@ -2,11 +2,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TaskCraftbook, TaskCraftbookStep } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { ProviderQueue } from '../providers/queue.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
+import type { QuotaReserveHold } from './night-quota-gate.js';
 import { TaskRunner } from './runner.js';
 
 /** Build a fixture craftbook from inline step records — keeps tests terse. */
@@ -1243,6 +1244,145 @@ describe('TaskRunner — night-shift gating + priority', () => {
 
     expect(dispatcher.dispatches).toHaveLength(0);
     expect(runner.snapshot().pendingCount).toBe(1);
+  });
+});
+
+describe('TaskRunner — night quota reserve gating', () => {
+  const hold: QuotaReserveHold = {
+    provider: 'copilot',
+    bucket: 'premium_interactions',
+    remainingPercent: 10,
+    floorPercent: 20,
+    rule: 'overall',
+  };
+
+  async function writeStepTask(
+    num: number,
+    opts: { nightShift?: boolean; gezelId?: string },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const gezelId = opts.gezelId ?? 'bea';
+    await store.writeTask({
+      projectId: 'p1',
+      num,
+      ref: `p1/${num}`,
+      title: `t${num}`,
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId },
+      craftbook: fixtureCraftbook([
+        { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId }, createdAt: now },
+      ]),
+      activeStepId: 'plan',
+      ...(opts.nightShift ? { nightShift: { enabled: true } } : {}),
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+  }
+
+  it('holds a night handoff under quota, files it as scheduled, then releases', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, { nightShift: true });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    let verdict: QuotaReserveHold | null = hold;
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      nightQuotaHold: async () => verdict,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(0);
+    const snap = runner.snapshot();
+    expect(snap.scheduled).toEqual({ count: 1, byGezel: { bea: 1 } });
+    expect(snap.dispatchable.count).toBe(0);
+    expect(snap.holdReason).toBeUndefined();
+
+    // Quota freed (e.g. a five_hour window reset) — the next tick dispatches.
+    verdict = null;
+    await runner.tick();
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/1']);
+    expect(runner.snapshot().pendingCount).toBe(0);
+  });
+
+  it('holds only the gated provider: local night work keeps flowing', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await store.createGezel({ name: 'Cas' });
+    await writeStepTask(1, { nightShift: true, gezelId: 'bea' });
+    await writeStepTask(2, { nightShift: true, gezelId: 'cas' });
+
+    const dispatcher = new FakeDispatcher(
+      new Map([
+        ['bea', 'copilot'],
+        ['cas', 'llama-cpp'],
+      ]),
+    );
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    dispatcher.setProvider('llama-cpp', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      nightQuotaHold: async (provider) => (provider === 'copilot' ? hold : null),
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    runner.enqueueHandoff({ taskRef: 'p1/2', stepId: 'plan', gezelId: 'cas', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/2']);
+    expect(runner.snapshot().scheduled).toEqual({ count: 1, byGezel: { bea: 1 } });
+  });
+
+  it('does not quota-gate daytime (non-night) work on the same provider', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const gate = vi.fn(async () => hold);
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      nightQuotaHold: gate,
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/1']);
+    expect(gate).not.toHaveBeenCalled();
+  });
+
+  it('dispatches when the gate rejects (optimistic on gate failure)', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, { nightShift: true });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      nightQuotaHold: async () => {
+        throw new Error('gate exploded');
+      },
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches.map((d) => d.taskRef)).toEqual(['p1/1']);
   });
 });
 

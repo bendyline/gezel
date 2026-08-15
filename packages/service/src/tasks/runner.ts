@@ -50,6 +50,7 @@ import {
 import type { Store } from '../fs/store.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { mainBookSource, stepOwnerGezelId } from './manager.js';
+import type { QuotaReserveHold } from './night-quota-gate.js';
 
 const log = createLogger('tasks');
 
@@ -98,8 +99,12 @@ export interface PendingHandoff {
    * activated during the day is filed as scheduled work immediately,
    * rather than counting as a backlog item for the up-to-one-tick window
    * before the first `tick` reads it back off disk.
+   *
+   * `'night-quota'` — the shift is ON but this handoff's resolved provider
+   * is inside the configured cloud quota reserve; re-checked every tick so
+   * a mid-window quota reset releases it.
    */
-  heldFor?: 'night-shift' | 'provider-busy';
+  heldFor?: 'night-shift' | 'night-quota' | 'provider-busy';
 }
 
 /** One side of the pending split — see {@link TaskRunner.snapshot}. */
@@ -205,6 +210,13 @@ export interface TaskRunnerOptions {
    * the engine. Defaults to never-active.
    */
   isIndexCatchUpActive?: () => boolean;
+  /**
+   * Quota-reserve verdict for a night handoff's resolved provider. A
+   * non-null hold keeps the handoff on the queue (`heldFor: 'night-quota'`)
+   * without touching in-flight turns — admission-only, like every other
+   * gate here. Defaults to always-allow.
+   */
+  nightQuotaHold?: (provider: ProviderName) => Promise<QuotaReserveHold | null>;
 }
 
 export class TaskRunner {
@@ -215,6 +227,7 @@ export class TaskRunner {
   private readonly isNightShiftActive: () => boolean;
   private readonly isNightShiftPending: (task: Task) => boolean;
   private readonly isIndexCatchUpActive: () => boolean;
+  private readonly nightQuotaHold: (provider: ProviderName) => Promise<QuotaReserveHold | null>;
   private readonly pending: PendingHandoff[] = [];
   private readonly activeDispatches = new Map<
     string,
@@ -241,6 +254,7 @@ export class TaskRunner {
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
     this.isNightShiftPending = opts.isNightShiftPending ?? (() => true);
     this.isIndexCatchUpActive = opts.isIndexCatchUpActive ?? (() => false);
+    this.nightQuotaHold = opts.nightQuotaHold ?? (async () => null);
   }
 
   start(): void {
@@ -360,7 +374,8 @@ export class TaskRunner {
     for (const h of this.pending) {
       byGezel[h.gezelId] = (byGezel[h.gezelId] ?? 0) + 1;
       byProject[h.projectId] = (byProject[h.projectId] ?? 0) + 1;
-      const bucket = h.heldFor === 'night-shift' ? scheduled : dispatchable;
+      const bucket =
+        h.heldFor === 'night-shift' || h.heldFor === 'night-quota' ? scheduled : dispatchable;
       bucket.count += 1;
       bucket.byGezel[h.gezelId] = (bucket.byGezel[h.gezelId] ?? 0) + 1;
     }
@@ -504,6 +519,9 @@ export class TaskRunner {
     const nightItems: PendingHandoff[] = [];
     const taskByHandoffId = new Map<number, Task>();
     const seenSnapshotKeys = new Set<string>();
+    // One quota verdict per provider per tick: several night handoffs on
+    // the same provider shouldn't each re-read config / re-probe a CLI.
+    const quotaVerdicts = new Map<ProviderName, QuotaReserveHold | null>();
     for (const handoff of snapshot) {
       // Status check: has the task moved out of 'active' while we
       // waited? Or been deleted entirely? Drop it either way.
@@ -565,6 +583,24 @@ export class TaskRunner {
           return null;
         });
       if (!providerName) continue;
+
+      // Quota reserve: the shift may be ON while this handoff's cloud
+      // provider sits inside the user's configured reserve. Hold ONLY this
+      // item — local and other-provider night work keeps flowing — and only
+      // at admission: a turn already dispatched is never interrupted.
+      if (isNight) {
+        let quotaHold = quotaVerdicts.get(providerName);
+        if (quotaHold === undefined) {
+          quotaHold = await this.nightQuotaHold(providerName).catch(() => null);
+          quotaVerdicts.set(providerName, quotaHold);
+        }
+        if (quotaHold) {
+          handoff.heldFor = 'night-quota';
+          keep.push(handoff);
+          continue;
+        }
+      }
+
       const provider = this.dispatcher.getProvider(providerName);
       const lane = 'background' as const;
       if (provider?.queue) {

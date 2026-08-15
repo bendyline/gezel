@@ -38,7 +38,11 @@ describe('GET /api/queues', () => {
           holdReason: 'provider-busy',
         }),
       },
-      { isActive: () => false, nextStartIso: () => '2026-08-02T22:00:00.000Z' },
+      {
+        isActive: () => false,
+        nextStartIso: () => '2026-08-02T22:00:00.000Z',
+        quotaHoldStatus: () => null,
+      },
     );
 
     const response = await queueRoutes(ctx).request('/');
@@ -64,12 +68,39 @@ describe('GET /api/queues', () => {
           scheduled: { count: 0, byGezel: {} },
         }),
       },
-      { isActive: () => false, nextStartIso: () => null },
+      { isActive: () => false, nextStartIso: () => null, quotaHoldStatus: () => null },
     );
 
     const response = await queueRoutes(ctx).request('/');
     const body = (await response.json()) as { taskRunner: { nightShift: unknown } };
     expect(body.taskRunner.nightShift).toEqual({ active: false, opensAt: null });
+  });
+
+  it('flags the night-shift block while the quota reserve holds work', async () => {
+    const ctx = ctxWith(
+      {
+        snapshot: () => ({
+          pendingCount: 1,
+          pendingByGezel: { wren: 1 },
+          pendingByProject: { default: 1 },
+          dispatchable: { count: 0, byGezel: {} },
+          scheduled: { count: 1, byGezel: { wren: 1 } },
+        }),
+      },
+      {
+        isActive: () => false,
+        nextStartIso: () => '2026-08-02T22:00:00.000Z',
+        quotaHoldStatus: () => ({ heldTaskCount: 1, reasons: [] }),
+      },
+    );
+
+    const response = await queueRoutes(ctx).request('/');
+    const body = (await response.json()) as { taskRunner: { nightShift: unknown } };
+    expect(body.taskRunner.nightShift).toEqual({
+      active: false,
+      opensAt: '2026-08-02T22:00:00.000Z',
+      quotaHold: true,
+    });
   });
 
   it('keeps product queues local and merges only sanitized native broker telemetry', async () => {
@@ -96,7 +127,11 @@ describe('GET /api/queues', () => {
           pendingByProject: { project: 2 },
         }),
       },
-      { isActive: () => true, nextStartIso: () => '2026-08-05T22:00:00.000Z' },
+      {
+        isActive: () => true,
+        nextStartIso: () => '2026-08-05T22:00:00.000Z',
+        quotaHoldStatus: () => null,
+      },
     );
     Object.assign(ctx.chat, {
       getProviderIfReady: (name: string) => (name === 'openai' ? localProvider : null),

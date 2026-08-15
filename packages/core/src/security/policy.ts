@@ -77,6 +77,27 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
    * separate, deliberate action and is not gated here.
    */
   allowMail: boolean;
+  /**
+   * Whether a connector may move data at all — the user-initiated paths
+   * (bind, manual sync, a task launch whose craftbook declares a corpus).
+   *
+   * Deliberately NOT `allowExternalServices`. That flag is an *agency*
+   * gate: what the model may reach for on its own. A connector is the
+   * opposite arrangement — the runtime holds the credential and does the
+   * fetch, there is no model-callable fetch tool, and the gezel only ever
+   * reads normalized files. What a connector pull actually needs is
+   * permission for the machine to talk to the network on the user's
+   * behalf, which is `allowAppNetwork`: true at `lockdown`, false at
+   * `super-lockdown`, whose promise is that nothing leaves the machine.
+   *
+   * The three levels therefore read: super-lockdown, connectors move no
+   * data; lockdown, they move data when the user asks; free, they also
+   * sync autonomously in the background (that loop stays on
+   * `allowExternalServices`). Model-initiated write-back — `send_email`,
+   * `publish_post` — is unaffected and stays on `allowExternalServices`
+   * too: committing transmits, which is real outbound agency.
+   */
+  allowConnectorData: boolean;
 }
 
 /**
@@ -340,5 +361,7 @@ export function resolveSecurityPolicy(
     allowModelGit: caps.allowFileEdits,
     // Email sync + send are external-service network actions (see field doc).
     allowMail: caps.allowExternalServices,
+    // Runtime-side corpus movement, not model agency (see field doc).
+    allowConnectorData: caps.allowAppNetwork,
   };
 }

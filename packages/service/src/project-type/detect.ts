@@ -1,6 +1,7 @@
 import { PROJECT_TYPES, type ProjectType } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import { scanFolderProfile } from './scan-folder.js';
 
 /**
  * Project-type auto-detection. Scores the bundled taxonomy against a
@@ -103,14 +104,65 @@ async function readAboutText(store: Store, projectId: string): Promise<string> {
 }
 
 /**
- * Detect a project's type from its index + about text. Best-effort: any I/O
- * failure degrades to whichever signal is available (or an empty ranking).
+ * Detect a project's type from its file shape + about text. Best-effort: any
+ * I/O failure degrades to whichever signal is available (or an empty ranking).
+ *
+ * The content index is the preferred profile source — it is already built and
+ * carries the whole tree. When it is absent or empty (no `contentIndex` wired,
+ * or the project has never been indexed) we fall back to a bounded folder scan
+ * so a freshly-opened folder still gets a type on its first session instead of
+ * waiting for the index tick.
  */
 export async function detectProjectType(
-  deps: { store: Store; contentIndex: ContentIndex },
+  deps: { store: Store; contentIndex?: ContentIndex | undefined },
   projectId: string,
 ): Promise<ProjectTypeScore[]> {
-  const profile = await deps.contentIndex.languageProfile(projectId).catch(() => null);
+  const indexed = (await deps.contentIndex?.languageProfile(projectId).catch(() => null)) ?? null;
+  const profile =
+    indexed && indexed.fileCount > 0 ? indexed : await scanProjectWorkspace(deps.store, projectId);
   const aboutText = await readAboutText(deps.store, projectId);
   return scoreProjectTypes({ profile, aboutText });
+}
+
+/** Bounded walk of the project's workspace dir; null on any failure. */
+async function scanProjectWorkspace(
+  store: Store,
+  projectId: string,
+): Promise<LanguageProfile | null> {
+  try {
+    const dir = await store.projectWorkspaceDir(projectId);
+    if (!dir) return null;
+    return await scanFolderProfile(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect and persist `project.detectedProjectType` when the top candidate
+ * clears {@link PROJECT_TYPE_MIN_SCORE}. Returns the persisted entry, or null
+ * when nothing scored high enough (or detection failed).
+ *
+ * Never touches a project carrying an explicit `projectTypeId` — the user's
+ * override is authoritative and re-detecting under it would only churn a field
+ * nothing reads. Best-effort throughout: callers run this beside real work
+ * (project creation, the index tick) and must not fail because of it.
+ */
+export async function detectAndPersistProjectType(
+  deps: { store: Store; contentIndex?: ContentIndex | undefined },
+  projectId: string,
+): Promise<{ id: string; score: number } | null> {
+  try {
+    const project = await deps.store.getProject(projectId);
+    if (project?.projectTypeId) return null;
+    const ranked = await detectProjectType(deps, projectId);
+    const top = ranked[0];
+    if (!top || top.score < PROJECT_TYPE_MIN_SCORE) return null;
+    await deps.store.updateProject(projectId, {
+      detectedProjectType: { id: top.id, score: top.score, scannedAt: new Date().toISOString() },
+    });
+    return top;
+  } catch {
+    return null;
+  }
 }

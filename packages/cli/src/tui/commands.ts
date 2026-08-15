@@ -26,7 +26,7 @@ export const SLASH_COMMAND_WORDWHEEL_SIZE = 4;
 export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'help', description: 'show the command reference' },
   { name: 'project', description: 'switch active project' },
-  { name: 'gezel', description: 'switch active gezel' },
+  { name: 'gezel', description: 'switch gezel, or bring a role onto the project' },
   { name: 'allow', description: 'allow a project permission' },
   { name: 'disallow', description: 'disallow a project permission' },
   { name: 'show', description: 'show optional chat details' },

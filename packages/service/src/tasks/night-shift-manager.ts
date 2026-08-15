@@ -15,7 +15,9 @@ import {
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { Store } from '../fs/store.js';
-import type { TaskManager } from './manager.js';
+import type { ProviderName } from '../providers/types.js';
+import { type TaskManager, stepOwnerGezelId } from './manager.js';
+import type { QuotaReserveHold } from './night-quota-gate.js';
 
 const log = createLogger('night-shift');
 
@@ -39,6 +41,24 @@ export interface NightShiftManagerOptions {
   intervalMs?: number;
   /** Clock override for tests. */
   now?: () => Date;
+  /** Quota-reserve verdicts (NightShiftQuotaGate); absent = never hold. */
+  quotaGate?: { holdFor(provider: ProviderName): Promise<QuotaReserveHold | null> };
+  /**
+   * Night-aware provider resolution — the same `chat.providerForGezel`
+   * closure the runner's dispatcher uses, so classification here and
+   * admission there cannot disagree. Absent = the gate never applies.
+   */
+  resolveProviderName?: (
+    gezelId: string,
+    opts?: { nightShift?: boolean },
+  ) => Promise<ProviderName>;
+}
+
+/** Why pending night work is parked, summarized for status surfaces. */
+export interface NightShiftQuotaHoldStatus {
+  heldTaskCount: number;
+  /** One reason per affected provider. */
+  reasons: QuotaReserveHold[];
 }
 
 const TICK_INTERVAL_MS = 30_000;
@@ -55,6 +75,12 @@ const TICK_INTERVAL_MS = 30_000;
  *     pending night-shift tasks remain, then reverts to scheduled logic.
  *   - SCHEDULED: outside the window → off (latch cleared); window open but
  *     no pending work → latch off for the rest of THIS window; otherwise on.
+ *   - QUOTA-HELD: pending work whose resolved provider is inside the cloud
+ *     quota reserve doesn't keep a shift alive. All pending work held →
+ *     off WITHOUT latching (parked, not drained) so a mid-window quota
+ *     reset re-activates on a later tick; a manual request survives the
+ *     hold and resumes by itself. `quotaHoldStatus()` names the parked
+ *     state for the UI.
  *
  * Consumers read `isActive()` synchronously: `TaskRunner` (dispatch gating
  * + priority), `TaskScheduler` (cron-spawn gating), `IndexEnrichmentManager`
@@ -66,6 +92,13 @@ export class NightShiftManager {
   private readonly events: ChatEventBus;
   private readonly intervalMs: number;
   private readonly now: () => Date;
+  private readonly quotaGate?: {
+    holdFor(provider: ProviderName): Promise<QuotaReserveHold | null>;
+  };
+  private readonly resolveProviderName?: (
+    gezelId: string,
+    opts?: { nightShift?: boolean },
+  ) => Promise<ProviderName>;
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
@@ -85,6 +118,10 @@ export class NightShiftManager {
   private enabled = true;
   /** Window config from the last tick — drives the synchronous day-key. */
   private window: NightShiftWindow = DEFAULT_NIGHT_SHIFT_WINDOW;
+  /** Quota-reserve hold summary from the last tick; null when nothing is held. */
+  private quotaHold: NightShiftQuotaHoldStatus | null = null;
+  /** Refs of pending night tasks the quota reserve is holding, per last tick. */
+  private quotaHeldRefs = new Set<string>();
 
   constructor(opts: NightShiftManagerOptions) {
     this.store = opts.store;
@@ -92,6 +129,8 @@ export class NightShiftManager {
     this.events = opts.events;
     this.intervalMs = opts.intervalMs ?? TICK_INTERVAL_MS;
     this.now = opts.now ?? (() => new Date());
+    this.quotaGate = opts.quotaGate;
+    this.resolveProviderName = opts.resolveProviderName;
   }
 
   start(): void {
@@ -115,6 +154,21 @@ export class NightShiftManager {
 
   source(): NightShiftSource {
     return this.src;
+  }
+
+  /**
+   * Why pending night work is parked by the cloud quota reserve, as of the
+   * last tick — null when nothing is held. Non-null both while the shift
+   * runs with a subset held (mixed providers) and while it sits fully
+   * parked (active=false, no latch) waiting for a quota window to reset.
+   */
+  quotaHoldStatus(): NightShiftQuotaHoldStatus | null {
+    return this.quotaHold;
+  }
+
+  /** Refs of the pending night tasks currently held by the quota reserve. */
+  quotaHeldTaskRefs(): ReadonlySet<string> {
+    return this.quotaHeldRefs;
   }
 
   /**
@@ -244,20 +298,37 @@ export class NightShiftManager {
 
     let active = false;
     let src: NightShiftSource = null;
+    let quotaHeld: Array<{ task: Task; hold: QuotaReserveHold }> = [];
 
     if (enabled) {
       const windowKey = nightShiftWindowKey(now, window);
       const todayKey = windowKey ?? localDateKey(now);
-      const pending = await this.hasPendingNightShiftTasks(todayKey);
+      const pendingTasks = await this.pendingNightShiftTasks(todayKey);
+      const pending = pendingTasks.length > 0;
+
+      // Classify only when the outcome can matter — a shift that could
+      // otherwise turn ON this tick. Daytime and latched-off windows skip
+      // the gate so no quota probe ever runs outside a shift.
+      const couldActivate =
+        pending &&
+        (this.manualRequested || (windowKey !== null && this.latchedOffForWindowKey !== windowKey));
+      const { dispatchable, held } = couldActivate
+        ? await this.classifyPending(pendingTasks)
+        : { dispatchable: pendingTasks, held: [] };
+      quotaHeld = held;
+      const hasDispatchable = dispatchable.length > 0;
 
       if (this.manualRequested) {
-        if (pending) {
-          active = true;
-          src = 'manual';
-        } else {
+        if (!pending) {
           // Manual shift drained — revert: fall through to scheduled logic.
           this.manualRequested = false;
+        } else if (hasDispatchable) {
+          active = true;
+          src = 'manual';
         }
+        // else: everything is quota-held. Keep the request — the user asked
+        // for this shift, so it resumes by itself when quota frees; stopManual
+        // remains the way out. Not active, so keepAwake releases below.
       }
 
       if (!active && !this.manualRequested) {
@@ -267,12 +338,25 @@ export class NightShiftManager {
           // already drained this window — stay off
         } else if (!pending) {
           this.latchedOffForWindowKey = windowKey; // latch off for the rest of the window
+        } else if (!hasDispatchable) {
+          // Quota-held, NOT drained: off this tick but deliberately no latch
+          // — a five_hour bucket can reset mid-window, and the next tick must
+          // re-activate (firing onActivated to rehydrate + wake the runner).
         } else {
           active = true;
           src = 'scheduled';
         }
       }
     }
+
+    this.quotaHeldRefs = new Set(quotaHeld.map((h) => h.task.ref));
+    this.quotaHold =
+      quotaHeld.length > 0
+        ? {
+            heldTaskCount: quotaHeld.length,
+            reasons: dedupeHoldsByProvider(quotaHeld.map((h) => h.hold)),
+          }
+        : null;
 
     this.keepAwake = active && ns.keepAwakeWhileRunning === true;
     const activating = active && !this.active;
@@ -310,9 +394,54 @@ export class NightShiftManager {
     return this.pendingNightShiftTasks(todayKey);
   }
 
-  /** True if any active night-shift task still has work to do `todayKey`. */
-  private async hasPendingNightShiftTasks(todayKey: string): Promise<boolean> {
-    return (await this.pendingNightShiftTasks(todayKey)).length > 0;
+  /**
+   * Partition pending night tasks into dispatchable vs quota-held using
+   * the same provider resolution the runner's dispatcher applies (night
+   * override included). Optimistic on every failure path: a task whose
+   * owner or provider can't resolve counts dispatchable — the runner
+   * drops it later, and counting it held would wrongly deactivate the
+   * shift. Verdicts are memoized per provider per pass.
+   */
+  private async classifyPending(tasks: Task[]): Promise<{
+    dispatchable: Task[];
+    held: Array<{ task: Task; hold: QuotaReserveHold }>;
+  }> {
+    const dispatchable: Task[] = [];
+    const held: Array<{ task: Task; hold: QuotaReserveHold }> = [];
+    const quotaGate = this.quotaGate;
+    const resolveProviderName = this.resolveProviderName;
+    if (!quotaGate || !resolveProviderName) {
+      return { dispatchable: [...tasks], held };
+    }
+    const providerByGezel = new Map<string, ProviderName | null>();
+    const holdByProvider = new Map<ProviderName, QuotaReserveHold | null>();
+    for (const task of tasks) {
+      const step = task.activeStepId
+        ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
+        : undefined;
+      const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
+      if (!gezelId) {
+        dispatchable.push(task);
+        continue;
+      }
+      let provider = providerByGezel.get(gezelId);
+      if (provider === undefined) {
+        provider = await resolveProviderName(gezelId, { nightShift: true }).catch(() => null);
+        providerByGezel.set(gezelId, provider);
+      }
+      if (!provider) {
+        dispatchable.push(task);
+        continue;
+      }
+      let hold = holdByProvider.get(provider);
+      if (hold === undefined) {
+        hold = await quotaGate.holdFor(provider).catch(() => null);
+        holdByProvider.set(provider, hold);
+      }
+      if (hold) held.push({ task, hold });
+      else dispatchable.push(task);
+    }
+    return { dispatchable, held };
   }
 
   /** Active night-shift tasks pending `todayKey`, in `manager.list` order. */
@@ -342,4 +471,13 @@ export class NightShiftManager {
     this.events.publishGlobalEvent({ type: 'night_shift', active: next, source: src });
     log.info(`[night-shift] ${next ? `ON (${src})` : 'OFF'}`);
   }
+}
+
+/** First hold per provider — one status line per affected provider. */
+function dedupeHoldsByProvider(holds: QuotaReserveHold[]): QuotaReserveHold[] {
+  const byProvider = new Map<ProviderName, QuotaReserveHold>();
+  for (const hold of holds) {
+    if (!byProvider.has(hold.provider)) byProvider.set(hold.provider, hold);
+  }
+  return [...byProvider.values()];
 }

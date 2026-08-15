@@ -30,6 +30,12 @@ export interface DiscoveredWorkspaceFile {
 
 export interface DiscoverWorkspaceFilesOptions {
   maxFiles: number;
+  /**
+   * Budget for the `git ls-files` discovery step. Callers on an interactive
+   * path (project-type scan at create time) lower this so a slow repository
+   * degrades to the filesystem walk instead of blocking the request.
+   */
+  gitTimeoutMs?: number;
 }
 
 /**
@@ -47,7 +53,7 @@ export async function discoverWorkspaceFiles(
   workspaceDir: string,
   opts: DiscoverWorkspaceFilesOptions,
 ): Promise<DiscoveredWorkspaceFile[]> {
-  const gitPaths = await listGitVisiblePaths(workspaceDir, opts.maxFiles);
+  const gitPaths = await listGitVisiblePaths(workspaceDir, opts.maxFiles, opts.gitTimeoutMs);
   if (gitPaths) return statListedFiles(workspaceDir, gitPaths, opts.maxFiles);
 
   const out: DiscoveredWorkspaceFile[] = [];
@@ -62,6 +68,7 @@ export async function discoverWorkspaceFiles(
 async function listGitVisiblePaths(
   workspaceDir: string,
   maxFiles: number,
+  timeoutMs = 30_000,
 ): Promise<string[] | null> {
   try {
     const { stdout } = await runGit(
@@ -76,7 +83,7 @@ async function listGitVisiblePaths(
         '--',
         '.',
       ],
-      { cwd: workspaceDir, timeoutMs: 30_000 },
+      { cwd: workspaceDir, timeoutMs },
     );
     const seen = new Set<string>();
     const paths: string[] = [];

@@ -199,6 +199,41 @@ describe('Night Shift header status', () => {
     expect(await screen.findByText('No work is running or queued.')).toBeInTheDocument();
     expect(screen.queryByText('Up next')).not.toBeInTheDocument();
   });
+
+  it('explains a quota-reserve hold and marks the held rows', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({
+      active: false,
+      source: null,
+      quotaHold: {
+        heldTaskCount: 1,
+        reasons: [
+          {
+            provider: 'copilot',
+            bucket: 'premium_interactions',
+            remainingPercent: 12,
+            floorPercent: 20,
+            rule: 'overall',
+          },
+        ],
+      },
+    });
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [],
+      active: [],
+      upcoming: [{ ref: 'p1/1', title: 'Nightly digest', projectName: 'Molen', quotaHeld: true }],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+
+    expect(
+      await screen.findByText(
+        'Holding 1 task to protect your quota — Copilot premium interactions at 12% (reserve 20%)',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Molen · waiting for quota')).toBeInTheDocument();
+  });
 });
 
 describe('App project deletion navigation', () => {

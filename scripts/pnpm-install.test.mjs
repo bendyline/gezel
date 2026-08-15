@@ -22,6 +22,7 @@ import {
   workspaceDependenciesReady,
 } from './pnpm-install.mjs';
 import {
+  importSpecifier,
   runNodeWithDependencyReadLease,
   runWithDependencyReadLease,
 } from './run-with-dependency-lease.mjs';
@@ -490,6 +491,14 @@ test('repository command wrapper forwards script arguments without a literal sep
   ]);
 });
 
+test('passes the tsx loader to --import as a URL, not a bare Windows path', () => {
+  // `--import D:\...\loader.mjs` throws ERR_UNSUPPORTED_ESM_URL_SCHEME: Node
+  // reads the drive letter as a URL scheme. Bare specifiers pass through.
+  assert.equal(importSpecifier('tsx'), 'tsx');
+  const absolute = process.platform === 'win32' ? 'D:\\repo\\tsx\\loader.mjs' : '/repo/tsx.mjs';
+  assert.match(importSpecifier(absolute), /^file:\/\//);
+});
+
 test('direct-node repository wrapper runs eval entries without a nested pnpm process', async (t) => {
   const root = await fixture(t);
   let invocation;
@@ -520,14 +529,23 @@ test('direct-node repository wrapper runs eval entries without a nested pnpm pro
   assert.equal(invocation.options.env.GEZEL_DEPENDENCY_LEASE_MODE, 'read');
 });
 
-test('direct-node wrapper waits for graceful signal cleanup before exiting', async (t) => {
-  const temp = await fixture(t);
-  const entry = join(temp, 'signal-child.ts');
-  const ready = join(temp, 'ready');
-  const finalized = join(temp, 'finalized');
-  await writeFile(
-    entry,
-    `import { writeFile } from 'node:fs/promises';
+// Windows cannot express what this asserts: `child.kill('SIGINT')` does not
+// deliver a signal there, it terminates the process, so neither the wrapper's
+// handler nor the grandchild's ever runs. Real Ctrl+C still works — the
+// console sends CTRL_C_EVENT to the whole group, reaching both directly.
+test(
+  'direct-node wrapper waits for graceful signal cleanup before exiting',
+  {
+    skip: process.platform === 'win32' ? 'no programmatic SIGINT delivery on Windows' : false,
+  },
+  async (t) => {
+    const temp = await fixture(t);
+    const entry = join(temp, 'signal-child.ts');
+    const ready = join(temp, 'ready');
+    const finalized = join(temp, 'finalized');
+    await writeFile(
+      entry,
+      `import { writeFile } from 'node:fs/promises';
 const [ready, finalized] = process.argv.slice(2);
 const hold = setInterval(() => {}, 1000);
 process.on('SIGINT', () => {
@@ -535,44 +553,45 @@ process.on('SIGINT', () => {
 });
 void writeFile(ready, 'ready');
 `,
-  );
-  const wrapper = spawn(
-    process.execPath,
-    [
-      fileURLToPath(new URL('run-with-dependency-lease.mjs', import.meta.url)),
-      '--direct-node',
-      entry,
-      ready,
-      finalized,
-    ],
-    {
-      cwd: fileURLToPath(new URL('..', import.meta.url)),
-      stdio: ['ignore', 'ignore', 'pipe'],
-    },
-  );
-  let stderr = '';
-  wrapper.stderr.setEncoding('utf8');
-  wrapper.stderr.on('data', (chunk) => {
-    stderr += chunk;
-  });
-  t.after(() => {
-    if (wrapper.exitCode === null && !wrapper.killed) wrapper.kill('SIGKILL');
-  });
+    );
+    const wrapper = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL('run-with-dependency-lease.mjs', import.meta.url)),
+        '--direct-node',
+        entry,
+        ready,
+        finalized,
+      ],
+      {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        stdio: ['ignore', 'ignore', 'pipe'],
+      },
+    );
+    let stderr = '';
+    wrapper.stderr.setEncoding('utf8');
+    wrapper.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    t.after(() => {
+      if (wrapper.exitCode === null && !wrapper.killed) wrapper.kill('SIGKILL');
+    });
 
-  const deadline = Date.now() + 5_000;
-  while (!existsSync(ready) && Date.now() < deadline) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
-  }
-  assert.equal(existsSync(ready), true, `signal child did not become ready: ${stderr}`);
-  wrapper.kill('SIGINT');
-  const exit = await new Promise((resolveExit, rejectExit) => {
-    wrapper.once('error', rejectExit);
-    wrapper.once('close', (code, signal) => resolveExit({ code, signal }));
-  });
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(ready) && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.equal(existsSync(ready), true, `signal child did not become ready: ${stderr}`);
+    wrapper.kill('SIGINT');
+    const exit = await new Promise((resolveExit, rejectExit) => {
+      wrapper.once('error', rejectExit);
+      wrapper.once('close', (code, signal) => resolveExit({ code, signal }));
+    });
 
-  assert.deepEqual(exit, { code: 7, signal: null });
-  assert.equal(existsSync(finalized), true, 'wrapper exited before child cleanup completed');
-});
+    assert.deepEqual(exit, { code: 7, signal: null });
+    assert.equal(existsSync(finalized), true, 'wrapper exited before child cleanup completed');
+  },
+);
 
 test('build, test, typecheck, and lint entry points use dependency read leases', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));

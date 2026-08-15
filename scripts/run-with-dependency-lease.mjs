@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { withDependencyReadLease } from './dependency-lease.mjs';
@@ -78,6 +78,16 @@ export async function runWithDependencyReadLease(options = {}) {
 }
 
 /**
+ * `--import` accepts a URL or a bare specifier, and `require.resolve` returns
+ * an absolute filesystem path. On Windows Node parses that path's drive letter
+ * as a URL scheme and throws ERR_UNSUPPORTED_ESM_URL_SCHEME before the entry
+ * ever loads, so every `--direct-node` leased run (the eval CLIs) died there.
+ */
+export function importSpecifier(value) {
+  return isAbsolute(value) ? pathToFileURL(value).href : value;
+}
+
+/**
  * Run a TypeScript entry directly under Node while retaining the checkout
  * dependency lease. Eval CLIs use this path so an interrupt reaches the
  * process that owns trial cleanup; a nested pnpm process can exit on SIGINT
@@ -101,7 +111,7 @@ export async function runNodeWithDependencyReadLease(options = {}) {
     spawnChild: (env) =>
       (options.spawnNodeFn ?? spawn)(
         process.execPath,
-        ['--import', tsxImport, absoluteEntry, ...forwardedArgs],
+        ['--import', importSpecifier(tsxImport), absoluteEntry, ...forwardedArgs],
         {
           cwd: repoRoot,
           env,
