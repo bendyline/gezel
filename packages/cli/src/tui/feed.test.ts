@@ -1,6 +1,7 @@
 import type { ChatEventEnvelope } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_FEED_ROW_CHARS,
   type TurnMap,
   appendShellChunk,
   finalizeShellRun,
@@ -47,7 +48,7 @@ describe('reduceTurns live status', () => {
     );
 
     expect(turns.get('s1')).toMatchObject({
-      label: 'running tool · write_artifact',
+      label: 'running tool · write_artifact · ~5 tokens',
       activeToolName: 'write_artifact',
     });
   });
@@ -92,6 +93,60 @@ describe('reduceFeed task events', () => {
         taskEvent: { kind: 'task.status.changed', gezelId: 'reviewer' },
       }),
     ]);
+  });
+});
+
+describe('reduceFeed thinking', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('can keep reasoning hidden explicitly', () => {
+    expect(
+      reduceFeed([], envelope({ type: 'reasoning_delta', content: 'private thought' }), {
+        showThinking: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it('streams reasoning into one row and closes it before the visible answer', () => {
+    let rows = reduceFeed([], envelope({ type: 'reasoning_delta', content: 'Inspect ' }), {
+      showThinking: true,
+    });
+    rows = reduceFeed(rows, envelope({ type: 'reasoning_delta', content: 'the workspace.' }), {
+      showThinking: true,
+    });
+    rows = reduceFeed(rows, envelope({ type: 'delta', content: 'I built it.' }), {
+      showThinking: true,
+    });
+
+    expect(rows.map((row) => [row.kind, row.text, row.open])).toEqual([
+      ['thinking', 'Inspect the workspace.', false],
+      ['assistant', 'I built it.', true],
+    ]);
+  });
+
+  it('bounds retained streamed text after it exceeds the render limit', () => {
+    let rows = reduceFeed(
+      [],
+      envelope({ type: 'reasoning_delta', content: 'x'.repeat(MAX_FEED_ROW_CHARS) }),
+      { showThinking: true },
+    );
+    rows = reduceFeed(
+      rows,
+      envelope({ type: 'reasoning_delta', content: 'overflow'.repeat(1_000) }),
+      { showThinking: true },
+    );
+    const capped = rows[0]?.text;
+    rows = reduceFeed(rows, envelope({ type: 'reasoning_delta', content: 'more overflow' }), {
+      showThinking: true,
+    });
+
+    expect(capped).toHaveLength(MAX_FEED_ROW_CHARS + 1);
+    expect(rows[0]?.text).toBe(capped);
   });
 });
 
@@ -152,7 +207,120 @@ describe('reduceFeed queued messages', () => {
   });
 });
 
+describe('reduceFeed cold-start messages', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('shows the submitted text while chat starts, then replaces it with the durable message', () => {
+    let rows = reduceFeed(
+      [],
+      envelope({ type: 'user_message_pending', preview: 'hello from the terminal' }),
+    );
+    let turns = reduceTurns(
+      new Map(),
+      envelope({ type: 'user_message_pending', preview: 'hello from the terminal' }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        key: 'startup-s1',
+        kind: 'pending',
+        text: 'hello from the terminal',
+      }),
+    ]);
+    expect(turns.get('s1')?.label).toBe('preparing chat');
+
+    rows = reduceFeed(
+      rows,
+      envelope({
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'hello from the terminal',
+          at: '2026-08-14T12:00:00.000Z',
+        },
+      }),
+    );
+    turns = reduceTurns(
+      turns,
+      envelope({
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'hello from the terminal',
+          at: '2026-08-14T12:00:00.000Z',
+        },
+      }),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'hello from the terminal' }),
+    ]);
+    expect(turns.get('s1')?.label).toBe('thinking…');
+  });
+
+  it('removes the pending text when provider startup fails', () => {
+    const pending = reduceFeed([], envelope({ type: 'user_message_pending', preview: 'hello' }));
+
+    expect(
+      reduceFeed(pending, envelope({ type: 'error', error: 'local model could not start' })),
+    ).toEqual([expect.objectContaining({ kind: 'error', text: 'local model could not start' })]);
+  });
+});
+
 describe('reduceFeed tool events', () => {
+  const envelope = (event: ChatEventEnvelope['event']): ChatEventEnvelope => ({
+    sessionId: 's1',
+    gezelId: 'g1',
+    projectId: 'default',
+    event,
+  });
+
+  it('keeps write bodies hidden by default', () => {
+    const rows = reduceFeed(
+      [],
+      envelope({
+        type: 'tool_args_delta',
+        name: 'write_file',
+        content: '{"path":"index.html","content":"<main>hidden</main>"}',
+      }),
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  it('streams only the selected write body when enabled', () => {
+    let rows = reduceFeed(
+      [],
+      envelope({
+        type: 'tool_args_delta',
+        name: 'write_file',
+        content: '{"path":"index.html","content":"<main>',
+      }),
+      { showWrites: true },
+    );
+    rows = reduceFeed(
+      rows,
+      envelope({ type: 'tool_args_delta', name: '', content: 'Snake</main>"}' }),
+      { showWrites: true },
+    );
+    rows = reduceFeed(
+      rows,
+      envelope({ type: 'tool', name: 'write_file', durationMs: 12, success: true }),
+      { showWrites: true },
+    );
+
+    expect(rows.map((row) => [row.kind, row.text, row.open])).toEqual([
+      ['write', '<main>Snake</main>', false],
+      ['tool', '🔧 write_file', false],
+    ]);
+    expect(rows.map((row) => row.text).join('\n')).not.toContain('index.html');
+  });
+
   it('shows the server-built args summary on the tool row', () => {
     const event: ChatEventEnvelope = {
       sessionId: 's1',
@@ -211,6 +379,7 @@ describe('sessionToFeedRows', () => {
           role: 'assistant',
           content: 'The report is ready.',
           at: '2026-08-08T12:01:00.000Z',
+          reasoning: 'I should verify the report before replying.',
           toolCalls: [
             { name: 'write_file', durationMs: 20, success: true },
             {
@@ -232,11 +401,31 @@ describe('sessionToFeedRows', () => {
 
     expect(rows.map((row) => [row.kind, row.text])).toEqual([
       ['user', 'Where are we?'],
+      ['thinking', 'I should verify the report before replying.'],
       ['tool', '🔧 write_file'],
       ['tool', '🔧 read_file · Read docs/plan.md'],
       ['assistant', 'The report is ready.'],
     ]);
     expect(rows.every((row) => row.sessionId === 'session-2')).toBe(true);
+
+    const rowsWithoutThinking = sessionToFeedRows(
+      {
+        id: 'session-2',
+        gezelId: 'meester',
+        messages: [
+          {
+            role: 'assistant',
+            content: 'The report is ready.',
+            at: '2026-08-08T12:01:00.000Z',
+            reasoning: 'I should verify the report before replying.',
+          },
+        ],
+      },
+      { showThinking: false },
+    );
+    expect(rowsWithoutThinking.map((row) => [row.kind, row.text])).toEqual([
+      ['assistant', 'The report is ready.'],
+    ]);
   });
 });
 
@@ -270,5 +459,15 @@ describe('shell feed rows', () => {
       text: 'done\n[exit 0 · 0.0s]',
       open: false,
     });
+  });
+
+  it('does not retain a runaway terminal stream beyond the render limit', () => {
+    let rows = appendShellChunk([], 'run-large', 'x'.repeat(MAX_FEED_ROW_CHARS));
+    rows = appendShellChunk(rows, 'run-large', 'y'.repeat(MAX_FEED_ROW_CHARS));
+    const capped = rows[0]?.text;
+    rows = appendShellChunk(rows, 'run-large', 'ignored');
+
+    expect(capped).toHaveLength(MAX_FEED_ROW_CHARS + 1);
+    expect(rows[0]?.text).toBe(capped);
   });
 });

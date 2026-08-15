@@ -23,7 +23,10 @@ device-ranked model choices:
 3. Other compatible chat-only models, ordered for this device.
 
 Downloads show live progress and activate inside the running daemon, so setup
-continues directly into the TUI without a restart.
+continues directly into the TUI without a restart. Setup only offers helpers
+whose runtime is present: the lean npm install omits the in-process Kokoro TTS
+stack, while desktop and relocatable distributions include its reviewed
+runtime.
 
 If the per-user or machine-shared store already has the configured model, the
 TUI uses it without downloading another copy. A stale recommendation never
@@ -87,8 +90,9 @@ CLI-owned daemon on the canonical port.
 
 ## What you get with no further setup
 
-The CLI does not bundle native inference engines; those are downloaded only on
-demand when you opt into on-device models. Straight away you can use:
+The CLI does not bundle model weights or native inference engines; those are
+downloaded only on demand when you opt into on-device models. Straight away
+you can use:
 
 - The interactive TUI (`gezel`) and one-shot prompts (`gezel run "…"`)
 - Cloud providers — OpenAI, Anthropic, GitHub Copilot, and any

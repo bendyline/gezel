@@ -443,6 +443,7 @@ export function BootstrapGate(props: {
     );
     const workshopDownloadBytes =
       accessoryBytes + (best && !bestInstalled ? best.approxSizeBytes : 0);
+    const workshopHelperLabels = screen.plan.accessories.map(accessoryKindLabel).join(', ');
     const options = [
       ...(best
         ? [
@@ -452,7 +453,7 @@ export function BootstrapGate(props: {
                 workshopDownloadBytes > 0
                   ? formatDownloadSize(workshopDownloadBytes)
                   : 'already available'
-              }`,
+              }${workshopHelperLabels ? ` · includes ${workshopHelperLabels}` : ''}`,
               value: 'bundle',
             },
             {
@@ -671,7 +672,12 @@ async function installChatModel(
   if (model.provider === 'mlx') {
     await client.installMlxModel(model.id, listener);
   } else {
-    await client.installLlamaCppModel(model.id, listener);
+    // Bootstrap owns the choice between a model-only install and the explicit
+    // workshop bundle. Suppress the service's implicit image-reader companion
+    // so "only" really means only, and bundle helpers get their own visible job.
+    await client.installLlamaCppModel(model.id, listener, undefined, {
+      skipCompanion: true,
+    });
   }
   if (terminalError) throw new Error(terminalError);
 }
@@ -724,7 +730,24 @@ function updateDownloadProgress(
   } else if (event.type === 'retrying' && 'attempt' in event) {
     detail = `${job.label} · retrying ${event.attempt}/${event.maxAttempts}`;
   } else if (event.type === 'verifying') {
+    pct = 100;
     detail = `${job.label} · verifying`;
+  } else if (event.type === 'extracting-metadata') {
+    pct = 100;
+    detail = `${job.label} · reading model details`;
+  } else if (event.type === 'companion') {
+    const name = 'name' in event && typeof event.name === 'string' ? event.name : 'Image reader';
+    const written = event.bytesWritten;
+    const all = event.totalBytes;
+    if (typeof written === 'number' && typeof all === 'number' && all > 0) {
+      pct = Math.min(100, Math.floor((written / all) * 100));
+      detail = `${name} · image reader · ${formatDownloadSize(written)} of ${formatDownloadSize(all)}`;
+    } else {
+      detail = `${name} · image reader`;
+    }
+    if ('error' in event && typeof event.error === 'string') {
+      detail = `${name} · image reader unavailable: ${event.error}`;
+    }
   } else if (event.type === 'done') {
     pct = 100;
     detail = `${job.label} · ready`;
@@ -764,6 +787,21 @@ function nativeLabel(engine: NativeEngineName): string {
       return 'local runtime helper';
     case 'ds4-server':
       return 'ds4';
+  }
+}
+
+function accessoryKindLabel(model: BootstrapAccessoryModel): string {
+  switch (model.kind) {
+    case 'image':
+      return 'image generator';
+    case 'recognition':
+      return 'image reader';
+    case 'stt':
+      return 'speech recognition';
+    case 'tts':
+      return 'voice';
+    case 'video':
+      return 'video generator';
   }
 }
 

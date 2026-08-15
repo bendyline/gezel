@@ -10,13 +10,56 @@ import {
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
 } from '../../models/model-id.js';
-import { KOKORO_DEFAULT_MODEL_ID, KOKORO_DEFAULT_VOICES } from '../../providers/audio/kokoro.js';
+import {
+  KOKORO_DEFAULT_MODEL_ID,
+  KOKORO_DEFAULT_VOICES,
+  isKokoroRuntimeAvailable,
+} from '../../providers/audio/kokoro.js';
 import type { AudioModelPullSpec } from '../../providers/audio/types.js';
 import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
 import type { ServiceContext } from '../context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('audio');
+
+export function buildAudioCatalog(options: { kokoroRuntimeAvailable?: boolean } = {}) {
+  const kokoroRuntimeAvailable = options.kokoroRuntimeAvailable ?? isKokoroRuntimeAvailable();
+  return {
+    // All Whisper weights ship under MIT (whisper.cpp / OpenAI Whisper);
+    // Kokoro under Apache 2.0. Both are permissive → "Free, open".
+    stt: WHISPER_MODEL_CATALOG.map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      approxSizeBytes: m.approxSizeBytes,
+      kind: 'stt' as const,
+      license: 'MIT',
+      licenseClass: 'open' as const,
+      licenseShortName: 'MIT',
+      licenseUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+      // The Base (English) variant is the recommended STT default: ~140 MB,
+      // realtime on laptop CPUs. Curated recoScore → ★ badge + auto-pick.
+      ...(m.id === 'whisper-base.en' ? { recoScore: 20 } : {}),
+    })),
+    tts: kokoroRuntimeAvailable
+      ? [
+          {
+            id: KOKORO_DEFAULT_MODEL_ID,
+            name: 'Kokoro 82M v1.0',
+            description:
+              'Apache 2.0 TTS — 54+ voices, ~80MB quantized, near-realtime on M1 / modern desktop CPUs.',
+            approxSizeBytes: 95_000_000,
+            kind: 'tts' as const,
+            license: 'Apache 2.0',
+            licenseClass: 'open' as const,
+            licenseShortName: 'Apache 2.0',
+            licenseUrl: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX',
+            recoScore: 20,
+          },
+        ]
+      : [],
+  };
+}
 
 /**
  * Audio (STT + TTS) endpoints. Mounted at `/api/audio`.
@@ -173,39 +216,7 @@ export function audioRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/catalog', (c) => {
-    return c.json({
-      // All Whisper weights ship under MIT (whisper.cpp / OpenAI Whisper);
-      // Kokoro under Apache 2.0. Both are permissive → "Free, open".
-      stt: WHISPER_MODEL_CATALOG.map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        approxSizeBytes: m.approxSizeBytes,
-        kind: 'stt' as const,
-        license: 'MIT',
-        licenseClass: 'open' as const,
-        licenseShortName: 'MIT',
-        licenseUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-        // The Base (English) variant is the recommended STT default: ~140 MB,
-        // realtime on laptop CPUs. Curated recoScore → ★ badge + auto-pick.
-        ...(m.id === 'whisper-base.en' ? { recoScore: 20 } : {}),
-      })),
-      tts: [
-        {
-          id: KOKORO_DEFAULT_MODEL_ID,
-          name: 'Kokoro 82M v1.0',
-          description:
-            'Apache 2.0 TTS — 54+ voices, ~80MB quantized, near-realtime on M1 / modern desktop CPUs.',
-          approxSizeBytes: 95_000_000,
-          kind: 'tts' as const,
-          license: 'Apache 2.0',
-          licenseClass: 'open' as const,
-          licenseShortName: 'Apache 2.0',
-          licenseUrl: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX',
-          recoScore: 20,
-        },
-      ],
-    });
+    return c.json(buildAudioCatalog());
   });
 
   app.get('/stt/models', async (c) => {

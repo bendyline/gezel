@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 /**
  * Assert that the Electron app namespace contains a discoverable stable release.
  *
- * The repository also hosts `native-v*` engine and npm-package releases. The
+ * The repository also hosts `native-v*` engine and legacy npm-package releases. The
  * desktop updater therefore lists releases and selects the greatest stable tag
  * exactly matching `v<semver>`; GitHub's repository-wide "latest" pointer is
  * deliberately irrelevant. Keep this script aligned with

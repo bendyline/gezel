@@ -44,6 +44,27 @@ const nudgeMemory = new WeakMap<EvalContext, Set<string>>();
  * rejected payload every five seconds only floods logs and cannot heal. */
 const permanentNudgeFailureMemory = new WeakMap<EvalContext, Set<string>>();
 const INFLIGHT_FEEDBACK_DEFER_MS = 4 * 60_000;
+const FEEDBACK_DEFERRAL_LOG_INTERVAL_MS = 60_000;
+const feedbackDeferralLogMemory = new WeakMap<EvalContext, Map<string, number>>();
+
+/**
+ * The success checker polls every five seconds, so a healthy long-running turn
+ * can otherwise write the same deferral line dozens of times. Preserve the
+ * first observation and a one-minute heartbeat without drowning the evidence
+ * around actual sends, mutations, and terminal decisions.
+ */
+function logFeedbackDeferral(ctx: EvalContext, key: string, message: string): void {
+  let perContext = feedbackDeferralLogMemory.get(ctx);
+  if (!perContext) {
+    perContext = new Map();
+    feedbackDeferralLogMemory.set(ctx, perContext);
+  }
+  const now = Date.now();
+  const lastLoggedAt = perContext.get(key);
+  if (lastLoggedAt !== undefined && now - lastLoggedAt < FEEDBACK_DEFERRAL_LOG_INTERVAL_MS) return;
+  perContext.set(key, now);
+  ctx.log(message);
+}
 
 /**
  * Escalation ladder state, keyed by COARSE failure signature (filePath +
@@ -456,7 +477,9 @@ export async function postSniffFeedback(
   const inflight = target ? await targetInflightTurn(ctx, target, deliveryProjectId) : null;
   const inflightFeedbackDeferMs = opts.inflightDeferMs ?? INFLIGHT_FEEDBACK_DEFER_MS;
   if (inflight && (stage >= 3 || inflight.elapsedMs < inflightFeedbackDeferMs)) {
-    ctx.log(
+    logFeedbackDeferral(
+      ctx,
+      `sniff:${filePath}:${target?.gezelId ?? 'unknown'}:${deliveryProjectId ?? 'default'}:${stage >= 3 ? 'exhaustion' : 'nudge'}`,
       `[sniff-feedback] deferred ${stage >= 3 ? 'exhaustion terminal handoff' : 'nudge'} for ${filePath}; target ${target?.gezelId} is still mid-turn for ${Math.round(inflight.elapsedMs / 1000)}s${deliveryProjectId ? ` in project ${deliveryProjectId}` : ''}`,
     );
     return { status: 'deferred' };
@@ -544,6 +567,7 @@ export async function postSniffFeedback(
     const delivered = await ctx.client.messageGezel(target.gezelId, {
       fromGezelId: ctx.meesterId,
       text,
+      suppressReply: true,
       ...deliverableFragment,
       ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
     });
@@ -562,6 +586,7 @@ export async function postSniffFeedback(
       await ctx.client.messageGezel(ensured.gezelId, {
         fromGezelId: ctx.meesterId,
         text: opts.assetHandoff.message,
+        suppressReply: true,
         ...attachableDeliverable(opts.assetHandoff.filePath, ensured.role ?? 'Developer', ctx.log),
         ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
       });
@@ -1132,7 +1157,9 @@ export async function postMissingDeliverableFeedback(
     }
     const firstSeenAt = state.firstSeenTargetAtPoll ?? state.absentPolls;
     if (targetGracePolls > 0 && state.absentPolls - firstSeenAt < targetGracePolls) {
-      ctx.log(
+      logFeedbackDeferral(
+        ctx,
+        `missing:${filePath}:${specialist.gezelId}:${opts.projectId ?? specialist.projectId ?? 'default'}:target-grace`,
         `[sniff-feedback] missing-deliverable nudge for ${filePath} deferred (target ${specialist.gezelId} first seen ${state.absentPolls - firstSeenAt}/${targetGracePolls} polls ago)`,
       );
       return;
@@ -1145,7 +1172,9 @@ export async function postMissingDeliverableFeedback(
     state.coordinatorFallbackSentAtPoll !== undefined &&
     state.absentPolls - state.coordinatorFallbackSentAtPoll < repeatEvery
   ) {
-    ctx.log(
+    logFeedbackDeferral(
+      ctx,
+      `missing:${filePath}:coordinator:repeat-window`,
       `[sniff-feedback] missing-deliverable coordinator fallback for ${filePath} deferred (last sent ${state.absentPolls - state.coordinatorFallbackSentAtPoll}/${repeatEvery} polls ago)`,
     );
     return;
@@ -1177,7 +1206,9 @@ export async function postMissingDeliverableFeedback(
       const deliveryProjectId = opts.projectId ?? specialist.projectId;
       const inflight = await targetInflightTurn(ctx, specialist, deliveryProjectId);
       if (inflight && inflight.elapsedMs < inflightGraceMs) {
-        ctx.log(
+        logFeedbackDeferral(
+          ctx,
+          `missing:${filePath}:${specialist.gezelId}:${deliveryProjectId ?? 'default'}:inflight`,
           `[sniff-feedback] missing-deliverable nudge for ${filePath} deferred; target ${specialist.gezelId} is still mid-turn for ${Math.round(inflight.elapsedMs / 1000)}s${deliveryProjectId ? ` in project ${deliveryProjectId}` : ''}`,
         );
         return;
@@ -1185,6 +1216,7 @@ export async function postMissingDeliverableFeedback(
       await ctx.client.messageGezel(specialist.gezelId, {
         fromGezelId: ctx.meesterId,
         text,
+        suppressReply: true,
         ...attachableDeliverable(filePath, specialist.role, ctx.log),
         ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
       });
@@ -1209,6 +1241,7 @@ export async function postMissingDeliverableFeedback(
         await ctx.client.messageGezel(ensured.gezelId, {
           fromGezelId: ctx.meesterId,
           text,
+          suppressReply: true,
           ...attachableDeliverable(filePath, ensured.role ?? 'Developer', ctx.log),
           ...(opts.projectId ? { projectId: opts.projectId } : {}),
         });
@@ -1221,7 +1254,9 @@ export async function postMissingDeliverableFeedback(
           `[sniff-feedback] missing-deliverable nudge #${state.nudgesSent + 1} -> ensured developer ${ensured.gezelId} for ${filePath} (${reason})`,
         );
       } else {
-        ctx.log(
+        logFeedbackDeferral(
+          ctx,
+          `missing:${filePath}:coordinator:no-specialist`,
           `[sniff-feedback] missing-deliverable nudge for ${filePath} deferred (no implementation specialist yet, absent ${state.absentPolls} polls)`,
         );
         return;

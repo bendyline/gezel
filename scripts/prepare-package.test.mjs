@@ -217,7 +217,7 @@ test('dry run reports both stamps without writing or rebuilding', async () => {
   }
 });
 
-test('the release config still wires prepareCmd at this script', async () => {
+test('the release config normalizes package state before committing without creating GitHub Releases', async () => {
   // A dropped hook is the exact failure this script exists to prevent: the
   // release succeeds and every published package reports 0.0.0 forever.
   const config = JSON.parse(await readFile(join(here, '..', '.releaserc.json'), 'utf8'));
@@ -229,6 +229,7 @@ test('the release config still wires prepareCmd at this script', async () => {
     exec[1].prepareCmd ?? '',
     /scripts\/prepare-package\.mjs \$\{nextRelease\.version\}/,
   );
+  assert.match(exec[1].prepareCmd ?? '', /scripts\/format-release-manifest\.mjs/);
   assert.match(exec[1].publishCmd ?? '', /scripts\/publish-package\.mjs/);
   const execIndex = config.plugins.indexOf(exec);
   const npmIndex = config.plugins.findIndex(
@@ -244,6 +245,13 @@ test('the release config still wires prepareCmd at this script', async () => {
   assert.ok(
     execIndex < gitIndex,
     'prepare-package must normalize package.json before git commits it',
+  );
+  assert.equal(
+    config.plugins.some(
+      (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/github',
+    ),
+    false,
+    'npm package tags must not create one public GitHub Release per package',
   );
 });
 

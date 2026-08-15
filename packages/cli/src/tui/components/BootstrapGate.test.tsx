@@ -122,6 +122,7 @@ describe('BootstrapGate interactions', () => {
       ),
       installLlamaCppModel: vi.fn(async (_id, onEvent) => {
         onEvent({ type: 'progress', bytesWritten: 1, totalBytes: 2 });
+        onEvent({ type: 'extracting-metadata' });
         await new Promise<void>((resolve) => {
           finishInstall = resolve;
         });
@@ -135,16 +136,82 @@ describe('BootstrapGate interactions', () => {
       expect(harness.text()).toContain(
         'Downloading local models from Hugging Face (huggingface.co)',
       );
+      expect(harness.text()).toContain('reading model details');
+      expect(harness.text()).toContain('100%');
     });
     finishInstall?.();
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
-    expect(client.installLlamaCppModel).toHaveBeenCalledWith('chat-model', expect.any(Function));
+    expect(client.installLlamaCppModel).toHaveBeenCalledWith(
+      'chat-model',
+      expect.any(Function),
+      undefined,
+      { skipCompanion: true },
+    );
     expect(client.updateConfig).toHaveBeenCalledWith({
       provider: 'llama-cpp',
       defaultModel: { 'llama-cpp': 'chat-model' },
       firstRunInstallError: null,
     });
+  });
+
+  it('keeps the model-only choice free of image-reader and other helper downloads', async () => {
+    const client = createClient({
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model' ? { items: [chatModel()] } : { items: [] },
+      ),
+      listRecognitionCatalog: vi.fn().mockResolvedValue({ models: [recognitionModel()] }),
+      installLlamaCppModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'done', id: 'chat-model' });
+      }),
+      pullRecognitionModel: vi.fn(),
+    });
+    const harness = mountGate(client);
+
+    await chooseOption(harness, 'Download Chat Model', '2');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.installLlamaCppModel).toHaveBeenCalledWith(
+      'chat-model',
+      expect.any(Function),
+      undefined,
+      { skipCompanion: true },
+    );
+    expect(client.pullRecognitionModel).not.toHaveBeenCalled();
+  });
+
+  it('installs workshop helpers explicitly and visibly instead of as chat companions', async () => {
+    let finishReader: (() => void) | undefined;
+    const client = createClient({
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model' ? { items: [chatModel()] } : { items: [] },
+      ),
+      listRecognitionCatalog: vi.fn().mockResolvedValue({ models: [recognitionModel()] }),
+      installLlamaCppModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'done', id: 'chat-model' });
+      }),
+      pullRecognitionModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'progress', bytesWritten: 25, totalBytes: 100 });
+        await new Promise<void>((resolve) => {
+          finishReader = resolve;
+        });
+        onEvent({ type: 'done', id: 'reader' });
+      }),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => expect(harness.text()).toContain('includes image reader'));
+    await chooseFirst(harness, 'Recommended workshop set');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('2/2 Reader');
+      expect(harness.text()).toContain('25%');
+    });
+    finishReader?.();
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.pullRecognitionModel).toHaveBeenCalledTimes(1);
   });
 
   it('does not accept any shared model as proof that the pinned model exists', async () => {
@@ -207,7 +274,12 @@ describe('BootstrapGate interactions', () => {
     await chooseFirst(harness, 'Recommended workshop set — Best Fit');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
-    expect(client.installLlamaCppModel).toHaveBeenCalledWith('best-fit', expect.any(Function));
+    expect(client.installLlamaCppModel).toHaveBeenCalledWith(
+      'best-fit',
+      expect.any(Function),
+      undefined,
+      { skipCompanion: true },
+    );
   });
 
   it('recommends an installed hardware winner without downloading it again', async () => {
@@ -275,6 +347,10 @@ function mountGate(
 }
 
 async function chooseFirst(harness: InkHarness, marker: string): Promise<void> {
+  await chooseOption(harness, marker, '1');
+}
+
+async function chooseOption(harness: InkHarness, marker: string, option: string): Promise<void> {
   await vi.waitFor(() => expect(harness.text()).toContain(marker));
   // Ink can paint the choice list just before React commits useInput's
   // subscription. Under a fully parallel workspace run, writing in that tiny
@@ -282,7 +358,7 @@ async function chooseFirst(harness: InkHarness, marker: string): Promise<void> {
   // Give the effect one event-loop turn, then use the explicit quick-select
   // key so this tests the same public interaction without racing the commit.
   await new Promise((resolve) => setTimeout(resolve, 10));
-  harness.write('1');
+  harness.write(option);
 }
 
 function nativeStatus(installed: boolean): NativeEngineStatusResponse {
@@ -323,8 +399,21 @@ function createClient(overrides: Record<string, unknown> = {}) {
     ensureNativeEngine: vi.fn(),
     installLlamaCppModel: vi.fn(),
     installMlxModel: vi.fn(),
+    pullImageModel: vi.fn(),
+    pullVideoModel: vi.fn(),
+    pullRecognitionModel: vi.fn(),
+    pullAudioModel: vi.fn(),
     updateConfig: vi.fn().mockResolvedValue(config),
     ...overrides,
+  };
+}
+
+function recognitionModel() {
+  return {
+    id: 'reader',
+    name: 'Reader',
+    approxSizeBytes: 100,
+    recoScore: 90,
   };
 }
 

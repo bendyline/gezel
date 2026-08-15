@@ -1,7 +1,7 @@
 import { GEZEL_VERSION, type GezelSummary } from '@bendyline/gezel';
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
-import { type FeedRow, gezelLabel } from '../feed.js';
+import { type FeedRow, MAX_FEED_ROW_CHARS, gezelLabel } from '../feed.js';
 import { humanizeToolMarkup } from '../tool-markup.js';
 
 const TABLE_LOGO = [
@@ -15,6 +15,8 @@ const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
   user: 'white',
   pending: 'yellow',
   assistant: 'cyan',
+  thinking: 'magenta',
+  write: 'yellow',
   tool: 'yellow',
   note: 'magenta',
   error: 'red',
@@ -35,7 +37,11 @@ export function ChatFeed(props: {
   visible?: number;
 }): JSX.Element {
   const { rows, gezels, boring, focusedSessionId, visible = 16 } = props;
-  const shown = rows.slice(Math.max(0, rows.length - visible));
+  // The reducer starts a write decoder as soon as structured arguments
+  // arrive, often before the selected content/text field. Do not flash an
+  // empty "writing:" row while path/ref arguments are still streaming.
+  const visibleRows = rows.filter((row) => row.kind !== 'write' || row.text.length > 0);
+  const shown = visibleRows.slice(Math.max(0, visibleRows.length - visible));
 
   return (
     <Box flexDirection="column" flexGrow={1} marginBottom={1}>
@@ -65,15 +71,19 @@ export function ChatFeed(props: {
               ? 'you'
               : row.kind === 'pending'
                 ? 'pending'
-                : row.gezelId
-                  ? gezelLabel(row.gezelId, gezels, boring)
-                  : row.kind === 'tool'
-                    ? 'tool'
-                    : row.kind === 'shell'
-                      ? 'shell'
-                      : row.kind === 'error'
-                        ? 'error'
-                        : 'system';
+                : row.kind === 'thinking'
+                  ? 'thinking'
+                  : row.kind === 'write'
+                    ? 'writing'
+                    : row.gezelId
+                      ? gezelLabel(row.gezelId, gezels, boring)
+                      : row.kind === 'tool'
+                        ? 'tool'
+                        : row.kind === 'shell'
+                          ? 'shell'
+                          : row.kind === 'error'
+                            ? 'error'
+                            : 'system';
           const isFocused = focusedSessionId && row.sessionId === focusedSessionId;
           // Full message body, wrapped to the terminal width (Ink's default).
           // Only the speaker prefix is fixed; long chat replies render in
@@ -88,7 +98,12 @@ export function ChatFeed(props: {
                   {who}
                   {': '}
                 </Text>
-                <Text color={KIND_COLOR[row.kind]} dimColor={row.kind === 'pending'}>
+                <Text
+                  color={KIND_COLOR[row.kind]}
+                  dimColor={
+                    row.kind === 'pending' || row.kind === 'thinking' || row.kind === 'write'
+                  }
+                >
                   {clip(
                     row.taskEvent
                       ? taskEventText(row, gezels, boring)
@@ -139,8 +154,7 @@ function taskEventText(row: FeedRow, gezels: ReadonlyArray<GezelSummary>, boring
  * shell dump) so one row can't blow up the render. Newlines are preserved
  * — ink wraps and honors them.
  */
-const MAX_CHARS = 8000;
 function clip(text: string): string {
   const t = text.replace(/\s+$/, '');
-  return t.length > MAX_CHARS ? `${t.slice(0, MAX_CHARS)}\n… (truncated)` : t;
+  return t.length > MAX_FEED_ROW_CHARS ? `${t.slice(0, MAX_FEED_ROW_CHARS)}\n… (truncated)` : t;
 }

@@ -36,21 +36,25 @@ import { WorkspaceWriteDeniedError } from './errors.js';
  *     `pending-approval` pointing at the existing question.
  */
 
-export const SHIPPED_ALLOWLIST: ReadonlyArray<{ package: string; allowedVersions: string[] }> = [
-  { package: 'zod', allowedVersions: ['^3', '^4'] },
-  { package: 'chalk', allowedVersions: ['^5'] },
-  { package: 'commander', allowedVersions: ['^12', '^13'] },
-  { package: 'date-fns', allowedVersions: ['^3', '^4'] },
-  { package: 'yaml', allowedVersions: ['^2'] },
-  { package: 'cheerio', allowedVersions: ['^1'] },
-  { package: 'mime-types', allowedVersions: ['^2', '^3'] },
-  { package: 'marked', allowedVersions: ['^12', '^13', '^14', '^15'] },
-  { package: 'nanoid', allowedVersions: ['^5'] },
-  { package: 'pino', allowedVersions: ['^9'] },
-  { package: 'playwright-core', allowedVersions: ['^1'] },
-  { package: 'tsx', allowedVersions: ['^4'] },
-  { package: 'typescript', allowedVersions: ['^5'] },
-  { package: 'undici', allowedVersions: ['^6', '^7'] },
+export const SHIPPED_ALLOWLIST: ReadonlyArray<{
+  package: string;
+  allowedVersions: string[];
+  defaultVersion: string;
+}> = [
+  { package: 'zod', allowedVersions: ['^3', '^4'], defaultVersion: '^4' },
+  { package: 'chalk', allowedVersions: ['^5'], defaultVersion: '^5' },
+  { package: 'commander', allowedVersions: ['^12', '^13'], defaultVersion: '^13' },
+  { package: 'date-fns', allowedVersions: ['^3', '^4'], defaultVersion: '^4' },
+  { package: 'yaml', allowedVersions: ['^2'], defaultVersion: '^2' },
+  { package: 'cheerio', allowedVersions: ['^1'], defaultVersion: '^1' },
+  { package: 'mime-types', allowedVersions: ['^2', '^3'], defaultVersion: '^3' },
+  { package: 'marked', allowedVersions: ['^12', '^13', '^14', '^15'], defaultVersion: '^15' },
+  { package: 'nanoid', allowedVersions: ['^5'], defaultVersion: '^5' },
+  { package: 'pino', allowedVersions: ['^9'], defaultVersion: '^9' },
+  { package: 'playwright-core', allowedVersions: ['^1'], defaultVersion: '^1' },
+  { package: 'tsx', allowedVersions: ['^4'], defaultVersion: '^4' },
+  { package: 'typescript', allowedVersions: ['^5'], defaultVersion: '^5' },
+  { package: 'undici', allowedVersions: ['^6', '^7'], defaultVersion: '^7' },
 ];
 
 interface AllowlistedEntry {
@@ -103,6 +107,10 @@ function matchesAllowlist(pkg: string, version: string): boolean {
     if (entry.allowedVersions.includes(version) || entry.allowedVersions.includes('*')) return true;
   }
   return false;
+}
+
+function shippedDefaultVersion(pkg: string): string | undefined {
+  return SHIPPED_ALLOWLIST.find((entry) => entry.package === pkg)?.defaultVersion;
 }
 
 function matchesProjectApproval(
@@ -345,7 +353,13 @@ function dedupRequests(raw: NpmInstallPackageRequest[]): NpmInstallApprovalPacka
   const out: NpmInstallApprovalPackage[] = [];
   for (const r of raw) {
     const pkg = NpmPackageNameSchema.parse(r.package);
-    const version = NpmRegistryVersionSchema.parse(r.version ?? 'latest');
+    // A bare pre-vetted package should follow the tool contract and install
+    // immediately. Pin it to the vetted range instead of widening the trust
+    // decision to the moving `latest` dist-tag. Unknown packages still use
+    // `latest`, which correctly goes through explicit user approval.
+    const version = NpmRegistryVersionSchema.parse(
+      r.version ?? shippedDefaultVersion(pkg) ?? 'latest',
+    );
     const key = keyOf(pkg, version);
     if (seen.has(key)) continue;
     seen.add(key);

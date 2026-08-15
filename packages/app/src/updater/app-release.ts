@@ -1,15 +1,15 @@
 /**
  * GitHub hosts both whole-app releases (`v1.2.3`) and native-engine releases
- * (`native-v1.2.3`) and npm-package releases in the same repository. GitHub's
- * repository-wide `/releases/latest` endpoint cannot distinguish them, so
- * electron-updater's built-in GitHub provider is not a safe discovery
+ * (`native-v1.2.3`) and legacy npm-package releases in the same repository.
+ * GitHub's repository-wide `/releases/latest` endpoint cannot distinguish
+ * them, so electron-updater's built-in GitHub provider is not a safe discovery
  * mechanism for Gezel.
  *
  * This module establishes an explicit app-release namespace by listing public
  * releases and selecting the greatest stable tag that is exactly `v<semver>`.
  * The updater is then pointed at that immutable release through its generic
- * provider; native and package releases can never participate in metadata or
- * downloads.
+ * provider; native and legacy package releases can never participate in
+ * metadata or downloads.
  */
 
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/bendyline/gezel/releases?per_page=100';
@@ -83,7 +83,7 @@ export function latestPublishedAppRelease(records: unknown): PublishedAppRelease
 /**
  * Resolve the latest application release independently of GitHub's mutable
  * repository-wide "latest" pointer. One 100-entry API page leaves ample room
- * for the npm package releases that are interleaved between desktop releases,
+ * for the legacy npm package releases interleaved between desktop releases,
  * while keeping automatic launch checks to one public request.
  */
 export async function discoverLatestAppRelease(

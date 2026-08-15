@@ -28,11 +28,10 @@ export interface PublishScope {
  * History is bus-side only: cleared on `done` so completed turns don't get
  * re-delivered when a new subscriber connects after the fact.
  *
- * The early `fail()` path in `ChatManager.send` (when `ensureState` itself
- * fails before we have a record) doesn't know the gezelId/projectId, so it
- * publishes session-scoped only via `publishSessionOnly`. Project + global
- * subscribers don't see those failures — only the session's SSE listener
- * does, which is the only listener that cares about that scope.
+ * If a send truly cannot resolve its session record, it does not know the
+ * gezelId/projectId and publishes session-scoped via `publishSessionOnly`.
+ * Once a record is known, even provider-start failures use `publish` so
+ * project/global clients receive the error.
  */
 export class ChatEventBus {
   private readonly sessionBuses = new Map<

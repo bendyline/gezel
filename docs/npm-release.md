@@ -59,6 +59,14 @@ Commits — the same model as the sister repos `docblocks` and `squisq`. Each
 package bumps only when its own files (or a dependency) change, gets its own
 `CHANGELOG.md`, and is tagged `@bendyline/gezel-cli@1.2.3`.
 
+The npm pipeline deliberately does **not** create GitHub Release objects for
+those tags. npm already owns package discovery and provenance, while GitHub's
+Releases page is reserved for distributable Electron and native-engine assets.
+Because package versions are independent, one combined GitHub Release would
+need an unrelated umbrella version and would duplicate the package changelogs.
+The per-package git tags remain load-bearing for semantic-release's next-version
+calculation.
+
 This is unrelated to the Electron app's `1.YYDDD.RUN` scheme, which
 [`scripts/stamp-version.mjs`](../scripts/stamp-version.mjs) mints in CI and
 never commits.
@@ -122,9 +130,12 @@ lockfile stale and disables pnpm's explicit local-package contract.
 [`scripts/prepare-package.mjs`](../scripts/prepare-package.mjs) therefore
 records the computed manifest outside the checkout, then restores every local
 dependency to `workspace:*` before `@semantic-release/git` commits
-`package.json`. [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
-briefly materializes that recorded manifest while `pnpm publish` packs the
-tarball, then restores the workspace source even if publishing fails. This
+`package.json`. The same prepare hook runs
+[`scripts/format-release-manifest.mjs`](../scripts/format-release-manifest.mjs)
+after semantic-release's JSON writer so the committed manifest remains
+Biome-compatible. [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
+briefly materializes the recorded release manifest while `pnpm publish` packs
+the tarball, then restores the workspace source even if publishing fails. This
 preserves exact dependency versions without relying on sibling release order.
 Plugin ordering in `.releaserc.json` is load-bearing: the exec prepare hook must
 stay before the git plugin.
@@ -206,7 +217,9 @@ real tarballs into a non-pnpm project rather than trusting the workspace.
 
 The local-ML packages are therefore optional peers of the published service.
 The default npm install is the cloud/headless/runtime surface and carries no
-Transformers, Sharp, or ONNX tree. Consumers that opt into in-process memory
+Transformers, Sharp, or ONNX tree. The CLI's first-run workshop consumes the
+service's capability-filtered audio catalog, so it does not offer or download
+Kokoro when those peers are absent. Consumers that opt into in-process memory
 embeddings or Kokoro TTS must use the safe root overrides documented in the
 service README. Complete Electron and relocatable Node artifacts merge the
 private `packages/ml-runtime` deployment, where workspace overrides do apply.

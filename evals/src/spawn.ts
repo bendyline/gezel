@@ -9,6 +9,7 @@ import {
   resolveDaemonEntry,
   stopOwnedDaemon,
 } from '@bendyline/gezel-client/node';
+import { assertServiceBuildFresh } from './service-build-freshness.ts';
 
 export interface SpawnTrialDaemonOptions {
   /** GEZEL_HOME for this daemon — should be a writable, ideally fresh dir. */
@@ -245,6 +246,7 @@ export class BoundedDaemonLogSink extends Writable {
  */
 export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<TrialDaemon> {
   const daemonEntry = resolveDaemonEntry(import.meta.url);
+  assertServiceBuildFresh(daemonEntry);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,

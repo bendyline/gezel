@@ -12,7 +12,7 @@
  *     query-string tokens, and email addresses on top. Only for text that
  *     is leaving the user's machine.
  *
- * Why the split: an `ENOENT … open '/Users/mike/proj/src/x.ts'` message is
+ * Why the split: an `ENOENT … open '/workspace/proj/src/x.ts'` message is
  * genuinely useful to the user *on their own machine*. Collapsing that path
  * before they ever see it makes the app worse at the one thing errors are
  * for. The user's own disk is not a threat surface for the user's own paths

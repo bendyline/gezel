@@ -46,6 +46,7 @@ import {
   isSelfOrchestratingProvider,
   probeProviderAuth,
 } from './providers.ts';
+import { resolveEvalRunsDir } from './run-paths.ts';
 import { lastDeliveredSniffNudge } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 import { writeTrialFacts } from './trial-facts.ts';
@@ -112,10 +113,6 @@ export function completedRepairActionSnapshot(
     ).length,
     inflight,
   };
-}
-
-function defaultRunsDir(): string {
-  return join(repoRoot(), 'evals', 'runs');
 }
 
 /**
@@ -295,14 +292,18 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   // Local-engine eval launch overrides (env + config + timeouts). Shared shape
   // across llama-cpp and ds4 (both supervised GGUF engines), so it flows
   // through the same `evalDaemonEnvForTrial` + `updateConfig` path below.
-  const llamaEvalLaunch =
+  const defaultLlamaEvalLaunch =
     engine === 'llama-cpp'
       ? llamaCppEvalLaunchOverridesForModel(opts.modelId)
       : engine === 'ds4'
         ? ds4EvalLaunchOverridesForModel(opts.modelId)
         : undefined;
+  const llamaEvalLaunch = mergeLlamaCppEvalLaunchOverrides(
+    defaultLlamaEvalLaunch,
+    llamaCppReasoningEvalLaunchOverrides(opts, engine),
+  );
   const trialId = makeTrialId(scenario.id, engine, opts.modelId);
-  const runsDir = opts.runsDir ?? defaultRunsDir();
+  const runsDir = resolveEvalRunsDir(opts.runsDir);
   const runDir = join(runsDir, trialId);
   const cacheRoot = opts.cacheRoot ?? defaultCacheRoot();
   const pollIntervalMs = opts.pollIntervalMs ?? 5_000;
@@ -1311,6 +1312,48 @@ export interface LlamaCppEvalLaunchOverrides {
   summary?: string;
 }
 
+export function llamaCppReasoningEvalLaunchOverrides(
+  opts: Pick<TrialOptions, 'llamaCppReasoningPreserve' | 'llamaCppReasoningBudgetTokens'>,
+  engine: ChatProvider,
+): LlamaCppEvalLaunchOverrides | undefined {
+  const preserve = opts.llamaCppReasoningPreserve;
+  const budget = opts.llamaCppReasoningBudgetTokens;
+  if (preserve === undefined && budget === undefined) return undefined;
+  if (engine !== 'llama-cpp') {
+    throw new Error('llama.cpp reasoning launch overrides require engine=llama-cpp');
+  }
+  if (budget !== undefined && (!Number.isSafeInteger(budget) || budget <= 0)) {
+    throw new Error('llamaCppReasoningBudgetTokens must be a positive safe integer');
+  }
+  return {
+    extraEnv: {
+      ...(preserve !== undefined ? { GEZEL_LLAMA_REASONING_PRESERVE: preserve ? '1' : '0' } : {}),
+      ...(budget !== undefined ? { GEZEL_LLAMA_REASONING_BUDGET_TOKENS: String(budget) } : {}),
+    },
+    summary: `reasoning experiment: preserve=${preserve ?? 'catalog/default'} budget=${budget ?? 'catalog'}`,
+  };
+}
+
+export function mergeLlamaCppEvalLaunchOverrides(
+  base: LlamaCppEvalLaunchOverrides | undefined,
+  experiment: LlamaCppEvalLaunchOverrides | undefined,
+): LlamaCppEvalLaunchOverrides | undefined {
+  if (!base) return experiment;
+  if (!experiment) return base;
+  return {
+    ...base,
+    ...experiment,
+    extraEnv: { ...base.extraEnv, ...experiment.extraEnv },
+    config: { ...base.config, ...experiment.config },
+    minTrialTimeoutMs: Math.max(base.minTrialTimeoutMs ?? 0, experiment.minTrialTimeoutMs ?? 0),
+    hardProgressTimeoutMs: Math.max(
+      base.hardProgressTimeoutMs ?? 0,
+      experiment.hardProgressTimeoutMs ?? 0,
+    ),
+    summary: [base.summary, experiment.summary].filter(Boolean).join('; '),
+  };
+}
+
 export function llamaCppEvalLaunchOverridesForModel(
   modelId: string,
 ): LlamaCppEvalLaunchOverrides | undefined {
@@ -1826,8 +1869,11 @@ export async function pollUntilDone(
   // message the service had rejected with a 400.
   let reEngageNudgeAttempted = false;
   let reEngageNudgeDelivered = false;
+  let reEngageNudgeDeliveredAt: number | null = null;
+  let reEngageTargetGezelId: string | null = null;
   const reEngageThresholdMs = Math.floor(args.softProgressTimeoutMs * 0.8);
   let inflightSoftDeferralLoggedAt = 0;
+  let inflightHardReEngageDeferralLoggedAt = 0;
   let silentRecoveryLoggedAt = 0;
   let silentRecoveryNote: string | null = null;
   let imageRetryLoopDeferralLoggedAt = 0;
@@ -2052,7 +2098,9 @@ export async function pollUntilDone(
       // minutes, and that turn IS in flight the whole time.
       const pendingRecoveries = poisonedSessionRecovery.unconfirmedRecoveries();
       const inflightTurns =
-        softStuckMs >= reEngageThresholdMs || pendingRecoveries.length > 0
+        softStuckMs >= reEngageThresholdMs ||
+        pendingRecoveries.length > 0 ||
+        (reEngageNudgeDeliveredAt !== null && hardStuckMs >= args.hardProgressTimeoutMs)
           ? await listInflightTurnsForWatchdog(args.client).catch(() => [])
           : [];
       const silentSummary = summarizeSilentRecoveries(
@@ -2124,6 +2172,7 @@ export async function pollUntilDone(
             await args.client.messageGezel(targetId, {
               fromGezelId: args.meesterId,
               text: nudge,
+              suppressReply: true,
               projectId: downstream.projectId,
               ...attachableDeliverable(filePath, downstream.role, args.log),
             });
@@ -2134,6 +2183,8 @@ export async function pollUntilDone(
             });
           }
           reEngageNudgeDelivered = true;
+          reEngageNudgeDeliveredAt = Date.now();
+          reEngageTargetGezelId = targetId;
         } catch (err) {
           args.log(`[poll] re-engage nudge send failed (non-fatal): ${describeSendFailure(err)}`);
         }
@@ -2182,23 +2233,38 @@ export async function pollUntilDone(
         };
       }
       if (hardStuckMs >= args.hardProgressTimeoutMs) {
-        // This watchdog catches two opposite shapes, and naming the wrong one
-        // sends triage after a slow model when the real fault is a session
-        // that stopped responding. The soft clock is the discriminator: it
-        // tracks token streams and slot updates, so a flat soft clock means
-        // the engine is issuing nothing at all. Wild-caught on
-        // conflict-synthesis / qwen3.6-27b-q8 (2026-08-05), where a chat idle
-        // for 722s was reported as "model busy but not delivering".
-        const shape = hardStallShape(softStuckMs);
-        args.log(
-          `[poll] no-progress (hard): no real progress for ${Math.round(hardStuckMs / 1000)}s (threshold=${Math.round(args.hardProgressTimeoutMs / 1000)}s); ${shape}${silentRecoveryNote ?? ''} — failing trial`,
-        );
-        return {
-          success: false,
-          reason: `no real progress for ${Math.round(hardStuckMs / 1000)}s — ${shape} (hard digest stuck at ${digest.hard})${silentRecoveryNote ?? ''}`,
-          failureMode: 'model-stuck',
-          ...finalSniffOf(),
-        };
+        const deferHardForReEngage = shouldDeferHardWatchdogForReEngage({
+          deliveredAt: reEngageNudgeDeliveredAt,
+          targetGezelId: reEngageTargetGezelId,
+          inflightTurns,
+          now: Date.now(),
+        });
+        if (deferHardForReEngage) {
+          if (Date.now() - inflightHardReEngageDeferralLoggedAt >= 60_000) {
+            inflightHardReEngageDeferralLoggedAt = Date.now();
+            args.log(
+              `[poll] hard-watchdog deferred: harness re-engage target is still mid-turn (${summarizeInflightTurnsForLog(inflightTurns)}); granting that dispatched recovery one bounded completion window`,
+            );
+          }
+        } else {
+          // This watchdog catches two opposite shapes, and naming the wrong one
+          // sends triage after a slow model when the real fault is a session
+          // that stopped responding. The soft clock is the discriminator: it
+          // tracks token streams and slot updates, so a flat soft clock means
+          // the engine is issuing nothing at all. Wild-caught on
+          // conflict-synthesis / qwen3.6-27b-q8 (2026-08-05), where a chat idle
+          // for 722s was reported as "model busy but not delivering".
+          const shape = hardStallShape(softStuckMs);
+          args.log(
+            `[poll] no-progress (hard): no real progress for ${Math.round(hardStuckMs / 1000)}s (threshold=${Math.round(args.hardProgressTimeoutMs / 1000)}s); ${shape}${silentRecoveryNote ?? ''} — failing trial`,
+          );
+          return {
+            success: false,
+            reason: `no real progress for ${Math.round(hardStuckMs / 1000)}s — ${shape} (hard digest stuck at ${digest.hard})${silentRecoveryNote ?? ''}`,
+            failureMode: 'model-stuck',
+            ...finalSniffOf(),
+          };
+        }
       }
 
       // Retry-loop guard. Two trip paths — see the constants block
@@ -2276,6 +2342,7 @@ export async function pollUntilDone(
               await args.client.messageGezel(targetId, {
                 fromGezelId: args.meesterId,
                 text: nudge,
+                suppressReply: true,
                 projectId: downstream.projectId,
                 ...attachableDeliverable(filePath, downstream.role, args.log),
               });
@@ -2943,6 +3010,30 @@ export function shouldDeferSoftWatchdog(
  * engine.
  */
 const STALL_INFLIGHT_DEFER_MS = 15 * 60 * 1000;
+
+/**
+ * A re-engage turn is work the harness itself dispatched. Do not launch it
+ * late in the hard-progress window and then kill the same actively decoding
+ * target before it can produce a mutation. This is a one-shot, target-bound
+ * grace, not a general "busy means progress" exemption: it ends as soon as
+ * the target turn ends and is capped at the same slow-turn budget used by the
+ * retry-loop STALL path.
+ */
+export function shouldDeferHardWatchdogForReEngage(args: {
+  deliveredAt: number | null;
+  targetGezelId: string | null;
+  inflightTurns: InflightTurnSnapshot[];
+  now?: number;
+  graceMs?: number;
+}): boolean {
+  if (args.deliveredAt === null || args.targetGezelId === null) return false;
+  const now = args.now ?? Date.now();
+  const graceMs = args.graceMs ?? STALL_INFLIGHT_DEFER_MS;
+  if (now - args.deliveredAt >= graceMs) return false;
+  return args.inflightTurns.some(
+    (turn) => turn.gezelId === args.targetGezelId && turn.elapsedMs < graceMs,
+  );
+}
 
 /**
  * Should a tripped retry-loop watchdog hold off because a turn is still

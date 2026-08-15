@@ -2,6 +2,7 @@ import type { GezelClient } from '@bendyline/gezel-client/node';
 import { render } from 'ink';
 import { App } from './App.js';
 import { BootstrapGate } from './components/BootstrapGate.js';
+import { startTuiRuntimeDiagnostics } from './memory-diagnostics.js';
 
 export interface LaunchTuiOpts {
   client: GezelClient;
@@ -16,10 +17,12 @@ export interface LaunchTuiOpts {
  * client and the active project.
  */
 export async function launchTui(opts: LaunchTuiOpts): Promise<void> {
+  const diagnostics = startTuiRuntimeDiagnostics();
   const instance = render(
     <BootstrapGate client={opts.client}>
       <App
         client={opts.client}
+        diagnostics={diagnostics}
         initialProjectId={opts.projectId}
         initialProjectName={opts.projectName}
         initialGezelId={opts.gezelId}
@@ -28,5 +31,9 @@ export async function launchTui(opts: LaunchTuiOpts): Promise<void> {
     // We own Ctrl+C (interrupt-then-exit); don't let ink exit on the first press.
     { exitOnCtrlC: false },
   );
-  await instance.waitUntilExit();
+  try {
+    await instance.waitUntilExit();
+  } finally {
+    await diagnostics.stop();
+  }
 }

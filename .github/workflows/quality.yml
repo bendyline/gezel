@@ -163,7 +163,9 @@ jobs:
     # The CLI repeat is intentionally limited to its interaction-heavy App
     # suite; repeating daemon integration here would consume the timeout
     # without adding coverage for render/input timing regressions.
-    timeout-minutes: 40
+    # A progressing run reached the previous 40 min ceiling on 2026-08-15;
+    # leave enough headroom for ordinary hosted-runner variance.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace

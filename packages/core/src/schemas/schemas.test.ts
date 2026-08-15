@@ -273,6 +273,9 @@ describe('ChatEventSchema', () => {
     );
     expect(ChatEventSchema.parse({ type: 'done' }).type).toBe('done');
     expect(ChatEventSchema.parse({ type: 'error', error: 'oops' }).type).toBe('error');
+    expect(ChatEventSchema.parse({ type: 'user_message_pending', preview: 'hello' }).type).toBe(
+      'user_message_pending',
+    );
     expect(ChatEventSchema.parse({ type: 'cancelled' }).type).toBe('cancelled');
     expect(
       ChatEventSchema.parse({ type: 'gezel_created', gezelId: 'sipho', name: 'Sipho' }).type,
@@ -552,6 +555,17 @@ describe('UpdateTaskRequestSchema', () => {
   it('lets an empty plan string through (callers use that to clear)', () => {
     const parsed = UpdateTaskRequestSchema.parse({ plan: '' });
     expect(parsed.plan).toBe('');
+  });
+});
+
+describe('CLI presentation config', () => {
+  it('persists the CLI detail display flags', () => {
+    expect(GezelConfigSchema.parse({ cliShowThinking: true }).cliShowThinking).toBe(true);
+    expect(GezelConfigSchema.parse({ cliShowWrites: true }).cliShowWrites).toBe(true);
+    expect(GezelConfigSchema.parse({}).cliShowThinking).toBeUndefined();
+    expect(GezelConfigSchema.parse({}).cliShowWrites).toBeUndefined();
+    expect(() => GezelConfigSchema.parse({ cliShowThinking: 'yes' })).toThrow();
+    expect(() => GezelConfigSchema.parse({ cliShowWrites: 'yes' })).toThrow();
   });
 });
 

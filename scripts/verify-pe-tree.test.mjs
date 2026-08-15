@@ -138,10 +138,11 @@ describe('auditPeTree', () => {
 });
 
 describe('third-party allowlist covers prebuilt Windows payloads', () => {
-  // The eight prebuilt binaries observed unsigned inside
+  // Prebuilt binaries observed unsigned inside
   // service-bundle.tar.gz for win32-x64. If a bundled package renames one,
   // verify-pe-tree fails the release; this fails first, and says why.
   const bundled = [
+    'rg.exe',
     'resvgjs.win32-x64-msvc.node',
     'keyring.win32-x64-msvc.node',
     'vec0.dll',

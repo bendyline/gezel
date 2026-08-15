@@ -1,5 +1,6 @@
 # npm release workflow — versions, changelogs, tags and publishes the gezel
-# packages to npm via multi-semantic-release.
+# packages to npm via multi-semantic-release. Package tags remain in Git for
+# version calculation; npm publishes do not create GitHub Release entries.
 #
 # Trigger: manual dispatch only. Same house rule as release-electron.yml —
 # a CI run must never be able to ship by accident. Merging to main changes
@@ -126,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      # semantic-release pushes the release commit and creates GitHub releases.
+      # semantic-release pushes release commits and per-package git tags.
       contents: write
       # Load-bearing for npm publishing, not just provenance: this repo has no
       # NPM_TOKEN. See the header.
@@ -154,8 +155,10 @@ jobs:
       # multi-semantic-release serializes each package's prepare+publish pair.
       # prepare-package.mjs therefore preserves its computed dependency
       # upgrades outside the checkout before restoring workspace:* for the
-      # release commit; publish-package.mjs materializes those versions only
-      # while pnpm packs that package. Do not add `--sequential-prepare`: the
+      # release commit. format-release-manifest.mjs then restores Biome's
+      # package.json layout before git snapshots it. publish-package.mjs
+      # materializes computed versions only while pnpm packs that package. Do
+      # not add `--sequential-prepare`: the
       # installed multi-semantic-release has no such option and silently
       # forwards unknown flags to semantic-release.
       #

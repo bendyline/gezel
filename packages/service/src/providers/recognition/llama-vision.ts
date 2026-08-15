@@ -236,6 +236,7 @@ export class LlamaVisionProvider implements RecognitionProvider {
     await mkdir(itemDir, { recursive: true });
     const totalAllBytes = spec.files.reduce((n, f) => n + f.approxSizeBytes, 0);
     let writtenAll = 0;
+    const verifiedDigests: Record<string, string> = {};
 
     for (const file of spec.files) {
       const result = yield* downloadWithSha256(this.fetchImpl, {
@@ -252,11 +253,15 @@ export class LlamaVisionProvider implements RecognitionProvider {
         return;
       }
       writtenAll = result.writtenAll;
+      // downloadWithSha256 just proved the published file matches this digest.
+      // Reuse it below instead of silently reading multi-gigabyte weights and
+      // projector files from disk for a second full hash pass.
+      verifiedDigests[file.filename] = file.sha256.toLowerCase();
     }
 
     // Written last, so an interrupted pull leaves no manifest and the model
     // reads as not-installed rather than installed-and-broken.
-    const fileSha256 = await hashModelPayloadFiles(itemDir);
+    const fileSha256 = await hashModelPayloadFiles(itemDir, verifiedDigests);
     await writeFile(
       join(itemDir, 'manifest.json'),
       `${JSON.stringify(

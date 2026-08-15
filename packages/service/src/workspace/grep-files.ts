@@ -103,9 +103,13 @@ export async function grepWorkspace(opts: WorkspaceGrepOptions): Promise<SearchF
   const ripgrepPath =
     requestedEngine === 'javascript'
       ? null
-      : await resolveExecutableOnPath('rg', target.workspaceDir, Math.min(plan.timeoutMs, 2000));
+      : await resolveRipgrepExecutable(target.workspaceDir, Math.min(plan.timeoutMs, 2000));
   if (requestedEngine === 'ripgrep' && !ripgrepPath) {
-    throw new WorkspaceGrepError('ripgrep is not installed on this machine', 500, 'rg-unavailable');
+    throw new WorkspaceGrepError(
+      'ripgrep is unavailable (the bundled platform package is missing and rg is not on PATH)',
+      500,
+      'rg-unavailable',
+    );
   }
 
   let raw: RawSearchResult;
@@ -724,6 +728,27 @@ async function resolveExecutableOnPath(
   }
 }
 
+/**
+ * Prefer an operator-provided ripgrep on PATH, then fall back to the
+ * platform binary installed with @vscode/ripgrep. The package import stays
+ * lazy so an install that deliberately omits optional dependencies can still
+ * use a system rg (or the JavaScript literal-search fallback) instead of
+ * making the entire service fail at module load.
+ */
+async function resolveRipgrepExecutable(
+  forbiddenRoot: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const onPath = await resolveExecutableOnPath('rg', forbiddenRoot, timeoutMs);
+  if (onPath) return onPath;
+  try {
+    const { rgPath } = await import('@vscode/ripgrep');
+    return await validateExecutable(rgPath, forbiddenRoot);
+  } catch {
+    return null;
+  }
+}
+
 async function findExecutableOnPath(
   command: string,
   forbiddenRoot: string,
@@ -740,22 +765,31 @@ async function findExecutableOnPath(
     // depend on the model-controlled workspace cwd. Never honor them.
     if (!entry || !isAbsolute(entry)) continue;
     for (const suffix of suffixes) {
-      try {
-        const executable = await realpath(join(entry, `${command}${suffix}`));
-        if (pathIsInside(forbiddenRoot, executable)) continue;
-        const executableStat = await stat(executable);
-        if (!executableStat.isFile()) continue;
-        await access(
-          executable,
-          process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK,
-        );
-        return executable;
-      } catch {
-        // Try the next PATH entry/extension.
-      }
+      const executable = await validateExecutable(
+        join(entry, `${command}${suffix}`),
+        forbiddenRoot,
+      );
+      if (executable) return executable;
     }
   }
   return null;
+}
+
+async function validateExecutable(
+  candidate: string,
+  forbiddenRoot: string,
+): Promise<string | null> {
+  if (!isAbsolute(candidate)) return null;
+  try {
+    const executable = await realpath(candidate);
+    if (pathIsInside(forbiddenRoot, executable)) return null;
+    const executableStat = await stat(executable);
+    if (!executableStat.isFile()) return null;
+    await access(executable, process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK);
+    return executable;
+  } catch {
+    return null;
+  }
 }
 
 function pathIsInside(root: string, candidate: string): boolean {

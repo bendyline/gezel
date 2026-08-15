@@ -2143,6 +2143,19 @@ export const GezelConfigSchema = z.object({
    */
   themePref: z.enum(['system', 'light', 'dark']).optional(),
   /**
+   * Whether the terminal UI renders streamed and persisted model reasoning
+   * inline with the chat transcript. CLI-only presentation preference;
+   * absent/true shows reasoning, while false keeps it represented only by
+   * the live token counter.
+   */
+  cliShowThinking: z.boolean().optional(),
+  /**
+   * Whether the terminal UI shows streamed write payloads inline. This is
+   * deliberately opt-in because file, artifact, and task-note bodies can be
+   * long; absent/false keeps the compact tool activity row only.
+   */
+  cliShowWrites: z.boolean().optional(),
+  /**
    * Last-used document export settings. This is the cross-boot source of
    * truth for the editor's quick-export action; see
    * `DocumentExportOptionsSchema`.
@@ -3025,6 +3038,11 @@ export const MessageGezelRequestSchema = z.object({
   fromSessionId: z.string().optional(),
   projectId: z.string().optional(),
   text: z.string().min(1),
+  /**
+   * One-way system/harness feedback. The recipient still runs normally, but
+   * its completion is not injected back into and auto-processed by the sender.
+   */
+  suppressReply: z.boolean().optional(),
   /**
    * Shape-of-deliverable hint persisted on the target's session so
    * their consultation-mode addendum knows whether to default to

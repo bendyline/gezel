@@ -684,6 +684,17 @@ async function daemonSmoke(consumerDir, opts = {}) {
     if (!gezel?.id) fail('could not create a gezel');
     else ok(`created gezel ${gezel.id}`);
 
+    if (pty === 'unavailable') {
+      const audioCatalog = await client.listAudioCatalog();
+      if (audioCatalog.tts.length === 0) {
+        ok('default npm service does not advertise the unavailable Kokoro runtime');
+      } else {
+        fail(
+          `default npm service advertised unavailable TTS models\n${JSON.stringify(audioCatalog.tts)}`,
+        );
+      }
+    }
+
     // npm can install node-pty's macOS spawn-helper without its execute bit.
     // Exercise the Gezel terminal path rather than raw node-pty: the service's
     // lazy pre-spawn repair is the supported behavior for published consumers.

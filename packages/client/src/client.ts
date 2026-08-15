@@ -1115,6 +1115,16 @@ export interface ConfigResponse {
    */
   themePref?: 'system' | 'light' | 'dark';
   /**
+   * Whether the terminal UI shows streamed and persisted reasoning inline.
+   * Absent/true shows reasoning; false keeps only the live activity count.
+   */
+  cliShowThinking?: boolean;
+  /**
+   * Whether the terminal UI shows streamed file/artifact/note bodies inline.
+   * Absent/false keeps writes compact; true enables `/show writes` behavior.
+   */
+  cliShowWrites?: boolean;
+  /**
    * Last-used markdown/document export settings. Mirrored server-side so the
    * quick-export action survives the embedded daemon's changing loopback port.
    */
@@ -3137,6 +3147,9 @@ export class GezelClient {
    * (either `done` or `error`); rejects on HTTP error or if the
    * caller aborts the signal.
    *
+   * `skipCompanion` is for callers that own an explicit bundle plan: it keeps
+   * the service from implicitly pulling an image reader after the chat model.
+   *
    * Mirrors {@link pullOllamaModel} — bearer auth + SSE parsing
    * happen here so UI code doesn't need to reach for the raw
    * token.
@@ -3145,7 +3158,7 @@ export class GezelClient {
     catalogId: string,
     onEvent: (event: LlamaCppInstallEvent) => void,
     signal?: AbortSignal,
-    options?: { skipSha?: boolean },
+    options?: { skipSha?: boolean; skipCompanion?: boolean },
   ): Promise<void> {
     return this.installGgufSse('llama-cpp', catalogId, onEvent, signal, options);
   }
@@ -3170,9 +3183,13 @@ export class GezelClient {
     catalogId: string,
     onEvent: (event: LlamaCppInstallEvent) => void,
     signal?: AbortSignal,
-    options?: { skipSha?: boolean },
+    options?: { skipSha?: boolean; skipCompanion?: boolean },
   ): Promise<void> {
-    const qs = options?.skipSha ? '?skipSha=1' : '';
+    const query = [
+      ...(options?.skipSha ? ['skipSha=1'] : []),
+      ...(options?.skipCompanion ? ['skipCompanion=1'] : []),
+    ].join('&');
+    const qs = query ? `?${query}` : '';
     const url = `${this.baseUrl}/api/${enginePath}/models/${encodeURIComponent(catalogId)}/install${qs}`;
     await consumeApiSseJson({
       ...MODEL_DOWNLOAD_SSE_POLICY,

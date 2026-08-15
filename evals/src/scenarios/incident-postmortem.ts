@@ -227,7 +227,19 @@ function explicitlyLeavesClaimUnknown(clause: string): boolean {
     /\b(?:not\s+enough|insufficient)\s+evidence\s+to\s+(?:show|establish|conclude|determine|prove|support|confirm)\b/i.test(
       clause,
     ) ||
-    /\b(?:unknown|unclear|not\s+established|not\s+measured)\s+(?:whether|if)\b/i.test(clause)
+    /\b(?:unknown|unclear|not\s+established|not\s+measured)\s+(?:whether|if)\b/i.test(clause) ||
+    /\b(?:makes?|made|states?|draws?|reaches?)\s+no\s+(?:claim|assertion|conclusion)\b/i.test(
+      clause,
+    ) ||
+    /\b(?:is|are|was|were)\s+(?:not\s+)?(?:established|measured|known)\s+either\s+way\b/i.test(
+      clause,
+    )
+  );
+}
+
+function containsUnqualifiedEvidenceAssertion(text: string, assertion: RegExp): boolean {
+  return evidenceClaimClauses(text).some(
+    (clause) => !explicitlyLeavesClaimUnknown(clause) && assertion.test(clause),
   );
 }
 
@@ -311,31 +323,42 @@ function extrapolatesWholeFlowConfiguration(text: string): boolean {
 const UNSUPPORTED_EVIDENCE_CLAIM_CHECKS: ReadonlyArray<UnsupportedEvidenceClaimCheck> = [
   {
     label: 'unsupported assertion that no data loss occurred',
-    test: (text) => /\b(?:no|without)\s+(?:customer\s+)?data\s+loss\b/i.test(text),
+    test: (text) =>
+      containsUnqualifiedEvidenceAssertion(
+        text,
+        /\b(?:no|without)\s+(?:customer\s+)?data\s+loss\b/i,
+      ),
   },
   {
     label: 'unsupported assertion that data was not lost or corrupted',
-    test: (text) => /\b(?:data|records?)\s+(?:was|were)\s+not\s+(?:lost|corrupted)\b/i.test(text),
+    test: (text) =>
+      containsUnqualifiedEvidenceAssertion(
+        text,
+        /\b(?:data|records?)\s+(?:was|were)\s+not\s+(?:lost|corrupted)\b/i,
+      ),
   },
   {
     label: 'unsupported assertion that no security/privacy impact occurred',
     test: (text) =>
-      /\b(?:no|without)\s+(?:known\s+)?(?:security|privacy)\s+(?:breach|incident|impact|compromise)\b/i.test(
+      containsUnqualifiedEvidenceAssertion(
         text,
+        /\b(?:no|without)\s+(?:known\s+)?(?:security|privacy)\s+(?:breach|incident|impact|compromise)\b/i,
       ),
   },
   {
     label: 'unsupported assertion that security/privacy was unaffected',
     test: (text) =>
-      /\b(?:security|privacy)\s+(?:was|were)\s+not\s+(?:affected|impacted|compromised)\b/i.test(
+      containsUnqualifiedEvidenceAssertion(
         text,
+        /\b(?:security|privacy)\s+(?:was|were)\s+not\s+(?:affected|impacted|compromised)\b/i,
       ),
   },
   {
     label: 'unsupported assertion that data loss or a security/privacy breach occurred',
     test: (text) =>
-      /\b(?:caused|resulted\s+in|included)\s+(?:a\s+)?(?:data\s+loss|security\s+breach|privacy\s+breach)\b/i.test(
+      containsUnqualifiedEvidenceAssertion(
         text,
+        /\b(?:caused|resulted\s+in|included)\s+(?:a\s+)?(?:data\s+loss|security\s+breach|privacy\s+breach)\b/i,
       ),
   },
   {
@@ -440,7 +463,7 @@ function isConcreteHandle(value: string): boolean {
 }
 
 function isSpecificActionTeamOrRole(value: string): boolean {
-  return /^(?:sre(?:\s+(?:team|owner|on-?call|rotation))?|platform(?:\s+(?:team|eng(?:ineering)?|owner))?|release(?:\s+engineering)?(?:\s+(?:team|owner))?|observability(?:\s+(?:team|owner))?|security(?:\s+(?:team|owner))?|infra(?:structure)?(?:\s+(?:team|owner))?|operations?(?:\s+(?:team|owner))?|ops(?:\s+(?:team|owner))?|devops(?:\s+(?:team|owner))?|site\s+reliability(?:\s+(?:team|owner))?|qa(?:\s+team)?|quality\s+assurance(?:\s+team)?|engineering\s+(?:management|mgmt)(?:\s+team)?|checkout(?:-api)?\s+(?:team|owner|on-?call|rotation)|payment(?:s|\s+gateway)?\s+(?:team|owner))$/i.test(
+  return /^(?:sre(?:\s+(?:team|owner|on-?call|rotation))?|platform(?:\s+(?:team|eng(?:ineering)?|owner))?|release(?:\s+engineering)?(?:\s+(?:team|owner))?|(?:ci|cd)(?:\s+(?:team|owner|engineering))?|observability(?:\s+(?:team|owner))?|security(?:\s+(?:team|owner))?|infra(?:structure)?(?:\s+(?:team|owner))?|operations?(?:\s+(?:team|owner))?|ops(?:\s+(?:team|owner))?|devops(?:\s+(?:team|owner))?|site\s+reliability(?:\s+(?:team|owner))?|qa(?:\s+team)?|quality\s+assurance(?:\s+team)?|engineering\s+(?:management|mgmt)(?:\s+team)?|checkout(?:-api)?\s+(?:team|owner|on-?call(?:\s+rotation)?|rotation)|payment(?:s|\s+gateway)?\s+(?:team|owner))$/i.test(
     value,
   );
 }
@@ -1188,7 +1211,7 @@ export const incidentPostmortemScenario: EvalScenario = {
 
     const bytes = postmortem.length;
     const verdict = evaluateIncidentPostmortem(postmortem, persistedEvidence);
-    const { signals, score, failReason, failures } = verdict;
+    const { signals, hardSignals, score, failReason, failures } = verdict;
     logChanged(
       'sniff',
       `[scenario] incident-postmortem bytes=${bytes} score=${score}/9 signals=${signals.join(',') || 'none'}${failReason ? ` failReason="${failReason}"` : ''}`,
@@ -1217,14 +1240,14 @@ export const incidentPostmortemScenario: EvalScenario = {
       };
     }
 
-    // Pass when all 8 hard signals fire. `no-blame-language` is
-    // soft (we just record it). The judge layer (when --llm-judge ran)
-    // contributes its own advisory axes via the report.
+    // Pass when all 8 hard signals fire. `no-blame-language` is soft (we
+    // just record it), so report hard and advisory results separately instead
+    // of saying "8" beside a list that may contain 9 signals.
     if (verdict.success) {
       return {
         done: true,
         success: true,
-        reason: `all 8 hard signals firing (signals: ${signals.join(', ')})`,
+        reason: `all hard signals firing (${hardSignals.length}/8; advisory no-blame-language=${signals.includes('no-blame-language') ? 'pass' : 'miss'}; signals: ${signals.join(', ')})`,
       };
     }
 

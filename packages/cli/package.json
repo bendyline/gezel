@@ -33,7 +33,7 @@
   },
   "files": ["dist", "!dist/**/*.map"],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/verify-build.mjs",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo",

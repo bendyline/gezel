@@ -121,6 +121,47 @@ describe('requestNpmInstalls — approval question publishing', () => {
     );
   });
 
+  it('uses the vetted range when a shipped package omits its version', async () => {
+    const events: ChatEventEnvelope[] = [];
+    const chatEvents = new ChatEventBus();
+    chatEvents.subscribeProject(projectId, (envelope) => events.push(envelope));
+
+    const result = await requestNpmInstalls({
+      store,
+      home,
+      projectId,
+      packages: [{ package: 'tsx' }],
+      gezelId: 'linnea',
+      sessionId: 'sess-abc',
+      chatEvents,
+    });
+
+    expect(result.results[0]).toMatchObject({ kind: 'installed', package: 'tsx', version: '^4' });
+    expect(vi.mocked(runPnpm)).toHaveBeenCalledWith(
+      ['add', '--', 'tsx@^4'],
+      expect.objectContaining({ cwd: expect.any(String) }),
+    );
+    expect(events.filter((event) => event.event.type === 'question_asked')).toHaveLength(0);
+  });
+
+  it('still asks when a shipped package explicitly requests an unvetted dist-tag', async () => {
+    const result = await requestNpmInstalls({
+      store,
+      home,
+      projectId,
+      packages: [{ package: 'tsx', version: 'latest' }],
+      gezelId: 'linnea',
+      sessionId: 'sess-abc',
+    });
+
+    expect(result.results[0]).toMatchObject({
+      kind: 'pending-approval',
+      package: 'tsx',
+      version: 'latest',
+    });
+    expect(vi.mocked(runPnpm)).not.toHaveBeenCalled();
+  });
+
   it.each([
     { package: '--global' },
     { package: 'https://example.test/pkg.tgz' },

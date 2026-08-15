@@ -4,6 +4,12 @@ import type {
   GezelSummary,
   TerminalMessage,
 } from '@bendyline/gezel';
+import {
+  type WriteStreamState,
+  appendWriteArgumentChunk,
+  createWriteStreamState,
+  isStreamedWriteTool,
+} from './write-stream.js';
 
 /**
  * A single rendered line in the live chat feed. `assistant` rows stay
@@ -14,9 +20,20 @@ export interface FeedRow {
   key: string;
   sessionId: string;
   gezelId: string;
-  kind: 'user' | 'pending' | 'assistant' | 'tool' | 'note' | 'error' | 'shell';
+  kind:
+    | 'user'
+    | 'pending'
+    | 'assistant'
+    | 'thinking'
+    | 'write'
+    | 'tool'
+    | 'note'
+    | 'error'
+    | 'shell';
   text: string;
   open: boolean;
+  /** Incremental decoder state retained only while a write payload streams. */
+  writeStream?: WriteStreamState;
   /** Structured actor metadata for client-side task-summary name rendering. */
   taskEvent?: {
     kind: string;
@@ -25,6 +42,18 @@ export interface FeedRow {
 }
 
 const MAX_ROWS = 200;
+export const MAX_FEED_ROW_CHARS = 8_000;
+
+/** Keep one extra character so the renderer can distinguish capped state. */
+function capFeedText(text: string): string {
+  return text.length > MAX_FEED_ROW_CHARS ? text.slice(0, MAX_FEED_ROW_CHARS + 1) : text;
+}
+
+function appendFeedText(current: string, chunk: string): string {
+  if (current.length > MAX_FEED_ROW_CHARS || chunk.length === 0) return current;
+  const remaining = MAX_FEED_ROW_CHARS + 1 - current.length;
+  return current + chunk.slice(0, remaining);
+}
 
 let counter = 0;
 function nextKey(): string {
@@ -37,21 +66,42 @@ function nextKey(): string {
  * Deltas coalesce into the session's open assistant row; `complete` closes
  * it with the final text; `done`/`error` close any stragglers.
  */
-export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
+export function reduceFeed(
+  rows: FeedRow[],
+  env: ChatEventEnvelope,
+  opts: { showThinking?: boolean; showWrites?: boolean } = {},
+): FeedRow[] {
   const { sessionId, gezelId, event } = env;
   const cap = (next: FeedRow[]): FeedRow[] =>
     next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
 
   switch (event.type) {
+    case 'user_message_pending': {
+      const key = `startup-${sessionId}`;
+      const pending: FeedRow = {
+        key,
+        sessionId,
+        gezelId,
+        kind: 'pending',
+        text: capFeedText(event.preview),
+        open: false,
+      };
+      const idx = rows.findIndex((row) => row.key === key);
+      if (idx === -1) return cap([...rows, pending]);
+      const next = rows.slice();
+      next[idx] = pending;
+      return next;
+    }
+
     case 'user_message':
       return cap([
-        ...rows,
+        ...withoutStartupPending(rows, sessionId),
         {
           key: nextKey(),
           sessionId,
           gezelId,
           kind: 'user',
-          text: event.message.content,
+          text: capFeedText(event.message.content),
           open: false,
         },
       ]);
@@ -63,7 +113,7 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
         sessionId,
         gezelId,
         kind: 'pending',
-        text: event.preview,
+        text: capFeedText(event.preview),
         open: false,
       };
       const idx = rows.findIndex((row) => row.key === key);
@@ -76,45 +126,75 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
     case 'queue_removed':
       return rows.filter((row) => row.key !== `queue-${event.queueId}`);
 
-    case 'delta': {
-      const idx = findOpenAssistant(rows, sessionId);
-      const open = idx === -1 ? undefined : rows[idx];
+    case 'reasoning_delta': {
+      const settled = closeWriteRows(rows, sessionId);
+      if (opts.showThinking === false) return settled;
+      const idx = findOpenRow(settled, sessionId, 'thinking');
+      const open = idx === -1 ? undefined : settled[idx];
       if (!open) {
         return cap([
-          ...rows,
+          ...settled,
+          {
+            key: nextKey(),
+            sessionId,
+            gezelId,
+            kind: 'thinking',
+            text: capFeedText(event.content),
+            open: true,
+          },
+        ]);
+      }
+      const next = settled.slice();
+      const text = appendFeedText(open.text, event.content);
+      if (text === open.text) return settled;
+      next[idx] = { ...open, text };
+      return next;
+    }
+
+    case 'delta': {
+      const settled = closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId);
+      const idx = findOpenAssistant(settled, sessionId);
+      const open = idx === -1 ? undefined : settled[idx];
+      if (!open) {
+        return cap([
+          ...settled,
           {
             key: nextKey(),
             sessionId,
             gezelId,
             kind: 'assistant',
-            text: event.content,
+            text: capFeedText(event.content),
             open: true,
           },
         ]);
       }
-      const next = rows.slice();
-      next[idx] = { ...open, text: open.text + event.content };
+      const next = settled.slice();
+      const text = appendFeedText(open.text, event.content);
+      if (text === open.text) return settled;
+      next[idx] = { ...open, text };
       return next;
     }
 
     case 'complete': {
-      const idx = findOpenAssistant(rows, sessionId);
-      const open = idx === -1 ? undefined : rows[idx];
-      const text = event.message.content;
+      const settled = closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId);
+      const idx = findOpenAssistant(settled, sessionId);
+      const open = idx === -1 ? undefined : settled[idx];
+      const text = capFeedText(event.message.content);
       if (!open) {
         return cap([
-          ...rows,
+          ...settled,
           { key: nextKey(), sessionId, gezelId, kind: 'assistant', text, open: false },
         ]);
       }
-      const next = rows.slice();
+      const next = settled.slice();
       next[idx] = { ...open, text: text || open.text, open: false };
       return next;
     }
 
-    case 'tool':
+    case 'tool': {
+      const settled = closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId);
       return cap([
-        ...rows,
+        ...settled,
         {
           key: nextKey(),
           sessionId,
@@ -124,6 +204,15 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
           open: false,
         },
       ]);
+    }
+
+    case 'tool_args_delta': {
+      const settled = closeOpenRows(rows, sessionId, 'thinking');
+      if (opts.showWrites !== true) {
+        return closeWriteRows(settled, sessionId);
+      }
+      return appendWriteStream(settled, sessionId, gezelId, event.name, event.content);
+    }
 
     case 'awaiting_gezel':
       return cap([
@@ -146,7 +235,7 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
           sessionId: 'local',
           gezelId: '',
           kind: 'note',
-          text: `task · ${event.summary}`,
+          text: capFeedText(`task · ${event.summary}`),
           open: false,
           taskEvent: {
             kind: event.kind,
@@ -155,14 +244,28 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
         },
       ]);
 
-    case 'error':
+    case 'error': {
+      const settled = withoutStartupPending(
+        closeWriteRows(closeOpenRows(rows, sessionId, 'thinking'), sessionId),
+        sessionId,
+      );
       return cap([
-        ...rows,
-        { key: nextKey(), sessionId, gezelId, kind: 'error', text: event.error, open: false },
+        ...settled,
+        {
+          key: nextKey(),
+          sessionId,
+          gezelId,
+          kind: 'error',
+          text: capFeedText(event.error),
+          open: false,
+        },
       ]);
+    }
 
-    case 'done':
-      return rows.map((r) => (r.sessionId === sessionId && r.open ? { ...r, open: false } : r));
+    case 'done': {
+      const settled = withoutStartupPending(closeWriteRows(rows, sessionId), sessionId);
+      return settled.map((r) => (r.sessionId === sessionId && r.open ? { ...r, open: false } : r));
+    }
 
     default:
       return rows;
@@ -176,11 +279,22 @@ export function reduceFeed(rows: FeedRow[], env: ChatEventEnvelope): FeedRow[] {
  */
 export function sessionToFeedRows(
   session: Pick<ChatSession, 'id' | 'gezelId' | 'messages' | 'lastTurnError'>,
+  opts: { showThinking?: boolean } = {},
 ): FeedRow[] {
   const rows: FeedRow[] = [];
   for (const message of session.messages) {
     if (message.hidden) continue;
     if (message.role === 'assistant') {
+      if (opts.showThinking !== false && message.reasoning?.trim()) {
+        rows.push({
+          key: nextKey(),
+          sessionId: session.id,
+          gezelId: message.from?.gezelId ?? session.gezelId,
+          kind: 'thinking',
+          text: capFeedText(message.reasoning),
+          open: false,
+        });
+      }
       for (const tool of message.toolCalls ?? []) {
         rows.push({
           key: nextKey(),
@@ -203,7 +317,7 @@ export function sessionToFeedRows(
           : message.from
             ? 'assistant'
             : message.role,
-      text: message.content,
+      text: capFeedText(message.content),
       open: false,
     });
   }
@@ -213,7 +327,7 @@ export function sessionToFeedRows(
       sessionId: session.id,
       gezelId: session.gezelId,
       kind: 'error',
-      text: session.lastTurnError,
+      text: capFeedText(session.lastTurnError),
       open: false,
     });
   }
@@ -250,6 +364,8 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     return m;
   };
   switch (event.type) {
+    case 'user_message_pending':
+      return set('preparing chat', 0, null);
     case 'user_message':
       return set('thinking…', 0, null);
     case 'queued':
@@ -266,11 +382,11 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     case 'tool_args_delta': {
       const outputChars = (prior?.outputChars ?? 0) + event.content.length;
       const name = event.name.trim() || prior?.activeToolName || null;
-      return set(runningToolLabel(name), outputChars, name);
+      return set(runningToolLabel(name, outputChars), outputChars, name);
     }
     case 'tool': {
       const name = event.name.trim() || prior?.activeToolName || null;
-      return set(runningToolLabel(name), undefined, name);
+      return set(runningToolLabel(name, prior?.outputChars ?? 0), undefined, name);
     }
     case 'heartbeat':
       return event.label ? set(heartbeatLabel(event.label), undefined, null) : turns;
@@ -282,6 +398,11 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     default:
       return turns;
   }
+}
+
+function withoutStartupPending(rows: FeedRow[], sessionId: string): FeedRow[] {
+  const key = `startup-${sessionId}`;
+  return rows.some((row) => row.key === key) ? rows.filter((row) => row.key !== key) : rows;
 }
 
 function phaseLabel(
@@ -315,8 +436,11 @@ function generationLabel(outputChars: number): string {
   return `generating · ~${tokens.toLocaleString('en-US')} ${tokens === 1 ? 'token' : 'tokens'}`;
 }
 
-function runningToolLabel(name: string | null): string {
-  return name ? `running tool · ${name}` : 'running tool';
+function runningToolLabel(name: string | null, outputChars = 0): string {
+  const base = name ? `running tool · ${name}` : 'running tool';
+  if (!isStreamedWriteTool(name) || outputChars <= 0) return base;
+  const tokens = Math.max(1, Math.round(outputChars / 4));
+  return `${base} · ~${tokens.toLocaleString('en-US')} ${tokens === 1 ? 'token' : 'tokens'}`;
 }
 
 /**
@@ -343,7 +467,14 @@ export function appendNote(
 ): FeedRow[] {
   const next = [
     ...rows,
-    { key: nextKey(), sessionId: 'local', gezelId: '', kind, text, open: false },
+    {
+      key: nextKey(),
+      sessionId: 'local',
+      gezelId: '',
+      kind,
+      text: capFeedText(text),
+      open: false,
+    },
   ];
   return next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
 }
@@ -370,7 +501,7 @@ export function finalizeShellRun(
         sessionId: `term-${runId}`,
         gezelId: '',
         kind: 'shell' as const,
-        text: text ? `${text}${footer}` : footer.trimStart(),
+        text: capFeedText(text ? `${text}${footer}` : footer.trimStart()),
         open: false,
       },
     ];
@@ -379,7 +510,11 @@ export function finalizeShellRun(
   const row = rows[idx];
   if (!row) return rows;
   const next = rows.slice();
-  next[idx] = { ...row, open: false, text: `${row.text.replace(/\s+$/, '')}${footer}` };
+  next[idx] = {
+    ...row,
+    open: false,
+    text: capFeedText(`${row.text.replace(/\s+$/, '')}${footer}`),
+  };
   return next;
 }
 
@@ -402,7 +537,7 @@ export function appendShellChunk(rows: FeedRow[], runId: string, chunk: string):
         sessionId: `term-${runId}`,
         gezelId: '',
         kind: 'shell' as const,
-        text: chunk,
+        text: capFeedText(chunk),
         open: true,
       },
     ];
@@ -410,17 +545,100 @@ export function appendShellChunk(rows: FeedRow[], runId: string, chunk: string):
   }
   const row = rows[idx];
   if (!row) return rows;
+  const text = appendFeedText(row.text, chunk);
+  if (text === row.text) return rows;
   const next = rows.slice();
-  next[idx] = { ...row, text: row.text + chunk };
+  next[idx] = { ...row, text };
   return next;
 }
 
 function findOpenAssistant(rows: FeedRow[], sessionId: string): number {
+  return findOpenRow(rows, sessionId, 'assistant');
+}
+
+function findOpenRow(rows: FeedRow[], sessionId: string, kind: FeedRow['kind']): number {
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i];
-    if (r && r.sessionId === sessionId && r.kind === 'assistant' && r.open) return i;
+    if (r && r.sessionId === sessionId && r.kind === kind && r.open) return i;
   }
   return -1;
+}
+
+function closeOpenRows(rows: FeedRow[], sessionId: string, kind: FeedRow['kind']): FeedRow[] {
+  let changed = false;
+  const next = rows.map((row) => {
+    if (row.sessionId !== sessionId || row.kind !== kind || !row.open) return row;
+    changed = true;
+    return { ...row, open: false };
+  });
+  return changed ? next : rows;
+}
+
+function appendWriteStream(
+  rows: FeedRow[],
+  sessionId: string,
+  gezelId: string,
+  eventToolName: string,
+  chunk: string,
+): FeedRow[] {
+  let idx = findOpenRow(rows, sessionId, 'write');
+  let open = idx === -1 ? undefined : rows[idx];
+  const toolName = eventToolName.trim() || open?.writeStream?.toolName || '';
+  if (!isStreamedWriteTool(toolName)) return closeWriteRows(rows, sessionId);
+
+  let currentRows = rows;
+  if (open?.writeStream?.toolName !== toolName) {
+    currentRows = closeWriteRows(rows, sessionId);
+    idx = -1;
+    open = undefined;
+  }
+
+  const decoded = appendWriteArgumentChunk(
+    open?.writeStream ?? createWriteStreamState(toolName),
+    chunk,
+  );
+  if (!open) {
+    const next = [
+      ...currentRows,
+      {
+        key: nextKey(),
+        sessionId,
+        gezelId,
+        kind: 'write' as const,
+        text: capFeedText(decoded.text),
+        open: true,
+        writeStream: decoded.state,
+      },
+    ];
+    return next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
+  }
+
+  const next = currentRows.slice();
+  next[idx] = {
+    ...open,
+    text: appendFeedText(open.text, decoded.text),
+    writeStream: decoded.state,
+  };
+  return next;
+}
+
+/** Close a live write preview and discard its decoder state. */
+function closeWriteRows(rows: FeedRow[], sessionId: string): FeedRow[] {
+  let changed = false;
+  const next: FeedRow[] = [];
+  for (const row of rows) {
+    if (row.sessionId !== sessionId || row.kind !== 'write' || !row.writeStream) {
+      next.push(row);
+      continue;
+    }
+    changed = true;
+    // If the tool ended before the selected payload field appeared, there
+    // is no content to show and no useful empty "writing:" row to keep.
+    if (!row.text) continue;
+    const { writeStream: _writeStream, ...settled } = row;
+    next.push({ ...settled, open: false });
+  }
+  return changed ? next : rows;
 }
 
 function toolLabel(event: Extract<ChatEventEnvelope['event'], { type: 'tool' }>): string {
@@ -452,7 +670,7 @@ function toolRowText(call: {
       : flat;
   const failed =
     call.success === false ? ` · failed${call.errorMessage ? `: ${call.errorMessage}` : ''}` : '';
-  return `🔧 ${name}${clipped ? ` · ${clipped}` : ''}${failed}`;
+  return capFeedText(`🔧 ${name}${clipped ? ` · ${clipped}` : ''}${failed}`);
 }
 
 /**

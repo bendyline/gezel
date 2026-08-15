@@ -346,6 +346,17 @@ export interface TrialOptions {
   /** Override the resolved sd-server binary path. */
   sdBin?: string;
   /**
+   * Controlled llama.cpp capability experiment: replay captured private
+   * reasoning on later requests and launch the engine with
+   * `--reasoning-preserve`. Explicit false is recorded as an arm too.
+   */
+  llamaCppReasoningPreserve?: boolean;
+  /**
+   * Controlled llama.cpp capability experiment: override the catalog's
+   * launch-time `tuning.reasoning.thinkingBudget` without editing Gilde.
+   */
+  llamaCppReasoningBudgetTokens?: number;
+  /**
    * When set, the runner aborts the polling loop and runs cleanup as soon
    * as the signal fires. Bin entry points wire this to SIGINT/SIGTERM so
    * Ctrl+C still produces a fully captured postmortem instead of leaving

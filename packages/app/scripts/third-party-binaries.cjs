@@ -54,6 +54,7 @@ const THIRD_PARTY_PATTERNS = [
   // carries OpenJS's own signature and must keep it.
   { pattern: '^uv\\.exe$', source: 'Astral uv (prebuilt release)' },
   { pattern: '^node\\.exe$', source: 'OpenJS Node.js (prebuilt release)' },
+  { pattern: '^rg\\.exe$', source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)' },
   {
     pattern: '^fastlist-[\\w.-]+\\.exe$',
     source: 'pnpm fastlist helper (ordinary pnpm package)',

@@ -271,24 +271,34 @@ export function buildPreflightChecks(ev: PreflightEvidence): {
     profileResolution = { ok: true, detail: 'no tuning trace lines found (non-gating)' };
   }
 
-  // Reasoning budget: any logged budget at/above the unbounded sentinel
-  // repeats the deepseek-r1 reason-forever saga.
-  const budgets = [...log.matchAll(/reasoning-budget[^\n]*?budget=(\d+)/g)]
+  // Reasoning budget: inspect both runtime transition traces and the launch
+  // diagnostic. A bounded budget may never emit an "activated" transition
+  // during a short probe, which previously made a thinking model look like
+  // reasoning was disabled even though the correct launch flag was present.
+  const budgets = [
+    ...log.matchAll(/reasoning-budget[^\n]*?budget=(\d+)/g),
+    ...log.matchAll(/"reasoningBudgetTokens":(\d+)/g),
+  ]
     .map((m) => Number.parseInt(m[1] ?? '0', 10))
     .filter((n) => Number.isFinite(n));
   const worstBudget = budgets.length > 0 ? Math.max(...budgets) : null;
+  const thinkingEnabled = /tuning gezel=\S+[^\n]*thinking=yes/.test(log);
+  const launchReportsUnbounded = /"reasoningBudgetTokens":"unbounded"/.test(log);
   const reasoningBudget: PreflightCheck =
-    worstBudget !== null && worstBudget >= UNBOUNDED_REASONING_THRESHOLD
+    (worstBudget !== null && worstBudget >= UNBOUNDED_REASONING_THRESHOLD) ||
+    (thinkingEnabled && launchReportsUnbounded)
       ? {
           ok: false,
-          detail: `unbounded reasoning budget in effect (budget=${worstBudget}) — set tuning.reasoning.thinkingBudget in the manifest`,
+          detail: `unbounded reasoning budget in effect${worstBudget !== null ? ` (budget=${worstBudget})` : ''} — set tuning.reasoning.thinkingBudget in the manifest`,
         }
       : {
           ok: true,
           detail:
             worstBudget !== null
               ? `reasoning budget bounded (budget=${worstBudget})`
-              : 'no reasoning-budget trace (non-thinking model or thinking disabled)',
+              : thinkingEnabled
+                ? 'thinking enabled; no reasoning-budget launch/runtime trace found (budget not verifiable)'
+                : 'no reasoning-budget trace (non-thinking model or thinking disabled)',
         };
 
   const throughput: PreflightCheck =
@@ -361,6 +371,8 @@ const PREFLIGHT_LAUNCH_ENV_KEYS = [
   'GEZEL_EVAL_SOFT_PROGRESS_TIMEOUT_MS',
   'GEZEL_LLAMA_NUM_CTX',
   'GEZEL_LLAMA_PRE_FIRST_BYTE_TIMEOUT_MS',
+  'GEZEL_LLAMA_REASONING_PRESERVE',
+  'GEZEL_LLAMA_REASONING_BUDGET_TOKENS',
   'GEZEL_LLAMA_SERVER_BIN',
   'GEZEL_LLAMA_STARTUP_TIMEOUT_MS',
 ] as const;

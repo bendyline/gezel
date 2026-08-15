@@ -10,6 +10,8 @@ const log = createLogger('models');
 export interface GgufInstallOpts {
   skipSha: boolean;
   includeMmproj: boolean;
+  /** Whether a text-only chat install should also pull the default image reader. */
+  installCompanion: boolean;
 }
 
 export interface MlxInstallOpts {
@@ -32,10 +34,11 @@ export interface ChatModelInstallRegistries {
  * failure mode that used to strand multi-GB `.partial` trees with no
  * record they ever existed.
  *
- * The llama-cpp job additionally carries the companion image-reader pull
- * (previously inlined in the route): the chat model's own `done` is held
- * back until the companion finishes, because every consumer treats `done`
- * as terminal and would detach while the reader was still downloading.
+ * By default the llama-cpp job additionally carries the companion image-reader
+ * pull (previously inlined in the route): the chat model's own `done` is held
+ * back until the companion finishes, because every consumer treats `done` as
+ * terminal and would detach while the reader was still downloading. Callers
+ * with an explicit bundle plan can suppress it through `installCompanion`.
  */
 export function buildChatModelInstallRegistries(opts: {
   home: string;
@@ -85,7 +88,7 @@ async function* runGgufInstallWithCompanion(
     yield event;
   }
   if (!finished) return;
-  yield* companionRecognitionEvents(catalogId, deps);
+  if (o.installCompanion) yield* companionRecognitionEvents(catalogId, deps);
   yield finished;
 }
 

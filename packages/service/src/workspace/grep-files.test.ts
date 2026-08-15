@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rgPath as bundledRipgrepPath } from '@vscode/ripgrep';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type ResolvedSearchTarget,
@@ -10,7 +11,7 @@ import {
   grepWorkspace,
 } from './grep-files.js';
 
-const HAS_RIPGREP = spawnSync('rg', ['--version'], { stdio: 'ignore' }).status === 0;
+const HAS_RIPGREP = spawnSync(bundledRipgrepPath, ['--version'], { stdio: 'ignore' }).status === 0;
 
 let workspaceDir: string;
 let outsideDir: string;
@@ -309,6 +310,27 @@ describe('grepWorkspace path containment', () => {
 });
 
 describe.runIf(HAS_RIPGREP)('grepWorkspace ripgrep engine', () => {
+  it('uses the bundled platform binary when rg is absent from PATH', async () => {
+    const priorPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      const result = await grepWorkspace({
+        workspaceDir,
+        engine: 'ripgrep',
+        path: 'src/b.ts',
+        pattern: 'needle\\s+in\\s+b',
+      });
+
+      expect(result).toMatchObject({
+        engine: 'ripgrep',
+        matches: [{ path: 'src/b.ts', line: 1, text: 'needle in b' }],
+      });
+    } finally {
+      if (priorPath === undefined) delete process.env.PATH;
+      else process.env.PATH = priorPath;
+    }
+  });
+
   it('treats an option-looking pattern as data and reports invalid regexes', async () => {
     await writeFile(join(workspaceDir, 'src', 'options.txt'), '--pre=echo-owned\n');
 
@@ -354,7 +376,7 @@ describe.runIf(HAS_RIPGREP)('grepWorkspace ripgrep engine', () => {
 });
 
 describe.runIf(process.platform !== 'win32')('grepWorkspace ripgrep process contract', () => {
-  it('never executes an rg binary supplied through the model-controlled workspace', async () => {
+  it('ignores an rg binary supplied through the model-controlled workspace', async () => {
     const workspaceRg = join(workspaceDir, 'rg');
     await writeFile(
       workspaceRg,
@@ -370,7 +392,7 @@ describe.runIf(process.platform !== 'win32')('grepWorkspace ripgrep process cont
         path: 'src/b.ts',
         pattern: 'needle in b',
       });
-      expect(result.engine).toBe('javascript');
+      expect(result.engine).toBe('ripgrep');
       expect(result.matches).toEqual([{ path: 'src/b.ts', line: 1, text: 'needle in b' }]);
     } finally {
       if (priorPath === undefined) delete process.env.PATH;

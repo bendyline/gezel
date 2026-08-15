@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import { DeviceHealthGate, createSystemDeviceHealthProbe } from '@bendyline/gezel/native';
 import { repoRoot } from './native-bin.ts';
 import { ensurePreflightAdmission, formatPreflightFailure } from './preflight.ts';
 import { isLocalEngine } from './providers.ts';
+import { resolveEvalRunsDir } from './run-paths.ts';
 import { runTrial } from './runner.ts';
 import { formatPassClaim } from './stats-discipline.ts';
 import { detectTriageCluster, trialSignature } from './trial-signature.ts';
@@ -111,11 +112,6 @@ function matrixDir(): string {
  * land at `evals/evals/runs/foo`. Falls back to the default dir factory
  * when unset.
  */
-function resolveRunsDir(runsDir: string | undefined, fallback: () => string): string {
-  if (!runsDir) return fallback();
-  return isAbsolute(runsDir) ? runsDir : join(repoRoot(), runsDir);
-}
-
 /**
  * Run N trials of `scenario`. Trials are sequential by default — each
  * trial spawns its own llama-server, and running >1 large model
@@ -129,7 +125,7 @@ function resolveRunsDir(runsDir: string | undefined, fallback: () => string): st
  */
 export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Promise<BatchSummary> {
   const startedAt = new Date();
-  const runsDir = resolveRunsDir(opts.runsDir, batchDir);
+  const runsDir = resolveEvalRunsDir(opts.runsDir, batchDir);
   await mkdir(runsDir, { recursive: true });
   // eslint-disable-next-line no-console
   console.log(`[batch] scenario=${scenario.id} count=${opts.count} runsDir=${runsDir}`);
@@ -346,7 +342,7 @@ export async function runMatrix(
     throw new Error('runMatrix requires at least one scenario');
   }
   const startedAt = new Date();
-  const root = resolveRunsDir(opts.runsDir, matrixDir);
+  const root = resolveEvalRunsDir(opts.runsDir, matrixDir);
   await mkdir(root, { recursive: true });
   // eslint-disable-next-line no-console
   console.log(

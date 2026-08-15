@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
@@ -1052,10 +1052,12 @@ export class ChatManager {
    */
   private readonly afterSessionIdle = new Map<string, Array<() => void>>();
   /**
-   * One live async file handoff per sender/target/project/path. Models can
+   * One live async file handoff per sender/target/project/path/intent. Models can
    * emit the same `message_gezel` call several times while the sender turn
    * is still active; joining that work prevents a parked-send burst from
-   * replaying the same assignment into the recipient session.
+   * replaying the same assignment into the recipient session. A later
+   * validator repair for a file that was originally missing is distinct work
+   * and must never join the older create request.
    */
   private readonly inflightFileHandoffs = new Map<
     string,
@@ -3559,6 +3561,8 @@ export class ChatManager {
     toGezelIdOrName: string;
     projectId?: string;
     text: string;
+    /** One-way feedback that must not wake the sender with the recipient's reply. */
+    suppressReply?: boolean;
     /** Internal task context for scheduler re-drives. */
     taskRef?: string;
     /** Exact step paired with taskRef when re-driving task work. */
@@ -3665,6 +3669,7 @@ export class ChatManager {
           target.id,
           projectId,
           normalizeExpectedDeliverablePath(requestedFilePath),
+          fileHandoffIntentKey(args.text),
         ].join('\u0000')
       : null;
     const pendingHandoff = fileHandoffKey
@@ -3747,7 +3752,7 @@ export class ChatManager {
         : await this.ensureOrCreateSession({ gezelId: args.fromGezelId, projectId })
             .then((s) => s.id)
             .catch(() => null));
-    if (resolvedFromSessionId && resolvedFromSessionId !== session.id) {
+    if (!args.suppressReply && resolvedFromSessionId && resolvedFromSessionId !== session.id) {
       this.attachReplyListener({
         targetSessionId: session.id,
         fromSessionId: resolvedFromSessionId,
@@ -5793,25 +5798,50 @@ export class ChatManager {
       }
     }
 
-    // All terminal paths below must publish a terminal event + `done` to
-    // the session's SSE bus. Intentional cancellation is distinct from an
-    // error so the UI can stop spinning without poisoning the session.
-    // Before the record is loaded we don't know the gezel/project, so we
-    // publish on the session bus only.
+    // A cold provider session can spend a noticeable amount of time loading
+    // before the durable user message is appended below. Keep project/global
+    // timelines honest during that gap: show the submitted text as pending
+    // and mark the turn as active instead of leaving it on "idle". Once
+    // ensureState succeeds the pending row is replaced by the ordinary
+    // user_message event.
+    const preflightScope: PublishScope | undefined = ffRecord
+      ? {
+          sessionId,
+          gezelId: ffRecord.gezelId,
+          projectId: ffRecord.projectId,
+        }
+      : undefined;
+    const coldStartPending = preflightScope && !this.states.get(sessionId)?.session;
+    if (preflightScope && coldStartPending) {
+      this.events.publish(preflightScope, {
+        type: 'user_message_pending',
+        preview: userText.length > 160 ? `${userText.slice(0, 157)}…` : userText,
+      });
+    }
+
+    // All terminal paths below must publish a terminal event + `done`.
+    // Intentional cancellation is distinct from an error so the UI can stop
+    // spinning without poisoning the session. A valid on-disk record gives
+    // us enough scope to reach project/global clients even when ensureState
+    // fails; only a genuinely missing record falls back to session-only.
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('error:', message);
+      const publish = (event: ChatEvent): void => {
+        if (preflightScope) this.events.publish(preflightScope, event);
+        else this.events.publishSessionOnly(sessionId, event);
+      };
       if (inflightTurn.cancelled) {
-        this.events.publishSessionOnly(sessionId, { type: 'cancelled' });
+        publish({ type: 'cancelled' });
       } else {
         const detail = describeTurnError(err);
-        this.events.publishSessionOnly(sessionId, {
+        publish({
           type: 'error',
           error: redactCredentials(message),
           ...(detail ? { errorDetail: detail } : {}),
         });
       }
-      this.events.publishSessionOnly(sessionId, { type: 'done' });
+      publish({ type: 'done' });
       throw err;
     };
 
@@ -15620,6 +15650,23 @@ export function messageExpressesModifyIntent(text: string): boolean {
       text,
     )
   );
+}
+
+/**
+ * Preserve create-request deduplication while keeping concrete repairs from
+ * being swallowed by an older in-flight create for the same path. Distinct
+ * repair verdicts get distinct keys; byte-identical/reformatted retries still
+ * join one live handoff.
+ */
+export function fileHandoffIntentKey(text: string): string {
+  const repair =
+    messageExpressesModifyIntent(text) ||
+    /\[scenario check\]|\b(?:specific failure|signals? that (?:didn't|did not) fire|success criteria (?:aren't|are not) met|repeat miss|gate_full_rewrite|rejected)\b/i.test(
+      text,
+    );
+  if (!repair) return 'create';
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  return `repair:${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
 }
 
 export function isSubstantiveExistingWorkspaceFile(filePath: string, content: string): boolean {

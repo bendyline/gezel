@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -21,7 +21,10 @@ import {
   withPnpmInstallLock,
   workspaceDependenciesReady,
 } from './pnpm-install.mjs';
-import { runWithDependencyReadLease } from './run-with-dependency-lease.mjs';
+import {
+  runNodeWithDependencyReadLease,
+  runWithDependencyReadLease,
+} from './run-with-dependency-lease.mjs';
 import { parseWorkspaceValidationArgs, runWorkspaceValidation } from './validate-workspace.mjs';
 
 async function fixture(t) {
@@ -456,6 +459,119 @@ test('repository command wrapper passes a live read lease to pnpm', async (t) =>
   assert.equal(code, 0);
   assert.deepEqual(invocation.args, ['run', 'lint:unleased']);
   assert.equal(invocation.env.GEZEL_DEPENDENCY_LEASE_MODE, 'read');
+});
+
+test('repository command wrapper forwards script arguments without a literal separator', async (t) => {
+  const root = await fixture(t);
+  const invocations = [];
+  const spawnPnpmFn = (args) => {
+    invocations.push(args);
+    const child = new EventEmitter();
+    child.pid = 2_147_483_647;
+    child.killed = false;
+    child.kill = () => true;
+    queueMicrotask(() => child.emit('close', 0, null));
+    return child;
+  };
+
+  for (const args of [['--list'], ['--', '--list']]) {
+    const code = await runWithDependencyReadLease({
+      repoRoot: root,
+      script: 'eval:all:unleased',
+      args,
+      spawnPnpmFn,
+    });
+    assert.equal(code, 0);
+  }
+
+  assert.deepEqual(invocations, [
+    ['run', 'eval:all:unleased', '--list'],
+    ['run', 'eval:all:unleased', '--list'],
+  ]);
+});
+
+test('direct-node repository wrapper runs eval entries without a nested pnpm process', async (t) => {
+  const root = await fixture(t);
+  let invocation;
+  const code = await runNodeWithDependencyReadLease({
+    repoRoot: root,
+    entry: 'evals/src/bin/run.ts',
+    args: ['--', '--list'],
+    tsxImport: 'tsx-test-entry',
+    spawnNodeFn: (command, args, options) => {
+      invocation = { command, args, options };
+      const child = new EventEmitter();
+      child.pid = 2_147_483_647;
+      child.killed = false;
+      child.kill = () => true;
+      queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.equal(invocation.command, process.execPath);
+  assert.deepEqual(invocation.args, [
+    '--import',
+    'tsx-test-entry',
+    join(root, 'evals/src/bin/run.ts'),
+    '--list',
+  ]);
+  assert.equal(invocation.options.env.GEZEL_DEPENDENCY_LEASE_MODE, 'read');
+});
+
+test('direct-node wrapper waits for graceful signal cleanup before exiting', async (t) => {
+  const temp = await fixture(t);
+  const entry = join(temp, 'signal-child.ts');
+  const ready = join(temp, 'ready');
+  const finalized = join(temp, 'finalized');
+  await writeFile(
+    entry,
+    `import { writeFile } from 'node:fs/promises';
+const [ready, finalized] = process.argv.slice(2);
+const hold = setInterval(() => {}, 1000);
+process.on('SIGINT', () => {
+  setTimeout(() => void writeFile(finalized, 'done').then(() => { process.exitCode = 7; clearInterval(hold); }), 75);
+});
+void writeFile(ready, 'ready');
+`,
+  );
+  const wrapper = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL('run-with-dependency-lease.mjs', import.meta.url)),
+      '--direct-node',
+      entry,
+      ready,
+      finalized,
+    ],
+    {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      stdio: ['ignore', 'ignore', 'pipe'],
+    },
+  );
+  let stderr = '';
+  wrapper.stderr.setEncoding('utf8');
+  wrapper.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  t.after(() => {
+    if (wrapper.exitCode === null && !wrapper.killed) wrapper.kill('SIGKILL');
+  });
+
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(ready) && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
+  assert.equal(existsSync(ready), true, `signal child did not become ready: ${stderr}`);
+  wrapper.kill('SIGINT');
+  const exit = await new Promise((resolveExit, rejectExit) => {
+    wrapper.once('error', rejectExit);
+    wrapper.once('close', (code, signal) => resolveExit({ code, signal }));
+  });
+
+  assert.deepEqual(exit, { code: 7, signal: null });
+  assert.equal(existsSync(finalized), true, 'wrapper exited before child cleanup completed');
 });
 
 test('build, test, typecheck, and lint entry points use dependency read leases', async () => {

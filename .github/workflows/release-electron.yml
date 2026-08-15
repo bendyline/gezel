@@ -1280,5 +1280,5 @@ jobs:
             echo "node scripts/check-latest-release-namespace.mjs --expect ${{ needs.release-preflight.outputs.version }}"
             echo '```'
             echo
-            echo 'This ignores interleaved native-engine and npm-package releases.'
+            echo 'This ignores interleaved native-engine and legacy npm-package releases.'
           } >> "$GITHUB_STEP_SUMMARY"

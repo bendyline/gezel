@@ -50,6 +50,7 @@ import {
   planMoeOffload,
 } from './offload-planner.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from './provider.js';
+import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
 import { resolveSpecDraft } from './spec-draft.js';
 
 const log = createLogger('chat');
@@ -142,6 +143,12 @@ export async function buildLlamaCppProvider(opts: {
     ? undefined
     : (process.env.GEZEL_LLAMA_SERVER_URL ?? config.llamaCppBaseUrl);
   const binary = process.env.GEZEL_LLAMA_SERVER_BIN;
+  // Experimental A/B lever. Preservation is a two-sided contract: launch
+  // llama-server with `--reasoning-preserve` AND replay the captured
+  // `reasoning_content` on subsequent requests. Keep it opt-in until diverse
+  // agent-loop trials show that the extra history improves convergence.
+  const reasoningLaunchOverrides = reasoningLaunchOverridesFromEnv();
+  const reasoningPreserve = reasoningLaunchOverrides.preserve;
 
   const defaultModelId = opts.modelOverride?.modelId ?? config.defaultModel?.['llama-cpp'];
   // Slot count (`--parallel N`) is the single source of truth — drives the
@@ -188,6 +195,7 @@ export async function buildLlamaCppProvider(opts: {
     // rate for its own default engine — throughput was reachable only by
     // scraping stdout from the eval harness.
     includeUsageInStream: true,
+    replayReasoningContent: reasoningPreserve,
     // External-baseUrl default; the supervised path overrides this with the
     // auto-sized `slots` computed below (after the model resolves).
     concurrency: configuredSlots ?? 2,
@@ -569,12 +577,20 @@ export async function buildLlamaCppProvider(opts: {
   // budget at the manifest's recommended value is the difference
   // between "Builder produces code" and "Builder hangs the trial."
   // See `resolveCatalogReasoningBudget` for the lookup rationale.
-  const reasoningBudgetTokens = opts.catalog
+  const catalogReasoningBudgetTokens = opts.catalog
     ? await resolveCatalogReasoningBudget(
         opts.catalog,
         opts.modelOverride?.modelId ?? defaultModelId,
       )
     : undefined;
+  const reasoningBudgetTokens =
+    reasoningLaunchOverrides.budgetTokens ?? catalogReasoningBudgetTokens;
+  const reasoningBudgetSource =
+    reasoningLaunchOverrides.budgetTokens !== undefined
+      ? 'env'
+      : catalogReasoningBudgetTokens !== undefined
+        ? 'catalog'
+        : 'unbounded';
 
   // Speculative-decoding draft resolution — a manifest names its draft by
   // catalog id; resolve it to the installed GGUF path (or disable) before the
@@ -1184,6 +1200,7 @@ export async function buildLlamaCppProvider(opts: {
         // disables llama-server's chat-template output parsing so mangled
         // model output reaches `delta.content` for provider-side salvage.
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
+        reasoningPreserve,
         architecture: modelCatalogInfo?.architecture,
         modelId: defaultModelId ?? undefined,
         swaFullAutoFits,
@@ -1299,6 +1316,9 @@ export async function buildLlamaCppProvider(opts: {
           batchSize: lastArgValue(resolvedAdvancedArgs, '--batch-size') ?? 'default',
           ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
           flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
+          reasoningBudgetTokens: reasoningBudgetTokens ?? 'unbounded',
+          reasoningBudgetSource,
+          reasoningPreserve,
           cudaGraphs: process.env.GGML_CUDA_DISABLE_GRAPHS ? 'disabled-by-env' : 'default',
         },
         env: {

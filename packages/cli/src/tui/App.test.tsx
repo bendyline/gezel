@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import type { ChatEventEnvelope } from '@bendyline/gezel';
+import type { ChatEventEnvelope, Question } from '@bendyline/gezel';
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { type RenderOptions, render } from 'ink';
 import type { ReactNode } from 'react';
@@ -64,6 +64,84 @@ describe('App interactions', () => {
     expect(harness.text()).toContain('Studio');
     expect(harness.text()).toContain('Voorman');
     expect(harness.text()).toContain('New thread');
+  });
+
+  it('surfaces and answers npm and command approvals in the pending queue', async () => {
+    const npmApproval: Question = {
+      id: 'npm-approval',
+      projectId: 'studio',
+      gezelId: 'builder',
+      sessionId: 'builder-session',
+      prompt: 'Approve tsx?',
+      allowWriteIn: false,
+      multiSelect: false,
+      intent: {
+        kind: 'npm-install-approval',
+        packages: [
+          { package: 'tsx', version: 'latest' },
+          { package: 'left-pad', version: 'latest' },
+        ],
+      },
+      createdAt: '2026-08-14T12:00:00.000Z',
+    };
+    const commandApproval: Question = {
+      id: 'command-approval',
+      projectId: 'studio',
+      gezelId: 'builder',
+      sessionId: 'builder-session',
+      prompt: 'Run `npm run convert`?\n\nCommand body: `node scripts/convert-to-md.mjs`',
+      choices: ['Approve', 'Decline'],
+      allowWriteIn: false,
+      multiSelect: false,
+      intent: {
+        kind: 'command-approval',
+        scope: 'script',
+        name: 'convert',
+        body: 'node scripts/convert-to-md.mjs',
+      },
+      createdAt: '2026-08-14T12:01:00.000Z',
+    };
+    const client = createClient();
+    client.listQuestions.mockResolvedValue({ questions: [commandApproval, npmApproval] });
+    client.answerQuestion.mockImplementation(async (id, body) => {
+      const question = id === npmApproval.id ? npmApproval : commandApproval;
+      return { ...question, answer: { ...body, at: '2026-08-14T12:02:00.000Z' } };
+    });
+
+    const harness = mountApp(client);
+    await ready(client, harness);
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('npm package approval');
+      expect(harness.text()).toContain('tsx@latest');
+    });
+
+    await pressKey(harness, '\r');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('left-pad@latest');
+      expect(harness.text()).toContain('package 2/2');
+      expect(client.answerQuestion).not.toHaveBeenCalled();
+    });
+    await pressKey(harness, '\u001B[B');
+    await pressKey(harness, '\u001B[B');
+    await pressKey(harness, '\r');
+    await vi.waitFor(() => {
+      expect(client.answerQuestion).toHaveBeenCalledWith('npm-approval', {
+        npmInstallDecisions: [
+          { package: 'tsx', version: 'latest', decision: 'install' },
+          { package: 'left-pad', version: 'latest', decision: 'decline' },
+        ],
+      });
+      expect(harness.text()).toContain('Command approval');
+      expect(harness.text()).toContain('npm run convert');
+    });
+
+    await pressKey(harness, '\u001B[B');
+    await pressKey(harness, '\r');
+    await vi.waitFor(() => {
+      expect(client.answerQuestion).toHaveBeenCalledWith('command-approval', {
+        selectedChoices: [1],
+      });
+    });
   });
 
   it('shows an edit-permission note when the initial folder is read-only', async () => {
@@ -290,6 +368,106 @@ describe('App interactions', () => {
     });
   });
 
+  it('shows thinking by default and persists both visibility commands', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: { type: 'reasoning_delta', content: 'Thinking is visible by default.' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('thinking: Thinking is visible by default.');
+    });
+
+    await submit(harness, '/hide thinking');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenLastCalledWith({ cliShowThinking: false });
+      expect(harness.text()).toContain(
+        'Thinking is now hidden. The live token count still includes it.',
+      );
+    });
+    await harness.waitUntilRenderFlush();
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: { type: 'reasoning_delta', content: 'This thought should remain hidden.' },
+    });
+    await harness.waitUntilRenderFlush();
+    expect(harness.text()).not.toContain('This thought should remain hidden.');
+
+    await submit(harness, '/show thinking');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenLastCalledWith({ cliShowThinking: true });
+      expect(harness.text()).toContain('Thinking is now shown inline.');
+    });
+  });
+
+  it('keeps write streams off by default and persists both visibility commands', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'tool_args_delta',
+        name: 'write_file',
+        content: '{"path":"hidden.md","content":"hidden by default"}',
+      },
+    });
+    await harness.waitUntilRenderFlush();
+    expect(harness.text()).not.toContain('hidden by default');
+
+    await submit(harness, '/show writes');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenLastCalledWith({ cliShowWrites: true });
+      expect(harness.text()).toContain('Write content is now shown inline as it streams.');
+    });
+
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'tool_args_delta',
+        name: 'write_task_note',
+        content: '{"ref":"studio/4","text":"mapped the visible risk"}',
+      },
+    });
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('writing: mapped the visible risk');
+    });
+    expect(harness.text()).not.toContain('studio/4');
+
+    await submit(harness, '/hide writes');
+    await vi.waitFor(() => {
+      expect(client.updateConfig).toHaveBeenLastCalledWith({ cliShowWrites: false });
+      expect(harness.text()).toContain(
+        'Write content is now hidden. Tool token counts remain visible.',
+      );
+    });
+    projectEventHandler()({
+      sessionId: 'session-studio-foreman',
+      gezelId: 'foreman',
+      projectId: 'studio',
+      event: {
+        type: 'tool_args_delta',
+        name: 'write_artifact',
+        content: '{"path":"report.md","content":"hidden after command"}',
+      },
+    });
+    await harness.waitUntilRenderFlush();
+    expect(harness.text()).not.toContain('hidden after command');
+  });
+
   it('opens model downloads from the model picker, then uses the result', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -337,6 +515,53 @@ describe('App interactions', () => {
     await vi.waitFor(() => {
       expect(harness.text()).toContain('Download and use an on-device model');
       expect(harness.text()).toContain('Fresh Gemma (test)');
+    });
+  });
+
+  it('names and explains the companion image-reader download separately', async () => {
+    const client = createClient();
+    let finishDownload!: () => void;
+    const holdDownload = new Promise<void>((resolve) => {
+      finishDownload = resolve;
+    });
+    client.installLlamaCppModel.mockImplementation(
+      async (_id: string, onEvent: (event: unknown) => void) => {
+        onEvent({
+          type: 'companion',
+          kind: 'image-recognition',
+          id: 'granite-vision-4.1-4b-q4',
+          name: 'Granite Vision 4.1 (4B)',
+          bytesWritten: 2_013_000_000,
+          totalBytes: 3_300_000_000,
+        });
+        await holdDownload;
+        onEvent({ type: 'done', id: 'fresh-gemma' });
+      },
+    );
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/model download');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Fresh Gemma (test)');
+    });
+    await pressKey(harness, '\r');
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Adding image reader: Granite Vision 4.1 (4B)');
+      expect(harness.text()).toContain(
+        'Fresh Gemma is ready. This separate helper reads images for it.',
+      );
+      expect(harness.text()).toContain('61% · 2.0 GB / 3.3 GB');
+      expect(harness.text()).not.toContain('Downloading Fresh Gemma');
+    });
+
+    finishDownload();
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain(
+        'downloaded Fresh Gemma with Granite Vision 4.1 (4B) for image reading',
+      );
+      expect(harness.text()).toContain('model → llama.cpp · Fresh Gemma');
     });
   });
 
@@ -608,6 +833,7 @@ function createClient(opts?: {
       messages: [],
     })),
     listQuestions: vi.fn().mockResolvedValue({ questions: [] }),
+    answerQuestion: vi.fn(),
     listProjectTasks: vi.fn().mockResolvedValue({ tasks: [] }),
     listProjectCraftbooks: vi.fn().mockResolvedValue({
       items: [],
