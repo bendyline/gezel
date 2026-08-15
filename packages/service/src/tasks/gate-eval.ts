@@ -613,7 +613,10 @@ async function evalCheckInner(
       };
     }
     case 'corpusCoverage': {
-      const ledger = await ws.read(c.file);
+      // The ledger honors `artifact` like every other check; the corpus
+      // records it is compared against are always in the drawer, since
+      // that is the only place a connector mirror writes.
+      const ledger = await reader.read(c.file);
       if (ledger === null) {
         return {
           ok: false,

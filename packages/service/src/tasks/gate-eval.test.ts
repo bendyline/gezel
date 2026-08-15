@@ -180,6 +180,46 @@ describe('evaluateGate', () => {
     expect(complete.checks[0]?.detail).toContain('all 2 changed path');
   });
 
+  it('corpusCoverage reads an artifact-flagged ledger from the drawer', async () => {
+    // Review bookkeeping belongs in the drawer, which is also the only
+    // surface a writes-off project leaves writable. The ledger used to be
+    // read from the workspace whatever the flag said, so the drawer copy
+    // read as "ledger not found".
+    const artifactRecord = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n`;
+    const ledger = JSON.stringify({
+      reviewedFiles: ['src/early.ts'],
+      reviewedRecords: ['data/github-pulls/pr-52/files/001--early--aaaa1111.md'],
+    });
+    const check = {
+      kind: 'corpusCoverage' as const,
+      file: 'pr-review-coverage.json',
+      corpusDir: 'artifacts/data/github-pulls/pr-52',
+      artifact: true,
+    };
+
+    const res = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          'pr-review-coverage.json': ledger,
+          'data/github-pulls/pr-52/files/001--early--aaaa1111.md': artifactRecord('src/early.ts'),
+        },
+      ),
+    );
+    expect(res.pass).toBe(true);
+
+    const workspaceOnly = await evaluateGate(
+      [check],
+      splitReader(
+        { 'pr-review-coverage.json': ledger },
+        { 'data/github-pulls/pr-52/files/001--early--aaaa1111.md': artifactRecord('src/early.ts') },
+      ),
+    );
+    expect(workspaceOnly.pass).toBe(false);
+    expect(workspaceOnly.failures[0]).toContain('not found');
+  });
+
   it('notContains rejects forbidden content with a repairable gap', async () => {
     const res = await evaluateGate(
       [{ kind: 'notContains', file: 'CHANGELOG.md', pattern: 'Internal|CI', flags: 'i' }],

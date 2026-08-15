@@ -1381,4 +1381,91 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     expect(outcome.gate.paused).toBe(true);
     expect(events).toEqual(['gate_exhausted']);
   });
+
+  /**
+   * A gate SCRIPT names no file, so "a script rejected" is not by itself
+   * evidence that a workspace write was needed. Pull Request Review's scope
+   * step is gated on a TASK NOTE: the note was written correctly, the gate
+   * rejected for an unrelated reason, and the task paused telling the user
+   * to enable workspace writes — a fix that would have changed nothing.
+   */
+  function rejectingScriptRunner(): Parameters<TaskManager['setScriptRunner']>[0] {
+    return {
+      run: async () => ({
+        id: 'run-1',
+        projectId: 'default',
+        scriptName: 'checkTaskNoteContains',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        status: 'ok' as const,
+        trigger: { kind: 'manual' as const },
+        inputs: {},
+        output: { decision: 'reject', message: 'The note does not match the pattern.' },
+        calls: [],
+        logs: '',
+      }),
+    } as unknown as Parameters<TaskManager['setScriptRunner']>[0];
+  }
+
+  it('keeps a note-only script gate repairable on a writes-off project', async () => {
+    const task = await tasks.create('default', {
+      title: 'Map the corpus',
+      description: 'script gate over a task note, no workspace deliverable.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    // Flip the policy AFTER creation: the activation pre-check would
+    // otherwise never let a writes-off task reach its completion gate.
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+    tasks.setScriptRunner(rejectingScriptRunner());
+
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.unsatisfiable).toBeUndefined();
+    expect(outcome.gate.paused).toBe(false);
+    expect(outcome.gate.attempt).toBe(1);
+    expect(outcome.gate.message).not.toContain('workspace writes are OFF');
+
+    const after = await tasks.get('default', task.num);
+    expect(after!.status).not.toBe('paused');
+  });
+
+  it('still pauses a script gate whose step owes an unwritable workspace file', async () => {
+    const task = await tasks.create('default', {
+      title: 'Synthesize the review',
+      description: 'script gate on a step whose deliverable is a workspace file.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Report',
+          assignee: { kind: 'user' } as const,
+          advanceWhen: { file: 'pr-review.md', minBytes: 500 } as never,
+          gate: {
+            at: 'completion',
+            scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+          } as never,
+        },
+        { name: 'Done', assignee: { kind: 'user' } as const },
+      ],
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+    tasks.setScriptRunner(rejectingScriptRunner());
+
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.unsatisfiable).toBe(true);
+    expect(outcome.gate.attempt).toBe(0);
+    expect(outcome.gate.message).toContain('pr-review.md');
+  });
 });

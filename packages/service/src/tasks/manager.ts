@@ -2806,7 +2806,7 @@ export class TaskManager {
     // naming the real cause and the real fixes — instead of charging the
     // budget and then demanding `write_file` from a roster it was
     // stripped from.
-    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, gate, outcome);
+    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, step, gate, outcome);
     if (unsatFiles) {
       const fileList =
         unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
@@ -3102,15 +3102,6 @@ export class TaskManager {
   }
 
   /**
-   * A rejected gate is unsatisfiable when a FAILING check reads the
-   * workspace tree while gezel workspace writes are off for the project
-   * (gate scripts always read the workspace, so a script rejection
-   * qualifies too). Returns the workspace files the failing checks name
-   * (possibly empty), or null when the gate is repairable. Drawer-only
-   * failures stay repairable — the artifacts drawer is deliberately
-   * exempt from the writes-off policy.
-   */
-  /**
    * The workspace files a step must produce that no assignee is able to
    * write. The proactive twin of {@link unsatisfiableWorkspaceGateFiles}:
    * that one reads a gate REJECTION, this one reads the step's own
@@ -3187,8 +3178,25 @@ export class TaskManager {
     return true;
   }
 
+  /**
+   * A rejected gate is unsatisfiable when a FAILING check reads the
+   * workspace tree while gezel workspace writes are off for the project.
+   * Returns the workspace files the failing checks name (possibly empty),
+   * or null when the gate is repairable. Drawer-only failures stay
+   * repairable — the artifacts drawer is deliberately exempt from the
+   * writes-off policy.
+   *
+   * A gate SCRIPT names no file, so it is judged by what the step itself
+   * owes: unwinnable only when the step's own deliverable is a workspace
+   * file nobody can write. Counting every script rejection as a
+   * workspace-write failure misread the note-only gate on Pull Request
+   * Review's scope step — the note was written correctly and the real
+   * fault was elsewhere, but the task paused telling the user to enable
+   * workspace writes, which would have changed nothing.
+   */
   private async unsatisfiableWorkspaceGateFiles(
     projectId: string,
+    step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
     gate: NormalizedStepGate,
     outcome: StepGateOutcome,
   ): Promise<string[] | null> {
@@ -3202,9 +3210,11 @@ export class TaskManager {
     const failingWorkspace = (outcome.checkResults ?? []).filter(
       (o) => !o.ok && workspaceChecks.has(o.label),
     );
-    const scriptRejected = outcome.runs.some((r) => r.decision === 'reject');
-    if (failingWorkspace.length === 0 && !scriptRejected) return null;
-    return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
+    if (failingWorkspace.length > 0) {
+      return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
+    }
+    if (!outcome.runs.some((r) => r.decision === 'reject')) return null;
+    return await this.unsatisfiableStepWorkspaceFiles(projectId, step);
   }
 
   /**

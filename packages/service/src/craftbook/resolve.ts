@@ -36,6 +36,13 @@ export function runtimeCraftbookFromTemplate(
     // set from `task.craftbook.toolsets`, and the launcher reads them to
     // offer install/config before invoking.
     ...(m.toolsets ? { toolsets: m.toolsets } : {}),
+    // connectors decide whether `TaskManager.create` runs launch-time
+    // connector prep at all. Dropping them here silently disabled the whole
+    // feature for every catalog craftbook: Pull Request Review launched with
+    // no corpus, `{{corpusScope}}` / `{{number}}` survived interpolation into
+    // the step prompts AND the gate patterns, and the reviewer fell back to
+    // live API calls — the exact failure the connector mirror replaced.
+    ...(m.connectors ? { connectors: m.connectors } : {}),
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),

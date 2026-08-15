@@ -1,3 +1,5 @@
+import { formatContextWindow } from './model-context.js';
+
 /**
  * Shared formatting for the model-list Size cell.
  *
@@ -24,6 +26,12 @@ export interface ModelSizeCopyInput {
   /** Weights + `plannedSlots` slots' KV — what the capacity broker holds. */
   reservedResidentBytes?: number | undefined;
   plannedSlots?: number | undefined;
+  /** Weights alone (with runtime overhead) — unlocks the tooltip breakdown. */
+  weightsResidentBytes?: number | undefined;
+  /** Fixed per-slot context state (SWA layers, scratch buffers). */
+  kvFixedBytesPerSlot?: number | undefined;
+  /** Granted per-turn window, labeling the KV figure. */
+  effectiveContextWindow?: number | undefined;
 }
 
 /**
@@ -38,11 +46,37 @@ export function modelMemoryHeadline(input: ModelSizeCopyInput): string | null {
   return `~${formatMemoryBytes(input.predictedResidentBytes)} in memory`;
 }
 
+/**
+ * Below this, the fixed context state stays folded into the KV figure —
+ * a few-MB slice quoted beside GB-scale numbers is noise, not breakdown.
+ */
+const FIXED_STATE_BREAKOUT_MIN_BYTES = 100 * 1024 ** 2;
+
 export function modelSizeTitle(input: ModelSizeCopyInput): string {
   const onDisk = `${formatBytes(input.approxSizeBytes)} on disk.`;
   if (!input.predictedResidentBytes) return onDisk;
-  const single = `Expect about ${formatMemoryBytes(input.predictedResidentBytes)} of memory to serve one chat: weights plus the KV cache at the granted context window.`;
+  const total = formatMemoryBytes(input.predictedResidentBytes);
   const slots = input.plannedSlots ?? 1;
-  if (slots <= 1 || !input.reservedResidentBytes) return `${onDisk} ${single}`;
-  return `${onDisk} ${single} Serving ${slots} chats at once reserves about ${formatMemoryBytes(input.reservedResidentBytes)}.`;
+  const multiSlot = slots > 1 && input.reservedResidentBytes;
+
+  const weights = input.weightsResidentBytes;
+  const perChatBytes = weights ? input.predictedResidentBytes - weights : 0;
+  if (!weights || perChatBytes <= 0) {
+    const single = `Expect about ${total} of memory to serve one chat: weights plus the KV cache at the granted context window.`;
+    if (!multiSlot) return `${onDisk} ${single}`;
+    return `${onDisk} ${single} Serving ${slots} chats at once reserves about ${formatMemoryBytes(input.reservedResidentBytes ?? 0)}.`;
+  }
+
+  const window =
+    input.effectiveContextWindow !== undefined
+      ? `the granted ${formatContextWindow(input.effectiveContextWindow)} context window`
+      : 'the granted context window';
+  const fixed = input.kvFixedBytesPerSlot ?? 0;
+  const perChat =
+    fixed >= FIXED_STATE_BREAKOUT_MIN_BYTES && perChatBytes - fixed > 0
+      ? `plus ${formatMemoryBytes(perChatBytes - fixed)} of KV cache and ${formatMemoryBytes(fixed)} of fixed context state at ${window}`
+      : `plus ${formatMemoryBytes(perChatBytes)} of KV cache at ${window}`;
+  const single = `Expect about ${total} of memory to serve one chat: ${formatMemoryBytes(weights)} for the model weights, ${perChat}.`;
+  if (!multiSlot) return `${onDisk} ${single}`;
+  return `${onDisk} ${single} Serving ${slots} chats at once reserves about ${formatMemoryBytes(input.reservedResidentBytes ?? 0)}: one copy of the weights plus ${formatMemoryBytes(perChatBytes)} for each chat.`;
 }
