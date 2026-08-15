@@ -134,6 +134,11 @@ interface ModelDownloadProgress {
   totalBytes: number | null;
   pct: number | null;
   phase?: string;
+  companion?: {
+    kind: 'image-recognition';
+    id: string;
+    name: string;
+  };
 }
 
 const HELP = [
@@ -1311,6 +1316,10 @@ export function App(props: {
       const choice = modelDownloadChoices.find((candidate) => candidate.value === value);
       if (!choice) return;
       let terminalError: string | null = null;
+      const companionResult: { name: string | null; error: string | null } = {
+        name: null,
+        error: null,
+      };
       setModelDownloadProgress({
         choice,
         bytesWritten: 0,
@@ -1320,6 +1329,10 @@ export function App(props: {
       });
       const onEvent = (event: LlamaCppInstallEvent | MlxInstallEvent) => {
         if (event.type === 'error') terminalError = event.error;
+        if (event.type === 'companion') {
+          companionResult.name = event.name;
+          if (event.error) companionResult.error = event.error;
+        }
         const progress = readModelDownloadProgress(choice, event);
         if (progress) setModelDownloadProgress(progress);
       };
@@ -1344,7 +1357,17 @@ export function App(props: {
           installedChoice,
         ]);
         setModelDownloadProgress(null);
-        note(`downloaded ${choice.model.name}; switching this gezel to it…`);
+        if (companionResult.name && companionResult.error) {
+          note(
+            `downloaded ${choice.model.name}; ${companionResult.name} image reader could not be added: ${companionResult.error}. Switching this gezel to ${choice.model.name}…`,
+          );
+        } else if (companionResult.name) {
+          note(
+            `downloaded ${choice.model.name} with ${companionResult.name} for image reading; switching this gezel to it…`,
+          );
+        } else {
+          note(`downloaded ${choice.model.name}; switching this gezel to it…`);
+        }
         await applyModelSelection(installedChoice);
       } catch (err) {
         setModelDownloadProgress(null);
@@ -1744,6 +1767,7 @@ function ModelDownloadProgressPanel(props: {
   onCancel: () => void;
 }): JSX.Element {
   const { progress, onCancel } = props;
+  const companion = progress.companion;
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) onCancel();
   });
@@ -1753,8 +1777,15 @@ function ModelDownloadProgressPanel(props: {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text bold color="yellow">
-        Downloading {progress.choice.model.name}
+        {companion
+          ? `Adding image reader: ${companion.name}`
+          : `Downloading ${progress.choice.model.name}`}
       </Text>
+      {companion ? (
+        <Text>
+          {progress.choice.model.name} is ready. This separate helper reads images for it.
+        </Text>
+      ) : null}
       <Text>
         {progress.pct == null ? 'Working…' : `${progress.pct}%`} · {transferred}
       </Text>
@@ -1788,7 +1819,11 @@ function readModelDownloadProgress(
         event.totalBytes > 0
           ? Math.min(100, Math.floor((event.bytesWritten / event.totalBytes) * 100))
           : null,
-      phase: `downloading ${event.name}`,
+      companion: {
+        kind: event.kind,
+        id: event.id,
+        name: event.name,
+      },
     };
   }
   return null;

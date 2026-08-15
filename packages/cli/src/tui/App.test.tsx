@@ -518,6 +518,53 @@ describe('App interactions', () => {
     });
   });
 
+  it('names and explains the companion image-reader download separately', async () => {
+    const client = createClient();
+    let finishDownload!: () => void;
+    const holdDownload = new Promise<void>((resolve) => {
+      finishDownload = resolve;
+    });
+    client.installLlamaCppModel.mockImplementation(
+      async (_id: string, onEvent: (event: unknown) => void) => {
+        onEvent({
+          type: 'companion',
+          kind: 'image-recognition',
+          id: 'granite-vision-4.1-4b-q4',
+          name: 'Granite Vision 4.1 (4B)',
+          bytesWritten: 2_013_000_000,
+          totalBytes: 3_300_000_000,
+        });
+        await holdDownload;
+        onEvent({ type: 'done', id: 'fresh-gemma' });
+      },
+    );
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/model download');
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Fresh Gemma (test)');
+    });
+    await pressKey(harness, '\r');
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Adding image reader: Granite Vision 4.1 (4B)');
+      expect(harness.text()).toContain(
+        'Fresh Gemma is ready. This separate helper reads images for it.',
+      );
+      expect(harness.text()).toContain('61% · 2.0 GB / 3.3 GB');
+      expect(harness.text()).not.toContain('Downloading Fresh Gemma');
+    });
+
+    finishDownload();
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain(
+        'downloaded Fresh Gemma with Granite Vision 4.1 (4B) for image reading',
+      );
+      expect(harness.text()).toContain('model → llama.cpp · Fresh Gemma');
+    });
+  });
+
   it('allows and disallows managed project edits', async () => {
     const client = createClient();
     const harness = mountApp(client);
