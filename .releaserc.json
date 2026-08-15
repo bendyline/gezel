@@ -28,7 +28,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "node ../../scripts/prepare-package.mjs ${nextRelease.version}",
+        "prepareCmd": "node ../../scripts/prepare-package.mjs ${nextRelease.version} && node ../../scripts/format-release-manifest.mjs",
         "publishCmd": "node ../../scripts/publish-package.mjs"
       }
     ],
@@ -37,14 +37,6 @@
       {
         "assets": ["CHANGELOG.md", "package.json"],
         "message": "chore(release): ${nextRelease.gitTag} [skip ci]\n\n${nextRelease.notes}"
-      }
-    ],
-    [
-      "@semantic-release/github",
-      {
-        "successCommentCondition": false,
-        "failCommentCondition": false,
-        "releasedLabels": false
       }
     ]
   ]

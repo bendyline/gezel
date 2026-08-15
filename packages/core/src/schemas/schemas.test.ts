@@ -555,6 +555,17 @@ describe('UpdateTaskRequestSchema', () => {
   });
 });
 
+describe('CLI presentation config', () => {
+  it('persists the CLI detail display flags', () => {
+    expect(GezelConfigSchema.parse({ cliShowThinking: true }).cliShowThinking).toBe(true);
+    expect(GezelConfigSchema.parse({ cliShowWrites: true }).cliShowWrites).toBe(true);
+    expect(GezelConfigSchema.parse({}).cliShowThinking).toBeUndefined();
+    expect(GezelConfigSchema.parse({}).cliShowWrites).toBeUndefined();
+    expect(() => GezelConfigSchema.parse({ cliShowThinking: 'yes' })).toThrow();
+    expect(() => GezelConfigSchema.parse({ cliShowWrites: 'yes' })).toThrow();
+  });
+});
+
 describe('Codex CLI config', () => {
   it('accepts current model-dependent reasoning effort values', () => {
     for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {

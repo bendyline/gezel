@@ -55,6 +55,20 @@ describe('ChatFeed', () => {
     expect(output).not.toContain('Builder: please also inspect the tests');
   });
 
+  it('renders model reasoning as a distinct thinking row', () => {
+    const output = renderToString(
+      <ChatFeed
+        rows={[row('focus', 'thinking', 'I should inspect the workspace first.', 'builder')]}
+        gezels={gezels}
+        boring
+        focusedSessionId="focus"
+      />,
+    );
+
+    expect(output).toContain('▎thinking: I should inspect the workspace first.');
+    expect(output).not.toContain('Builder: I should inspect');
+  });
+
   it('rewrites actor names in task updates for boring mode', () => {
     const output = renderToString(
       <ChatFeed

@@ -25,6 +25,7 @@ import {
   parseCliEngagementMode,
 } from '../engagement-mode.js';
 import { activeAccessMode } from './active-access.js';
+import { useBufferedState } from './buffered-state.js';
 import {
   PROJECT_PERMISSION_USAGE,
   SLASH_COMMAND_WORDWHEEL_SIZE,
@@ -58,6 +59,7 @@ import {
   reduceTurns,
   sessionToFeedRows,
 } from './feed.js';
+import type { TuiRuntimeDiagnostics } from './memory-diagnostics.js';
 import {
   type ModelChoice,
   type ModelDownloadChoice,
@@ -72,7 +74,7 @@ import {
   rememberCliOpenReferences,
   resolveCliOpenTarget,
 } from './open-command.js';
-import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
+import { pendingQuestionsForTui, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
 interface PendingInput {
@@ -140,6 +142,8 @@ const HELP = [
   '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
   '/allow codexedits|claudeedits — allow provider-native project edits',
   '/disallow codexedits|claudeedits — put that provider in read-only plan mode',
+  '/show thinking — show model reasoning inline   /hide thinking — hide it',
+  '/show writes — stream write contents inline   /hide writes — hide them (default)',
   '/mode — choose read-only, reactive, reactive+tasks, or full-play AI activity',
   '/thread — switch or start a chat thread',
   '/open workspace|artifacts|<recent file> — open a folder or file from chat',
@@ -163,6 +167,7 @@ export function App(props: {
   initialGezelId: string;
   /** Role-based labels are the compact TUI default. */
   boring?: boolean;
+  diagnostics?: TuiRuntimeDiagnostics;
 }): JSX.Element {
   const { client } = props;
   const { exit } = useApp();
@@ -202,8 +207,8 @@ export function App(props: {
   const [mode, setMode] = useState<'chat' | 'cli'>('chat');
   const [overlay, setOverlay] = useState<Overlay | TaskOverlay>(null);
   const [value, setValue] = useState('');
-  const [rows, setRows] = useState<FeedRow[]>([]);
-  const [turns, setTurns] = useState<TurnMap>(() => new Map());
+  const [rows, setRows, setRowsBuffered] = useBufferedState<FeedRow[]>([], 50);
+  const [turns, setTurns, setTurnsBuffered] = useBufferedState<TurnMap>(() => new Map(), 50);
   const [recentOpenReferences, setRecentOpenReferences] = useState<CliOpenReference[]>([]);
   const recentOpenReferencesRef = useRef<ReadonlyArray<CliOpenReference>>([]);
   const [status, setStatus] = useState<string | null>('Connecting…');
@@ -213,6 +218,9 @@ export function App(props: {
   const [managedTaskRef, setManagedTaskRef] = useState<string | null>(null);
   const [taskPrompt, setTaskPrompt] = useState<TaskTextPrompt | null>(null);
   const [exitArmed, setExitArmed] = useState(false);
+  useEffect(() => {
+    props.diagnostics?.recordReactCommit();
+  });
   const pendingQuestion = pendingQuestions[0];
   const { rows: termRows, columns: termColumns } = useTerminalSize();
   // The root Ink box has one cell of horizontal padding on each side.
@@ -264,7 +272,7 @@ export function App(props: {
   }, [turns, focusedSessionId, ownSessionId]);
   const note = useCallback(
     (text: string, kind: FeedRow['kind'] = 'note') => setRows((r) => appendNote(r, text, kind)),
-    [],
+    [setRows],
   );
   useEffect(() => {
     recentOpenReferencesRef.current = recentOpenReferences;
@@ -324,8 +332,20 @@ export function App(props: {
     projectId,
     useCallback(
       (env) => {
-        setRows((r) => reduceFeed(r, env));
-        setTurns((t) => reduceTurns(t, env));
+        props.diagnostics?.recordChatEvent(env);
+        const streaming =
+          env.event.type === 'delta' ||
+          env.event.type === 'reasoning_delta' ||
+          env.event.type === 'tool_args_delta';
+        const updateRows = streaming ? setRowsBuffered : setRows;
+        const updateTurns = streaming ? setTurnsBuffered : setTurns;
+        updateRows((r) =>
+          reduceFeed(r, env, {
+            showThinking: config?.cliShowThinking !== false,
+            showWrites: config?.cliShowWrites === true,
+          }),
+        );
+        updateTurns((t) => reduceTurns(t, env));
         const observedReferences = cliOpenReferencesFromEvent(env);
         if (observedReferences.length > 0) {
           setRecentOpenReferences((current) =>
@@ -352,41 +372,56 @@ export function App(props: {
           setPendingQuestions((questions) => updatePendingQuestion(questions, question));
         }
       },
-      [ownSessionId, refreshGezels, refreshTasks],
+      [
+        config?.cliShowThinking,
+        config?.cliShowWrites,
+        ownSessionId,
+        props.diagnostics,
+        refreshGezels,
+        refreshTasks,
+        setRows,
+        setRowsBuffered,
+        setTurns,
+        setTurnsBuffered,
+      ],
     ),
   );
   useTerminalEvents(
     client,
     projectId,
-    useCallback((env) => {
-      switch (env.kind) {
-        case 'runStarted':
-          setActiveRuns((s) => new Set(s).add(env.runId));
-          return;
-        case 'outputChunk':
-          setRows((r) => appendShellChunk(r, env.runId, env.chunk));
-          return;
-        case 'inputRequested':
-          setPendingInput({ runId: env.runId, mode: env.mode, promptLine: env.promptLine });
-          setRows((r) => appendNote(r, `⌨ waiting for input — ${env.promptLine}`, 'note'));
-          return;
-        case 'message': {
-          const runId = env.runId;
-          if (!runId) return;
-          setActiveRuns((s) => {
-            if (!s.has(runId)) return s;
-            const n = new Set(s);
-            n.delete(runId);
-            return n;
-          });
-          setPendingInput((p) => (p?.runId === runId ? null : p));
-          setRows((r) => finalizeShellRun(r, runId, env.message));
-          return;
+    useCallback(
+      (env) => {
+        props.diagnostics?.recordTerminalEvent(env);
+        switch (env.kind) {
+          case 'runStarted':
+            setActiveRuns((s) => new Set(s).add(env.runId));
+            return;
+          case 'outputChunk':
+            setRowsBuffered((r) => appendShellChunk(r, env.runId, env.chunk));
+            return;
+          case 'inputRequested':
+            setPendingInput({ runId: env.runId, mode: env.mode, promptLine: env.promptLine });
+            setRows((r) => appendNote(r, `⌨ waiting for input — ${env.promptLine}`, 'note'));
+            return;
+          case 'message': {
+            const runId = env.runId;
+            if (!runId) return;
+            setActiveRuns((s) => {
+              if (!s.has(runId)) return s;
+              const n = new Set(s);
+              n.delete(runId);
+              return n;
+            });
+            setPendingInput((p) => (p?.runId === runId ? null : p));
+            setRows((r) => finalizeShellRun(r, runId, env.message));
+            return;
+          }
+          default:
+            return;
         }
-        default:
-          return;
-      }
-    }, []),
+      },
+      [props.diagnostics, setRows, setRowsBuffered],
+    ),
   );
 
   // Create (or recreate) the user's own session for the active gezel +
@@ -445,7 +480,7 @@ export function App(props: {
         note(`could not switch project: ${errMsg(err)}`, 'error');
       }
     },
-    [client, ensureSession, note, projectId, projects],
+    [client, ensureSession, note, projectId, projects, setRows, setTurns],
   );
 
   const openModelPicker = useCallback(async () => {
@@ -526,13 +561,13 @@ export function App(props: {
         setOwnSessionId(session.id);
         setFocusedSessionId(session.id);
         setActiveThreadTitle(displayThreadTitle(session.title));
-        setRows(sessionToFeedRows(session));
+        setRows(sessionToFeedRows(session, { showThinking: config?.cliShowThinking !== false }));
         setRecentOpenReferences(cliOpenReferencesFromSession(session));
       } catch (err) {
         note(`could not switch thread: ${errMsg(err)}`, 'error');
       }
     },
-    [activeGezelId, client, note, projectId],
+    [activeGezelId, client, config?.cliShowThinking, note, projectId, setRows],
   );
 
   const startNewThread = useCallback(async () => {
@@ -553,7 +588,7 @@ export function App(props: {
     } catch (err) {
       note(`could not start a thread: ${errMsg(err)}`, 'error');
     }
-  }, [activeGezelId, client, note, projectId, boring]);
+  }, [activeGezelId, boring, client, note, projectId, setRows]);
 
   // Initial load. Mount-only — project/gezel switches are driven by their
   // pickers, which call ensureSession directly.
@@ -614,7 +649,7 @@ export function App(props: {
     void client
       .listQuestions({ projectId, pending: true })
       .then((result) => {
-        if (!cancelled) setPendingQuestions(plainPendingQuestions(result.questions));
+        if (!cancelled) setPendingQuestions(pendingQuestionsForTui(result.questions));
       })
       .catch(() => {
         /* non-fatal — a later question_asked event still surfaces */
@@ -784,6 +819,42 @@ export function App(props: {
       }
     },
     [client, note, projectId, projectName],
+  );
+
+  const applyChatDetailVisibility = useCallback(
+    async (requested: string, visible: boolean) => {
+      const target = requested.trim().toLowerCase();
+      if (target !== 'thinking' && target !== 'writes') {
+        note(`usage: /${visible ? 'show' : 'hide'} thinking|writes`, 'error');
+        return;
+      }
+      try {
+        const updated = await client.updateConfig(
+          target === 'thinking' ? { cliShowThinking: visible } : { cliShowWrites: visible },
+        );
+        setConfig(updated);
+        if (!visible) {
+          const kind = target === 'thinking' ? 'thinking' : 'write';
+          setRows((current) => current.filter((row) => row.kind !== kind));
+        }
+        if (target === 'thinking') {
+          note(
+            visible
+              ? 'Thinking is now shown inline.'
+              : 'Thinking is now hidden. The live token count still includes it.',
+          );
+        } else {
+          note(
+            visible
+              ? 'Write content is now shown inline as it streams.'
+              : 'Write content is now hidden. Tool token counts remain visible.',
+          );
+        }
+      } catch (err) {
+        note(`could not ${visible ? 'show' : 'hide'} ${target}: ${errMsg(err)}`, 'error');
+      }
+    },
+    [client, note, setRows],
   );
 
   const startCraftbook = useCallback(
@@ -1003,6 +1074,12 @@ export function App(props: {
         case 'disallow':
           await applyProjectPermission(rest, false);
           return;
+        case 'show':
+          await applyChatDetailVisibility(rest, true);
+          return;
+        case 'hide':
+          await applyChatDetailVisibility(rest, false);
+          return;
         case 'mode':
           if (!rest.trim()) return setOverlay('engagement-mode');
           await applyEngagementMode(rest);
@@ -1171,6 +1248,7 @@ export function App(props: {
     [
       applyEngagementMode,
       applyProjectPermission,
+      applyChatDetailVisibility,
       client,
       craftbooks,
       note,
@@ -1182,6 +1260,8 @@ export function App(props: {
       projectName,
       refreshCraftbooks,
       refreshTasks,
+      setRows,
+      setTurns,
       startCraftbook,
     ],
   );
@@ -1629,7 +1709,7 @@ export function App(props: {
           active={pendingInput === null}
           onAnswered={(question) => {
             setPendingQuestions((questions) => updatePendingQuestion(questions, question));
-            setFocusedSessionId(question.sessionId);
+            if (question.sessionId) setFocusedSessionId(question.sessionId);
           }}
         />
       ) : null}

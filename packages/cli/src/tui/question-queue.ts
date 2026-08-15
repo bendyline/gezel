@@ -1,12 +1,14 @@
 import type { Question } from '@bendyline/gezel';
+import { canAnswerQuestionInTui } from './question-presentation.js';
 
 /**
- * The TUI currently handles plain model-authored questions. Specialized
- * approval intents keep their purpose-built desktop forms.
+ * Questions the terminal can answer, oldest first. Approval intents must stay
+ * in this queue: several providers synchronously wait for the answer, so
+ * dropping one leaves the gezel paused with no visible way to continue.
  */
-export function plainPendingQuestions(questions: ReadonlyArray<Question>): Question[] {
+export function pendingQuestionsForTui(questions: ReadonlyArray<Question>): Question[] {
   return questions
-    .filter((question) => !question.answer && !question.intent)
+    .filter((question) => !question.answer && canAnswerQuestionInTui(question))
     .slice()
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
@@ -17,5 +19,5 @@ export function updatePendingQuestion(
   question: Question,
 ): Question[] {
   const withoutCurrent = questions.filter((candidate) => candidate.id !== question.id);
-  return plainPendingQuestions(question.answer ? withoutCurrent : [...withoutCurrent, question]);
+  return pendingQuestionsForTui(question.answer ? withoutCurrent : [...withoutCurrent, question]);
 }

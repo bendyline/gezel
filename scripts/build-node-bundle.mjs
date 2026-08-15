@@ -150,6 +150,22 @@ async function main() {
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 
+  // The service loads ripgrep only when a workspace regex search runs, so an
+  // eager import smoke would miss a platform-package omission. Prove that the
+  // deployed @vscode/ripgrep wrapper resolves and launches its native binary.
+  const ripgrepUrl = pathToFileURL(
+    join(target, 'node_modules', '@vscode', 'ripgrep', 'lib', 'index.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const {spawnSync}=await import('node:child_process'); const {rgPath}=await import(${JSON.stringify(ripgrepUrl)}); const result=spawnSync(rgPath,['--version'],{encoding:'utf8'}); if(result.status!==0||!result.stdout?.startsWith('ripgrep ')) throw new Error('bundled ripgrep executable smoke failed');`,
+    ],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
   // Public npm installs do not receive the optional node-pty peer; this
   // complete relocatable bundle must. The service imports it lazily, so
   // exercise the deployed native module explicitly or a deployment-only merge

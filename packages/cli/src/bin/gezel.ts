@@ -104,7 +104,10 @@ program.action(async () => {
     } catch {
       /* fall back to the folder name */
     }
-    const { launchTui } = await import('../tui/index.js');
+    // Keep this path indirect so the non-splitting build preserves the TUI
+    // as a real runtime boundary instead of hoisting Ink into the main bin.
+    const tuiModule = '../tui/index.js';
+    const { launchTui } = (await import(tuiModule)) as typeof import('../tui/index.js');
     await launchTui({ client, projectId, projectName, gezelId });
   } finally {
     await connection.stop?.();
@@ -703,7 +706,9 @@ handboek
     'URL of the surrounding site; adds a wordmark link back out of the docs',
   )
   .action(async (opts: { out: string; css: string[]; siteUrl?: string }) => {
-    const { runHandboekExport } = await import('../handboek-export.js');
+    type HandboekExportModule = typeof import('../handboek-export.js');
+    const handboekModule = '../handboek-export.js';
+    const { runHandboekExport } = (await import(handboekModule)) as HandboekExportModule;
     const result = await runHandboekExport({
       out: opts.out,
       css: opts.css,

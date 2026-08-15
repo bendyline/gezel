@@ -1115,6 +1115,16 @@ export interface ConfigResponse {
    */
   themePref?: 'system' | 'light' | 'dark';
   /**
+   * Whether the terminal UI shows streamed and persisted reasoning inline.
+   * Absent/true shows reasoning; false keeps only the live activity count.
+   */
+  cliShowThinking?: boolean;
+  /**
+   * Whether the terminal UI shows streamed file/artifact/note bodies inline.
+   * Absent/false keeps writes compact; true enables `/show writes` behavior.
+   */
+  cliShowWrites?: boolean;
+  /**
    * Last-used markdown/document export settings. Mirrored server-side so the
    * quick-export action survives the embedded daemon's changing loopback port.
    */

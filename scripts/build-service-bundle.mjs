@@ -188,6 +188,24 @@ async function verifyBundleRuntime(root) {
     { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
 
+  // Regex workspace search resolves ripgrep lazily. Importing the service
+  // therefore cannot prove that pnpm carried the current platform's optional
+  // @vscode/ripgrep package into the deployment. Resolve and execute it from
+  // the extracted tree so a missing rg fails the build rather than a user's
+  // first grep_files call.
+  const ripgrepUrl = pathToFileURL(
+    join(root, 'node_modules', '@vscode', 'ripgrep', 'lib', 'index.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const {spawnSync}=await import('node:child_process'); const {rgPath}=await import(${JSON.stringify(ripgrepUrl)}); const result=spawnSync(rgPath,['--version'],{encoding:'utf8'}); if(result.status!==0||!result.stdout?.startsWith('ripgrep ')) throw new Error('bundled ripgrep executable smoke failed');`,
+    ],
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
+  );
+
   // node-pty is an optional peer for public npm consumers and dynamically
   // imported on the first terminal command. Complete app bundles are not
   // optional-feature installs: the desktop terminal must be present. Import

@@ -2432,7 +2432,7 @@ server.tool(
         z.object({
           package: NpmPackageNameSchema.describe('Package name (e.g. "zod", "@types/node").'),
           version: NpmRegistryVersionSchema.optional().describe(
-            'Semver range or exact version (e.g. "^3", "3.22.4"). Defaults to "latest".',
+            'Semver range or exact version (e.g. "^3", "3.22.4"). A known pre-vetted package defaults to its vetted range; other packages default to "latest".',
           ),
         }),
       )

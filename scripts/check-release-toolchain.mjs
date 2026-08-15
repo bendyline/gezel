@@ -68,6 +68,7 @@ try {
 
 for (const relativePath of [
   'scripts/prepare-package.mjs',
+  'scripts/format-release-manifest.mjs',
   'scripts/publish-package.mjs',
   'scripts/release-package-state.mjs',
   'scripts/workspace-dependencies.mjs',
@@ -108,6 +109,9 @@ try {
   const gitIndex = config.plugins.findIndex(
     (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/git',
   );
+  const githubIndex = config.plugins.findIndex(
+    (plugin) => Array.isArray(plugin) && plugin[0] === '@semantic-release/github',
+  );
   const exec = config.plugins[execIndex]?.[1] ?? {};
 
   if (!/scripts\/prepare-package\.mjs \$\{nextRelease\.version\}/.test(exec.prepareCmd ?? '')) {
@@ -118,6 +122,11 @@ try {
   if (!/scripts\/publish-package\.mjs/.test(exec.publishCmd ?? '')) {
     failures.push('.releaserc.json must publish through publish-package.mjs / pnpm publish');
   }
+  if (!/scripts\/format-release-manifest\.mjs/.test(exec.prepareCmd ?? '')) {
+    failures.push(
+      '.releaserc.json must format package.json after semantic-release stamps it and before the release commit',
+    );
+  }
   if (npmIndex < 0 || npmIndex >= execIndex) {
     failures.push(
       '.releaserc.json must run @semantic-release/npm before @semantic-release/exec so package versions are stamped before normalization',
@@ -126,6 +135,11 @@ try {
   if (execIndex < 0 || gitIndex < 0 || execIndex >= gitIndex) {
     failures.push(
       '.releaserc.json must run @semantic-release/exec before @semantic-release/git so concrete local versions are never committed',
+    );
+  }
+  if (githubIndex >= 0) {
+    failures.push(
+      '.releaserc.json must not create one GitHub Release per npm package; npm, changelogs, and git tags are the package release surfaces',
     );
   }
 } catch (err) {

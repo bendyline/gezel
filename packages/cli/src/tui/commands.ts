@@ -29,6 +29,8 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'gezel', description: 'switch active gezel' },
   { name: 'allow', description: 'allow a project permission' },
   { name: 'disallow', description: 'disallow a project permission' },
+  { name: 'show', description: 'show optional chat details' },
+  { name: 'hide', description: 'hide optional chat details' },
   { name: 'mode', description: 'set AI activity: read-only through full play' },
   { name: 'model', description: 'switch engine and model' },
   { name: 'thread', description: 'switch the active chat thread' },
@@ -72,6 +74,19 @@ const NIGHT_SHIFT_SUBCOMMANDS = [
 
 const MODEL_SUBCOMMANDS = [
   { name: 'download', description: 'choose and download a new on-device model' },
+] as const;
+
+const CHAT_DETAIL_TARGETS = [
+  {
+    name: 'thinking',
+    showDescription: 'show model thinking inline as it streams',
+    hideDescription: 'hide model thinking and keep only the activity count',
+  },
+  {
+    name: 'writes',
+    showDescription: 'show file, artifact, and note content as it streams',
+    hideDescription: 'hide streamed write content and keep compact tool activity',
+  },
 ] as const;
 
 export const PROJECT_PERMISSIONS = [
@@ -168,6 +183,19 @@ export function suggestSlashWordwheel(
         completion: `/${command} ${permission.name}`,
       }),
     );
+  }
+
+  const detailMatch = input.match(/^\/(show|hide)\s+(.*)$/i);
+  if (detailMatch) {
+    const command = (detailMatch[1] ?? '').toLowerCase() as 'show' | 'hide';
+    const query = (detailMatch[2] ?? '').trim().toLowerCase();
+    return CHAT_DETAIL_TARGETS.filter((target) => target.name.startsWith(query)).map((target) => ({
+      key: `${command}:${target.name}`,
+      label: `/${command} ${target.name}`,
+      description: command === 'show' ? target.showDescription : target.hideDescription,
+      submit: `/${command} ${target.name}`,
+      completion: `/${command} ${target.name}`,
+    }));
   }
 
   const modeMatch = input.match(/^\/mode\s+(.*)$/i);

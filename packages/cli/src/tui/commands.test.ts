@@ -162,6 +162,31 @@ describe('suggestSlashWordwheel', () => {
       }),
     ]);
   });
+
+  it('offers thinking and write visibility targets after /show and /hide', () => {
+    expect(suggestSlashWordwheel('/show ', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/show thinking',
+        description: 'show model thinking inline as it streams',
+      }),
+      expect.objectContaining({
+        submit: '/show writes',
+        description: 'show file, artifact, and note content as it streams',
+      }),
+    ]);
+    expect(suggestSlashWordwheel('/hide th', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/hide thinking',
+        description: 'hide model thinking and keep only the activity count',
+      }),
+    ]);
+    expect(suggestSlashWordwheel('/hide wr', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/hide writes',
+        description: 'hide streamed write content and keep compact tool activity',
+      }),
+    ]);
+  });
 });
 
 describe('parseInput', () => {
