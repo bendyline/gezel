@@ -809,6 +809,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('writer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('task-notes.md'),
       expectedDeliverable: { kind: 'file', filePath: 'task-notes.md' },
       projectId: 'project-1',
@@ -1216,6 +1217,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('writer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
       projectId: 'project-1',
@@ -1286,6 +1288,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('writer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('data/audit.json summary.total_records should equal 6'),
       expectedDeliverable: { kind: 'file', filePath: 'data/audit.json' },
       projectId: 'project-1',
@@ -1375,6 +1378,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('developer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('server.mjs is 0 bytes, need ≥ 2200'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
       projectId: 'project-1',
@@ -1452,6 +1456,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('developer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('contract-test.mjs did not pass when run with node'),
       expectedDeliverable: { kind: 'file', filePath: 'contract-test.mjs' },
       projectId: 'project-1',
@@ -1532,6 +1537,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('developer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('server.mjs is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
       projectId: 'project-1',
@@ -1604,6 +1610,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('developer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('Created book title mismatch'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
       projectId: 'project-1',
@@ -1679,6 +1686,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledWith('developer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('server.mjs'),
       expectedDeliverable: { kind: 'file', filePath: 'server.mjs' },
       projectId: 'project-1',
@@ -1750,6 +1758,7 @@ ${'Detailed supporting analysis.\n'.repeat(22)}`;
     });
     expect(client.messageGezel).toHaveBeenCalledWith('reviewer-1', {
       fromGezelId: 'meester',
+      suppressReply: true,
       text: expect.stringContaining('Specific failure: audit.md is missing required content'),
       expectedDeliverable: { kind: 'file', filePath: 'audit.md' },
       projectId: 'project-1',
