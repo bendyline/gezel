@@ -10,6 +10,7 @@ import {
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
 } from '../../models/model-id.js';
+import { ReadOnlyModelError } from '../../models/storage-roots.js';
 import {
   KOKORO_DEFAULT_MODEL_ID,
   KOKORO_DEFAULT_VOICES,
@@ -272,7 +273,14 @@ export function audioRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
     }
     const provider = await ctx.stt.current();
-    await provider.deleteModel(id);
+    try {
+      await provider.deleteModel(id);
+    } catch (err) {
+      if (err instanceof ReadOnlyModelError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
     return c.json({ ok: true as const });
   });
 
@@ -332,7 +340,14 @@ export function audioRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
     }
     const provider = await ctx.tts.current();
-    await provider.deleteModel(id);
+    try {
+      await provider.deleteModel(id);
+    } catch (err) {
+      if (err instanceof ReadOnlyModelError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
     return c.json({ ok: true as const });
   });
 

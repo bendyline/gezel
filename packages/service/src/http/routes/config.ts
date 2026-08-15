@@ -384,6 +384,11 @@ export function configRoutes(ctx: ServiceContext): Hono {
           `[codex-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
+      await ctx.opencodeSetup.reconcile().catch((err) => {
+        log.warn(
+          `[opencode-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
     // Live gilde updates: enabling kicks a background check; disabling
     // reverts to bundled content immediately and prunes the cache. Never

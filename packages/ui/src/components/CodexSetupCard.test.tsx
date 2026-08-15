@@ -99,6 +99,8 @@ function setupStatus(
     launchCommand: string;
     canConfigure: boolean;
     canRemove: boolean;
+    canRepair: boolean;
+    profileBackupPath: string;
   }> = {},
 ) {
   return {
@@ -117,6 +119,7 @@ function setupStatus(
     canRemove:
       overrides.canRemove ??
       ['configured', 'update-needed', 'conflict'].includes(overrides.state ?? 'not-configured'),
+    canRepair: false,
     ...overrides,
   };
 }
@@ -276,6 +279,64 @@ describe('CodexSetupCard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Clear Gezel setup' }));
 
     await waitFor(() => expect(removeCodexSetup).toHaveBeenCalledOnce());
+  });
+
+  it('repairs a foreign profile after confirmation and reports where it was kept', async () => {
+    getCodexSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'conflict',
+        message: '/Users/test/.codex/gezel-local.config.toml was changed outside this setup.',
+        canConfigure: false,
+        canRepair: true,
+      }),
+    );
+    configureCodex.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        profileBackupPath: '/Users/test/.codex/gezel-local.config.toml.backup',
+      }),
+    );
+
+    render(<CodexSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText('Needs attention')).toBeInTheDocument();
+    // The picker stays available so a repair can also pick a different gezel.
+    fireEvent.change(screen.getByTestId('mock-select'), { target: { value: MODELS[1]!.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Repair Codex setup…' }));
+    expect(configureCodex).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Repair the Codex setup?' });
+    expect(within(dialog).getByText(/backup/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Repair setup' }));
+
+    await waitFor(() =>
+      expect(configureCodex).toHaveBeenCalledWith({
+        model: MODELS[1]!.id,
+        backupConflictingProfile: true,
+      }),
+    );
+    expect(await screen.findByText(/was saved as/)).toHaveTextContent(
+      '/Users/test/.codex/gezel-local.config.toml.backup',
+    );
+  });
+
+  it('offers no repair for a conflict that belongs to another app', async () => {
+    getCodexSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'conflict',
+        message: 'Another connected app is using Gezel’s reserved Codex credential identity.',
+        canConfigure: false,
+        canRepair: false,
+        canRemove: false,
+      }),
+    );
+
+    render(<CodexSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText('Needs attention')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Repair/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mock-select')).not.toBeInTheDocument();
   });
 
   it('hides the launch command until a local setup is healthy', async () => {

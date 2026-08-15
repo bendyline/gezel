@@ -825,9 +825,7 @@ export function ProjectGitStatusBar({
                       <dt>Indexed</dt>
                       <dd>
                         {indexStatus.meta.fileCount} file
-                        {indexStatus.meta.fileCount === 1 ? '' : 's'} ·{' '}
-                        {indexStatus.meta.commandCount} command
-                        {indexStatus.meta.commandCount === 1 ? '' : 's'}
+                        {indexStatus.meta.fileCount === 1 ? '' : 's'}
                       </dd>
                     </div>
                     <div>

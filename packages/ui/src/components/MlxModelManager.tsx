@@ -16,12 +16,12 @@ import {
 } from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { ModelSizeCell } from './ModelSizeCell.js';
-import { RecommendedBadge } from './RecommendedBadge.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
@@ -843,7 +843,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
                   <div className="catalog-ollama-specs muted small">
-                    <code>{m.mlx.huggingfaceRepo}</code>
+                    <HuggingFaceRepoLink repo={m.mlx.huggingfaceRepo} />
                     <span>·</span>
                     <span>{m.parameterSize}</span>
                     <span>·</span>
@@ -856,8 +856,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     )}
                   </div>
                   <div className="catalog-ollama-pills">
-                    <LicenseButton manifest={m} />
-                    <RecommendedBadge manifest={m} />
+                    <LicenseButton
+                      manifest={m}
+                      fallbackHref={huggingFaceRepoUrl(m.mlx.huggingfaceRepo)}
+                    />
                     {tight && (
                       <span
                         className="home-status-pill home-status-warn"

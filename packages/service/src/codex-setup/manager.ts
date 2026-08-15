@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type {
@@ -40,6 +40,7 @@ const LOCAL_PROVIDERS = [
 ] as const satisfies readonly ProviderName[];
 const LOCAL_PROVIDER_SET = new Set<ProviderName>(LOCAL_PROVIDERS);
 const MINIMUM_CODEX_VERSION = [0, 147, 0] as const;
+const MAX_PROFILE_BACKUPS = 50;
 
 interface SetupState {
   version: 1;
@@ -47,6 +48,8 @@ interface SetupState {
   createdAt: string;
   updatedAt: string;
 }
+
+type ConflictKind = 'profile' | 'credential' | 'state';
 
 export interface CodexCatalogModel {
   slug: string;
@@ -213,6 +216,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     state: SetupState | null;
     models: CodexSetupModelOption[];
     detection: CodexBinaryDetection;
+    conflict: ConflictKind | null;
   }> => {
     const configPromise = opts.readConfig();
     const [config, models, detection, stateResult, profile, tokenFile, catalog] = await Promise.all(
@@ -250,18 +254,22 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     const reasons: string[] = [];
     let statusState: CodexSetupStatusResponse['state'] = 'not-configured';
     let message: string | undefined;
+    let conflict: ConflictKind | null = null;
 
     if (profile !== null && !isManagedProfile(profile, setupOwnerId)) {
       statusState = 'conflict';
+      conflict = 'profile';
       message = profile.startsWith(MANAGED_HEADER)
         ? `${profilePath} was changed outside this setup or belongs to another Gezel home. It was preserved.`
         : `${profilePath} already exists and is not managed by Gezel. It was not changed.`;
     } else if (tokenRecord && !tokenOwnedBySetup) {
       statusState = 'conflict';
+      conflict = 'credential';
       message =
         'Another connected app is using Gezel’s reserved Codex credential identity. Revoke that app before setting up Codex.';
     } else if (stateResult.error) {
       statusState = 'conflict';
+      conflict = 'state';
       message = 'Gezel found damaged Codex setup state and left the existing files untouched.';
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
@@ -303,12 +311,16 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         : 'Install a local chat model with tool support before setting up Codex.';
     }
 
-    const canConfigure =
-      endpointsEnabled && versionSupported && models.length > 0 && statusState !== 'conflict';
+    const publishable = endpointsEnabled && versionSupported && models.length > 0;
+    const canConfigure = publishable && statusState !== 'conflict';
+    // A credential conflict is another app's to release; the profile and our own
+    // damaged state are the only conflicts Gezel may resolve on the user's behalf.
+    const canRepair = publishable && (conflict === 'profile' || conflict === 'state');
     return {
       state,
       models,
       detection,
+      conflict,
       status: {
         state: statusState,
         models,
@@ -331,11 +343,31 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         bridge: bridgeSnapshot(),
         canConfigure,
         canRemove,
+        canRepair,
       },
     };
   };
 
   const status = async (): Promise<CodexSetupStatusResponse> => (await inspect()).status;
+
+  // Exclusive create, never overwrite: the whole point of the backup is that a
+  // file Gezel does not own survives, and that includes an earlier backup.
+  const preserveConflictingProfile = async (content: string): Promise<string> => {
+    for (let attempt = 1; attempt <= MAX_PROFILE_BACKUPS; attempt++) {
+      const candidate =
+        attempt === 1 ? `${profilePath}.backup` : `${profilePath}.backup-${attempt}`;
+      try {
+        await writeFile(candidate, content, { mode: 0o600, flag: 'wx' });
+        return candidate;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
+    throw new CodexSetupError(
+      'codex_profile_backup_failed',
+      `Could not save a backup copy of ${profilePath}. Move the existing backup files aside and try again.`,
+    );
+  };
 
   const configure = (input: ConfigureCodexRequest): Promise<CodexSetupStatusResponse> =>
     serialize(async () => {
@@ -356,7 +388,8 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!before.detection.installed || !isSupportedCodexVersion(before.detection.version)) {
         throw new CodexSetupError('codex_unavailable', codexVersionReason(before.detection));
       }
-      if (before.status.state === 'conflict') {
+      const repairing = input.backupConflictingProfile === true && before.status.canRepair;
+      if (before.status.state === 'conflict' && !repairing) {
         throw new CodexSetupError(
           'codex_profile_conflict',
           before.status.message ?? `${profilePath} is not managed by Gezel.`,
@@ -375,9 +408,14 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         throw new CodexSetupError('codex_bridge_unavailable', asError(error).message);
       });
       let issuedNewToken = false;
+      let backup: { path: string; content: string } | null = null;
       try {
         const currentProfile = await readOptional(profilePath);
-        if (currentProfile !== null && !isManagedProfile(currentProfile, setupOwnerId)) {
+        const foreignProfile =
+          currentProfile !== null && !isManagedProfile(currentProfile, setupOwnerId)
+            ? currentProfile
+            : null;
+        if (foreignProfile !== null && !repairing) {
           throw new CodexSetupError(
             'codex_profile_conflict',
             `${profilePath} changed while setup was running and was not overwritten.`,
@@ -432,10 +470,29 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
             `${profilePath} changed while setup was running and was not overwritten.`,
           );
         }
+        if (foreignProfile !== null) {
+          backup = {
+            path: await preserveConflictingProfile(foreignProfile),
+            content: foreignProfile,
+          };
+        }
         await writeFileAtomic(profilePath, profile, { mode: 0o600, durable: true });
         await writeSecurityJson(statePath, `${JSON.stringify(nextState, null, 2)}\n`);
-        return status();
+        const published = await status();
+        return backup ? { ...published, profileBackupPath: backup.path } : published;
       } catch (error) {
+        if (backup) {
+          // Undo the move before any other cleanup: the file we displaced is the
+          // user's, and a failed repair must leave it where they left it.
+          const published = await readOptional(profilePath).catch(() => null);
+          if (published === null || isManagedProfile(published, setupOwnerId)) {
+            await writeFileAtomic(profilePath, backup.content, {
+              mode: 0o600,
+              durable: true,
+            }).catch(() => undefined);
+          }
+          await rm(backup.path, { force: true }).catch(() => undefined);
+        }
         if (issuedNewToken) await opts.tokenStore.revoke(CODEX_SETUP_APP_ID).catch(() => false);
         if (!before.state) {
           const publishedProfile = await readOptional(profilePath).catch(() => null);

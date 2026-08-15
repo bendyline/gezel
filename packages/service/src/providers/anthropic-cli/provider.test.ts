@@ -3,13 +3,14 @@ import { AnthropicCliProvider } from './provider.js';
 import { CLAUDE_REASONING_EFFORTS, isClaudeReasoningEffort } from './reasoning.js';
 
 describe('AnthropicCliProvider model catalog', () => {
-  it('offers the complete stable Claude Code alias set', async () => {
+  it('offers the complete stable Claude Code alias set plus Claude Fable', async () => {
     const provider = new AnthropicCliProvider({ runtimeDir: '/tmp/gezel-claude-cli-test' });
     const models = await provider.listModels();
 
     expect(models.map((model) => model.id)).toEqual([
       'best',
       'default',
+      'fable',
       'haiku',
       'opus',
       'opus[1m]',
@@ -17,6 +18,24 @@ describe('AnthropicCliProvider model catalog', () => {
       'sonnet',
       'sonnet[1m]',
     ]);
+  });
+
+  it('uses human-readable labels and current Fable capabilities', async () => {
+    const provider = new AnthropicCliProvider({ runtimeDir: '/tmp/gezel-claude-cli-test' });
+    const models = await provider.listModels();
+
+    expect(models.find((model) => model.id === 'sonnet')?.name).toBe(
+      'Claude Sonnet — Balanced speed and capability for daily work',
+    );
+    expect(models.find((model) => model.id === 'fable')).toMatchObject({
+      name: 'Claude Fable 5 — Highest capability for demanding, long-running work',
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultReasoningEffort: 'high',
+      contextWindow: 1_000_000,
+    });
+    expect(models.find((model) => model.id === 'opusplan')?.name).toBe(
+      'Plan with Opus, build with Sonnet — For complex implementation work',
+    );
   });
 
   it('describes the current model-specific reasoning ranges', async () => {

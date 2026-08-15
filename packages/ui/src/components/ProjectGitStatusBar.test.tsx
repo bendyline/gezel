@@ -115,7 +115,7 @@ describe('ProjectGitStatusBar', () => {
       '57',
     );
     expect(panel).toHaveTextContent('15 of 20 files searchable · 5 waiting');
-    expect(panel).toHaveTextContent('24 files · 3 commands');
+    expect(panel).toHaveTextContent('24 files');
     expect(panel).toHaveTextContent('12 of 20 files');
     expect(panel).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
   });

@@ -528,7 +528,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Consume a pending "+" intent from the sidebar synchronously on first
   // render (the event below covers the already-mounted case). Never in
   // detail-only mode — a single project tab has no create UI.
-  const [createMode, setCreateMode] = useState<'crew' | 'solo' | null>(() =>
+  const [createMode, setCreateMode] = useState<'crew' | null>(() =>
     !detailOnly && consumeCreate('project') ? 'crew' : null,
   );
   const [pkgName, setPkgName] = useState('');
@@ -2116,23 +2116,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         <aside className={`side${sidebarCollapsed ? ' collapsed' : ''}`}>
           <div className="area-toolbar">
             {!sidebarCollapsed && (
-              <>
-                <button
-                  type="button"
-                  className="area-toolbar-btn"
-                  onClick={() => setCreateMode('crew')}
-                >
-                  + New Project
-                </button>
-                <button
-                  type="button"
-                  className="area-toolbar-btn"
-                  onClick={() => setCreateMode('solo')}
-                  title="A solo project — one Builder handles everything"
-                >
-                  + New Job
-                </button>
-              </>
+              <button type="button" className="area-toolbar-btn" onClick={() => setCreateMode('crew')}>
+                + New Project
+              </button>
             )}
             <button
               type="button"
@@ -2157,18 +2143,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   +
                 </span>
                 <span className="collapsed-create-label">Project</span>
-              </button>
-              <button
-                type="button"
-                className="collapsed-create-btn"
-                onClick={() => setCreateMode('solo')}
-                title="New Job (solo project)"
-                aria-label="New Job"
-              >
-                <span className="collapsed-create-symbol" aria-hidden="true">
-                  +
-                </span>
-                <span className="collapsed-create-label">Job</span>
               </button>
             </div>
           )}

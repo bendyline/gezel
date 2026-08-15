@@ -11,6 +11,7 @@ import { generateGezelAbout } from '../about/generator.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { MATCH_THRESHOLD, type MatchCandidate, rankCandidates } from './match.js';
+import { titleCaseRole } from './role-title.js';
 
 export interface EnsureGezelOptions {
   /** Free-form job title — "designer", "dev", "UX researcher", etc. */
@@ -132,23 +133,25 @@ export async function ensureGezel(args: {
   // transition happens inside another gezel's MCP call, so synchronously
   // asking the same local engine to author a persona can queue behind the
   // caller and deadlock the transition.
+  // The about.md keeps the raw title — it reads as prose ("You are the crew's
+  // **marine biologist**"), where display casing would be wrong. Only the
+  // frontmatter role, which the UI renders verbatim as a label, is cased.
+  const roleTitle = titleCaseRole(query);
   const bespokeAbout =
-    bespokeMode === 'static'
-      ? staticSpecialistAbout(opts.jobTitle)
-      : await generateGezelAbout(chat, opts.jobTitle);
+    bespokeMode === 'static' ? staticSpecialistAbout(query) : await generateGezelAbout(chat, query);
   const { name: chosenName, gender: chosenGender } = pickNameAndGender({
     preferredName: opts.preferredName,
   });
   const created = await store.createGezel({
     name: chosenName,
-    role: opts.jobTitle,
+    role: roleTitle,
     gender: chosenGender,
     about: bespokeAbout,
   });
   return {
     gezelId: created.id,
     name: created.name,
-    role: created.role ?? opts.jobTitle,
+    role: created.role ?? roleTitle,
     action: 'created-bespoke',
   };
 }

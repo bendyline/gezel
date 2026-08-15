@@ -26,6 +26,7 @@ const getCodexSetupStatus = vi.fn(
     bridge: { baseUrl: 'https://127.0.0.1:3333/v1', listening: true, port: 3333 },
     canConfigure: false,
     canRemove: false,
+    canRepair: false,
   }),
 );
 
@@ -70,6 +71,7 @@ describe('ConnectedAppsPanel', () => {
       bridge: { baseUrl: 'https://127.0.0.1:3333/v1', listening: true, port: 3333 },
       canConfigure: false,
       canRemove: false,
+      canRepair: false,
     });
     vi.stubGlobal(
       'fetch',
@@ -200,6 +202,7 @@ describe('ConnectedAppsPanel', () => {
         bridge: { baseUrl: 'http://127.0.0.1:11435/v1', listening: false, port: 11_435 },
         canConfigure: false,
         canRemove: false,
+        canRepair: false,
       })
       .mockResolvedValue({
         state: 'not-configured',
@@ -223,6 +226,7 @@ describe('ConnectedAppsPanel', () => {
         bridge: { baseUrl: 'http://127.0.0.1:11435/v1', listening: false, port: 11_435 },
         canConfigure: true,
         canRemove: false,
+        canRepair: false,
       });
 
     render(<ConnectedAppsPanel />);

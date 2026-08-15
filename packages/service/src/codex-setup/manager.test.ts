@@ -249,6 +249,74 @@ describe('CodexSetupManager', () => {
     expect(f.tokenStore.list().some((item) => item.appId === CODEX_SETUP_APP_ID)).toBe(false);
   });
 
+  it('repairs an unmanaged profile by preserving it as a backup beside itself', async () => {
+    const f = await fixture();
+    await mkdir(f.codexHome, { recursive: true });
+    const profilePath = join(f.codexHome, `${CODEX_SETUP_PROFILE_NAME}.config.toml`);
+    await writeFile(profilePath, 'model = "mine"\n');
+
+    const conflicted = await f.manager.status();
+    expect(conflicted.state).toBe('conflict');
+    expect(conflicted.canRepair).toBe(true);
+
+    const repaired = await f.manager.configure({
+      model: 'llama-cpp:coder.gguf',
+      backupConflictingProfile: true,
+    });
+    expect(repaired.state).toBe('configured');
+    expect(repaired.profileBackupPath).toBe(`${profilePath}.backup`);
+    expect(await readFile(`${profilePath}.backup`, 'utf8')).toBe('model = "mine"\n');
+    expect(await readFile(profilePath, 'utf8')).toContain('# Managed by Gezel.');
+
+    // A second repair must not clobber the first preserved copy.
+    await writeFile(profilePath, 'model = "mine again"\n');
+    const again = await f.manager.configure({
+      model: 'llama-cpp:coder.gguf',
+      backupConflictingProfile: true,
+    });
+    expect(again.profileBackupPath).toBe(`${profilePath}.backup-2`);
+    expect(await readFile(`${profilePath}.backup`, 'utf8')).toBe('model = "mine"\n');
+    expect(await readFile(`${profilePath}.backup-2`, 'utf8')).toBe('model = "mine again"\n');
+  });
+
+  it('adopts a profile left behind by another Gezel home when asked to repair', async () => {
+    const first = await fixture();
+    await first.manager.configure({ model: 'llama-cpp:coder.gguf' });
+    const profilePath = join(first.codexHome, `${CODEX_SETUP_PROFILE_NAME}.config.toml`);
+    const firstProfile = await readFile(profilePath, 'utf8');
+
+    const second = await fixture({ codexHome: first.codexHome });
+    expect((await second.manager.status()).canRepair).toBe(true);
+    const repaired = await second.manager.configure({
+      model: 'llama-cpp:coder.gguf',
+      backupConflictingProfile: true,
+    });
+
+    expect(repaired.state).toBe('configured');
+    expect(await readFile(`${profilePath}.backup`, 'utf8')).toBe(firstProfile);
+    expect(await readFile(profilePath, 'utf8')).not.toBe(firstProfile);
+    expect((await first.manager.status()).state).toBe('conflict');
+  });
+
+  it('refuses to repair a conflict owned by another connected app', async () => {
+    const f = await fixture();
+    const record = await f.tokenStore.issue({
+      appId: CODEX_SETUP_APP_ID,
+      appName: 'Unrelated app',
+      scopes: ['openai'],
+    });
+
+    const status = await f.manager.status();
+    expect(status.state).toBe('conflict');
+    expect(status.canRepair).toBe(false);
+    await expect(
+      f.manager.configure({ model: 'llama-cpp:coder.gguf', backupConflictingProfile: true }),
+    ).rejects.toMatchObject({ code: 'codex_profile_conflict' });
+    expect(f.tokenStore.list().find((item) => item.appId === CODEX_SETUP_APP_ID)?.token).toBe(
+      record.token,
+    );
+  });
+
   it('clears owned setup material after a conflict without deleting an unmanaged profile', async () => {
     const f = await fixture();
     await f.manager.configure({ model: 'llama-cpp:coder.gguf' });

@@ -3102,6 +3102,30 @@ export class TaskManager {
   }
 
   /**
+   * True when EVERY one of `tasks` is parked on a step that owes a
+   * workspace file managed writes can't produce. Lets the ambient nudger
+   * tell a genuinely stuck writes-off project from one doing artifact-only
+   * work — the drawer is exempt from the writes-off policy, so a nightly
+   * report or a review still completes there and its voorman still wants
+   * the check-in.
+   *
+   * Conservative by construction: an empty list, a task with no active
+   * step, or any step whose deliverable is satisfiable all answer `false`.
+   * We only claim "blocked" on positive evidence for every task.
+   */
+  async allActiveStepsBlockedByWorkspaceWrites(projectId: string, tasks: Task[]): Promise<boolean> {
+    if (tasks.length === 0) return false;
+    for (const task of tasks) {
+      const step = task.activeStepId
+        ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
+        : undefined;
+      if (!step) return false;
+      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, step))) return false;
+    }
+    return true;
+  }
+
+  /**
    * The workspace files a step must produce that no assignee is able to
    * write. The proactive twin of {@link unsatisfiableWorkspaceGateFiles}:
    * that one reads a gate REJECTION, this one reads the step's own

@@ -57,6 +57,9 @@ export const APP_GRANTABLE_SCOPES = ['openai', 'remote-inference', 'product', 'c
  */
 export const CODEX_SETUP_RESERVED_APP_ID = 'gezel.codex.local-model-bridge';
 
+/** App id owned by the Settings-managed OpenCode bridge. Same contract as Codex's. */
+export const OPENCODE_SETUP_RESERVED_APP_ID = 'gezel.opencode.local-model-bridge';
+
 /** App ids owned by the daemon itself rather than the public grant flow. */
 export function isReservedTokenAppId(appId: string): boolean {
   return (
@@ -70,7 +73,11 @@ export function isReservedTokenAppId(appId: string): boolean {
 
 /** App ids that callers of the public `/v1/apps` consent flow cannot claim. */
 export function isReservedPublicGrantAppId(appId: string): boolean {
-  return isReservedTokenAppId(appId) || appId === CODEX_SETUP_RESERVED_APP_ID;
+  return (
+    isReservedTokenAppId(appId) ||
+    appId === CODEX_SETUP_RESERVED_APP_ID ||
+    appId === OPENCODE_SETUP_RESERVED_APP_ID
+  );
 }
 
 export class ReservedPublicGrantAppIdError extends Error {

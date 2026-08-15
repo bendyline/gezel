@@ -286,6 +286,7 @@ export class DiffusersVideoProvider implements VideoProvider {
       name: m.name,
       approxSizeBytes: m.approxSizeBytes,
       installedAt: m.installedAt,
+      ...(m.readOnly ? { readOnly: true } : {}),
     }));
   }
 

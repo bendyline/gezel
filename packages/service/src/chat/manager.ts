@@ -10921,12 +10921,20 @@ export class ChatManager {
    * pool replica. This is the broker-side half of remote admission: focusing a
    * chat needs the live memory clamp so the user daemon can size its prompt,
    * but it must not load the model or evict somebody else's resident engine.
+   *
+   * `standalone` is for callers writing the answer somewhere durable rather
+   * than spending it on one turn. Live pricing charges the model for whatever
+   * else happens to be resident, so a preview taken while another engine is
+   * warm collapses to the local context floor — fine for a decision
+   * made and discarded in the same second, wrong for a config file read back
+   * days later. See {@link previewLocalEnginePlan}'s `standalone` note.
    */
   async previewContextWindowForModel(
     name: LocalProviderName,
     modelId: string,
+    opts: { standalone?: boolean } = {},
   ): Promise<number | undefined> {
-    return (await this.previewLocalEnginePlan(name, modelId)).contextWindow;
+    return (await this.previewLocalEnginePlan(name, modelId, opts)).contextWindow;
   }
 
   /**

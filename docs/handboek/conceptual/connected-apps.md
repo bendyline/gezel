@@ -20,9 +20,11 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 
 ## Codex and other agent harnesses
 
-The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference.
+The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. OpenCode connects the same way through the chat endpoint — see [OpenCode](#opencode) below.
 
-For Codex, use **Use a gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
+For Codex, use **Use Gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
+
+If the card says **Needs attention**, the `gezel-local` profile on disk was hand-edited or was written by a different Gezel installation, so gezel will not touch it. **Repair Codex setup** writes a fresh profile pointed at this copy of gezel and keeps the old file beside it as `gezel-local.config.toml.backup`. The one conflict repair cannot resolve is another connected app holding the Codex credential identity — revoke that app first.
 
 Keep Gezel running while Codex uses the local model. If you want the model bridge available without keeping the desktop window open, turn on Gezel's daemon autostart setting.
 
@@ -34,7 +36,27 @@ Codex custom providers use `wire_api = "responses"`. The managed profile also se
 
 The setup card puts eligible gezels first. Choosing one gives Codex that gezel's character (`about.md`), effective local model, and tuning while Codex keeps its own tools, sandbox, approvals, and conversation loop. The profile stores the stable gezel id, so renaming the gezel does not break the connection. Raw installed models remain available in a separate fallback group for users who want inference without a gezel persona.
 
+The gezel you choose on the card is the profile's *default*, not its only option: gezel writes a model catalog listing every eligible gezel and local model, so Codex's own model picker shows the whole crew and you can switch between them inside a Codex session.
+
 A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
+
+## OpenCode
+
+[OpenCode](https://opencode.ai) connects the same way, through **Use Gezel in OpenCode** in this Settings screen. Gezel writes its own settings file, a model list covering your eligible crew, and a dedicated revocable credential. It does not edit your own OpenCode configuration, sessions, or permissions — instead it hands you a command that points OpenCode at the Gezel-owned file for that run:
+
+```
+OPENCODE_CONFIG=<path shown on the card> opencode
+```
+
+On Windows the card shows the PowerShell form of the same command. OpenCode merges configuration files rather than replacing them, so your own settings still apply; Gezel only adds a provider named `gezel`.
+
+The gezel you choose is the one OpenCode starts with. Every eligible gezel and local model is listed in the file, so OpenCode's own model picker shows the whole crew and you can switch inside a session. Gezel also pins OpenCode's *small* model — the one it uses for titles and summaries — to the same choice, so a machine set up for local inference never quietly reaches for a cloud provider you have not configured.
+
+If the card says **Needs attention**, the managed file was hand-edited or was written by a different Gezel installation, so gezel will not touch it. **Repair OpenCode setup** writes a fresh file and keeps the old one beside it as `opencode.json.backup`. The one conflict repair cannot resolve is another connected app holding the OpenCode credential identity — revoke that app first.
+
+Because the credential lives in its own file and the config references it by path, revoking the OpenCode entry under Connected Apps immediately stops it from using the bridge, and no secret is ever copied into a project or shell profile.
+
+As with Codex, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while OpenCode uses the model. The bridge carries only inference: the credential grants no access to Gezel projects, files, terminals, or settings.
 
 ## Who answers: gezel choices and the fallback
 

@@ -519,7 +519,7 @@ describe('HomeView', () => {
     expect(screen.queryByText('Run npx tsx to check the frame timing?')).not.toBeInTheDocument();
   });
 
-  it('reflects status chips from projects and pending questions', async () => {
+  it('shows only the actionable chip — never ambient status about projects', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [
         { id: 'default', name: 'default' },
@@ -539,17 +539,12 @@ describe('HomeView', () => {
       ],
     } as never);
     render(<HomeView />);
-    // Chips arrive from three independent async sources (config, projects,
-    // questions). "Ready to work" lands as soon as the probe resolves —
-    // before listQuestions necessarily settles — so the "1 waiting on you"
-    // chip can race the synchronous reads below. Wait for the last-to-
-    // arrive chip and assert the rest from the same settled DOM.
     await waitFor(() => {
       expect(screen.getByText('1 waiting on you')).toBeInTheDocument();
     });
-    expect(screen.getByText('Ready to work')).toBeInTheDocument();
-    expect(screen.getByText('Choplifter on the bench')).toBeInTheDocument();
-    expect(screen.getByText('2 projects open')).toBeInTheDocument();
+    expect(screen.queryByText('Ready to work')).not.toBeInTheDocument();
+    expect(screen.queryByText('Choplifter on the bench')).not.toBeInTheDocument();
+    expect(screen.queryByText('2 projects open')).not.toBeInTheDocument();
   });
 
   it('collapses and expands the greeting band, persisting the preference', async () => {

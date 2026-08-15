@@ -15,6 +15,7 @@ import {
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
 } from '../../models/model-id.js';
+import { ReadOnlyModelError } from '../../models/storage-roots.js';
 import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
@@ -375,7 +376,14 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
     }
     const provider = await ctx.imageProvider.current();
-    await provider.deleteModel(id);
+    try {
+      await provider.deleteModel(id);
+    } catch (err) {
+      if (err instanceof ReadOnlyModelError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
     return c.json({ ok: true as const });
   });
 

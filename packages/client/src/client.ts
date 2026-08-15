@@ -52,6 +52,7 @@ import type {
   CompleteStepRequest,
   CompleteStepResponse,
   ConfigureCodexRequest,
+  ConfigureOpenCodeRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -213,6 +214,7 @@ import type {
   NewCraftbookStep,
   NightShiftReviewResponse,
   NightShiftTasksResponse,
+  OpenCodeSetupStatusResponse,
   OutlineFileRequest,
   OutlineFileResponse,
   PageCheckRequest,
@@ -2209,6 +2211,20 @@ export class GezelClient {
 
   removeCodexSetup(): Promise<CodexSetupStatusResponse> {
     return this.request('DELETE', '/api/codex-setup');
+  }
+
+  // ---------- OpenCode local-model setup ----------
+
+  getOpenCodeSetupStatus(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('GET', '/api/opencode-setup');
+  }
+
+  configureOpenCode(body: ConfigureOpenCodeRequest): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/opencode-setup', body);
+  }
+
+  removeOpenCodeSetup(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/opencode-setup');
   }
 
   // ---------- live gilde content updates ----------

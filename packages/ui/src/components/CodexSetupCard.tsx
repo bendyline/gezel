@@ -8,7 +8,7 @@ import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
-type Confirmation = 'configure' | 'remove' | null;
+type Confirmation = 'configure' | 'repair' | 'remove' | null;
 
 export function CodexSetupCard({
   endpointsEnabled,
@@ -22,12 +22,16 @@ export function CodexSetupCard({
   const [status, setStatus] = useState<CodexSetupStatusResponse | null>(null);
   const [model, setModel] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const applyStatus = useCallback((next: CodexSetupStatusResponse) => {
     setStatus(next);
+    if (next.profileBackupPath) {
+      setNotice(`Your previous Codex profile was saved as ${next.profileBackupPath}.`);
+    }
     setModel((current) => {
       const available = new Set(next.models.map((candidate) => candidate.id));
       if (current && available.has(current)) return current;
@@ -71,33 +75,32 @@ export function CodexSetupCard({
     endpointsEnabled &&
     localDesktopMode;
   const modelChanged = configured && model !== status?.configuredModel;
+  const repairable = status?.state === 'conflict' && status.canRepair;
   const needsConfigure =
-    status?.state === 'not-configured' || status?.state === 'update-needed' || modelChanged;
-  const configureDisabled =
-    busy ||
-    !localDesktopMode ||
-    !endpointsEnabled ||
-    !status?.canConfigure ||
-    !model ||
-    status.state === 'conflict' ||
-    status.state === 'unavailable';
-  const selectionDisabled =
-    busy ||
-    !localDesktopMode ||
-    !endpointsEnabled ||
-    !status?.canConfigure ||
-    status.state === 'conflict' ||
-    status.state === 'unavailable';
+    status?.state === 'not-configured' ||
+    status?.state === 'update-needed' ||
+    modelChanged ||
+    repairable;
+  // `canConfigure` already refuses both conflict and unavailable; repair is the
+  // one path that deliberately proceeds from a conflict.
+  const canPublish =
+    status?.state === 'conflict' ? status.canRepair : (status?.canConfigure ?? false);
+  const configureDisabled = busy || !localDesktopMode || !endpointsEnabled || !canPublish || !model;
+  const selectionDisabled = busy || !localDesktopMode || !endpointsEnabled || !canPublish;
 
   const runConfirmedAction = useCallback(async () => {
     if (!confirmation || busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const next =
         confirmation === 'remove'
           ? await api.removeCodexSetup()
-          : await api.configureCodex({ model });
+          : await api.configureCodex({
+              model,
+              ...(confirmation === 'repair' ? { backupConflictingProfile: true } : {}),
+            });
       applyStatus(next);
       setConfirmation(null);
       void Promise.resolve(onChanged?.()).catch(() => {
@@ -107,7 +110,7 @@ export function CodexSetupCard({
     } catch (err) {
       setConfirmation(null);
       setError(
-        `${confirmation === 'remove' ? 'Could not remove' : status?.state === 'not-configured' ? 'Could not set up' : 'Could not update'} the Codex setup — ${apiErrorMessage(err)}`,
+        `${confirmation === 'remove' ? 'Could not remove' : confirmation === 'repair' ? 'Could not repair' : status?.state === 'not-configured' ? 'Could not set up' : 'Could not update'} the Codex setup — ${apiErrorMessage(err)}`,
       );
     } finally {
       setBusy(false);
@@ -132,7 +135,11 @@ export function CodexSetupCard({
   }, [status?.launchCommand]);
 
   const stateLabel = status ? codexStateLabel(status.state) : 'Checking…';
-  const configureLabel = status?.state === 'not-configured' ? 'Set up Codex…' : 'Update Codex…';
+  const configureLabel = repairable
+    ? 'Repair Codex setup…'
+    : status?.state === 'not-configured'
+      ? 'Set up Codex…'
+      : 'Update Codex…';
   const configuredOption = status?.models.find(
     (candidate) => candidate.id === status.configuredModel,
   );
@@ -142,23 +149,25 @@ export function CodexSetupCard({
 
   return (
     <section
-      className="settings-subsection provider-card codex-setup-card"
+      className="settings-subsection provider-card harness-setup-card"
       aria-labelledby="codex-setup-heading"
     >
       <div className="settings-card-header">
-        <h3 id="codex-setup-heading">Use a gezel in Codex</h3>
+        <h3 id="codex-setup-heading">Use Gezel in Codex</h3>
         <span
-          className={`codex-setup-state codex-setup-state--${status?.state ?? 'checking'}`}
+          className={`harness-setup-state harness-setup-state--${status?.state ?? 'checking'}`}
           aria-live="polite"
         >
           {stateLabel}
         </span>
       </div>
 
-      <p className="muted small codex-setup-intro">
-        Codex keeps its coding tools, sandbox, approvals, and conversation loop while your selected
-        gezel supplies the character, model, and tuning. Raw local models remain available when you
-        want inference without a gezel persona.
+      <p className="muted small harness-setup-intro">
+        Codex keeps its coding tools, sandbox, approvals, and conversation loop while a gezel
+        supplies the character, model, and tuning. Your whole eligible crew is offered to Codex —
+        the gezel you pick here is the one it starts with, and you can switch to any other from
+        Codex's own model picker. Raw local models remain available when you want inference without
+        a gezel persona.
       </p>
 
       {!status && !error && <p className="muted small">Checking the Codex setup…</p>}
@@ -169,13 +178,22 @@ export function CodexSetupCard({
             <p
               className={
                 status.state === 'conflict' || status.state === 'unavailable'
-                  ? 'codex-setup-caution small'
+                  ? 'harness-setup-caution small'
                   : 'muted small'
               }
             >
               {status.message}
             </p>
           )}
+
+          {repairable && (
+            <p className="muted small">
+              Repair writes a fresh <code>{status.profileName}</code> profile for this Gezel and
+              keeps a copy of the existing file next to it.
+            </p>
+          )}
+
+          {notice && <p className="muted small">{notice}</p>}
 
           {!status.codexInstalled && status.state !== 'unavailable' && (
             <p className="muted small">
@@ -185,28 +203,28 @@ export function CodexSetupCard({
           )}
 
           {remoteMode && (
-            <p className="codex-setup-caution small">
+            <p className="harness-setup-caution small">
               One-click setup is unavailable while this app is connected to a remote Gezel service.
               Configure Codex on the computer where you plan to run it.
             </p>
           )}
 
           {!remoteMode && !localDesktopMode && (
-            <p className="codex-setup-caution small">
+            <p className="harness-setup-caution small">
               One-click setup is available in the Gezel desktop app when it is connected to your
               user service on this computer.
             </p>
           )}
 
           {!endpointsEnabled && (
-            <p className="codex-setup-caution small">
+            <p className="harness-setup-caution small">
               Turn on <strong>Allow apps to connect</strong> above before setting up or updating
               Codex.
             </p>
           )}
 
           {status.state === 'update-needed' && status.reasons.length > 0 && (
-            <div className="codex-setup-reasons">
+            <div className="harness-setup-reasons">
               <span className="small">The managed setup needs an update:</span>
               <ul className="muted small">
                 {status.reasons.map((reason) => (
@@ -218,14 +236,13 @@ export function CodexSetupCard({
 
           {configured && configuredOption && !modelChanged && (
             <p className="muted small">
-              Codex is configured to {isGezelOption(configuredOption) ? 'work with' : 'use'}{' '}
-              <strong>{configuredOption.label}</strong>.
+              Codex starts with <strong>{configuredOption.label}</strong>.
               {status.codexVersion ? ` Codex ${status.codexVersion} was found.` : ''}
             </p>
           )}
 
           {canLaunch && (
-            <div className="codex-setup-command-row">
+            <div className="harness-setup-command-row">
               <span className="muted small">Start it with</span>
               <code>{status.launchCommand}</code>
               <button type="button" onClick={() => void copyLaunchCommand()}>
@@ -240,9 +257,9 @@ export function CodexSetupCard({
             </div>
           )}
 
-          {status.models.length > 0 && status.state !== 'conflict' && (
-            <div className="codex-setup-model-row">
-              <span id={modelLabelId}>Gezel</span>
+          {status.models.length > 0 && (status.state !== 'conflict' || repairable) && (
+            <div className="harness-setup-model-row">
+              <span id={modelLabelId}>Default gezel</span>
               <Select.Root value={model} onValueChange={setModel} disabled={selectionDisabled}>
                 <Select.Trigger aria-labelledby={modelLabelId}>
                   <Select.Value />
@@ -277,12 +294,12 @@ export function CodexSetupCard({
           )}
 
           {status.models.length === 0 && status.state !== 'conflict' && (
-            <p className="codex-setup-caution small">
+            <p className="harness-setup-caution small">
               No gezels or inference models compatible with the Codex tool loop are available yet.
             </p>
           )}
 
-          <div className="codex-setup-actions">
+          <div className="harness-setup-actions">
             {needsConfigure && (
               <button
                 type="button"
@@ -290,7 +307,7 @@ export function CodexSetupCard({
                 disabled={configureDisabled}
                 onClick={() => {
                   setError(null);
-                  setConfirmation('configure');
+                  setConfirmation(repairable ? 'repair' : 'configure');
                 }}
               >
                 {configureLabel}
@@ -318,12 +335,12 @@ export function CodexSetupCard({
       )}
 
       {error && (
-        <p className="error small codex-setup-error" role="alert">
+        <p className="error small harness-setup-error" role="alert">
           {error}
         </p>
       )}
       {!status && error && (
-        <div className="codex-setup-actions">
+        <div className="harness-setup-actions">
           <button type="button" onClick={() => void refresh()} disabled={busy}>
             Try again
           </button>
@@ -358,6 +375,30 @@ export function CodexSetupCard({
           </>
         }
         confirmLabel={status?.state === 'not-configured' ? 'Set up Codex' : 'Update Codex'}
+        onConfirm={runConfirmedAction}
+        onCancel={() => setConfirmation(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmation === 'repair'}
+        title="Repair the Codex setup?"
+        message={
+          <>
+            Gezel will write a working <code>{status?.profileName}</code> profile for{' '}
+            <strong>{selectedOption?.label ?? model}</strong>, connected to this copy of Gezel.
+            {status?.profilePath ? (
+              <>
+                {' '}
+                The file now at <code>{status.profilePath}</code> is kept as a <code>.backup</code>{' '}
+                copy beside it, so nothing is lost.
+              </>
+            ) : (
+              <> The file it replaces is kept as a .backup copy beside it, so nothing is lost.</>
+            )}{' '}
+            Your other Codex settings and conversations stay untouched.
+          </>
+        }
+        confirmLabel="Repair setup"
         onConfirm={runConfirmedAction}
         onCancel={() => setConfirmation(null)}
       />

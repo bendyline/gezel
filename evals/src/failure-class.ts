@@ -130,7 +130,7 @@ const LLAMA_SIGABRT = /\[llama-server\][^\n]*(?:signal=SIGABRT|"signal":"SIGABRT
 const STRUCTURED_CUDA_CRASH =
   /"expected":false[^\n]*"panicKind":"cuda-[^"]+"|"panicKind":"cuda-[^"]+"[^\n]*"expected":false/i;
 const JINJA_TEMPLATE_500 = /Jinja Exception: Conversation roles must alternate/;
-const VOORMAN_SCHEDULER_SKIP = /skip — voorman is the Meester/;
+const VOORMAN_SCHEDULER_SKIP = /skip meester nudge — voorman is the Meester/;
 
 /** Minimum repeats before a log signature counts as the cause: a single
  * Jinja 500 can be recovered from; a single scheduler skip is routine. */
@@ -216,7 +216,7 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
       return {
         failureClass: 'infra',
         rule: 'scheduler-voorman-deadlock',
-        evidence: `${voorman}× "[scheduler] skip — voorman is the Meester" (project never driven)`,
+        evidence: `${voorman}× "[scheduler] skip meester nudge — voorman is the Meester" (project never driven)`,
       };
     }
   }

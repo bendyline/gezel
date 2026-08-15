@@ -170,7 +170,8 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
   });
 
   it('voorman-is-meester scheduler deadlock → infra', () => {
-    const line = '[tasks] [scheduler] tank-combat-arcade: skip — voorman is the Meester';
+    const line =
+      '[tasks] [scheduler] tank-combat-arcade: skip meester nudge — voorman is the Meester';
     const c = classifyTrial({ ...stall, daemonLog: Array(56).fill(line).join('\n') });
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'scheduler-voorman-deadlock' });
   });

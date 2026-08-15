@@ -69,13 +69,14 @@ import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
-import { codexBridgePortForHome } from './http/codex-bridge-port.js';
 import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
+import { codexBridgePortForHome, opencodeBridgePortForHome } from './http/local-bridge-port.js';
 import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
+import { buildOpenCodeBridgeApp, createOpenCodeBridgeController } from './http/opencode-bridge.js';
 import {
   PreviewCapabilityStore,
   normalizePreviewPath,
@@ -107,6 +108,7 @@ import {
   modelStorageRoots,
   reclaimAbandonedModelDownloads,
 } from './models/storage-roots.js';
+import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
@@ -257,6 +259,8 @@ export interface StartServiceOptions {
   codexHome?: string;
   /** Exact Codex bridge port override (`0` = ephemeral); production derives one from `home`. */
   codexBridgePort?: number;
+  /** Exact OpenCode bridge port override (`0` = ephemeral); production derives one from `home`. */
+  opencodeBridgePort?: number;
 }
 
 export interface RunningService {
@@ -2091,7 +2095,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           remoteProvider.getContextWindow?.()
         );
       }
-      return chat.previewContextWindowForModel(provider, modelId);
+      // Standalone, because this number is published to a Codex profile on
+      // disk and read back on every launch for days. Live pricing charged the
+      // model for whatever else was resident at setup time, so every entry
+      // came out at the 64K floor even on a host admitting 128K+ — Codex then
+      // compacted at 90% of the wrong figure, repeatedly, mid-task.
+      return chat.previewContextWindowForModel(provider, modelId, { standalone: true });
     },
   });
   const codexSetup = createCodexSetupManager({
@@ -2102,6 +2111,32 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     readConfig: () => store.readConfig(),
     listGezels: () => store.listGezels(),
     providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    listModels: listCodexSetupModels,
+  });
+
+  // OpenCode needs the same stable plain-HTTP origin as Codex, on its own port
+  // so neither integration's lifecycle can take the other's listener down. Its
+  // provider speaks chat completions rather than the Responses API, hence a
+  // separate app over the same authenticated route stack.
+  const opencodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const opencodeBridge = createOpenCodeBridgeController({
+    fetch: () => {
+      if (!opencodeBridgeFetchRef.value) {
+        throw new Error('OpenCode bridge cannot start before the HTTP app is ready');
+      }
+      return opencodeBridgeFetchRef.value;
+    },
+    port: opts.opencodeBridgePort ?? opencodeBridgePortForHome(home),
+  });
+  const opencodeSetup = createOpenCodeSetupManager({
+    home,
+    tokenStore,
+    bridge: opencodeBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    // The same proven-capability model source Codex uses: a coding harness
+    // cannot fall back gracefully from a model that turns out not to do tools.
     listModels: listCodexSetupModels,
   });
 
@@ -2191,6 +2226,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remoteTenantLimits,
     ollamaEmulation,
     codexSetup,
+    opencodeSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2226,6 +2262,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     models: () => codexSetup.codexModelCatalog(),
   });
   codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
+  const opencodeBridgeApp = buildOpenCodeBridgeApp(context);
+  opencodeBridgeFetchRef.value = opencodeBridgeApp.fetch.bind(opencodeBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2490,6 +2528,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await opencodeSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2732,6 +2775,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await remoteServing.stop();
       await ollamaEmulation.stop();
       await codexSetup.stop();
+      await opencodeSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

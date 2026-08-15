@@ -10,6 +10,12 @@ import {
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
+import {
+  INVALID_MODEL_ID_CODE,
+  INVALID_MODEL_ID_MESSAGE,
+  isSafeModelId,
+} from '../../models/model-id.js';
+import { ReadOnlyModelError } from '../../models/storage-roots.js';
 import { UnknownVideoModelError } from '../../providers/video/pull-registry.js';
 import type { VideoInputBytes, VideoProvider } from '../../providers/video/types.js';
 import type { ServiceContext } from '../context.js';
@@ -291,8 +297,18 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
 
   app.delete('/models/:id', async (c) => {
     const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
     const provider = await ctx.videoProvider.current();
-    await provider.deleteModel(id);
+    try {
+      await provider.deleteModel(id);
+    } catch (err) {
+      if (err instanceof ReadOnlyModelError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
     return c.json({ ok: true as const });
   });
 

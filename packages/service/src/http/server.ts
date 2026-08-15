@@ -61,6 +61,7 @@ import { nightShiftRoutes } from './routes/night-shift.js';
 import { oauthClientRoutes } from './routes/oauth-clients.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
 import { ollamaRoutes } from './routes/ollama.js';
+import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
@@ -622,6 +623,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
+  app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));

@@ -1175,7 +1175,22 @@ function Group({
             title={addTitle}
             aria-label={addTitle}
           >
-            +
+            {/* An SVG plus, not a "+" glyph: flex centering aligns the text
+                line box, and the font's ascender/descender asymmetry then
+                leaves the character sitting visibly low in the 22px key. */}
+            <svg
+              width={12}
+              height={12}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+              focusable="false"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
           </button>
         )}
       </div>

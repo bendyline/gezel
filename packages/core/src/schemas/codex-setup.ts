@@ -1,30 +1,15 @@
 import { z } from 'zod';
+import {
+  LocalHarnessBridgeSchema,
+  LocalHarnessModelOptionSchema,
+  LocalHarnessSetupStateSchema,
+} from './local-harness.js';
 
 /** A gezel or raw local model that can safely sit behind Codex's tool loop. */
-export const CodexSetupModelOptionSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  description: z.string().optional(),
-  kind: z.enum(['gezel', 'model']).default('model'),
-  provider: z.string().min(1),
-  /** Stable gezel id for persona-backed entries. Absent on raw-model entries. */
-  gezelId: z.string().min(1).optional(),
-  role: z.string().min(1).optional(),
-  /** Human-readable name of the effective inference model behind a gezel. */
-  modelLabel: z.string().min(1).optional(),
-  contextWindow: z.number().int().positive().optional(),
-  supportsReasoning: z.boolean().optional(),
-  supportsTools: z.boolean().optional(),
-});
+export const CodexSetupModelOptionSchema = LocalHarnessModelOptionSchema;
 export type CodexSetupModelOption = z.infer<typeof CodexSetupModelOptionSchema>;
 
-export const CodexSetupStateSchema = z.enum([
-  'not-configured',
-  'configured',
-  'update-needed',
-  'conflict',
-  'unavailable',
-]);
+export const CodexSetupStateSchema = LocalHarnessSetupStateSchema;
 export type CodexSetupState = z.infer<typeof CodexSetupStateSchema>;
 
 /**
@@ -45,18 +30,30 @@ export const CodexSetupStatusResponseSchema = z.object({
   profileName: z.string().min(1),
   profilePath: z.string().min(1),
   launchCommand: z.string().min(1),
-  bridge: z.object({
-    baseUrl: z.string().url(),
-    listening: z.boolean(),
-    port: z.number().int().nonnegative(),
-  }),
+  bridge: LocalHarnessBridgeSchema,
   canConfigure: z.boolean(),
   /** Whether Gezel-owned credential/state material exists and can be safely removed. */
   canRemove: z.boolean(),
+  /**
+   * Whether a `conflict` can be resolved by backing the foreign profile up and
+   * republishing a managed one. False for a credential conflict, which belongs
+   * to another app and is only the user's to revoke.
+   */
+  canRepair: z.boolean(),
+  /**
+   * Where a conflicting profile was preserved. Present only on the response of
+   * the repairing request that moved it.
+   */
+  profileBackupPath: z.string().min(1).optional(),
 });
 export type CodexSetupStatusResponse = z.infer<typeof CodexSetupStatusResponseSchema>;
 
 export const ConfigureCodexRequestSchema = z.object({
   model: z.string().min(1),
+  /**
+   * Copy a conflicting Codex profile to a `.backup` sibling and replace it with
+   * a managed one. Rejected unless the status reports `canRepair`.
+   */
+  backupConflictingProfile: z.boolean().optional(),
 });
 export type ConfigureCodexRequest = z.infer<typeof ConfigureCodexRequestSchema>;

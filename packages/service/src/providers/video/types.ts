@@ -107,6 +107,11 @@ export interface InstalledVideoModelInfo {
   name: string;
   approxSizeBytes: number;
   installedAt: string;
+  /**
+   * True when the model lives in the read-only machine asset store, so
+   * `deleteModel` would refuse it and the UI must not offer Delete.
+   */
+  readOnly?: boolean;
 }
 
 /**

@@ -305,7 +305,7 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Collapse project list' }));
 
     expect(screen.getByRole('button', { name: 'New Project' })).toHaveTextContent('+Project');
-    expect(screen.getByRole('button', { name: 'New Job' })).toHaveTextContent('+Job');
+    expect(screen.queryByRole('button', { name: /New Job/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand project list' })).toBeInTheDocument();
   });
 

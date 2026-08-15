@@ -60,6 +60,15 @@ function resolveClass(m: LicensedManifest): LicenseClass | null {
  * and the default is safe: any current or future render site is ollama-free
  * unless it says otherwise.
  */
+/** Host shown in the tooltip, e.g. "huggingface.co". Falsy input never reaches here. */
+function linkHost(href: string): string {
+  try {
+    return new URL(href).hostname;
+  } catch {
+    return 'the web';
+  }
+}
+
 function isOllamaHost(href: string): boolean {
   try {
     const { hostname } = new URL(href);
@@ -75,12 +84,18 @@ function isOllamaHost(href: string): boolean {
 }
 
 /**
- * License link target: the explicit URL, else the model card (`upstream`).
- * An ollama.com target is dropped unless `allowOllamaLink` is set, so the
- * badge falls back to a static chip rather than linking off-page.
+ * License link target: the explicit URL, else the model card (`upstream`),
+ * else whatever page the caller knows documents this build (`fallbackHref` —
+ * for local models, the Hugging Face repo the weights come from). An
+ * ollama.com target is dropped unless `allowOllamaLink` is set, so the badge
+ * falls back to a static chip rather than linking off-page.
  */
-function licenseHref(m: LicensedManifest, allowOllamaLink: boolean): string | null {
-  const href = m.licenseUrl ?? m.upstream ?? null;
+function licenseHref(
+  m: LicensedManifest,
+  allowOllamaLink: boolean,
+  fallbackHref?: string,
+): string | null {
+  const href = m.licenseUrl ?? m.upstream ?? fallbackHref ?? null;
   if (href && !allowOllamaLink && isOllamaHost(href)) return null;
   return href;
 }
@@ -88,9 +103,17 @@ function licenseHref(m: LicensedManifest, allowOllamaLink: boolean): string | nu
 export function LicenseButton({
   manifest,
   allowOllamaLink = false,
+  fallbackHref,
 }: {
   manifest: LicensedManifest;
   allowOllamaLink?: boolean;
+  /**
+   * Where to send the user when the manifest itself names no license page.
+   * Catalog entries are expected to carry one; community and hand-authored
+   * content is not, and a license the user cannot read is worse than a chip
+   * that lands on the repo publishing it.
+   */
+  fallbackHref?: string;
 }) {
   const cls = resolveClass(manifest);
   const shortName = manifest.licenseShortName ?? manifest.license;
@@ -105,7 +128,7 @@ export function LicenseButton({
     : (shortName as string);
   const title = cls ? CLASS_TITLE[cls] : undefined;
   const className = `license-button license-button--${cls ?? 'unknown'}`;
-  const href = licenseHref(manifest, allowOllamaLink);
+  const href = licenseHref(manifest, allowOllamaLink, fallbackHref);
 
   // No link target — render a static chip rather than a dead link.
   if (!href) {
@@ -115,8 +138,14 @@ export function LicenseButton({
       </span>
     );
   }
+  // The chip carries the same silhouette as the read-only status badges around
+  // it, so the tooltip has to say it goes somewhere — the ↗ alone is easy to
+  // miss at 0.75rem.
+  const linkTitle = [title, `Opens the license page on ${linkHost(href)}.`]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <a className={className} href={href} target="_blank" rel="noreferrer" title={title}>
+    <a className={className} href={href} target="_blank" rel="noreferrer" title={linkTitle}>
       {label}
       <span aria-hidden="true" className="license-button__ext">
         ↗

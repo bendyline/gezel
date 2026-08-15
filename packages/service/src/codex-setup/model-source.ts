@@ -14,9 +14,15 @@ export interface CodexSetupModelSourceOptions {
   /** Runtime inventory. This may be local disk metadata or machine-broker discovery. */
   listModels(provider: ProviderName, signal: AbortSignal): Promise<ModelInfo[]>;
   /**
-   * Resolve the window the native engine can actually admit now. Implementations
-   * must remain non-binding: local daemons use previewLocalEnginePlan; user
-   * daemons with a machine broker use its `/v1/remote/admit` preflight.
+   * Resolve the window the native engine can admit for this model on this
+   * device. Implementations must remain non-binding: local daemons use
+   * previewLocalEnginePlan; user daemons with a machine broker use its
+   * `/v1/remote/admit` preflight.
+   *
+   * Price the model as the only resident engine. The result is written to a
+   * durable Codex profile, so it must describe the device rather than the
+   * instant — a window that shrinks because another model happened to be warm
+   * would be frozen into the file and read back long after that engine exited.
    */
   resolveNativeContextWindow(
     provider: CodexNativeProvider,

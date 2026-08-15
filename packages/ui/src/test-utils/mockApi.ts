@@ -165,6 +165,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     bridge: { baseUrl: 'https://127.0.0.1:6228/v1', listening: true, port: 6228 },
     canConfigure: false,
     canRemove: false,
+    canRepair: false,
   },
   getLlamaCppContextSizing: { policy: 'adaptive' },
   getModelContextOverrides: { overrides: {} },
