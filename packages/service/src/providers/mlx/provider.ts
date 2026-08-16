@@ -85,7 +85,7 @@ import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
 } from '../project-macro-loop-bail.js';
-import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import {
   type EnginePhaseEvent,
@@ -456,7 +456,9 @@ export class MlxProvider implements LLMProvider {
     this.queue = new ProviderQueue({
       concurrency: queueConcurrency,
       interactiveConcurrency,
-      backgroundConcurrency: Math.max(1, queueConcurrency - interactiveConcurrency),
+      // Keyed to the engine gate's width (`batchMax`), not to the queue's
+      // deadlock reserve above — see `backgroundLaneCap`.
+      backgroundConcurrency: backgroundLaneCap(batchMax),
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
       // Single local GPU — same ambient admission control as llama-cpp:
       // housekeeping turns wait for a quiet window so they never wedge

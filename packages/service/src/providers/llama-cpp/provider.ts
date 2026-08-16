@@ -78,7 +78,7 @@ import type {
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
-import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
@@ -2122,7 +2122,12 @@ export class LlamaCppProvider implements LLMProvider {
       // without two sessions ever pinning the same native slot concurrently.
       concurrency: queueConcurrency,
       interactiveConcurrency,
-      backgroundConcurrency: Math.max(1, queueConcurrency - interactiveConcurrency),
+      // Keyed to `slots` — the width `acquireExclusiveEngineRequest`
+      // enforces — not to the queue's deadlock reserve. This is a no-op
+      // for the serial and ds4 paths, where the old expression already
+      // came out to `slots - 1`; it only widens the batched path, which
+      // was pinned at 1. See `backgroundLaneCap`.
+      backgroundConcurrency: backgroundLaneCap(slots),
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
       // A single local GPU: hold ambient housekeeping (nudges,
       // extraction, icon/about) while the user is actively engaged, so

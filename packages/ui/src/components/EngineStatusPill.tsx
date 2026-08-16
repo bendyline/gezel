@@ -806,6 +806,10 @@ function EngineStatusPillForProvider({
   //   they account for most of the "phantom" queue entries that
   //   appeared after a visible turn completed.
   const queuedRunning = queueState ? queueState.running : 0;
+  // `running` counts slots, not conversations. Take the interactive
+  // lane for anything the copy calls a chat, and leave the rest to be
+  // named as background work.
+  const queuedRunningInteractive = queueState?.runningInteractive;
   // Fold both queue layers into the numbers/strings the pill renders:
   // the provider request queue (running / interactive / background)
   // and the per-session backlog. See composeQueueStatus for why the
@@ -813,10 +817,16 @@ function EngineStatusPillForProvider({
   // while chats sat enqueued.
   const queue = composeQueueStatus({
     running: queuedRunning,
+    ...(queuedRunningInteractive !== undefined
+      ? { runningInteractive: queuedRunningInteractive }
+      : {}),
     interactive: queueState?.queuedInteractive ?? 0,
     background: queueState?.queuedBackground ?? 0,
     backlog: sessionBacklog,
   });
+  // Chats only — the badge's own tooltip has always called these
+  // "chats waiting to be answered", so counting one-shots here made the
+  // pill promise conversations that did not exist.
   const queuedWaiting = queue.waiting;
   // Inline suffix shows "+N queued" when there's anything waiting.
   const queueSuffix = queuedWaiting > 0 ? ` · +${queuedWaiting} queued` : '';

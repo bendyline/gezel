@@ -78,8 +78,14 @@ export function formatBytes(bytes: number): string {
  * "Idle" while chats wait.
  */
 export interface QueueStatusInput {
-  /** In-flight slots in the provider request queue. */
+  /** In-flight slots in the provider request queue, all lanes. */
   running: number;
+  /**
+   * In-flight slots held by the interactive lane — i.e. live
+   * conversations. Omit on a queue that predates the lane split and the
+   * whole of `running` is treated as chat work, preserving the old copy.
+   */
+  runningInteractive?: number;
   /** Foreground turns waiting in the provider request queue. */
   interactive: number;
   /** Background work (memory extraction, auto-recall, fan-out) waiting. */
@@ -89,7 +95,7 @@ export interface QueueStatusInput {
 }
 
 export interface QueueStatusView {
-  /** Total items waiting across both layers — drives the "+N" badge. */
+  /** Chats waiting across both layers — drives the "+N" badge. */
   waiting: number;
   /** True when anything is in flight or waiting — drives busy styling. */
   active: boolean;
@@ -106,18 +112,32 @@ export interface QueueStatusView {
  * comes from the live SSE phase, not from queue counts).
  */
 export function composeQueueStatus(input: QueueStatusInput): QueueStatusView {
-  const pending = input.interactive + input.background;
-  const waiting = pending + input.backlog;
-  const active = input.running > 0 || waiting > 0;
-  const idleStatus =
-    input.running > 0 || waiting > 0
-      ? [
-          input.running > 0 ? `${input.running} running` : null,
-          waiting > 0 ? `${waiting} queued` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ')
-      : 'Idle — waiting for a message';
+  // Chats are the headline noun. A queue slot is not a conversation:
+  // index enrichment, memory extraction and digests all occupy `running`
+  // while zero humans are being talked to, which is how the Status line
+  // came to read "1 running" against an empty inflight-turn registry.
+  const chatsRunning = input.runningInteractive ?? input.running;
+  const chatsQueued = input.interactive + input.backlog;
+  const chores = Math.max(0, input.running - chatsRunning) + input.background;
+  const waiting = chatsQueued;
+  // Chores still light the pill — going quiet while the GPU decodes a
+  // one-shot is the regression the background counts were folded in to
+  // fix; they just never get to call themselves chats.
+  const active = input.running > 0 || chatsQueued > 0 || input.background > 0;
+  const parts: string[] = [];
+  if (chatsRunning > 0) {
+    parts.push(`${chatsRunning} ${chatsRunning === 1 ? 'chat' : 'chats'} running`);
+  }
+  if (chatsQueued > 0) {
+    parts.push(
+      chatsRunning > 0
+        ? `${chatsQueued} queued`
+        : `${chatsQueued} ${chatsQueued === 1 ? 'chat' : 'chats'} queued`,
+    );
+  }
+  if (parts.length === 0 && chores > 0) parts.push('No chats');
+  if (chores > 0) parts.push(`${chores} background ${chores === 1 ? 'job' : 'jobs'}`);
+  const idleStatus = parts.length > 0 ? parts.join(' · ') : 'Idle — waiting for a message';
   const queueRow = [
     input.running > 0 ? `${input.running} running` : null,
     input.interactive > 0 ? `${input.interactive} interactive` : null,

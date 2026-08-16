@@ -265,6 +265,14 @@ function sanitizeBrokerProviderQueue(value: unknown): Record<string, unknown> | 
     : [];
   return {
     running,
+    // Optional so an older broker that predates the lane split still
+    // sanitizes; the pill falls back to `running` when they are absent.
+    ...(finiteNumber(value.runningInteractive) !== undefined
+      ? { runningInteractive: finiteNumber(value.runningInteractive) }
+      : {}),
+    ...(finiteNumber(value.runningBackground) !== undefined
+      ? { runningBackground: finiteNumber(value.runningBackground) }
+      : {}),
     queuedInteractive,
     queuedBackground,
     concurrency,

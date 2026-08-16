@@ -252,6 +252,28 @@ export function defaultAmbientQuietMs(): number {
   return 180_000;
 }
 
+/**
+ * How many slots the background lane may hold on an engine that can
+ * generate `engineWidth` sequences at once: all but one, so an arriving
+ * chat never waits behind a full background cohort.
+ *
+ * Key this to the ENGINE's width, not the queue's. A local provider sets
+ * `concurrency = interactiveConcurrency + 1`, where the `+1` is a
+ * deadlock reserve — it exists so a mid-turn one-shot the foreground
+ * turn is awaiting (compaction, memory extraction) can enter the queue
+ * while the interactive lane is full. Deriving the background cap from
+ * that difference yields exactly 1 for any batch width, which is right
+ * at width 1 and wrong everywhere above it: the queue kept housekeeping
+ * strictly serial while the engine sat with slots to spare, and the
+ * one-shot drives kept dispatching `concurrency`-many jobs into it.
+ *
+ * Floors at 1 so a single-slot engine still admits the deadlock-breaking
+ * chore. `ProviderQueue` clamps the result to its own `concurrency`.
+ */
+export function backgroundLaneCap(engineWidth: number): number {
+  return Math.max(1, engineWidth - 1);
+}
+
 export class AbortedWhileQueuedError extends Error {
   constructor() {
     super('request aborted while queued');
@@ -389,6 +411,14 @@ export class ProviderQueue {
    */
   describe(): {
     running: number;
+    /**
+     * In-flight slots split by lane. `running` alone cannot answer "how
+     * many conversations are live right now?" — a queue holding nothing
+     * but index-enrichment one-shots still reports `running: 1`, which
+     * the pill used to render as "1 running" beside a chat-shaped noun.
+     */
+    runningInteractive: number;
+    runningBackground: number;
     queuedInteractive: number;
     queuedBackground: number;
     /** Pending ambient entries currently held by the admission gate. */
@@ -442,6 +472,8 @@ export class ProviderQueue {
       : this.pending.filter((p) => p.ambient).length;
     return {
       ...snap,
+      runningInteractive: this.runningInteractive,
+      runningBackground: this.runningBackground,
       ambientHeld,
       concurrency: this.concurrency,
       interactiveConcurrency: this.interactiveConcurrency,

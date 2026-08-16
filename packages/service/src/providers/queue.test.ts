@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AbortedWhileQueuedError, ProviderQueue } from './queue.js';
+import { AbortedWhileQueuedError, ProviderQueue, backgroundLaneCap } from './queue.js';
 
 /**
  * Fake clock: each `advance(ms)` also flushes any microtask
@@ -996,5 +996,83 @@ describe('ProviderQueue — ambient admission control', () => {
     expect(ambientRan).toBe(true);
     (await pAmbient)();
     (await poke)();
+  });
+});
+
+/**
+ * The wild-caught case: an MLX engine launched at `--max-concurrency 3`
+ * ran index enrichment strictly one-at-a-time with three more queued and
+ * zero chats in flight. The background cap had been derived from
+ * `concurrency - interactiveConcurrency`, which is the size of the
+ * deadlock reserve (always 1), not the room the engine actually had.
+ */
+describe('backgroundLaneCap', () => {
+  it('leaves exactly one engine slot for an arriving chat', () => {
+    expect(backgroundLaneCap(3)).toBe(2);
+    expect(backgroundLaneCap(4)).toBe(3);
+  });
+
+  it('still admits the deadlock-breaking chore on a single-slot engine', () => {
+    expect(backgroundLaneCap(1)).toBe(1);
+    expect(backgroundLaneCap(0)).toBe(1);
+  });
+
+  it('is unchanged from the old expression on a serial interactive lane', () => {
+    // llama-cpp unbatched: interactive 1, queue max(slots, 2). The old
+    // `queueConcurrency - interactiveConcurrency` and the new width-keyed
+    // cap agree everywhere here — only the batched path moves.
+    for (const slots of [1, 2, 4, 8]) {
+      const interactive = 1;
+      const queueConcurrency = Math.max(slots, interactive + 1);
+      expect(backgroundLaneCap(slots)).toBe(Math.max(1, queueConcurrency - interactive));
+    }
+  });
+
+  it('lets background work fill the widened lane', async () => {
+    // Width 3 → 2 concurrent chores, third waits. Before the fix the
+    // second and third both waited behind the first.
+    const q = new ProviderQueue({
+      concurrency: 4,
+      interactiveConcurrency: 3,
+      backgroundConcurrency: backgroundLaneCap(3),
+      ambientQuietMs: 0,
+    });
+    const releases: Array<() => void> = [];
+    let started = 0;
+    for (let i = 0; i < 3; i++) {
+      void q.acquire({ lane: 'background' }).then((rel) => {
+        started++;
+        releases.push(rel);
+      });
+    }
+    await flush();
+    expect(started).toBe(2);
+    expect(q.describe().runningBackground).toBe(2);
+    releases.pop()?.();
+    await flush();
+    expect(started).toBe(3);
+    releases.forEach((rel) => rel());
+  });
+
+  it('keeps a slot free for a chat while background work saturates its lane', async () => {
+    const q = new ProviderQueue({
+      concurrency: 4,
+      interactiveConcurrency: 3,
+      backgroundConcurrency: backgroundLaneCap(3),
+      ambientQuietMs: 0,
+    });
+    const bg = await Promise.all([
+      q.acquire({ lane: 'background' }),
+      q.acquire({ lane: 'background' }),
+    ]);
+    let chatStarted = false;
+    void q.acquire({ lane: 'interactive' }).then(() => {
+      chatStarted = true;
+    });
+    await flush();
+    // Two chores hold two of the engine's three slots; the chat takes the
+    // third without waiting for either to finish.
+    expect(chatStarted).toBe(true);
+    bg.forEach((rel) => rel());
   });
 });

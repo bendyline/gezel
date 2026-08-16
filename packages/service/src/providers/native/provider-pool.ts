@@ -152,6 +152,9 @@ export interface PoolSnapshot {
  */
 export interface PooledQueueSummary {
   running: number;
+  /** See {@link ProviderQueue.describe}. Summed across replicas like `running`. */
+  runningInteractive: number;
+  runningBackground: number;
   queuedInteractive: number;
   queuedBackground: number;
   /** Pending ambient entries held by the admission gate across replicas. */
@@ -184,6 +187,8 @@ export interface PooledQueueSummary {
 function emptyPooledQueueSummary(): PooledQueueSummary {
   return {
     running: 0,
+    runningInteractive: 0,
+    runningBackground: 0,
     queuedInteractive: 0,
     queuedBackground: 0,
     ambientHeld: 0,
@@ -952,6 +957,8 @@ export class ProviderPool {
       const name = entry.parsed.provider;
       const cur = out.get(name) ?? emptyPooledQueueSummary();
       cur.running += d.running;
+      cur.runningInteractive += d.runningInteractive;
+      cur.runningBackground += d.runningBackground;
       cur.queuedInteractive += d.queuedInteractive;
       cur.queuedBackground += d.queuedBackground;
       cur.ambientHeld += d.ambientHeld;

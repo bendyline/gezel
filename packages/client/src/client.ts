@@ -483,6 +483,15 @@ export interface NightShiftStatusResponse {
  */
 export interface ProviderQueueState {
   running: number;
+  /**
+   * In-flight slots split by lane. Chat turns take the `interactive`
+   * lane; one-shot housekeeping (index enrichment, memory extraction,
+   * digests) takes `background`. Read `runningInteractive` — not
+   * `running` — for anything that calls the number a "chat". Absent
+   * from brokers older than the lane split.
+   */
+  runningInteractive?: number;
+  runningBackground?: number;
   queuedInteractive: number;
   queuedBackground: number;
   /** Ambient jobs currently held until the provider has been quiet long enough. */

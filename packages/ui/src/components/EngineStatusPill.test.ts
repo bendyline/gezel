@@ -113,30 +113,68 @@ describe('composeQueueStatus', () => {
     const v = composeQueueStatus({ ...empty, backlog: 2 });
     expect(v.waiting).toBe(2);
     expect(v.active).toBe(true);
-    expect(v.idleStatus).toBe('2 queued');
+    expect(v.idleStatus).toBe('2 chats queued');
     expect(v.queueRow).toBe('2 chats waiting');
   });
 
   it('singularizes a backlog of one', () => {
     const v = composeQueueStatus({ ...empty, backlog: 1 });
-    expect(v.idleStatus).toBe('1 queued');
+    expect(v.idleStatus).toBe('1 chat queued');
     expect(v.queueRow).toBe('1 chat waiting');
   });
 
-  it('sums provider pending and backlog into the waiting badge count', () => {
-    const v = composeQueueStatus({ running: 1, interactive: 1, background: 2, backlog: 3 });
-    // 1 interactive + 2 background + 3 backlog waiting (running excluded).
-    expect(v.waiting).toBe(6);
+  it('counts only chats in the waiting badge, not background one-shots', () => {
+    const v = composeQueueStatus({
+      running: 1,
+      runningInteractive: 1,
+      interactive: 1,
+      background: 2,
+      backlog: 3,
+    });
+    // 1 interactive + 3 backlog are chats; the 2 background one-shots
+    // are named separately rather than inflating the chat count.
+    expect(v.waiting).toBe(4);
     expect(v.active).toBe(true);
-    expect(v.idleStatus).toBe('1 running · 6 queued');
+    expect(v.idleStatus).toBe('1 chat running · 4 queued · 2 background jobs');
     expect(v.queueRow).toBe('1 running · 1 interactive · 2 background · 3 chats waiting');
   });
 
-  it('treats running-only (no waiting) as active without a queued count', () => {
-    const v = composeQueueStatus({ ...empty, running: 1 });
+  /**
+   * The wild-caught case: a Boekwachter index-enrichment drive holding
+   * the only running slot with five more queued, while
+   * `/api/sessions/inflight` reported zero turns. The Status line read
+   * "1 running · 5 queued" — both numbers chat-shaped, neither a chat.
+   */
+  it('never calls a background one-shot a chat', () => {
+    const v = composeQueueStatus({
+      running: 1,
+      runningInteractive: 0,
+      interactive: 0,
+      background: 5,
+      backlog: 0,
+    });
+    expect(v.waiting).toBe(0);
+    expect(v.idleStatus).toBe('No chats · 6 background jobs');
+    // Still busy: the GPU is saturated even though nobody is chatting.
+    expect(v.active).toBe(true);
+  });
+
+  it('treats running chats (no waiting) as active without a queued count', () => {
+    const v = composeQueueStatus({ ...empty, running: 1, runningInteractive: 1 });
     expect(v.waiting).toBe(0);
     expect(v.active).toBe(true);
-    expect(v.idleStatus).toBe('1 running');
+    expect(v.idleStatus).toBe('1 chat running');
     expect(v.queueRow).toBe('1 running');
+  });
+
+  it('falls back to treating every running slot as chat work when the lane split is absent', () => {
+    // A broker older than the lane split omits `runningInteractive`.
+    const v = composeQueueStatus({ ...empty, running: 2 });
+    expect(v.idleStatus).toBe('2 chats running');
+  });
+
+  it('pluralizes a single background job', () => {
+    const v = composeQueueStatus({ ...empty, running: 1, runningInteractive: 0 });
+    expect(v.idleStatus).toBe('No chats · 1 background job');
   });
 });

@@ -58,6 +58,8 @@ type Describe = ReturnType<import('../queue.js').ProviderQueue['describe']>;
 function mkDesc(partial: Partial<Describe>): Describe {
   return {
     running: 0,
+    runningInteractive: 0,
+    runningBackground: 0,
     queuedInteractive: 0,
     queuedBackground: 0,
     ambientHeld: 0,
