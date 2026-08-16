@@ -96,8 +96,9 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       ├── artifacts/       read-write user/agent outputs
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories
-├── documents/               cross-project shared library (mission, guidelines)
-├── index/                   global.db — sqlite FTS cache over sessions, history, documents
+├── documents/               cross-project shared library (mission, guidelines) — the
+│                            `shared` project's workspace; see docs/documents-library.md
+├── index/                   global.db — sqlite FTS cache over sessions + history
 └── tasks/history/           completed task records
 ```
 
@@ -239,9 +240,39 @@ Each project also carries:
 - **`missionObjectives`** — `documents/missionObjectives.md`. Concrete success criteria. Same lifecycle as `about` and same prompt injection (under `### Mission objectives`). Use this for the kind of bullet list you'd put in a team brief.
 - **`voormanGezelId`** — optional pointer to the gezel who acts as the project's voorman (Dutch for foreman / crew lead). Stored in `project.json`. When set, the system prompt for any session here notes "The voorman of this project is **{Name}**." This is informational only — it doesn't change any access or routing — but the model knows whom to defer to.
 
-The per-project `documents/` folder is **distinct from the global `~/.gezel/documents/` library**. Project docs are only injected into chats scoped to that project; the global library is referenced through MCP tools and the shared header listing.
+The per-project `documents/` folder is **distinct from the global `~/.gezel/documents/` library** and holds only `about.md` + `missionObjectives.md`. Project docs are injected into chats scoped to that project; the shared library is a project in its own right (below).
 
 All three fields are settable via the unified `PUT /api/projects/:id` endpoint and the MCP `update_project` tool, so the Meester (and any project voorman gezel) can adjust them in conversation.
+
+### The shared document library
+
+Cross-project knowledge — mission, guidelines, policies, house style — lives in
+the shared library, and **the library is a project**: a canonical `shared`
+project whose `workingDir` IS the documents root. That is what gives it the
+whole per-project stack (content index, office-doc shadow conversion,
+embeddings + hybrid search, the fs watcher, idle enrichment) instead of a
+second, thinner pipeline. The Documents area, `/api/documents/*`, and the
+`*_document` MCP tools are a facade over it.
+
+Rules that bite if you miss them:
+
+- **Identify it with `isSharedLibraryProject(project)`, never by id.** A user
+  project can own the `shared` id first; the library then takes a different one
+  and records it in `config.sharedProjectId`. `Store.sharedProjectId()` resolves
+  the live id.
+- **Nothing gezel-derived may be written into the library folder.** It is the
+  user's, and often cloud-synced: the index is forced home-side and conversions
+  land in the shared project's `artifacts/shadow/`. Outside-in editing twins
+  (`report.docx_files/`) are the deliberate exception — they are the user's
+  editable copy.
+- **It is not a jobsite.** No voorman, no meester check-ins, no review tier;
+  the Boekwachter is its resident gezel and the AI-tier opt-in.
+- Undeletable, unarchivable, not git-linkable; its location moves through
+  Settings → Folders, and `workingDir` is derived on every boot.
+
+Full contract — indexing rules, freshness, audit, cloud-sync limitations, and
+the per-project `documents/` stance — in [docs/documents-library.md](docs/documents-library.md);
+the decision and its alternatives in [ADR 0006](docs/decisions/0006-shared-library-project.md).
 
 ### Session
 
@@ -352,7 +383,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` — sqlite-vec index (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
-  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts, the history log, and the documents library, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete
+  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006), which is forced home-side so no database rides the user's — possibly cloud-synced — documents folder
   - `~/.gezel/projects/{id}/artifacts/shadow/` — the reserved shadow-file cache: markdown twins of workspace content (sandboxed squisq conversions of office docs from the static index pass; vision descriptions and STT transcripts from the AI tier), laid out as `<parent>/<basename>_files/<stem>.md` and owned by the content indexer ([index-store/docs.ts](packages/service/src/index-store/docs.ts) + [index-store/ai-shadow.ts](packages/service/src/index-store/ai-shadow.ts)). Lives under artifacts — never the (possibly read-only) workspace — write-denied through the artifact store, hidden from listings, orphan-swept, regenerable, safe to delete. See [ADR 0005](docs/decisions/0005-indexing-3.0.md).
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
   - `~/.gezel/handboek/narration/` — content-hash-keyed TTS narration WAVs + duration sidecars for Handboek articles, owned by [handboek/narration.ts](packages/service/src/handboek/narration.ts); derived cache, safe to delete
@@ -466,3 +497,5 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | "Unlimited" shown for a user with a real cap | `CopilotProvider.parseUsage` — look at the raw event |
 | Provider switch doesn't take effect | `ChatManager.resetClient` gets called on credential change; check `config.ts` reset-fields list |
 | E2E fails "waiting for…" | Usually `GEZEL_MOCK_PROVIDER=1` not set, or the Electron window didn't reach `domcontentloaded` in time |
+| A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Check the path isn't filtered as an outside-in twin or sync junk ([fs/sync-junk.ts](packages/service/src/fs/sync-junk.ts)) |
+| A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |

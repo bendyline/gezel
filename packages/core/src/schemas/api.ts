@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
+import { ProjectIconIdSchema } from '../project-icons.js';
 import {
   type GitAbandonMergeResponse,
   GitAbandonMergeResponseSchema,
@@ -2980,6 +2981,12 @@ export type TransformStreamEvent = z.infer<typeof TransformStreamEventSchema>;
 export const WriteDocumentRequestSchema = z.object({
   path: z.string().min(1),
   content: z.string(),
+  /**
+   * Who is writing. A gezel's MCP subprocess passes its own id so the audit
+   * trail can attribute the edit; the app omits it, which reads as the user.
+   */
+  gezelId: z.string().optional(),
+  sessionId: z.string().optional(),
 });
 export type WriteDocumentRequest = z.infer<typeof WriteDocumentRequestSchema>;
 
@@ -3702,6 +3709,8 @@ export const ListProjectsResponseSchema = z.object({
 export const CreateProjectRequestSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  /** Optional per-project maker's-mark override. Missing inherits from its type. */
+  icon: ProjectIconIdSchema.optional(),
   /**
    * Existing local folder to use as the project workspace. Folder-backed
    * projects are created with ambient Meester progress check-ins disabled;
@@ -3753,6 +3762,8 @@ export const CreateProjectRequestSchema = z.object({
 export const UpdateProjectRequestSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  /** Set a maker's-mark override, or null to resume inheriting from the type. */
+  icon: ProjectIconIdSchema.nullable().optional(),
   /** null clears the external working directory (falls back to internal). */
   workingDir: z.string().nullable().optional(),
   /** null clears the voorman. */
@@ -3953,6 +3964,7 @@ export const CreateTypedProjectRequestSchema = CreateProjectRequestSchema.pick({
   name: true,
   description: true,
   mode: true,
+  icon: true,
 }).extend({
   projectType: ApplyProjectTypeRequestSchema,
 });
@@ -4978,12 +4990,20 @@ export const DocumentSearchResultSchema = z.object({
   path: z.string(),
   lineStart: z.number().int().positive(),
   snippet: z.string(),
+  /** 0..1 relevance. Optional: older services returned unranked hits. */
+  score: z.number().optional(),
+  /**
+   * For an office document, the converted markdown the snippet came from.
+   * The source path stays the identity — that is the file the user filed.
+   */
+  markdownPath: z.string().optional(),
 });
 export type DocumentSearchResult = z.infer<typeof DocumentSearchResultSchema>;
 
 export const SearchDocumentsResponseSchema = z.object({
   results: z.array(DocumentSearchResultSchema),
-  engine: z.enum(['fts', 'unavailable']),
+  /** `hybrid`/`semantic` once the library carries embeddings. */
+  engine: z.enum(['hybrid', 'semantic', 'fts', 'unavailable']),
 });
 export type SearchDocumentsResponse = z.infer<typeof SearchDocumentsResponseSchema>;
 

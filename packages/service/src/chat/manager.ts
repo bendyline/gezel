@@ -306,6 +306,17 @@ const DEFAULT_PROJECT_ID = 'default';
  */
 const ABORT_SALVAGE_CONTENT_CAP = 32 * 1024;
 
+/**
+ * Per-turn shared-library recall (see `resolveTurnLibraryRecall`). The floor
+ * is higher than turn-1 recall's because this fires on every user turn: a
+ * mediocre match that interrupts an unrelated conversation costs more than a
+ * missed one, which the model can still reach with `search_documents`.
+ */
+const TURN_LIBRARY_RECALL_MIN_SCORE = 0.55;
+const TURN_LIBRARY_RECALL_TOP_K = 2;
+/** "ok", "yes", "go on" carry no retrievable topic — skip the search. */
+const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
+
 const log = createLogger('chat');
 const memLog = createLogger('memory');
 const oneShotLog = createLogger('one-shot');
@@ -568,6 +579,13 @@ export type TaskBudgetPauseFn = (
 interface LiveSessionState {
   /** Persisted session metadata + messages. Always in sync with disk after each turn. */
   record: ChatSession;
+  /**
+   * Library documents already offered by the per-turn recall prelude in this
+   * session. In-memory only: the point is to avoid repeating an offer inside
+   * one conversation, and a fresh process is a fresh conversation for the
+   * model too.
+   */
+  libraryRecallPaths?: Set<string>;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
   /** Model shared by provider binding, prompt construction, and live telemetry. */
@@ -6354,7 +6372,13 @@ export class ChatManager {
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
-      const preludeForTurn = await this.resolveUserPromptPrelude(state, userText, messageOrigin);
+      const libraryRecall = await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const preludeForTurn = await this.resolveUserPromptPrelude(
+        state,
+        userText,
+        messageOrigin,
+        libraryRecall,
+      );
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -8516,6 +8540,9 @@ export class ChatManager {
         config,
         memory: this.memory,
         ...(this.contentIndexRef ? { contentIndex: this.contentIndexRef } : {}),
+        // The library is install-wide knowledge, so it is searched for every
+        // session regardless of which project the session belongs to.
+        libraryProjectId: await this.store.sharedProjectId().catch(() => null),
         ...(gezel?.parsed.frontmatter.autoRecall !== undefined
           ? { gezelOptIn: gezel.parsed.frontmatter.autoRecall }
           : {}),
@@ -12209,10 +12236,64 @@ export class ChatManager {
     }
   }
 
+  /**
+   * Shared-library documents bearing on THIS message.
+   *
+   * The turn-1 recall snapshot is frozen for the session (per the KV-cache
+   * rationale on `record.recall`), so a topic that arrives later — "what's
+   * our refund policy" on turn eight — would otherwise reach the model with
+   * no retrieval at all. This runs on the user-message channel instead,
+   * where per-turn content belongs.
+   *
+   * Quiet by construction: real user turns only, a high score floor, and a
+   * per-session dedupe so the same document is offered once and then left
+   * alone. No hits means no prelude and no tokens.
+   */
+  private async resolveTurnLibraryRecall(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+  ): Promise<Array<{ path: string; snippet: string; score: number }>> {
+    if (messageOrigin !== 'direct-user') return [];
+    if (!this.contentIndexRef?.searchLibrary) return [];
+    const text = userText.trim();
+    if (text.length < TURN_LIBRARY_RECALL_MIN_CHARS) return [];
+    const libraryId = await this.store.sharedProjectId().catch(() => null);
+    if (!libraryId) return [];
+    // A session scoped to the library already lists these files as its
+    // workspace; offering them back as "recalled" is noise.
+    if (state.record.projectId === libraryId) return [];
+    try {
+      const found = await this.contentIndexRef.searchLibrary(libraryId, text, {
+        maxResults: TURN_LIBRARY_RECALL_TOP_K * 3,
+      });
+      const already = state.libraryRecallPaths ?? new Set<string>();
+      const picked: Array<{ path: string; snippet: string; score: number }> = [];
+      for (const hit of found.results) {
+        const score = hit.score ?? 0;
+        if (score < TURN_LIBRARY_RECALL_MIN_SCORE) continue;
+        if (already.has(hit.path)) continue;
+        // The frozen turn-1 snapshot already put these in the system prompt.
+        if (state.record.recall?.hits.some((h) => h.text.includes(`\`${hit.path}\``))) continue;
+        picked.push({ path: hit.path, snippet: hit.snippet, score });
+        if (picked.length >= TURN_LIBRARY_RECALL_TOP_K) break;
+      }
+      if (picked.length > 0) {
+        for (const hit of picked) already.add(hit.path);
+        state.libraryRecallPaths = already;
+      }
+      return picked;
+    } catch (err) {
+      log.warn('[library-recall] search failed:', err instanceof Error ? err.message : err);
+      return [];
+    }
+  }
+
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
     messageOrigin: TurnMessageOrigin,
+    libraryRecall: ReadonlyArray<{ path: string; snippet: string; score: number }> = [],
   ): Promise<{ behaviorId: string; text: string } | null> {
     const profile = state.profile;
     if (!profile) return null;
@@ -12229,6 +12310,7 @@ export class ChatManager {
       drained: [],
       assistantContent: '',
       continuationCount: 0,
+      ...(libraryRecall.length > 0 ? { libraryRecall } : {}),
     };
     for (const entry of profile.behaviors) {
       const hook = entry.behavior.userPromptPrelude;
@@ -13059,7 +13141,14 @@ export class ChatManager {
     // companion dirs (`report.docx_files/report.md`) are derived twins of a
     // document already in the listing — showing both invites the model to
     // read the wrong one.
-    const documentListing = await this.store.listDocumentsRecursiveDetailed();
+    // A session scoped to the library itself already lists these files under
+    // `### Workspace files` — its workspace IS the library — so the shared
+    // block would render the same inventory twice.
+    const libraryProjectId = await this.store.sharedProjectId().catch(() => null);
+    const sessionIsLibrary = libraryProjectId !== null && record.projectId === libraryProjectId;
+    const documentListing = sessionIsLibrary
+      ? { entries: [], truncated: false }
+      : await this.store.listDocumentsRecursiveDetailed();
     const documentFiles = documentListing.entries.filter(
       (entry) => !isOutsideInInternalPath(entry.path),
     );
@@ -13235,6 +13324,15 @@ export class ChatManager {
       project && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt')
         ? await this.buildWorkspaceGestalt(record.projectId)
         : '';
+    const documentDescriptions =
+      documentFiles.length > 0 &&
+      libraryProjectId &&
+      this.contentIndexRef?.libraryDescriptions &&
+      profileHasBehavior(modelProfile, 'prompt.documents-summaries')
+        ? await this.contentIndexRef
+            .libraryDescriptions(libraryProjectId)
+            .catch(() => new Map<string, string>())
+        : new Map<string, string>();
 
     // Resolve per-model tuning: gezel-frontmatter override (sparse)
     // on top of the install-wide override on top of the catalog
@@ -13671,6 +13769,7 @@ export class ChatManager {
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
       ...(documentListing.truncated ? { documentFilesTruncated: true } : {}),
+      ...(documentDescriptions.size > 0 ? { documentDescriptions } : {}),
       voormanName: voorman?.name,
       ...(voorman?.roleBasedName ? { voormanRoleBasedName: voorman.roleBasedName } : {}),
       ...(voorman?.parsed.frontmatter.gender

@@ -29,6 +29,7 @@ import type {
   ScanFindingsResponse,
   SearchCodeResponse,
   SearchDocsResponse,
+  SearchDocumentsResponse,
   SearchImagesResponse,
   SecurityFindingWire,
   SecurityOverviewResponse,
@@ -36,7 +37,7 @@ import type {
   SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
-import { nowIso } from '@bendyline/gezel';
+import { isSharedLibraryProject, nowIso } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -66,7 +67,7 @@ import {
 } from './artifacts-indexer.js';
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
-import { ensureShadowDocSidecar, shadowDocFilesPaths } from './docs.js';
+import { ensureShadowDocSidecar, isConvertibleDoc, shadowDocFilesPaths } from './docs.js';
 import { type EnrichDeps, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
@@ -226,9 +227,12 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { workspaceDir, artifactsDir, dbPath } = opened;
+    const { workspaceDir, artifactsDir, dbPath, isLibrary } = opened;
     try {
-      if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+      // The library keeps its database home-side, so there is no in-workspace
+      // `.gezel/` to ignore — and writing one into the user's documents
+      // folder is exactly what that placement avoids.
+      if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
         await ensureIndexGitignore(workspaceDir);
       }
     } finally {
@@ -243,8 +247,9 @@ export class ContentIndex {
       workspaceDir,
       artifactsDir,
       collectionId: projectId,
+      ...(isLibrary ? { scope: 'library' as const } : {}),
     });
-    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+    if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
       // Conversions now live under artifacts/shadow; the old in-workspace
       // cache is stranded stale content and doubled disk. Regenerable and
       // deny-all-gitignored, so removal is safe. Machine-shared workspaces are
@@ -1625,6 +1630,75 @@ export class ContentIndex {
     }
   }
 
+  /**
+   * Content search over the shared document library.
+   *
+   * The library is a project, so this is the ordinary hybrid searcher
+   * (embeddings + keyword) reshaped to document identity: callers name a
+   * document by the path the user filed it under, never by the converted
+   * markdown the snippet happened to come from. That mapping is why this
+   * exists rather than callers using `searchCode` directly.
+   */
+  async searchLibrary(
+    projectId: string,
+    query: string,
+    opts: { maxResults?: number; queryVector?: number[] } = {},
+  ): Promise<SearchDocumentsResponse> {
+    const maxResults = opts.maxResults ?? 10;
+    const code = await this.searchCode(projectId, query, {
+      maxResults,
+      ...(opts.queryVector ? { queryVector: opts.queryVector } : {}),
+    });
+    if (code.engine === 'unavailable') return { results: [], engine: 'unavailable' };
+    const artifactsDir = this.store.projectArtifactsDir(projectId);
+    return {
+      results: code.results.map((hit) => {
+        const shadow = shadowDocFilesPaths(artifactsDir, hit.path);
+        return {
+          path: hit.path,
+          lineStart: hit.lineStart,
+          snippet: hit.snippet,
+          score: hit.score,
+          ...(shadow && isConvertibleDoc(hit.path.split('.').pop() ?? '')
+            ? { markdownPath: `artifacts/${shadow.mdRel}` }
+            : {}),
+        };
+      }),
+      engine: code.engine,
+    };
+  }
+
+  /**
+   * One-line descriptions for library documents, keyed by path.
+   *
+   * Two sources, in precedence order: the document's own frontmatter
+   * `description`/`title` — the user said what this is, so nothing should
+   * outrank it — then the Boekwachter's generated summary. Absent entries
+   * simply have no description; a listing renders the bare path.
+   */
+  async libraryDescriptions(projectId: string): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const opened = await this.open(projectId);
+    if (!opened) return out;
+    const { index } = opened;
+    try {
+      const authored = index.metadataValuesForKeys(['description', 'title']);
+      for (const file of index.allFiles()) {
+        const own = authored.get(file.path);
+        const stated = own?.description ?? own?.title;
+        if (stated?.trim()) {
+          out.set(file.path, stated.trim());
+          continue;
+        }
+        const summary = file.hash ? index.getSummary(file.hash) : undefined;
+        if (summary?.trim()) out.set(file.path, summary.trim());
+      }
+    } finally {
+      index.close();
+    }
+    return out;
+  }
+
   async readDocAsMarkdown(projectId: string, relPath: string): Promise<ReadDocAsMarkdownResponse> {
     let workspaceDir: string;
     try {
@@ -1942,6 +2016,7 @@ export class ContentIndex {
     workspaceDir: string;
     artifactsDir: string;
     dbPath: string;
+    isLibrary: boolean;
   } | null> {
     let workspaceDir: string;
     try {
@@ -1962,7 +2037,18 @@ export class ContentIndex {
     // A machine-shared workspace is a collaborative content tree, not a safe
     // home for a mutable SQLite database opened by every account daemon.
     // Build the same derived index independently in each account's sidecar.
-    let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
+    // The shared library's workspace is the user's documents folder, which
+    // may be cloud-synced: its database stays home-side regardless.
+    // Method-guarded, not just catch-wrapped: a narrow store double without
+    // `getProject` would throw synchronously and fail the whole open.
+    const meta =
+      typeof this.store.getProject === 'function'
+        ? await this.store.getProject(projectId).catch(() => null)
+        : null;
+    const isLibrary = meta ? isSharedLibraryProject(meta) : false;
+    let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir, {
+      ...(isLibrary ? { forceHomeSide: true } : {}),
+    });
     let index: IndexStore | null;
     try {
       index = await open(dbPath);
@@ -1980,7 +2066,7 @@ export class ContentIndex {
       index = await open(dbPath).catch(() => null);
     }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir, artifactsDir, dbPath } : null;
+    return index ? { index, workspaceDir, artifactsDir, dbPath, isLibrary } : null;
   }
 
   private async syncFindingLifecycle(

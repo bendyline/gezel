@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
@@ -1061,6 +1062,8 @@ const ProjectTypeCompositionShape = {
 export const ProjectTypeIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('project-type'),
   category: ProjectTypeCategorySchema.optional(),
+  /** Small monochrome maker's mark inherited by project instances. */
+  icon: ProjectIconIdSchema.optional(),
 });
 export type ProjectTypeIdentity = z.infer<typeof ProjectTypeIdentitySchema>;
 
@@ -1084,6 +1087,8 @@ export const ProjectTypeManifestSchema = z.object({
   description: z.string(),
   tags: z.array(z.string()).default([]),
   category: ProjectTypeCategorySchema.optional(),
+  /** Small monochrome maker's mark inherited by project instances. */
+  icon: ProjectIconIdSchema.optional(),
   maintainer: z.object({
     name: z.string(),
     url: z.string().url().optional(),

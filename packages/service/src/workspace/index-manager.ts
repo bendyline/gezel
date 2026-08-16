@@ -11,6 +11,7 @@ import {
   type WorkspaceInstructionIndex,
   type WorkspaceSkillIndex,
   createLogger,
+  isSharedLibraryProject,
   nowIso,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -609,7 +610,20 @@ export class WorkspaceIndexManager {
     if (!cfg?.recentTabs) return Number.POSITIVE_INFINITY;
     const projectTabs = cfg.recentTabs.filter((t) => t.kind === 'project');
     const i = projectTabs.findIndex((t) => t.id === projectId);
-    return i < 0 ? Number.POSITIVE_INFINITY : i;
+    if (i >= 0) return i;
+    // The shared library is opened through the Documents area, which records
+    // no project tab, so recency alone would file it as cold (30 min). Yet it
+    // is the workspace most likely to change while nobody is looking — a sync
+    // client landing another device's edits, often while the app was closed,
+    // where the watcher never sees the event at all. Treat it as recent so
+    // the poll is the backstop the watcher needs.
+    return (await this.isSharedLibrary(projectId)) ? 1 : Number.POSITIVE_INFINITY;
+  }
+
+  private async isSharedLibrary(projectId: string): Promise<boolean> {
+    if (typeof this.store.getProject !== 'function') return false;
+    const meta = await this.store.getProject(projectId).catch(() => null);
+    return meta ? isSharedLibraryProject(meta) : false;
   }
 
   /**

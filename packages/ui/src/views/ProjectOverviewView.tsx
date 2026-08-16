@@ -8,6 +8,7 @@ import { getProjectType, resolveProjectTypeId } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MarkdownField } from '../components/MarkdownField.js';
+import { ProjectIcon } from '../components/ProjectIcon.js';
 import { RailSection } from './home/RailSection.js';
 
 /**
@@ -94,7 +95,10 @@ export function ProjectOverviewView({
   return (
     <div className="project-overview">
       <div className="project-overview-head">
-        <h2>{project.name}</h2>
+        <div className="project-overview-title">
+          <ProjectIcon project={project} size={24} className="project-overview-icon" />
+          <h2>{project.name}</h2>
+        </div>
         <div className="project-overview-meta">
           {typeName && <span className="project-overview-chip">{typeName}</span>}
           {map?.indexed && (

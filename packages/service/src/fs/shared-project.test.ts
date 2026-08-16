@@ -89,6 +89,31 @@ describe('ensureSharedProject', () => {
   });
 });
 
+describe('the documents facade', () => {
+  it('serves the same directory the library project indexes', async () => {
+    // The load-bearing invariant of the whole design: the Documents API and
+    // the shared project's workspace are one directory. If these ever
+    // diverge, the indexer studies one folder while the API serves another
+    // and every downstream surface splits silently.
+    const { id } = await store.ensureSharedProject();
+    expect(await store.projectWorkspaceDir(id)).toBe(store.documentsDir());
+  });
+
+  it('keeps that invariant after the library is relocated', async () => {
+    await store.ensureSharedProject();
+    const relocated = new Store({ home, external: { documents: join(home, 'onedrive') } });
+    const { id } = await relocated.ensureSharedProject();
+    expect(await relocated.projectWorkspaceDir(id)).toBe(relocated.documentsDir());
+  });
+
+  it('writes a document that the project workspace can read back', async () => {
+    const { id } = await store.ensureSharedProject();
+    await store.writeDocument('guidelines/tone.md', '# Tone\n\nPlain and warm.');
+    const viaWorkspace = await store.readProjectWorkspaceFile(id, 'guidelines/tone.md');
+    expect(viaWorkspace).toContain('Plain and warm.');
+  });
+});
+
 describe('shared library guards', () => {
   it('refuses deletion', async () => {
     const { id } = await store.ensureSharedProject();

@@ -3229,14 +3229,15 @@ button.machine-memory-unload-button {
   padding-left: 0.45rem;
 }
 
-/* Project initial badge (no avatar data). */
-.app-sidebar-proj-badge {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 600;
+/* Project maker's mark — a small tool stamp inherited from the project type.
+   Unlike gezels, projects are workbenches rather than characters, so the tile
+   stays monochrome and material-toned instead of becoming an avatar. */
+.project-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
 }
 
 /* Project row: the name button flexes all the way to the right-aligned signal.
@@ -3248,14 +3249,17 @@ button.machine-memory-unload-button {
   align-items: center;
   --project-action-overlay-bg: var(--panel);
 }
+/* Same indent correction as `.app-sidebar-gezel`: the base subitem 0.6rem
+   pushes the mark ~2px right of the header icon column, which the documented
+   `list 0.9rem + item 0.45rem` restores. */
 .app-sidebar-proj-row > .app-sidebar-item {
   width: auto;
   flex: 1 1 auto;
   min-width: 0;
+  padding-left: 0.45rem;
 }
 /* Keep the selected-row surface anchored to the sidebar seam while nudging
-   the project's badge, label, actions, and status signal into alignment. */
-.app-sidebar-proj-row > .app-sidebar-item,
+   the project's actions and status signal into alignment. */
 .app-sidebar-proj-row > .project-actions-trigger,
 .app-sidebar-proj-row > .app-sidebar-proj-signal {
   position: relative;
@@ -3452,11 +3456,43 @@ button.machine-memory-unload-button {
   align-items: center;
 }
 .project-rail-name {
+  display: flex;
+  align-items: center;
+  gap: 0.48rem;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Bare glyph, no tile. A bordered, tinted rounded square is this app's key
+   (button) treatment, so wearing it made every row's mark read as a control —
+   and the rectangular glyphs (die, terminal, frame) became a box in a box. */
+.project-rail-mark {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--accent);
+}
+.project-rail-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-overview-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.project-overview-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--accent);
 }
 .project-rail-row > .project-actions-trigger {
   position: absolute;
@@ -3942,12 +3978,14 @@ button.machine-memory-unload-button {
 /* Wrapper-owned selections suppress the old button-shaped selection inside
    them. Keeping one elevation layer avoids a doubled border/shadow while the
    nested button retains its full hit target. */
+/* The border goes transparent rather than away: dropping the box entirely
+   would pull the mark and label 1px left the moment a row is selected. */
 .app-sidebar-proj-row.active > .app-sidebar-item.active,
 .app-sidebar-gezel-row.active > .app-sidebar-item.active {
   position: static;
   z-index: auto;
   background: transparent;
-  border: none;
+  border-color: transparent;
   border-radius: 0;
   box-shadow: none;
 }
@@ -26727,13 +26765,14 @@ button.linklike {
   overflow-y: auto;
   max-width: 860px;
 }
-.project-overview-head h2 {
-  margin: 0 0 6px;
+.project-overview-title h2 {
+  margin: 0;
 }
 .project-overview-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 6px;
 }
 .project-overview-chip {
   font-size: 12px;
@@ -27345,4 +27384,50 @@ button.boekwachter-pill:focus-visible {
   .handboek-toc-caret {
     transition: none;
   }
+}
+
+/* Library content search — the file tree answers "where did I file it", this
+   answers "which document says this". Sits in the browser pane's header, so
+   it takes the ordinary in-panel input treatment rather than the titlebar
+   search's carved-into-the-chrome one. */
+.documents-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.documents-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.documents-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.documents-search-status {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* One line of matched prose under the document name. Clamped: a search
+   result is a signpost to the document, not a substitute for opening it. */
+.documents-search-snippet {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -922,8 +922,18 @@ export function projectContentIndexDbFile(
   root: string,
   projectId: string,
   workspaceDir: string,
+  opts: {
+    /**
+     * Keep the database out of the workspace even though it is writable.
+     * The shared document library's workspace is the user's own documents
+     * folder, which may be a cloud-synced directory (OneDrive/Dropbox):
+     * mutable SQLite must not ride a sync client, and the user must not find
+     * a `.gezel/` directory in a folder they browse in Finder.
+     */
+    forceHomeSide?: boolean;
+  } = {},
 ): string {
-  return projectStorageScope(root, projectId) === 'machine-shared'
+  return opts.forceHomeSide || projectStorageScope(root, projectId) === 'machine-shared'
     ? join(fallbackProjectIndexDir(root, projectId), 'index.db')
     : projectLocalIndexDbFile(workspaceDir);
 }

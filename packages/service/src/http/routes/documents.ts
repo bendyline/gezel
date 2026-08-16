@@ -54,9 +54,14 @@ export function documentRoutes(ctx: ServiceContext): Hono {
         ? Number.parseInt(c.req.query('maxResults')!, 10)
         : undefined,
     });
-    const results = await ctx.globalIndex.searchDocuments(params.q, params.maxResults);
-    const status = await ctx.globalIndex.status();
-    return c.json({ results, engine: status.available ? 'fts' : 'unavailable' });
+    // The library is a project, so its content index is the one that has
+    // ranked, embedding-backed retrieval over these documents.
+    const libraryId = await ctx.store.sharedProjectId();
+    if (!libraryId) return c.json({ results: [], engine: 'unavailable' });
+    const found = await ctx.contentIndex.searchLibrary(libraryId, params.q, {
+      ...(params.maxResults ? { maxResults: params.maxResults } : {}),
+    });
+    return c.json(found);
   });
 
   app.get('/read', async (c) => {
@@ -121,7 +126,10 @@ export function documentRoutes(ctx: ServiceContext): Hono {
 
   app.put('/write', async (c) => {
     const body = WriteDocumentRequestSchema.parse(await c.req.json());
-    await ctx.store.writeDocument(body.path, body.content);
+    await ctx.store.writeDocument(body.path, body.content, {
+      ...(body.gezelId ? { gezelId: body.gezelId } : {}),
+      ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+    });
     return c.json({ ok: true, path: body.path });
   });
 
@@ -141,7 +149,8 @@ export function documentRoutes(ctx: ServiceContext): Hono {
   app.delete('/delete', async (c) => {
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
-    await ctx.store.deleteDocument(filePath);
+    const gezelId = c.req.query('gezelId');
+    await ctx.store.deleteDocument(filePath, gezelId ? { gezelId } : undefined);
     return c.json({ ok: true });
   });
 

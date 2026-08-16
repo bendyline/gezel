@@ -475,4 +475,58 @@ describe('DocumentsView', () => {
       expect(screen.getByText(/connection refused/)).toBeInTheDocument();
     });
   });
+
+  it('searches document contents and lists the matches', async () => {
+    // The tree answers "where did I file it"; this answers "which document
+    // says this" — the question a growing library makes hard.
+    vi.mocked(api.searchDocuments).mockResolvedValue({
+      results: [{ path: 'policies/refunds.md', lineStart: 4, snippet: 'refunded within 30 days' }],
+      engine: 'hybrid',
+    } as never);
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Search document contents'), {
+      target: { value: 'refund' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('refunded within 30 days')).toBeInTheDocument();
+    });
+    expect(vi.mocked(api.searchDocuments)).toHaveBeenCalledWith({ q: 'refund' });
+  });
+
+  it('says so plainly when nothing in the library matches', async () => {
+    vi.mocked(api.searchDocuments).mockResolvedValue({ results: [], engine: 'hybrid' } as never);
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Search document contents'), {
+      target: { value: 'nothing here' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Nothing in the library mentions/)).toBeInTheDocument();
+    });
+  });
+
+  it('restores the tree when the search box is cleared', async () => {
+    vi.mocked(api.searchDocuments).mockResolvedValue({ results: [], engine: 'hybrid' } as never);
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toBeInTheDocument());
+    const box = screen.getByLabelText('Search document contents');
+
+    fireEvent.change(box, { target: { value: 'refund' } });
+    await waitFor(() => {
+      expect(screen.getByText(/Nothing in the library mentions/)).toBeInTheDocument();
+    });
+
+    fireEvent.change(box, { target: { value: '' } });
+    await waitFor(() => {
+      expect(screen.queryByText(/Nothing in the library mentions/)).not.toBeInTheDocument();
+    });
+  });
 });

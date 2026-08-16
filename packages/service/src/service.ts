@@ -164,6 +164,13 @@ import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 const log = createLogger('service');
 
 /**
+ * Collapses an editor autosave burst (or a gezel writing several documents in
+ * one turn) into a single library re-index. Long enough to batch, short
+ * enough that a document is searchable while the user is still looking at it.
+ */
+const LIBRARY_REFRESH_DEBOUNCE_MS = 3_000;
+
+/**
  * Canonical fixed port for the Gezel daemon. `6228` spells "MAAT" on a
  * phone keypad (M-A-A-T → 6-2-2-8). "Maat" is Dutch for a mate, companion,
  * or fellow worker — a close sibling to "gezel". It sits in the IANA User
@@ -1843,8 +1850,30 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // HistoryManager itself.
   const globalIndex = new GlobalIndex(home);
   const globalIndexManager = new GlobalIndexManager({ store, history });
+
+  let libraryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleLibraryRefresh = (): void => {
+    if (!sharedProject) return;
+    if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
+    libraryRefreshTimer = setTimeout(() => {
+      libraryRefreshTimer = null;
+      void workspaceIndex
+        .refresh(sharedProject!.id)
+        .catch((err) =>
+          log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
+        );
+    }, LIBRARY_REFRESH_DEBOUNCE_MS);
+    libraryRefreshTimer.unref?.();
+  };
+
   store.onSessionChange((ev) => globalIndexManager.enqueueSession(ev));
-  store.onDocumentChange((ev) => globalIndexManager.enqueueDocument(ev));
+  store.onDocumentChange((ev) => {
+    globalIndexManager.enqueueDocument(ev);
+    // An in-app document write is the one library change we learn about
+    // immediately; the watcher covers edits made outside. Debounced so an
+    // editor autosave burst collapses into one pass.
+    scheduleLibraryRefresh();
+  });
   history.subscribe((event) => globalIndexManager.enqueueHistory(event));
   history.setQueryBackend((f) => globalIndex.searchHistory(f));
   history.setRewriteBackend(() => globalIndexManager.rebuildHistoryMirror());
@@ -1921,6 +1950,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     store,
     indexManager: workspaceIndex,
     onProjectMcpConfigChanged: (projectId) => chat.resetProjectToolsets(projectId),
+    // The library never opens as a project tab, so it can never earn an MRU
+    // watcher slot — yet it is the one workspace that routinely changes from
+    // outside the app (a sync client landing a file from another device).
+    pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,
@@ -2769,6 +2802,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       workspaceWatch.stop();
       indexEnrichment.stop();
       globalIndexManager.stop();
+      // An open document-edit window would otherwise lose its audit event.
+      await store.flushDocumentAudit().catch(() => {});
       connectorSync.stop();
       cacheController.stop();
       imagePulls.clear();

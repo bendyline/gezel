@@ -355,6 +355,7 @@ describe('applyProjectType', () => {
     expect(detail?.projectType?.source).toBe('bundled');
     expect(detail?.projectType?.params).toEqual({ language: 'Spanish' });
     expect(detail?.projectType?.appliedAt).toBeTruthy();
+    expect(detail?.projectType?.icon).toBe('book');
     expect(detail?.projectTypeId).toBe('content-writing');
     expect(detail?.voormanGezelId).toBe(applied.gezelsCreated[0]?.id);
     expect(detail?.indexingEnabled).toBe(false);

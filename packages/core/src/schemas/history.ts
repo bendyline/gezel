@@ -68,6 +68,7 @@ export const HistoryEventKindSchema = z.enum([
   'project.connector.synced',
   'document.created',
   'document.folder.created',
+  'document.updated',
   'document.renamed',
   'document.deleted',
   'workspace.write',

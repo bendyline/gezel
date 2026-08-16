@@ -145,7 +145,9 @@ const PRESERVED_PROPERTY_DESCRIPTIONS: Readonly<Record<string, string>> = {
     'True ONLY for an intermediate edit of a multi-edit build not meant to parse yet. Skips the syntax gate; you must finish with an edit that omits it or work cannot be declared done.',
 };
 
-function restorePreservedDescriptions(parameters: Record<string, unknown>): Record<string, unknown> {
+function restorePreservedDescriptions(
+  parameters: Record<string, unknown>,
+): Record<string, unknown> {
   const properties = propertiesFor(parameters);
   if (!properties) return parameters;
   let changed = false;

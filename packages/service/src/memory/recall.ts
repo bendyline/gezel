@@ -8,8 +8,13 @@ const log = createLogger('memory');
 
 export interface RecallHit {
   text: string;
-  /** 'workspace' = an index-derived code hit, not a memory (empty `day`). */
-  scope: 'gezel' | 'project' | 'workspace';
+  /**
+   * 'workspace' = an index-derived code hit, not a memory (empty `day`).
+   * 'library'   = a shared-document hit, likewise index-derived. It is not
+   * scoped to the session's project: the library is the install's knowledge,
+   * so a policy filed once should surface wherever the question is asked.
+   */
+  scope: 'gezel' | 'project' | 'workspace' | 'library';
   day: string;
   /** EFFECTIVE score — post-decay; this is what ranking and filtering used. */
   score: number;
@@ -24,6 +29,13 @@ const OLLAMA_TOP_K = 3;
 /** Cap + floor for index-derived code hits appended after the memory hits. */
 const CODE_TOP_K = 3;
 const CODE_MIN_SCORE = 0.45;
+/**
+ * Library hits are cheap to include and expensive to get wrong: this corpus
+ * is global, so a weak match pulls another project's document into an
+ * unrelated conversation. Fewer, and only when the match is strong.
+ */
+const LIBRARY_TOP_K = 2;
+const LIBRARY_MIN_SCORE = 0.5;
 /**
  * Useful when explicitly read, but noisy as unsolicited prompt recall: their
  * raw JSON/config payload consumes context without orienting the model to the
@@ -81,7 +93,12 @@ interface RecallArgs {
   memory: MemoryManager;
   /** When set, the project's content index contributes code hits (reusing
    *  the same query embedding — no extra embed). */
-  contentIndex?: Pick<ContentIndex, 'searchCode' | 'hasIndex'>;
+  contentIndex?: Pick<ContentIndex, 'searchCode' | 'hasIndex' | 'searchLibrary'>;
+  /**
+   * Shared-library project id. Present once the library exists; when absent
+   * (machine-engine role, or a boot before the ensure) the leg is skipped.
+   */
+  libraryProjectId?: string | null;
   /** Injectable embedder (tests). Defaults to the real local model. */
   embedQuery?: (query: string) => Promise<number[]>;
   gezelOptIn?: boolean;
@@ -209,6 +226,35 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
       log.warn('[recall] code search failed:', err instanceof Error ? err.message : err);
     }
   }
+  // Shared-library hits ride last: the team's standing knowledge, reached
+  // with the same query vector. Deliberately NOT scoped to the session's
+  // project — a refund policy filed once is the answer wherever it is asked.
+  if (args.contentIndex?.searchLibrary && args.libraryProjectId) {
+    try {
+      const found = await args.contentIndex.searchLibrary(args.libraryProjectId, args.query, {
+        queryVector: vector,
+        maxResults: LIBRARY_TOP_K * 3,
+      });
+      const seenDocs = new Set<string>();
+      let added = 0;
+      for (const r of found.results) {
+        if ((r.score ?? 0) < LIBRARY_MIN_SCORE) continue;
+        if (seenDocs.has(r.path)) continue;
+        seenDocs.add(r.path);
+        const snippet = r.snippet.replace(/\s+/g, ' ').trim().slice(0, 160);
+        hits.push({
+          text: `\`${r.path}\` — ${snippet}`,
+          scope: 'library',
+          day: '',
+          score: r.score ?? 0,
+        });
+        if (++added >= LIBRARY_TOP_K) break;
+      }
+    } catch (err) {
+      log.warn('[recall] library search failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   if (args.debug?.isEnabled()) {
     log.info(
       `[recall] query="${args.query.slice(0, 80)}" → ${hits.length} hit(s) ` +
@@ -247,6 +293,7 @@ export function renderRecallBlock(hits: RecallHit[], now: Date = new Date()): st
   const lines = eligibleHits
     .map((h) => {
       if (h.scope === 'workspace') return `- [workspace] ${h.text}`;
+      if (h.scope === 'library') return `- [library] ${h.text}`;
       if (h.kind === 'status') {
         return `- [${h.scope}/${h.day}] As of ${h.day} (${agePhrase(ageInDays(h.day, now))}): ${h.text}`;
       }

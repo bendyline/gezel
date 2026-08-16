@@ -162,6 +162,76 @@ describe('recall cold-start guard', () => {
   });
 });
 
+describe('shared-library recall', () => {
+  const libraryIndex = (results: Array<{ path: string; snippet: string; score: number }>) =>
+    ({
+      hasIndex: async () => true,
+      searchCode: async () => ({ results: [], engine: 'semantic' as const, truncated: false }),
+      searchLibrary: async () => ({
+        results: results.map((r) => ({ lineStart: 1, ...r })),
+        engine: 'hybrid' as const,
+      }),
+    }) as never;
+
+  it('surfaces a strong library hit regardless of the session project', async () => {
+    // The library is install-wide: a policy filed once answers the question
+    // wherever it is asked, so this leg is not scoped to `projectId`.
+    const hits = await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'some-unrelated-project',
+      query: 'what is our refund window',
+      providerName: 'openai',
+      config: {},
+      memory: stubMemory([]),
+      embedQuery: stubEmbed,
+      contentIndex: libraryIndex([
+        { path: 'policies/refunds.md', snippet: 'Refunds within 30 days.', score: 0.82 },
+      ]),
+      libraryProjectId: 'shared',
+    });
+    expect(hits!.map((h) => h.scope)).toEqual(['library']);
+    expect(hits![0]!.text).toContain('policies/refunds.md');
+    expect(renderRecallBlock(hits!)).toContain('- [library] `policies/refunds.md`');
+  });
+
+  it('drops weak matches — a global corpus makes a loose hit an intrusion', async () => {
+    const hits = await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'unrelated question',
+      providerName: 'openai',
+      config: {},
+      memory: stubMemory([]),
+      embedQuery: stubEmbed,
+      contentIndex: libraryIndex([
+        { path: 'notes/misc.md', snippet: 'Tangentially similar prose.', score: 0.31 },
+      ]),
+      libraryProjectId: 'shared',
+    });
+    expect(hits ?? []).toEqual([]);
+  });
+
+  it('skips the leg entirely when no library exists', async () => {
+    const searchLibrary = vi.fn();
+    await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'q',
+      providerName: 'openai',
+      config: {},
+      memory: stubMemory([]),
+      embedQuery: stubEmbed,
+      contentIndex: {
+        hasIndex: async () => true,
+        searchCode: async () => ({ results: [], engine: 'semantic' as const, truncated: false }),
+        searchLibrary,
+      } as never,
+      libraryProjectId: null,
+    });
+    expect(searchLibrary).not.toHaveBeenCalled();
+  });
+});
+
 describe('index-enriched recall', () => {
   it('appends deduped code hits from the content index after the memory hits', async () => {
     const memory = stubMemory([

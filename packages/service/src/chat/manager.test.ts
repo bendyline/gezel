@@ -5020,6 +5020,70 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
   });
 });
 
+describe('ChatManager — per-turn shared-library recall', () => {
+  /** Minimal content-index stand-in: only the library search is exercised. */
+  function libraryIndex(
+    results: Array<{ path: string; snippet: string; score: number }>,
+    calls?: string[],
+  ) {
+    return {
+      searchLibrary: async (_projectId: string, query: string) => {
+        calls?.push(query);
+        return {
+          results: results.map((r) => ({ lineStart: 1, ...r })),
+          engine: 'hybrid' as const,
+        };
+      },
+    } as unknown as import('../index-store/content-index.js').ContentIndex;
+  }
+
+  async function sendAndReadPrompt(text: string): Promise<string> {
+    mock.script('ok');
+    const before = mock.calls.length;
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    await manager.send(session.id, text);
+    const sent = mock.calls.slice(before).find((c) => c.kind === 'send');
+    return (sent?.prompt as string) ?? '';
+  }
+
+  it('surfaces a document matching a topic the session did not open with', async () => {
+    // The gap this closes: turn-1 recall is frozen for the session, so a
+    // question that arrives later would otherwise reach the model with no
+    // retrieval at all.
+    await store.ensureSharedProject();
+    manager.setContentIndex(
+      libraryIndex([
+        { path: 'policies/refunds.md', snippet: 'Refunds are issued within 30 days.', score: 0.82 },
+      ]),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).toContain('policies/refunds.md');
+    expect(prompt).toContain('shared document library');
+  });
+
+  it('stays silent when nothing matches strongly enough', async () => {
+    // A global corpus makes a loose match an intrusion into an unrelated
+    // conversation, so a weak hit is dropped rather than offered.
+    await store.ensureSharedProject();
+    manager.setContentIndex(
+      libraryIndex([{ path: 'notes/misc.md', snippet: 'Vaguely similar prose.', score: 0.2 }]),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).not.toContain('notes/misc.md');
+  });
+
+  it('does not search on a message with no retrievable topic', async () => {
+    await store.ensureSharedProject();
+    const queries: string[] = [];
+    manager.setContentIndex(libraryIndex([], queries));
+
+    await sendAndReadPrompt('ok thanks');
+    expect(queries).toEqual([]);
+  });
+});
+
 describe('ChatManager — mission objectives are voorman-only context', () => {
   // Mission objectives describe the strategic direction the project is
   // moving toward — that's voorman-thinking, not specialist-thinking.
@@ -6265,6 +6329,32 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(trimmed).not.toContain('### Shared documents library');
       expect(trimmed).not.toContain('brand/guidelines.md');
       expect(trimmed).toContain('A shared documents library exists');
+    });
+
+    it('renders a description beside each document when the behavior is on', async () => {
+      // A bare path makes the model guess: `mission.md` and `notes-2024.md`
+      // are indistinguishable until something reads them.
+      await store.writeDocument('policies/refunds.md', '# Refunds\n');
+      await store.ensureSharedProject();
+      manager.setContentIndex({
+        libraryDescriptions: async () =>
+          new Map([['policies/refunds.md', 'How refunds are handled and when they apply.']]),
+      } as unknown as import('../index-store/content-index.js').ContentIndex);
+
+      // sysFor() owns the force env for the trim cases, so drive the send
+      // directly here with this behavior forced on instead.
+      process.env[FORCE] = 'prompt.documents-summaries';
+      try {
+        const project = await store.createProject({ name: 'Described Docs' });
+        const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+        mock.script('ok');
+        await manager.send(session.id, 'go');
+        const create = mock.calls.find((c) => c.kind === 'create');
+        const sys = create!.opts!.systemMessage as string;
+        expect(sys).toContain('policies/refunds.md — How refunds are handled');
+      } finally {
+        delete process.env[FORCE];
+      }
     });
 
     it('steers to search_documents and hides outside-in companion twins', async () => {

@@ -29,7 +29,7 @@ format. Implementation lands in phases (see the end of this doc).
   its detection profile, `craftbookTags`, and gezel-role affinity.
 - `project.json` today carries `projectTypeId` (user override) and `detectedProjectType`
   (auto-detected). This grows into full provenance: `projectType: {id, version, source,
-  params}`. `resolveProjectTypeId` keeps working for existing consumers.
+  params, icon}`. `resolveProjectTypeId` keeps working for existing consumers.
 - The **email pipeline** ([packages/service/src/mail/](../packages/service/src/mail/))
   stays native service code. It gets *wrapped* by a bundled type manifest so the New
   Project gallery presents one mental model — it is not retrofitted into the manifest
@@ -43,7 +43,7 @@ New catalog kind `project-type`, using the standard gilde item layout — identi
 ```
 data/project-types/{shard}/{id}/
 ├── manifest.json              identity: schemaVersion, id, name, description, tags,
-│                              category?, maintainer, logo?, yankedVersions,
+│                              category?, icon?, maintainer, logo?, yankedVersions,
 │                              minSupportedVersion?, kind: 'project-type'
 └── versions/{semver}/
     ├── manifest.json          composition payload (below)
@@ -68,6 +68,39 @@ gallery card explains itself to someone who has never met the role. The Dutch
 name carries the character; the gloss carries the meaning. Gezel-template
 descriptions don't repeat their own card's name, so they need no gloss — they
 lead with plain English instead.
+
+### Maker's marks
+
+Every project type has a small monochrome **maker's mark**. It is the type's
+durable iconographic identity and is deliberately separate from `logo`: a logo
+may be richer catalog artwork, while a mark must remain legible at 16–24px,
+follow `currentColor`, and sit naturally in Gezel's paper/wood palette. Marks
+come from the finite `ProjectIconIdSchema` vocabulary in
+`packages/core/src/project-icons.ts`; examples include `code` (curly braces),
+`quill`, `palette`, `server`, `book`, `meal`, and `plane`.
+
+An identity manifest may declare one directly:
+
+```jsonc
+{
+  "kind": "project-type",
+  "id": "api-workshop",
+  "category": "code",
+  "icon": "server"
+}
+```
+
+If it does not, Gezel deterministically infers a mark from the type id, tags,
+taxonomy base, and category. On adoption the resolved mark is stamped into the
+project-type provenance, so project lists do not need a catalog lookup. Project
+instances follow one inheritance rule:
+
+`project.icon` override → applied type mark → explicit/detected taxonomy mark →
+connected-folder affordance → general `sheet`.
+
+The optional project override is a maker's-mark id today. Future generated
+instance artwork can layer over this fallback without changing type manifests
+or making old projects lose their recognizable mark.
 
 Version manifest (composition payload):
 

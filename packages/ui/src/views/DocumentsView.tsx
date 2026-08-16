@@ -19,6 +19,7 @@ import {
 } from '../components/file-view-modes.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
+import { useDocumentSearch } from './useDocumentSearch.js';
 
 const SELECTED_DOC_STORAGE_KEY = 'gezel:documents:selectedPath';
 
@@ -65,6 +66,7 @@ function writeStored(key: string, value: string) {
 export function DocumentsView() {
   const editorTheme = useEffectiveTheme();
   const source = useMemo(() => documentsFileSource(), []);
+  const search = useDocumentSearch();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [truncated, setTruncated] = useState(false);
   // Distinguishes "no documents" from "not loaded yet" so a persisted folder
@@ -198,10 +200,40 @@ export function DocumentsView() {
     viewer = <p className="placeholder">Loading…</p>;
   }
 
+  const searchResultList = search.hits
+    ? {
+        entries: search.hits.map((hit) => hit.entry),
+        emptyMessage: search.unavailable
+          ? 'The library is still being indexed — search will work shortly.'
+          : `Nothing in the library mentions “${search.query.trim()}”.`,
+        trailingForEntry: (entry: FileEntry) => {
+          const hit = search.hits?.find((h) => h.entry.path === entry.path);
+          return hit ? <span className="documents-search-snippet">{hit.snippet}</span> : null;
+        },
+      }
+    : null;
+
   return (
     <div className="documents-listing" data-testid="documents-view">
       <FileBrowserPane
         source={source}
+        headerExtra={
+          <div className="documents-search">
+            <input
+              type="search"
+              className="documents-search-input"
+              placeholder="Search documents…"
+              aria-label="Search document contents"
+              value={search.query}
+              onChange={(e) => search.setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') search.clear();
+              }}
+            />
+            {search.searching && <span className="muted documents-search-status">searching…</span>}
+          </div>
+        }
+        customList={searchResultList}
         layoutClassName="project-files-layout-documents"
         entries={visibleEntries}
         truncated={truncated}

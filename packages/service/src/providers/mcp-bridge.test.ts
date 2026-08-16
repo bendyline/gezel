@@ -318,9 +318,10 @@ describe('McpBridge', () => {
   it('callTool(list_documents) returns text content', async () => {
     const out = await bridge.callTool('list_documents', {});
     expect(typeof out).toBe('string');
-    // With a fresh home there are no documents — server returns the
-    // friendly "No documents found." message.
-    expect(out).toMatch(/No documents found|📄|📁/);
+    // A fresh home is seeded with the one starter document, so the listing
+    // is never empty. Rows are `dir `/`file` prefixed — no emoji.
+    expect(out).toMatch(/No documents found|^\s*(dir|file) /m);
+    expect(out).not.toMatch(/📄|📁/);
   });
 
   it('callTool(write_document) + callTool(read_document) round-trips content', async () => {

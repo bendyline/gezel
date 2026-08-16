@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectIconIdSchema } from '../project-icons.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
@@ -163,6 +164,8 @@ export const ProjectTypeProvenanceSchema = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
   /** ISO timestamp of adoption. */
   appliedAt: z.string(),
+  /** Maker's mark inherited from the type at adoption. */
+  icon: ProjectIconIdSchema.optional(),
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 
@@ -179,6 +182,8 @@ export const ProjectSchema = z.object({
   id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
+  /** Explicit maker's-mark override. Missing inherits from the project type. */
+  icon: ProjectIconIdSchema.optional(),
   workingDir: z.string().optional(),
   /** Optional gezel that acts as the project's voorman (foreman). Surfaces in
    *  the project detail pane, flows into the system prompt when a session is

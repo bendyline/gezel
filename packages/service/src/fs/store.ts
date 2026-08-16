@@ -56,6 +56,7 @@ import {
   type ProjectDetail,
   type ProjectFileEntry,
   type ProjectGitHub,
+  type ProjectIconId,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
   type ProjectManagedWorkspaceWritePolicy,
@@ -90,6 +91,7 @@ import {
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
   projectManagedWorkspaceWritePolicy,
+  resolveSharedProjectId,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
@@ -272,6 +274,11 @@ export interface StoreOptions {
    */
   history?: import('../history/manager.js').HistoryManager;
   /**
+   * Test seam: shorten the document-edit audit's quiet window so a test can
+   * observe a sitting close without waiting minutes.
+   */
+  auditQuietWindowMs?: number;
+  /**
    * Per-scope external roots, captured at boot from
    * `config.json#externalFolders`. When set, the Store routes reads/
    * writes for the externalized scopes (documents, gezels, projects)
@@ -371,8 +378,8 @@ export class Store {
    */
   private readonly sessionListeners = new Set<(ev: SessionChangeEvent) => void>();
 
-  /** Notified on every document write/delete, including overwrites (which
-   *  emit no history event). Same enqueue-only contract as session listeners. */
+  /** Notified on every document write/delete, including overwrites. Same
+   *  enqueue-only contract as session listeners. */
   private readonly documentListeners = new Set<(ev: DocumentChangeEvent) => void>();
 
   /** Notified after a shared gezel has been fully created and is listable.
@@ -395,6 +402,9 @@ export class Store {
       home: this.home,
       external: this.external,
       history: this.history,
+      ...(opts.auditQuietWindowMs !== undefined
+        ? { auditQuietWindowMs: opts.auditQuietWindowMs }
+        : {}),
       onChange: (ev) => {
         for (const listener of this.documentListeners) {
           try {
@@ -1032,6 +1042,19 @@ export class Store {
       await this.writeConfig({ ...config, sharedProjectId: created.id });
     }
     return { id: created.id, created: true };
+  }
+
+  /**
+   * Id of the shared library project, or null when it does not exist yet
+   * (machine-engine role, or a boot that has not reached the ensure).
+   * Callers that need the library's index — document search, recall — go
+   * through this rather than assuming the default id.
+   */
+  async sharedProjectId(): Promise<string | null> {
+    const config = await this.readConfig().catch(() => null);
+    const id = resolveSharedProjectId(config ?? undefined);
+    const meta = await this.tryGetProjectMeta(id);
+    return meta && isSharedLibraryProject(meta) ? id : null;
   }
 
   private async createSharedProject(id: string, documentsRoot: string): Promise<ProjectDetail> {
@@ -2596,6 +2619,8 @@ export class Store {
     input: {
       name: string;
       description?: string;
+      /** Explicit maker's-mark override; missing inherits from the project type. */
+      icon?: ProjectIconId;
       /** Written to documents/about.md at creation. */
       about?: string;
       /** Written to documents/missionObjectives.md at creation. */
@@ -2657,6 +2682,7 @@ export class Store {
         id,
         name: input.name,
         description: input.description,
+        ...(input.icon ? { icon: input.icon } : {}),
         ...(input.workingDir ? { workingDir: input.workingDir } : {}),
         // Opening an existing folder is an intake action, not a declaration
         // that its objectives are ready for active supervision. Keep the
@@ -2686,6 +2712,7 @@ export class Store {
         details: {
           name: project.name,
           description: project.description,
+          icon: project.icon,
           workingDir: project.workingDir,
           ...(project.indexingEnabled !== undefined
             ? { indexingEnabled: project.indexingEnabled }
@@ -3206,6 +3233,8 @@ export class Store {
     patch: {
       name?: string;
       description?: string;
+      /** Explicit maker's-mark override; null resumes type inheritance. */
+      icon?: ProjectIconId | null;
       workingDir?: string | null;
       voormanGezelId?: string | null;
       voormanAutoAssignedAt?: string;
@@ -3297,6 +3326,11 @@ export class Store {
       updatedAt: nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.icon === null
+        ? { icon: undefined }
+        : patch.icon !== undefined
+          ? { icon: patch.icon }
+          : {}),
       ...(patch.workingDir === null
         ? { workingDir: undefined }
         : patch.workingDir !== undefined
@@ -3391,6 +3425,7 @@ export class Store {
     if (patch.name !== undefined && patch.name !== meta.name) metaChanged.push('name');
     if (patch.description !== undefined && patch.description !== meta.description)
       metaChanged.push('description');
+    if (patch.icon !== undefined && patch.icon !== meta.icon) metaChanged.push('icon');
     if (patch.workingDir !== undefined) metaChanged.push('workingDir');
     if (
       patch.nudgeConfig !== undefined &&
@@ -4955,6 +4990,11 @@ export class Store {
     return this.documents.listDocumentsRecursive();
   }
 
+  /** Close any in-flight document-edit audit windows (service shutdown). */
+  async flushDocumentAudit(): Promise<void> {
+    await this.documents.flushAudit();
+  }
+
   async readDocumentAsMarkdown(
     filePath: string,
   ): Promise<{ content: string; converted: boolean } | null> {
@@ -4980,8 +5020,12 @@ export class Store {
     return this.documents.readDocumentBinary(filePath);
   }
 
-  async writeDocument(filePath: string, content: string): Promise<void> {
-    await this.documents.writeDocument(filePath, content);
+  async writeDocument(
+    filePath: string,
+    content: string,
+    actor?: import('./documents-store.js').DocumentWriteActor,
+  ): Promise<void> {
+    await this.documents.writeDocument(filePath, content, actor);
   }
 
   /**
@@ -4994,8 +5038,11 @@ export class Store {
     await this.documents.writeDocumentBinary(filePath, data);
   }
 
-  async deleteDocument(filePath: string): Promise<void> {
-    await this.documents.deleteDocument(filePath);
+  async deleteDocument(
+    filePath: string,
+    actor?: import('./documents-store.js').DocumentWriteActor,
+  ): Promise<void> {
+    await this.documents.deleteDocument(filePath, actor);
   }
 
   async createDocumentFolder(folderPath: string): Promise<void> {

@@ -61,8 +61,13 @@ export const TIER_DEFAULT_BEHAVIORS: Record<ModelTier, ReadonlyArray<BehaviorEnt
     'fabrication.detect-past-tense-no-tools',
     'prompt.retrieval-first',
     'prompt.workspace-gestalt',
+    'prompt.documents-summaries',
   ],
-  large: ['fabrication.detect-past-tense-no-tools', 'prompt.workspace-gestalt'],
+  large: [
+    'fabrication.detect-past-tense-no-tools',
+    'prompt.workspace-gestalt',
+    'prompt.documents-summaries',
+  ],
   cloud: [],
 };
 

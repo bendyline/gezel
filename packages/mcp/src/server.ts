@@ -4029,7 +4029,7 @@ server.tool(
       'write_document',
     );
     if (redirected) return redirected;
-    await api.writeDocument(path, normalizeMarkdown(content));
+    await api.writeDocument(path, normalizeMarkdown(content), { gezelId });
     return { content: [{ type: 'text' as const, text: `Wrote document ${path}` }] };
   },
 );
@@ -4041,7 +4041,7 @@ server.tool(
     path: z.string().describe('File or folder path to delete'),
   },
   async ({ path }) => {
-    await api.deleteDocument(path);
+    await api.deleteDocument(path, { gezelId });
     return { content: [{ type: 'text' as const, text: `Deleted ${path}` }] };
   },
 );

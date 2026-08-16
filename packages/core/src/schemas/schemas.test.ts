@@ -351,6 +351,11 @@ describe('CreateProjectRequestSchema', () => {
     ).toBe(false);
   });
 
+  it('accepts a project maker-mark override at creation', () => {
+    expect(CreateProjectRequestSchema.parse({ ...base, icon: 'code' }).icon).toBe('code');
+    expect(() => CreateProjectRequestSchema.parse({ ...base, icon: 'rocketship' })).toThrow();
+  });
+
   it('accepts an existing folder at creation', () => {
     expect(
       CreateProjectRequestSchema.parse({ ...base, workingDir: '/work/sample' }).workingDir,
@@ -424,6 +429,11 @@ describe('UpdateProjectRequestSchema', () => {
   it('accepts the project archive flag', () => {
     expect(UpdateProjectRequestSchema.parse({ archived: true }).archived).toBe(true);
     expect(UpdateProjectRequestSchema.parse({ archived: false }).archived).toBe(false);
+  });
+
+  it('sets or clears a project maker-mark override', () => {
+    expect(UpdateProjectRequestSchema.parse({ icon: 'quill' }).icon).toBe('quill');
+    expect(UpdateProjectRequestSchema.parse({ icon: null }).icon).toBeNull();
   });
 
   it('accepts a per-project workspace-indexing switch', () => {

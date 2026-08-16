@@ -1,22 +1,13 @@
-import { join } from 'node:path';
 import {
   type ChatMessage,
   type ChatSession,
   type HistoryEvent,
   createLogger,
-  isOutsideInInternalPath,
   nowIso,
 } from '@bendyline/gezel';
 import type { DocumentChangeEvent, SessionChangeEvent, Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import { classifyFile } from './classify.js';
-import { chunkMarkdown, convertDocToMarkdown, isConvertibleDoc } from './docs.js';
-import {
-  DOCUMENTS_ROOT_META_KEY,
-  HISTORY_BACKFILL_META_KEY,
-  openGlobalCollection,
-} from './global-index.js';
-import { sha256 } from './hash.js';
+import { HISTORY_BACKFILL_META_KEY, openGlobalCollection } from './global-index.js';
 import type { ChunkInput, IndexStore } from './index-store.js';
 
 /**
@@ -52,7 +43,6 @@ export interface GlobalIndexManagerOptions {
 interface CollectionGates {
   sessions: boolean;
   history: boolean;
-  documents: boolean;
 }
 
 export class GlobalIndexManager {
@@ -64,7 +54,6 @@ export class GlobalIndexManager {
 
   private readonly dirtySessions = new Map<string, SessionChangeEvent>();
   private pendingHistory: HistoryEvent[] = [];
-  private readonly dirtyDocuments = new Map<string, 'write' | 'delete'>();
 
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -114,13 +103,13 @@ export class GlobalIndexManager {
     this.scheduleFlush();
   }
 
-  enqueueDocument(ev: DocumentChangeEvent): void {
-    // A new folder has no content to index; its children arrive as their own
-    // write events. The hook still fires so other listeners see the change.
-    if (ev.type === 'mkdir') return;
-    this.dirtyDocuments.set(ev.path, ev.type);
-    this.scheduleFlush();
-  }
+  /**
+   * Documents are no longer a global collection: the shared library is a
+   * project, so its content is indexed by the per-project pipeline (ADR
+   * 0006). The hook stays wired because Store still emits document change
+   * events; there is simply nothing for this manager to do with them.
+   */
+  enqueueDocument(_ev: DocumentChangeEvent): void {}
 
   private scheduleFlush(): void {
     if (this.stopped) return;
@@ -151,11 +140,6 @@ export class GlobalIndexManager {
         this.pendingHistory = [];
         if (gates.history) await this.flushHistory(batch);
       }
-      if (this.dirtyDocuments.size > 0) {
-        const batch = new Map(this.dirtyDocuments);
-        this.dirtyDocuments.clear();
-        if (gates.documents) await this.flushDocuments(batch);
-      }
     } finally {
       this.flushing = false;
       if (this.flushQueued) {
@@ -181,11 +165,9 @@ export class GlobalIndexManager {
           log.warn(`history reconcile failed: ${describe(err)}`),
         );
       }
-      if (gates.documents) {
-        await this.reconcileDocuments().catch((err) =>
-          log.warn(`documents reconcile failed: ${describe(err)}`),
-        );
-      }
+      await this.purgeLegacyDocuments().catch((err) =>
+        log.warn(`legacy documents purge failed: ${describe(err)}`),
+      );
       await this.flush();
     } finally {
       this.reconciling = false;
@@ -199,7 +181,6 @@ export class GlobalIndexManager {
     return {
       sessions: master && si?.sessions !== false,
       history: master && si?.history !== false,
-      documents: master && si?.documents !== false,
     };
   }
 
@@ -324,117 +305,29 @@ export class GlobalIndexManager {
     }
   }
 
-  // ── documents ──────────────────────────────────────────────────────────
+  // ── documents (legacy) ─────────────────────────────────────────────────
 
-  private async flushDocuments(batch: Map<string, 'write' | 'delete'>): Promise<void> {
+  /**
+   * Drop the retired `documents` collection.
+   *
+   * Documents used to be mirrored here as a second, thinner pipeline: FTS
+   * only, unranked, with a conversion that ran before it could hash-gate — so
+   * every office document was re-parsed on each reconcile and the markdown
+   * discarded. The shared library is a project now (ADR 0006) and its content
+   * lives in that project's index, so these rows are stale duplicates that
+   * would otherwise keep answering searches.
+   *
+   * One-shot and idempotent: once the rows are gone this finds nothing. No
+   * data migration — the library re-indexes through the project pipeline.
+   */
+  private async purgeLegacyDocuments(): Promise<void> {
     const index = await openGlobalCollection(this.store.homePath, 'documents');
     if (!index) return;
     try {
-      for (const [path, type] of batch) {
-        if (type === 'delete') {
-          index.deleteFile(path);
-          continue;
-        }
-        await this.indexDocument(index, path);
-      }
-    } finally {
-      index.close();
-    }
-  }
-
-  private async indexDocument(index: IndexStore, path: string): Promise<void> {
-    if (isOutsideInInternalPath(path)) {
-      index.deleteFile(path);
-      return;
-    }
-    const cls = classifyFile(path, 0);
-    if (cls.modality === 'doc' && isConvertibleDoc(path.split('.').pop() ?? '')) {
-      await this.indexConvertibleDocument(index, path);
-      return;
-    }
-    if (cls.modality !== 'text' && cls.modality !== 'code') {
-      // Binaries/images: record presence only, no content chunks.
-      index.putChunks(path, null, []);
-      index.upsertFile({
-        path,
-        hash: null,
-        size: 0,
-        mtimeMs: Date.now(),
-        lang: cls.lang,
-        kind: cls.kind,
-        modality: cls.modality,
-        trivial: true,
-        indexedAt: nowIso(),
-        loc: null,
-      });
-      return;
-    }
-    const content = await this.store.readDocument(path).catch(() => null);
-    if (content === null) {
-      index.deleteFile(path);
-      return;
-    }
-    const hash = sha256(content);
-    if (index.getFile(path)?.hash === hash) return;
-    const chunks = cls.kind === 'markdown' ? chunkMarkdown(content) : singleTextChunk(content);
-    index.putChunks(path, hash, chunks);
-    index.upsertFile({
-      path,
-      hash,
-      size: content.length,
-      mtimeMs: Date.now(),
-      lang: cls.lang,
-      kind: cls.kind,
-      modality: cls.modality,
-      trivial: cls.trivial,
-      indexedAt: nowIso(),
-      loc: null,
-    });
-  }
-
-  private async indexConvertibleDocument(index: IndexStore, path: string): Promise<void> {
-    const absPath = join(this.store.documentsDir(), path);
-    const conversion = await convertDocToMarkdown(absPath).catch(() => null);
-    const markdown = conversion?.markdown ?? null;
-    const hash = markdown ? sha256(markdown) : null;
-    if (hash && index.getFile(path)?.hash === hash) return;
-    index.putChunks(path, hash, markdown ? chunkMarkdown(markdown) : []);
-    index.upsertFile({
-      path,
-      hash,
-      size: markdown?.length ?? 0,
-      mtimeMs: Date.now(),
-      lang: null,
-      kind: 'doc',
-      modality: 'doc',
-      trivial: !markdown,
-      indexedAt: nowIso(),
-      loc: null,
-    });
-  }
-
-  private async reconcileDocuments(): Promise<void> {
-    const entries = await this.store.listDocumentsRecursive().catch(() => []);
-    const index = await openGlobalCollection(this.store.homePath, 'documents');
-    if (!index) return;
-    try {
-      const root = this.store.documentsDir();
-      if (index.getMeta(DOCUMENTS_ROOT_META_KEY) !== root) {
-        for (const f of index.allFiles()) index.deleteFile(f.path);
-        index.setMeta(DOCUMENTS_ROOT_META_KEY, root);
-      }
-      const wanted = new Set(
-        entries
-          .filter((entry) => !entry.isDirectory && !isOutsideInInternalPath(entry.path))
-          .map((entry) => entry.path),
-      );
-      for (const f of index.allFiles()) {
-        if (!wanted.has(f.path)) index.deleteFile(f.path);
-      }
-      // Hash gating happens inside indexDocument at flush time; enqueueing
-      // everything is cheap relative to reading + re-chunking only what
-      // actually changed.
-      for (const path of wanted) this.dirtyDocuments.set(path, 'write');
+      const files = index.allFiles();
+      if (files.length === 0) return;
+      for (const file of files) index.deleteFile(file.path);
+      log.info(`purged ${files.length} rows from the retired documents collection`);
     } finally {
       index.close();
     }

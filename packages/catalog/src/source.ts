@@ -971,6 +971,7 @@ function mergeIdentityAndVersion(
       description: identity.description,
       tags: identity.tags,
       ...(identity.category !== undefined ? { category: identity.category } : {}),
+      ...(identity.icon !== undefined ? { icon: identity.icon } : {}),
       maintainer: identity.maintainer,
       ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
       ...(identity.license !== undefined ? { license: identity.license } : {}),

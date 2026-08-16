@@ -6,8 +6,10 @@ import { isTransientIndexError } from './sqlite-driver.js';
 /**
  * Read facade over the home-scoped `~/.gezel/index/global.db` — the first
  * non-project index db. Hosts three collections mirrored from plain-file
- * sources of truth (session JSON, history JSONL, the documents library) by
- * GlobalIndexManager, the db's single writer. Readers open per call (WAL
+ * sources of truth (session JSON, history JSONL) by GlobalIndexManager, the
+ * db's single writer. `documents` remains in the collection union only so the
+ * retired collection's rows can be opened and purged — the shared library is
+ * a project now and its content lives in that project's index (ADR 0006). Readers open per call (WAL
  * permits concurrent readers while the manager writes) and degrade to
  * empty/null results when sqlite is unavailable, matching ContentIndex.
  */
@@ -17,10 +19,6 @@ export type GlobalCollectionId = 'sessions' | 'history' | 'documents';
 /** Set once the first history JSONL backfill completes; until then
  *  searchHistory returns null so callers keep the full-scan fallback. */
 export const HISTORY_BACKFILL_META_KEY = 'history_backfilled_at';
-
-/** Records which documents root the collection was built from, so an
- *  externalized-folder move invalidates the whole collection. */
-export const DOCUMENTS_ROOT_META_KEY = 'documents_root';
 
 export interface SessionSearchHit {
   sessionId: string;
@@ -34,18 +32,11 @@ export interface SessionSearchHit {
   archived: boolean;
 }
 
-export interface DocumentSearchHit {
-  path: string;
-  lineStart: number;
-  snippet: string;
-}
-
 export interface GlobalIndexStatus {
   available: boolean;
   sessions: number;
   history: number;
   historyBackfilledAt: string | null;
-  documents: number;
 }
 
 export async function openGlobalCollection(
@@ -125,27 +116,12 @@ export class GlobalIndex {
     }
   }
 
-  async searchDocuments(q: string, maxResults = 20): Promise<DocumentSearchHit[]> {
-    const index = await openGlobalCollection(this.home, 'documents');
-    if (!index) return [];
-    try {
-      return index.searchDocs(q, maxResults).map((hit) => ({
-        path: hit.filePath,
-        lineStart: hit.lineStart,
-        snippet: hit.snippet,
-      }));
-    } finally {
-      index.close();
-    }
-  }
-
   async status(): Promise<GlobalIndexStatus> {
     const empty: GlobalIndexStatus = {
       available: false,
       sessions: 0,
       history: 0,
       historyBackfilledAt: null,
-      documents: 0,
     };
     const sessions = await openGlobalCollection(this.home, 'sessions');
     if (!sessions) return empty;
@@ -166,21 +142,11 @@ export class GlobalIndex {
         history.close();
       }
     }
-    const documents = await openGlobalCollection(this.home, 'documents');
-    let documentCount = 0;
-    if (documents) {
-      try {
-        documentCount = documents.fileCount();
-      } finally {
-        documents.close();
-      }
-    }
     return {
       available: true,
       sessions: sessionCount,
       history: historyCount,
       historyBackfilledAt: backfilledAt,
-      documents: documentCount,
     };
   }
 }

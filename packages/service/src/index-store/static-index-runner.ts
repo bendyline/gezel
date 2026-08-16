@@ -12,6 +12,12 @@ export interface StaticIndexRequest {
   /** Project artifacts root — converted-doc shadows land under its `shadow/`. */
   artifactsDir: string;
   collectionId: string;
+  /**
+   * `library` applies the shared-document-library exclusions. A function
+   * cannot cross the worker boundary, so the scope travels as a flag and the
+   * predicate is resolved on the far side.
+   */
+  scope?: 'workspace' | 'library';
 }
 
 interface WorkerRequest extends StaticIndexRequest {
@@ -65,7 +71,9 @@ async function runStaticIndexInProcess(request: StaticIndexRequest): Promise<Con
   });
   if (!index) throw new Error(`content index unavailable at ${request.dbPath}`);
   try {
-    return await indexWorkspaceContent(index, request.workspaceDir, request.artifactsDir);
+    return await indexWorkspaceContent(index, request.workspaceDir, request.artifactsDir, {
+      ...(request.scope ? { scope: request.scope } : {}),
+    });
   } finally {
     index.close();
   }

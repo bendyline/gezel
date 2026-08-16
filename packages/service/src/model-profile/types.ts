@@ -125,6 +125,13 @@ export interface TurnCtx extends ModelCtx {
   assistantContent: string;
   /** How many continuation nudges have already fired in this user-initiated send. */
   continuationCount: number;
+  /**
+   * Shared-library documents matching THIS turn's message, resolved before
+   * the prelude hooks run (they are synchronous; the search is not).
+   * Populated only for user-origin turns, and only with matches strong
+   * enough to be worth the tokens — usually absent.
+   */
+  libraryRecall?: ReadonlyArray<{ path: string; snippet: string; score: number }>;
 }
 
 /**

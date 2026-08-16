@@ -63,6 +63,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listCatalogItems: { items: [] },
   listFolders: { folders: [] },
   listDocuments: { documents: [] },
+  searchDocuments: { results: [], engine: 'unavailable' },
   search: { results: [], truncated: false },
   quickOpen: { results: [], truncated: false },
   listTasks: { tasks: [] },

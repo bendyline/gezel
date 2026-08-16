@@ -24,7 +24,9 @@ import { McpRelaxRequiredFields } from './mcp-relax-required-fields.js';
 import { McpValidateIdsStrict } from './mcp-validate-ids-strict.js';
 import { ParseGemmaSpecialToken } from './parse-gemma-special-token.js';
 import { PromptDeriveByExecution } from './prompt-derive-by-execution.js';
+import { PromptDocumentsSummaries } from './prompt-documents-summaries.js';
 import { PromptExecutorContextTrim } from './prompt-executor-context-trim.js';
+import { PromptLibraryRecallPrelude } from './prompt-library-recall-prelude.js';
 import { PromptMeesterBuildPrelude } from './prompt-meester-build-prelude.js';
 import { PromptMeesterCraftbookPrelude } from './prompt-meester-craftbook-prelude.js';
 import { PromptMinimalContext } from './prompt-minimal-context.js';
@@ -65,6 +67,8 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   FabricationDetectClaimWithoutTool as Behavior<unknown>,
   PromptMeesterBuildPrelude as Behavior<unknown>,
   PromptMeesterCraftbookPrelude as Behavior<unknown>,
+  PromptLibraryRecallPrelude as Behavior<unknown>,
+  PromptDocumentsSummaries as Behavior<unknown>,
   PromptExecutorContextTrim as Behavior<unknown>,
   PromptMinimalContext as Behavior<unknown>,
   PromptWorkspaceGestalt as Behavior<unknown>,

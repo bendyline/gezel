@@ -6,6 +6,7 @@ import {
   ProjectGlyph,
   type ProjectGlyphId,
   type ProjectKindMeta,
+  catalogProjectTypeGlyph,
   categorizeCatalogType,
   categoryMeta,
 } from './new-project-meta.js';
@@ -77,11 +78,18 @@ export function NewProjectPaneHero({ selection }: { selection: PaneSelection }) 
     <div className="gz-npd-hero">
       <div className="gz-npd-hero-art" aria-hidden="true">
         <CatalogArtwork
-          {...(isCatalog && selection.item.iconSvg ? { iconSvg: selection.item.iconSvg } : {})}
-          {...(isCatalog && selection.item.logoUrl ? { logoUrl: selection.item.logoUrl } : {})}
+          {...(isCatalog && !catalogType?.icon && selection.item.iconSvg
+            ? { iconSvg: selection.item.iconSvg }
+            : {})}
+          {...(isCatalog && !catalogType?.icon && selection.item.logoUrl
+            ? { logoUrl: selection.item.logoUrl }
+            : {})}
           svgClassName="gz-npd-hero-art-svg"
           fallback={
-            <ProjectGlyph glyph={isCatalog ? category.glyph : selection.kind.glyph} size={34} />
+            <ProjectGlyph
+              glyph={isCatalog ? catalogProjectTypeGlyph(selection.item) : selection.kind.glyph}
+              size={34}
+            />
           }
         />
       </div>

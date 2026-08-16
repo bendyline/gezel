@@ -100,6 +100,7 @@ describe('resolveProfile — skeleton path (no behaviors registered yet)', () =>
     expect(profile.behaviors.map((e) => e.id)).toEqual([
       'tools.gezels-as-roles',
       'prompt.meester-craftbook-prelude',
+      'prompt.library-recall-prelude',
     ]);
   });
 
@@ -116,6 +117,7 @@ describe('resolveProfile — skeleton path (no behaviors registered yet)', () =>
     expect(profile.behaviors.map((e) => e.id)).toEqual([
       'tools.gezels-as-roles',
       'prompt.meester-craftbook-prelude',
+      'prompt.library-recall-prelude',
     ]);
   });
 });

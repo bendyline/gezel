@@ -342,6 +342,16 @@ describe('projects', () => {
     expect(detail!.packages).toEqual([]);
   });
 
+  it('persists and clears an explicit project maker-mark override', async () => {
+    const created = await store.createProject({ name: 'Design', icon: 'palette' });
+    expect(created.icon).toBe('palette');
+    expect((await store.getProject(created.id))?.icon).toBe('palette');
+
+    const cleared = await store.updateProject(created.id, { icon: null });
+    expect(cleared.icon).toBeUndefined();
+    expect((await store.getProject(created.id))?.icon).toBeUndefined();
+  });
+
   it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {
     await store.createProject({ name: 'External', workingDir: '/tmp/ext' });
     const detail = await store.getProject('external');

@@ -6331,10 +6331,17 @@ export class GezelClient {
     return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);
   }
 
-  writeDocument(filePath: string, content: string): Promise<{ ok: true; path: string }> {
+  writeDocument(
+    filePath: string,
+    content: string,
+    /** Attribution for the audit trail. Gezels pass their own id; the app omits it. */
+    actor?: { gezelId?: string; sessionId?: string },
+  ): Promise<{ ok: true; path: string }> {
     return this.request('PUT', '/api/documents/write', {
       path: filePath,
       content,
+      ...(actor?.gezelId ? { gezelId: actor.gezelId } : {}),
+      ...(actor?.sessionId ? { sessionId: actor.sessionId } : {}),
     });
   }
 
@@ -6418,8 +6425,11 @@ export class GezelClient {
     return res.blob();
   }
 
-  deleteDocument(filePath: string): Promise<{ ok: true }> {
-    return this.request('DELETE', `/api/documents/delete?path=${encodeURIComponent(filePath)}`);
+  deleteDocument(filePath: string, actor?: { gezelId?: string }): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `/api/documents/delete?path=${encodeURIComponent(filePath)}${actor?.gezelId ? `&gezelId=${encodeURIComponent(actor.gezelId)}` : ''}`,
+    );
   }
 
   createDocumentFolder(folderPath: string): Promise<{ ok: true; path: string }> {

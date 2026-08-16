@@ -48,6 +48,7 @@ import { ProjectChat } from '../components/ProjectChat.js';
 import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
+import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
@@ -127,13 +128,6 @@ import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 
 const SELECTED_PROJECT_STORAGE_KEY = 'gezel:projects:selectedId';
-
-function projectInitial(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return '?';
-  const ch = Array.from(trimmed)[0];
-  return ch ? ch.toUpperCase() : '?';
-}
 
 function isHtml(name: string): boolean {
   return /\.html?$/i.test(name);
@@ -2102,12 +2096,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
             onClick={() => handleProjectRowClick(p.id)}
             title={p.name}
+            aria-label={sidebarCollapsed ? p.name : undefined}
           >
-            {sidebarCollapsed ? (
-              projectInitial(p.name)
-            ) : (
+            <ProjectIcon project={p} size={18} className="project-rail-mark" />
+            {!sidebarCollapsed && (
               <>
-                {p.name}
+                <span className="project-rail-label">{p.name}</span>
                 {p.storageScope === 'machine-shared' && (
                   <span
                     className="machine-shared-badge"

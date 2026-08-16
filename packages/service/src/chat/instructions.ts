@@ -163,6 +163,12 @@ export interface BuildInstructionsOptions {
    * an honest "more exist" note.
    */
   documentFilesTruncated?: boolean;
+  /**
+   * path → one-line description, when `prompt.documents-summaries` is on the
+   * profile. Sparse: a document with neither authored frontmatter nor an
+   * indexed summary simply renders as a bare path.
+   */
+  documentDescriptions?: ReadonlyMap<string, string>;
   voormanName?: string;
   /**
    * The current gezel's id. Used to gate prompt content that's only
@@ -374,6 +380,19 @@ const MINIMAL_CONTEXT_ABOUT_MAX_CHARS = 900;
  */
 const DOCUMENT_LISTING_CAP = 50;
 
+/** Cap when each row also carries a description (see `documentDescriptions`). */
+const DOCUMENT_LISTING_CAP_DESCRIBED = 20;
+
+/** One line per document: a description is a signpost, not a summary. */
+const DOCUMENT_DESCRIPTION_MAX_CHARS = 100;
+
+function truncateDescription(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > DOCUMENT_DESCRIPTION_MAX_CHARS
+    ? `${flat.slice(0, DOCUMENT_DESCRIPTION_MAX_CHARS)}…`
+    : flat;
+}
+
 /**
  * The entire conduct layer in minimal-context mode. Replaces the ~530-token
  * conduct core (act-don't-narrate + ask-when-stuck + markdown) with one
@@ -424,6 +443,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     workspaceFilesTruncated,
     documentFiles,
     documentFilesTruncated,
+    documentDescriptions,
     voormanName,
     voormanRoleBasedName,
     roleBasedNameOnlyMode,
@@ -926,8 +946,17 @@ ${artifactsLine}
       // Files only: with recursive paths the folder is evident from the path,
       // and a bare directory row taught the model nothing it could act on.
       const files = documentFiles.filter((f) => !f.isDirectory);
-      const shown = files.slice(0, DOCUMENT_LISTING_CAP);
-      const listing = shown.map((f) => f.path).join('\n');
+      const described = documentDescriptions ?? new Map<string, string>();
+      // A described row costs roughly three bare ones, so the cap tightens
+      // when descriptions are on: the block stays a map, not an inventory.
+      const cap = described.size > 0 ? DOCUMENT_LISTING_CAP_DESCRIBED : DOCUMENT_LISTING_CAP;
+      const shown = files.slice(0, cap);
+      const listing = shown
+        .map((f) => {
+          const description = described.get(f.path);
+          return description ? `${f.path} — ${truncateDescription(description)}` : f.path;
+        })
+        .join('\n');
       documentsContext = `\n\n---\n\n### Shared documents library\n\nCross-project reference available to every gezel — guidelines, mission statements, style guides, policies:\n\`\`\`\n${listing}\n\`\`\``;
       const fullTreeHint =
         toolsFrom(['list_documents']).length > 0
@@ -937,8 +966,8 @@ ${artifactsLine}
         // The walker's own cap dropped part of the tree, so `files.length` is
         // itself a floor — an exact "N more" here would understate.
         documentsContext += `\n(listing incomplete — more files exist; a path absent above may still exist${fullTreeHint})`;
-      } else if (files.length > DOCUMENT_LISTING_CAP) {
-        const more = files.length - DOCUMENT_LISTING_CAP;
+      } else if (files.length > cap) {
+        const more = files.length - cap;
         documentsContext += `\n(${more} more ${
           more === 1 ? 'file' : 'files'
         } not shown${fullTreeHint})`;

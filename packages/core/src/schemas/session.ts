@@ -273,9 +273,10 @@ export const ChatSessionSchema = z.object({
       hits: z.array(
         z.object({
           text: z.string(),
-          /** 'workspace' = an index-derived code hit (path:line + snippet),
-           *  not a memory; `day` is empty for those. */
-          scope: z.enum(['gezel', 'project', 'workspace']),
+          /** 'workspace' = an index-derived code hit (path:line + snippet)
+           *  and 'library' = a shared-document hit — neither is a memory, so
+           *  `day` is empty for both. */
+          scope: z.enum(['gezel', 'project', 'workspace', 'library']),
           day: z.string(),
           score: z.number(),
           /** Memory kind; absent on hits recalled before kinds existed. */

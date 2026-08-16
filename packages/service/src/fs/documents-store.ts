@@ -6,6 +6,7 @@ import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
 import { convertDocToMarkdown, isConvertibleDoc } from '../index-store/docs.js';
 import { writeFileAtomic } from './atomic.js';
+import { DocumentAuditCoalescer } from './document-audit.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
 import {
@@ -33,11 +34,18 @@ export interface DocumentsStoreOptions {
   external?: ExternalFolders;
   history?: HistoryManager;
   /**
-   * Notified on every write/delete/rename — including overwrites of an existing
-   * document, which deliberately emit NO history event (the `!existed`
-   * gate below). The global search index relies on this hook to see edits.
+   * Notified on every write/delete/rename, including overwrites. The search
+   * index relies on this hook to see edits.
    */
   onChange?: (ev: { type: 'write' | 'delete' | 'mkdir'; path: string }) => void;
+  /** Test seam: shorten the audit coalescer's quiet window. */
+  auditQuietWindowMs?: number;
+}
+
+/** Who is writing. Absent means the person, editing in the app. */
+export interface DocumentWriteActor {
+  gezelId?: string;
+  sessionId?: string;
 }
 
 /**
@@ -52,12 +60,23 @@ export class DocumentsStore {
   private readonly external?: ExternalFolders;
   private readonly history?: HistoryManager;
   private readonly onChange?: (ev: { type: 'write' | 'delete' | 'mkdir'; path: string }) => void;
+  private readonly audit: DocumentAuditCoalescer;
 
   constructor(opts: DocumentsStoreOptions) {
     this.home = opts.home;
     this.external = opts.external;
     this.history = opts.history;
     this.onChange = opts.onChange;
+    this.audit = new DocumentAuditCoalescer({
+      ...(opts.history ? { history: opts.history } : {}),
+      ...(opts.auditQuietWindowMs !== undefined ? { quietWindowMs: opts.auditQuietWindowMs } : {}),
+    });
+    this.audit.readAfter = (path) => this.readDocument(path);
+  }
+
+  /** Close any open edit windows — called on service shutdown. */
+  async flushAudit(): Promise<void> {
+    await this.audit.flushAll();
   }
 
   private notifyChange(type: 'write' | 'delete' | 'mkdir', path: string): void {
@@ -149,19 +168,37 @@ export class DocumentsStore {
     }
   }
 
-  async writeDocument(filePath: string, content: string): Promise<void> {
+  async writeDocument(
+    filePath: string,
+    content: string,
+    actor?: DocumentWriteActor,
+  ): Promise<void> {
     const full = this.resolveWritePath(filePath);
     const existed = await pathExists(full);
+    // Read the prior content before overwriting so the audit trail can say
+    // how much moved, not merely that something did.
+    const before =
+      existed && !isOutsideInInternalPath(filePath) ? await this.readDocument(filePath) : null;
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content);
     this.notifyChange('write', filePath);
-    if (!existed && !isOutsideInInternalPath(filePath)) {
+    if (isOutsideInInternalPath(filePath)) return;
+    if (!existed) {
       await this.history?.log({
         kind: 'document.created',
         summary: `Created document ${filePath}`,
+        ...(actor?.gezelId ? { gezelId: actor.gezelId } : {}),
         details: { path: filePath, bytes: content.length },
       });
+      return;
     }
+    this.audit.note({
+      path: filePath,
+      before,
+      bytes: content.length,
+      source: actor?.gezelId ? 'gezel' : 'ui',
+      ...(actor ? { actor } : {}),
+    });
   }
 
   async writeDocumentBinary(filePath: string, data: Uint8Array): Promise<void> {
@@ -179,14 +216,17 @@ export class DocumentsStore {
     }
   }
 
-  async deleteDocument(filePath: string): Promise<void> {
+  async deleteDocument(filePath: string, actor?: DocumentWriteActor): Promise<void> {
     const full = this.resolveWritePath(filePath);
+    // The edits belong to the document while it still exists.
+    await this.audit.flushPath(filePath);
     await rm(full, { recursive: true, force: true });
     this.notifyChange('delete', filePath);
     if (!isOutsideInInternalPath(filePath)) {
       await this.history?.log({
         kind: 'document.deleted',
         summary: `Deleted document ${filePath}`,
+        ...(actor?.gezelId ? { gezelId: actor.gezelId } : {}),
         details: { path: filePath },
       });
     }
@@ -206,6 +246,8 @@ export class DocumentsStore {
   }
 
   async renameDocument(fromPath: string, toPath: string): Promise<void> {
+    // Close the sitting against the name the edits were made under.
+    await this.audit.flushPath(fromPath);
     const fromFull = this.resolveWritePath(fromPath);
     const toFull = this.resolveWritePath(toPath);
     if (fromFull === this.documentsDir() || toFull === this.documentsDir()) {

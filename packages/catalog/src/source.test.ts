@@ -824,12 +824,10 @@ describe('BundledSource — project types', () => {
   });
 
   it('resolves a minimal project type and fills composition defaults', async () => {
-    const dir = await writeIdentity(
-      root,
-      'project-type',
-      'nn-type',
-      projectTypeIdentity('nn-type'),
-    );
+    const dir = await writeIdentity(root, 'project-type', 'nn-type', {
+      ...projectTypeIdentity('nn-type'),
+      icon: 'server',
+    });
     await writeVersion(dir, '1.0.0', {
       schemaVersion: 1,
       version: '1.0.0',
@@ -842,6 +840,7 @@ describe('BundledSource — project types', () => {
     expect(detail).not.toBeNull();
     if (!detail || detail.manifest.kind !== 'project-type') throw new Error('wrong kind');
     expect(detail.manifest.extends).toBe('email');
+    expect(detail.manifest.icon).toBe('server');
     expect(detail.manifest.gezels).toEqual([]);
     expect(detail.manifest.toolsets).toEqual([]);
     expect(detail.manifest.tools).toEqual([]);

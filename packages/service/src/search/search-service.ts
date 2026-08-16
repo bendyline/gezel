@@ -1,6 +1,7 @@
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
+import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import { embedQuery } from '../memory/embeddings.js';
@@ -180,6 +181,9 @@ export class SearchService {
     }
     for (const d of documents) {
       if (d.isDirectory) continue;
+      // Companion twins of a binary document (`brief.docx_files/brief.md`)
+      // are a derived view of a document already listed here.
+      if (isLibraryInternalPath(d.path)) continue;
       entries.push({
         kind: 'document',
         id: `document:${d.path}`,
@@ -191,7 +195,11 @@ export class SearchService {
 
     // File paths from each project's persisted files.json (no re-walk), plus
     // indexed artifact-corpus records (connector data under artifacts/data/**).
-    const fileLists = await mapPool(projects, FANOUT_CONCURRENCY, async (p) => {
+    // The library's files are already in the catalog as `document` entries
+    // above; walking it again here would list every document twice, once as
+    // a document and once as a file in a project the user never opens.
+    const fileListProjects = projects.filter((p) => !isSharedLibraryProject(p));
+    const fileLists = await mapPool(fileListProjects, FANOUT_CONCURRENCY, async (p) => {
       const [files, artifactFiles] = await Promise.all([
         this.indexManager.readFiles(p.id).catch(() => []),
         this.contentIndex.listArtifactIndexFiles(p.id, ARTIFACT_CATALOG_CAP).catch(() => []),
@@ -286,6 +294,10 @@ export class SearchService {
     // One pool unit per project: code + docs + symbols + project memory.
     const perProject = projects.map((p) => async () => {
       const out: UnifiedSearchResult[] = [];
+      // The shared library has its own arm below, emitting `document` rows.
+      // Running it here too would list every document a second time as
+      // project content.
+      if (isSharedLibraryProject(p)) return out;
       const workspaceIndexing = p.indexingEnabled !== false;
       const codeOpts = vector
         ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
@@ -430,10 +442,21 @@ export class SearchService {
         });
       });
       globalTasks.push(async () => {
-        const hits = await globalIndex.searchDocuments(query, PER_SOURCE_RESULTS).catch(() => []);
+        // The library is a project now, so its content search is the ranked
+        // hybrid one. It is emitted as `document` rather than `content` (and
+        // skipped in the per-project loop) so a library hit reads as "a
+        // document" wherever it surfaces, not as a file in some project.
+        const libraryId = await this.store.sharedProjectId().catch(() => null);
+        if (!libraryId) return [];
+        const found = await this.contentIndex
+          .searchLibrary(libraryId, query, {
+            maxResults: PER_SOURCE_RESULTS,
+            ...(vector ? { queryVector: vector } : {}),
+          })
+          .catch(() => null);
         // Same id scheme as the catalog's document entries, so a name hit and
         // a content hit on one document collapse to a single row in merge().
-        return hits.map((h) => ({
+        return (found?.results ?? []).map((h) => ({
           kind: 'document' as const,
           id: `document:${h.path}`,
           title: basename(h.path),
@@ -441,7 +464,7 @@ export class SearchService {
           snippet: h.snippet,
           path: h.path,
           line: h.lineStart,
-          score: 0.6 * WEIGHT.document,
+          score: clamp01(h.score ?? 0.6) * WEIGHT.document,
         }));
       });
     }

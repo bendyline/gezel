@@ -29,6 +29,7 @@ import { GezelActionsMenu } from './GezelActionsMenu.js';
 import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
+import { ProjectIcon } from './ProjectIcon.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
@@ -199,16 +200,6 @@ function readStoredGroups(): Record<GroupId, boolean> {
   } catch {
     return { ...DEFAULT_GROUPS };
   }
-}
-
-/** Stable color + initial for a project's icon badge (no avatar data). */
-function projectInitial(name: string): string {
-  return (name.trim()[0] ?? '?').toUpperCase();
-}
-function hueFromString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
 }
 
 export function Sidebar({
@@ -724,13 +715,7 @@ export function Sidebar({
                     title={p.name}
                     aria-current={activeKey === key ? 'page' : undefined}
                   >
-                    <span
-                      className="app-sidebar-item-icon app-sidebar-proj-badge"
-                      style={{ background: `hsl(${hueFromString(p.id)}, 50%, 42%)` }}
-                      aria-hidden="true"
-                    >
-                      {projectInitial(p.name)}
-                    </span>
+                    <ProjectIcon project={p} size={18} className="app-sidebar-item-icon" />
                     <span className="app-sidebar-item-label">
                       {p.name}
                       {p.storageScope === 'machine-shared' && (

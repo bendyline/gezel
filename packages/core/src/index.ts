@@ -10,6 +10,7 @@ export * from './engagement.js';
 export * from './entity-id.js';
 export * from './night-shift.js';
 export * from './project-properties.js';
+export * from './project-icons.js';
 export * from './shared-project.js';
 export * from './growth-cosmetics.js';
 export * from './security/policy.js';

@@ -36,6 +36,14 @@ export interface DiscoverWorkspaceFilesOptions {
    * degrades to the filesystem walk instead of blocking the request.
    */
   gitTimeoutMs?: number;
+  /**
+   * Extra per-path exclusion, applied to the forward-slashed relative path in
+   * both discovery modes. The shared document library uses it to skip
+   * outside-in companion twins (a derived markdown view of a document that is
+   * itself in the listing) and cloud-sync droppings — content the old
+   * documents indexer filtered and a plain workspace walk knows nothing about.
+   */
+  ignorePath?: (relPath: string) => boolean;
 }
 
 /**
@@ -53,11 +61,16 @@ export async function discoverWorkspaceFiles(
   workspaceDir: string,
   opts: DiscoverWorkspaceFilesOptions,
 ): Promise<DiscoveredWorkspaceFile[]> {
-  const gitPaths = await listGitVisiblePaths(workspaceDir, opts.maxFiles, opts.gitTimeoutMs);
+  const gitPaths = await listGitVisiblePaths(
+    workspaceDir,
+    opts.maxFiles,
+    opts.gitTimeoutMs,
+    opts.ignorePath,
+  );
   if (gitPaths) return statListedFiles(workspaceDir, gitPaths, opts.maxFiles);
 
   const out: DiscoveredWorkspaceFile[] = [];
-  await walkFilesystem(workspaceDir, workspaceDir, out, opts.maxFiles);
+  await walkFilesystem(workspaceDir, workspaceDir, out, opts.maxFiles, opts.ignorePath);
   return out;
 }
 
@@ -69,6 +82,7 @@ async function listGitVisiblePaths(
   workspaceDir: string,
   maxFiles: number,
   timeoutMs = 30_000,
+  ignorePath?: (relPath: string) => boolean,
 ): Promise<string[] | null> {
   try {
     const { stdout } = await runGit(
@@ -91,6 +105,7 @@ async function listGitVisiblePaths(
       if (!raw) continue;
       const path = raw.replaceAll('\\', '/').replace(/^\.\//, '');
       if (!path || seen.has(path) || containsAlwaysSkippedDir(path)) continue;
+      if (ignorePath?.(path)) continue;
       seen.add(path);
       paths.push(path);
       if (paths.length >= maxFiles) break;
@@ -140,6 +155,7 @@ async function walkFilesystem(
   dir: string,
   out: DiscoveredWorkspaceFile[],
   maxFiles: number,
+  ignorePath?: (relPath: string) => boolean,
 ): Promise<void> {
   if (out.length >= maxFiles) return;
   let entries: import('node:fs').Dirent[];
@@ -152,13 +168,15 @@ async function walkFilesystem(
     if (out.length >= maxFiles) return;
     if (entry.isDirectory() && ALWAYS_SKIP_DIRS.has(entry.name)) continue;
     const abs = join(dir, entry.name);
+    const rel = relative(root, abs).replaceAll('\\', '/');
+    if (ignorePath?.(rel)) continue;
     if (entry.isDirectory()) {
-      await walkFilesystem(root, abs, out, maxFiles);
+      await walkFilesystem(root, abs, out, maxFiles, ignorePath);
     } else if (entry.isFile()) {
       try {
         const st = await lstat(abs);
         out.push({
-          path: relative(root, abs).replaceAll('\\', '/'),
+          path: rel,
           abs,
           size: st.size,
           mtimeMs: st.mtimeMs,

@@ -3,6 +3,7 @@ import { readFile, readdir, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { nowIso } from '@bendyline/gezel';
 import { PROJECT_SHADOW_DIR_NAME, projectLocalIndexDbFile } from '@bendyline/gezel/paths';
+import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import { indexFileSecurity } from '../security/extract.js';
 import { discoverWorkspaceFiles } from '../workspace/file-walk.js';
 import { classifyFile, isDenseBlob } from './classify.js';
@@ -88,6 +89,7 @@ export async function indexWorkspaceContent(
   store: IndexStore,
   workspaceDir: string,
   artifactsDir: string,
+  opts: { scope?: 'workspace' | 'library' } = {},
 ): Promise<ContentIndexStats> {
   const stats: ContentIndexStats = {
     scanned: 0,
@@ -101,7 +103,15 @@ export async function indexWorkspaceContent(
   const indexedAt = nowIso();
   const forceCode = store.getMeta('extractor_version') !== String(EXTRACTOR_VERSION);
 
-  const walkedFiles = await discoverWorkspaceFiles(workspaceDir, { maxFiles: MAX_FILES });
+  const walkedFiles = await discoverWorkspaceFiles(workspaceDir, {
+    maxFiles: MAX_FILES,
+    // The shared document library is a user folder, not a source tree: it
+    // holds outside-in companion twins (a derived markdown view of a
+    // document already in the listing) and whatever a cloud-sync client
+    // leaves behind. Indexing either produces a second, worse hit for the
+    // same document.
+    ...(opts.scope === 'library' ? { ignorePath: isLibraryInternalPath } : {}),
+  });
   for (const file of walkedFiles) {
     stats.scanned++;
     seen.add(file.path);
