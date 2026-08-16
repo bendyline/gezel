@@ -27,6 +27,8 @@ import {
   foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
+  isPayloadMutationToolName,
+  isWriteShapedToolName,
   parseGemmaToolCall,
   parseJsonEnvelopeToolCall,
   parseJsonEnvelopeToolCalls,
@@ -1518,6 +1520,83 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
       8192,
     );
     expect(twice).toBe(once);
+  });
+
+  it('steers even when the cap ate the ARGUMENTS json and the args arrived sanitized', () => {
+    // The shape this helper exists for: generation stopped inside the
+    // arguments, so nothing parsed and the call reaches us as `{}` — no
+    // `content` to prove truncation with. Without the caller's vouch the
+    // guard skipped exactly the case it was written to catch, and the
+    // model saw only "malformed JSON — emit one new compact call", which
+    // reads as an invitation to rewrite the whole file again.
+    const before = 'ERROR: `write_file` was not executed because the model emitted malformed JSON.';
+    const after = appendCapTruncationHintToRejectedWrite(before, 'write_file', {}, 16384, {
+      argsLostToCap: true,
+      pathHint: 'index.html',
+    });
+    expect(after).not.toBe(before);
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('max_tokens=16384');
+    expect(after).toContain('replace_in_file(path="index.html"');
+    expect(after).toContain('do not retry a full rewrite');
+  });
+
+  it('covers payload-carrying mutations beyond whole-file writes', () => {
+    for (const toolName of [
+      'insert_at_marker',
+      'replace_in_file',
+      'replace_lines',
+      'apply_patch',
+    ]) {
+      const before = `ERROR: ${toolName} was rejected: index.html has an unterminated <script>.`;
+      const after = appendCapTruncationHintToRejectedWrite(
+        before,
+        toolName,
+        { path: 'index.html', content: 'A'.repeat(30000) },
+        16384,
+      );
+      expect(after, toolName).toContain('hit the per-turn output token cap');
+      expect(after, toolName).toContain(`\`${toolName}\` call for \`index.html\``);
+    }
+  });
+
+  it('names the strategy instead of a fake path when none was recovered', () => {
+    const before = 'ERROR: `insert_at_marker` was not executed — malformed JSON arguments.';
+    const after = appendCapTruncationHintToRejectedWrite(before, 'insert_at_marker', {}, 16384, {
+      argsLostToCap: true,
+    });
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('replace_in_file');
+    // A `(unknown path)` placeholder inside a call example gets copied
+    // verbatim by small local models.
+    expect(after).not.toContain('(unknown path)');
+    expect(after).not.toContain('path="');
+  });
+
+  it('still skips a non-truncated write whose args carry no content', () => {
+    const before = 'ERROR: bad call';
+    expect(appendCapTruncationHintToRejectedWrite(before, 'write_file', { path: 'x' }, 8192)).toBe(
+      before,
+    );
+  });
+});
+
+describe('write-shaped vs payload-mutation tool sets', () => {
+  it('keeps whole-file semantics narrow and cap detection wide', () => {
+    for (const name of ['write_file', 'write_artifact', 'append_to_file']) {
+      expect(isWriteShapedToolName(name), name).toBe(true);
+      expect(isPayloadMutationToolName(name), name).toBe(true);
+    }
+    // Payload-carrying, but a partial one never lands on disk — so these
+    // must stay out of the `{path, content}` salvage/repair paths while
+    // still being visible to cap detection.
+    for (const name of ['insert_at_marker', 'replace_in_file', 'replace_lines', 'apply_patch']) {
+      expect(isWriteShapedToolName(name), name).toBe(false);
+      expect(isPayloadMutationToolName(name), name).toBe(true);
+    }
+    for (const name of ['read_file', 'set_task_status', 'browser_navigate']) {
+      expect(isPayloadMutationToolName(name), name).toBe(false);
+    }
   });
 });
 

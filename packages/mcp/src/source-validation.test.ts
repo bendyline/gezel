@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { validateSourceContent } from './source-validation.js';
+import { locateUnterminatedConstruct, validateSourceContent } from './source-validation.js';
+
+/** 1-based line/col of an offset, for asserting locator results. */
+function at(source: string, offset: number): { line: number; col: number } {
+  const before = source.slice(0, offset);
+  return { line: before.split('\n').length, col: offset - before.lastIndexOf('\n') };
+}
 
 describe('validateSourceContent', () => {
   describe('unrelated extensions', () => {
@@ -294,5 +300,102 @@ draw();
       );
       expect(res?.ok).toBe(false);
     });
+  });
+});
+
+describe('locateUnterminatedConstruct', () => {
+  it('points at the opening /* of an unclosed block comment', () => {
+    const src = 'const a = 1;\nfoo();\n/* section marker\n';
+    const found = locateUnterminatedConstruct(src);
+    expect(found).not.toBeNull();
+    expect(at(src, found!.start)).toEqual({ line: 3, col: 1 });
+    expect(found!.label).toBe('block comment');
+    expect(found!.closer).toBe('*/');
+  });
+
+  it('points at the opening backtick of an unclosed template literal', () => {
+    const src = 'const a = 1;\nconst s = `oops;\nbar();\n';
+    const found = locateUnterminatedConstruct(src);
+    expect(at(src, found!.start)).toEqual({ line: 2, col: 11 });
+    expect(found!.closer).toBe('`');
+  });
+
+  it('points at the opening brace of an unclosed block', () => {
+    const src = 'const a = 1;\nfunction f() {\n  g();\n';
+    const found = locateUnterminatedConstruct(src);
+    expect(at(src, found!.start)).toEqual({ line: 2, col: 14 });
+    expect(found!.closer).toBe('}');
+  });
+
+  it('points into the unclosed call for a dangling paren', () => {
+    const src = 'const a = 1;\nfoo(1,\n';
+    const found = locateUnterminatedConstruct(src);
+    expect(at(src, found!.start).line).toBe(2);
+    expect(found!.closer).toBe(')');
+  });
+
+  it('returns null when the parse error is interior — that position is already correct', () => {
+    expect(locateUnterminatedConstruct('const a = 1;\nlet 3x = 5;\nbar();\n')).toBeNull();
+  });
+
+  it('returns null for source that parses', () => {
+    expect(
+      locateUnterminatedConstruct('const a = 1;\nfunction f(){ return `x${a}`; }\n'),
+    ).toBeNull();
+  });
+
+  it('does not mistake a /* inside a string literal for a comment opener', () => {
+    const src = 'const s = "/*";\nfunction f() {\n';
+    const found = locateUnterminatedConstruct(src);
+    expect(found!.closer).toBe('}');
+    expect(at(src, found!.start)).toEqual({ line: 2, col: 14 });
+  });
+
+  it('locates unterminated constructs in .ts sources despite type syntax', () => {
+    const src = 'const a: number = 1;\nfunction f(x: string) {\n  g(x);\n';
+    const found = locateUnterminatedConstruct(src, 4 /* ts.ScriptKind.TS */);
+    expect(found!.closer).toBe('}');
+    expect(at(src, found!.start)).toEqual({ line: 2, col: 23 });
+  });
+});
+
+describe('unterminated-construct reporting (vampire-survivors regression)', () => {
+  // The model appended a section marker it never closed, as the last
+  // line of an insert_at_marker payload. Both parsers could only report
+  // end-of-input, which lands on `</script>` — so the tool told the
+  // model to edit the one line that was correct, and its next attempt
+  // deleted `</script>`.
+  const html = [
+    '<!DOCTYPE html>',
+    '<html><body>',
+    '<canvas id="c"></canvas>',
+    '<script>',
+    "const ctx = document.getElementById('c').getContext('2d');",
+    'function spawn() { ctx.fillRect(0, 0, 1, 1); }',
+    '',
+    '/* ===SPAWN-END===',
+    '</script>',
+    '</body></html>',
+  ].join('\n');
+
+  it('names the comment opener, not the </script> line', () => {
+    const res = validateSourceContent('index.html', html);
+    expect(res?.ok).toBe(false);
+    const { message } = res as { message: string };
+    expect(message).toContain('block comment at line 8');
+    expect(message).toContain('*/');
+    expect(message).not.toContain('at line 9');
+  });
+
+  it('tells the model NOT to edit the closing tag', () => {
+    const { message } = validateSourceContent('index.html', html) as { message: string };
+    expect(message).toMatch(/do not edit the last line of the script or the <\/script> tag/i);
+  });
+
+  it('still reports interior syntax errors at their own position', () => {
+    const broken = html.replace('/* ===SPAWN-END===', 'let 3bad = 1;');
+    const { message } = validateSourceContent('index.html', broken) as { message: string };
+    expect(message).toContain('line 8');
+    expect(message).not.toContain('block comment');
   });
 });

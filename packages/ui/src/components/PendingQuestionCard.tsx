@@ -9,6 +9,7 @@ import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab } from './nav-actions.js';
 import { questionChatTarget } from './question-nav.js';
+import { toolDisplayName } from './tool-display.js';
 
 type NpmDecision = NpmInstallApprovalDecision['decision'];
 
@@ -502,7 +503,10 @@ function ToolPermissionForm({
     <div className="pending-question pending-question-pending pending-question-tool-permission">
       <ContextStrip question={question} />
       <div className="pending-question-prompt">
-        Claude wants to use the <code>{intent.toolName}</code> tool.
+        {/* The raw slug rides along as the title so a power user can still
+            see which tool this is without it being the headline. */}
+        Your gezel wants to use the{' '}
+        <strong title={intent.toolName}>{toolDisplayName(intent.toolName)}</strong> tool.
       </div>
       {Object.keys(intent.toolInput).length > 0 && (
         <details className="pending-question-tool-args" open>

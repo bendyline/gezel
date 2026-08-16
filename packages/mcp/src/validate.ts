@@ -28,6 +28,7 @@
  */
 
 import ts from 'typescript';
+import { locateUnterminatedConstruct } from './source-validation.js';
 
 export type ValidateCheck =
   | { ok: true; name: string; detail?: string }
@@ -210,6 +211,33 @@ interface InlineScriptForLint {
   openLine: number;
 }
 
+/**
+ * Markup that does nothing without JavaScript. A page carrying one of
+ * these and no `<script>` at all is not a static page — it is a page
+ * whose code is missing.
+ *
+ * This exists because `script-tag-present` reported PASS with the detail
+ * "no inline scripts (valid for a static page)" for a game whose entire
+ * engine had been dropped on a retry: a `<canvas>`, a full HUD, and zero
+ * lines of JS. The gezel read that PASS as proof the page worked and
+ * reported "clean headless load" to the user.
+ */
+const INERT_WITHOUT_SCRIPT: ReadonlyArray<{ re: RegExp; what: string }> = [
+  { re: /<canvas\b/i, what: '<canvas> element' },
+  {
+    re: /\son(?:click|change|input|submit|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseover|mouseout|touchstart|touchend|touchmove|load|focus|blur|error|scroll|resize)\s*=/i,
+    what: 'inline event-handler attribute',
+  },
+];
+
+function inertMarkupWithoutScript(html: string): { what: string; line: number } | null {
+  for (const { re, what } of INERT_WITHOUT_SCRIPT) {
+    const m = re.exec(html);
+    if (m) return { what, line: (html.slice(0, m.index).match(/\n/g)?.length ?? 0) + 1 };
+  }
+  return null;
+}
+
 function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
   if (!content.text) {
     return [
@@ -231,6 +259,19 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
   const opens = (html.match(SCRIPT_OPEN_RE) ?? []).length;
   const closes = (html.match(SCRIPT_CLOSE_RE) ?? []).length;
   if (opens === 0) {
+    const inert = inertMarkupWithoutScript(html);
+    if (inert) {
+      checks.push({
+        ok: false,
+        name: 'script-tag-present',
+        message: `page has a ${inert.what} but no <script> at all — this markup is inert, so nothing on the page can run`,
+        location: { line: inert.line },
+        excerpt: buildExcerpt(html, inert.line, 2),
+        fixHint:
+          'the page is missing its JavaScript entirely — a syntax pass on markup alone is not evidence it works. Add the <script> block that drives it, then re-validate.',
+      });
+      return checks;
+    }
     checks.push({
       ok: true,
       name: 'script-tag-present',
@@ -276,6 +317,26 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
       ? tryParseSource(body, ts.ScriptKind.JS)
       : tryParseFunctionBody(body);
     if (parseError) {
+      // An unclosed comment/brace/template consumes the remainder of the
+      // script, so every parser can only report end-of-input — which for
+      // an inline script is the </script> line. Naming that line sends
+      // the model to edit the one line that was correct.
+      const unterminated = locateUnterminatedConstruct(body);
+      if (unterminated) {
+        const before = body.slice(0, unterminated.start);
+        const newlines = before.match(/\n/g)?.length ?? 0;
+        const fileLine = openLine + newlines;
+        const col = newlines > 0 ? unterminated.start - before.lastIndexOf('\n') : undefined;
+        checks.push({
+          ok: false,
+          name: scriptIdx === 1 ? 'script-body-parses' : `script-body-parses[${scriptIdx}]`,
+          message: `unterminated ${unterminated.label} — it swallows the rest of the script, so nothing on the page runs`,
+          location: { line: fileLine, ...(col ? { col } : {}) },
+          excerpt: buildExcerpt(html, fileLine, 2),
+          fixHint: `add the missing \`${unterminated.closer}\` where that construct should end. The defect is at line ${fileLine}, not at the end of the script — do not edit or remove the </script> tag.`,
+        });
+        return checks;
+      }
       // V8's error message often includes "line N, col M"; pull it out
       // for a clean location field. Fall back to the script's opening
       // line if the parser didn't surface coordinates.

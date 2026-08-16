@@ -1411,6 +1411,10 @@ html.embedded-chat #root {
 .engine-pill-live-tokens {
   opacity: 0.78;
 }
+.engine-pill-live-rate {
+  opacity: 0.78;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Compact prefill progress bar — replaces the verbose "X / Y tokens
    · Z tok/s" label when an `engine_phase` event carries a progress
@@ -1580,6 +1584,33 @@ html.embedded-chat #root {
 }
 .engine-pill-memory {
   min-width: 14rem;
+}
+/* Per-model decode speed. Same three-column idiom as the VRAM owner
+   rows above it, so the popover reads as one table of machine facts. */
+.engine-pill-model-speeds {
+  display: grid;
+  gap: 0.12rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.engine-pill-model-speeds > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.engine-pill-model-speed-name {
+  overflow-wrap: anywhere;
+}
+.engine-pill-model-speed-rate {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.engine-pill-model-speed-turns {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
 }
 .machine-memory-strip {
   display: flex;
@@ -5536,10 +5567,14 @@ button.danger {
 
 /* ── Flat file list (view modes beyond the tree) ── */
 
-/* The view-mode tray sits on its own full-width header row, like the
-   index summary above — the 2-column header grid stays intact. */
-.file-view-tray {
+/* The trays sit on their own full-width header row, like the index summary
+   above — the 2-column header grid stays intact. */
+.file-tree-toolbar {
   grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .file-flat-parent {
@@ -7500,8 +7535,25 @@ button.danger {
   letter-spacing: 0.04em;
 }
 
+.chat-composer-to-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.2;
+}
+
 .chat-composer-to-name {
   font-weight: 500;
+}
+
+.chat-composer-to-role {
+  overflow: hidden;
+  max-width: 12rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-composer-to-recipient {

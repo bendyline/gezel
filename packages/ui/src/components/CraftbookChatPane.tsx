@@ -86,6 +86,7 @@ export function CraftbookChatPane({
       <ChatComposer
         gezelId={gezel.id}
         gezelName={gezel.name}
+        gezelRole={gezel.role}
         gezelIcon={gezel.icon ?? null}
         {...(gezel.poppetje ? { gezelPoppetje: gezel.poppetje } : {})}
         {...(gezel.iconOverride ? { gezelIconOverride: gezel.iconOverride } : {})}

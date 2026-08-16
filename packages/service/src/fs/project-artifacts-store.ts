@@ -106,27 +106,35 @@ export class ProjectArtifactsStore {
     return projectArtifactsDir(this.home, id, this.external);
   }
 
-  async listProjectArtifacts(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
-    const entries = await listDirEntries(this.projectArtifactsDir(id), subpath);
+  async listProjectArtifacts(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    const entries = await listDirEntries(this.projectArtifactsDir(id), subpath, {
+      includeHidden: opts?.includeHidden === true,
+    });
     // The reserved shadow cache stays out of listings (it would drown real
-    // artifacts); explicit-path reads under shadow/ still work.
-    if (subpath !== '') return entries;
+    // artifacts); explicit-path reads under shadow/ still work. `includeHidden`
+    // is the user asking to see it anyway.
+    if (subpath !== '' || opts?.includeHidden) return entries;
     return entries.filter((e) => !(e.isDirectory && e.name === PROJECT_SHADOW_DIR_NAME));
   }
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<ProjectFileEntry[]> {
     return (await this.listProjectArtifactsRecursiveDetailed(id, opts)).entries;
   }
 
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<WalkDirResult> {
     return walkDirDetailed(this.projectArtifactsDir(id), {
       ...(opts?.withStats ? { withStats: true } : {}),
+      ...(opts?.includeHidden ? { includeHidden: true } : {}),
       skipRootDirs: SHADOW_SKIP,
     });
   }

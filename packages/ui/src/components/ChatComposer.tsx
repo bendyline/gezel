@@ -80,6 +80,11 @@ export interface ChatComposerProps {
   gezelId: string;
   /** The primary recipient's display name — rendered in the "To:" pill. */
   gezelName: string;
+  /**
+   * The primary recipient's role, rendered under the name on the "To:" line.
+   * Suppressed in boring mode, where the rendered name is already the role.
+   */
+  gezelRole?: string;
   /** The primary recipient's sanitized SVG icon. */
   gezelIcon?: string | null;
   /** The primary recipient's persisted poppetje. */
@@ -209,6 +214,7 @@ export interface ChatComposerProps {
 export function ChatComposer({
   gezelId,
   gezelName,
+  gezelRole,
   gezelIcon,
   gezelPoppetje,
   gezelIconOverride,
@@ -1116,7 +1122,12 @@ export function ChatComposer({
           name={gezelName}
           size={18}
         />
-        <span className="chat-composer-to-name">{gezelName}</span>
+        <span className="chat-composer-to-text">
+          <span className="chat-composer-to-name">{gezelName}</span>
+          {!roleBasedNameOnlyMode && gezelRole && (
+            <span className="chat-composer-to-role">{gezelRole}</span>
+          )}
+        </span>
         {additionalRecipients.map((recipient) => {
           const rendered = displayName(
             { name: recipient.name, roleBasedName: recipient.roleBasedName },
@@ -1131,7 +1142,12 @@ export function ChatComposer({
                 name={rendered}
                 size={18}
               />
-              <span className="chat-composer-to-name">{rendered}</span>
+              <span className="chat-composer-to-text">
+                <span className="chat-composer-to-name">{rendered}</span>
+                {!roleBasedNameOnlyMode && recipient.role && (
+                  <span className="chat-composer-to-role">{recipient.role}</span>
+                )}
+              </span>
               <button
                 type="button"
                 className="chat-composer-recipient-remove"

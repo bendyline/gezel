@@ -1094,6 +1094,13 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('turn_stats'),
     provider: z.enum(['llama-cpp', 'ollama', 'mlx', 'ds4']),
+    /**
+     * Model that generated the turn, as the session recorded it. Lets the
+     * UI bucket speed by model instead of averaging a 27B and a 4B into
+     * one meaningless number. Optional because older daemons (and remote
+     * peers on an older wire) don't send it.
+     */
+    model: z.string().optional(),
     promptTokens: z.number().int().nonnegative(),
     completionTokens: z.number().int().nonnegative(),
     durationMs: z.number().int().nonnegative(),

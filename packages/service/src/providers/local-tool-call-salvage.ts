@@ -3326,6 +3326,29 @@ function stripTrailingCommas(json: string): string {
  */
 const WRITE_SHAPED_TOOL_NAMES = new Set(['write_file', 'write_artifact', 'append_to_file']);
 
+/**
+ * Mutation tools whose arguments carry a content payload large enough for
+ * the per-turn output cap to cut mid-stream. A superset of
+ * {@link WRITE_SHAPED_TOOL_NAMES}.
+ *
+ * These extra entries deliberately do NOT join the write-shaped set: they
+ * lack whole-file write semantics, so a partial `insert_at_marker` never
+ * lands on disk and the salvage/repair paths that synthesize a
+ * `{path, content}` call from partial args would corrupt them. But a cap
+ * that cuts one of them is the same failure with the same recovery — a
+ * sequence of smaller targeted edits — so the cap-truncation steer covers
+ * this wider set. Wild-caught on a 16384-token `write_file` that, once
+ * rejected, retried twice as an equally-truncated `insert_at_marker` with
+ * no hint and no warning either time.
+ */
+const PAYLOAD_MUTATION_TOOL_NAMES = new Set([
+  ...WRITE_SHAPED_TOOL_NAMES,
+  'insert_at_marker',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+]);
+
 export interface TruncationSalvageResult {
   /**
    * Synthesized tool call carrying the partial bytes — provider-agnostic
@@ -3472,27 +3495,47 @@ export function appendTruncationHintToToolResult(
  *
  * Idempotent via the stable `hit the per-turn output token cap` marker.
  * Returns the input unchanged when:
- *   - the tool name isn't write-shaped
+ *   - the tool name isn't a payload-carrying mutation
  *   - the result is NOT an `ERROR:` (the write landed; nothing to steer)
- *   - `args.content` isn't a string (nothing was truncated)
+ *   - `args.content` isn't a string AND the caller didn't flag the args as
+ *     lost to the cap (nothing was truncated)
  */
 export function appendCapTruncationHintToRejectedWrite(
   toolResult: string,
   toolName: string,
   args: Record<string, unknown>,
   maxTokens: number | null,
+  opts?: {
+    /**
+     * The arguments JSON itself was cut by the cap and never parsed, so
+     * the call arrived sanitized (no `content`, usually no `path`). This
+     * is the failure the helper exists for — and, until it was passed,
+     * the one shape whose `args.content` guard silently skipped it.
+     */
+    argsLostToCap?: boolean;
+    /** Path recovered from the unparseable argument prefix. */
+    pathHint?: string | null;
+  },
 ): string {
-  if (!WRITE_SHAPED_TOOL_NAMES.has(toolName)) return toolResult;
+  if (!PAYLOAD_MUTATION_TOOL_NAMES.has(toolName)) return toolResult;
   if (!toolResult.startsWith('ERROR:')) return toolResult;
-  if (typeof args.content !== 'string') return toolResult;
+  if (typeof args.content !== 'string' && !opts?.argsLostToCap) return toolResult;
   if (toolResult.includes('hit the per-turn output token cap')) return toolResult;
   const path =
-    typeof args.path === 'string'
-      ? args.path
-      : typeof args.name === 'string'
-        ? args.name
-        : '(unknown path)';
+    typeof opts?.pathHint === 'string' && opts.pathHint
+      ? opts.pathHint
+      : typeof args.path === 'string'
+        ? args.path
+        : typeof args.name === 'string'
+          ? args.name
+          : null;
   const capLabel = maxTokens !== null ? ` (max_tokens=${maxTokens})` : '';
+  // Without a recovered path the parameterized examples would read
+  // `replace_in_file(path="(unknown path)")` — a call shape the model can
+  // and does copy verbatim. Name the strategy instead of a fake target.
+  if (!path) {
+    return `${toolResult}\n\n[runtime] Your \`${toolName}\` call hit the per-turn output token cap${capLabel} mid-content — the payload never finished, the call was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead (\`replace_in_file\` or \`replace_lines\`), naming the target file explicitly, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+  }
   return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` hit the per-turn output token cap${capLabel} mid-content — the file body never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead: \`replace_in_file(path="${path}", find="...", replace="...")\` or \`replace_lines(path="${path}", startLine=N, endLine=M, content="...")\`, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
 }
 
@@ -3502,4 +3545,15 @@ export function appendCapTruncationHintToRejectedWrite(
  */
 export function isWriteShapedToolName(name: string): boolean {
   return WRITE_SHAPED_TOOL_NAMES.has(name);
+}
+
+/**
+ * Test seam / provider seam for {@link PAYLOAD_MUTATION_TOOL_NAMES} — the
+ * wider set a per-turn output cap can cut mid-payload. Use this for cap
+ * detection; use {@link isWriteShapedToolName} for anything that assumes
+ * whole-file write semantics (partial-bytes-landed hints, `{path, content}`
+ * salvage, append-based continuation).
+ */
+export function isPayloadMutationToolName(name: string): boolean {
+  return PAYLOAD_MUTATION_TOOL_NAMES.has(name);
 }

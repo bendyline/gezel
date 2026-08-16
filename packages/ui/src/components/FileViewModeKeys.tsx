@@ -60,6 +60,21 @@ const FlatCriticalityIcon = () => (
   </svg>
 );
 
+const HiddenFilesIcon = () => (
+  <svg {...ICON_PROPS} aria-hidden="true">
+    <path d="M1.4 8S3.8 3.8 8 3.8 14.6 8 14.6 8 12.2 12.2 8 12.2 1.4 8 1.4 8Z" />
+    <circle cx="8" cy="8" r="1.9" strokeWidth="1.3" />
+  </svg>
+);
+
+const HiddenFilesOffIcon = () => (
+  <svg {...ICON_PROPS} aria-hidden="true">
+    <path d="M1.4 8S3.8 3.8 8 3.8 14.6 8 14.6 8 12.2 12.2 8 12.2 1.4 8 1.4 8Z" />
+    <circle cx="8" cy="8" r="1.9" strokeWidth="1.3" />
+    <path d="M2.6 13.4 13.4 2.6" />
+  </svg>
+);
+
 const MODE_KEYS: Record<FileViewMode, { label: string; hint: string; icon: () => JSX.Element }> = {
   'tree-alpha': {
     label: 'Folders, A to Z',
@@ -126,6 +141,43 @@ export function FileViewModeKeys({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * "Show hidden files" — a latching key in its own tray beside the view-mode
+ * switch. Separate tray because it is a toggle, not a member of the mode
+ * radiogroup. In the Workspace it reveals dotfiles and vendor folders; in
+ * Artifacts it additionally reveals the reserved `shadow/` cache.
+ */
+export function FileHiddenKey({
+  tab,
+  value,
+  onChange,
+}: {
+  tab: 'workspace' | 'artifacts';
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const Icon = value ? HiddenFilesIcon : HiddenFilesOffIcon;
+  const hint = value
+    ? 'Hide hidden files again.'
+    : tab === 'workspace'
+      ? 'Show hidden files — dot-files and folders like node_modules.'
+      : 'Show hidden files — dot-files and the generated shadow folder.';
+  return (
+    <div className="gz-tray file-hidden-tray">
+      <button
+        type="button"
+        aria-pressed={value}
+        className={`gz-key gz-key--icon${value ? ' gz-key-active' : ''}`}
+        title={hint}
+        aria-label="Show hidden files"
+        onClick={() => onChange(!value)}
+      >
+        <Icon />
+      </button>
     </div>
   );
 }

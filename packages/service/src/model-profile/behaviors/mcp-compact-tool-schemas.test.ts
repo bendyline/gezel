@@ -98,6 +98,37 @@ describe('compact-tool-schemas checks-union slim', () => {
     expect(JSON.stringify(out).length).toBeLessThan(JSON.stringify(raw).length * 0.7);
   });
 
+  it('keeps the `partial` description even though it strips every other one', () => {
+    const tool: OpenAIFunctionTool = {
+      type: 'function',
+      name: 'insert_at_marker',
+      description: 'Insert content before or after a unique marker substring in an existing file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path relative to the project root.' },
+          marker: { type: 'string', description: 'Literal substring appearing exactly once.' },
+          partial: { type: 'boolean', description: 'Long authored prose that gets replaced.' },
+        },
+        required: ['path', 'marker'],
+      },
+    };
+    const props = decorate(tool).parameters.properties as Record<
+      string,
+      Record<string, unknown> | undefined
+    >;
+    expect(props.path?.description).toBeUndefined();
+    expect(props.marker?.description).toBeUndefined();
+    // A behavioral opt-in reduced to a bare boolean invites a guess.
+    expect(props.partial?.description).toMatch(/intermediate edit/i);
+    expect(props.partial?.type).toBe('boolean');
+  });
+
+  it('leaves tools without a `partial` property alone', () => {
+    const out = decorate(delegateTool());
+    expect(JSON.stringify(out)).not.toContain('intermediate edit');
+  });
+
   it('leaves small unions untouched', () => {
     const tool = delegateTool();
     const ed = (tool.parameters.properties as Record<string, unknown>)

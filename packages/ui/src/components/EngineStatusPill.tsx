@@ -13,10 +13,14 @@
  *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Generating",
  *      "Loading model") surfaced live from the SSE stream.
  *
+ * While a turn decodes, the busy label carries a live tok/s estimate
+ * measured from the start of the generating phase — for engines that
+ * don't already publish an exact rate in their own phase detail.
+ *
  * Click opens a dropdown with richer telemetry — per-turn tokens
  * in/out, generation tokens/sec, a rolling average over the last
- * minute, and the static RAM footprint llama-cpp reported after
- * loading the model.
+ * minute, a per-model speed table for the life of the page, and the
+ * static RAM footprint llama-cpp reported after loading the model.
  *
  * Drives off the same global `streamAllChatEvents` feed the rest of
  * the app uses, plus the cheap queue / in-flight snapshots that keep
@@ -49,12 +53,16 @@ import { summarizeCacheEntries } from './cacheDisplay.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
+  type ModelSpeedTotals,
   type TurnStatsEntry,
+  accumulateModelSpeed,
   composeQueueStatus,
+  computeLiveTokensPerSec,
   computeRollingTokensPerSec,
   estimateLiveOutputTokens,
   formatBytes,
   formatTokensPerSec,
+  rankModelSpeeds,
 } from './engine-pill-stats.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
@@ -389,6 +397,11 @@ function EngineStatusPillForProvider({
   >([]);
   // Rolling window of recent turn_stats events, newest-last.
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
+  // Per-model generation speed for the life of this page, keyed by model
+  // id. Not windowed: the 60s window empties the moment the machine goes
+  // quiet, which is precisely when a user opens the popover to ask how
+  // fast their model is.
+  const [modelSpeeds, setModelSpeeds] = useState<ReadonlyMap<string, ModelSpeedTotals>>(new Map());
   // Static RAM footprint (bytes) once llama-cpp finishes loading the model.
   const [ramAllocBytes, setRamAllocBytes] = useState<number | undefined>(undefined);
   // Active local media-engine work (image / video generation), keyed by
@@ -588,6 +601,7 @@ function EngineStatusPillForProvider({
   useEffect(() => {
     if (!onDeviceProvider) {
       setRecentTurns([]);
+      setModelSpeeds(new Map());
       setRamAllocBytes(undefined);
       return;
     }
@@ -605,6 +619,7 @@ function EngineStatusPillForProvider({
             if (event.provider !== onDeviceProvider) continue;
             const entry: TurnStats = {
               at: Date.now(),
+              ...(event.model ? { model: event.model } : {}),
               promptTokens: event.promptTokens,
               completionTokens: event.completionTokens,
               durationMs: event.durationMs,
@@ -612,6 +627,7 @@ function EngineStatusPillForProvider({
                 ? { tokensPerSec: event.tokensPerSec }
                 : {}),
             };
+            setModelSpeeds((prev) => accumulateModelSpeed(prev, entry));
             setRecentTurns((prev) => {
               const cutoff = Date.now() - STATS_WINDOW_MS;
               const filtered = prev.filter((t) => t.at >= cutoff);
@@ -701,6 +717,7 @@ function EngineStatusPillForProvider({
     () => computeRollingTokensPerSec(recentTurns),
     [recentTurns],
   );
+  const modelSpeedRows = useMemo(() => rankModelSpeeds(modelSpeeds), [modelSpeeds]);
   const lastTurn = recentTurns.length > 0 ? recentTurns[recentTurns.length - 1] : undefined;
 
   // Most-recent active media-engine job, if any. Takes visual precedence
@@ -752,6 +769,21 @@ function EngineStatusPillForProvider({
       : 0;
   const liveTokenLabel =
     estimatedOutputTokens > 0 ? `≈${estimatedOutputTokens.toLocaleString('en-US')} tok` : '';
+  // Live decode rate for the turn in flight. Only for engines whose own
+  // phase label doesn't already carry one — MLX and DwarfStar report an
+  // exact engine-side tok/s in `detail`, and printing a second, weaker
+  // estimate beside it would read as a contradiction.
+  const liveTokensPerSec =
+    current?.phase === 'generating' &&
+    current.generatingSince !== undefined &&
+    !phaseLabelIncludesTokenRate(busyLabel)
+      ? computeLiveTokensPerSec(estimatedOutputTokens, current.generatingSince, Date.now())
+      : null;
+  // The token count feeding this is itself an estimate, so the rate
+  // inherits the approximation mark rather than implying engine truth.
+  const liveRateLabel = liveTokensPerSec !== null ? `≈${formatTokensPerSec(liveTokensPerSec)}` : '';
+  const liveRateTooltip =
+    liveTokensPerSec !== null ? ` · about ${formatTokensPerSec(liveTokensPerSec)}` : '';
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -837,7 +869,7 @@ function EngineStatusPillForProvider({
   // the live phase label (queue counts aren't known to composeQueueStatus);
   // otherwise the queue-aware idle/queued string.
   const statusText = busy
-    ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · ${liveTokenLabel}` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
+    ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · ${liveTokenLabel}` : ''}${liveRateLabel ? ` · ${liveRateLabel}` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
     : queue.idleStatus;
   const healthPresentation = deviceHealth ? presentDeviceHealth(deviceHealth) : null;
   const dotClassName = [
@@ -880,7 +912,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · about ${estimatedOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · about ${estimatedOutputTokens.toLocaleString('en-US')} output tokens` : ''}${liveRateTooltip}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -915,6 +947,9 @@ function EngineStatusPillForProvider({
               )}
               {liveTokenLabel && (
                 <span className="engine-pill-live-tokens">{` · ${liveTokenLabel}`}</span>
+              )}
+              {liveRateLabel && (
+                <span className="engine-pill-live-rate">{` · ${liveRateLabel}`}</span>
               )}
             </>
           ) : (
@@ -1112,6 +1147,28 @@ function EngineStatusPillForProvider({
                 <dd>{formatTokensPerSec(rollingAvgTokensPerSec)}</dd>
               </>
             )}
+            {modelSpeedRows.length > 0 && !activeMedia && (
+              <>
+                <dt>Speed by model</dt>
+                <dd>
+                  <ul className="engine-pill-model-speeds">
+                    {modelSpeedRows.map((row) => (
+                      <li key={row.model}>
+                        <span className="engine-pill-model-speed-name">
+                          {installedModelNames.get(row.model) ?? row.model}
+                        </span>
+                        <span className="engine-pill-model-speed-rate">
+                          {formatTokensPerSec(row.tokensPerSec)}
+                        </span>
+                        <span className="engine-pill-model-speed-turns">
+                          {row.turns === 1 ? '1 turn' : `${row.turns} turns`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            )}
             {cacheState !== null && !activeMedia && (
               <>
                 <dt>Cache</dt>
@@ -1209,6 +1266,10 @@ function pickCurrentInflight(turns: readonly InflightTurn[]): InflightTurn | nul
 
 function phaseLabelIncludesTokenCount(label: string): boolean {
   return /\b\d[\d,]*\s+tokens?\b/i.test(label);
+}
+
+function phaseLabelIncludesTokenRate(label: string): boolean {
+  return /\btok\/s\b/i.test(label);
 }
 
 /** One in-flight local media-engine job (image / video / recognition). */

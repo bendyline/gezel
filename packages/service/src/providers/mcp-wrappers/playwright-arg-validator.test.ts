@@ -1,6 +1,10 @@
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import { describe, expect, it, vi } from 'vitest';
+import { SYSTEM_TOOLSETS } from '../../system-toolsets/manifest.js';
+import { installDirName } from '../../system-toolsets/resolve.js';
+import { selectWrappersFor } from './index.js';
 import {
   LOCAL_PREVIEW_BROWSER_TOOLS,
   PlaywrightArgValidator,
@@ -39,6 +43,42 @@ describe('PlaywrightArgValidator', () => {
         env: {},
       }),
     ).toBe(true);
+  });
+
+  // Derived from the real install layout on purpose: `installDirName`
+  // slugifies `@playwright/mcp` into `@playwright__mcp@<version>`, so the
+  // package name is absent from the spawn command for the copy Gezel
+  // manages. Selecting wrappers by sniffing that command line left all four
+  // browser wrappers inert against exactly that copy — `browser_navigate`
+  // handed Chromium the raw `file:` URL the prompt teaches, and
+  // playwright-core rejects it outright. Build the spec the way ChatManager
+  // does so a future slug change fails here instead of in the field.
+  it('selects every browser wrapper for the managed system-toolset spawn spec', () => {
+    const entry = SYSTEM_TOOLSETS.find((e) => e.toolsetId === '@playwright/mcp');
+    if (!entry?.entry) throw new Error('@playwright/mcp is no longer a pinned system toolset');
+    const installRoot = join(
+      systemToolsetsInstallDir(resolve('home')),
+      installDirName(entry),
+      'package',
+    );
+    expect(installRoot).not.toContain('@playwright/mcp');
+
+    const selected = selectWrappersFor({
+      toolsetId: entry.toolsetId,
+      kind: 'stdio',
+      command: 'node',
+      args: [join(installRoot, entry.entry), '--headless'],
+      env: {},
+    }).map((w) => w.id);
+
+    expect(selected).toEqual(
+      expect.arrayContaining([
+        'playwright-arg-validator',
+        'playwright-tool-descriptions',
+        'playwright-snapshot-inliner',
+        'playwright-auto-screenshot',
+      ]),
+    );
   });
 
   it('allows browser_navigate with a real https URL', async () => {

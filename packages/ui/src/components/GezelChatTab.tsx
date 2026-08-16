@@ -247,6 +247,7 @@ function GezelChatBody({
           <ChatComposer
             gezelId={gezel.id}
             gezelName={gezel.name}
+            gezelRole={gezel.role}
             gezelIcon={gezel.icon ?? null}
             gezelPoppetje={gezel.poppetje}
             gezelIconOverride={gezel.iconOverride}
@@ -339,6 +340,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
           <ChatComposer
             gezelId={gezel.id}
             gezelName={gezel.name}
+            gezelRole={gezel.role}
             gezelIcon={gezel.icon ?? null}
             gezelPoppetje={gezel.poppetje}
             gezelIconOverride={gezel.iconOverride}

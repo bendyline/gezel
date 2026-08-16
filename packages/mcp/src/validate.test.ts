@@ -73,6 +73,58 @@ describe('validateFile — HTML', () => {
     expect(formatted).toMatch(/valid for a static page/);
   });
 
+  // A retry after an output-ceiling truncation re-emitted this page's
+  // markup with the whole game engine dropped. validate said PASS, and
+  // the gezel reported "clean headless load" to the user.
+  it('fails a page with a <canvas> and no <script> at all', () => {
+    const html = [
+      '<!DOCTYPE html><html><body>',
+      '<div id="wrap">',
+      '<canvas id="gameCanvas" width="1000" height="700"></canvas>',
+      '</div>',
+      '</body></html>',
+    ].join('\n');
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('script-tag-present');
+    expect(formatted).toContain('<canvas> element');
+    expect(formatted).toMatch(/inert/);
+    expect(formatted).toMatch(/at line 3/);
+  });
+
+  it('fails a page whose only behavior is an inline handler with no <script>', () => {
+    const html =
+      '<!DOCTYPE html><html><body>\n<button onclick="start()">Go</button>\n</body></html>';
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('inline event-handler attribute');
+  });
+
+  it('accepts a <canvas> page that loads an external script', () => {
+    const html =
+      '<!DOCTYPE html><html><body><canvas id="c"></canvas><script src="game.js"></script></body></html>';
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/PASS/);
+  });
+
+  it('points an unterminated block comment at its opener, not at </script>', () => {
+    const html = [
+      '<!DOCTYPE html><html><body>',
+      '<canvas id="c"></canvas>',
+      '<script>',
+      "const ctx = document.getElementById('c').getContext('2d');",
+      '',
+      '/* ===SPAWN-END===',
+      '</script>',
+      '</body></html>',
+    ].join('\n');
+    const formatted = formatValidateResult(validateFile('index.html', textContent(html)));
+    expect(formatted).toMatch(/FAIL/);
+    expect(formatted).toContain('unterminated block comment');
+    expect(formatted).toMatch(/at line 6/);
+    expect(formatted).toMatch(/do not edit or remove the <\/script> tag/i);
+  });
+
   it('fails a truncated document even when its script tag is balanced', () => {
     const html = '<!DOCTYPE html><html><body><script>const x = 1;</script>';
     const formatted = formatValidateResult(validateFile('index.html', textContent(html)));

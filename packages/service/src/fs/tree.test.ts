@@ -120,6 +120,48 @@ describe('walkDirDetailed', () => {
     expect(paths).toContain('nested/shadow/keep.md');
     expect(paths.some((p) => p === 'shadow' || p.startsWith('shadow/'))).toBe(false);
   });
+
+  it('includeHidden surfaces dotfiles, skipRootDirs, and vendor dirs', async () => {
+    await Promise.all([
+      seed('README.md'),
+      seed('.env'),
+      seed('.github/workflows/ci.yml'),
+      seed('shadow/report_files/report.md'),
+    ]);
+    await mkdir(join(root, 'node_modules'), { recursive: true });
+
+    const { entries } = await walkDirDetailed(root, {
+      includeHidden: true,
+      skipRootDirs: new Set(['shadow']),
+    });
+    const paths = entries.map((e) => e.path);
+
+    expect(paths).toContain('README.md');
+    expect(paths).toContain('.env');
+    expect(paths).toContain('.github/workflows/ci.yml');
+    expect(paths).toContain('node_modules');
+    expect(paths).toContain('shadow/report_files/report.md');
+  });
+
+  it('includeHidden lists vendor dirs without walking into them', async () => {
+    // One node_modules would otherwise consume the whole entry budget and
+    // truncate the real tree away.
+    await Promise.all([
+      seed('index.html'),
+      ...Array.from({ length: 20 }, (_, i) => seed(`node_modules/pkg-${i}/index.js`)),
+      seed('.git/objects/ab/cdef'),
+    ]);
+
+    const { entries, truncated } = await walkDirDetailed(root, { includeHidden: true });
+    const paths = entries.map((e) => e.path);
+
+    expect(truncated).toBe(false);
+    expect(paths).toContain('index.html');
+    expect(paths).toContain('node_modules');
+    expect(paths).toContain('.git');
+    expect(paths.some((p) => p.startsWith('node_modules/'))).toBe(false);
+    expect(paths.some((p) => p.startsWith('.git/'))).toBe(false);
+  });
 });
 
 describe('findHtmlPages', () => {

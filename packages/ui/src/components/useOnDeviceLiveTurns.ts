@@ -39,6 +39,14 @@ export interface LiveTurnState {
   projectId?: string;
   /** When we first saw this turn start (used for elapsed-time). */
   startedAt: number;
+  /**
+   * When the engine entered its `generating` phase. Distinct from
+   * `startedAt` because prefill on a large local model can run tens of
+   * seconds; dividing output tokens by the whole turn would report a
+   * decode speed a fraction of the real one. Absent until the engine
+   * actually starts decoding.
+   */
+  generatingSince?: number;
   /** 0-1 progress, when the phase event carried one (prompt-processing batches). */
   progress?: number;
   /**
@@ -115,6 +123,9 @@ export function useOnDeviceLiveTurns(
             startedAt: prior?.startedAt ?? now,
             lastEventAt: now,
             ...(prior?.progress !== undefined ? { progress: prior.progress } : {}),
+            ...(prior?.generatingSince !== undefined
+              ? { generatingSince: prior.generatingSince }
+              : {}),
             outputChars: (prior?.outputChars ?? 0) + addition.chars,
           });
         }
@@ -151,6 +162,12 @@ export function useOnDeviceLiveTurns(
                 next.delete(sessionId);
                 return next;
               }
+              // Latch the first `generating` event of the turn. Engines
+              // re-emit the phase on a ticker, so re-stamping it here
+              // would reset the live-rate clock every second and pin the
+              // reading to whatever arrived in the last tick.
+              const generatingSince =
+                phase === 'generating' ? (prior?.generatingSince ?? Date.now()) : undefined;
               next.set(sessionId, {
                 phase,
                 provider: event.provider,
@@ -160,6 +177,7 @@ export function useOnDeviceLiveTurns(
                 startedAt: prior?.startedAt ?? Date.now(),
                 lastEventAt: Date.now(),
                 outputChars: prior?.outputChars ?? 0,
+                ...(generatingSince !== undefined ? { generatingSince } : {}),
                 ...(typeof progress === 'number' ? { progress } : {}),
               });
               return next;

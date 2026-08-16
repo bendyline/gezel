@@ -3756,20 +3756,24 @@ export class Store {
     return this.artifacts.projectArtifactsDir(id);
   }
 
-  async listProjectArtifacts(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
-    return this.artifacts.listProjectArtifacts(id, subpath);
+  async listProjectArtifacts(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    return this.artifacts.listProjectArtifacts(id, subpath, opts);
   }
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<ProjectFileEntry[]> {
     return this.artifacts.listProjectArtifactsRecursive(id, opts);
   }
 
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<WalkDirResult> {
     return this.artifacts.listProjectArtifactsRecursiveDetailed(id, opts);
   }
@@ -4100,14 +4104,20 @@ export class Store {
     return this.resolveWorkspaceDir(id, meta).dir;
   }
 
-  async listProjectWorkspace(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
+  async listProjectWorkspace(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
     const base = await this.projectWorkspaceDir(id);
-    return listDirEntries(base, intoWorkspaceRelative(base, subpath));
+    return listDirEntries(base, intoWorkspaceRelative(base, subpath), {
+      includeHidden: opts?.includeHidden === true,
+    });
   }
 
   async listProjectWorkspaceRecursive(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<ProjectFileEntry[]> {
     return (await this.listProjectWorkspaceRecursiveDetailed(id, opts)).entries;
   }
@@ -4116,7 +4126,7 @@ export class Store {
    *  tell the user/model when the walker's entry cap dropped files. */
   async listProjectWorkspaceRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean },
   ): Promise<WalkDirResult> {
     const base = await this.projectWorkspaceDir(id);
     return walkDirDetailed(base, opts);

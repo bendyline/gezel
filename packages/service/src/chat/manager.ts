@@ -142,11 +142,12 @@ import {
 } from '../providers/llama-cpp/offload-planner.js';
 import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
-import type { OpenAIFunctionTool } from '../providers/mcp-bridge.js';
+import type { OpenAIFunctionTool, StdioMcpServerSpec } from '../providers/mcp-bridge.js';
 import {
   hasLocalPreviewBrowserNetworkOverride,
   localPreviewBrowserLaunchArgs,
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
+import { isPlaywrightMcp } from '../providers/mcp-wrappers/playwright-snapshot.js';
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { readMlxModelGeometry } from '../providers/mlx/model-geometry.js';
 import {
@@ -6205,6 +6206,7 @@ export class ChatManager {
         this.events.publish(scope, {
           type: 'turn_stats',
           provider,
+          ...(state.record.model ? { model: state.record.model } : {}),
           promptTokens: ev.promptTokens,
           completionTokens: ev.completionTokens,
           durationMs: ev.durationMs,
@@ -14484,6 +14486,7 @@ export class ChatManager {
           extras.push({
             id: reserveExtraServerId(t.runtime.serverName, t.toolsetId),
             ...spec,
+            toolsetId: t.toolsetId,
           });
         } catch (error) {
           log.warn(
@@ -14502,6 +14505,7 @@ export class ChatManager {
         if (headers === null) continue; // required field missing — skip with warning
         extras.push({
           id: reserveExtraServerId(t.toolsetId, t.toolsetId),
+          toolsetId: t.toolsetId,
           kind: 'http',
           transport: t.runtime.transport,
           url: t.runtime.url,
@@ -14621,14 +14625,27 @@ export class ChatManager {
       // a post-install symlink swap must not turn a catalog entry into an
       // arbitrary host executable.
       const runtimeEntry = await resolveInside(t.installPath, t.runtime.entry);
-      const extraServerId = reserveExtraServerId(t.toolsetId, t.toolsetId);
-      extras.push({
-        id: extraServerId,
+      const spec: StdioMcpServerSpec = {
+        toolsetId: t.toolsetId,
         kind: 'stdio',
         command: 'node',
         args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
         env,
-      });
+      };
+      // The local-preview posture lives in the wrapper: `decorateTools`
+      // prunes the surface to `LOCAL_PREVIEW_BROWSER_TOOLS`, and `preProcess`
+      // rewrites `file:` navigation and refuses every non-preview origin. A
+      // spec the wrapper does not recognize would advertise a browser with
+      // none of that, so refuse it rather than silently ship the weaker one
+      // on the strength of the Chromium proxy flags alone.
+      if (isLocalPreviewBrowser && !isPlaywrightMcp(spec)) {
+        log.warn(
+          'security: refusing local-preview Playwright because its spawn spec is not recognized by the browser wrapper layer',
+        );
+        continue;
+      }
+      const extraServerId = reserveExtraServerId(t.toolsetId, t.toolsetId);
+      extras.push({ id: extraServerId, ...spec });
       if (isLocalPreviewBrowser) localPreviewBrowserExtraIds.add(extraServerId);
       if (
         isTrustedConstrainedToolset({

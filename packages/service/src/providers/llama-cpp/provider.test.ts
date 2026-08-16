@@ -1577,6 +1577,131 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
   });
 
+  it('steers a cap-truncated insert_at_marker whose arguments never parsed', async () => {
+    // The Vampire Survivors overhaul incident: qwen3.8-27b spent all 16384
+    // tokens of its `thinking-coding` cap inside one tool call's arguments,
+    // so the args JSON never parsed and the call arrived sanitized to `{}`.
+    // Two gaps compounded: the cap hint required `args.content` (erased by
+    // that same sanitization) and `insert_at_marker` wasn't recognized as
+    // payload-carrying at all. The model got "malformed JSON — emit one new
+    // compact call", retried the whole-file rewrite twice more, and the user
+    // saw no warning naming the cap.
+    const bodies: Array<{
+      max_tokens?: number;
+      messages?: Array<{ role: string; content?: string | null }>;
+    }> = [];
+    const toolCalls: string[] = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_cut_insert',
+                      type: 'function',
+                      function: {
+                        name: 'insert_at_marker',
+                        // Cut mid-arguments: no closing quote, no closing
+                        // brace. `path` is still readable in the prefix.
+                        arguments:
+                          '{"path":"index.html","marker":"</script>","content":"' +
+                          '<script>class Projectile { update(dt) { this.x += this.vx * ',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [{ index: 0, finish_reason: 'length' }],
+            usage: { prompt_tokens: 33000, completion_tokens: 16384 },
+          },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Switching to targeted edits.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 34000, completion_tokens: 20 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      includeUsageInStream: true,
+    });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen3.8-27b-q4',
+      tuning: {
+        sampling: { maxTokens: 16384 },
+        reasoning: {},
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['insert_at_marker', 'replace_in_file', 'replace_lines', 'read_file'].map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async (name: string) => {
+        toolCalls.push(name);
+        return 'unexpected dispatch';
+      },
+    };
+    const warnings: string[] = [];
+    session.onWarning?.((msg) => warnings.push(msg));
+
+    await expect(
+      session.sendAndWait('The bullets do not hurt the vampires and the graphics are basic.'),
+    ).resolves.toBe('Switching to targeted edits.');
+
+    expect(bodies).toHaveLength(2);
+    // Sanitized args are never dispatched — the loop short-circuits to an
+    // ERROR result, which is what the hint attaches to.
+    expect(toolCalls).toEqual([]);
+    const toolResultMessage =
+      (bodies[1]?.messages ?? []).find((m) => m.role === 'tool')?.content ?? '';
+    expect(toolResultMessage).toContain('hit the per-turn output token cap');
+    expect(toolResultMessage).toContain('max_tokens=16384');
+    // Path recovered from the unparseable prefix, so the steer can name
+    // the file instead of a placeholder.
+    expect(toolResultMessage).toContain('replace_in_file(path="index.html"');
+    expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
+    expect(warnings.some((w) => w.includes('insert_at_marker'))).toBe(true);
+  });
+
   it('gate-surgical-edit turns get a low-temp patch-only surface on the first move', async () => {
     // The gate-escalation stage-1 nudge (GATE_TARGETED_EDIT marker) must
     // reshape the turn immediately — no read precondition — to the

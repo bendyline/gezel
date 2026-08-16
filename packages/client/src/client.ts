@@ -5052,7 +5052,8 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-    opts?: { stats?: boolean },
+    /** `hidden` also surfaces the reserved `shadow/` cache. */
+    opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
     files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
@@ -5062,6 +5063,7 @@ export class GezelClient {
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
     if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/artifacts${qs}`);
   }
@@ -5269,7 +5271,8 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-    opts?: { stats?: boolean },
+    /** `hidden` also surfaces `node_modules` and friends — listed, not walked into. */
+    opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
     files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
@@ -5279,6 +5282,7 @@ export class GezelClient {
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
     if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/workspace${qs}`);
   }

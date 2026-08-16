@@ -37,7 +37,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
-import { FileViewModeKeys } from '../components/FileViewModeKeys.js';
+import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
@@ -83,6 +83,7 @@ import {
   compareFilesByMtimeDesc,
   describeSeverities,
   fileEntryFromPath,
+  fileHiddenStorageKey,
   fileViewStorageKey,
   sortAggregates,
 } from '../components/file-view-modes.js';
@@ -572,6 +573,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     workspace: 'tree-alpha',
     artifacts: 'tree-alpha',
   });
+  // Per-tab "show hidden files", persisted alongside the view mode. Drives the
+  // listing request itself — the exclusions are the walker's, not the tree's.
+  const [showHiddenFiles, setShowHiddenFiles] = useState<Record<FileTab, boolean>>({
+    workspace: false,
+    artifacts: false,
+  });
   // Flat index-backed workspace file list ({path, size, mtimeMs}); fetched
   // lazily when the flat "by modified" view is active. Null = not loaded.
   const [workspaceIndexFiles, setWorkspaceIndexFiles] = useState<WorkspaceIndexFile[] | null>(null);
@@ -846,19 +853,24 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
-  const refreshFiles = useCallback(async (id: string) => {
-    // Always ask for stats: one fetch powers the alpha tree, the
-    // modified-sorted tree, and the artifacts flat view. Cost is bounded by
-    // the walker's 500-entry cap.
-    const [ws, art] = await Promise.all([
-      api.listProjectWorkspace(id, '', true, { stats: true }),
-      api.listProjectArtifacts(id, '', true, { stats: true }),
-    ]);
-    setWorkspaceFiles(ws.files);
-    setArtifactFiles(art.files);
-    setWorkspaceTruncated(ws.truncated === true);
-    setArtifactsTruncated(art.truncated === true);
-  }, []);
+  const showWorkspaceHidden = showHiddenFiles.workspace;
+  const showArtifactsHidden = showHiddenFiles.artifacts;
+  const refreshFiles = useCallback(
+    async (id: string) => {
+      // Always ask for stats: one fetch powers the alpha tree, the
+      // modified-sorted tree, and the artifacts flat view. Cost is bounded by
+      // the walker's 500-entry cap.
+      const [ws, art] = await Promise.all([
+        api.listProjectWorkspace(id, '', true, { stats: true, hidden: showWorkspaceHidden }),
+        api.listProjectArtifacts(id, '', true, { stats: true, hidden: showArtifactsHidden }),
+      ]);
+      setWorkspaceFiles(ws.files);
+      setArtifactFiles(art.files);
+      setWorkspaceTruncated(ws.truncated === true);
+      setArtifactsTruncated(art.truncated === true);
+    },
+    [showWorkspaceHidden, showArtifactsHidden],
+  );
 
   // Output discovery has deliberately tighter traversal rules than the full
   // Workspace file tree: no node_modules/dot-folders, and at most four
@@ -924,10 +936,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     setWorkspaceIndexFiles(null);
     if (!selectedProjectId) {
       setFileViewModes({ workspace: 'tree-alpha', artifacts: 'tree-alpha' });
+      setShowHiddenFiles({ workspace: false, artifacts: false });
       return;
     }
     let workspaceMode: FileViewMode = 'tree-alpha';
     let artifactsMode: FileViewMode = 'tree-alpha';
+    let workspaceHidden = false;
+    let artifactsHidden = false;
     try {
       workspaceMode = coerceFileViewMode(
         window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'workspace')),
@@ -937,8 +952,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'artifacts')),
         'artifacts',
       );
+      workspaceHidden =
+        window.localStorage.getItem(fileHiddenStorageKey(selectedProjectId, 'workspace')) === '1';
+      artifactsHidden =
+        window.localStorage.getItem(fileHiddenStorageKey(selectedProjectId, 'artifacts')) === '1';
     } catch {}
     setFileViewModes({ workspace: workspaceMode, artifacts: artifactsMode });
+    setShowHiddenFiles({ workspace: workspaceHidden, artifacts: artifactsHidden });
   }, [selectedProjectId]);
 
   const setFileViewMode = useCallback(
@@ -947,6 +967,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       if (selectedProjectId) {
         try {
           window.localStorage.setItem(fileViewStorageKey(selectedProjectId, tabKey), mode);
+        } catch {}
+      }
+    },
+    [selectedProjectId],
+  );
+
+  const setShowHidden = useCallback(
+    (tabKey: FileTab, next: boolean) => {
+      setShowHiddenFiles((current) => ({ ...current, [tabKey]: next }));
+      if (selectedProjectId) {
+        try {
+          window.localStorage.setItem(
+            fileHiddenStorageKey(selectedProjectId, tabKey),
+            next ? '1' : '0',
+          );
         } catch {}
       }
     },
@@ -1753,9 +1788,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const activeEntries = fileTab === 'workspace' ? workspaceFiles : artifactFiles;
+  const showActiveHidden = fileTab ? showHiddenFiles[fileTab] : false;
+  // The outside-in sidecar folders (`_squisq`, `*_files`) are hidden for the
+  // same reason the walker hides dot-folders — "show hidden files" reveals
+  // both, otherwise the artifacts shadow/ folder would open onto nothing.
   const visibleActiveEntries = useMemo(
-    () => activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
-    [activeEntries],
+    () =>
+      showActiveHidden
+        ? activeEntries
+        : activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
+    [activeEntries, showActiveHidden],
   );
   const activeViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
   // Flat "by modified": prefer the complete index-backed list for the
@@ -1766,7 +1808,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (activeViewMode !== 'flat-modified') return [];
     if (fileTab === 'workspace' && workspaceIndexFiles && workspaceIndexFiles.length > 0) {
       return workspaceIndexFiles
-        .filter((file) => !isOutsideInInternalPath(file.path))
+        .filter((file) => showActiveHidden || !isOutsideInInternalPath(file.path))
         .map((file) => fileEntryFromPath(file.path, file.mtimeMs))
         .sort(compareFilesByMtimeDesc);
     }
@@ -1774,7 +1816,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       .filter((entry) => !entry.isDirectory)
       .slice()
       .sort(compareFilesByMtimeDesc);
-  }, [activeViewMode, fileTab, workspaceIndexFiles, visibleActiveEntries]);
+  }, [activeViewMode, fileTab, workspaceIndexFiles, visibleActiveEntries, showActiveHidden]);
   // Triage views: aggregate the already-polled live issues by file.
   const issueAggregates = useMemo(
     () => aggregateIssuesByFile(workspaceIssues?.issues ?? []),
@@ -2962,13 +3004,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               )}
                             </div>
                           )}
-                          <FileViewModeKeys
-                            value={activeViewMode}
-                            modes={
-                              fileTab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES
-                            }
-                            onChange={(mode) => setFileViewMode(fileTab, mode)}
-                          />
+                          <div className="file-tree-toolbar">
+                            <FileViewModeKeys
+                              value={activeViewMode}
+                              modes={
+                                fileTab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES
+                              }
+                              onChange={(mode) => setFileViewMode(fileTab, mode)}
+                            />
+                            <FileHiddenKey
+                              tab={fileTab}
+                              value={showActiveHidden}
+                              onChange={(next) => setShowHidden(fileTab, next)}
+                            />
+                          </div>
                         </div>
                         {fileTab === 'artifacts' && (
                           <div style={{ padding: '0.35rem 0.5rem' }}>

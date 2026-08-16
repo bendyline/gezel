@@ -22,7 +22,10 @@ vi.mock('../api.js', async () => {
   return { api: createMockApi() };
 });
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
-vi.mock('./useRoleBasedNameOnlyMode.js', () => ({ useRoleBasedNameOnlyMode: () => false }));
+const roleBasedNameOnly = vi.hoisted(() => ({ value: false }));
+vi.mock('./useRoleBasedNameOnlyMode.js', () => ({
+  useRoleBasedNameOnlyMode: () => roleBasedNameOnly.value,
+}));
 vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
@@ -133,6 +136,45 @@ describe('ChatComposer keyboard hints', () => {
     );
 
     await waitFor(() => expect(document.activeElement).toBe(editor));
+  });
+});
+
+describe('ChatComposer To line', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    roleBasedNameOnly.value = false;
+  });
+
+  it('shows the role under the recipient name', () => {
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        gezelRole="Scheepstimmerman"
+        projectId="default"
+        sessionId="session-1"
+      />,
+    );
+
+    expect(screen.getByText('Tomas')).toBeTruthy();
+    expect(screen.getByText('Scheepstimmerman')).toBeTruthy();
+  });
+
+  it('omits the role in boring mode, where the name already is the role', () => {
+    roleBasedNameOnly.value = true;
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="scheepstimmerman"
+        gezelRole="Scheepstimmerman"
+        projectId="default"
+        sessionId="session-1"
+      />,
+    );
+
+    expect(screen.getByText('scheepstimmerman')).toBeTruthy();
+    expect(screen.queryByText('Scheepstimmerman')).toBeNull();
   });
 });
 

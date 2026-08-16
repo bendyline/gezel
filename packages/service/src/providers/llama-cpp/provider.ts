@@ -58,6 +58,7 @@ import {
   findXmlTagToolCallSpans,
   foldPostActionRumination,
   foldPreToolPreamble,
+  isPayloadMutationToolName,
   isWriteShapedToolName,
   parseJsonEnvelopeToolCalls,
   salvageWriteShapedTruncation,
@@ -5372,6 +5373,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           }
         }
         let malformedStructuredCallIds = new Set<string>();
+        let malformedStructuredCallPaths = new Map<string, string>();
         if (toolCalls.length > 0) {
           const normalized = normalizeMalformedStructuredToolCalls(
             toolCalls,
@@ -5384,6 +5386,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           );
           toolCalls = normalized.toolCalls;
           malformedStructuredCallIds = new Set(normalized.sanitizedIds);
+          malformedStructuredCallPaths = normalized.sanitizedPaths;
           for (const r of normalized.repaired) {
             log.info(
               `[llama-cpp] repaired malformed structured ${r.name} args (path=${r.path}, content=${r.bytes} bytes)`,
@@ -6131,15 +6134,20 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               `[llama-cpp] surgical edit targeted a missing file; forcing create path=${missingEditPath}`,
             );
           }
-          const writeShapedCall =
-            call.function.name === 'write_file' || call.function.name === 'append_to_file';
+          const writeShapedCall = isWriteShapedToolName(call.function.name);
+          // Cap detection covers every payload-carrying mutation, not just
+          // whole-file writes: `insert_at_marker` / `replace_in_file` /
+          // `replace_lines` / `apply_patch` carry bodies just as large and
+          // fail the same way. Whole-file-only bookkeeping above keeps
+          // `writeShapedCall`.
+          const payloadMutationCall = isPayloadMutationToolName(call.function.name);
           const requestMaxTokens = typeof body.max_tokens === 'number' ? body.max_tokens : null;
           // ds4-server can recover a tool envelope that was cut at the
           // generation limit and then report finish_reason=tool_calls. The
           // explicit `length` signal is therefore not sufficient: usage at
           // the request cap plus a failed write is the reliable fallback.
           const failedWriteHitOutputLimit =
-            writeShapedCall &&
+            payloadMutationCall &&
             output.startsWith('ERROR:') &&
             (finishReason === 'length' ||
               (requestMaxTokens !== null &&
@@ -6371,19 +6379,28 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           // the MCP layer already saved the draft for append-based recovery.
           if (failedWriteHitOutputLimit && !recoverableImmediateWriteError) {
             const before = output.length;
+            // When the cap cut the ARGUMENTS json (not just the file body)
+            // the call arrives sanitized to `{}`, so `args.content` is gone
+            // and the helper's usual truncation proof with it. That is the
+            // most common shape of this failure, not an exotic one — vouch
+            // for it explicitly and hand over the recovered path.
+            const argsLostToCap = malformedStructuredCallIds.has(call.id);
+            const recoveredPath = malformedStructuredCallPaths.get(call.id) ?? null;
             output = appendCapTruncationHintToRejectedWrite(
               output,
               call.function.name,
               args,
               requestMaxTokens,
+              { argsLostToCap, pathHint: recoveredPath },
             );
             if (output.length !== before) {
-              const path = typeof args.path === 'string' ? args.path : '(unknown)';
+              const path =
+                recoveredPath ?? (typeof args.path === 'string' ? args.path : '(unknown)');
               log.info(
-                `[llama-cpp] cap-truncated rejected write — incremental-edit hint appended tool=${call.function.name} id=${call.id} path=${path} max_tokens=${requestMaxTokens ?? 'unset'}`,
+                `[llama-cpp] cap-truncated rejected write — incremental-edit hint appended tool=${call.function.name} id=${call.id} path=${path} args-lost=${argsLostToCap} max_tokens=${requestMaxTokens ?? 'unset'}`,
               );
               this.emitWarning(
-                `The model hit its output-token cap mid-write_file (${path}); the write was rejected and it was steered to incremental edits instead of a full rewrite.`,
+                `The model hit its output-token cap mid-\`${call.function.name}\` (${path}); the edit was rejected and it was steered to incremental edits instead of a full rewrite.`,
               );
             }
           }
@@ -6768,10 +6785,18 @@ export function normalizeMalformedStructuredToolCalls(
   repaired: Array<{ name: string; path: string; bytes: number }>;
   sanitized: string[];
   sanitizedIds: string[];
+  /**
+   * Call id → path recovered from the unparseable argument prefix, when
+   * the truncation left one readable. Sanitizing to `{}` erases the only
+   * evidence of which file the model was mid-way through, and the
+   * cap-truncation steer needs to name it.
+   */
+  sanitizedPaths: Map<string, string>;
 } {
   const repaired: Array<{ name: string; path: string; bytes: number }> = [];
   const sanitized: string[] = [];
   const sanitizedIds: string[] = [];
+  const sanitizedPaths = new Map<string, string>();
   const normalized = toolCalls.map((call): StructuredToolCall => {
     const raw = call.function.arguments;
     try {
@@ -6796,9 +6821,13 @@ export function normalizeMalformedStructuredToolCalls(
     }
     sanitized.push(call.function.name || '<unknown>');
     sanitizedIds.push(call.id);
+    if (isPayloadMutationToolName(call.function.name)) {
+      const recoveredPath = findLoosePathArg(looseUnescapeToolArgumentText(raw))?.value;
+      if (recoveredPath) sanitizedPaths.set(call.id, recoveredPath);
+    }
     return { ...call, function: { ...call.function, arguments: '{}' } };
   });
-  return { toolCalls: normalized, repaired, sanitized, sanitizedIds };
+  return { toolCalls: normalized, repaired, sanitized, sanitizedIds, sanitizedPaths };
 }
 
 export function tryRepairMalformedWriteToolArguments(

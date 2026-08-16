@@ -938,14 +938,19 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
     // (the shallow listing has no stats path).
     const withStats = c.req.query('stats') === '1';
+    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
+    // the reserved shadow/ cache.
+    const includeHidden = c.req.query('hidden') === '1';
     if (recursive) {
-      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(
-        id,
-        withStats ? { withStats: true } : undefined,
-      );
+      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id, {
+        ...(withStats ? { withStats: true } : {}),
+        ...(includeHidden ? { includeHidden: true } : {}),
+      });
       return c.json({ files: detailed.entries, truncated: detailed.truncated });
     }
-    return c.json({ files: await ctx.store.listProjectArtifacts(id, subpath) });
+    return c.json({
+      files: await ctx.store.listProjectArtifacts(id, subpath, { includeHidden }),
+    });
   });
 
   app.get('/:id/artifacts/read', async (c) => {
@@ -1333,15 +1338,21 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
     // (the shallow listing has no stats path).
     const withStats = c.req.query('stats') === '1';
+    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
+    // the vendor directories (node_modules and friends), which are listed but
+    // still never walked into.
+    const includeHidden = c.req.query('hidden') === '1';
     try {
       if (recursive) {
-        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(
-          id,
-          withStats ? { withStats: true } : undefined,
-        );
+        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id, {
+          ...(withStats ? { withStats: true } : {}),
+          ...(includeHidden ? { includeHidden: true } : {}),
+        });
         return c.json({ files: detailed.entries, truncated: detailed.truncated });
       }
-      return c.json({ files: await ctx.store.listProjectWorkspace(id, subpath) });
+      return c.json({
+        files: await ctx.store.listProjectWorkspace(id, subpath, { includeHidden }),
+      });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);

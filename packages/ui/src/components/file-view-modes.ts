@@ -128,6 +128,11 @@ export function fileViewStorageKey(projectId: string, tab: 'workspace' | 'artifa
   return `gezel.projectFilesView:${projectId}:${tab}`;
 }
 
+/** Persistence key for the per-tab "show hidden files" toggle. */
+export function fileHiddenStorageKey(projectId: string, tab: 'workspace' | 'artifacts'): string {
+  return `gezel.projectFilesHidden:${projectId}:${tab}`;
+}
+
 /**
  * Coerce a persisted (or otherwise untrusted) mode string to one valid for
  * the given tab. Unknown values — and workspace-only modes persisted before

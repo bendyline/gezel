@@ -138,6 +138,15 @@ function validateHtmlInlineScripts(path: string, html: string): SourceValidation
     if (isModuleScript(s.attrs)) continue;
     const parseError = tryParseFunctionBody(s.body);
     if (parseError) {
+      const unterminated = locateUnterminatedConstruct(s.body);
+      if (unterminated) {
+        const at = lineColAt(html, s.bodyStart + unterminated.start);
+        return {
+          ok: false,
+          message: `${path}: inline <script> #${i + 1} opens a ${unterminated.label} at line ${at.line}, col ${at.col} and never closes it, so the rest of the script is swallowed and nothing runs. Add the missing \`${unterminated.closer}\` where that construct should end. The defect is at line ${at.line} — do not edit the last line of the script or the </script> tag, which are correct.`,
+          recoverablePartialWrite: 'invalid-html',
+        };
+      }
       const loc = locateInlineScriptError(html, s.bodyStart, s.body);
       const where = loc ? `at line ${loc.line}, col ${loc.col}` : `(opens near line ${s.openLine})`;
       return {
@@ -182,6 +191,155 @@ function tryParseFunctionBody(body: string): string | null {
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
+}
+
+/** An opened-but-never-closed construct that swallowed the rest of the source. */
+export interface UnterminatedConstruct {
+  /** Offset within the parsed body where the construct opens. */
+  start: number;
+  /** What is unclosed, phrased for the model. */
+  label: string;
+  /** The token that would close it. */
+  closer: string;
+}
+
+const DIAG_BLOCK_COMMENT_UNCLOSED = 1010;
+const DIAG_TEMPLATE_UNTERMINATED = 1160;
+const DIAG_TOKEN_EXPECTED = 1005;
+
+/**
+ * Find where an unterminated construct *opens*, when the parser could
+ * only report that it ran out of input.
+ *
+ * This exists because the naive "report the first parse diagnostic"
+ * answer is actively harmful for this failure class. An unclosed `/*`,
+ * backtick, or brace consumes everything after it, so the parser has
+ * nothing to object to until end-of-input — and for an inline script
+ * that offset lands on the `</script>` line. A gezel told "fix the
+ * syntax error at line N" then edits line N, which is the one line that
+ * was correct. Wild-caught on the vampire-survivors session: the model
+ * was pointed at `</script>`, deleted it, and turned an unterminated
+ * comment into an unterminated script block.
+ *
+ * Returns null when the first diagnostic already points inside the
+ * source — those positions are meaningful and the caller should use
+ * them unchanged.
+ */
+export function locateUnterminatedConstruct(
+  body: string,
+  scriptKind: ts.ScriptKind = ts.ScriptKind.JS,
+): UnterminatedConstruct | null {
+  const sf = parseFor(body, scriptKind);
+  const first = parseDiagnosticsOf(sf)?.[0];
+  if (!first || first.start == null) return null;
+  if (first.start < body.trimEnd().length) return null;
+
+  if (first.code === DIAG_BLOCK_COMMENT_UNCLOSED) {
+    const start = locateTrailingBlockComment(body, scriptKind);
+    if (start !== null) return { start, label: 'block comment', closer: '*/' };
+  }
+
+  const closer = closerForDiagnostic(first);
+  if (!closer) return null;
+
+  // TypeScript points at the matching opener itself for unbalanced
+  // braces, which is exact and cheaper than re-parsing.
+  const relatedStart = first.relatedInformation?.[0]?.start;
+  if (typeof relatedStart === 'number') {
+    return { start: relatedStart, label: labelForCloser(closer), closer };
+  }
+
+  const start = locateNodeSpanningEnd(body, closer, scriptKind);
+  return start === null ? null : { start, label: labelForCloser(closer), closer };
+}
+
+function parseFor(source: string, scriptKind: ts.ScriptKind): ts.SourceFile {
+  const ext =
+    scriptKind === ts.ScriptKind.TSX
+      ? 'tsx'
+      : scriptKind === ts.ScriptKind.TS
+        ? 'ts'
+        : scriptKind === ts.ScriptKind.JSX
+          ? 'jsx'
+          : 'js';
+  return ts.createSourceFile(
+    `unterminated-probe.${ext}`,
+    source,
+    ts.ScriptTarget.ES2022,
+    /*setParentNodes*/ false,
+    scriptKind,
+  );
+}
+
+function parseDiagnosticsOf(sf: ts.SourceFile): ts.DiagnosticWithLocation[] | undefined {
+  return (sf as ts.SourceFile & { parseDiagnostics?: ts.DiagnosticWithLocation[] })
+    .parseDiagnostics;
+}
+
+function closerForDiagnostic(diag: ts.DiagnosticWithLocation): string | null {
+  if (diag.code === DIAG_BLOCK_COMMENT_UNCLOSED) return '*/';
+  if (diag.code === DIAG_TEMPLATE_UNTERMINATED) return '`';
+  if (diag.code === DIAG_TOKEN_EXPECTED) {
+    const text = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
+    const quoted = /^'(.{1,2})' expected/.exec(text);
+    const token = quoted?.[1];
+    return token && ['}', ')', ']'].includes(token) ? token : null;
+  }
+  return null;
+}
+
+function labelForCloser(closer: string): string {
+  switch (closer) {
+    case '*/':
+      return 'block comment';
+    case '`':
+      return 'template literal';
+    case '}':
+      return '{ ... } block';
+    case ')':
+      return '( ... ) group';
+    case ']':
+      return '[ ... ] list';
+    default:
+      return 'construct';
+  }
+}
+
+/**
+ * Close the comment, re-parse, and read back the comment range that now
+ * ends at EOF. Hand-scanning for the last `/*` would mis-fire on one
+ * inside a string or template, and TypeScript's raw scanner desyncs on
+ * template literals without parser cooperation.
+ */
+function locateTrailingBlockComment(body: string, scriptKind: ts.ScriptKind): number | null {
+  const repaired = `${body}*/`;
+  const sf = parseFor(repaired, scriptKind);
+  const ranges = ts.getLeadingCommentRanges(repaired, sf.endOfFileToken.pos) ?? [];
+  const trailing = ranges.find((r) => r.end === repaired.length);
+  return trailing ? trailing.pos : null;
+}
+
+/**
+ * Append the missing closer and find the innermost node that then spans
+ * to EOF — its start is where the construct opened.
+ */
+function locateNodeSpanningEnd(
+  body: string,
+  closer: string,
+  scriptKind: ts.ScriptKind,
+): number | null {
+  const repaired = `${body}${closer}`;
+  const sf = parseFor(repaired, scriptKind);
+  let best: number | null = null;
+  const visit = (node: ts.Node): void => {
+    const start = node.getStart(sf);
+    if (node.end === repaired.length && start < repaired.length) {
+      if (best === null || start > best) best = start;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return best;
 }
 
 /**
@@ -259,6 +417,14 @@ function validateJsTsSource(path: string, source: string): SourceValidationResul
   const diags = (sf as ts.SourceFile & { parseDiagnostics?: ts.DiagnosticWithLocation[] })
     .parseDiagnostics;
   if (diags && diags.length > 0) {
+    const unterminated = locateUnterminatedConstruct(source, scriptKind);
+    if (unterminated) {
+      const { line, character } = sf.getLineAndCharacterOfPosition(unterminated.start);
+      return {
+        ok: false,
+        message: `${path}: opens a ${unterminated.label} at line ${line + 1}, col ${character + 1} and never closes it, so everything after it is swallowed. Add the missing \`${unterminated.closer}\` where that construct should end. The defect is at line ${line + 1}, not at the end of the file.${atomicSourceWriteRejectionRecovery(path)}`,
+      };
+    }
     return formatSourceDiagnostic(path, sf, diags[0]!);
   }
   const nestedModuleSyntax = findNestedStaticModuleDeclaration(sf);

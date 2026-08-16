@@ -4,13 +4,17 @@ import { join, normalize } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from './safe-paths.js';
 
-export async function listDirEntries(base: string, subpath: string): Promise<ProjectFileEntry[]> {
+export async function listDirEntries(
+  base: string,
+  subpath: string,
+  opts: { includeHidden?: boolean } = {},
+): Promise<ProjectFileEntry[]> {
   const safePath = await safeResolveRead(base, subpath);
   if (!safePath) return [];
   try {
     const entries = await readdir(safePath, { withFileTypes: true });
     return entries
-      .filter((e) => !e.name.startsWith('.'))
+      .filter((e) => opts.includeHidden || !e.name.startsWith('.'))
       .map((e) => ({
         name: e.name,
         path: subpath ? `${subpath}/${e.name}` : e.name,
@@ -56,12 +60,22 @@ export async function walkDirDetailed(
      * large excluded subtree never consumes the entry budget. Scoped to depth
      * 0 on purpose: the artifacts walk must hide its reserved `shadow/` cache
      * without hiding a user folder that happens to share the name deeper in.
+     * Ignored under `includeHidden`.
      */
     skipRootDirs?: ReadonlySet<string>;
+    /**
+     * Surface what the walk normally hides: dotfiles, the vendor/VCS
+     * directories, and anything named by `skipRootDirs`. The vendor dirs are
+     * listed but never entered — one `node_modules` would swallow the whole
+     * entry budget and truncate the rest of the tree away, which is worse
+     * than showing the folder without its contents.
+     */
+    includeHidden?: boolean;
   } = {},
 ): Promise<WalkDirResult> {
   const maxEntries = opts.maxEntries ?? 500;
   const maxDepth = opts.maxDepth ?? 6;
+  const includeHidden = opts.includeHidden === true;
   const skipDirs = new Set(['node_modules', '.git', '.next', '.turbo', '.cache']);
   const results: ProjectFileEntry[] = [];
   let truncated = false;
@@ -78,9 +92,11 @@ export async function walkDirDetailed(
       continue;
     }
     for (const e of entries) {
-      if (e.name.startsWith('.')) continue;
-      if (skipDirs.has(e.name)) continue;
-      if (item.depth === 0 && e.isDirectory() && opts.skipRootDirs?.has(e.name)) continue;
+      if (!includeHidden) {
+        if (e.name.startsWith('.')) continue;
+        if (skipDirs.has(e.name)) continue;
+        if (item.depth === 0 && e.isDirectory() && opts.skipRootDirs?.has(e.name)) continue;
+      }
       if (results.length >= maxEntries) {
         return { entries: results, truncated: true };
       }
@@ -99,6 +115,7 @@ export async function walkDirDetailed(
       }
       results.push(entry);
       if (e.isDirectory()) {
+        if (includeHidden && skipDirs.has(e.name)) continue;
         if (item.depth + 1 > maxDepth) truncated = true;
         else queue.push({ dir: join(item.dir, e.name), prefix: rel, depth: item.depth + 1 });
       }

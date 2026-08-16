@@ -130,6 +130,38 @@ function compactChecksUnion(checksSchema: unknown): unknown {
   return { ...schema, items: { ...(items as Record<string, unknown>), oneOf: kept } };
 }
 
+/**
+ * Property descriptions compaction must not drop.
+ *
+ * Stripping prose is safe when the property name carries the meaning — a
+ * `path` is a path, a `content` is content, and the system prompt
+ * already covers when to reach for the tool. It is not safe for a
+ * behavioral opt-in, which changes what the call DOES rather than
+ * describing a value it takes. Reduced to `{"type":"boolean"}` a flag
+ * named `partial` is worse than absent: it is an invitation to guess.
+ */
+const PRESERVED_PROPERTY_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  partial:
+    'True ONLY for an intermediate edit of a multi-edit build not meant to parse yet. Skips the syntax gate; you must finish with an edit that omits it or work cannot be declared done.',
+};
+
+function restorePreservedDescriptions(parameters: Record<string, unknown>): Record<string, unknown> {
+  const properties = propertiesFor(parameters);
+  if (!properties) return parameters;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(properties)) {
+    const preserved = PRESERVED_PROPERTY_DESCRIPTIONS[key];
+    if (preserved && schema && typeof schema === 'object' && !Array.isArray(schema)) {
+      next[key] = { ...(schema as Record<string, unknown>), description: preserved };
+      changed = true;
+    } else {
+      next[key] = schema;
+    }
+  }
+  return changed ? { ...parameters, properties: next } : parameters;
+}
+
 function compactTool(
   tool: OpenAIFunctionTool,
   schemaByTool: Map<string, Record<string, unknown>>,
@@ -138,7 +170,9 @@ function compactTool(
   return {
     ...tool,
     description: compactDescription(tool.description),
-    parameters: compactSchema(tool.parameters) as Record<string, unknown>,
+    parameters: restorePreservedDescriptions(
+      compactSchema(tool.parameters) as Record<string, unknown>,
+    ),
   };
 }
 
