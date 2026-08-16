@@ -1655,9 +1655,9 @@ export function SettingsView() {
                 <span>% of my quota per day until it resets</span>
               </label>
               <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
-                The daily reserve scales with the time left: 10% a day with 4 days until reset
-                keeps the last 40% for you. Work already running finishes; held work resumes when
-                your quota frees up. Gezels on local models are never held.
+                The daily reserve scales with the time left: 10% a day with 4 days until reset keeps
+                the last 40% for you. Work already running finishes; held work resumes when your
+                quota frees up. Gezels on local models are never held.
               </p>
             </section>
             <section style={{ marginTop: '2rem' }}>
@@ -1676,6 +1676,13 @@ export function SettingsView() {
 
         {section === 'team' && (
           <>
+            <EngagementModePanel
+              mode={config?.aiEngagementMode ?? 'proactive'}
+              tempo={config?.workshopTempo ?? 'bedrijvig'}
+              onChange={saveEngagementMode}
+              onTempoChange={saveWorkshopTempo}
+            />
+
             <section style={{ marginBottom: '2rem' }}>
               <h3>Meester</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -2213,13 +2220,6 @@ export function SettingsView() {
                 )}
               </section>
             )}
-
-            <EngagementModePanel
-              mode={config?.aiEngagementMode ?? 'proactive'}
-              tempo={config?.workshopTempo ?? 'bedrijvig'}
-              onChange={saveEngagementMode}
-              onTempoChange={saveWorkshopTempo}
-            />
           </>
         )}
 

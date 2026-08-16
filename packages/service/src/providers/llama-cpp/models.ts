@@ -83,6 +83,15 @@ export interface InstalledLlamaCppModel {
    */
   mmprojPath?: string;
   /**
+   * On-disk size of {@link mmprojPath}, read from the file rather than the
+   * manifest. `approxSizeBytes` does NOT include the projector — the value
+   * recorded at install time is the weights alone whenever the payload was
+   * adopted or resumed rather than freshly downloaded — so every memory
+   * estimate has to add this explicitly or it under-reserves a vision model
+   * by the projector plus its compute buffers (1.7 GB on muse-glimmer).
+   */
+  mmprojSizeBytes?: number;
+  /**
    * Absolute path to a speculative-decoding companion GGUF, when the
    * catalog ships one. The launcher forwards it as
    * `--spec-draft-model <path>` for the selected draft algorithm.
@@ -977,13 +986,26 @@ export class LlamaCppModelManager {
     ) {
       return null;
     }
+    // Read from disk, not the manifest: `approxSizeBytes` recorded at install
+    // is the weights alone whenever the payload was adopted or resumed rather
+    // than freshly downloaded, so it cannot be trusted to include the projector.
+    const mmprojSizeBytes = parsed.mmprojFilename
+      ? await stat(join(root, id, parsed.mmprojFilename))
+          .then((s) => s.size)
+          .catch(() => 0)
+      : 0;
     return {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
       installedAt: parsed.installedAt,
       weightsPath: join(root, id, parsed.weightsFilename),
-      ...(parsed.mmprojFilename ? { mmprojPath: join(root, id, parsed.mmprojFilename) } : {}),
+      ...(parsed.mmprojFilename
+        ? {
+            mmprojPath: join(root, id, parsed.mmprojFilename),
+            ...(mmprojSizeBytes > 0 ? { mmprojSizeBytes } : {}),
+          }
+        : {}),
       ...(parsed.draftModelFilename
         ? { draftModelPath: join(root, id, parsed.draftModelFilename) }
         : {}),

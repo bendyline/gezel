@@ -1,4 +1,4 @@
-import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
+import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import { CapacityBroker } from './capacity-broker.js';
@@ -154,8 +154,8 @@ describe('EngineRouter', () => {
       resolveResidentBytes: () => undefined,
       fallbackApproxBytes: 10 * GB,
     });
-    // mlx multiplier is the measured 1.05.
-    expect(router.resolveBytes('mlx', 'unknown')).toBe(Math.round(10 * GB * 1.05));
+    // mlx is measured too, and fixed-plus-proportional like llama.cpp.
+    expect(router.resolveBytes('mlx', 'unknown')).toBe(estimateMlxResidentBytes(10 * GB));
     expect(router.resolveBytes('llama-cpp', 'unknown')).toBe(
       estimateLlamaCppResidentBytes(10 * GB),
     );

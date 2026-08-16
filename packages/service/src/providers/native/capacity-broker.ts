@@ -26,6 +26,7 @@ import {
   type LlamaCppContextSizing,
   createLogger,
   estimateLlamaCppResidentBytes,
+  estimateMlxResidentBytes,
   localContextFloorTokens,
 } from '@bendyline/gezel';
 import {
@@ -500,8 +501,11 @@ export class CapacityBroker {
    * `approxSizeBytes`. Reflects the working-set footprint vs. on-disk
    * size WITHOUT any KV — every caller prices KV explicitly on top.
    *
-   * llama.cpp: see {@link estimateLlamaCppResidentBytes}.
-   * MLX at 4bit: ~1.05 × on-disk.
+   * llama.cpp: see {@link estimateLlamaCppResidentBytes}. Pass `mmprojBytes`
+   * for a multimodal model — `approxSizeBytes` counts the weights alone, and
+   * the projector plus its vision buffers is 1.7 GB on a 30B.
+   * MLX: see {@link estimateMlxResidentBytes}. MLX needs no equivalent — its
+   * vision tower is inside the same safetensors set `approxSizeBytes` sums.
    *
    * ds4 is special: it streams MoE experts from SSD, so its resident
    * working set is bounded by the configured expert-cache budget + KV +
@@ -510,22 +514,21 @@ export class CapacityBroker {
    * conservative streaming working set so a 64GB box is never told an
    * 87GB DeepSeek-V4 model "can't fit" (which is the whole point of ds4).
    */
-  static estimateResidentBytes(engine: LocalProviderName, approxSizeBytes: number): number {
+  static estimateResidentBytes(
+    engine: LocalProviderName,
+    approxSizeBytes: number,
+    opts?: { mmprojBytes?: number },
+  ): number {
     if (engine === 'ds4') {
       const DS4_STREAMING_RESIDENT_FALLBACK = 48 * 1024 ** 3;
       return Math.min(approxSizeBytes, DS4_STREAMING_RESIDENT_FALLBACK);
     }
-    // MLX: measured, not assumed. `mx.get_active_memory()` immediately after
-    // `load()` and before any inference reads 27.47 GiB for a 27.50 GiB model
-    // — 0.999x. The old 1.3 came from a whole-footprint sample "at 8K ctx"
-    // and so folded KV into the weights term; every caller now prices KV
-    // explicitly on top, making it a double-count worth ~8.9 GB on a 27B.
-    // The 1.05 is allocator slack, not a KV allowance.
-    if (engine === 'mlx') return Math.round(approxSizeBytes * 1.05);
-    return estimateLlamaCppResidentBytes(approxSizeBytes);
+    if (engine === 'mlx') return estimateMlxResidentBytes(approxSizeBytes);
+    return estimateLlamaCppResidentBytes(approxSizeBytes, {
+      mmprojBytes: opts?.mmprojBytes ?? 0,
+    });
   }
 }
-
 
 const GIB = 1024 ** 3;
 

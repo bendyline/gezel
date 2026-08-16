@@ -660,7 +660,9 @@ export async function buildLlamaCppProvider(opts: {
         ggufHasMtp = mtpLayerCount > 0;
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
-      const residentBytes = estimateLlamaCppResidentBytes(approxBytes);
+      const residentBytes = estimateLlamaCppResidentBytes(approxBytes, {
+        mmprojBytes: modelCatalogInfo?.mmprojSizeBytes ?? 0,
+      });
       const vramBytes = maxGpuVramBytes(llamaDevices);
       const split =
         summary.nonExpertBytes !== undefined &&

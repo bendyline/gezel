@@ -38,6 +38,7 @@ export type TuningProfileId = z.infer<typeof TuningProfileIdSchema>;
  */
 export const KNOWN_PROFILE_IDS = [
   'thinking-general',
+  'thinking-deep',
   'thinking-coding',
   'thinking-precise',
   'instruct',
@@ -87,6 +88,13 @@ export const CANONICAL_PROFILES: Record<KnownProfileId, ProfileMeta> = {
     description: 'Reasoning mode for general analytical tasks.',
     kind: 'thinking',
     fallbackChain: ['instruct'],
+  },
+  'thinking-deep': {
+    id: 'thinking-deep',
+    label: 'Thinking — Deep',
+    description: 'Higher-effort reasoning for difficult tasks when extra latency is acceptable.',
+    kind: 'thinking',
+    fallbackChain: ['thinking-general', 'instruct'],
   },
   'thinking-coding': {
     id: 'thinking-coding',

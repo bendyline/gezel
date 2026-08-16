@@ -1,5 +1,5 @@
 import type { ChatModelManifest } from '@bendyline/gezel';
-import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
+import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { toRecoCandidate } from './hardware-tier.js';
 
@@ -55,7 +55,11 @@ describe('toRecoCandidate', () => {
     expect(c?.tags).toEqual(['moe']);
   });
 
-  it('uses the MLX block on Mac, falling back to size × overhead when no residentBytes', () => {
+  it('uses the MLX block on Mac, and MLX’s own estimator with it', () => {
+    // The two estimators differ in shape (MLX carries a flat sidecar cost;
+    // llama.cpp a bigger proportional term), so pricing a Mac candidate with
+    // llama.cpp's multiplier over-reserved every first-run pick on Apple
+    // Silicon and could shrink the model the installer offered.
     const c = toRecoCandidate(
       chatModel({
         llamaCpp: { huggingfaceRepo: 'r', filename: 'f', approxSizeBytes: 10 * GB },
@@ -63,7 +67,8 @@ describe('toRecoCandidate', () => {
       }),
       'darwin',
     );
-    expect(c?.residentBytes).toBe(estimateLlamaCppResidentBytes(8 * GB));
+    expect(c?.residentBytes).toBe(estimateMlxResidentBytes(8 * GB));
+    expect(c?.residentBytes).not.toBe(estimateLlamaCppResidentBytes(8 * GB));
   });
 
   it('carries supportsTools through, so the picker can drop a tool-less model', () => {

@@ -1,5 +1,9 @@
 import type { ChatModelManifest, RecoModelInput } from '@bendyline/gezel';
-import { estimateLlamaCppResidentBytes, pickRecommendedModel } from '@bendyline/gezel';
+import {
+  estimateLlamaCppResidentBytes,
+  estimateMlxResidentBytes,
+  pickRecommendedModel,
+} from '@bendyline/gezel';
 import { detectMemoryProfile } from '../../system/memory.js';
 
 /**
@@ -50,13 +54,21 @@ export interface TierDecision {
  * Returns null when the model ships no block for that provider (can't install
  * it there). `residentBytes` prefers the manifest's pinned value, else the
  * on-disk size × overhead — the same working-set estimate the UI's fit badge
- * uses. Pure — unit-tested.
+ * uses, and per ENGINE: the two differ in shape, and estimating a Mac's MLX
+ * candidate with llama.cpp's multiplier over-reserved every first-run pick on
+ * Apple Silicon. Pure — unit-tested.
  */
 export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoModelInput | null {
   const block = platform === 'darwin' ? m.mlx : m.llamaCpp;
   if (!block) return null;
   const approx = block.approxSizeBytes ?? m.approxSizeBytes;
-  const residentBytes = block.residentBytes ?? estimateLlamaCppResidentBytes(approx);
+  // A multimodal llama.cpp entry loads a projector `approxSizeBytes` excludes.
+  // MLX needs no equivalent — its vision tower is inside the same safetensors.
+  const estimated =
+    platform === 'darwin'
+      ? estimateMlxResidentBytes(approx)
+      : estimateLlamaCppResidentBytes(approx, { mmprojBytes: m.llamaCpp?.mmproj?.sizeBytes ?? 0 });
+  const residentBytes = block.residentBytes ?? estimated;
   return {
     id: m.id,
     ...(m.recoScore != null ? { recoScore: m.recoScore } : {}),

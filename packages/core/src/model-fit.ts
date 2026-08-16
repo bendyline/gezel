@@ -61,8 +61,80 @@ export const LLAMA_CPP_FIXED_ENGINE_BYTES = 256 * 1024 ** 2;
  * must agree — a fit computed from a different number offers models the
  * broker then refuses.
  */
-export function estimateLlamaCppResidentBytes(approxSizeBytes: number): number {
-  return Math.round(approxSizeBytes * LLAMA_CPP_WEIGHTS_MULTIPLIER) + LLAMA_CPP_FIXED_ENGINE_BYTES;
+/**
+ * Extra fixed cost once a multimodal projector is loaded: llama.cpp reserves a
+ * second set of compute buffers for the vision graph, sized from the image
+ * batch rather than from the projector. Measured at 292.30 MiB (Metal) + 73.27
+ * MiB (CPU) = 366 MiB on muse-glimmer-30b-q4, the one mmproj-bearing GGUF
+ * installed when this was measured; 384 sits just above it.
+ *
+ * Only one model's worth of evidence, so it is deliberately a flat term rather
+ * than anything derived — an image batch is the same shape whatever the
+ * projector weighs.
+ */
+export const LLAMA_CPP_VISION_COMPUTE_BYTES = 384 * 1024 ** 2;
+
+/**
+ * Resident llama.cpp footprint. `mmprojBytes` is the multimodal projector's
+ * on-disk size, which is NOT part of `approxSizeBytes` — the installed
+ * manifest counts the GGUF alone, so a vision model that loads a 1.3 GiB
+ * projector was reserved as if it were text-only. Measured on
+ * muse-glimmer-30b-q4: loading the projector moved RSS by 1698 MiB against a
+ * 1335 MiB file, the remainder being the vision compute buffers above.
+ *
+ * The projector is weights-like — tensors llama.cpp buffers the same way — so
+ * it rides the same proportional term rather than getting one of its own.
+ */
+export function estimateLlamaCppResidentBytes(
+  approxSizeBytes: number,
+  opts?: { mmprojBytes?: number },
+): number {
+  const mmprojBytes = opts?.mmprojBytes ?? 0;
+  return (
+    Math.round((approxSizeBytes + mmprojBytes) * LLAMA_CPP_WEIGHTS_MULTIPLIER) +
+    LLAMA_CPP_FIXED_ENGINE_BYTES +
+    (mmprojBytes > 0 ? LLAMA_CPP_VISION_COMPUTE_BYTES : 0)
+  );
+}
+
+/**
+ * Proportional term for MLX. Measured 2026-08-15 on an M5 Max from
+ * `mx.get_active_memory()` immediately after `mlx_vlm.utils.load` and before
+ * any inference — so weights only, no KV, no activations:
+ *
+ *   lfm2.5-2.6b-q4        1.43 GiB file → 0.9883× active
+ *   gemma4-12b-q4        10.26 GiB file → 0.9973×
+ *   qwen3.8-27b-q4       14.98 GiB file → 0.9984×
+ *   qwen3.6-27b-q8       27.50 GiB file → 0.9991×
+ *   qwen3.6-35b-a3b-q8   35.16 GiB file → 0.9993×
+ *   laguna-s-2.1-118b-q6 86.15 GiB file → 0.9999×
+ *
+ * MLX allocates the weights and essentially nothing else — every sample sits
+ * at or below 1.0, and the shortfall is safetensors metadata plus the
+ * tokenizer files that `approxSizeBytes` counts and no tensor ever holds. The
+ * 1.02 is architecture margin, not observed cost.
+ */
+export const MLX_WEIGHTS_MULTIPLIER = 1.02;
+
+/**
+ * Fixed term for MLX: the sidecar process itself — Python, the MLX runtime,
+ * mlx_vlm/transformers, and the tokenizer — measured at 376–875 MiB across
+ * that same 1.4→86 GiB span. Flat over a 60× range, which is what makes a
+ * bare multiplier the wrong shape here: the old `× 1.05` under-reserved a
+ * 1.4 GiB model by 633 MiB while wasting 1.1 GiB on a 35 GiB one.
+ */
+export const MLX_FIXED_ENGINE_BYTES = 1024 * 1024 ** 2;
+
+/**
+ * Resident MLX footprint for a model of `approxSizeBytes`, KV EXCLUDED —
+ * every caller prices KV explicitly on top.
+ *
+ * Same fixed-plus-proportional shape as {@link estimateLlamaCppResidentBytes}
+ * and for the same reason: the cost that does not scale with the weights has
+ * to be carried by a term that does not scale either.
+ */
+export function estimateMlxResidentBytes(approxSizeBytes: number): number {
+  return Math.round(approxSizeBytes * MLX_WEIGHTS_MULTIPLIER) + MLX_FIXED_ENGINE_BYTES;
 }
 
 export type ModelFitTier = 'fits' | 'fits-offload' | 'tight' | 'too-big';

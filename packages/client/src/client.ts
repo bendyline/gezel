@@ -770,6 +770,16 @@ export interface ProviderCacheStatsResponse {
 
 export type FolderScope = 'documents' | 'gezels' | 'projects';
 
+/** One pre-move snapshot under `~/.gezel/backup/<timestamp>/`. */
+export interface FolderBackupSnapshot {
+  id: string;
+  path: string;
+  scopes: FolderScope[];
+  bytes: number;
+  /** ISO timestamp, or null when the folder name doesn't parse. */
+  createdAt: string | null;
+}
+
 export interface FoldersStatusResponse {
   /** Default (un-externalized) location of each scope. */
   defaults: Record<FolderScope, string>;
@@ -780,8 +790,13 @@ export interface FoldersStatusResponse {
   /** True when a folder-move job is queued or running — the UI should
    *  disable the move buttons rather than queueing parallel ops. */
   activeJob: boolean;
-  /** Backup folder summary for the UI footer. */
-  backups: { count: number; totalBytes: number; path: string };
+  /** Pre-move snapshot summary, newest first. */
+  backups: {
+    count: number;
+    totalBytes: number;
+    path: string;
+    snapshots: FolderBackupSnapshot[];
+  };
 }
 
 export interface FolderMovePlanValidation {
@@ -1619,6 +1634,13 @@ export interface LlamaCppInstalledModel {
   id: string;
   name: string;
   approxSizeBytes: number;
+  /**
+   * On-disk size of the multimodal projector, when this model has one.
+   * Deliberately NOT folded into `approxSizeBytes`, which stays the weights
+   * (and so the download size the UI shows); memory estimates add it
+   * explicitly via `estimateLlamaCppResidentBytes`'s `mmprojBytes`.
+   */
+  mmprojSizeBytes?: number;
   installedAt: string;
   weightsPath: string;
   /** Context capacity advertised by the GGUF metadata. */

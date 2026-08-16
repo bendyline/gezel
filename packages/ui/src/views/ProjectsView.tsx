@@ -2116,7 +2116,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         <aside className={`side${sidebarCollapsed ? ' collapsed' : ''}`}>
           <div className="area-toolbar">
             {!sidebarCollapsed && (
-              <button type="button" className="area-toolbar-btn" onClick={() => setCreateMode('crew')}>
+              <button
+                type="button"
+                className="area-toolbar-btn"
+                onClick={() => setCreateMode('crew')}
+              >
                 + New Project
               </button>
             )}

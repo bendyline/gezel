@@ -1,4 +1,5 @@
 import type {
+  FolderBackupSnapshot,
   FolderMovePlan,
   FolderMoveStatus,
   FolderScope,
@@ -205,8 +206,9 @@ export function FoldersSettings() {
       <h2>Folders</h2>
       <p className="muted small">
         Move parts of your gezel data to a folder of your choosing — for example a OneDrive, iCloud
-        Drive, or Dropbox folder so it syncs across machines and gets backed up. A snapshot of the
-        source is always written to <code>{status.backups.path}</code> before any move runs.
+        Drive, or Dropbox folder so it syncs across machines and gets backed up. Before any move
+        runs, a copy of the source is written to <code>{status.backups.path}</code> so the move can
+        be undone by hand if something goes wrong.
       </p>
 
       {error && (
@@ -234,10 +236,7 @@ export function FoldersSettings() {
         ))}
       </div>
 
-      <p className="muted small" style={{ marginTop: 16 }}>
-        Backups: {status.backups.count} {status.backups.count === 1 ? 'snapshot' : 'snapshots'}
-        {status.backups.count > 0 && ` (${formatBytes(status.backups.totalBytes)})`}
-      </p>
+      {status.backups.count > 0 && <SnapshotList backups={status.backups} onOpen={onOpen} />}
 
       {activeJob && <MoveProgress job={activeJob} onRestart={onRestart} />}
 
@@ -328,6 +327,55 @@ function ScopeRow({
       </div>
     </div>
   );
+}
+
+function SnapshotList({
+  backups,
+  onOpen,
+}: {
+  backups: FoldersStatusResponse['backups'];
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <div className="folders-snapshots" style={{ marginTop: 24 }}>
+      <h3>Move snapshots</h3>
+      <p className="muted small">
+        Copies of the source taken before each move, newest first. The last 10 are kept; older ones
+        are removed automatically. Nothing here is used by gezel — they exist so you can restore a
+        move by hand.
+      </p>
+      <ul className="folders-snapshot-list">
+        {backups.snapshots.map((snapshot) => (
+          <li key={snapshot.id} className="folders-snapshot">
+            <div>
+              <div>{describeSnapshot(snapshot)}</div>
+              <div className="muted small">
+                {describeScopes(snapshot.scopes)} · {formatBytes(snapshot.bytes)}
+              </div>
+            </div>
+            {window.__GEZEL__?.openPath && (
+              <button type="button" onClick={() => onOpen(snapshot.path)}>
+                Open
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">
+        {formatBytes(backups.totalBytes)} total in <code>{backups.path}</code>
+      </p>
+    </div>
+  );
+}
+
+function describeSnapshot(snapshot: FolderBackupSnapshot): string {
+  if (!snapshot.createdAt) return snapshot.id;
+  return new Date(snapshot.createdAt).toLocaleString();
+}
+
+function describeScopes(scopes: FolderScope[]): string {
+  if (scopes.length === 0) return 'empty';
+  return scopes.map((scope) => SCOPES.find((s) => s.id === scope)?.label ?? scope).join(', ');
 }
 
 function ConflictPolicyPicker({

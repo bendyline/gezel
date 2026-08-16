@@ -165,6 +165,7 @@ export function parseProposalOutput(
  */
 const PROFILE_ADJACENCY: Record<KnownProfileId, KnownProfileId> = {
   'thinking-general': 'thinking-coding',
+  'thinking-deep': 'thinking-general',
   'thinking-coding': 'thinking-precise',
   'thinking-precise': 'thinking-general',
   instruct: 'thinking-general',

@@ -1,4 +1,4 @@
-import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
+import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   estimateKvReserveBytes,
@@ -382,16 +382,25 @@ describe('CapacityBroker', () => {
     expect(CapacityBroker.estimateResidentBytes('llama-cpp', 10 * GB)).toBe(
       estimateLlamaCppResidentBytes(10 * GB),
     );
-    expect(estimateLlamaCppResidentBytes(10 * GB)).toBe(Math.round(10 * GB * 1.1) + 256 * 1024 ** 2);
+    expect(estimateLlamaCppResidentBytes(10 * GB)).toBe(
+      Math.round(10 * GB * 1.1) + 256 * 1024 ** 2,
+    );
     // The fixed term is what stops a small model from being under-described:
     // doubling the file must NOT double the engine overhead.
     expect(estimateLlamaCppResidentBytes(2 * GB) - Math.round(2 * GB * 1.1)).toBe(
       estimateLlamaCppResidentBytes(20 * GB) - Math.round(20 * GB * 1.1),
     );
-    // Measured: `mx.get_active_memory()` after load(), before inference, on a
-    // 27.50 GiB model reads 27.47 GiB. The old 1.3 folded KV into the weights
-    // term; callers price KV explicitly, so it was a double-count.
-    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.05));
+    // MLX is the same shape for the same reason. `mx.get_active_memory()`
+    // after load(), before inference, tracks the weights at 0.988-0.9999x
+    // across a 1.4-86 GiB span; what it does NOT scale with is the sidecar's
+    // Python/MLX/tokenizer cost, a flat 376-875 MiB. The old bare 1.05x
+    // under-reserved a 1.4 GiB model by 633 MiB and wasted 1.1 GiB on a 35.
+    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(
+      estimateMlxResidentBytes(10 * GB),
+    );
+    expect(estimateMlxResidentBytes(2 * GB) - Math.round(2 * GB * 1.02)).toBe(
+      estimateMlxResidentBytes(20 * GB) - Math.round(20 * GB * 1.02),
+    );
   });
 
   it('estimateResidentBytes caps ds4 at the streaming working set, not the weight size', () => {
@@ -562,7 +571,7 @@ describe('localEngineKvBudgetBytes', () => {
     // the invariant that matters is still MLX <= llama in SLOTS.
     const base = { budgetBytes: 96 * GB, weightsBytes: 28 * GB };
     expect(localEngineKvBudgetBytes({ engine: 'mlx', ...base })).toBe(
-      96 * GB - Math.round(28 * GB * 1.05),
+      96 * GB - estimateMlxResidentBytes(28 * GB),
     );
     const slotInput = { ...base, perTurnCtxTokens: 32_768, kvCacheType: 'f16' as const };
     expect(localEngineSlotCeiling({ engine: 'mlx', ...slotInput })).toBeLessThanOrEqual(

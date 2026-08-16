@@ -1281,11 +1281,23 @@ export const ChatModelLlamaCppSourceSchema = z
     /** Total on-disk size: the GGUF for single-file, sum of all shards for sharded. */
     approxSizeBytes: z.number().int().positive(),
     /**
-     * Working-set footprint when loaded: weights + KV cache at default
-     * context + activations + buffers. Used by the local-engine capacity
-     * broker to decide how many models fit concurrently. Optional —
-     * absent entries fall back to `estimateLlamaCppResidentBytes`, which
-     * is measured rather than assumed (see its comment in model-fit.ts).
+     * Working-set footprint when loaded, **KV cache EXCLUDED**: weights as
+     * the engine actually buffers them, plus its compute/output buffers and
+     * process cost. Used by the local-engine capacity broker to decide how
+     * many models fit concurrently; it prices KV explicitly on top from the
+     * launch context (see `mlxPlannedReservationBytes` in the MLX builder).
+     *
+     * Folding KV in here double-counts it. This field used to be documented
+     * as "weights + KV cache at default context", and the pins authored to
+     * that reading carried a flat 1.2-1.3x that was mostly KV — worth ~10 GiB
+     * of phantom reservation on a 35B, while still under-reserving small
+     * models whose real overhead is a fixed process cost.
+     *
+     * Optional, and only worth setting when someone has MEASURED this model:
+     * absent entries fall back to `estimateLlamaCppResidentBytes` /
+     * `estimateMlxResidentBytes`, which are themselves measured (see their
+     * comments in model-fit.ts) and improve as the fleet is re-measured. A
+     * pin that merely restates the formula is drift waiting to happen.
      */
     residentBytes: z.number().int().positive().optional(),
     /** Short quant tag for display ('Q4_K_M', 'Q8_0', 'BF16'). */

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LLAMA_CPP_VISION_COMPUTE_BYTES,
+  LLAMA_CPP_WEIGHTS_MULTIPLIER,
+  MLX_FIXED_ENGINE_BYTES,
+  MLX_WEIGHTS_MULTIPLIER,
   computeModelFit,
+  estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
+  estimateMlxResidentBytes,
   isMemoryConstrainedMachine,
   isMoEFromTags,
   localContextFloorTokens,
@@ -235,6 +241,90 @@ describe('localContextFloorTokens', () => {
     const small = { totalRamBytes: 16 * GiB, gpuVramBytes: null };
     expect(estimateManifestKvBytes(manifest, { ctxTokens: localContextFloorTokens(small) })).toBe(
       Math.round(140_000 * 32_768 * 0.55),
+    );
+  });
+});
+
+describe('estimateMlxResidentBytes', () => {
+  // Weights-only footprints measured 2026-08-15 on an M5 Max from
+  // `mx.get_active_memory()` after load and before any inference, paired with
+  // the process cost the sidecar carries on top (macOS phys_footprint).
+  const measured = [
+    { id: 'lfm2.5-2.6b-q4', approx: 1_535_590_880, footprint: 2_097_219_960 },
+    { id: 'gemma4-12b-q4', approx: 11_020_138_609, footprint: 11_937_326_368 },
+    { id: 'qwen3.8-27b-q4', approx: 16_081_488_731, footprint: 16_822_088_256 },
+    { id: 'qwen3.6-27b-q8', approx: 29_528_164_409, footprint: 30_222_800_904 },
+    { id: 'qwen3.6-35b-a3b-q8', approx: 37_748_365_642, footprint: 38_446_395_160 },
+    { id: 'laguna-s-2.1-118b-q6', approx: 92_507_783_098, footprint: 92_902_328_032 },
+  ];
+
+  it('covers every measured model without over-reserving more than 30%', () => {
+    for (const { id, approx, footprint } of measured) {
+      const estimate = estimateMlxResidentBytes(approx);
+      expect(estimate, `${id} must not under-reserve`).toBeGreaterThanOrEqual(footprint);
+      expect(estimate / footprint, `${id} must not over-reserve`).toBeLessThan(1.3);
+    }
+  });
+
+  it('is fixed-plus-proportional, so the engine term does not scale with weights', () => {
+    // The bug a bare multiplier hides: the sidecar's Python/MLX/tokenizer cost
+    // is flat, so scaling it starves small models and wastes on large ones.
+    const small = estimateMlxResidentBytes(2 * GiB) - Math.round(2 * GiB * MLX_WEIGHTS_MULTIPLIER);
+    const large =
+      estimateMlxResidentBytes(80 * GiB) - Math.round(80 * GiB * MLX_WEIGHTS_MULTIPLIER);
+    expect(small).toBe(large);
+    expect(small).toBe(MLX_FIXED_ENGINE_BYTES);
+  });
+
+  it('reserves more than the old bare 1.05x on the small end it under-served', () => {
+    const approx = 1_535_590_880;
+    expect(estimateMlxResidentBytes(approx)).toBeGreaterThan(Math.round(approx * 1.05));
+  });
+});
+
+describe('estimateLlamaCppResidentBytes — the multimodal projector', () => {
+  // muse-glimmer-30b-q4, measured 2026-08-15 on an M5 Max: the GGUF alone runs
+  // at 15928 MiB RSS, and loading `--mmproj mmproj-kquant.gguf` takes it to
+  // 17626 MiB. `approxSizeBytes` counts only the 15980 MiB GGUF.
+  const GGUF_BYTES = 16_756_681_056;
+  const MMPROJ_BYTES = 1_400_328_928;
+  const MEASURED_RSS_WITH_MMPROJ = 18_482_675_712;
+
+  it('covers the measured vision footprint without overcorrecting', () => {
+    const withVision = estimateLlamaCppResidentBytes(GGUF_BYTES, { mmprojBytes: MMPROJ_BYTES });
+    expect(withVision).toBeGreaterThanOrEqual(MEASURED_RSS_WITH_MMPROJ);
+    expect(withVision / MEASURED_RSS_WITH_MMPROJ).toBeLessThan(1.2);
+  });
+
+  it('stops the projector from eating the margin meant for architecture variance', () => {
+    // On a 15.6 GiB model the weights-only estimate happens to clear the
+    // measured vision footprint — but only because the proportional term's
+    // ~1.6 GiB of headroom is almost exactly the projector. That headroom
+    // exists to absorb an unusual architecture (gemma4-E4B ran 1.09x on
+    // Windows), so spending it here leaves nothing for the case it is for.
+    expect(estimateLlamaCppResidentBytes(GGUF_BYTES)).toBeGreaterThan(MEASURED_RSS_WITH_MMPROJ);
+
+    // The coincidence is size-dependent, and inverts on a small model with a
+    // full-size projector: 10% of 4 GiB cannot absorb a 1.3 GiB sidecar.
+    const smallVisionModel = 4 * GiB;
+    expect(estimateLlamaCppResidentBytes(smallVisionModel)).toBeLessThan(
+      smallVisionModel + MMPROJ_BYTES,
+    );
+    expect(
+      estimateLlamaCppResidentBytes(smallVisionModel, { mmprojBytes: MMPROJ_BYTES }),
+    ).toBeGreaterThan(smallVisionModel + MMPROJ_BYTES + LLAMA_CPP_VISION_COMPUTE_BYTES);
+  });
+
+  it('charges the vision compute buffers only when a projector is loaded', () => {
+    const none = estimateLlamaCppResidentBytes(GGUF_BYTES);
+    expect(estimateLlamaCppResidentBytes(GGUF_BYTES, {})).toBe(none);
+    expect(estimateLlamaCppResidentBytes(GGUF_BYTES, { mmprojBytes: 0 })).toBe(none);
+
+    const withVision = estimateLlamaCppResidentBytes(GGUF_BYTES, { mmprojBytes: MMPROJ_BYTES });
+    expect(withVision - none).toBe(
+      Math.round((GGUF_BYTES + MMPROJ_BYTES) * LLAMA_CPP_WEIGHTS_MULTIPLIER) -
+        Math.round(GGUF_BYTES * LLAMA_CPP_WEIGHTS_MULTIPLIER) +
+        LLAMA_CPP_VISION_COMPUTE_BYTES,
     );
   });
 });

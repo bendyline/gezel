@@ -722,7 +722,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                     // because of slot count. Pricing the fleet here would flag
                     // models as too big that the daemon would happily run.
                     const installedResidentBytes =
-                      m.predictedResidentBytes ?? estimateLlamaCppResidentBytes(m.approxSizeBytes);
+                      m.predictedResidentBytes ??
+                      estimateLlamaCppResidentBytes(m.approxSizeBytes, {
+                        mmprojBytes: m.mmprojSizeBytes,
+                      });
                     const ramFit = memory
                       ? computeModelFit({
                           residentBytes: installedResidentBytes,
@@ -939,7 +942,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
                 residentBytes:
-                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) + fitKvBytes(m, memory),
+                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
+                    mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
+                  }) + fitKvBytes(m, memory),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -960,7 +965,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const fit = memory
               ? computeModelFit({
                   residentBytes:
-                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) + fitKvBytes(m, memory),
+                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
+                    fitKvBytes(m, memory),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })

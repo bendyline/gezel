@@ -32,6 +32,8 @@ export type ContextEngine = 'llama-cpp' | 'mlx' | 'ds4';
 export interface ContextControlModel {
   id: string;
   approxSizeBytes: number;
+  /** Projector size on a multimodal llama.cpp model — not part of `approxSizeBytes`. */
+  mmprojSizeBytes?: number;
   contextWindow?: number;
   effectiveContextWindow?: number;
   overrideContextTokens?: number;
@@ -273,7 +275,8 @@ export function ModelContextSliderPanel({
   // slot-fleet reservation for the over-fit check.
   const kvPerToken = model.kvBytesPerTokenPerSlot;
   const weightsBytes =
-    model.weightsResidentBytes ?? estimateLlamaCppResidentBytes(model.approxSizeBytes);
+    model.weightsResidentBytes ??
+    estimateLlamaCppResidentBytes(model.approxSizeBytes, { mmprojBytes: model.mmprojSizeBytes });
   const kvFixed = model.kvFixedBytesPerSlot ?? 0;
   const singleBytes =
     kvPerToken !== undefined ? weightsBytes + kvFixed + kvPerToken * value : undefined;

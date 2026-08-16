@@ -222,25 +222,36 @@ body.hb {
   max-width: 100%;
   margin: 0 0 1.25rem;
 }
+/* A step down from body copy: the model scorecard puts eight columns of
+   figures inside a 42rem reading measure, and at prose size the numbers get
+   less room than the words around them. */
 .hb-article table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 /* Prose cells wrap. Catalog tables pair a short name against a full sentence
    of description, so white-space:nowrap would push the description off the
-   page and force a horizontal scroll to read every row. */
+   page and force a horizontal scroll to read every row.
+
+   break-word, not anywhere: both keep an over-long token from spilling out
+   of the table, but "anywhere" also lets the browser count a single
+   character as a column's minimum width, so a squeezed table shreds its
+   headings mid-word ("Rea" / "ds" / "at"). With break-word a column never
+   narrows past its longest word, and the excess goes to the scroller. */
 .hb-article th, .hb-article td {
   border: 1px solid var(--hb-border);
-  padding: 0.45rem 0.7rem;
+  padding: 0.4rem 0.45rem;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  min-width: 3rem;
 }
 .hb-article th { background: var(--hb-inset); font-weight: 600; }
 /* Keep the leading label column from collapsing to one word per line while
    the description column takes the slack. */
-.hb-article tbody td:first-child { min-width: 11rem; }
+.hb-article tbody td:first-child { min-width: 6rem; }
 
 .hb-watch { max-width: var(--hb-measure); margin: 1.25rem 0 0; font-size: 0.9rem; }
 

@@ -3230,11 +3230,8 @@ button.machine-memory-unload-button {
   position: relative;
   left: -1px;
 }
-.app-sidebar-proj-row > .app-sidebar-proj-signal {
-  left: -2px;
-}
-/* Match the group header's 22px add button + 0.2rem outer margin, with the
-   project signals optically offset 1px left of the New project "+" above. */
+/* Match the group header's 22px add button + 0.2rem outer margin, so the
+   project signals line up with the New project "+" above. */
 .app-sidebar-proj-signal {
   flex: 0 0 auto;
   width: 22px;
@@ -9147,6 +9144,24 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .settings-panel .home-link {
   font-family: var(--font-ui);
 }
+/* A checkbox row's <label>/<span> is neither `p` nor a form control, so it
+   escaped the two rules above and rendered at the inherited body size —
+   visibly larger than the helper line directly beneath it. */
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.settings-toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
+}
 
 .claude-permission-tray.gz-tray {
   display: grid;
@@ -9734,6 +9749,26 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   gap: 0.5rem;
 }
 
+.folders-snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folders-snapshot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
 /* Provider switch + pills are keys-in-trays aliases — the full visual recipe
    lives in the "Keys in trays" block at the end of this file. Only
    surface-specific constraints stay here. */
@@ -9909,6 +9944,26 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--panel);
   border: 1px dashed var(--border);
   border-radius: 8px;
+}
+
+/* One setting row in an engine card: a label and its control(s) on a line.
+   Call sites have always written flex-child props against this class
+   (`flex: 1` on the API-key input, `flex-direction: column` on the
+   confirmation fieldsets, `gap` on the toggles), but it carried only the
+   margin below — no `display` — so every one of those was inert and rows
+   fell back to ad-hoc margins for spacing. */
+.provider-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Margins don't collapse inside a flex container, so let the row's gap own
+   the spacing for the explanatory line in the column-stacked confirmation
+   fieldsets rather than stacking on top of the paragraph's own margins. */
+.provider-row > p {
+  margin: 0;
 }
 
 /* Space top-level setting rows in image/audio engine cards. Scoped to

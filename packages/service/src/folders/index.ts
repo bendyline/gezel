@@ -6,6 +6,12 @@ export {
   backupRootForScope,
   makeScopeFilter,
 } from './scope.js';
+export {
+  type BackupSnapshot,
+  type BackupSummary,
+  snapshotCreatedAt,
+  summarizeBackups,
+} from './backups.js';
 export { type ValidationResult, validateExternalPath } from './validation.js';
 export { type MovePlan, planMove } from './plan.js';
 export {
