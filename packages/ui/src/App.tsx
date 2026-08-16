@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
+import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
 import { EngineStatusPill } from './components/EngineStatusPill.js';
@@ -21,6 +22,7 @@ import { ModelBundleImportController } from './components/ModelBundleControls.js
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
 import { Sidebar } from './components/Sidebar.js';
+import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
@@ -619,6 +621,8 @@ function FullApp() {
           to navigate to Settings → Connected Apps. */}
       <GrantConsentDialog />
       <MacUninstallDialog />
+      <StorageCleanupDialog />
+      <BackupRestoreDialog />
       <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
       {/* The top bar is now status-only — it remains the OS title bar (drag
           region + native window-control reservations via CSS padding). The

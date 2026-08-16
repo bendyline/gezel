@@ -70,9 +70,9 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   app.post('/move', async (c) => {
-    if (ctx.folderJobs.hasActive()) {
+    if (ctx.folderJobs.hasActive() || ctx.storageJobs?.hasActive()) {
       return c.json(
-        { error: 'job-in-progress', hint: 'Wait for the current move to finish.' },
+        { error: 'job-in-progress', hint: 'Wait for the current move or cleanup to finish.' },
         409,
       );
     }
@@ -137,9 +137,9 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   app.post('/reset', async (c) => {
-    if (ctx.folderJobs.hasActive()) {
+    if (ctx.folderJobs.hasActive() || ctx.storageJobs?.hasActive()) {
       return c.json(
-        { error: 'job-in-progress', hint: 'Wait for the current move to finish.' },
+        { error: 'job-in-progress', hint: 'Wait for the current move or cleanup to finish.' },
         409,
       );
     }

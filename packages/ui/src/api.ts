@@ -112,6 +112,15 @@ declare global {
         onShowRequested(callback: () => void): () => void;
       };
       /**
+       * Where a content backup should be written or read from. The renderer
+       * only resolves a path; the daemon streams the archive itself, so a
+       * multi-gigabyte file never passes through this process.
+       */
+      backupFile?: {
+        chooseSavePath(defaultName?: string): Promise<{ path?: string }>;
+        chooseOpenPath(): Promise<{ path?: string }>;
+      };
+      /**
        * App update status from the Electron shell. On macOS `install` opens a
        * downloaded, signature- and notarization-verified PKG so Installer.app
        * can authenticate the user — Squirrel's in-place ZIP swap cannot

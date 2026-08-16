@@ -1,5 +1,5 @@
-import { basename } from 'node:path';
-import { GEZEL_VERSION } from '@bendyline/gezel';
+import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
+import { GEZEL_VERSION, type StorageJob } from '@bendyline/gezel';
 import {
   type LlamaCppInstallEvent,
   type MlxInstallEvent,
@@ -46,6 +46,16 @@ import {
   parseNativeVariant,
 } from '../native-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
+import {
+  type CleanupFlags,
+  formatBackupPlan,
+  formatCleanupPreview,
+  formatCleanupResult,
+  formatRestoreReview,
+  formatStorageSummary,
+  resolveCleanupSelection,
+  resolveRestoreSelection,
+} from '../storage-format.js';
 import {
   craftbookStartRequest,
   findCraftbook,
@@ -1191,6 +1201,192 @@ program
       }
     }
   });
+
+// ── Storage: see what Gezel is keeping, and reclaim it before uninstalling ──
+program
+  .command('cleanup')
+  .description('Show or reclaim the space Gezel is using on this device')
+  .option('--refresh', 'Re-measure instead of using the cached sizes')
+  .option('--models', 'Delete downloaded models')
+  .option('--engines', 'Delete engine binaries and their caches')
+  .option('--toolsets', 'Delete installed tools and the automation browser')
+  .option('--caches', 'Delete catalog content and generated indexes')
+  .option('--redownloadable', 'Delete everything Gezel can download again')
+  .option(
+    '--content <what>',
+    'Delete your own content: gezels, projects, documents, settings, or all',
+  )
+  .option('--dry-run', 'Show what would be deleted without deleting anything')
+  .option('--yes', 'Skip the confirmation prompt')
+  .action(async (opts: CleanupCommandOptions) => {
+    const client = await connectOwned(cliGlobals());
+    const selection = resolveCleanupSelection(opts);
+
+    // No flags means "tell me what's here" — the discovery surface, and the
+    // safe default for a command whose other modes delete things.
+    if (selection.categories.length === 0) {
+      const summary = await client.storageSummary(opts.refresh ? { refresh: true } : undefined);
+      console.log(formatStorageSummary(summary));
+      if (!opts.dryRun) {
+        console.log(
+          '\nTo reclaim space, re-run with --redownloadable (safe: Gezel downloads these again).',
+        );
+      }
+      return;
+    }
+
+    const summary = await client.storageSummary({ refresh: true });
+    console.log(formatCleanupPreview(summary, selection.categories));
+
+    if (opts.dryRun) {
+      console.log('\nDry run — nothing was deleted.');
+      return;
+    }
+
+    // Deleting downloads is a bandwidth decision; deleting content is not.
+    // `--yes` covers the first, and never the second.
+    if (selection.destroysUserContent) {
+      const confirmed = await confirmByTyping(
+        'This permanently deletes content only you have. Type "delete my content" to continue: ',
+        'delete my content',
+      );
+      if (!confirmed) {
+        console.log('Cancelled.');
+        return;
+      }
+    } else if (!opts.yes) {
+      const confirmed = await confirmByTyping('Delete these? Type "yes" to continue: ', 'yes');
+      if (!confirmed) {
+        console.log('Cancelled.');
+        return;
+      }
+    }
+
+    const { jobId } = await client.startCleanup({
+      categories: selection.categories,
+      ...(selection.destroysUserContent ? { confirmUserContent: true } : {}),
+    });
+    const job = await pollStorageJob(client, jobId);
+    console.log(formatCleanupResult(job));
+    if (job.status === 'error') process.exitCode = 1;
+  });
+
+program
+  .command('backup <file>')
+  .description('Write your gezels, projects, and documents to a backup file')
+  .option('--no-workspaces', 'Leave project working files out of the backup')
+  .option('--dry-run', 'Show what would be included without writing the file')
+  .action(async (file: string, opts: { workspaces?: boolean; dryRun?: boolean }) => {
+    const client = await connectOwned(cliGlobals());
+    const outPath = resolvePath(file);
+    const excludeWorkspaces = opts.workspaces === false;
+
+    const plan = await client.planBackup({ destPath: outPath, excludeWorkspaces });
+    console.log(formatBackupPlan(plan));
+    if (opts.dryRun) {
+      console.log('\nDry run — no file was written.');
+      return;
+    }
+    if (plan.items.length === 0) throw new CliError('There is nothing to back up yet.');
+
+    const { jobId } = await client.startBackup({ outPath, excludeWorkspaces });
+    const job = await pollStorageJob(client, jobId);
+    if (job.status === 'error') {
+      throw new CliError(`Backup failed: ${job.error ?? 'unknown error'}`);
+    }
+    console.log(`\nWrote ${outPath}`);
+  });
+
+program
+  .command('restore <file>')
+  .description('Restore gezels, projects, and documents from a backup file')
+  .option('--list', 'Show what the backup holds without restoring anything')
+  .option(
+    '--only <item...>',
+    'Restore just these items, by id (repeatable, e.g. --only tamsin roof-survey)',
+  )
+  .option('--replace', 'Overwrite items that already exist here')
+  .option('--settings', 'Also restore preferences from the backup')
+  .action(
+    async (
+      file: string,
+      opts: { list?: boolean; only?: string[]; replace?: boolean; settings?: boolean },
+    ) => {
+      const client = await connectOwned(cliGlobals());
+      const review = await client.scanRestore({ path: resolvePath(file) });
+      console.log(formatRestoreReview(review));
+
+      if (opts.list) return;
+
+      const selection = resolveRestoreSelection(review, opts);
+      for (const note of selection.skipped) console.log(`  skipping ${note}`);
+      if (selection.items.length === 0) {
+        console.log('\nNothing to restore.');
+        await client.cancelRestore(review.restoreId);
+        return;
+      }
+
+      const { jobId } = await client.confirmRestore(review.restoreId, {
+        items: selection.items,
+        ...(opts.settings ? { settings: true } : {}),
+      });
+      const job = await pollStorageJob(client, jobId);
+      if (job.status === 'error') {
+        throw new CliError(`Restore failed: ${job.error ?? 'unknown error'}`);
+      }
+      console.log(`\nRestored ${selection.items.length} item(s).`);
+      if (job.restartRequired) console.log('Restart Gezel to see them.');
+    },
+  );
+
+/** Absolute path from whatever the user typed, relative to their shell. */
+function resolvePath(file: string): string {
+  return isAbsolutePath(file) ? file : joinPath(process.cwd(), file);
+}
+
+interface CleanupCommandOptions extends CleanupFlags {
+  refresh?: boolean;
+  dryRun?: boolean;
+  yes?: boolean;
+}
+
+/** Reads one line from the terminal and compares it to the required phrase. */
+async function confirmByTyping(prompt: string, required: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    throw new CliError(
+      'Refusing to delete without a confirmation. Re-run in a terminal, or use --dry-run to preview.',
+    );
+  }
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(prompt);
+    return answer.trim().toLowerCase() === required;
+  } finally {
+    rl.close();
+  }
+}
+
+/** Poll to completion, drawing a single rewritten progress line on stderr. */
+async function pollStorageJob(
+  client: Awaited<ReturnType<typeof connectOwned>>,
+  jobId: string,
+): Promise<StorageJob> {
+  for (;;) {
+    const job = await client.getStorageJob(jobId);
+    if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
+      if (process.stderr.isTTY) process.stderr.write('\n');
+      return job;
+    }
+    if (process.stderr.isTTY) {
+      const label = job.currentLabel ? ` ${job.currentLabel}` : '';
+      process.stderr.write(
+        `\r${job.phase ?? 'working'}${label} — ${job.itemsDone}/${job.totalItems}   `,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   // CliError is a user-facing failure (e.g. a guest connection trying to run

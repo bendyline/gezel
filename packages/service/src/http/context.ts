@@ -1,4 +1,4 @@
-import type { ServiceRole } from '@bendyline/gezel';
+import type { ProviderName, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
@@ -50,6 +50,7 @@ import type { ReportActionManager } from '../report-actions/report-action-manage
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
+import type { StorageJobManager } from '../storage/job-manager.js';
 import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
@@ -283,6 +284,13 @@ export interface ServiceContext {
    *  (the worker writes a sentinel file so the next boot can detect a
    *  crashed mid-move). */
   folderJobs: JobManager;
+  /** In-memory tracker for the one storage cleanup/backup/restore job that
+   *  may run at a time. Same lifetime as `folderJobs`, and mutually
+   *  exclusive with it — both rewrite the same directories. */
+  storageJobs: StorageJobManager;
+  /** Drop the cached model inventory after cleanup deletes model files, so
+   *  listings stop advertising models that are no longer on disk. */
+  invalidateModelsCache?: (provider?: ProviderName) => void;
   /** Background workspace indexer: commands + files + token index. */
   workspaceIndex: WorkspaceIndexManager;
   /** Content index (code/doc intelligence) backing the code-intel MCP tools. */

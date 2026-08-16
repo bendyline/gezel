@@ -28,6 +28,7 @@ import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import { StorageUsageCard } from '../components/StorageUsageCard.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
@@ -3555,6 +3556,7 @@ export function SettingsView() {
               <UpdateStatus />
             </section>
             <GildeUpdatesCard />
+            <StorageUsageCard />
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>
               <p className="muted" style={{ marginTop: 0 }}>

@@ -37,6 +37,8 @@ import type {
   ArchiveListResponse,
   AskQuestionRequest,
   AskQuestionResponse,
+  BackupPlan,
+  BackupRequest,
   CancelCodeReviewResponse,
   CatalogItemDetail,
   CatalogItemSummary,
@@ -47,6 +49,7 @@ import type {
   ChatHistoryResponse,
   ChatSession,
   ChatSessionSummary,
+  CleanupRequest,
   CodeReviewResponse,
   CodexSetupStatusResponse,
   CompleteStepRequest,
@@ -259,6 +262,9 @@ import type {
   ResolveArtifactResponse,
   ResolveSecurityFindingRequest,
   ResolveSecurityFindingResponse,
+  RestoreConfirm,
+  RestoreReview,
+  RestoreScanRequest,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -302,6 +308,8 @@ import type {
   StartCodeReviewRequest,
   StartCodeReviewResponse,
   StepPosition,
+  StorageJob,
+  StorageSummary,
   SuggestCraftbooksResponse,
   SuggestedWorkItem,
   SuggestedWorkResponse,
@@ -2386,6 +2394,71 @@ export class GezelClient {
    *  arrives on the global SSE stream as a `meester_status` event. */
   runMeesterStatus(): Promise<{ started: boolean }> {
     return this.request('POST', '/api/meester-status/run');
+  }
+
+  // ── storage accounting, cleanup & backup ──
+
+  /**
+   * Per-category disk usage for the Gezel home directory, split into content
+   * that can be downloaded again and content that cannot. Sizes are memoized
+   * for a minute; pass `refresh` after anything that changes them.
+   */
+  storageSummary(opts?: { refresh?: boolean }): Promise<StorageSummary> {
+    return this.request('GET', `/api/storage/summary${opts?.refresh ? '?refresh=1' : ''}`);
+  }
+
+  /**
+   * Start a cleanup. Returns immediately with a job to poll — deleting tens
+   * of gigabytes outlives any sensible request timeout. Deleting user content
+   * additionally requires `confirmUserContent`.
+   */
+  startCleanup(body: CleanupRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/storage/cleanup', body);
+  }
+
+  getStorageJob(jobId: string): Promise<StorageJob> {
+    return this.request('GET', `/api/storage/cleanup/${encodeURIComponent(jobId)}`);
+  }
+
+  /** Stop at the next item. Already-deleted files are not restored. */
+  cancelStorageJob(jobId: string): Promise<{ cancelled: boolean }> {
+    return this.request('POST', `/api/storage/cleanup/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  /** What a content backup would contain, with sizes, before writing one. */
+  planBackup(opts?: { destPath?: string; excludeWorkspaces?: boolean }): Promise<BackupPlan> {
+    const params = new URLSearchParams();
+    if (opts?.destPath) params.set('dest', opts.destPath);
+    if (opts?.excludeWorkspaces) params.set('excludeWorkspaces', '1');
+    const query = params.toString();
+    return this.request('GET', `/api/storage/backup/plan${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Write a content backup. The daemon writes the archive to `outPath`
+   * itself — a multi-gigabyte download through the renderer is the fragile
+   * way to do this, and the CLI and desktop app both have a real path.
+   */
+  startBackup(body: BackupRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/storage/backup', body);
+  }
+
+  /** Inspect a backup and report what restoring it would do. Read-only. */
+  scanRestore(body: RestoreScanRequest): Promise<RestoreReview> {
+    return this.request('POST', '/api/storage/restore/scan', body);
+  }
+
+  /** Apply a reviewed restore. Items that exist need an explicit `replace`. */
+  confirmRestore(restoreId: string, body: RestoreConfirm): Promise<{ jobId: string }> {
+    return this.request(
+      'POST',
+      `/api/storage/restore/${encodeURIComponent(restoreId)}/confirm`,
+      body,
+    );
+  }
+
+  cancelRestore(restoreId: string): Promise<{ cancelled: boolean }> {
+    return this.request('POST', `/api/storage/restore/${encodeURIComponent(restoreId)}/cancel`);
   }
 
   // ---------- folders externalization ----------

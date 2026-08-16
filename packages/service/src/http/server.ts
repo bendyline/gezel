@@ -86,6 +86,7 @@ import { scriptRoutes } from './routes/scripts.js';
 import { sdkTypesRoutes } from './routes/sdk-types.js';
 import { searchRoutes } from './routes/search.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { storageRoutes } from './routes/storage.js';
 import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
 import { systemMemoryRoutes, systemRoutes } from './routes/system.js';
@@ -589,6 +590,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/document-media-export', documentMediaExportRoutes(ctx));
   app.route('/api/search', searchRoutes(ctx));
   app.route('/api/folders', folderRoutes(ctx));
+  app.route('/api/storage', storageRoutes(ctx));
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
   app.route('/api/remotes', remotesRoutes(ctx));

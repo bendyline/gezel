@@ -1,5 +1,10 @@
+import type { StorageSummary } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
+import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import { requestBackupRestore } from './BackupRestoreDialog.js';
+import { requestStorageCleanup } from './StorageCleanupDialog.js';
+import { formatBytes } from './model-memory-copy.js';
 
 export const SHOW_MAC_UNINSTALL_EVENT = 'gezel:show-mac-uninstall';
 
@@ -76,6 +81,8 @@ export function MacUninstallDialog() {
             Gezel startup item, and its macOS installer receipt. Choose whether its data should stay
             for a later reinstall.
           </AlertDialog.Description>
+
+          <UninstallStorageNote busy={busy} onLeave={() => setOpen(false)} />
 
           <fieldset className="gz-uninstall-choices" disabled={busy}>
             <legend>Also remove</legend>
@@ -172,5 +179,67 @@ export function MacUninstallDialog() {
         </AlertDialog.Content>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+/**
+ * What uninstalling would leave behind, and the two things worth doing
+ * first.
+ *
+ * Uninstalling on any platform can leave tens of gigabytes of downloaded
+ * models sitting in the home folder, and on Windows and Linux the installer
+ * never touches that folder at all. Naming the number here is the difference
+ * between someone reclaiming it and someone never thinking about it again.
+ */
+function UninstallStorageNote({ busy, onLeave }: { busy: boolean; onLeave: () => void }) {
+  const [summary, setSummary] = useState<StorageSummary | null>(null);
+
+  useEffect(() => {
+    // Strictly best-effort. Someone uninstalling a broken install may have no
+    // reachable daemon at all, and nothing about this figure is worth
+    // blocking the uninstall over — so every failure mode ends the same way.
+    void (async () => {
+      try {
+        setSummary(await api.storageSummary());
+      } catch {
+        setSummary(null);
+      }
+    })();
+  }, []);
+
+  if (!summary || summary.redownloadableBytes + summary.userContentBytes === 0) return null;
+
+  return (
+    <div className="gz-uninstall-storage-note">
+      <p className="small" style={{ margin: 0 }}>
+        Gezel is storing <strong>{formatBytes(summary.redownloadableBytes)}</strong> of downloads
+        and <strong>{formatBytes(summary.userContentBytes)}</strong> of your content. Uninstalling
+        does not remove any of it unless you choose to below.
+      </p>
+      <div className="gz-uninstall-storage-actions">
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={() => {
+            onLeave();
+            requestBackupRestore({ tab: 'backup' });
+          }}
+        >
+          Back up my content first…
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={() => {
+            onLeave();
+            requestStorageCleanup({ preselectRedownloadable: true });
+          }}
+        >
+          Free up space first…
+        </button>
+      </div>
+    </div>
   );
 }

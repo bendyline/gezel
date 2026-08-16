@@ -1207,6 +1207,27 @@ export function keurmeesterDigestStatePath(root: string): string {
 }
 
 /**
+ * Root of every downloaded engine payload: per-engine model stores, the
+ * verified native binary releases, the HuggingFace cache, uv virtualenvs,
+ * and per-engine scratch. This is the bulk of a heavy install's disk use —
+ * on a working machine it dwarfs everything else in the home directory
+ * combined. Owned by the engine/model managers, not the Store.
+ */
+export function enginesRoot(root: string): string {
+  return join(root, 'engines');
+}
+
+/**
+ * Pinned node + pnpm runtimes the supervisor extracts so packaged installs
+ * need no system toolchain. The daemon executes through these, so nothing
+ * daemon-side may delete them; the platform uninstaller owns removal and the
+ * supervisor re-extracts on a sentinel mismatch.
+ */
+export function binRuntimeRoot(root: string): string {
+  return join(root, 'bin');
+}
+
+/**
  * Read the on-disk `config.json` without instantiating a Store. Used at
  * boot to discover `externalFolders` before the Store is constructed
  * (the Store needs `external` to resolve every other path correctly,

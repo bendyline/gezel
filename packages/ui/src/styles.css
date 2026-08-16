@@ -27431,3 +27431,191 @@ button.boekwachter-pill:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- Settings → About → Storage on this device ------------------------
+   A plain two-column ledger: what the category is on the left, how much
+   room it takes on the right. Sizes are the reason anyone opens this, so
+   they get tabular figures and stay aligned down the column. */
+
+.storage-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.storage-group h4 {
+  margin: 0 0 0.15rem;
+  font-size: var(--text-md);
+}
+
+.storage-group p {
+  margin: 0 0 0.4rem;
+}
+
+.storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+  overflow: hidden;
+}
+
+.storage-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0.6rem;
+  font-size: var(--text-sm);
+}
+
+.storage-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.storage-list-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.storage-list-bytes {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Free up space dialog ---------------------------------------------
+   Shares the uninstall dialog's choice-row shape: the two are the same
+   decision at different moments, and looking alike is the point. The
+   content group is collapsed by default so clearing downloads never puts
+   a person one stray click from deleting their gezels. */
+
+.gz-cleanup-dialog {
+  max-width: 44rem;
+}
+
+.gz-cleanup-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-cleanup-choices legend {
+  margin-bottom: 0.15rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gz-cleanup-choices label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-cleanup-choices label:has(input:disabled) {
+  opacity: 0.55;
+}
+
+.gz-cleanup-choices input {
+  margin-top: 0.18rem;
+}
+
+.gz-cleanup-choices label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-cleanup-choices small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.gz-cleanup-content-group {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.gz-cleanup-warning {
+  margin: 0.1rem 0 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.gz-cleanup-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.storage-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
+/* --- Back up / restore dialog ---------------------------------------- */
+
+.gz-backup-dialog {
+  max-width: 44rem;
+}
+
+.gz-backup-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0.8rem;
+}
+
+.gz-backup-tabs button {
+  border-radius: var(--radius-md);
+}
+
+.gz-backup-tabs button[aria-selected="true"] {
+  border-color: var(--accent);
+}
+
+.gz-backup-replace {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The pre-uninstall nudge: what leaving Gezel installed would strand. */
+.gz-uninstall-storage-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-uninstall-storage-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

@@ -1230,6 +1230,40 @@ ipcMain.handle(
   },
 );
 
+/**
+ * Where should a content backup be written, or read from?
+ *
+ * These only resolve a path. The daemon streams the archive itself, because
+ * pushing tens of gigabytes through the renderer to save a file is the
+ * fragile way to do it — and the daemon already has the content open.
+ */
+ipcMain.handle(
+  'gezel:backup:choose-save-path',
+  async (event, defaultName: unknown): Promise<{ path?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const suggested =
+      typeof defaultName === 'string' && defaultName.length > 0 ? defaultName : 'gezel-backup.zip';
+    const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
+      title: 'Save Gezel backup',
+      defaultPath: suggested,
+      filters: [{ name: 'Gezel backup', extensions: ['zip'] }],
+    });
+    if (picked.canceled || !picked.filePath) return {};
+    return { path: picked.filePath };
+  },
+);
+
+ipcMain.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: string }> => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const picked = await dialog.showOpenDialog(win as Electron.BrowserWindow, {
+    title: 'Open Gezel backup',
+    properties: ['openFile'],
+    filters: [{ name: 'Gezel backup', extensions: ['zip'] }],
+  });
+  if (picked.canceled || picked.filePaths.length === 0) return {};
+  return { path: picked.filePaths[0] };
+});
+
 ipcMain.handle(
   'gezel:show-reference-in-folder',
   async (_event, value: unknown): Promise<{ ok: true } | { ok: false; error: string }> => {

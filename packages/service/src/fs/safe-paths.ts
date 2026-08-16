@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 
 /**
  * Shared path-safety primitives. Every write or execution inside a
@@ -123,6 +123,25 @@ export async function realpathContained(base: string, fullPath: string): Promise
   if (!realTarget) return false;
   if (pathEq(realTarget, realBase)) return true;
   return pathStartsWithDir(realTarget, realBase);
+}
+
+/**
+ * Is `target` the same directory as `root`, or somewhere beneath it?
+ *
+ * The purely lexical companion to {@link realpathContained}, for callers
+ * that have already resolved symlinks or are only classifying a path rather
+ * than guarding a write. Both arguments are resolved first, and the compare
+ * respects the platform's case rules — on macOS and Windows, `~/.gezel` and
+ * `~/.Gezel` are one directory, and treating them as different silently
+ * misfiles content as living outside the home folder.
+ *
+ * A path that merely shares a string prefix (`<home>-backup`) is not inside.
+ */
+export function isPathInside(target: string, root: string): boolean {
+  const resolvedTarget = resolve(target);
+  const resolvedRoot = resolve(root);
+  if (pathEq(resolvedTarget, resolvedRoot)) return true;
+  return pathStartsWithDir(resolvedTarget, resolvedRoot);
 }
 
 async function realpathSafe(p: string): Promise<string | null> {

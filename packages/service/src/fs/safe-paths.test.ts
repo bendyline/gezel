@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   PathSafetyError,
   intoWorkspaceRelative,
+  isPathInside,
   isReservedWindowsName,
   realpathContained,
   resolveInside,
@@ -196,5 +197,33 @@ describe('resolveInside — end-to-end', () => {
   it('rejects an absolute path outside the base', async () => {
     const outside = process.platform === 'win32' ? 'C:\\etc\\passwd' : '/etc/passwd';
     await expect(resolveInside(base, outside)).rejects.toThrow(/outside the workspace/);
+  });
+});
+
+describe('isPathInside', () => {
+  it('accepts a directory and everything beneath it', () => {
+    expect(isPathInside('/home/foo', '/home/foo')).toBe(true);
+    expect(isPathInside('/home/foo/bar/baz.txt', '/home/foo')).toBe(true);
+  });
+
+  it('rejects a sibling that merely shares the name prefix', () => {
+    // The classic off-by-a-separator: `/home/foobar` is not in `/home/foo`.
+    expect(isPathInside('/home/foobar', '/home/foo')).toBe(false);
+  });
+
+  it('rejects an unrelated path', () => {
+    expect(isPathInside('/etc/hosts', '/home/foo')).toBe(false);
+  });
+
+  it('resolves traversal before deciding', () => {
+    expect(isPathInside('/home/foo/../foo/bar', '/home/foo')).toBe(true);
+    expect(isPathInside('/home/foo/../../etc', '/home/foo')).toBe(false);
+  });
+
+  it('follows the platform’s case rules', () => {
+    // On macOS and Windows these name one directory, so treating them as
+    // different would misfile a user's content as living outside their home.
+    const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32';
+    expect(isPathInside('/home/FOO/bar', '/home/foo')).toBe(caseInsensitive);
   });
 });

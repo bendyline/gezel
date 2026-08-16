@@ -1687,6 +1687,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const { JobManager: FolderJobManager } = await import('./folders/job-manager.js');
   const folderJobs = new FolderJobManager();
+  const { StorageJobManager } = await import('./storage/job-manager.js');
+  const storageJobs = new StorageJobManager();
   const { detectInterruptedMove } = await import('./folders/recovery.js');
   void detectInterruptedMove(home);
 
@@ -2278,6 +2280,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     childProcessSpawn,
     uiDir: serviceRole === 'machine-engine' ? undefined : opts.uiDir,
     folderJobs,
+    storageJobs,
+    invalidateModelsCache,
     workspaceIndex,
     contentIndex,
     globalIndex,

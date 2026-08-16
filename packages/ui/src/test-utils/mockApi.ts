@@ -118,6 +118,15 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listGilde: { gilde: [] },
   listToolsets: { toolsets: [] },
   health: { ok: true, version: 'test' },
+  // Settings → About measures the home directory on mount. An empty install
+  // is the right default: tests that care about the numbers set their own.
+  storageSummary: {
+    home: '/tmp/gezel-test-home',
+    categories: [],
+    redownloadableBytes: 0,
+    userContentBytes: 0,
+    measuredAt: '2026-07-31T18:32:00.000Z',
+  },
   // A realistic, PII-free profile so any view test that mounts a surface
   // hosting a "Report error on GitHub…" link renders a plausible machine
   // block rather than the fetch-failed fallback.

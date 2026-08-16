@@ -82,6 +82,14 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
       return () => macUninstallShowCallbacks.delete(callback);
     },
   },
+  // Content backups. The renderer only asks the OS where the file should go;
+  // the daemon does the reading and writing, so a multi-gigabyte archive
+  // never travels through the renderer.
+  backupFile: {
+    chooseSavePath: (defaultName) =>
+      ipcRenderer.invoke('gezel:backup:choose-save-path', defaultName ?? null),
+    chooseOpenPath: () => ipcRenderer.invoke('gezel:backup:choose-open-path'),
+  },
   // App updates. `state` is the pull for a freshly-mounted renderer;
   // `onStateChanged` is the push for transitions while it is open. `install`
   // opens the verified installer on macOS (Installer.app raises the admin
