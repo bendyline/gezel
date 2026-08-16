@@ -1370,6 +1370,67 @@ describe('McpBridge', () => {
         expect(out).toMatch(/now closed/);
       });
 
+      // The literal shape that broke: an HTML shell whose game engine is
+      // landed via insert_at_marker before `</body>`, in parts, with a
+      // section marker left open between them. Every intermediate state
+      // is unparseable by construction.
+      it('lets insert_at_marker build a script across two calls (the incident shape)', async () => {
+        const shell = [
+          '<!DOCTYPE html>',
+          '<html><body>',
+          '<canvas id="c"></canvas>',
+          '</body>',
+          '</html>',
+        ].join('\n');
+        await bridge.callTool('write_file', { path: 'layer4/game.html', content: shell });
+
+        const part1 = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game.html',
+          marker: '</body>',
+          where: 'before',
+          content: '<script>\nconst ctx = document.getElementById("c").getContext("2d");\n',
+          partial: true,
+        });
+        expect(part1).not.toMatch(/ERROR:/);
+        expect(part1).toMatch(/Provisional edit 1 of at most/);
+
+        const part2 = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game.html',
+          marker: '</body>',
+          where: 'before',
+          content: 'function draw() { ctx.fillRect(0, 0, 1, 1); }\ndraw();\n</script>\n',
+        });
+        expect(part2).not.toMatch(/ERROR:/);
+        expect(part2).not.toMatch(/Provisional edit/);
+
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/game.html',
+          raw: true,
+        });
+        expect(readBack).toContain('<script>');
+        expect(readBack).toContain('</script>');
+        expect(readBack).toContain('function draw()');
+        const validated = await bridge.callTool('validate', { path: 'layer4/game.html' });
+        expect(validated).toMatch(/PASS/);
+      });
+
+      it('names the opening line when a provisional sequence closes on a broken comment', async () => {
+        const shell = '<!DOCTYPE html>\n<html><body>\n<canvas id="c"></canvas>\n</body>\n</html>';
+        await bridge.callTool('write_file', { path: 'layer4/game2.html', content: shell });
+        const out = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game2.html',
+          marker: '</body>',
+          where: 'before',
+          content: '<script>\nconst a = 1;\n/* ===PART1-END===\n</script>\n',
+        });
+        expect(out).toMatch(/ERROR:/);
+        // `<script>` lands on 4, `const a = 1;` on 5, the unclosed
+        // comment on 6 — and 7 is the `</script>` the old message named.
+        expect(out).toMatch(/opens a block comment at line 6/);
+        expect(out).toMatch(/do not edit the last line of the script/i);
+        expect(out).toMatch(/pass `partial: true` on the intermediate edits/);
+      });
+
       it('reports the sequence as still open when validate fails', async () => {
         await bridge.callTool('write_file', { path: 'layer4/seq-f.js', content: seed });
         await bridge.callTool('replace_in_file', {
